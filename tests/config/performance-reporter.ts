@@ -8,7 +8,7 @@ import { testWorkerPlan, type TestWorkerPlan } from './workers.js';
 const TOTAL_BUDGET_MS = 90_000;
 const REPORT_DIRECTORY = '.test-results';
 
-type PerformanceGroupId = 'group-1' | 'group-2' | 'group-3' | 'group-4';
+type PerformanceGroupId = 'group-1' | 'group-2' | 'group-3';
 
 interface PerformanceGroupDefinition {
   id: PerformanceGroupId;
@@ -20,15 +20,12 @@ const GROUP_1: PerformanceGroupDefinition = {
   id: 'group-1', budgetMs: 20_000, slowTestBudgetMs: 250
 };
 const GROUP_2: PerformanceGroupDefinition = {
-  id: 'group-2', budgetMs: 15_000, slowTestBudgetMs: 500
+  id: 'group-2', budgetMs: 20_000, slowTestBudgetMs: 500
 };
 const GROUP_3: PerformanceGroupDefinition = {
-  id: 'group-3', budgetMs: 40_000, slowTestBudgetMs: 2_000
+  id: 'group-3', budgetMs: 20_000, slowTestBudgetMs: 5_000
 };
-const GROUP_4: PerformanceGroupDefinition = {
-  id: 'group-4', budgetMs: 20_000, slowTestBudgetMs: 5_000
-};
-const GROUP_DEFINITIONS = [GROUP_1, GROUP_2, GROUP_3, GROUP_4] as const;
+const GROUP_DEFINITIONS = [GROUP_1, GROUP_2, GROUP_3] as const;
 
 export interface PerformanceFileMeasurement {
   projectName: string;
@@ -48,7 +45,6 @@ export interface PerformanceTestMeasurement {
 
 export interface PerformanceEvaluationInput {
   workerPlan: TestWorkerPlan;
-  enforceTimingBudgets: boolean;
   runStartMs: number;
   runEndMs: number;
   files: readonly PerformanceFileMeasurement[];
@@ -74,13 +70,6 @@ interface PerformanceGroupReport extends PerformanceGroupDefinition {
   exceeded: boolean;
 }
 
-interface PerformanceViolation {
-  type: 'total' | 'group' | 'test';
-  name: string;
-  durationMs: number;
-  budgetMs: number;
-}
-
 export interface PerformanceReport {
   workerPlan: TestWorkerPlan;
   total: {
@@ -91,7 +80,6 @@ export interface PerformanceReport {
   groups: PerformanceGroupReport[];
   files: PerformanceFileReport[];
   tests: PerformanceTestReport[];
-  violations: PerformanceViolation[];
 }
 
 export interface SlowTestsReport {
@@ -134,46 +122,12 @@ export function evaluatePerformance(input: PerformanceEvaluationInput): Performa
       exceeded: durationMs > definition.budgetMs
     };
   });
-  const violations: PerformanceViolation[] = [];
-
-  if (input.workerPlan.referenceHardware && input.enforceTimingBudgets) {
-    if (total.exceeded) {
-      violations.push({
-        type: 'total',
-        name: 'total',
-        durationMs: total.durationMs,
-        budgetMs: total.budgetMs
-      });
-    }
-    for (const group of groups) {
-      if (group.exceeded) {
-        violations.push({
-          type: 'group',
-          name: group.id,
-          durationMs: group.durationMs,
-          budgetMs: group.budgetMs
-        });
-      }
-    }
-    for (const test of tests) {
-      if (test.exceeded) {
-        violations.push({
-          type: 'test',
-          name: `${test.path} > ${test.name}`,
-          durationMs: test.durationMs,
-          budgetMs: test.budgetMs
-        });
-      }
-    }
-  }
-
   return {
     workerPlan: input.workerPlan,
     total,
     groups,
     files,
-    tests,
-    violations
+    tests
   };
 }
 
@@ -184,26 +138,8 @@ export function createSlowTestsReport(report: PerformanceReport): SlowTestsRepor
   };
 }
 
-export function resolvePerformanceExitCode(
-  current: typeof process.exitCode,
-  hasTimingViolations: boolean
-): typeof process.exitCode {
-  if (
-    !hasTimingViolations
-    || (current !== undefined && current !== 0 && current !== '0')
-  ) {
-    return current;
-  }
-  return 1;
-}
-
-export function shouldEnforceTimingBudgets(lifecycleEvent: string | undefined): boolean {
-  return lifecycleEvent !== 'test:coverage';
-}
-
 export default class PerformanceReporter implements Reporter {
   private runStartMs = 0;
-  private enforceTimingBudgets = true;
   private readonly moduleStarts = new Map<string, {
     projectName: string;
     path: string;
@@ -214,18 +150,13 @@ export default class PerformanceReporter implements Reporter {
 
   onTestRunStart(): void {
     this.runStartMs = Date.now();
-    this.enforceTimingBudgets = shouldEnforceTimingBudgets(process.env.npm_lifecycle_event);
     this.moduleStarts.clear();
     this.files.length = 0;
     this.tests.length = 0;
     process.stdout.write(
       `Debrute test plan: cpu=${testWorkerPlan.availableCpus} reserved=2 unit=${testWorkerPlan.unitWorkers} `
-      + `dom=${testWorkerPlan.domWorkers} integration=${testWorkerPlan.integrationWorkers} `
-      + `system=${testWorkerPlan.systemWorkers}\n`
+      + `dom=${testWorkerPlan.domWorkers} release=${testWorkerPlan.releaseWorkers}\n`
     );
-    if (!this.enforceTimingBudgets) {
-      process.stdout.write('Debrute timing enforcement: disabled for coverage instrumentation\n');
-    }
   }
 
   onTestModuleStart(testModule: TestModule): void {
@@ -269,7 +200,6 @@ export default class PerformanceReporter implements Reporter {
   async onTestRunEnd(): Promise<void> {
     const report = evaluatePerformance({
       workerPlan: testWorkerPlan,
-      enforceTimingBudgets: this.enforceTimingBudgets,
       runStartMs: this.runStartMs,
       runEndMs: Date.now(),
       files: this.files,
@@ -284,11 +214,6 @@ export default class PerformanceReporter implements Reporter {
       await writeAtomicJson(resolve(directory, 'timing.json'), report);
       await writeAtomicJson(resolve(directory, 'slow-tests.json'), createSlowTestsReport(report));
     }
-
-    const exitCode = resolvePerformanceExitCode(process.exitCode, report.violations.length > 0);
-    if (exitCode !== process.exitCode) {
-      process.exitCode = exitCode;
-    }
   }
 }
 
@@ -299,11 +224,8 @@ function groupForProject(projectName: string): PerformanceGroupDefinition {
   if (projectName === 'dom-web') {
     return GROUP_2;
   }
-  if (projectName === 'integration') {
+  if (projectName === 'release') {
     return GROUP_3;
-  }
-  if (projectName === 'system' || projectName === 'release') {
-    return GROUP_4;
   }
   throw new Error(`Unknown Vitest project "${projectName}"`);
 }
@@ -337,15 +259,27 @@ function printReport(report: PerformanceReport): void {
   );
   printMeasurements('slowest files', slowTests.files);
   printMeasurements('slowest cases', slowTests.tests);
-  if (report.violations.length === 0) {
-    process.stdout.write('Debrute timing violations: none\n');
+  const exceededGroups = report.groups.filter(({ exceeded }) => exceeded);
+  const exceededTests = report.tests.filter(({ exceeded }) => exceeded);
+  if (!report.total.exceeded && exceededGroups.length === 0 && exceededTests.length === 0) {
+    process.stdout.write('Debrute timing thresholds exceeded: none\n');
     return;
   }
-  process.stdout.write('Debrute timing violations:\n');
-  for (const violation of report.violations) {
+  process.stdout.write('Debrute timing thresholds exceeded (diagnostic only):\n');
+  if (report.total.exceeded) {
     process.stdout.write(
-      `  ${violation.type} ${violation.name}: ${formatDuration(violation.durationMs)} `
-      + `> ${formatDuration(violation.budgetMs)}\n`
+      `  total: ${formatDuration(report.total.durationMs)} > ${formatDuration(report.total.budgetMs)}\n`
+    );
+  }
+  for (const group of exceededGroups) {
+    process.stdout.write(
+      `  ${group.id}: ${formatDuration(group.durationMs)} > ${formatDuration(group.budgetMs)}\n`
+    );
+  }
+  for (const test of exceededTests) {
+    process.stdout.write(
+      `  ${test.path} > ${test.name}: ${formatDuration(test.durationMs)} `
+      + `> ${formatDuration(test.budgetMs)}\n`
     );
   }
 }

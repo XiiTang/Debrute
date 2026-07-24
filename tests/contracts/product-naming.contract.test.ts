@@ -24,10 +24,8 @@ describe('Debrute product naming contract', () => {
     expect(readJson('apps/desktop/package.json')).toMatchObject({
       name: '@debrute/desktop'
     });
-    expect(readJson('apps/debrute-cli/package.json')).toMatchObject({
-      name: '@debrute/cli',
-      bin: { debrute: 'dist/index.js' }
-    });
+    expect(readFileSync(join(root, 'apps/runtime/src/bin/debrute.rs'), 'utf8'))
+      .toContain('fn main() -> ExitCode');
     for (const skillPath of [
       'skills/debrute-core/SKILL.md',
       'skills/debrute-image-director/SKILL.md',

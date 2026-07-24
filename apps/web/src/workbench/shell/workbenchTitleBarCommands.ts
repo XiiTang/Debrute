@@ -19,7 +19,13 @@ export async function executeTitleBarMenuCommand(
   if (!item.enabled) {
     return;
   }
-  if (context.shell?.executeNativeMenuCommand) {
+  if (
+    context.shell?.executeNativeMenuCommand
+    && (
+      !item.commandId.startsWith('project.')
+      || item.commandId === 'project.open-picker-new-window'
+    )
+  ) {
     await context.shell.executeNativeMenuCommand({
       commandId: item.commandId,
       ...(item.payload ? { payload: item.payload } : {})

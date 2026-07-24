@@ -11,6 +11,9 @@ tokenSource: apps/web/src/workbench/ui/styles/tokens.css
 
 Debrute is a browser-first local creative production workbench for browser and Electron pointer-and-keyboard environments. The UI is compact, neutral, theme-aware, and built for repeated daily use. Phone and touch-first layouts are outside the product contract.
 
+Current shell, state, Settings, theme, language, Explorer, and context-menu
+ownership is documented in [`docs/workbench.md`](./docs/workbench.md).
+
 ## Product Language
 
 Workbench chrome uses neutral surfaces, 1px hierarchy, restrained shadows, small radii, dense controls, and one compact sans-serif UI voice. Product chrome is not a marketing site, dashboard card grid, or decorative glass surface. Semantic color communicates warning, danger, information, or an explicit completed operation. Quiet ready, connected, configured, selected, and up-to-date states are neutral.
@@ -31,7 +34,7 @@ Shared layout without behavior stays a named CSS pattern. A React component exis
 
 ## Workbench Surfaces
 
-The Workbench uses one Canvas and floating-panel interaction model. `FloatingPanel` owns drag and resize geometry, placement, z-order, close placement, continuous background, and body overflow. The shell renders each panel name once.
+The Workbench uses one Canvas and floating-panel interaction model. `WorkbenchFloatingPanelShell` owns drag and resize geometry, placement, z-order, close placement, continuous background, and body overflow. The shell renders each panel name once.
 
 Settings uses grouped General, Models, and Integrations navigation, one title per selected page, explicit loading/error/ready content, ordinary sections for General settings, and cards only for independent repeated records.
 
@@ -65,6 +68,8 @@ Features do not use another feature's CSS classes. Reuse moves into `ui` only wh
 ## Canvas Exceptions
 
 Canvas may own zoom-scaled handles and hit targets, media preview sizing, editor geometry, annotation colors, node layout, and overlay placement. The terminal emulator may own emulator theme colors. These exceptions do not create alternate buttons, fields, cards, menus, status components, notifications, or panel shells.
+
+Canvas feedback bars use the shared floating-bar container and shared controls. Their size is derived from the visible fixed-size actions, creator, and saved-item row rather than media-specific width buckets. The creator is a compact rounded rectangle; saved feedback items may use pill geometry. A persistent feedback frame is one pointer-transparent, theme-aware presence border. Feedback kinds remain visible in the editing bar and media annotations, not as segmented frame colors.
 
 ## Enforcement
 

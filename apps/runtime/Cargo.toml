@@ -1,0 +1,56 @@
+[package]
+name = "debrute-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+cap-std.workspace = true
+debrute-native-fs = { path = "../../packages/native-fs" }
+debrute-native-control = { path = "../../packages/native-control" }
+debrute-native-process = { path = "../../packages/native-process" }
+ed25519-dalek.workspace = true
+flate2.workspace = true
+fs2.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+image.workspace = true
+notify.workspace = true
+portable-pty.workspace = true
+p256.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+resvg.workspace = true
+rs-vips.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+time.workspace = true
+tokio.workspace = true
+ts-rs.workspace = true
+uuid.workspace = true
+url.workspace = true
+vt100.workspace = true
+zip.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nix.workspace = true
+tao.workspace = true
+tray-icon.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+debrute-windows-product-fs = { path = "../../packages/windows-product-fs" }
+tao.workspace = true
+tray-icon.workspace = true
+winreg.workspace = true
+
+[lints]
+workspace = true

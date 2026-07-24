@@ -3,12 +3,17 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { packageManagerCommand } from './package-manager-command.mjs';
+import { validateNativeRasterLock } from './native-raster-payload.mjs';
 
 const root = process.cwd();
 const desktopRequire = createRequire(join(root, 'apps/desktop/package.json'));
 const requiredPaths = [
   'pnpm-lock.yaml',
+  'Cargo.toml',
+  'Cargo.lock',
+  'rust-toolchain.toml',
   'node_modules',
+  'apps/runtime/Cargo.toml',
   'apps/desktop/src/electron/main.ts',
   'apps/desktop/src/electron/preload.ts'
 ];
@@ -86,6 +91,24 @@ try {
   failures.push(`pnpm could not be launched through the declared packageManager: ${message}`);
 }
 
+let rustcVersion = 'unknown';
+try {
+  rustcVersion = execFileSync('rustc', ['--version'], { encoding: 'utf8' }).trim();
+  if (!rustcVersion.startsWith('rustc 1.97.0 ')) {
+    failures.push(`Rust 1.97.0 is required. Current: ${rustcVersion}`);
+  }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  failures.push(`rustc could not be launched through the pinned rustup toolchain: ${message}`);
+}
+
+try {
+  validateNativeRasterLock();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  failures.push(`Native raster payload lock is invalid. ${message}`);
+}
+
 if (process.platform !== 'darwin') {
   console.warn(`Debrute packaging is currently configured for macOS. Current platform: ${process.platform}`);
 }
@@ -95,4 +118,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`Debrute doctor passed. Node ${process.version}, pnpm ${pnpmVersion}, platform ${process.platform}.`);
+console.log(`Debrute doctor passed. Node ${process.version}, pnpm ${pnpmVersion}, ${rustcVersion}, platform ${process.platform}.`);

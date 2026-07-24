@@ -49,7 +49,7 @@ describe('web Adobe Bridge settings page', { tags: ['settings'] }, () => {
             transferId: 'transfer-failed',
             direction: 'debrute-to-photoshop',
             projectId: 'project-1',
-            adobeClientId: 'ps-1',
+            pluginInstanceId: 'ps-1',
             projectRelativePath: 'assets/cover.png',
             status: 'failed',
             errorCode: 'photoshop_place_failed',
@@ -96,12 +96,14 @@ describe('web Adobe Bridge settings page', { tags: ['settings'] }, () => {
         status: 'ready',
         value: {
           ...readyResourceValue(createState().adobeBridge),
-          adobeClients: [
-            ...readyResourceValue(createState().adobeBridge).adobeClients,
+          pairedPlugins: [],
+          clients: [
+            ...readyResourceValue(createState().adobeBridge).clients,
             {
-              adobeClientId: 'ps-other-project',
+              pluginInstanceId: 'ps-other-project',
               hostApp: 'photoshop',
               hostVersion: '2026',
+              clientRuntime: 'uxp',
               displayName: 'Photoshop 2026 · other.psd',
               documentCount: 1,
               activeDocumentTitle: 'other.psd',
@@ -114,7 +116,7 @@ describe('web Adobe Bridge settings page', { tags: ['settings'] }, () => {
             {
               linkId: 'link-other-project',
               projectId: 'project-2',
-              adobeClientId: 'ps-other-project',
+              pluginInstanceId: 'ps-other-project',
               createdAt: '2026-06-18T00:00:01.000Z',
               status: 'active'
             }
@@ -146,10 +148,12 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
       status: 'ready',
       value: {
         settings: { enabled: true, discoveryStatus: 'available' },
-        adobeClients: [{
-          adobeClientId: 'ps-1',
+        pairedPlugins: [],
+        clients: [{
+          pluginInstanceId: 'ps-1',
           hostApp: 'photoshop',
           hostVersion: '2026',
+          clientRuntime: 'uxp',
           displayName: 'Photoshop 2026 · poster.psd',
           documentCount: 1,
           activeDocumentTitle: 'poster.psd',
@@ -160,13 +164,12 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
           projectId: 'project-1',
           projectName: 'Campaign',
           projectRevision: 1,
-          connectedWorkbenchClientCount: 1,
           directories: [{ projectRelativePath: 'assets', name: 'assets', depth: 1 }]
         }],
         links: [{
           linkId: 'link-1',
           projectId: 'project-1',
-          adobeClientId: 'ps-1',
+          pluginInstanceId: 'ps-1',
           createdAt: '2026-06-18T00:00:01.000Z',
           status: 'active'
         }],
@@ -194,7 +197,7 @@ function createActions(): WorkbenchActions {
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
-    chrome: { recentProjectRoots: [] },
+    chrome: { recentProjects: [] },
     models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
     integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true },

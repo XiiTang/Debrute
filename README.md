@@ -2,7 +2,7 @@
 
 [中文版](./README.zh-CN.md)
 
-Debrute is a local creative production workbench for the files that AI agents generate: images, videos, audio, documents, design references, and future 3D assets.
+Debrute is a local creative production workbench for the files that AI agents generate: images, videos, audio, documents, and design references.
 
 It is built around a simple belief: the best agents already exist, and the best professional creative tools already exist. Debrute does not try to replace either side. Instead, it gives agents, designers, and creative teams a shared place to generate, inspect, organize, compare, annotate, and hand off production assets.
 
@@ -36,7 +36,7 @@ It does not force a fixed production pipeline. It does not prescribe how you sho
 
 Debrute is not a replacement for Photoshop, Blender, Premiere, Figma, or other professional creative software.
 
-For a long time, AI generation will not fully replace the precision, control, and expertise of professional editing tools. Debrute intentionally avoids features that those tools already do well. For professional designers, Debrute is the place to generate, gather, review, compare, and select resources before taking them into specialized software. Debrute includes and plans more plugins so designers can move assets between Debrute and professional tools with less friction.
+AI generation does not replace the precision, control, and expertise of professional editing tools. Debrute intentionally avoids features that those tools already do well. For professional designers, Debrute is the place to generate, gather, review, compare, and select resources before taking them into specialized software. The repository includes Photoshop plugins for moving assets between Debrute and Photoshop.
 
 ## Working With Agents
 
@@ -57,7 +57,7 @@ Debrute is meant to sit before and beside professional editing software, not abo
 
 A designer can use Debrute as a resource table: generate many candidates, keep references nearby, mark what works, reject what does not, annotate exact visual regions, compare variations, and then move selected assets into tools like Photoshop or other specialized editors.
 
-This repository already includes Photoshop plugin work, and the roadmap includes more professional-tool plugins and handoff paths.
+This repository includes UXP and CEP Photoshop plugins that share one Debrute bridge protocol.
 
 ## Project Model
 
@@ -78,21 +78,14 @@ Debrute ships standard Skills for external agents:
 
 The Skills explain how to call Debrute. They are not hidden APIs and they do not replace the agent's own tools.
 
-## Roadmap
-
-- 3D asset generation and review.
-- Richer previews for more binary asset types.
-- More plugins for professional creative tools.
-- Smoother handoff paths between Debrute, local project folders, and specialized editors.
-
 ## Technical Docs
 
 The README is intentionally short. Technical details live here:
 
-- [Development](./docs/development.md)
+- [Documentation index](./docs/README.md)
 - [Product model](./docs/product-model.md)
-- [CLI](./docs/cli.md)
-- [Releases](./docs/releases.md)
+- [Domain context map](./CONTEXT-MAP.md)
+- [Development](./docs/development.md)
 
 ## License
 

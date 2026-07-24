@@ -16,6 +16,8 @@ import type {
   WriteProjectTextFileInput
 } from '@debrute/project-core';
 
+export * from './runtimeControl.js';
+
 export {
   buildWorkbenchMenus,
   buildWorkbenchTitleBarState,
@@ -30,11 +32,6 @@ export {
   type WorkbenchMenuItem,
   type WorkbenchTitleBarPresentation,
   type WorkbenchTitleBarState
-} from './workbenchChrome.js';
-
-import type {
-  WorkbenchHostKind,
-  WorkbenchTitleBarState
 } from './workbenchChrome.js';
 
 export type { ProjectTextFile } from '@debrute/project-core';
@@ -80,27 +77,17 @@ export interface ProjectSessionSnapshot {
   health: ProjectHealthSummary;
 }
 
-export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'projectRoot'>;
+export type WorkbenchProjectHealthSummary = Omit<ProjectHealthSummary, 'runtimeDataLocation'>;
+export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'projectRoot' | 'health'> & {
+  health: WorkbenchProjectHealthSummary;
+};
 export type WorkbenchProjectTextFile = Omit<ProjectTextFile, 'absolutePath'>;
-
-export interface DebruteRuntimeInfo {
-  daemonUrl: string;
-  webBaseUrl: string | null;
-  platform: NodeJS.Platform;
-}
 
 export interface RevisionedProjectResult {
   projectId: string;
   projectRevision: number;
 }
 
-export interface RevisionedProjectMutation {
-  baseRevision: number;
-}
-
-export interface StaleProjectRevisionDetails extends RevisionedProjectResult {
-  snapshot: WorkbenchProjectSessionSnapshot;
-}
 
 export interface LiveProjectView extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
@@ -136,6 +123,11 @@ export type WorkbenchLocale = 'en' | 'zh-CN';
 export type WorkbenchThemePreference = 'system' | 'dark' | 'light';
 export type DebruteDefaultFrontend = 'electron' | 'browser' | 'runtime-only';
 
+export interface RecentProjectView {
+  projectId: string;
+  projectRoot: string;
+}
+
 export interface DebruteGlobalWorkbenchSettings {
   locale: WorkbenchLocale;
   themePreference: WorkbenchThemePreference;
@@ -143,7 +135,7 @@ export interface DebruteGlobalWorkbenchSettings {
 }
 
 export interface DebruteGlobalChromeSettings {
-  recentProjectRoots: string[];
+  recentProjects: RecentProjectView[];
 }
 
 export interface DebruteGlobalAdobeBridgeSettings {
@@ -188,32 +180,9 @@ export interface DebruteAgentCommandResult {
   fields?: Record<string, DebruteAgentFieldValue>;
 }
 
-export interface DaemonCliCommandRequest {
-  command: string;
-  positional: string[];
-  options: Record<string, string>;
-  projectRoot?: string;
-}
-
-export type DaemonCliRunEvent =
-  | { type: 'progress'; command: string; fields: Record<string, DebruteAgentFieldValue> }
-  | { type: 'result'; result: DebruteAgentCommandResult };
-
 export function isDebruteMutatingMethod(method: string): boolean {
   const normalized = method.toUpperCase();
   return normalized === 'POST' || normalized === 'PUT' || normalized === 'PATCH' || normalized === 'DELETE';
-}
-
-export function normalizeDebruteRuntimeInfo(input: {
-  daemonUrl: string;
-  webBaseUrl?: string | null;
-  platform: NodeJS.Platform;
-}): DebruteRuntimeInfo {
-  return {
-    daemonUrl: trimTrailingSlash(input.daemonUrl),
-    webBaseUrl: input.webBaseUrl ? trimTrailingSlash(input.webBaseUrl) : null,
-    platform: input.platform
-  };
 }
 
 export function parseDebruteWorkbenchPath(pathname: string, search = ''): DebruteWorkbenchRoute {
@@ -232,10 +201,6 @@ export function parseDebruteWorkbenchPath(pathname: string, search = ''): Debrut
     };
   }
   return { kind: 'workbench' };
-}
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
 export interface ProjectFileOperationResult extends ProjectPathOperationResult {
@@ -306,7 +271,7 @@ export interface WorkbenchProjectUploadImportInput {
   overwrite?: boolean;
 }
 
-export interface DaemonProjectUploadImportPlan extends RevisionedProjectMutation {
+export interface RuntimeProjectUploadImportPlan {
   entries: Array<
     | {
         kind: 'directory';
@@ -324,13 +289,41 @@ export interface DaemonProjectUploadImportPlan extends RevisionedProjectMutation
 
 export interface WorkbenchProjectOpenResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
+  workingCopies?: WorkbenchWorkingCopies;
+}
+
+export type WorkbenchProjectOpenOutcome =
+  | WorkbenchProjectOpenResult
+  | { outcome: 'focused_existing_desktop'; projectId: string };
+
+export interface WorkbenchTextWorkingCopy {
+  projectRelativePath: string;
+  content: string;
+  language: WorkbenchProjectTextFile['language'];
+  baseRevision: string;
+}
+
+export interface WorkbenchFeedbackWorkingCopy {
+  pendingItem: {
+    projectRelativePath: string;
+    kind: 'comment' | 'pin' | 'region';
+    scope: 'file' | 'moment';
+    momentTimeSeconds?: number | undefined;
+    geometry?: import('@debrute/canvas-core').CanvasFeedbackGeometry | undefined;
+    label?: number | string | undefined;
+  };
+  pendingComment: string;
+  localMode: 'pin' | 'rect' | null;
+}
+
+export interface WorkbenchWorkingCopies {
+  text: Record<string, WorkbenchTextWorkingCopy>;
+  feedback: WorkbenchFeedbackWorkingCopy | null;
 }
 
 export type WorkbenchProjectPickerOpenResult =
   | { opened: false }
-  | ({
-      opened: true;
-    } & WorkbenchProjectOpenResult);
+  | ({ opened: true } & WorkbenchProjectOpenOutcome);
 
 export interface WorkbenchProjectRefreshResult extends RevisionedProjectResult {
   snapshot: WorkbenchProjectSessionSnapshot;
@@ -489,52 +482,6 @@ export interface SaveAudioModelSettingInput {
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
   apiKey?: string;
-}
-
-export interface RunImageModelBatchInput {
-  source: ImageModelBatchSource;
-  concurrency: number;
-  retries: number;
-  timeoutMs?: number;
-  overwriteExisting?: boolean;
-  /** Project-relative output path for the result JSONL file. */
-  logPath: string;
-  /** Project-relative output path for the optional summary JSON file. */
-  summaryPath?: string;
-}
-
-export type ImageModelBatchSource =
-  | {
-      kind: 'manifest';
-      /** Project-relative batch manifest path. */
-      path: string;
-    }
-  | {
-      kind: 'jsonl';
-      /** Project-relative batch JSONL path. */
-      path: string;
-    }
-  | { kind: 'requests'; requests: ImageModelBatchRequest[] };
-
-export interface ImageModelBatchRequest {
-  model: string;
-  arguments: Record<string, unknown>;
-  timeoutMs?: number;
-  outputPath?: string;
-}
-
-export interface ImageModelBatchSummary {
-  total: number;
-  okCount: number;
-  skippedCount: number;
-  failedCount: number;
-  durationSeconds: number;
-  concurrency: number;
-  retries: number;
-  /** Project-relative output path reported to callers. */
-  logPath: string;
-  /** Project-relative summary path reported to callers. */
-  summaryPath?: string;
 }
 
 export type IntegrationId = 'ffmpeg' | 'imagemagick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
@@ -882,6 +829,35 @@ export interface TerminalEventSubscription {
   close(): void;
 }
 
+export interface TerminalCheckpoint {
+  version: number;
+  terminalId: string;
+  outputSequence: number;
+  cols: number;
+  rows: number;
+  scrollbackRows: number;
+  cursorRow: number;
+  cursorCol: number;
+  cursorHidden: boolean;
+  alternateScreen: boolean;
+  applicationCursor: boolean;
+  applicationKeypad: boolean;
+  bracketedPaste: boolean;
+  title: string;
+  ansiBase64: string;
+}
+
+export type TerminalServerFrame =
+  | { type: 'sync'; protocolVersion: number; topologyRevision: number; sessions: TerminalSessionView[]; checkpoints: TerminalCheckpoint[] }
+  | { type: 'observed'; checkpoint: TerminalCheckpoint }
+  | { type: 'input-ack'; terminalId: string; sequence: number }
+  | { type: 'resized'; terminalId: string; cols: number; rows: number }
+  | { type: 'topology'; topologyRevision: number; sessions: TerminalSessionView[] }
+  | { type: 'output'; terminalId: string; sequence: number; dataBase64: string }
+  | { type: 'status'; session: TerminalSessionView }
+  | { type: 'exit'; terminalId: string; exitCode: number | null; signal: string | null }
+  | { type: 'error'; terminalId: string | null; code: string; message: string };
+
 export interface AddProjectPathToCanvasMapInput {
   canvasId: string;
   projectRelativePath: string;
@@ -932,10 +908,10 @@ export type AdobeBridgeHostApp = 'photoshop';
 export type AdobeBridgeClientRuntime = 'uxp' | 'cep';
 
 export interface AdobeBridgeClient {
-  adobeClientId: string;
+  pluginInstanceId: string;
   hostApp: AdobeBridgeHostApp;
   hostVersion: string;
-  clientRuntime?: AdobeBridgeClientRuntime;
+  clientRuntime: AdobeBridgeClientRuntime;
   displayName: string;
   documentCount: number;
   activeDocumentTitle: string | null;
@@ -954,13 +930,12 @@ export interface ProjectBridgeClient {
   projectName: string;
   projectRevision: number;
   directories: ProjectBridgeDirectory[];
-  connectedWorkbenchClientCount: number;
 }
 
 export interface AdobeBridgeLink {
   linkId: string;
   projectId: string;
-  adobeClientId: string;
+  pluginInstanceId: string;
   createdAt: string;
   status: 'active' | 'adobe-offline' | 'project-offline';
 }
@@ -972,7 +947,7 @@ export interface AdobeBridgeTransferView {
   transferId: string;
   direction: AdobeBridgeTransferDirection;
   projectId: string;
-  adobeClientId: string;
+  pluginInstanceId: string;
   projectRelativePath: string | null;
   status: AdobeBridgeTransferStatus;
   errorCode?: AdobeBridgeErrorCode;
@@ -983,7 +958,13 @@ export interface AdobeBridgeTransferView {
 
 export interface AdobeBridgeStateView {
   settings: AdobeBridgeSettings;
-  adobeClients: AdobeBridgeClient[];
+  pairedPlugins: Array<{
+    pluginInstanceId: string;
+    clientRuntime: AdobeBridgeClientRuntime;
+    createdAt: string;
+    connected: boolean;
+  }>;
+  clients: AdobeBridgeClient[];
   projects: ProjectBridgeClient[];
   links: AdobeBridgeLink[];
   transfers: AdobeBridgeTransferView[];
@@ -994,12 +975,12 @@ export interface SaveAdobeBridgeSettingsInput {
 }
 
 export interface CreateAdobeBridgeLinkInput {
-  adobeClientId: string;
+  pluginInstanceId: string;
 }
 
 export interface SendProjectFileToPhotoshopInput {
   projectRelativePath: string;
-  adobeClientId: string;
+  pluginInstanceId: string;
 }
 
 export interface SendProjectFileToPhotoshopResult {
@@ -1008,12 +989,15 @@ export interface SendProjectFileToPhotoshopResult {
 
 export interface PhotoshopBridgeHelloMessage {
   type: 'hello';
-  adobeClientId?: string;
+  pluginInstanceId: string;
   hostApp: 'photoshop';
   hostVersion: string;
-  clientRuntime?: AdobeBridgeClientRuntime;
+  clientRuntime: AdobeBridgeClientRuntime;
   documentCount: number;
   activeDocumentTitle: string | null;
+  signature: string;
+  publicKey: string | null;
+  pairingCode: string | null;
 }
 
 export interface PhotoshopBridgeStatusMessage {
@@ -1033,15 +1017,29 @@ export interface PhotoshopBridgeImportResultMessage {
 export type PhotoshopBridgeClientMessage =
   | PhotoshopBridgeHelloMessage
   | PhotoshopBridgeStatusMessage
-  | PhotoshopBridgeImportResultMessage
-  | { type: 'heartbeat' };
+  | PhotoshopBridgeImportResultMessage;
 
-export interface DaemonBridgeStateMessage {
+export interface PhotoshopBridgeChallengeMessage {
+  type: 'bridge.challenge';
+  bridgeVersion: number;
+  productVersion: string;
+  runtimeInstanceId: string;
+  challenge: string;
+}
+
+export interface PhotoshopBridgeReadyMessage {
+  type: 'bridge.ready';
+  pluginSessionId: string;
+  bearer: string;
+  state: AdobeBridgeStateView;
+}
+
+export interface PhotoshopBridgeStateMessage {
   type: 'bridge.state';
   state: AdobeBridgeStateView;
 }
 
-export interface DaemonBridgeImportRequestMessage {
+export interface PhotoshopBridgeImportRequestMessage {
   type: 'transfer.import.request';
   transferId: string;
   projectId: string;
@@ -1052,9 +1050,12 @@ export interface DaemonBridgeImportRequestMessage {
   downloadUrl: string;
 }
 
-export type DaemonBridgeClientMessage =
-  | DaemonBridgeStateMessage
-  | DaemonBridgeImportRequestMessage
+export type PhotoshopBridgeRuntimeMessage =
+  | PhotoshopBridgeChallengeMessage
+  | PhotoshopBridgeReadyMessage
+  | PhotoshopBridgeStateMessage
+  | PhotoshopBridgeImportRequestMessage
+  | { type: 'runtime_replacing'; runtimeInstanceId: string; deadline: string }
   | { type: 'bridge.error'; code: AdobeBridgeErrorCode; message: string };
 
 export const adobeBridgeErrorCodes = [
@@ -1063,15 +1064,28 @@ export const adobeBridgeErrorCodes = [
   'adobe_client_offline',
   'project_offline',
   'project_not_linked',
+  'pairing_not_found',
+  'pairing_expired',
+  'pairing_code_invalid',
+  'pairing_attempts_exceeded',
+  'pairing_key_invalid',
+  'pairing_signature_invalid',
+  'pairing_registry_invalid',
+  'pairing_capacity_reached',
+  'plugin_session_invalid',
+  'plugin_session_replaced',
   'target_directory_missing',
   'target_directory_not_visible',
   'unsupported_file_type',
   'upload_too_large',
   'invalid_transfer_payload',
+  'transfer_capacity_reached',
   'no_active_document',
   'photoshop_place_failed',
   'transfer_url_expired',
-  'transfer_timeout'
+  'transfer_timeout',
+  'state_poisoned',
+  'persistence_failed'
 ] as const;
 
 export type AdobeBridgeErrorCode = typeof adobeBridgeErrorCodes[number];
@@ -1089,16 +1103,6 @@ export function adobeBridgeClientDisplayName(input: {
   return `${hostLabel} ${input.hostVersion} · ${input.activeDocumentTitle ?? 'No document open'}`;
 }
 
-export type AppServerEvent =
-  | { type: 'project.opened'; snapshot: ProjectSessionSnapshot }
-  | { type: 'project.changed'; snapshot: ProjectSessionSnapshot }
-  | { type: 'project.fileChanged'; event: NormalizedFileWatchEvent; snapshot: ProjectSessionSnapshot }
-  | { type: 'canvas.changed'; canvas: CanvasDocument; projection: CanvasProjection }
-  | { type: 'canvas.feedback.changed'; feedback: CanvasFeedbackDocument }
-  | { type: 'generatedAsset.metadata.changed'; record: GeneratedAssetRecord }
-  | { type: 'recentProjects.changed'; recentProjectRoots: string[] }
-  | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView };
-
 export type WorkbenchFileWatchEvent = Omit<NormalizedFileWatchEvent, 'absolutePath'>;
 
 export type WorkbenchEvent =
@@ -1108,20 +1112,24 @@ export type WorkbenchEvent =
   | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
   | { type: 'generatedAsset.metadata.changed'; projectId: string; projectRevision: number; record: GeneratedAssetRecord }
-  | { type: 'recentProjects.changed'; recentProjectRoots: string[] }
+  | { type: 'recentProjects.changed'; recentProjects: RecentProjectView[] }
   | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView }
-  | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView };
+  | { type: 'integrations.changed'; integrations: IntegrationSettingsView }
+  | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView }
+  | { type: 'product.changed'; product: DebruteProductState };
 
 export interface WorkbenchApiClient {
-  readonly mode: 'web' | 'desktop';
-  readonly clientId: string;
   adobeBridgeGetState(): Promise<AdobeBridgeStateView>;
+  adobeBridgeCreatePairing(): Promise<{ pairingId: string; code: string; expiresAt: string }>;
+  adobeBridgeCancelPairing(pairingId: string): Promise<void>;
+  adobeBridgeRemovePairing(pluginInstanceId: string): Promise<AdobeBridgeStateView>;
   adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<AdobeBridgeStateView>;
-  adobeBridgeUnlinkPhotoshop(adobeClientId: string): Promise<AdobeBridgeStateView>;
+  adobeBridgeUnlinkPhotoshop(pluginInstanceId: string): Promise<AdobeBridgeStateView>;
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
-  openProject(input: { projectRoot: string } | { projectId: string }): Promise<WorkbenchProjectOpenResult>;
+  openProject(
+    input: { projectRoot: string; forceOpenHere?: boolean } | { projectId: string; forceOpenHere?: boolean }
+  ): Promise<WorkbenchProjectOpenOutcome>;
   openProjectFromPicker(): Promise<WorkbenchProjectPickerOpenResult>;
-  getWorkbenchTitleBarState(input: { host: WorkbenchHostKind; projectId?: string | undefined }): Promise<WorkbenchTitleBarState>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
   getProductState(): Promise<DebruteProductState>;
   checkProductUpdate(): Promise<DebruteProductState>;
@@ -1129,7 +1137,7 @@ export interface WorkbenchApiClient {
   globalSettingsGet(): Promise<DebruteGlobalSettingsView>;
   globalSettingsSave(input: SaveDebruteGlobalSettingsInput): Promise<DebruteGlobalSettingsView>;
   getSnapshot(): Promise<WorkbenchProjectRefreshResult>;
-  getProjectHealth(): Promise<ProjectHealthSummary>;
+  getProjectHealth(): Promise<WorkbenchProjectHealthSummary>;
   listTerminalSessions(): Promise<TerminalSessionList>;
   createTerminalSession(input?: CreateTerminalSessionInput): Promise<TerminalSessionResult>;
   writeTerminalInput(input: TerminalInputWrite): Promise<{ ok: true }>;
@@ -1142,10 +1150,13 @@ export interface WorkbenchApiClient {
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile(input: WriteProjectTextFileInput): Promise<WorkbenchProjectTextFileWriteResult>;
+  putTextWorkingCopy(projectId: string, input: WorkbenchTextWorkingCopy): Promise<WorkbenchTextWorkingCopy>;
+  clearTextWorkingCopy(projectId: string, projectRelativePath: string): Promise<void>;
+  putFeedbackWorkingCopy(projectId: string, input: WorkbenchFeedbackWorkingCopy): Promise<WorkbenchFeedbackWorkingCopy>;
+  clearFeedbackWorkingCopy(projectId: string): Promise<void>;
   saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
   readCanvasVideoPreviewSources(input: CanvasVideoPreviewSourceRequest): Promise<CanvasVideoPreviewSourceResponse>;
-  getDesktopPlatform(): Promise<NodeJS.Platform>;
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
@@ -1183,4 +1194,7 @@ export interface WorkbenchApiClient {
   integrationsRescan(): Promise<IntegrationSettingsView>;
   integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
   onEvent(listener: (event: WorkbenchEvent) => void): () => void;
+  onProjectDetached(listener: () => void): () => void;
+  onConnectionEnded(listener: (error: Error) => void): () => void;
+  dispose(): void;
 }

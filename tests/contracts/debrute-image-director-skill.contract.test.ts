@@ -20,7 +20,6 @@ describe('Debrute image director Skill', () => {
     expect(skill).toContain('debrute.managed: "true"');
     expect(skill).toContain('debrute.package: "debrute"');
     expect(skill).toContain('Use for any task related to image generation or image editing.');
-    expect(skill).not.toContain('debrute-cli');
     expect(skill).toContain('Run `debrute models image list` to compare configured image models by original model parameters and constraints.');
     expect(skill).toContain('Before generation, run `debrute models image describe <model-id>` once for the selected model.');
     expect(skill).toContain('official documentation URLs');
@@ -38,7 +37,7 @@ describe('Debrute image director Skill', () => {
     expect(skill).toContain('Do not loop over `debrute generate image` for a planned set of image requests.');
     expect(skill).toContain('Batch result JSONL contains one final item outcome per line.');
     expect(skill).toContain('--timeout-ms defaults to 600000ms for single image requests');
-    expect(skill).toContain('--timeout-ms defaults to 900000ms per item attempt for image batches');
+    expect(skill).toContain('--timeout-ms defaults to 900000ms per item for image batches');
     expect(skill).toContain('--overwrite-existing');
     expect(skill).toContain('model-specific file format, size, dimension, alpha, and mask constraints are left to the upstream model');
   });

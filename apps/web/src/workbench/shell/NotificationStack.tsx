@@ -7,8 +7,8 @@ export function NotificationStack({ notifications }: { notifications: string[] }
   }
   return (
     <div className="db-notification-stack">
-      {notifications.map((notification) => (
-        <Card className="db-notification-row" key={notification}>{notification}</Card>
+      {notifications.map((notification, index) => (
+        <Card className="db-notification-row" key={`${index}:${notification}`}>{notification}</Card>
       ))}
     </div>
   );

@@ -236,7 +236,7 @@ export async function runPanRoundTripDiagnostic(options = {}) {
 export async function startCanvasPanRoundTripCapture(client) {
   await client.evaluate(`(() => {
     if (!window.__debruteCanvasPerf) {
-      throw new Error('window.__debruteCanvasPerf is not available. Enable canvas perf debug and use a main-world CDP target.');
+      throw new Error('window.__debruteCanvasPerf is not available. Start the development Workbench with --canvas-perf and use a main-world CDP target.');
     }
     window.__debruteCanvasPerf.stopCapture();
     performance.clearResourceTimings();
@@ -552,7 +552,12 @@ function inputMode(value, flag) {
 
 function usage() {
   return `Usage:
-  node scripts/canvas-pan-roundtrip-diagnostic.mjs --target-url http://127.0.0.1:17322/projects/<id>
+  pnpm dev:electron -- --canvas-perf
+  node scripts/canvas-pan-roundtrip-diagnostic.mjs --target-url 'http://127.0.0.1:17322/projects/<id>'
+
+The target development Workbench must be started with --canvas-perf so its
+Project pages register window.__debruteCanvasPerf. Production builds do not
+expose the probe.
 
 Options:
   --cdp-url <url>       Chrome DevTools Protocol HTTP URL. Default: ${DEFAULT_CDP_URL}

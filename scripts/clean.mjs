@@ -7,17 +7,11 @@ const paths = [
   'apps/desktop/release',
   'packages/app-protocol/dist',
   'packages/capability-core/dist',
-  'packages/capability-runtime/dist',
   'packages/canvas-core/dist',
   'packages/canvas-map-core/dist',
   'packages/project-core/dist',
   'packages/photoshop-bridge-plugin-core/dist',
-  'packages/workbench-runtime/dist',
-  'apps/app-server/dist',
-  'apps/daemon/dist',
-  'apps/debrute-cli/dist',
-  'apps/runtime-host/dist',
-  'apps/runtime-host/bundle'
+  'packages/runtime-control-client/dist'
 ];
 
 for (const path of paths) {

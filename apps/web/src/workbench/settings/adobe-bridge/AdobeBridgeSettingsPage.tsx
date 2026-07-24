@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { AlertTriangle, Cable, Link2, Unlink } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertTriangle, Cable, KeyRound, Link2, Trash2, Unlink, X } from 'lucide-react';
 import type {
   AdobeBridgeDiscoveryStatus,
   AdobeBridgeStateView,
@@ -14,6 +14,13 @@ import { useI18n, type WorkbenchI18n } from '../../i18n';
 type ClientOperation =
   | { status: 'loading' }
   | { status: 'error'; message: string };
+
+interface PendingPairing {
+  pairingId: string;
+  code: string;
+  expiresAt: string;
+  pairedPluginIdsAtCreation: string[];
+}
 
 export function AdobeBridgeSettingsPage({
   persistedSettings,
@@ -30,8 +37,25 @@ export function AdobeBridgeSettingsPage({
   const currentProjectId = projectId;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const [pairing, setPairing] = useState<PendingPairing>();
   const [clientOperations, setClientOperations] = useState<Record<string, ClientOperation | undefined>>({});
   const failedTransfers = recentFailedTransfers(bridge);
+
+  useEffect(() => {
+    if (!pairing) return;
+    const pairedAtCreation = new Set(pairing.pairedPluginIdsAtCreation);
+    if (bridge.pairedPlugins.some((plugin) => !pairedAtCreation.has(plugin.pluginInstanceId))) {
+      setPairing(undefined);
+      return;
+    }
+    const remaining = Date.parse(pairing.expiresAt) - Date.now();
+    if (remaining <= 0) {
+      setPairing(undefined);
+      return;
+    }
+    const timeout = window.setTimeout(() => setPairing(undefined), remaining);
+    return () => window.clearTimeout(timeout);
+  }, [bridge.pairedPlugins, pairing]);
 
   const setEnabled = async (enabled: boolean) => {
     setSaving(true);
@@ -45,19 +69,49 @@ export function AdobeBridgeSettingsPage({
     }
   };
 
-  const runClientOperation = async (adobeClientId: string, operation: () => Promise<void>) => {
+  const runClientOperation = async (pluginInstanceId: string, operation: () => Promise<void>) => {
     setClientOperations((current) => ({
       ...current,
-      [adobeClientId]: { status: 'loading' }
+      [pluginInstanceId]: { status: 'loading' }
     }));
     try {
       await operation();
-      setClientOperations((current) => ({ ...current, [adobeClientId]: undefined }));
+      setClientOperations((current) => ({ ...current, [pluginInstanceId]: undefined }));
     } catch (err) {
       setClientOperations((current) => ({
         ...current,
-        [adobeClientId]: { status: 'error', message: errorMessage(err) }
+        [pluginInstanceId]: { status: 'error', message: errorMessage(err) }
       }));
+    }
+  };
+
+  const createPairing = async () => {
+    setSaving(true);
+    setError(undefined);
+    try {
+      const created = await actions.createAdobeBridgePairing();
+      setPairing({
+        ...created,
+        pairedPluginIdsAtCreation: bridge.pairedPlugins.map((plugin) => plugin.pluginInstanceId)
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancelPairing = async () => {
+    if (!pairing) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      await actions.cancelAdobeBridgePairing(pairing.pairingId);
+      setPairing(undefined);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -70,20 +124,39 @@ export function AdobeBridgeSettingsPage({
           disabled={saving}
           onChange={(event) => void setEnabled(event.currentTarget.checked)}
         />
+        <Button
+          type="button"
+          disabled={!persistedSettings.enabled || saving}
+          iconStart={<KeyRound size={14} />}
+          onClick={() => void createPairing()}
+        >
+          {i18n.t(pairing ? 'settings.adobeBridge.replacePairing' : 'settings.adobeBridge.pairPlugin')}
+        </Button>
+        {pairing ? (
+          <Button type="button" disabled={saving} iconStart={<X size={14} />} onClick={() => void cancelPairing()}>
+            {i18n.t('settings.adobeBridge.cancelPairing')}
+          </Button>
+        ) : null}
       </Toolbar>
       {error ? <small className="db-form-error">{error}</small> : null}
+      {pairing ? (
+        <div className="db-record-summary" data-testid="adobe-bridge-pairing-code">
+          <strong>{i18n.t('settings.adobeBridge.pairingCode', { code: pairing.code })}</strong>
+          <small>{i18n.t('settings.adobeBridge.pairingExpires', { expiresAt: pairing.expiresAt })}</small>
+        </div>
+      ) : null}
       <div className="db-record-summary">
         <StatusPill tone={bridge.settings.discoveryStatus === 'available' || bridge.settings.discoveryStatus === 'disabled' ? 'neutral' : 'danger'}>
           {discoveryLabel(bridge.settings.discoveryStatus, i18n)}
         </StatusPill>
       </div>
       <div className="db-record-list">
-        {bridge.adobeClients.map((client) => {
-          const linked = isPhotoshopLinkedToCurrentProject(bridge, currentProjectId, client.adobeClientId);
-          const clientOperation = clientOperations[client.adobeClientId];
+        {bridge.clients.map((client) => {
+          const linked = isPhotoshopLinkedToCurrentProject(bridge, currentProjectId, client.pluginInstanceId);
+          const clientOperation = clientOperations[client.pluginInstanceId];
           const clientOperationLoading = clientOperation?.status === 'loading';
           return (
-            <div className="db-record-row" key={client.adobeClientId}>
+            <div className="db-record-row" key={client.pluginInstanceId}>
               <span><Cable size={14} /> {client.displayName}</span>
               <StatusPill tone="neutral">
                 {client.activeDocumentTitle ? i18n.t('settings.adobeBridge.documentOpen') : i18n.t('settings.adobeBridge.noDocumentOpen')}
@@ -96,8 +169,8 @@ export function AdobeBridgeSettingsPage({
                     loading={clientOperationLoading}
                     iconStart={<Unlink size={14} />}
                     onClick={() => void runClientOperation(
-                      client.adobeClientId,
-                      () => actions.unlinkAdobeBridgePhotoshop(client.adobeClientId)
+                      client.pluginInstanceId,
+                      () => actions.unlinkAdobeBridgePhotoshop(client.pluginInstanceId)
                     )}
                   >
                     {i18n.t('settings.adobeBridge.disconnect')}
@@ -109,8 +182,8 @@ export function AdobeBridgeSettingsPage({
                     loading={clientOperationLoading}
                     iconStart={<Link2 size={14} />}
                     onClick={() => void runClientOperation(
-                      client.adobeClientId,
-                      () => actions.linkAdobeBridgePhotoshop({ adobeClientId: client.adobeClientId })
+                      client.pluginInstanceId,
+                      () => actions.linkAdobeBridgePhotoshop({ pluginInstanceId: client.pluginInstanceId })
                     )}
                   >
                     {i18n.t('settings.adobeBridge.connect')}
@@ -129,6 +202,30 @@ export function AdobeBridgeSettingsPage({
             <StatusPill tone="neutral">{i18n.t('settings.adobeBridge.openProject')}</StatusPill>
             <small>{i18n.t('settings.adobeBridge.directories', { count: project.directories.length })}</small>
             <div className="db-record-row__action" />
+          </div>
+        ))}
+      </div>
+      <h3>{i18n.t('settings.adobeBridge.pairedPlugins')}</h3>
+      <div className="db-record-list">
+        {bridge.pairedPlugins.map((plugin) => (
+          <div className="db-record-row" key={plugin.pluginInstanceId}>
+            <span>{plugin.clientRuntime.toUpperCase()} · {plugin.pluginInstanceId}</span>
+            <StatusPill tone="neutral">
+              {i18n.t(plugin.connected ? 'settings.adobeBridge.connected' : 'settings.adobeBridge.disconnected')}
+            </StatusPill>
+            <small>{plugin.createdAt}</small>
+            <div className="db-record-row__action">
+              <Button
+                type="button"
+                iconStart={<Trash2 size={14} />}
+                onClick={() => void runClientOperation(
+                  plugin.pluginInstanceId,
+                  () => actions.removeAdobeBridgePairing(plugin.pluginInstanceId)
+                )}
+              >
+                {i18n.t('settings.adobeBridge.removePairing')}
+              </Button>
+            </div>
           </div>
         ))}
       </div>
@@ -154,14 +251,14 @@ export function AdobeBridgeSettingsPage({
 export function isPhotoshopLinkedToCurrentProject(
   bridge: AdobeBridgeStateView,
   currentProjectId: string | undefined,
-  adobeClientId: string
+  pluginInstanceId: string
 ): boolean {
   if (!currentProjectId) {
     return false;
   }
   return bridge.links.some((link) => (
     link.projectId === currentProjectId
-    && link.adobeClientId === adobeClientId
+    && link.pluginInstanceId === pluginInstanceId
     && link.status === 'active'
   ));
 }

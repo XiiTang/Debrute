@@ -49,7 +49,6 @@ export type CanvasImageNodeAssetEvent =
     }
   | { type: 'next-loaded'; loadKey: string }
   | { type: 'next-failed'; loadKey: string; message: string }
-  | { type: 'interaction-started' }
   | { type: 'retry' };
 
 export function initialCanvasImageNodeAssetState(): CanvasImageNodeAssetState {
@@ -127,14 +126,6 @@ export function canvasImageNodeAssetReducer(
           message: event.message
         }
       };
-    case 'interaction-started':
-      if (!state.loaded || !state.next) {
-        return state;
-      }
-      return {
-        ...state,
-        next: undefined
-      };
   }
 }
 
@@ -189,6 +180,11 @@ function reduceResolvedSource(
   event: Extract<CanvasImageNodeAssetEvent, { type: 'source-resolved' }>
 ): CanvasImageNodeAssetState {
   if (event.source.kind === 'not-eligible') {
+    if (event.source.sourceRevisionKey === state.sourceRevisionKey
+      && state.next === undefined
+      && state.error === undefined) {
+      return state;
+    }
     return {
       sourceRevisionKey: event.source.sourceRevisionKey,
       retryKey: state.retryKey,

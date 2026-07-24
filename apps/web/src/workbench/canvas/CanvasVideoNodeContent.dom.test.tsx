@@ -223,6 +223,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
 
     expect(html).toContain('poster is broken');
     expect(html).toContain('db-canvas-node-error-overlay');
+    expect(html).toContain('canvas-node-error-presentation');
     expect(html).not.toContain('data-testid="video-player-adapter"');
   });
 

@@ -1,0 +1,2840 @@
+{
+  "image": [
+    {
+      "debruteModelId": "doubao-seedream-5-0-lite-260128",
+      "summary": "Volcengine Ark Doubao Seedream image generation.",
+      "chooseWhen": "Chinese prompts, bilingual text inside images, multi-image composition, large outputs",
+      "avoidWhen": "you need seed control exposed in Debrute",
+      "supportsTextRendering": true,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "defaultRequestModelId": "doubao-seedream-5-0-lite-260128",
+      "listParameters": {
+        "prompt": "required text instruction for generation or editing",
+        "image": "optional string or string array for input images; supports single-image and multi-image input",
+        "size": "2K|4K or explicit dimensions supported by the service",
+        "output_format": "png|jpeg",
+        "response_format": "url|b64_json",
+        "watermark": "boolean",
+        "sequential_image_generation": "disabled for single image or auto for grouped image generation",
+        "sequential_image_generation_options.max_images": "maximum generated images for group generation",
+        "stream": "boolean streaming output for supported flows",
+        "optimize_prompt_options.mode": "standard supported for Seedream 5.0 Lite"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "output_formats": [
+          "png",
+          "jpeg"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "default": "2048x2048"
+          },
+          "n": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1
+          },
+          "response_format": {
+            "type": "string",
+            "default": "url"
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "png"
+          },
+          "sequential_image_generation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sequential_image_generation_options": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "stream": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "optimize_prompt_options": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "debruteImageInput": true,
+            "description": "Array of Project-relative image paths, http(s) image URLs, or data:image URLs."
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "doubao-seedream-5-0-lite-260128",
+          "arguments": {
+            "prompt": "A bilingual product poster with clean Chinese and English headline text",
+            "size": "2048x2048",
+            "output_format": "png",
+            "n": 1
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "fal-ai/flux/dev",
+      "summary": "Fal.ai FLUX.1 [dev] text-to-image.",
+      "chooseWhen": "plain text-to-image with `seed`, `guidance_scale`, `num_inference_steps`",
+      "avoidWhen": "you need image inputs",
+      "supportsTextRendering": false,
+      "supportsEditing": false,
+      "defaultBaseUrl": "https://fal.run",
+      "defaultRequestModelId": "fal-ai/flux/dev",
+      "listParameters": {
+        "prompt": "required string prompt",
+        "image_size": "square_hd|square|portrait_4_3|portrait_16_9|landscape_4_3|landscape_16_9 or {width,height}",
+        "num_inference_steps": "integer; default 28",
+        "seed": "integer",
+        "guidance_scale": "number; default 3.5",
+        "sync_mode": "boolean",
+        "num_images": "number of generated images; default 1",
+        "enable_safety_checker": "boolean; default true",
+        "output_format": "jpeg|png",
+        "acceleration": "none|regular|high"
+      },
+      "capabilities": {
+        "supports_image_inputs": false,
+        "output_formats": [
+          "png",
+          "jpeg"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "image_size": {
+            "type": [
+              "string",
+              "object"
+            ],
+            "default": "landscape_4_3"
+          },
+          "num_images": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "png"
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "guidance_scale": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "num_inference_steps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "sync_mode": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "enable_safety_checker": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "acceleration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "none",
+              "regular",
+              "high",
+              null
+            ]
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "fal-ai/flux/dev",
+          "arguments": {
+            "prompt": "A cinematic product render on a black acrylic surface",
+            "image_size": "landscape_4_3",
+            "num_images": 1,
+            "output_format": "png"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "fal-ai/flux/dev/image-to-image",
+      "summary": "Fal.ai FLUX.1 [dev] image-to-image.",
+      "chooseWhen": "image-to-image restyling with a `strength` dial and FLUX controls",
+      "avoidWhen": "you need more than one image input",
+      "supportsTextRendering": false,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://fal.run",
+      "defaultRequestModelId": "fal-ai/flux/dev/image-to-image",
+      "listParameters": {
+        "image_url": "required hosted URL or Base64 data URI of the source image",
+        "strength": "float source image strength; default 0.95",
+        "num_inference_steps": "integer; default 40",
+        "prompt": "required string prompt",
+        "seed": "integer",
+        "guidance_scale": "number; default 3.5",
+        "sync_mode": "boolean",
+        "num_images": "number of generated images; default 1",
+        "enable_safety_checker": "boolean; default true",
+        "output_format": "jpeg|png",
+        "acceleration": "none|regular|high"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "output_formats": [
+          "png",
+          "jpeg"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "image_size": {
+            "type": [
+              "string",
+              "object"
+            ],
+            "default": "landscape_4_3"
+          },
+          "num_images": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "png"
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "guidance_scale": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "num_inference_steps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "sync_mode": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "enable_safety_checker": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "acceleration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "none",
+              "regular",
+              "high",
+              null
+            ]
+          },
+          "image_url": {
+            "type": "string",
+            "debruteImageInput": true,
+            "description": "Hosted URL, Base64 data URI, or Project-relative source image path."
+          },
+          "strength": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "fal-ai/flux/dev/image-to-image",
+          "arguments": {
+            "prompt": "Restyle this product photo as a glossy studio render",
+            "image_url": "assets/product.png",
+            "strength": 0.65
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "gemini-3-pro-image-preview",
+      "summary": "Google Gemini 3 Pro image preview channel.",
+      "chooseWhen": "highest Gemini quality tier, more complex edits/compositions, better detail than Flash",
+      "avoidWhen": "you need the cheapest / fastest Gemini path",
+      "supportsTextRendering": false,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultRequestModelId": "gemini-3-pro-image-preview",
+      "listParameters": {
+        "prompt": "required text instruction",
+        "contents": "text and image parts used as context for generation, editing, composition, or reference workflows",
+        "aspect_ratio": "output aspect ratio such as 16:9",
+        "image_size": "1K|2K|4K where supported by the selected Gemini image model"
+      },
+      "capabilities": {
+        "supports_image_inputs": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "contents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Official Gemini contents array. Use model-specific text and image parts."
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "1:1"
+          },
+          "image_size": {
+            "type": "string",
+            "default": "1K",
+            "enum": [
+              "1K",
+              "2K",
+              "4K"
+            ]
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "gemini-3-pro-image-preview",
+          "arguments": {
+            "prompt": "A high-detail architectural interior concept with natural light",
+            "aspect_ratio": "4:3",
+            "image_size": "2K"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "gemini-3.1-flash-image",
+      "summary": "Google Gemini 3.1 Flash image generation.",
+      "chooseWhen": "the production (non-preview) Gemini 3.1 Flash image channel when your account has it enabled",
+      "avoidWhen": "you need the preview channel features",
+      "supportsTextRendering": false,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultRequestModelId": "gemini-3.1-flash-image",
+      "listParameters": {
+        "prompt": "required text instruction",
+        "contents": "text and image parts used as context for generation, editing, composition, or reference workflows",
+        "aspect_ratio": "output aspect ratio such as 16:9",
+        "image_size": "1K|2K|4K where supported by the selected Gemini image model"
+      },
+      "capabilities": {
+        "supports_image_inputs": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "contents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Official Gemini contents array. Use model-specific text and image parts."
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "1:1"
+          },
+          "image_size": {
+            "type": "string",
+            "default": "1K",
+            "enum": [
+              "1K",
+              "2K",
+              "4K"
+            ]
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "gemini-3.1-flash-image",
+          "arguments": {
+            "prompt": "A minimalist storefront facade, strong geometry, bright midday sun",
+            "aspect_ratio": "16:9",
+            "image_size": "1K"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "gemini-3.1-flash-image-preview",
+      "summary": "Google Gemini 3.1 Flash image preview channel.",
+      "chooseWhen": "fast single-image generation, extreme aspect ratios, Gemini image-input flows",
+      "avoidWhen": "you need multiple outputs per call",
+      "supportsTextRendering": false,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultRequestModelId": "gemini-3.1-flash-image-preview",
+      "listParameters": {
+        "prompt": "required text instruction",
+        "contents": "text and image parts used as context for generation, editing, composition, or reference workflows",
+        "aspect_ratio": "output aspect ratio such as 16:9",
+        "image_size": "1K|2K|4K where supported by the selected Gemini image model"
+      },
+      "capabilities": {
+        "supports_image_inputs": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "contents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Official Gemini contents array. Use model-specific text and image parts."
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "1:1"
+          },
+          "image_size": {
+            "type": "string",
+            "default": "1K",
+            "enum": [
+              "1K",
+              "2K",
+              "4K"
+            ]
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "gemini-3.1-flash-image-preview",
+          "arguments": {
+            "prompt": "A minimalist storefront facade, strong geometry, bright midday sun",
+            "aspect_ratio": "16:9",
+            "image_size": "1K"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "gpt-image-1",
+      "summary": "OpenAI gpt-image-1 text-to-image and image edits.",
+      "chooseWhen": "strong instruction following, strong text rendering, OpenAI edit flow, multiple image inputs",
+      "avoidWhen": "you need seed / diffusion knobs",
+      "supportsTextRendering": true,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://api.openai.com/v1",
+      "defaultRequestModelId": "gpt-image-1",
+      "listParameters": {
+        "prompt": "required text prompt",
+        "image": "optional reference/edit image input",
+        "mask": "optional edit mask for first image; same format and size as image; less than 50MB; alpha channel required",
+        "size": "1024x1024|1024x1536|1536x1024",
+        "quality": "auto|low|medium|high",
+        "n": "1..10"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "sizes": [
+          "1024x1024",
+          "1024x1536",
+          "1536x1024"
+        ],
+        "quality": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "default": "1024x1024"
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": "auto"
+          },
+          "n": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "image_url": {
+                      "type": "string",
+                      "pattern": "^(https?://|data:image/)"
+                    },
+                    "data": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    }
+                  },
+                  "anyOf": [
+                    {
+                      "required": [
+                        "image_url"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "data",
+                        "mime_type"
+                      ]
+                    }
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "debruteImageInput": true,
+            "debruteModelSpecificImageObject": {
+              "kind": "openai-image",
+              "acceptedValueFormat": "OpenAI image objects with `image_url` or base64 `data` plus `mime_type`"
+            },
+            "description": "Array of Project-relative image paths, http(s) image URLs, data:image URLs, or model-specific image objects."
+          },
+          "mask": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "image_url": {
+                    "type": "string",
+                    "pattern": "^(https?://|data:image/)"
+                  },
+                  "data": {
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": "string"
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "image_url"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "data",
+                      "mime_type"
+                    ]
+                  }
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "debruteImageInput": true,
+            "debruteModelSpecificImageObject": {
+              "kind": "openai-image",
+              "acceptedValueFormat": "OpenAI image objects with `image_url` or base64 `data` plus `mime_type`"
+            },
+            "description": "Project-relative image path, http(s) image URL, data:image URL, or model-specific image object."
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "gpt-image-1",
+          "arguments": {
+            "prompt": "A clean app icon with readable Debrute lettering",
+            "size": "1024x1024",
+            "quality": "high"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "gpt-image-2",
+      "summary": "OpenAI gpt-image-2 text-to-image and image edits.",
+      "chooseWhen": "latest OpenAI image quality tier, strong prompt adherence, text rendering, and OpenAI-native editing",
+      "avoidWhen": "you need seed / diffusion knobs or a non-OpenAI image stack",
+      "supportsTextRendering": true,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://api.openai.com/v1",
+      "defaultRequestModelId": "gpt-image-2",
+      "listParameters": {
+        "prompt": "required text prompt",
+        "image": "reference/edit image input; supports image references and edit flows",
+        "mask": "edit mask for first image; same format and size as image; less than 50MB; alpha channel required",
+        "size": "WIDTHxHEIGHT; both dimensions divisible by 16; aspect ratio between 1:3 and 3:1; maximum supported resolution 3840x2160; must satisfy current pixel and edge limits; auto supported",
+        "quality": "auto|low|medium|high",
+        "output_format": "png|jpeg|webp",
+        "output_compression": "0..100 for jpeg/webp",
+        "background": "auto|opaque",
+        "moderation": "auto|low",
+        "n": "1..10",
+        "user": "optional end-user identifier"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "sizes": [
+          "auto",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536",
+          "2048x2048",
+          "2048x1152",
+          "3840x2160",
+          "2160x3840"
+        ],
+        "quality": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ],
+        "background": [
+          "auto",
+          "opaque"
+        ],
+        "output_formats": [
+          "png",
+          "jpeg",
+          "webp"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "default": "auto"
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": "auto"
+          },
+          "background": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "opaque"
+            ],
+            "default": "auto"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ]
+          },
+          "output_compression": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "moderation": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low"
+            ]
+          },
+          "n": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "user": {
+            "type": "string"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "image_url": {
+                      "type": "string",
+                      "pattern": "^(https?://|data:image/)"
+                    },
+                    "data": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    }
+                  },
+                  "anyOf": [
+                    {
+                      "required": [
+                        "image_url"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "data",
+                        "mime_type"
+                      ]
+                    }
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "debruteImageInput": true,
+            "debruteModelSpecificImageObject": {
+              "kind": "openai-image",
+              "acceptedValueFormat": "OpenAI image objects with `image_url` or base64 `data` plus `mime_type`"
+            },
+            "description": "Array of Project-relative image paths, http(s) image URLs, data:image URLs, or model-specific image objects."
+          },
+          "mask": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "image_url": {
+                    "type": "string",
+                    "pattern": "^(https?://|data:image/)"
+                  },
+                  "data": {
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": "string"
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "image_url"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "data",
+                      "mime_type"
+                    ]
+                  }
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "debruteImageInput": true,
+            "debruteModelSpecificImageObject": {
+              "kind": "openai-image",
+              "acceptedValueFormat": "OpenAI image objects with `image_url` or base64 `data` plus `mime_type`"
+            },
+            "description": "Project-relative image path, http(s) image URL, data:image URL, or model-specific image object."
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "gpt-image-2",
+          "arguments": {
+            "prompt": "A clean hero image for a productivity app landing page, readable headline text",
+            "size": "2048x1152",
+            "quality": "high",
+            "background": "opaque",
+            "output_format": "webp",
+            "output_compression": 80,
+            "n": 1
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "grok-imagine",
+      "summary": "xAI Grok Imagine via Vydra.",
+      "chooseWhen": "one fast, simple single-image call with minimal controls",
+      "avoidWhen": "you need image inputs, batch outputs, or precise edit controls",
+      "supportsTextRendering": false,
+      "supportsEditing": false,
+      "defaultBaseUrl": "https://api.vydra.ai/api/v1",
+      "defaultRequestModelId": "grok-imagine",
+      "listParameters": {
+        "prompt": "required text description; maximum 5000 characters",
+        "aspect_ratio": "16:9|9:16|4:3|3:4|1:1|3:2|2:3"
+      },
+      "capabilities": {
+        "supports_image_inputs": false,
+        "async_polling": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "aspect_ratio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "grok-imagine",
+          "arguments": {
+            "prompt": "A fast concept sketch of a futuristic city gateway",
+            "aspect_ratio": "16:9"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "image-01",
+      "summary": "MiniMax image-01 image generation.",
+      "chooseWhen": "cheapest large batch in Debrute, character-style subject image input, up to 9 outputs per call",
+      "avoidWhen": "you need arbitrary edit controls or masks",
+      "supportsTextRendering": false,
+      "supportsEditing": false,
+      "defaultBaseUrl": "https://api.minimax.io",
+      "defaultRequestModelId": "image-01",
+      "listParameters": {
+        "prompt": "required text description; maximum 1500 characters",
+        "aspect_ratio": "1:1|16:9|4:3|3:2|2:3|3:4|9:16|21:9",
+        "width": "512..2048; divisible by 8; set together with height",
+        "height": "512..2048; divisible by 8; set together with width",
+        "response_format": "url|base64",
+        "seed": "integer seed",
+        "n": "1..9",
+        "prompt_optimizer": "boolean",
+        "subject_reference": "object array with character reference objects using image_file"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "aspect_ratios": [
+          "1:1",
+          "16:9",
+          "4:3",
+          "3:2",
+          "2:3",
+          "3:4",
+          "9:16",
+          "21:9"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "1:1"
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "n": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 9
+          },
+          "response_format": {
+            "type": "string",
+            "default": "base64"
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "prompt_optimizer": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "subject_reference": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "character"
+                    },
+                    "image_file": {
+                      "type": "string",
+                      "pattern": "^(https?://|data:image/)"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "image_file"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "debruteImageInput": true,
+            "debruteModelSpecificImageObject": {
+              "kind": "minimax-subject-reference",
+              "acceptedValueFormat": "MiniMax `subject_reference` objects with `image_file` public URL or data:image URL"
+            },
+            "description": "Array of Project-relative image paths, http(s) image URLs, data:image URLs, or model-specific image objects."
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "image-01",
+          "arguments": {
+            "prompt": "A character poster with consistent costume and confident pose",
+            "aspect_ratio": "3:4",
+            "n": 4
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "wan2.7-image",
+      "summary": "Aliyun DashScope Wan 2.7 image generation.",
+      "chooseWhen": "Chinese-first prompting, image-input generation or editing, simple reproducibility via `seed`, one endpoint for generation and editing",
+      "avoidWhen": "you need more than Debrute's exposed feature subset",
+      "supportsTextRendering": false,
+      "supportsEditing": true,
+      "defaultBaseUrl": "https://dashscope.aliyuncs.com/api/v1",
+      "defaultRequestModelId": "wan2.7-image",
+      "listParameters": {
+        "prompt": "required text prompt; Debrute forwards as request message text",
+        "image": "0..9 input images; JPEG/JPG/PNG without alpha/BMP/WEBP; width and height 240..8000; aspect ratio 1:8..8:1; file size <=20MB",
+        "size": "1K|2K or explicit pixels with total pixels 768*768..2048*2048 and aspect ratio 1:8..8:1",
+        "n": "1..4 when group mode is disabled; 1..12 maximum generated count when group mode is enabled",
+        "watermark": "boolean",
+        "seed": "integer 0..2147483647",
+        "thinking_mode": "boolean; applies when group mode is disabled and there is no image input",
+        "enable_sequential": "boolean group image output control",
+        "bbox_list": "optional bounding boxes; list length must match input image count"
+      },
+      "capabilities": {
+        "supports_image_inputs": true,
+        "async_polling": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "default": "1024*1024"
+          },
+          "n": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "thinking_mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enable_sequential": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "bbox_list": {
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "debruteImageInput": true,
+            "description": "Array of Project-relative image paths, http(s) image URLs, or data:image URLs."
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the first generated image. Debrute writes the file inside the open Project folder."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated image files when output_path is not used. Defaults to generated/<invocation-id>/."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "requestExample": {
+        "command": "generate.image",
+        "input": {
+          "model": "wan2.7-image",
+          "arguments": {
+            "prompt": "A quiet Jiangnan canal town in misty morning light",
+            "size": "1440*1024",
+            "n": 2,
+            "seed": 123
+          }
+        }
+      }
+    }
+  ],
+  "video": [
+    {
+      "debruteModelId": "doubao-seedance-2-0-260128",
+      "summary": "Volcengine Ark Doubao Seedance 2.0 video generation.",
+      "chooseWhen": "highest Seedance 2.0 quality, 1080p output, multimodal reference generation, generated audio",
+      "avoidWhen": "you need the fastest or cheapest Seedance path",
+      "supportsTextToVideo": true,
+      "supportsImageReferences": true,
+      "supportsVideoReferences": true,
+      "supportsAudioReferences": true,
+      "supportsGeneratedAudio": true,
+      "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "defaultRequestModelId": "doubao-seedance-2-0-260128",
+      "capabilities": {
+        "supports_multimodal_references": true,
+        "supports_generated_audio": true,
+        "supports_local_video_upload_service": true,
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "ratios": [
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "21:9",
+          "adaptive"
+        ],
+        "duration": {
+          "minimum": 4,
+          "maximum": 15,
+          "model_selected": -1
+        }
+      },
+      "listParameters": {
+        "prompt": "required text brief",
+        "intent": "generate|reference|audio_driven|extend|edit",
+        "references": "project file path, http(s) URL, asset:// URL, or data URL references; media type inferred when possible",
+        "ratio": "16:9|4:3|1:1|3:4|9:16|21:9|adaptive",
+        "resolution": "480p|720p|1080p",
+        "duration": "Seedance-supported duration range from official docs",
+        "generate_audio": "boolean",
+        "return_last_frame": "boolean"
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Required video brief."
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "generate",
+              "reference",
+              "audio_driven",
+              "extend",
+              "edit"
+            ],
+            "description": "High-level Debrute video intent. Debrute derives Seedance content routing internally."
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video",
+                    "audio",
+                    "mask"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "callback_url": {
+            "type": "string"
+          },
+          "return_last_frame": {
+            "type": "boolean"
+          },
+          "execution_expires_after": {
+            "type": "integer"
+          },
+          "generate_audio": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "safety_identifier": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "480p",
+              "720p",
+              "1080p"
+            ]
+          },
+          "ratio": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16",
+              "21:9",
+              "adaptive"
+            ]
+          },
+          "duration": {
+            "type": "integer",
+            "oneOf": [
+              {
+                "const": -1,
+                "description": "Let Seedance select the duration."
+              },
+              {
+                "minimum": 4,
+                "maximum": 15
+              }
+            ]
+          },
+          "frames": {
+            "type": "integer"
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "camera_fixed": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": "boolean"
+          },
+          "extend_direction": {
+            "type": "string",
+            "enum": [
+              "forward",
+              "backward"
+            ]
+          },
+          "edit_scope": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the generated video."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated video files when output_path is not used."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute builds the official Volcengine Ark content array internally. Project-local image references are encoded as supported image data URLs. Project-local audio references are encoded as supported audio data URLs. Project-local video references require a Debrute upload service; http(s) and asset:// video references pass through. `service_tier: flex` is not supported for the Seedance 2.0 series.",
+      "requestExample": {
+        "command": "generate.video",
+        "input": {
+          "model": "doubao-seedance-2-0-260128",
+          "arguments": {
+            "prompt": "A quiet product launch video with slow camera movement and synchronized ambient audio.",
+            "intent": "generate",
+            "references": [],
+            "resolution": "1080p",
+            "ratio": "16:9",
+            "duration": 5,
+            "generate_audio": true,
+            "watermark": false
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "doubao-seedance-2-0-fast-260128",
+      "summary": "Volcengine Ark Doubao Seedance 2.0 Fast video generation.",
+      "chooseWhen": "faster Seedance 2.0 iterations up to 720p with multimodal references",
+      "avoidWhen": "you need 1080p output",
+      "supportsTextToVideo": true,
+      "supportsImageReferences": true,
+      "supportsVideoReferences": true,
+      "supportsAudioReferences": true,
+      "supportsGeneratedAudio": true,
+      "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "defaultRequestModelId": "doubao-seedance-2-0-fast-260128",
+      "capabilities": {
+        "supports_multimodal_references": true,
+        "supports_generated_audio": true,
+        "supports_local_video_upload_service": true,
+        "resolutions": [
+          "480p",
+          "720p"
+        ],
+        "ratios": [
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "21:9",
+          "adaptive"
+        ],
+        "duration": {
+          "minimum": 4,
+          "maximum": 15,
+          "model_selected": -1
+        }
+      },
+      "listParameters": {
+        "prompt": "required text brief",
+        "intent": "generate|reference|audio_driven|extend|edit",
+        "references": "project file path, http(s) URL, asset:// URL, or data URL references; media type inferred when possible",
+        "ratio": "16:9|4:3|1:1|3:4|9:16|21:9|adaptive",
+        "resolution": "480p|720p",
+        "duration": "Seedance-supported duration range from official docs",
+        "generate_audio": "boolean",
+        "return_last_frame": "boolean"
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Required video brief."
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "generate",
+              "reference",
+              "audio_driven",
+              "extend",
+              "edit"
+            ],
+            "description": "High-level Debrute video intent. Debrute derives Seedance content routing internally."
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video",
+                    "audio",
+                    "mask"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "callback_url": {
+            "type": "string"
+          },
+          "return_last_frame": {
+            "type": "boolean"
+          },
+          "execution_expires_after": {
+            "type": "integer"
+          },
+          "generate_audio": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "safety_identifier": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "480p",
+              "720p"
+            ]
+          },
+          "ratio": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16",
+              "21:9",
+              "adaptive"
+            ]
+          },
+          "duration": {
+            "type": "integer",
+            "oneOf": [
+              {
+                "const": -1,
+                "description": "Let Seedance select the duration."
+              },
+              {
+                "minimum": 4,
+                "maximum": 15
+              }
+            ]
+          },
+          "frames": {
+            "type": "integer"
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "camera_fixed": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": "boolean"
+          },
+          "extend_direction": {
+            "type": "string",
+            "enum": [
+              "forward",
+              "backward"
+            ]
+          },
+          "edit_scope": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional project-relative output file path for the generated video."
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Optional project-relative directory for generated video files when output_path is not used."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute builds the official Volcengine Ark content array internally. Project-local image references are encoded as supported image data URLs. Project-local audio references are encoded as supported audio data URLs. Project-local video references require a Debrute upload service; http(s) and asset:// video references pass through. `service_tier: flex` is not supported for the Seedance 2.0 series.",
+      "requestExample": {
+        "command": "generate.video",
+        "input": {
+          "model": "doubao-seedance-2-0-fast-260128",
+          "arguments": {
+            "prompt": "A quiet product launch video with slow camera movement and synchronized ambient audio.",
+            "intent": "generate",
+            "references": [],
+            "resolution": "720p",
+            "ratio": "16:9",
+            "duration": 5,
+            "generate_audio": true,
+            "watermark": false
+          }
+        }
+      }
+    }
+  ],
+  "audio": [
+    {
+      "debruteModelId": "dashscope-qwen3-tts-flash",
+      "kind": "tts",
+      "summary": "Alibaba Cloud DashScope Qwen3 TTS Flash.",
+      "chooseWhen": "Qwen TTS through DashScope is configured",
+      "avoidWhen": "you need local-only synthesis",
+      "defaultBaseUrl": "https://dashscope.aliyuncs.com/api/v1",
+      "defaultRequestModelId": "qwen3-tts-flash",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice": "DashScope Qwen TTS voice",
+        "language": "optional DashScope language_type",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "wav"
+        ],
+        "supports_multilingual_text": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "dashscope-qwen3-tts-flash",
+          "arguments": {
+            "text": "Welcome to Debrute.",
+            "voice": "Cherry"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "doubao-seed-tts-2-0",
+      "kind": "tts",
+      "summary": "Volcengine Seed TTS 2.0 text-to-speech.",
+      "chooseWhen": "Doubao/Volcengine Seed TTS is configured",
+      "avoidWhen": "you need shared credentials across multiple Debrute model ids",
+      "defaultBaseUrl": "https://openspeech.bytedance.com/api/v3",
+      "defaultRequestModelId": "seed-tts-2.0",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice": "Volcengine speaker id",
+        "format": "mp3|wav|pcm",
+        "sample_rate": "optional req_params.audio_params.sample_rate number",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3",
+          "wav",
+          "pcm"
+        ],
+        "supports_voice_type": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "wav",
+              "pcm"
+            ]
+          },
+          "sample_rate": {
+            "type": "number"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "doubao-seed-tts-2-0",
+          "arguments": {
+            "text": "Welcome to Debrute.",
+            "voice": "BV700_V2_streaming",
+            "format": "mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "elevenlabs-multilingual-v2",
+      "kind": "tts",
+      "summary": "ElevenLabs multilingual v2 text-to-speech.",
+      "chooseWhen": "multilingual ElevenLabs narration is needed",
+      "avoidWhen": "you do not have a configured ElevenLabs voice id",
+      "defaultBaseUrl": "https://api.elevenlabs.io/v1",
+      "defaultRequestModelId": "eleven_multilingual_v2",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice_id": "required ElevenLabs voice id used in the request path",
+        "format": "mp3|wav",
+        "stability": "optional voice_settings.stability number",
+        "similarity_boost": "optional voice_settings.similarity_boost number",
+        "style": "optional voice_settings.style number",
+        "speed": "optional voice_settings.speed number",
+        "use_speaker_boost": "optional voice_settings.use_speaker_boost boolean",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "supports_voice_settings": true,
+        "formats": [
+          "mp3",
+          "wav"
+        ],
+        "requires_voice_id": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text",
+          "voice_id"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice_id": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "wav"
+            ]
+          },
+          "stability": {
+            "type": "number"
+          },
+          "similarity_boost": {
+            "type": "number"
+          },
+          "style": {
+            "type": "number"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "use_speaker_boost": {
+            "type": "boolean"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "elevenlabs-multilingual-v2",
+          "arguments": {
+            "text": "A concise multilingual narration line.",
+            "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+            "format": "mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "elevenlabs-music",
+      "kind": "music",
+      "summary": "ElevenLabs text-to-music generation.",
+      "chooseWhen": "prompted music generation through ElevenLabs is desired",
+      "avoidWhen": "you need an open local workflow",
+      "defaultBaseUrl": "https://api.elevenlabs.io/v1",
+      "defaultRequestModelId": "music_v2",
+      "listParameters": {
+        "prompt": "required music prompt",
+        "duration_seconds": "optional duration in seconds",
+        "format": "mp3",
+        "instrumental": "optional force_instrumental boolean",
+        "seed": "optional deterministic seed number",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3"
+        ],
+        "supports_duration": true,
+        "supports_seed": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Music prompt."
+          },
+          "duration_seconds": {
+            "type": "number"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3"
+            ]
+          },
+          "instrumental": {
+            "type": "boolean"
+          },
+          "seed": {
+            "type": "number"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.music",
+        "input": {
+          "model": "elevenlabs-music",
+          "arguments": {
+            "prompt": "Warm ambient electronic music for a product demo.",
+            "duration_seconds": 30,
+            "format": "mp3",
+            "output_path": "generated/demo-music.mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "elevenlabs-sound-effects",
+      "kind": "sound-effect",
+      "summary": "ElevenLabs text-to-sound-effects generation.",
+      "chooseWhen": "short sound effects through ElevenLabs are needed",
+      "avoidWhen": "you need full music composition",
+      "defaultBaseUrl": "https://api.elevenlabs.io/v1",
+      "defaultRequestModelId": "eleven_text_to_sound_v2",
+      "listParameters": {
+        "prompt": "required sound effect prompt",
+        "duration_seconds": "optional duration_seconds number",
+        "format": "mp3",
+        "loop": "optional loop boolean",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3"
+        ],
+        "supports_duration": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "type": "number"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3"
+            ]
+          },
+          "loop": {
+            "type": "boolean"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.sfx",
+        "input": {
+          "model": "elevenlabs-sound-effects",
+          "arguments": {
+            "prompt": "A clean futuristic notification chime.",
+            "duration_seconds": 2,
+            "format": "mp3",
+            "output_path": "generated/chime.mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "elevenlabs-v3-tts",
+      "kind": "tts",
+      "summary": "ElevenLabs v3 text-to-speech.",
+      "chooseWhen": "expressive ElevenLabs voice generation is desired",
+      "avoidWhen": "you do not have a configured ElevenLabs voice id",
+      "defaultBaseUrl": "https://api.elevenlabs.io/v1",
+      "defaultRequestModelId": "eleven_v3",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice_id": "required ElevenLabs voice id used in the request path",
+        "format": "mp3|wav",
+        "stability": "optional voice_settings.stability number",
+        "similarity_boost": "optional voice_settings.similarity_boost number",
+        "style": "optional voice_settings.style number",
+        "speed": "optional voice_settings.speed number",
+        "use_speaker_boost": "optional voice_settings.use_speaker_boost boolean",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "supports_voice_settings": true,
+        "formats": [
+          "mp3",
+          "wav"
+        ],
+        "requires_voice_id": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text",
+          "voice_id"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice_id": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "wav"
+            ]
+          },
+          "stability": {
+            "type": "number"
+          },
+          "similarity_boost": {
+            "type": "number"
+          },
+          "style": {
+            "type": "number"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "use_speaker_boost": {
+            "type": "boolean"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "elevenlabs-v3-tts",
+          "arguments": {
+            "text": "A cinematic narration line.",
+            "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+            "format": "mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "fal-stable-audio-sfx",
+      "kind": "sound-effect",
+      "summary": "fal Stable Audio text-to-audio for sound effects.",
+      "chooseWhen": "Stable Audio is desired for sound effects or ambience",
+      "avoidWhen": "you need TTS or lyric music generation",
+      "defaultBaseUrl": "https://queue.fal.run",
+      "defaultRequestModelId": "fal-ai/stable-audio-3/medium/base/text-to-audio",
+      "listParameters": {
+        "prompt": "required sound effect prompt",
+        "duration_seconds": "optional duration number",
+        "format": "mp3|wav",
+        "seed": "optional seed number",
+        "negative_prompt": "optional negative prompt",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3",
+          "wav"
+        ],
+        "supports_music_and_sfx": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "type": "number"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "wav"
+            ]
+          },
+          "seed": {
+            "type": "number"
+          },
+          "negative_prompt": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.sfx",
+        "input": {
+          "model": "fal-stable-audio-sfx",
+          "arguments": {
+            "prompt": "A distant sci-fi door opening with a soft hydraulic hiss.",
+            "duration_seconds": 4,
+            "format": "mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "fal-stable-audio-text-to-audio",
+      "kind": "music",
+      "summary": "fal Stable Audio text-to-audio music generation.",
+      "chooseWhen": "Stable Audio generation through fal is configured",
+      "avoidWhen": "you need a dedicated TTS voice model",
+      "defaultBaseUrl": "https://queue.fal.run",
+      "defaultRequestModelId": "fal-ai/stable-audio-25/text-to-audio",
+      "listParameters": {
+        "prompt": "required music prompt",
+        "duration_seconds": "optional seconds_total number",
+        "seed": "optional seed number",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "wav"
+        ],
+        "supports_music_and_sfx": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "type": "number"
+          },
+          "seed": {
+            "type": "number"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.music",
+        "input": {
+          "model": "fal-stable-audio-text-to-audio",
+          "arguments": {
+            "prompt": "Ambient downtempo music with soft pads.",
+            "duration_seconds": 20,
+            "output_path": "generated/stable-audio.wav"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "gemini-tts",
+      "kind": "tts",
+      "summary": "Gemini text-to-speech through the Gemini API.",
+      "chooseWhen": "Gemini-controlled single-speaker or multi-speaker TTS is desired",
+      "avoidWhen": "you need a ready MP3 response without PCM wrapping",
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultRequestModelId": "gemini-2.5-flash-preview-tts",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice": "Gemini TTS voice name",
+        "instructions": "optional style instruction prepended to text",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "wav"
+        ],
+        "response_audio_encoding": "pcm",
+        "default_sample_rate": 24000
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "gemini-tts",
+          "arguments": {
+            "text": "Say warmly: Welcome to Debrute.",
+            "voice": "Kore"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "google-lyria-3-clip-preview",
+      "kind": "music",
+      "summary": "Google Lyria 3 clip preview music generation.",
+      "chooseWhen": "Gemini API Lyria short music generation is configured",
+      "avoidWhen": "you need a non-preview model",
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultRequestModelId": "lyria-3-clip-preview",
+      "listParameters": {
+        "prompt": "required music prompt",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.music",
+        "input": {
+          "model": "google-lyria-3-clip-preview",
+          "arguments": {
+            "prompt": "A bright synth pop loop for a product reveal."
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "google-lyria-3-pro-preview",
+      "kind": "music",
+      "summary": "Google Lyria 3 pro preview music generation.",
+      "chooseWhen": "higher-capability Gemini API Lyria generation is configured",
+      "avoidWhen": "you need a stable non-preview model",
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultRequestModelId": "lyria-3-pro-preview",
+      "listParameters": {
+        "prompt": "required music prompt",
+        "format": "mp3|wav",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3",
+          "wav"
+        ]
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "wav"
+            ]
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.music",
+        "input": {
+          "model": "google-lyria-3-pro-preview",
+          "arguments": {
+            "prompt": "Cinematic orchestral underscore with hopeful momentum.",
+            "format": "wav"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "minimax-music-2-6",
+      "kind": "music",
+      "summary": "MiniMax Music 2.6 generation.",
+      "chooseWhen": "MiniMax music generation is configured",
+      "avoidWhen": "you need sound effects instead of music",
+      "defaultBaseUrl": "https://api.minimax.io",
+      "defaultRequestModelId": "music-2.6",
+      "listParameters": {
+        "prompt": "required music prompt",
+        "lyrics": "optional lyrics",
+        "instrumental": "optional is_instrumental boolean",
+        "format": "mp3|wav|flac",
+        "sample_rate": "optional audio_setting.sample_rate number",
+        "bitrate": "optional audio_setting.bitrate number",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3"
+        ],
+        "supports_lyrics": true,
+        "supports_instrumental": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "lyrics": {
+            "type": "string"
+          },
+          "instrumental": {
+            "type": "boolean"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "wav",
+              "flac"
+            ]
+          },
+          "sample_rate": {
+            "type": "number"
+          },
+          "bitrate": {
+            "type": "number"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.music",
+        "input": {
+          "model": "minimax-music-2-6",
+          "arguments": {
+            "prompt": "Upbeat technology demo music.",
+            "format": "mp3",
+            "instrumental": true
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "minimax-speech-2-8-hd",
+      "kind": "tts",
+      "summary": "MiniMax Speech 2.8 HD HTTP text-to-audio.",
+      "chooseWhen": "MiniMax high-definition TTS is configured",
+      "avoidWhen": "you need a non-MiniMax voice catalog",
+      "defaultBaseUrl": "https://api.minimax.io",
+      "defaultRequestModelId": "speech-2.8-hd",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice": "MiniMax voice id",
+        "format": "mp3|wav|flac",
+        "speed": "optional voice_setting.speed number",
+        "pitch": "optional voice_setting.pitch number",
+        "sample_rate": "optional audio_setting.sample_rate number",
+        "bitrate": "optional audio_setting.bitrate number",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "formats": [
+          "mp3",
+          "wav",
+          "flac"
+        ],
+        "supports_voice_settings": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "wav",
+              "flac"
+            ]
+          },
+          "speed": {
+            "type": "number"
+          },
+          "pitch": {
+            "type": "number"
+          },
+          "sample_rate": {
+            "type": "number"
+          },
+          "bitrate": {
+            "type": "number"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "minimax-speech-2-8-hd",
+          "arguments": {
+            "text": "Welcome to Debrute.",
+            "voice": "male-qn-qingse",
+            "format": "mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "openai-gpt-4o-mini-tts",
+      "kind": "tts",
+      "summary": "OpenAI GPT-4o mini TTS text-to-speech.",
+      "chooseWhen": "controllable narration with promptable speaking style",
+      "avoidWhen": "you need local-only synthesis",
+      "defaultBaseUrl": "https://api.openai.com/v1",
+      "defaultRequestModelId": "gpt-4o-mini-tts",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice": "OpenAI voice id",
+        "format": "mp3|opus|aac|flac|wav|pcm",
+        "speed": "optional speaking speed",
+        "instructions": "optional style control",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "voices": [
+          "alloy",
+          "ash",
+          "ballad",
+          "coral",
+          "echo",
+          "fable",
+          "onyx",
+          "nova",
+          "sage",
+          "shimmer"
+        ],
+        "formats": [
+          "mp3",
+          "opus",
+          "aac",
+          "flac",
+          "wav",
+          "pcm"
+        ],
+        "supports_instructions": true
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "opus",
+              "aac",
+              "flac",
+              "wav",
+              "pcm"
+            ]
+          },
+          "speed": {
+            "type": "number"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "openai-gpt-4o-mini-tts",
+          "arguments": {
+            "text": "Welcome to Debrute.",
+            "voice": "alloy",
+            "format": "mp3",
+            "output_path": "generated/voiceover.mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "openai-tts-1",
+      "kind": "tts",
+      "summary": "OpenAI tts-1 low-latency text-to-speech.",
+      "chooseWhen": "lower latency OpenAI TTS is preferred over maximum quality",
+      "avoidWhen": "you need promptable speaking style instructions",
+      "defaultBaseUrl": "https://api.openai.com/v1",
+      "defaultRequestModelId": "tts-1",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice": "OpenAI voice id",
+        "format": "mp3|opus|aac|flac|wav|pcm",
+        "speed": "optional speaking speed",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "voices": [
+          "alloy",
+          "echo",
+          "fable",
+          "onyx",
+          "nova",
+          "shimmer"
+        ],
+        "formats": [
+          "mp3",
+          "opus",
+          "aac",
+          "flac",
+          "wav",
+          "pcm"
+        ],
+        "supports_instructions": false
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "opus",
+              "aac",
+              "flac",
+              "wav",
+              "pcm"
+            ]
+          },
+          "speed": {
+            "type": "number"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "openai-tts-1",
+          "arguments": {
+            "text": "Welcome to Debrute.",
+            "voice": "alloy",
+            "format": "mp3"
+          }
+        }
+      }
+    },
+    {
+      "debruteModelId": "openai-tts-1-hd",
+      "kind": "tts",
+      "summary": "OpenAI tts-1-hd higher-quality text-to-speech.",
+      "chooseWhen": "OpenAI TTS quality matters more than latency",
+      "avoidWhen": "you need promptable speaking style instructions",
+      "defaultBaseUrl": "https://api.openai.com/v1",
+      "defaultRequestModelId": "tts-1-hd",
+      "listParameters": {
+        "text": "required text to synthesize",
+        "voice": "OpenAI voice id",
+        "format": "mp3|opus|aac|flac|wav|pcm",
+        "speed": "optional speaking speed",
+        "output_path": "optional project-relative path for the first artifact",
+        "output_directory": "optional project-relative directory for generated artifacts"
+      },
+      "capabilities": {
+        "voices": [
+          "alloy",
+          "echo",
+          "fable",
+          "onyx",
+          "nova",
+          "shimmer"
+        ],
+        "formats": [
+          "mp3",
+          "opus",
+          "aac",
+          "flac",
+          "wav",
+          "pcm"
+        ],
+        "supports_instructions": false
+      },
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "opus",
+              "aac",
+              "flac",
+              "wav",
+              "pcm"
+            ]
+          },
+          "speed": {
+            "type": "number"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "output_directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "usageNotes": "Use only parameters described by this Debrute catalog entry and its official documentation snapshot. Debrute stores audio credentials per Debrute model id.",
+      "requestExample": {
+        "command": "generate.tts",
+        "input": {
+          "model": "openai-tts-1-hd",
+          "arguments": {
+            "text": "Welcome to Debrute.",
+            "voice": "nova",
+            "format": "mp3"
+          }
+        }
+      }
+    }
+  ]
+}

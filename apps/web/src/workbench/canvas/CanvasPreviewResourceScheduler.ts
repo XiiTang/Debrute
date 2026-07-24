@@ -17,45 +17,34 @@ export interface CanvasPreviewResourceRequest {
   run: () => void;
 }
 
-interface QueuedCanvasPreviewResourceRequest {
-  request: CanvasPreviewResourceRequest;
-  enqueuedAt: number;
-}
-
 export interface CanvasPreviewResourceScheduler {
   enqueue(request: CanvasPreviewResourceRequest): void;
+  enqueuePublication(request: CanvasPreviewResourceRequest): void;
   cancel(kind: CanvasPreviewResourceKind, nodeId: string): void;
   setInteractionState(input: { cameraState: CanvasCameraState; dragActive: boolean }): void;
+  notifyVisibilityChanged(): void;
   dispose(): void;
 }
 
-export const CANVAS_PREVIEW_RESOURCE_SETTLE_MS = 500;
-const CANVAS_PREVIEW_RESOURCE_STARTS_PER_FRAME = 3;
+export const CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME = 3;
 
 export function createCanvasPreviewResourceScheduler(input: {
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   now?: (() => number) | undefined;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
-  setTimeout?: ((callback: () => void, delay: number) => number) | undefined;
-  clearTimeout?: ((handle: number) => void) | undefined;
-  settleMs?: number | undefined;
 } = {}): CanvasPreviewResourceScheduler {
   const requestFrame = input.requestFrame ?? globalThis.window?.requestAnimationFrame?.bind(globalThis.window);
   const cancelFrame = input.cancelFrame ?? globalThis.window?.cancelAnimationFrame?.bind(globalThis.window);
-  const setTimer = input.setTimeout ?? globalThis.window?.setTimeout?.bind(globalThis.window);
-  const clearTimer = input.clearTimeout ?? globalThis.window?.clearTimeout?.bind(globalThis.window);
-  if (!requestFrame || !cancelFrame || !setTimer || !clearTimer) {
-    throw new Error('Canvas preview resource scheduling requires animation frame and timer support.');
+  if (!requestFrame || !cancelFrame) {
+    throw new Error('Canvas preview resource scheduling requires animation frame support.');
   }
   const now = input.now ?? (() => globalThis.performance?.now?.() ?? Date.now());
-  const settleMs = input.settleMs ?? CANVAS_PREVIEW_RESOURCE_SETTLE_MS;
-  const queued = new Map<string, QueuedCanvasPreviewResourceRequest>();
+  const queuedStarts = new Map<string, CanvasPreviewResourceRequest>();
+  const queuedPublications = new Map<string, CanvasPreviewResourceRequest>();
   let cameraState: CanvasCameraState = 'idle';
   let dragActive = false;
   let frameHandle: number | undefined;
-  let settleTimer: number | undefined;
-  let lastInteractionAt: number | undefined;
 
   const record = (name: CanvasPerfCounterName, request?: CanvasPreviewResourceRequest): void => {
     input.perfMonitor?.recordCounter({
@@ -76,23 +65,9 @@ export function createCanvasPreviewResourceScheduler(input: {
 
   const interactionActive = (): boolean => cameraState !== 'idle' || dragActive;
 
-  const eligibleAt = (item: QueuedCanvasPreviewResourceRequest): number => (
-    lastInteractionAt === undefined
-      ? item.enqueuedAt + settleMs
-      : Math.max(lastInteractionAt, item.enqueuedAt) + settleMs
+  const publicationNeedsFrame = (request: CanvasPreviewResourceRequest): boolean => (
+    !request.isCurrent() || !request.isCulled()
   );
-
-  const canStart = (item: QueuedCanvasPreviewResourceRequest): boolean => (
-    !interactionActive() && now() >= eligibleAt(item)
-  );
-
-  const cancelSettleTimer = (): void => {
-    if (settleTimer === undefined) {
-      return;
-    }
-    clearTimer(settleTimer);
-    settleTimer = undefined;
-  };
 
   const cancelPendingFrame = (): void => {
     if (frameHandle === undefined) {
@@ -102,96 +77,109 @@ export function createCanvasPreviewResourceScheduler(input: {
     frameHandle = undefined;
   };
 
-  const scheduleSettleTimer = (): void => {
-    if (interactionActive() || settleTimer !== undefined || queued.size === 0) {
-      return;
-    }
-    const nextEligibleAt = Math.min(...[...queued.values()].map(eligibleAt));
-    const delay = Math.max(0, nextEligibleAt - now());
-    settleTimer = setTimer(() => {
-      settleTimer = undefined;
-      scheduleFrame();
-    }, delay);
-  };
-
   const scheduleFrame = (): void => {
-    if (frameHandle !== undefined || queued.size === 0) {
+    if (frameHandle !== undefined || (queuedStarts.size === 0 && queuedPublications.size === 0)) {
       return;
     }
     if (interactionActive()) {
       record('preview-resource-paused-moving');
-      scheduleSettleTimer();
       return;
     }
-    if (![...queued.values()].some(canStart)) {
-      scheduleSettleTimer();
+    if (![...queuedPublications.values()].some(publicationNeedsFrame)
+      && queuedStarts.size === 0) {
       return;
     }
     frameHandle = requestFrame(() => {
       frameHandle = undefined;
-      startQueued();
+      runQueued();
     });
   };
 
-  const startQueued = (): void => {
-    if (interactionActive() || ![...queued.values()].some(canStart)) {
+  const runQueued = (): void => {
+    if (interactionActive()) {
       scheduleFrame();
       return;
     }
-    let started = 0;
-    for (const [key, item] of queued) {
-      if (started >= CANVAS_PREVIEW_RESOURCE_STARTS_PER_FRAME) {
-        break;
+    let completed = 0;
+    const runCurrent = (
+      queue: Map<string, CanvasPreviewResourceRequest>,
+      phase: 'start' | 'publication'
+    ): void => {
+      for (const [key, request] of [...queue]) {
+        if (completed >= CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME) {
+          break;
+        }
+        if (!request.isCurrent()) {
+          queue.delete(key);
+          record('preview-resource-skip-stale', request);
+          continue;
+        }
+        if (request.isCulled()) {
+          if (phase === 'start') {
+            queue.delete(key);
+          }
+          record('preview-resource-skip-culled', request);
+          continue;
+        }
+        queue.delete(key);
+        record(phase === 'start' ? 'preview-resource-started' : 'preview-publication-committed', request);
+        request.run();
+        completed += 1;
       }
-      if (!canStart(item)) {
-        continue;
-      }
-      const { request } = item;
-      queued.delete(key);
-      if (!request.isCurrent()) {
-        record('preview-resource-skip-stale', request);
-        continue;
-      }
-      if (request.isCulled()) {
-        record('preview-resource-skip-culled', request);
-        continue;
-      }
-      record('preview-resource-started', request);
-      request.run();
-      started += 1;
+    };
+    runCurrent(queuedPublications, 'publication');
+    if (completed < CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME) {
+      runCurrent(queuedStarts, 'start');
     }
     scheduleFrame();
   };
 
+  const enqueue = (
+    queue: Map<string, CanvasPreviewResourceRequest>,
+    request: CanvasPreviewResourceRequest,
+    phase: 'start' | 'publication'
+  ): void => {
+    const key = previewResourceRequestKey(request.kind, request.nodeId);
+    const replacing = queue.has(key);
+    queue.set(key, request);
+    if (phase === 'start') {
+      record(replacing ? 'preview-resource-coalesced' : 'preview-resource-queued', request);
+    } else {
+      record(replacing ? 'preview-publication-coalesced' : 'preview-publication-queued', request);
+    }
+    scheduleFrame();
+  };
+
+  const cancel = (kind: CanvasPreviewResourceKind, nodeId: string): void => {
+    const key = previewResourceRequestKey(kind, nodeId);
+    queuedStarts.delete(key);
+    queuedPublications.delete(key);
+  };
+
   return {
     enqueue(request) {
-      const key = previewResourceRequestKey(request.kind, request.nodeId);
-      const replacing = queued.has(key);
-      queued.set(key, { request, enqueuedAt: now() });
-      record(replacing ? 'preview-resource-coalesced' : 'preview-resource-queued', request);
-      scheduleFrame();
+      enqueue(queuedStarts, request, 'start');
     },
-    cancel(kind, nodeId) {
-      queued.delete(previewResourceRequestKey(kind, nodeId));
-      if (queued.size === 0) {
-        cancelSettleTimer();
-      }
+    enqueuePublication(request) {
+      enqueue(queuedPublications, request, 'publication');
     },
+    cancel,
     setInteractionState(inputState) {
       cameraState = inputState.cameraState;
       dragActive = inputState.dragActive;
       if (interactionActive()) {
-        lastInteractionAt = now();
         cancelPendingFrame();
-        cancelSettleTimer();
         return;
       }
       scheduleFrame();
     },
+    notifyVisibilityChanged() {
+      scheduleFrame();
+    },
     dispose() {
-      queued.clear();
+      queuedStarts.clear();
+      queuedPublications.clear();
       cancelPendingFrame();
-      cancelSettleTimer();
     }
   };
 }

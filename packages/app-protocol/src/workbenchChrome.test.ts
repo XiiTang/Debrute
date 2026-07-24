@@ -26,23 +26,21 @@ describe('Workbench chrome protocol', () => {
     expect(menuLabels(state.menus)).toEqual(['File', 'Edit', 'View']);
   });
 
-  it('uses Web menus and self-drawn controls for Windows and Linux desktop', () => {
-    for (const platform of ['win32', 'linux'] as const) {
-      const state = buildWorkbenchTitleBarState({
-        platform,
-        projectTitle: 'Cutout Project',
-        recentProjectRoots: ['/projects/alpha', '/projects/beta'],
-        host: 'desktop'
-      });
+  it('uses Web menus and self-drawn controls for Windows desktop', () => {
+    const state = buildWorkbenchTitleBarState({
+      platform: 'win32',
+      projectTitle: 'Cutout Project',
+      recentProjectRoots: ['/projects/alpha', '/projects/beta'],
+      host: 'desktop'
+    });
 
-      expect(state.presentation.showWebMenus).toBe(true);
-      expect(state.presentation.showWindowControls).toBe(true);
-      expect(commandIds(state)).toContain('project.open-recent');
-      expect(commandIds(state)).toContain('window.close');
-      expect(commandIds(state)).toContain('edit.paste-and-match-style');
-      expect(commandIds(state)).not.toContain('edit.start-speaking');
-      expect(commandIds(state)).not.toContain('edit.stop-speaking');
-    }
+    expect(state.presentation.showWebMenus).toBe(true);
+    expect(state.presentation.showWindowControls).toBe(true);
+    expect(commandIds(state)).toContain('project.open-recent');
+    expect(commandIds(state)).toContain('window.close');
+    expect(commandIds(state)).toContain('edit.paste-and-match-style');
+    expect(commandIds(state)).not.toContain('edit.start-speaking');
+    expect(commandIds(state)).not.toContain('edit.stop-speaking');
   });
 
   it('uses Web menus without native window controls for browser Workbench', () => {
@@ -70,7 +68,7 @@ describe('Workbench chrome protocol', () => {
 
   it('omits native-only File commands without leaving separator artifacts in browser Workbench', () => {
     const state = buildWorkbenchTitleBarState({
-      platform: 'linux',
+      platform: 'darwin',
       projectTitle: 'Storyboard',
       recentProjectRoots: ['/projects/alpha'],
       host: 'web'
@@ -99,7 +97,7 @@ describe('Workbench chrome protocol', () => {
   it('keeps platform presentation as a pure helper', () => {
     expect(titleBarPresentationForPlatform({ platform: 'darwin', host: 'desktop' }).showWebMenus).toBe(false);
     expect(titleBarPresentationForPlatform({ platform: 'win32', host: 'desktop' }).showWindowControls).toBe(true);
-    expect(titleBarPresentationForPlatform({ platform: 'linux', host: 'web' }).showWindowControls).toBe(false);
+    expect(titleBarPresentationForPlatform({ platform: 'darwin', host: 'web' }).showWindowControls).toBe(false);
   });
 });
 

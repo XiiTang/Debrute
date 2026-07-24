@@ -200,11 +200,11 @@ function nodeFixture(
   };
 }
 
-function rawUrl(path: string, daemonToken?: string): string {
+function rawUrl(path: string, ignoredToken?: string): string {
   const url = new URL(`http://127.0.0.1:17321/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path.split('/').map(encodeURIComponent).join('/')}`);
   url.searchParams.set('v', 'rev');
-  if (daemonToken) {
-    url.searchParams.set('ignored', daemonToken);
+  if (ignoredToken) {
+    url.searchParams.set('ignored', ignoredToken);
   }
   return url.toString();
 }

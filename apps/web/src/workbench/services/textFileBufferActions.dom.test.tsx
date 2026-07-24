@@ -444,6 +444,115 @@ describe('useTextFileBufferActions', () => {
     await probe.unmount();
   });
 
+  it('persists each dirty full value and clears it after the matching save commits', async () => {
+    const putTextWorkingCopy = vi.fn<WorkbenchApiClient['putTextWorkingCopy']>(async (_projectId, value) => value);
+    const clearTextWorkingCopy = vi.fn<WorkbenchApiClient['clearTextWorkingCopy']>(async () => undefined);
+    const writeProjectTextFile = vi.fn<WorkbenchApiClient['writeProjectTextFile']>(async (input) => (
+      projectTextFileWriteResult(input.projectRelativePath, input.content, 'saved-rev')
+    ));
+    const probe = await renderActions({
+      putTextWorkingCopy,
+      clearTextWorkingCopy,
+      writeProjectTextFile
+    });
+
+    await act(async () => {
+      probe.current.actions.updateTextFileBuffer('brief.md', '# Unsaved full value');
+      await vi.waitFor(() => expect(putTextWorkingCopy).toHaveBeenCalledWith('project-1', {
+        projectRelativePath: 'brief.md',
+        content: '# Unsaved full value',
+        language: 'markdown',
+        baseRevision: 'disk-rev'
+      }));
+    });
+    await act(async () => {
+      await probe.current.actions.saveTextFileBuffer('brief.md');
+    });
+
+    expect(clearTextWorkingCopy).toHaveBeenCalledWith('project-1', 'brief.md');
+    expect(probe.current.buffers['brief.md']).toMatchObject({
+      content: '# Unsaved full value',
+      dirty: false,
+      baseRevision: 'saved-rev'
+    });
+    await probe.unmount();
+  });
+
+  it('clears the Working Copy before discarding back to the disk value', async () => {
+    const calls: string[] = [];
+    const clearTextWorkingCopy = vi.fn<WorkbenchApiClient['clearTextWorkingCopy']>(async () => {
+      calls.push('clear');
+    });
+    const readProjectTextFile = vi.fn<WorkbenchApiClient['readProjectTextFile']>(async () => {
+      calls.push('read');
+      return {
+        projectRelativePath: 'brief.md',
+        content: '# Disk value',
+        revision: 'disk-rev-2',
+        size: 12,
+        mtimeMs: 2,
+        language: 'markdown',
+        mimeType: 'text/markdown'
+      };
+    });
+    const probe = await renderActions({ clearTextWorkingCopy, readProjectTextFile });
+
+    await act(async () => {
+      await probe.current.actions.discardTextFileBuffer('brief.md');
+    });
+
+    expect(calls).toEqual(['clear', 'read']);
+    expect(probe.current.buffers['brief.md']).toMatchObject({
+      content: '# Disk value',
+      dirty: false,
+      baseRevision: 'disk-rev-2'
+    });
+    await probe.unmount();
+  });
+
+  it('keeps the saved buffer dirty when its Working Copy cannot be cleared', async () => {
+    const clearTextWorkingCopy = vi.fn<WorkbenchApiClient['clearTextWorkingCopy']>(async () => {
+      throw new Error('Working Copy storage is unavailable');
+    });
+    const writeProjectTextFile = vi.fn<WorkbenchApiClient['writeProjectTextFile']>(async (input) => (
+      projectTextFileWriteResult(input.projectRelativePath, input.content, 'saved-rev')
+    ));
+    const probe = await renderActions({ clearTextWorkingCopy, writeProjectTextFile });
+
+    await act(async () => {
+      await probe.current.actions.saveTextFileBuffer('brief.md');
+    });
+
+    expect(probe.current.buffers['brief.md']).toMatchObject({
+      content: '# Edited',
+      dirty: true,
+      saving: false,
+      baseRevision: 'saved-rev',
+      error: 'Working Copy storage is unavailable'
+    });
+    await probe.unmount();
+  });
+
+  it('does not discard local content when its Working Copy cannot be cleared', async () => {
+    const clearTextWorkingCopy = vi.fn<WorkbenchApiClient['clearTextWorkingCopy']>(async () => {
+      throw new Error('Working Copy storage is unavailable');
+    });
+    const readProjectTextFile = vi.fn<WorkbenchApiClient['readProjectTextFile']>();
+    const probe = await renderActions({ clearTextWorkingCopy, readProjectTextFile });
+
+    await act(async () => {
+      await probe.current.actions.discardTextFileBuffer('brief.md');
+    });
+
+    expect(readProjectTextFile).not.toHaveBeenCalled();
+    expect(probe.current.buffers['brief.md']).toMatchObject({
+      content: '# Edited',
+      dirty: true,
+      error: 'Working Copy storage is unavailable'
+    });
+    await probe.unmount();
+  });
+
   it('saves with the buffer disk revision and keeps rejected content dirty', async () => {
     const readProjectTextFile = vi.fn<WorkbenchApiClient['readProjectTextFile']>(async () => ({
       projectRelativePath: 'brief.md',
@@ -512,7 +621,11 @@ function ActionsProbe({ api, projectId, initialProjectRelativePath, onValue }: {
   const windowsRef = useRef<Record<string, FloatingTextEditorWindowState>>({});
   buffersRef.current = buffers;
   const actions = useTextFileBufferActions({
-    api: api as WorkbenchApiClient,
+    api: {
+      putTextWorkingCopy: vi.fn(async (_projectId, workingCopy) => workingCopy),
+      clearTextWorkingCopy: vi.fn(async () => undefined),
+      ...api
+    } as WorkbenchApiClient,
     projectId,
     textFileBuffers: buffers,
     setTextFileBuffers: setBuffers,

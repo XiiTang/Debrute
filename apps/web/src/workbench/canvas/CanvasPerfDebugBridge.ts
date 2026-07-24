@@ -159,6 +159,9 @@ export function createCanvasPerfDebugBridge(input: {
       return buildCapture();
     },
     exportCapture() {
+      if (!capturing && lastExport) {
+        return cloneCapture(lastExport);
+      }
       return buildCapture();
     },
     reset() {

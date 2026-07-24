@@ -1,160 +1,88 @@
 #!/usr/bin/env tsx
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+
 import { packageManagerCommand } from './package-manager-command.mjs';
 import {
-  DEFAULT_WORKBENCH_DAEMON_PORT,
-  DEFAULT_WORKBENCH_WEB_PORT,
-  chooseLoopbackPort,
-  createWorkbenchLaunchUrl,
-  deleteWorkbenchRuntimeState,
-  ensureRegisteredWorkbenchRuntime,
-  readWorkbenchRuntimeState,
-  resolveWorkbenchRuntimePaths,
-  type WorkbenchRuntimeState
-} from '@debrute/workbench-runtime';
+  buildRustRuntime,
+  chooseDevelopmentPort,
+  ensureRustRuntime,
+  stopRustRuntime,
+  workspaceRoot
+} from './rust-runtime-dev.js';
+import { parseWorkbenchDevelopmentOptions } from './workbench-development-options.js';
 
-const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const paths = resolveWorkbenchRuntimePaths();
-const children: ChildProcess[] = [];
-const ownerId = randomUUID();
-let currentRuntimeState: WorkbenchRuntimeState | undefined;
-let deleteOwnState = false;
+const developmentOptions = parseWorkbenchDevelopmentOptions(process.argv.slice(2));
+let vite: ChildProcess | undefined;
+let stopping = false;
+let shutdown: Promise<void> | undefined;
+const stopRuntimeOnExit = process.env.DEBRUTE_DEV_STOP_RUNTIME_ON_EXIT === '1';
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    void shutdown(currentRuntimeState, deleteOwnState).finally(() => process.exit(0));
-  });
+  process.once(signal, () => void stopDevelopment().finally(() => process.exit(0)));
 }
 
-const result = await ensureRegisteredWorkbenchRuntime({
-  paths,
-  launch: launchSourceDevRuntime,
-  onRuntimeLaunchFailed: stopChildren
-});
-currentRuntimeState = result.state;
-deleteOwnState = result.runtimeStarted;
-
-const launchUrl = createWorkbenchLaunchUrl({
-  webUrl: result.state.webUrl,
-  token: result.state.token,
-  next: '/'
+const runtimeRebuilt = await buildRustRuntime();
+const control = await ensureRustRuntime({ restartExisting: runtimeRebuilt });
+const vitePort = await chooseDevelopmentPort();
+const viteOrigin = `http://127.0.0.1:${vitePort}`;
+const registration = await control.registerDevWorkbenchOrigin(viteOrigin);
+if (registration.result !== 'dev_workbench_origin_registered') {
+  control.close();
+  throw new Error(`Runtime rejected source Workbench registration: ${registration.result}`);
+}
+const launchUrl = new URL('/', viteOrigin);
+const openArguments = process.env.DEBRUTE_DEV_NO_OPEN === '1'
+  ? []
+  : ['--open', launchUrl.pathname];
+const command = packageManagerCommand(workspaceRoot, [
+  '--filter',
+  '@debrute/web',
+  'dev',
+  '--port',
+  String(vitePort),
+  '--strictPort',
+  ...openArguments
+]);
+vite = spawn(command.command, command.args, {
+  cwd: workspaceRoot,
+  stdio: 'inherit',
+  env: {
+    ...process.env,
+    DEBRUTE_RUNTIME_ORIGIN: registration.runtime_origin,
+    VITE_DEBRUTE_CANVAS_PERF: developmentOptions.canvasPerfEnabled ? '1' : '0'
+  }
 });
 process.stdout.write(`Debrute Workbench launch URL: ${launchUrl}\n`);
-process.stdout.write(`Debrute Workbench origin: ${result.state.webUrl}\n`);
+process.stdout.write(`Canvas performance probe: ${developmentOptions.canvasPerfEnabled ? 'enabled' : 'disabled'}\n`);
 
-if (!deleteOwnState) {
-  process.exit(0);
-}
-
-await new Promise((resolveExit) => {
-  for (const child of children) {
-    child.once('exit', resolveExit);
-  }
-});
-await shutdown(currentRuntimeState, deleteOwnState);
-
-async function launchSourceDevRuntime(): Promise<WorkbenchRuntimeState> {
-  const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
-  const webPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_WEB_PORT, new Set([daemonPort]));
-  const token = randomUUID();
-  await writeRuntimeTokenFile(token);
-  const daemonUrl = `http://127.0.0.1:${daemonPort}`;
-  const webUrl = `http://127.0.0.1:${webPort}`;
-  const daemon = spawnPnpm([
-    '--filter',
-    '@debrute/daemon',
-    'dev',
-    '--port',
-    String(daemonPort),
-    '--token-file',
-    paths.tokenPath,
-    '--web-base-url',
-    webUrl
-  ], {
-    DEBRUTE_DAEMON_PORT: String(daemonPort),
-    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath,
-    DEBRUTE_WEB_BASE_URL: webUrl
+try {
+  const exitCode = await new Promise<number | null>((resolveExit, reject) => {
+    vite?.once('error', reject);
+    vite?.once('exit', resolveExit);
   });
-  const web = spawnPnpm([
-    '--filter',
-    '@debrute/web',
-    'dev',
-    '--host',
-    '127.0.0.1',
-    '--port',
-    String(webPort),
-    '--strictPort'
-  ], {
-    DEBRUTE_DAEMON_URL: daemonUrl,
-    DEBRUTE_DAEMON_TOKEN_FILE: paths.tokenPath
+  if (!stopping && exitCode !== 0) {
+    process.exitCode = exitCode ?? 1;
+  }
+} finally {
+  await stopDevelopment();
+  vite = undefined;
+}
+
+function stopDevelopment(): Promise<void> {
+  shutdown ??= stopVite().then(async () => {
+    if (stopRuntimeOnExit) {
+      await stopRustRuntime(control);
+    } else {
+      control.close();
+    }
   });
-  children.push(daemon, web);
-  const now = new Date().toISOString();
-  const state: WorkbenchRuntimeState = {
-    runtimeKind: 'source-dev',
-    processControl: 'external',
-    owner: {
-      kind: 'dev',
-      ownerId,
-      pid: process.pid
-    },
-    daemonUrl,
-    webUrl,
-    token,
-    daemonPid: requirePid(daemon, 'daemon'),
-    webPid: requirePid(web, 'web'),
-    daemonLogPath: paths.daemonLogPath,
-    webLogPath: paths.webLogPath,
-    startedAt: now,
-    updatedAt: now
-  };
-  currentRuntimeState = state;
-  deleteOwnState = true;
-  return state;
+  return shutdown;
 }
 
-async function writeRuntimeTokenFile(token: string): Promise<void> {
-  await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
-  await writeFile(paths.tokenPath, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
-}
-
-function spawnPnpm(args: string[], env: Record<string, string>): ChildProcess {
-  const command = packageManagerCommand(workspaceRoot, args);
-  return spawn(command.command, command.args, {
-    cwd: workspaceRoot,
-    stdio: 'inherit',
-    env: { ...process.env, ...env }
-  });
-}
-
-function requirePid(child: ChildProcess, label: string): number {
-  if (!child.pid) {
-    throw new Error(`Debrute ${label} process did not report a pid.`);
-  }
-  return child.pid;
-}
-
-async function shutdown(state: WorkbenchRuntimeState | undefined, shouldDeleteState: boolean): Promise<void> {
-  await stopChildren();
-  if (!state || !shouldDeleteState) {
-    return;
-  }
-  const current = await readWorkbenchRuntimeState(paths.statePath);
-  if (current?.daemonUrl === state.daemonUrl && current.webUrl === state.webUrl && current.token === state.token) {
-    await deleteWorkbenchRuntimeState(paths.statePath);
-  }
-}
-
-async function stopChildren(): Promise<void> {
-  await Promise.all(children.map((child) => stopChild(child)));
-}
-
-async function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
+async function stopVite(): Promise<void> {
+  stopping = true;
+  const child = vite;
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
     return;
   }
   await new Promise<void>((resolveExit) => {

@@ -73,7 +73,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     let pending!: Promise<void>;
     await act(async () => {
-      pending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-1' });
+      pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-1' });
       probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
       link.resolve(adobeBridgeFixture('Stale link project'));
       await pending;
@@ -94,7 +94,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     let pending!: Promise<void>;
     await act(async () => {
-      pending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-1' });
+      pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-1' });
       probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
       link.reject(new Error('stale link failure'));
       await expect(pending).resolves.toBeUndefined();
@@ -102,7 +102,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     expect(probe.current.adobeBridge).toMatchObject({
       status: 'ready',
-      value: { links: [{ adobeClientId: 'photoshop-1', status: 'active' }] }
+      value: { links: [{ pluginInstanceId: 'photoshop-1', status: 'active' }] }
     });
     await probe.unmount();
   });
@@ -112,14 +112,14 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     const secondLink = deferred<AdobeBridgeStateView>();
     const api = apiFixture({
       adobeBridgeLinkPhotoshop: vi.fn((linkInput) => (
-        linkInput.adobeClientId === 'photoshop-a' ? firstLink.promise : secondLink.promise
+        linkInput.pluginInstanceId === 'photoshop-a' ? firstLink.promise : secondLink.promise
       ))
     });
     const probe = await renderController(api);
 
     await act(async () => {
-      const firstPending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-a' });
-      const secondPending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-b' });
+      const firstPending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
+      const secondPending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-b' });
       firstLink.reject(new Error('Photoshop A link failed'));
       await expect(firstPending).rejects.toThrow('Photoshop A link failed');
       secondLink.resolve(adobeBridgeFixture('Second client result'));
@@ -137,7 +137,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       settings: { enabled: true, discoveryStatus: 'unavailable' }
     };
 
-    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-a' });
+    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
     await act(async () => {
       probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
       link.reject(new Error('Photoshop A link failed'));
@@ -160,13 +160,13 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       links: [{
         linkId: 'link-b',
         projectId: 'project-1',
-        adobeClientId: 'photoshop-b',
+        pluginInstanceId: 'photoshop-b',
         createdAt: '2026-07-10T00:00:00.000Z',
         status: 'active'
       }]
     };
 
-    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-a' });
+    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
     await act(async () => {
       probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
       link.reject(new Error('Photoshop A link failed'));
@@ -175,7 +175,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     expect(probe.current.adobeBridge).toMatchObject({
       status: 'ready',
-      value: { links: [{ adobeClientId: 'photoshop-b', status: 'active' }] }
+      value: { links: [{ pluginInstanceId: 'photoshop-b', status: 'active' }] }
     });
     await probe.unmount();
   });
@@ -189,13 +189,13 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       links: [{
         linkId: 'link-project-2',
         projectId: 'project-2',
-        adobeClientId: 'photoshop-a',
+        pluginInstanceId: 'photoshop-a',
         createdAt: '2026-07-10T00:00:00.000Z',
         status: 'active'
       }]
     };
 
-    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-a' });
+    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
     await act(async () => {
       probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
       link.reject(new Error('Project 1 link failed'));
@@ -204,7 +204,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     expect(probe.current.adobeBridge).toMatchObject({
       status: 'ready',
-      value: { links: [{ projectId: 'project-2', adobeClientId: 'photoshop-a', status: 'active' }] }
+      value: { links: [{ projectId: 'project-2', pluginInstanceId: 'photoshop-a', status: 'active' }] }
     });
     await probe.unmount();
   });
@@ -214,7 +214,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     const api = apiFixture({ adobeBridgeLinkPhotoshop: vi.fn(() => link.promise) });
     const probe = await renderController(api, 'project-1');
 
-    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-a' });
+    const pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
     await probe.rerender('project-2');
     link.reject(new Error('Old project link failed'));
 
@@ -231,8 +231,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     const probe = await renderController(apiFixture({ adobeBridgeLinkPhotoshop }));
 
     await act(async () => {
-      const firstPending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-a' });
-      const secondPending = probe.current.actions.linkAdobeBridgePhotoshop({ adobeClientId: 'photoshop-a' });
+      const firstPending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
+      const secondPending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
       firstLink.reject(new Error('replaced link failure'));
       await expect(firstPending).resolves.toBeUndefined();
       secondLink.resolve(adobeBridgeFixture('Current command result'));
@@ -380,7 +380,7 @@ function settingsFixture(workbench: {
 }): DebruteGlobalSettingsView {
   return {
     workbench,
-    chrome: { recentProjectRoots: [] },
+    chrome: { recentProjects: [] },
     models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
     integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true }
@@ -390,12 +390,12 @@ function settingsFixture(workbench: {
 function adobeBridgeFixture(projectName?: string): AdobeBridgeStateView {
   return {
     settings: { enabled: true, discoveryStatus: 'available' },
-    adobeClients: [],
+    pairedPlugins: [],
+    clients: [],
     projects: projectName ? [{
       projectId: projectName.toLowerCase().replaceAll(' ', '-'),
       projectName,
       projectRevision: 1,
-      connectedWorkbenchClientCount: 1,
       directories: []
     }] : [],
     links: [],
@@ -409,7 +409,7 @@ function linkedAdobeBridgeFixture(): AdobeBridgeStateView {
     links: [{
       linkId: 'link-1',
       projectId: 'project-1',
-      adobeClientId: 'photoshop-1',
+      pluginInstanceId: 'photoshop-1',
       createdAt: '2026-07-10T00:00:00.000Z',
       status: 'active'
     }]

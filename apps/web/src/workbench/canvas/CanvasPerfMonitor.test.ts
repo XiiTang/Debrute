@@ -189,10 +189,9 @@ describe('CanvasPerfMonitor', () => {
     monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasTextPreviewRuntime', name: 'text-preview-snapshot-built' });
     monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasTextPreviewRuntime', name: 'text-preview-raster-completed' });
     monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-upload-completed' });
-    monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasTextPreviewRuntime', name: 'text-preview-variant-fetched' });
-    monitor.recordCounter({ sessionId, timestamp: 8, source: 'CanvasTextPreviewRuntime', name: 'text-preview-pending-ready' });
-    monitor.recordCounter({ sessionId, timestamp: 9, source: 'CanvasTextPreviewRuntime', name: 'text-preview-published' });
-    monitor.recordCounter({ sessionId, timestamp: 10, source: 'CanvasTextPreviewRuntime', name: 'text-preview-failed' });
+    monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasTextPreviewRuntime', name: 'text-preview-pending-ready' });
+    monitor.recordCounter({ sessionId, timestamp: 8, source: 'CanvasTextPreviewRuntime', name: 'text-preview-published' });
+    monitor.recordCounter({ sessionId, timestamp: 9, source: 'CanvasTextPreviewRuntime', name: 'text-preview-failed' });
 
     const summary = monitor.endSession({ sessionId, timestamp: 11, source: 'CanvasSurface' });
 
@@ -203,7 +202,6 @@ describe('CanvasPerfMonitor', () => {
       'text-preview-snapshot-built': 1,
       'text-preview-raster-completed': 1,
       'text-preview-source-upload-completed': 1,
-      'text-preview-variant-fetched': 1,
       'text-preview-pending-ready': 1,
       'text-preview-published': 1,
       'text-preview-failed': 1

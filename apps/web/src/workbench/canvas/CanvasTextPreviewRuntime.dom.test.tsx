@@ -10,10 +10,14 @@ import type {
 import { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure';
 import type { CanvasTextPreviewPresentation } from './CanvasTextPreviewImageHandoff';
 import {
+  createCanvasPreviewResourceScheduler,
+  type CanvasPreviewResourceRequest,
+  type CanvasPreviewResourceScheduler
+} from './CanvasPreviewResourceScheduler';
+import {
   CanvasTextPreviewProvider,
   canvasTextPreviewNextCaptureTarget,
   canvasTextPreviewTargetsForNodes,
-  fetchCanvasTextPreviewVariant,
   useCanvasTextPreviewRuntime,
   type CanvasTextPreviewMeasuredBody,
   type CanvasTextPreviewRuntimeValue,
@@ -46,6 +50,8 @@ vi.mock('./CanvasTextPreviewStyleKey', () => ({
   canvasTextPreviewStyleKey: async () => 'sha256:style'
 }));
 
+let previewResourceScheduler: CanvasPreviewResourceScheduler;
+
 describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -59,10 +65,12 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     document.body.append(container);
     root = createRoot(container);
     frames = installAnimationFrameQueue();
+    previewResourceScheduler = createCanvasPreviewResourceScheduler();
   });
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    previewResourceScheduler.dispose();
     container.remove();
     frames.restore();
     vi.unstubAllGlobals();
@@ -197,8 +205,9 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     }));
   });
 
-  it('suspends mounted presentation while retaining active editor ownership', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
+  it('retains the exact committed presentation while the active editor owns the node', async () => {
+    const fetchMock = vi.fn(async () => new Response(new Blob(['png']), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
     const observed: CanvasTextPreviewPresentation[] = [];
     let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
     const node = nodeFixture('a.md', 0);
@@ -220,6 +229,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
     const visible = latest(observed)?.visible;
     await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
+    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
 
     await renderProvider({
       root,
@@ -231,7 +241,8 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     });
     await flushWork();
 
-    expect(latest(observed)).toEqual({ visible: undefined, pending: undefined });
+    expect(latest(observed)?.visible?.sourceKey).toBe(visible?.sourceKey);
+    expect(latest(observed)?.visibleCommittedSourceKey).toBe(visible?.sourceKey);
     expect(laneMock.props?.target).toBeUndefined();
 
     await renderProvider({
@@ -241,10 +252,24 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       cameraState: 'idle',
       probe
     });
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
+    await flushWork();
 
-    expect(latest(observed)?.visible).toBeUndefined();
-    expect(latest(observed)?.pending?.sourceKey).toBe(visible?.sourceKey);
+    expect(latest(observed)?.visible?.sourceKey).toBe(visible?.sourceKey);
+    expect(latest(observed)?.pending).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await renderProvider({
+      root,
+      nodes: [node],
+      actions: actionsFixture({ available: true }),
+      cameraState: 'idle',
+      activeInlineTextPath: 'a.md',
+      content: 'edited content',
+      probe
+    });
+    await flushWork();
+
+    expect(latest(observed)).toEqual({});
   });
 
   it('does not request preview availability for active intermediate content', async () => {
@@ -281,7 +306,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
   });
 
   it('retains the exact committed presentation when the node becomes culled', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
     const observed: CanvasTextPreviewPresentation[] = [];
     let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
     const node = nodeFixture('a.md', 0);
@@ -303,6 +327,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
     const visible = latest(observed)?.visible;
     await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
+    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
 
     await renderProvider({
       root,
@@ -319,7 +344,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
   });
 
   it('ignores a hidden body 0x0 measurement and reuses the committed preview after culling', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
     const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
       sources: Object.fromEntries(request.sources.map((source) => [
         source.projectRelativePath,
@@ -348,6 +372,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
     const visible = latest(observed)?.visible;
     await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
+    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
     const readCount = read.mock.calls.length;
 
     await renderProvider({
@@ -414,8 +439,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
   });
 
-  it('queues a fetched variant during interaction and mounts it on the next idle frame', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
+  it('queues a text variant during interaction and mounts it on the next idle frame', async () => {
     const observed: CanvasTextPreviewPresentation[] = [];
     const node = nodeFixture('a.md', 0);
 
@@ -445,8 +469,9 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     });
   });
 
-  it('mounts a fetched variant as pending and promotes it only after mounted DOM readiness', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
+  it('mounts one pending image without prefetching its resource URL', async () => {
+    const fetchMock = vi.fn(async () => new Response(new Blob(['png']), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
     const observed: CanvasTextPreviewPresentation[] = [];
     let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
     const node = nodeFixture('a.md', 0);
@@ -466,6 +491,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
 
     const pending = latest(observed)?.pending;
     expect(pending).toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(latest(observed)?.visible).toBeUndefined();
     await act(async () => runtimeValue?.reportPendingReady(node, pending!));
     expect(latest(observed)?.visible).toBeUndefined();
@@ -475,8 +501,131 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
   });
 
+  it('mounts pending text previews through the shared resource start scheduler', async () => {
+    const starts: CanvasPreviewResourceRequest[] = [];
+    const controlledScheduler: CanvasPreviewResourceScheduler = {
+      enqueue: (request) => starts.push(request),
+      enqueuePublication: () => undefined,
+      cancel: () => undefined,
+      setInteractionState: () => undefined,
+      notifyVisibilityChanged: () => undefined,
+      dispose: () => undefined
+    };
+    const observed: CanvasTextPreviewPresentation[] = [];
+    const node = nodeFixture('a.md', 0);
+
+    await renderProvider({
+      root,
+      nodes: [node],
+      actions: actionsFixture({ available: true }),
+      cameraState: 'idle',
+      previewResourceScheduler: controlledScheduler,
+      probe: (runtime) => observed.push(runtime.presentationForNode({ node }))
+    });
+    await waitFor(() => starts.length > 0);
+
+    expect(latest(observed)?.pending).toBeUndefined();
+    expect(starts[0]?.kind).toBe('text');
+    expect(starts[0]?.isCurrent()).toBe(true);
+    expect(starts[0]?.isCulled()).toBe(false);
+
+    await act(async () => starts.shift()?.run());
+
+    expect(latest(observed)?.pending).toBeDefined();
+  });
+
+  it('publishes at most three ready text previews in one shared scheduler frame', async () => {
+    const nodes = [
+      nodeFixture('a.md', 0),
+      nodeFixture('b.md', 100),
+      nodeFixture('c.md', 200),
+      nodeFixture('d.md', 300)
+    ];
+    const observed: Array<Record<string, CanvasTextPreviewPresentation>> = [];
+    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
+
+    await renderProvider({
+      root,
+      nodes,
+      actions: actionsFixture({ available: true }),
+      cameraState: 'idle',
+      probe: (runtime) => {
+        runtimeValue = runtime;
+        observed.push(Object.fromEntries(nodes.map((node) => [
+          node.projectRelativePath,
+          runtime.presentationForNode({ node })
+        ])));
+      }
+    });
+    await runFramesUntil(frames, () => presentationCount(latest(observed), 'pending') === nodes.length);
+
+    const pending = latest(observed)!;
+    await act(async () => {
+      for (const node of nodes) {
+        runtimeValue?.reportPendingReady(node, pending[node.projectRelativePath]!.pending!);
+      }
+    });
+    await runFramesUntil(frames, () => presentationCount(latest(observed), 'visible') > 0);
+
+    expect(presentationCount(latest(observed), 'visible')).toBe(3);
+    expect(presentationCount(latest(observed), 'pending')).toBe(1);
+
+    await runFramesUntil(frames, () => presentationCount(latest(observed), 'visible') === nodes.length);
+    const visible = latest(observed)!;
+
+    await act(async () => {
+      for (const node of nodes) {
+        runtimeValue?.reportVisibleCommitted(node, visible[node.projectRelativePath]!.visible!);
+      }
+    });
+    await runFramesUntil(frames, () => committedPresentationCount(latest(observed)) > 0);
+
+    expect(committedPresentationCount(latest(observed))).toBe(3);
+    await runFramesUntil(frames, () => committedPresentationCount(latest(observed)) === nodes.length);
+  });
+
+  it('does not add a follow-up commit for every text preview publication batch', async () => {
+    const nodes = Array.from({ length: 30 }, (_, index) => nodeFixture(`node-${index}.md`, index * 100));
+    const starts: CanvasPreviewResourceRequest[] = [];
+    const controlledScheduler: CanvasPreviewResourceScheduler = {
+      enqueue: (request) => starts.push(request),
+      enqueuePublication: () => undefined,
+      cancel: () => undefined,
+      setInteractionState: () => undefined,
+      notifyVisibilityChanged: () => undefined,
+      dispose: () => undefined
+    };
+    let commitCount = 0;
+    let pendingCount = 0;
+
+    await renderProvider({
+      root,
+      nodes,
+      actions: actionsFixture({ available: true }),
+      cameraState: 'idle',
+      previewResourceScheduler: controlledScheduler,
+      onCommit: () => {
+        commitCount += 1;
+      },
+      probe: (runtime) => {
+        pendingCount = nodes.filter((node) => runtime.presentationForNode({ node }).pending !== undefined).length;
+      }
+    });
+    await waitFor(() => starts.length === nodes.length);
+    const commitCountBeforeStarts = commitCount;
+    for (let batch = 0; batch < 20 && pendingCount !== nodes.length; batch += 1) {
+      await act(async () => {
+        for (const start of starts.splice(0, 3)) {
+          start.run();
+        }
+      });
+    }
+
+    expect(pendingCount).toBe(nodes.length);
+    expect(commitCount - commitCountBeforeStarts).toBeLessThanOrEqual(12);
+  });
+
   it('records publication only after the visible DOM commit callback', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
     const recordCounter = vi.fn();
     const observed: CanvasTextPreviewPresentation[] = [];
     let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
@@ -495,7 +644,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     });
     await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
     const pending = latest(observed)?.pending;
-    expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-variant-fetched')).toBe(true);
     await act(async () => runtimeValue?.reportPendingReady(node, pending!));
     expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-pending-ready')).toBe(true);
     await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
@@ -503,12 +651,14 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-published')).toBe(false);
     expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
     await act(async () => runtimeValue?.reportVisibleCommitted(node, pending!));
+    expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-published')).toBe(false);
+    expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
+    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === pending?.sourceKey);
     expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-published')).toBe(true);
     expect(latest(observed)?.visibleCommittedSourceKey).toBe(pending?.sourceKey);
   });
 
   it('defers a ready visible commit that arrives after interaction starts', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
     const recordCounter = vi.fn();
     const observed: CanvasTextPreviewPresentation[] = [];
     let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
@@ -561,7 +711,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
   });
 
   it('invalidates an older fingerprint instead of keeping it visible', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png']), { status: 200 })));
     const observed: CanvasTextPreviewPresentation[] = [];
     let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
     const node = nodeFixture('a.md', 0);
@@ -597,27 +746,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(latest(observed)).toEqual({ visible: undefined, pending: undefined });
   });
 
-  it('classifies variant HTTP failures at the fetch boundary', async () => {
-    const source: CanvasTextPreviewSource = {
-      projectRelativePath: 'a.md',
-      sourceKey: 'canvas-1\u001fa.md\u001fsha256:current\u001f320',
-      src: '/variant.png',
-      previewWidth: 320,
-      fingerprint: 'sha256:current'
-    };
-    const fields = {
-      canvasId: 'canvas-1',
-      projectRelativePath: 'a.md',
-      fingerprint: 'sha256:current'
-    };
-
-    await expect(fetchCanvasTextPreviewVariant({
-      source,
-      fields,
-      signal: new AbortController().signal,
-      request: async () => new Response('failed', { status: 500 })
-    })).rejects.toMatchObject({ stage: 'variant_failed' });
-  });
 });
 
 async function renderProvider(input: {
@@ -631,13 +759,20 @@ async function renderProvider(input: {
   culledNodePaths?: ReadonlySet<string> | undefined;
   bodyMeasurements?: Record<string, CanvasTextPreviewMeasuredBody> | undefined;
   perfMonitor?: { recordCounter(event: Parameters<NonNullable<React.ComponentProps<typeof CanvasTextPreviewProvider>['perfMonitor']>['recordCounter']>[0]): void } | undefined;
+  previewResourceScheduler?: CanvasPreviewResourceScheduler | undefined;
+  onCommit?: (() => void) | undefined;
 }): Promise<void> {
   const buffers = Object.fromEntries(input.nodes.map((node) => [
     node.projectRelativePath,
     bufferFixture(node.projectRelativePath, input.content ?? node.projectRelativePath)
   ]));
   await act(async () => {
-    input.root.render(
+    const scheduler = input.previewResourceScheduler ?? previewResourceScheduler;
+    scheduler.setInteractionState({
+      cameraState: input.cameraState,
+      dragActive: false
+    });
+    const provider = (
       <CanvasTextPreviewProvider
         canvasId="canvas-1"
         nodes={input.nodes}
@@ -651,6 +786,7 @@ async function renderProvider(input: {
         culledNodePaths={input.culledNodePaths ?? new Set()}
         styleDependencyKey="dark"
         perfMonitor={input.perfMonitor}
+        previewResourceScheduler={scheduler}
       >
         {input.nodes.map((node) => (
           <RegisteredBody
@@ -662,6 +798,9 @@ async function renderProvider(input: {
         {input.probe ? <RuntimeProbe onRuntime={input.probe} /> : null}
       </CanvasTextPreviewProvider>
     );
+    input.root.render(input.onCommit
+      ? <React.Profiler id="canvas-text-preview-runtime" onRender={input.onCommit}>{provider}</React.Profiler>
+      : provider);
   });
 }
 
@@ -869,4 +1008,19 @@ async function runFramesUntil(
 
 function latest<T>(items: T[]): T | undefined {
   return items.at(-1);
+}
+
+function presentationCount(
+  presentations: Record<string, CanvasTextPreviewPresentation> | undefined,
+  layer: 'visible' | 'pending'
+): number {
+  return Object.values(presentations ?? {}).filter((presentation) => presentation[layer] !== undefined).length;
+}
+
+function committedPresentationCount(
+  presentations: Record<string, CanvasTextPreviewPresentation> | undefined
+): number {
+  return Object.values(presentations ?? {}).filter((presentation) => (
+    presentation.visibleCommittedSourceKey !== undefined
+  )).length;
 }

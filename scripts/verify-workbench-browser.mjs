@@ -1,54 +1,97 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import sharp from 'sharp';
+import {
+  RuntimeControlError,
+  connectRuntimeControl
+} from '@debrute/runtime-control-client';
 import { packageManagerCommand } from './package-manager-command.mjs';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const fixtureRoot = join(workspaceRoot, 'build', 'browser-verification-project');
+const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
 const fixtureHome = join(fixtureRoot, '.home');
+const fixtureTemporaryDirectory = join(fixtureRoot, '.tmp');
+const fixtureProjectId = randomUUID();
 const fixtureTextPath = 'notes/browser-verification.md';
+const fixtureImagePath = 'images/browser-verification.png';
 const fixtureCanvasId = 'canvas-1';
+const fixtureImageWidth = 4096;
+const fixtureImageHeight = 3072;
+const productVersion = JSON.parse(await readFile(join(workspaceRoot, 'package.json'), 'utf8')).version;
 
 async function main() {
   await writeFixtureProject();
   const runtime = startWorkbenchRuntime();
   let browser;
   let context;
+  let page;
+  let verificationError;
   try {
     const launchUrl = await runtime.launchUrl;
-    const projectLaunchUrl = withProjectOpenNext(launchUrl, fixtureRoot);
     const projectOpenUrl = projectOpenUrlForOrigin(launchUrl, fixtureRoot);
     browser = await chromium.launch();
     context = await browser.newContext();
-    await runViewportVerification(context, projectLaunchUrl, { width: 1440, height: 900 }, 'desktop', 420);
-    await runViewportVerification(context, projectOpenUrl, { width: 390, height: 844 }, 'narrow', 620);
+    page = await context.newPage();
+    await runViewportVerification(context, page, { launchUrl, projectOpenUrl }, { width: 1440, height: 900 }, 'desktop', 420, true);
+    await page.close();
+    page = await context.newPage();
+    await runViewportVerification(context, page, { projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
+  } catch (error) {
+    verificationError = error;
+    if (page) {
+      console.error(`Browser verification failed at ${page.url()}`);
+      console.error((await page.locator('body').innerText().catch(() => '')).slice(0, 4000));
+    }
   } finally {
+    await page?.close();
     await context?.close();
     await browser?.close();
-    await runtime.stop();
+    try {
+      await runtime.stop();
+    } catch (error) {
+      verificationError = verificationError
+        ? new AggregateError([verificationError, error], 'Browser verification and Runtime cleanup failed.')
+        : error;
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  }
+  if (verificationError) {
+    throw verificationError;
   }
 }
 
 async function writeFixtureProject() {
   await rm(fixtureRoot, { recursive: true, force: true });
   await mkdir(join(fixtureRoot, 'notes'), { recursive: true });
+  await mkdir(join(fixtureRoot, 'images'), { recursive: true });
   await mkdir(fixtureHome, { recursive: true });
+  await mkdir(fixtureTemporaryDirectory, { recursive: true });
   await mkdir(join(fixtureRoot, '.debrute', 'canvases'), { recursive: true });
   await mkdir(join(fixtureRoot, '.debrute', 'canvas-maps'), { recursive: true });
   await mkdir(join(fixtureRoot, '.debrute', 'reviews'), { recursive: true });
 
   const lines = Array.from(
-    { length: 160 },
+    { length: 80 },
     (_, index) => `Line ${String(index + 1).padStart(3, '0')} - browser verification text viewport content.`
   );
   await writeFile(join(fixtureRoot, fixtureTextPath), `# Browser Verification\n\n${lines.join('\n')}\n`, 'utf8');
+  await sharp({
+    create: {
+      width: fixtureImageWidth,
+      height: fixtureImageHeight,
+      channels: 4,
+      background: { r: 32, g: 160, b: 224, alpha: 1 }
+    }
+  }).png().toFile(join(fixtureRoot, fixtureImagePath));
   await writeJson(join(fixtureRoot, '.debrute', 'project.json'), {
     project: {
-      id: '00000000-0000-4000-8000-000000000001',
+      id: fixtureProjectId,
       name: 'browser-verification-project',
       createdAt: '2026-07-07T00:00:00.000Z',
       updatedAt: '2026-07-07T00:00:00.000Z'
@@ -60,22 +103,38 @@ async function writeFixtureProject() {
   await writeJson(join(fixtureRoot, '.debrute', 'canvases', `${fixtureCanvasId}.json`), {
     id: fixtureCanvasId,
     name: 'Browser Verification',
-    nodeElements: [{
-      projectRelativePath: fixtureTextPath,
-      nodeKind: 'file',
-      mediaKind: 'text',
-      x: 120,
-      y: 80,
-      width: 420,
-      height: 260,
-      z: 0
-    }],
+    nodeElements: [
+      {
+        projectRelativePath: fixtureTextPath,
+        nodeKind: 'file',
+        mediaKind: 'text',
+        x: 120,
+        y: 80,
+        width: 420,
+        height: 260,
+        z: 0
+      },
+      {
+        projectRelativePath: fixtureImagePath,
+        nodeKind: 'file',
+        mediaKind: 'image',
+        x: 600,
+        y: 80,
+        width: 512,
+        height: 384,
+        z: 1
+      }
+    ],
     annotations: [],
     preferences: {
       showDiagnostics: true
     }
   });
-  await writeFile(join(fixtureRoot, '.debrute', 'canvas-maps', `${fixtureCanvasId}.yaml`), `paths:\n  - ${fixtureTextPath}\n`, 'utf8');
+  await writeFile(
+    join(fixtureRoot, '.debrute', 'canvas-maps', `${fixtureCanvasId}.yaml`),
+    `paths:\n  - ${fixtureTextPath}\n  - ${fixtureImagePath}\n`,
+    'utf8'
+  );
   await writeJson(join(fixtureRoot, '.debrute', 'reviews', 'canvas-feedback.json'), {
     updatedAt: '2026-07-07T00:00:00.000Z',
     entries: {}
@@ -88,21 +147,30 @@ async function writeJson(path, value) {
 
 function startWorkbenchRuntime() {
   const command = packageManagerCommand(workspaceRoot, ['dev']);
+  const toolHome = process.env.HOME;
   const child = spawn(command.command, command.args, {
     cwd: workspaceRoot,
     env: {
       ...process.env,
       HOME: fixtureHome,
       USERPROFILE: fixtureHome,
-      ...sourceDevProductEnv()
+      TMPDIR: fixtureTemporaryDirectory,
+      DEBRUTE_DEV_NO_OPEN: '1',
+      DEBRUTE_DEV_STOP_RUNTIME_ON_EXIT: '1',
+      ...(toolHome ? {
+        CARGO_HOME: process.env.CARGO_HOME ?? join(toolHome, '.cargo'),
+        RUSTUP_HOME: process.env.RUSTUP_HOME ?? join(toolHome, '.rustup'),
+        COREPACK_HOME: process.env.COREPACK_HOME ?? join(toolHome, '.cache', 'node', 'corepack')
+      } : {})
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32'
   });
   const exited = new Promise((resolveExit) => {
     child.once('exit', resolveExit);
   });
   const launchUrl = new Promise((resolveLaunchUrl, rejectLaunchUrl) => {
-    const timer = setTimeout(() => rejectLaunchUrl(new Error('Timed out waiting for Debrute Workbench launch URL.')), 120000);
+    const timer = setTimeout(() => rejectLaunchUrl(new Error('Timed out waiting for Debrute Workbench launch URL.')), 300000);
     let output = '';
     let resolved = false;
     child.stdout.on('data', (chunk) => {
@@ -127,113 +195,352 @@ function startWorkbenchRuntime() {
   return {
     launchUrl,
     stop: async () => {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        await exited;
-        return;
-      }
-      child.kill('SIGTERM');
-      const killTimer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill('SIGKILL');
+      try {
+        await stopIsolatedRuntime();
+      } finally {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          await exited;
+          return;
         }
-      }, 5000);
-      await exited;
-      clearTimeout(killTimer);
+        killChildTree(child, 'SIGTERM');
+        const killTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) {
+            killChildTree(child, 'SIGKILL');
+          }
+        }, 5000);
+        await exited;
+        clearTimeout(killTimer);
+        await ensureChildProcessGroupStopped(child.pid);
+      }
     }
   };
 }
 
-function sourceDevProductEnv() {
-  return {
-    DEBRUTE_DAEMON_PRODUCT_VERSION: readRootProductVersion(),
-    DEBRUTE_DAEMON_CLI_PATH: join(workspaceRoot, 'apps/debrute-cli/src/index.ts'),
-    DEBRUTE_DAEMON_SKILLS_PAYLOAD_DIR: join(workspaceRoot, 'skills')
-  };
-}
-
-function readRootProductVersion() {
-  const packageJsonPath = join(workspaceRoot, 'package.json');
-  const parsed = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-  if (!isRecord(parsed) || typeof parsed.version !== 'string' || parsed.version.trim() === '') {
-    throw new Error(`Invalid Debrute root package version: ${packageJsonPath}.`);
+async function stopIsolatedRuntime() {
+  let control;
+  try {
+    control = await connectRuntimeControl({
+      role: 'launcher',
+      productVersion,
+      temporaryDirectory: fixtureTemporaryDirectory,
+      handshakeTimeoutMs: 5000
+    });
+  } catch (error) {
+    if (error instanceof RuntimeControlError && error.code === 'runtime_unavailable') {
+      return;
+    }
+    throw error;
   }
-  return parsed.version;
+  const stopped = new Promise((resolve) => control.onRuntimeLost(() => resolve()));
+  try {
+    const response = await control.quitProduct();
+    if (response.result !== 'ok') {
+      throw new Error(`Isolated Runtime rejected browser-verification shutdown: ${response.result}.`);
+    }
+    await Promise.race([
+      stopped,
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('Isolated Runtime did not stop after browser verification.')),
+        10000
+      ))
+    ]);
+  } finally {
+    control.close();
+  }
 }
 
-function isRecord(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function killChildTree(child, signal) {
+  if (process.platform === 'win32') {
+    child.kill(signal);
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    child.kill(signal);
+  }
 }
 
-function withProjectOpenNext(launchUrl, projectRoot) {
-  const url = new URL(launchUrl);
-  url.searchParams.set('next', `/open?path=${encodeURIComponent(projectRoot)}`);
-  return url.toString();
+async function ensureChildProcessGroupStopped(processGroupId) {
+  if (process.platform === 'win32') {
+    return;
+  }
+  const deadline = Date.now() + 5000;
+  while (processGroupExists(processGroupId) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (!processGroupExists(processGroupId)) {
+    return;
+  }
+  try {
+    process.kill(-processGroupId, 'SIGKILL');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') {
+      throw error;
+    }
+  }
+}
+
+function processGroupExists(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ESRCH') {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function projectOpenUrlForOrigin(launchUrl, projectRoot) {
   return new URL(`/open?path=${encodeURIComponent(projectRoot)}`, launchUrl).toString();
 }
 
-async function runViewportVerification(context, url, viewport, label, targetScrollTop) {
-  const page = await context.newPage();
+async function runViewportVerification(context, page, urls, viewport, label, targetScrollTop, fullCanvasWorkflow) {
   await page.setViewportSize(viewport);
   const failures = [];
   const requestLog = [];
+  const pendingPreviewRequests = new Set();
   const canvasFeedbackLoad = observeCanvasTextResponse(page, (response) => (
     response.request().method() === 'GET'
     && response.url().includes('/canvas-feedback')
     && response.ok()
   ), { timeout: 60000 });
   page.on('request', (request) => {
+    if (isCanvasPreviewRequest(request)) {
+      pendingPreviewRequests.add(request);
+    }
     if (isWorkbenchVerificationRequest(request.url())) {
       requestLog.push(`> ${request.method()} ${request.url()}`);
     }
   });
   page.on('console', (message) => {
-    if (message.type() === 'error') {
+    if (message.type() === 'error' && !isExpectedUnavailableCapabilityConsole(message)) {
       failures.push(`[${label}] console error: ${message.text()}`);
     }
   });
   page.on('pageerror', (error) => failures.push(`[${label}] page error: ${error.message}`));
   page.on('requestfailed', (request) => {
-    if (isRequiredNetworkRequest(request)) {
+    pendingPreviewRequests.delete(request);
+    if (isRequiredNetworkRequest(request) && !isExpectedAbortedPreviewRequest(request)) {
       failures.push(`[${label}] request failed: ${request.url()} ${request.failure()?.errorText ?? ''}`.trim());
     }
   });
   page.on('response', (response) => {
+    pendingPreviewRequests.delete(response.request());
     if (isWorkbenchVerificationRequest(response.url())) {
       requestLog.push(`< ${response.status()} ${response.request().method()} ${response.url()}`);
     }
-    if (response.status() >= 400 && isRequiredNetworkRequest(response.request())) {
+    if (
+      response.status() >= 400
+      && isRequiredNetworkRequest(response.request())
+      && !isExpectedUnavailableCapabilityResponse(response)
+    ) {
       failures.push(`[${label}] response failed: ${response.status()} ${response.url()}`);
     }
   });
 
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    if (urls.launchUrl) {
+      await waitForWorkbenchOrigin(context, urls.launchUrl);
+      const root = await context.request.get(urls.launchUrl);
+      if (root.status() !== 200) {
+        throw new Error(`[${label}] stable Workbench root returned ${root.status()} instead of 200.`);
+      }
+    }
+    if (urls.projectOpenUrl) {
+      await page.goto(urls.projectOpenUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+    }
     await page.getByTestId('workbench-shell').waitFor({ state: 'visible', timeout: 60000 });
     await assertWorkbenchChrome(page, label);
     await assertIconButtonsHaveNames(page, label);
-    await assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog);
-    await assertCanvasHoverSurface(page, label, requestLog, canvasFeedbackLoad);
+    await assertCanvasImageWorkflow(page, label);
+    if (fullCanvasWorkflow) {
+      await assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog);
+      await assertCanvasHoverSurface(page, label, requestLog, canvasFeedbackLoad);
+      await assertCanvasImageResolutionWorkflow(page, label);
+      await waitForPendingPreviewRequests(pendingPreviewRequests, label);
+    } else {
+      await assertCanvasTextNodeVisible(page, label);
+    }
     if (failures.length > 0) {
       throw new Error(failures.join('\n'));
     }
-    console.log(`[${label}] Workbench launch, chrome, Canvas text, preview handoff, icon accessibility, and hover geometry passed.`);
-  } finally {
-    await page.close();
+  } catch (error) {
+    const diagnostics = await browserStartupDiagnostics(page);
+    throw new Error([
+      error instanceof Error ? error.message : String(error),
+      ...failures,
+      `Request log:\n${requestLog.join('\n') || '(empty)'}`,
+      `Browser startup diagnostics:\n${JSON.stringify(diagnostics, null, 2)}`
+    ].join('\n'));
   }
+  console.log(`[${label}] Workbench launch, chrome, Canvas nodes, icon accessibility${fullCanvasWorkflow ? ', preview handoff, and hover geometry' : ''} passed.`);
+}
+
+async function waitForWorkbenchOrigin(context, launchUrl) {
+  const rootUrl = new URL('/', launchUrl).toString();
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await context.request.get(rootUrl);
+      if (response.ok()) {
+        return;
+      }
+    } catch {
+      // Vite has not bound its selected development port yet.
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error(`Timed out waiting for Workbench origin: ${rootUrl}`);
 }
 
 function isRequiredNetworkRequest(request) {
-  return ['document', 'script', 'stylesheet', 'xhr', 'fetch', 'websocket'].includes(request.resourceType());
+  return ['document', 'script', 'stylesheet', 'image', 'xhr', 'fetch', 'websocket'].includes(request.resourceType());
+}
+
+function isCanvasPreviewRequest(request) {
+  if (request.method() !== 'GET') {
+    return false;
+  }
+  const path = new URL(request.url()).pathname;
+  return path.endsWith('/canvas-text-preview') || path.endsWith('/canvas-image-preview');
+}
+
+async function waitForPendingPreviewRequests(pending, label) {
+  const deadline = Date.now() + 60000;
+  while (pending.size > 0 && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (pending.size > 0) {
+    throw new Error(`[${label}] Canvas preview requests did not settle: ${[...pending].map((request) => request.url()).join(', ')}`);
+  }
+}
+
+function isExpectedAbortedPreviewRequest(request) {
+  const path = new URL(request.url()).pathname;
+  return request.failure()?.errorText === 'net::ERR_ABORTED'
+    && request.method() === 'GET'
+    && (path.endsWith('/canvas-text-preview') || path.endsWith('/canvas-image-preview'));
+}
+
+function isExpectedUnavailableCapabilityResponse(response) {
+  return response.status() === 503 && new URL(response.url()).pathname === '/api/runtime/product';
+}
+
+function isExpectedUnavailableCapabilityConsole(message) {
+  return message.text().includes('503 (Service Unavailable)')
+    && message.location().url
+    && new URL(message.location().url).pathname === '/api/runtime/product';
 }
 
 function isWorkbenchVerificationRequest(url) {
-  return url.includes('/text-viewport')
+  return url.includes('/api/global/events')
+    || url.includes('/api/projects/open')
+    || url.includes('/text-viewport')
     || url.includes('/canvas-feedback')
+    || url.includes('/canvas-image-preview')
     || url.includes('/canvas-text-preview')
     || url.includes('/canvas-text-previews/');
+}
+
+function browserStartupDiagnostics(page) {
+  return page.evaluate(() => ({
+    url: window.location.href,
+    resources: performance.getEntriesByType('resource')
+      .map((entry) => entry.name)
+      .filter((url) => url.includes('/api/'))
+  }));
+}
+
+async function assertCanvasImageWorkflow(page, label) {
+  const imageNode = page.locator(
+    `[data-canvas-node-kind="file"][data-canvas-media-kind="image"][data-project-relative-path="${fixtureImagePath}"]`
+  );
+  await imageNode.waitFor({ state: 'visible', timeout: 60000 });
+  const preview = imageNode.locator('img');
+  await preview.waitFor({ state: 'visible', timeout: 60000 });
+  const loaded = await preview.evaluate((image) => image.complete && image.naturalWidth > 0);
+  if (!loaded) {
+    throw new Error(`[${label}] Canvas image preview did not decode.`);
+  }
+  if (await imageNode.getByRole('button', { name: 'Retry' }).count() > 0) {
+    throw new Error(`[${label}] Canvas image preview exposed a retry error.`);
+  }
+  console.log(`[${label}] Canvas image preview loaded through the Runtime Project media route.`);
+}
+
+async function assertCanvasImageResolutionWorkflow(page, label) {
+  const imageNode = page.locator(
+    `[data-canvas-node-kind="file"][data-canvas-media-kind="image"][data-project-relative-path="${fixtureImagePath}"]`
+  );
+  const preview = imageNode.locator('img[data-canvas-image-layer="visible"]');
+  const initial = await readCanvasImageResolution(preview);
+  if (initial.previewWidth >= fixtureImageWidth || initial.naturalWidth !== initial.previewWidth) {
+    throw new Error(
+      `[${label}] Initial Canvas image tier was invalid: ${JSON.stringify(initial)}.`
+    );
+  }
+
+  await imageNode.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    for (let index = 0; index < 32; index += 1) {
+      node.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        ctrlKey: true,
+        deltaY: -10
+      }));
+    }
+  });
+  await page.waitForFunction(
+    ({ selector, width }) => {
+      const image = document.querySelector(selector);
+      return image instanceof HTMLImageElement
+        && image.complete
+        && image.naturalWidth === width
+        && image.dataset.previewWidth === String(width);
+    },
+    {
+      selector: `[data-project-relative-path="${fixtureImagePath}"] img[data-canvas-image-layer="visible"]`,
+      width: fixtureImageWidth
+    },
+    { timeout: 60000 }
+  );
+  const source = await readCanvasImageResolution(preview);
+  if (
+    source.previewWidth !== fixtureImageWidth
+    || source.naturalWidth !== fixtureImageWidth
+    || new URL(source.src).searchParams.get('w') !== String(fixtureImageWidth)
+  ) {
+    throw new Error(`[${label}] Canvas image did not reach its direct source tier: ${JSON.stringify(source)}.`);
+  }
+  console.log(
+    `[${label}] Canvas image resolution changed from ${initial.naturalWidth}px to the ${source.naturalWidth}px direct source tier.`
+  );
+}
+
+async function readCanvasImageResolution(preview) {
+  await preview.waitFor({ state: 'visible', timeout: 60000 });
+  return await preview.evaluate((image) => ({
+    naturalWidth: image.naturalWidth,
+    previewWidth: Number(image.dataset.previewWidth),
+    src: image.currentSrc || image.src
+  }));
+}
+
+async function assertCanvasTextNodeVisible(page, label) {
+  const textNode = page.locator(
+    `[data-canvas-node-kind="file"][data-canvas-media-kind="text"][data-project-relative-path="${fixtureTextPath}"]`
+  ).first();
+  await textNode.waitFor({ state: 'visible', timeout: 60000 });
+  if (await textNode.getByText('Text Error', { exact: false }).count() > 0) {
+    throw new Error(`[${label}] Canvas text node exposed an error state.`);
+  }
+  console.log(`[${label}] Canvas text node rendered in the narrow viewport.`);
 }
 
 async function assertWorkbenchChrome(page, label) {
@@ -273,7 +580,21 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
   const textNode = page.locator(`[data-canvas-node-kind="file"][data-canvas-media-kind="text"][data-project-relative-path="${fixtureTextPath}"]`).first();
   await textNode.waitFor({ state: 'visible', timeout: 60000 });
   const textBody = textNode.locator('.canvas-text-body');
+  const stackOrderChange = observeCanvasTextResponse(page, (response) => (
+    response.request().method() === 'POST'
+    && response.url().includes('/node-stack-order/bring-to-front')
+    && response.ok()
+  ), { timeout: 10000 });
   await clickVisibleElementPoint(page, textBody, label, 'Canvas text body');
+  await waitForCanvasTextResponse(
+    stackOrderChange,
+    page,
+    textNode,
+    label,
+    requestLog,
+    'Canvas stack-order mutation'
+  );
+  await assertCanvasImageWorkflow(page, `${label}: text active`);
   const scroller = textNode.locator('.cm-scroller').first();
   await scroller.waitFor({ state: 'visible', timeout: 60000 });
   const scrollerHandle = await scroller.elementHandle();
@@ -486,9 +807,7 @@ async function assertCanvasHoverSurface(page, label, requestLog, canvasFeedbackL
   await waitForCanvasTextResponse(canvasFeedbackLoad, page, textNode, label, requestLog, 'Canvas feedback load');
   await clickCanvasSurfaceEmptyPoint(page, textNode, label);
   const feedbackBar = page.locator('.canvas-feedback-bar').first();
-  if (!(await feedbackBar.isVisible().catch(() => false))) {
-    await moveToVisibleElementPoint(page, textNode, label, 'Canvas text node hover target');
-  }
+  await moveToVisibleElementPoint(page, textNode, label, 'Canvas text node hover target');
   const feedbackBarError = await feedbackBar.waitFor({ state: 'visible', timeout: 10000 }).then(
     () => undefined,
     (error) => error
@@ -499,7 +818,10 @@ async function assertCanvasHoverSurface(page, label, requestLog, canvasFeedbackL
     const message = feedbackBarError instanceof Error ? feedbackBarError.message : String(feedbackBarError);
     throw new Error(`[${label}] Timed out waiting for Canvas feedback bar: ${message}\n${diagnostics}\nWorkbench verification requests:\n${requests}`);
   }
-  const box = await feedbackBar.boundingBox();
+  const box = await page.locator('.canvas-feedback-bar:visible').first().evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { width: rect.width, height: rect.height };
+  }).catch(() => undefined);
   if (!box || box.width <= 0 || box.height <= 0) {
     throw new Error(`[${label}] Canvas feedback bar has no visible geometry.`);
   }

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   isDebruteMutatingMethod,
-  normalizeDebruteRuntimeInfo,
   parseDebruteWorkbenchPath,
   type DebruteDefaultFrontend,
   type DebruteGlobalSettingsView,
@@ -39,7 +38,7 @@ describe('app-protocol runtime metadata', { tags: ['runtime'] }, () => {
         defaultFrontend: frontend
       },
       chrome: {
-        recentProjectRoots: ['/tmp/project-a']
+        recentProjects: [{ projectId: 'project-a', projectRoot: '/tmp/project-a' }]
       },
       models: {
         image: { models: [] },
@@ -59,7 +58,7 @@ describe('app-protocol runtime metadata', { tags: ['runtime'] }, () => {
     const event: WorkbenchEvent = { type: 'globalSettings.changed', settings };
     const recentProjectsEvent: WorkbenchEvent = {
       type: 'recentProjects.changed',
-      recentProjectRoots: ['/tmp/project-a']
+      recentProjects: [{ projectId: 'project-a', projectRoot: '/tmp/project-a' }]
     };
 
     expect(settings.workbench.defaultFrontend).toBe('runtime-only');
@@ -70,23 +69,8 @@ describe('app-protocol runtime metadata', { tags: ['runtime'] }, () => {
     expect(event.type).toBe('globalSettings.changed');
     expect(recentProjectsEvent).toEqual({
       type: 'recentProjects.changed',
-      recentProjectRoots: ['/tmp/project-a']
+      recentProjects: [{ projectId: 'project-a', projectRoot: '/tmp/project-a' }]
     });
-  });
-
-  it('normalizes runtime info without active project state', () => {
-    const runtime = normalizeDebruteRuntimeInfo({
-      daemonUrl: 'http://127.0.0.1:17456/',
-      webBaseUrl: 'http://127.0.0.1:17573/',
-      platform: 'darwin'
-    });
-
-    expect(runtime).toEqual({
-      daemonUrl: 'http://127.0.0.1:17456',
-      webBaseUrl: 'http://127.0.0.1:17573',
-      platform: 'darwin'
-    });
-    expect(JSON.stringify(runtime)).not.toContain('token');
   });
 
   it('parses final Web Workbench routes', () => {

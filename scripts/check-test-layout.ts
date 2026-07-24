@@ -85,8 +85,6 @@ function testPathViolations(path: string): string[] {
   }
   const rules = [
     { directory: 'tests/contracts/', suffix: '.contract.test.ts', allowTsx: false },
-    { directory: 'tests/integration/', suffix: '.integration.test.ts', allowTsx: true },
-    { directory: 'tests/system/', suffix: '.system.test.ts', allowTsx: false },
     { directory: 'tests/release/', suffix: '.release.test.ts', allowTsx: false }
   ];
   const rule = rules.find((candidate) => path.startsWith(candidate.directory));
@@ -95,13 +93,11 @@ function testPathViolations(path: string): string[] {
     return valid ? [] : [`${path}: ${rule.directory.slice(0, -1)} requires the ${rule.suffix} suffix`];
   }
   if (path.startsWith('tests/')) {
-    return [`${path}: tests/ test files must live under contracts, integration, system, or release`];
+    return [`${path}: tests/ test files must live under contracts or release`];
   }
 
   const reservedSuffix = [
     '.contract.test.ts',
-    '.integration.test.ts',
-    '.system.test.ts',
     '.release.test.ts'
   ].find((suffix) => path.endsWith(suffix) || path.endsWith(`${suffix}x`));
   if (reservedSuffix) {

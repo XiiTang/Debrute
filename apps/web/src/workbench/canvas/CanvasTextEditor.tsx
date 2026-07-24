@@ -288,11 +288,13 @@ export function CanvasTextEditor({
     });
   }, [language, readOnly, wordWrap]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const wasReadOnly = previousReadOnlyRef.current;
     const nextReadOnly = Boolean(readOnly);
     previousReadOnlyRef.current = nextReadOnly;
     if (!wasReadOnly && nextReadOnly) {
+      setPointerFocus(false);
+      viewRef.current?.contentDOM.blur();
       const position = commitObservedScrollPositionRef.current?.();
       if (position) {
         onReadOnlyTransition?.(position);
@@ -305,12 +307,16 @@ export function CanvasTextEditor({
       ref={hostRef}
       data-canvas-text-editor="true"
       data-editor-engine="codemirror"
-      data-editor-mode="edit"
+      data-editor-mode={readOnly ? 'handoff' : 'edit'}
       data-word-wrap={wordWrap ? 'on' : 'off'}
-      data-pointer-focus={pointerFocus ? 'true' : 'false'}
-      className="canvas-text-editor canvas-text-editor--edit"
+      data-pointer-focus={!readOnly && pointerFocus ? 'true' : 'false'}
+      className={`canvas-text-editor canvas-text-editor--${readOnly ? 'handoff' : 'edit'}`}
       style={canvasTextSurfaceCssVariables() as React.CSSProperties}
-      onPointerDownCapture={() => setPointerFocus(true)}
+      onPointerDownCapture={() => {
+        if (!readOnly) {
+          setPointerFocus(true);
+        }
+      }}
     />
   );
 }

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AlertTriangle, RefreshCw, Video } from 'lucide-react';
+import { AlertTriangle, Video } from 'lucide-react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, ProjectedCanvasNode } from '@debrute/canvas-core';
-import { Button } from '../ui';
 import { useI18n } from '../i18n';
 import {
   CanvasVideoPlayerAdapter,
@@ -12,6 +11,7 @@ import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
+import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
 
 type CanvasVideoVisibleLayer = 'preview' | 'player';
 
@@ -311,28 +311,16 @@ export function CanvasVideoNodeContent({
       {titleBar}
       <div ref={playerShellRef} className="canvas-video-player-shell">
         {error ? (
-          <div className="db-canvas-node-error-overlay">
-            <AlertTriangle size={16} />
-            <span>{error}</span>
-            <Button
-              className="db-canvas-node-retry"
-              size="xs"
-              iconStart={<RefreshCw size={12} />}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => {
-                setError(undefined);
-                setRetryKey((current) => current + 1);
-              }}
-            >
-              {i18n.t('canvas.node.retry')}
-            </Button>
-          </div>
+          <CanvasNodeErrorPresentation
+            message={error}
+            onRetry={() => {
+              setError(undefined);
+              setRetryKey((current) => current + 1);
+            }}
+          />
         ) : null}
         {videoPreviewError && targetLayer === 'preview' ? (
-          <div className="db-canvas-node-error-overlay">
-            <AlertTriangle size={16} />
-            <span>{videoPreviewError}</span>
-          </div>
+          <CanvasNodeErrorPresentation message={videoPreviewError} />
         ) : null}
         {previewLayerSource ? (
           <img

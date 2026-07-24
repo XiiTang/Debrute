@@ -10,7 +10,6 @@
   "references": [
     { "path": "../../packages/app-protocol" },
     { "path": "../../packages/project-core" },
-    { "path": "../../packages/canvas-core" },
-    { "path": "../../packages/workbench-runtime" }
+    { "path": "../../packages/canvas-core" }
   ]
 }

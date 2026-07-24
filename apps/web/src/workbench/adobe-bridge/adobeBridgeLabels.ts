@@ -3,7 +3,7 @@ import type { WorkbenchI18n, WorkbenchTranslationKey } from '../i18n';
 
 const SUPPORTED_SEND_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.psd']);
 
-const ADOBE_BRIDGE_ERROR_KEYS: Record<AdobeBridgeErrorCode, WorkbenchTranslationKey> = {
+const ADOBE_BRIDGE_ERROR_KEYS: Partial<Record<AdobeBridgeErrorCode, WorkbenchTranslationKey>> = {
   adobe_bridge_disabled: 'adobeBridge.error.adobe_bridge_disabled',
   adobe_discovery_unavailable: 'adobeBridge.error.adobe_discovery_unavailable',
   adobe_client_offline: 'adobeBridge.error.adobe_client_offline',
@@ -21,7 +21,8 @@ const ADOBE_BRIDGE_ERROR_KEYS: Record<AdobeBridgeErrorCode, WorkbenchTranslation
 };
 
 export function adobeBridgeErrorLabel(code: AdobeBridgeErrorCode, i18n: WorkbenchI18n): string {
-  return i18n.t(ADOBE_BRIDGE_ERROR_KEYS[code]);
+  const key = ADOBE_BRIDGE_ERROR_KEYS[code];
+  return key ? i18n.t(key) : code;
 }
 
 export function isSupportedAdobeBridgeWorkbenchFile(projectRelativePath: string): boolean {

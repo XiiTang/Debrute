@@ -16,18 +16,6 @@ const desktopDockTarget = `${desktopBuildDir}/dock_icon.png`;
 const desktopLogoTarget = `${desktopBuildDir}/logo.png`;
 const desktopIcnsTarget = `${desktopBuildDir}/icon.icns`;
 const desktopIcoTarget = `${desktopBuildDir}/icon.ico`;
-const desktopTrayTarget = `${desktopBuildDir}/tray_icon.png`;
-const desktopTrayTemplateTarget = `${desktopBuildDir}/tray_icon_template.png`;
-const desktopTrayTemplate2xTarget = `${desktopBuildDir}/tray_icon_template@2x.png`;
-const runtimeTrayStatuses = ['starting', 'running', 'degraded', 'stopped', 'error'];
-const runtimeTrayStatusColors = {
-  starting: { r: 74, g: 144, b: 226 },
-  running: { r: 28, g: 184, b: 111 },
-  degraded: { r: 245, g: 166, b: 35 },
-  stopped: { r: 142, g: 142, b: 147 },
-  error: { r: 225, g: 80, b: 72 }
-};
-const runtimeTrayStatusTargets = runtimeTrayStatuses.map((status) => `${desktopBuildDir}/tray_icon_${status}.png`);
 const appIconSizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
 const icoIconSizes = [16, 32, 48, 256];
 const neutralIconRadiusRatio = 0.2;
@@ -36,12 +24,6 @@ const windowsIconRadiusRatio = 0.12;
 const appIconInsetRatio = 0.08;
 const macIconInsetRatio = 0.1;
 const macIconForegroundRatio = 0.9;
-const trayIconSize = 66;
-const trayIconContentSize = 60;
-const trayTemplateIconSize = 18;
-const trayTemplateIconContentSize = 16;
-const trayTemplateIcon2xSize = 36;
-const trayTemplateIcon2xContentSize = 32;
 
 export async function syncProjectIcons({ root = defaultRoot } = {}) {
   const source = resolve(root, 'assets/project-icon/debrute.svg');
@@ -52,10 +34,6 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
     desktopDockTarget,
     desktopIcnsTarget,
     desktopIcoTarget,
-    desktopTrayTarget,
-    desktopTrayTemplateTarget,
-    desktopTrayTemplate2xTarget,
-    ...runtimeTrayStatusTargets,
     ...appIconSizes.map((size) => `${desktopBuildDir}/icons/${size}x${size}.png`)
   ];
 
@@ -83,21 +61,6 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
   }));
   await writeFile(resolve(root, desktopIcnsTarget), icnsBuffer(macIconPngs));
   await writeFile(resolve(root, desktopIcoTarget), icoBuffer(windowsIconPngs));
-  await writeFile(resolve(root, desktopTrayTarget), await trayIconPng(svg));
-  await writeFile(
-    resolve(root, desktopTrayTemplateTarget),
-    await trayTemplateIconPng(svg, trayTemplateIconSize, trayTemplateIconContentSize)
-  );
-  await writeFile(
-    resolve(root, desktopTrayTemplate2xTarget),
-    await trayTemplateIconPng(svg, trayTemplateIcon2xSize, trayTemplateIcon2xContentSize)
-  );
-  await Promise.all(runtimeTrayStatuses.map(async (status) => {
-    await writeFile(
-      resolve(root, `${desktopBuildDir}/tray_icon_${status}.png`),
-      await trayStatusIconPng(svg, runtimeTrayStatusColors[status])
-    );
-  }));
 
   return {
     source,
@@ -108,9 +71,7 @@ export async function syncProjectIcons({ root = defaultRoot } = {}) {
 
 async function removeStaleIconOutputs(root) {
   await Promise.all([
-    rm(resolve(root, `${desktopBuildDir}/icons`), { recursive: true, force: true }),
-    rm(resolve(root, `${desktopBuildDir}/tray_icon_dark.png`), { force: true }),
-    rm(resolve(root, `${desktopBuildDir}/tray_icon_light.png`), { force: true })
+    rm(resolve(root, `${desktopBuildDir}/icons`), { recursive: true, force: true })
   ]);
 }
 
@@ -192,90 +153,6 @@ async function maskedIconPng(svg, size, insetRatio, maskForContentSize) {
     }
   })
     .composite([{ input: iconBody, left: inset, top: inset }])
-    .png()
-    .toBuffer();
-}
-
-async function trayIconPng(svg) {
-  const cutout = removeBackgroundLayer(svg);
-  const trimmed = await sharp(Buffer.from(cutout))
-    .resize(1024, 1024, { fit: 'fill' })
-    .png()
-    .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .toBuffer();
-  const content = await sharp(trimmed)
-    .resize(trayIconContentSize, trayIconContentSize, {
-      fit: 'inside',
-      withoutEnlargement: true
-    })
-    .png()
-    .toBuffer();
-  return sharp({
-    create: {
-      width: trayIconSize,
-      height: trayIconSize,
-      channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    }
-  })
-    .composite([{ input: content, gravity: 'center' }])
-    .png()
-    .toBuffer();
-}
-
-async function trayStatusIconPng(svg, statusColor) {
-  const base = await trayIconPng(svg);
-  const badgeSize = 20;
-  const badge = await sharp({
-    create: {
-      width: badgeSize,
-      height: badgeSize,
-      channels: 4,
-      background: { ...statusColor, alpha: 1 }
-    }
-  })
-    .composite([{ input: await roundedRectangleMask(badgeSize, 0.5), blend: 'dest-in' }])
-    .png()
-    .toBuffer();
-  return sharp(base)
-    .composite([{ input: badge, left: trayIconSize - badgeSize - 3, top: trayIconSize - badgeSize - 3 }])
-    .png()
-    .toBuffer();
-}
-
-async function trayTemplateIconPng(svg, size, contentSize) {
-  const content = await foregroundIconPng(svg, contentSize);
-  const { data, info } = await sharp(content)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const templatePixels = Buffer.alloc(info.width * info.height * 4);
-  for (let y = 0; y < info.height; y += 1) {
-    for (let x = 0; x < info.width; x += 1) {
-      const offset = (y * info.width + x) * info.channels;
-      const targetOffset = (y * info.width + x) * 4;
-      templatePixels[targetOffset] = 255;
-      templatePixels[targetOffset + 1] = 255;
-      templatePixels[targetOffset + 2] = 255;
-      templatePixels[targetOffset + 3] = data[offset + 3];
-    }
-  }
-  const templateContent = await sharp(templatePixels, {
-    raw: {
-      width: info.width,
-      height: info.height,
-      channels: 4
-    }
-  }).png().toBuffer();
-  return sharp({
-    create: {
-      width: size,
-      height: size,
-      channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    }
-  })
-    .composite([{ input: templateContent, gravity: 'center' }])
     .png()
     .toBuffer();
 }

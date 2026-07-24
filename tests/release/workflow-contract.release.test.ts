@@ -9,8 +9,9 @@ describe('GitHub release workflow contract', () => {
   it('uses a release workflow with preflight, Desktop, and final publish jobs', () => {
     expect(workflow).toContain('preflight:');
     expect(workflow).toContain('node scripts/validate-release-version-contract.mjs');
-    expect(workflow).toContain('Install ripgrep');
-    expect(workflow).toContain('sudo apt-get update && sudo apt-get install -y ripgrep');
+    expect(workflow).toContain('runs-on: macos-latest');
+    expect(workflow).toContain('Prepare pinned native raster payload');
+    expect(workflow).toContain('pnpm native:raster:prepare');
     expect(workflow).toContain('build-desktop:');
     expect(workflow).toContain('publish-release:');
     expect(workflow).toContain('CSC_IDENTITY_AUTO_DISCOVERY: false');
@@ -29,6 +30,10 @@ describe('GitHub release workflow contract', () => {
     expect(releaseDocs).toContain('debrute-update-manifest.json');
     expect(releaseDocs).toContain('debrute-update-manifest.json.sig');
     expect(releaseDocs).toContain('Signed Manifest Verification');
+    expect(releaseDocs).toContain('debrute-product-X.Y.Z-macos-arm64.zip');
+    expect(releaseDocs).toContain('debrute-product-X.Y.Z-windows-x64.zip');
+    expect(releaseDocs).toContain('required eight-file');
+    expect(releaseDocs).toContain('does not sign Linux into the update manifest');
   });
 
   it('rejects unexpected files from the final release upload set', () => {
@@ -49,8 +54,37 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('electron-builder --mac dmg --${{ matrix.arch }} --publish never');
     expect(buildDesktopBlock).toContain('electron-builder --win nsis --x64 --publish never');
     expect(buildDesktopBlock).toContain('electron-builder --linux AppImage --x64 --publish never');
+    expect(buildDesktopBlock).toContain('continue-on-error: ${{ matrix.required == false }}');
+    expect(buildDesktopBlock).toContain('required: false');
     expect(buildDesktopBlock).toContain('debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}');
     expect(workflow).toContain('Generate signed update manifest');
+    expect(buildDesktopBlock).toContain('Archive signed Product seed');
+    expect(buildDesktopBlock).toContain('node scripts/archive-product-seed.mjs');
+    expect(buildDesktopBlock).toContain('debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip');
+  });
+
+  it('smoke tests the packaged Windows Desktop with a Ready Runtime tray', () => {
+    const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
+
+    expect(buildDesktopBlock).toContain('Smoke test packaged Windows Desktop and Runtime');
+    expect(buildDesktopBlock).toContain("Resolve-Path 'apps/desktop/release/win-unpacked/debrute.exe'");
+    expect(buildDesktopBlock).toContain('runtime status');
+    expect(buildDesktopBlock).toContain("$lastStatus.Contains('runtime_state=ready')");
+    expect(buildDesktopBlock).toContain("$lastStatus.Contains('native_tray=active')");
+    expect(buildDesktopBlock).toContain('runtime stop');
+  });
+
+  it('signs native Product binaries before assembling each supported Product archive', () => {
+    const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
+    const archiveIndex = buildDesktopBlock.indexOf('Archive signed Product seed');
+
+    expect(buildDesktopBlock).toContain('Sign macOS Product binaries and rebuild the strict seed');
+    expect(buildDesktopBlock).toContain('codesign --verify --strict --verbose=2 "$binary"');
+    expect(buildDesktopBlock).toContain('Sign Windows Product binaries and rebuild the strict seed');
+    expect(buildDesktopBlock).toContain('WINDOWS_CSC_LINK_SECRET: ${{ secrets.WINDOWS_CSC_LINK }}');
+    expect(buildDesktopBlock).toContain('& $signTool verify /pa /v $binary');
+    expect(buildDesktopBlock.indexOf('Sign macOS Product binaries')).toBeLessThan(archiveIndex);
+    expect(buildDesktopBlock.indexOf('Sign Windows Product binaries')).toBeLessThan(archiveIndex);
   });
 
   it('configures the final signed macOS Desktop identity', () => {

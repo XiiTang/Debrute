@@ -64,11 +64,13 @@ describe('SendToPhotoshopDialog', () => {
 function bridgeState(): AdobeBridgeStateView {
   return {
     settings: { enabled: true, discoveryStatus: 'available' },
-    adobeClients: [
+    pairedPlugins: [],
+    clients: [
       {
-        adobeClientId: 'ps-open',
+        pluginInstanceId: 'ps-open',
         hostApp: 'photoshop',
         hostVersion: '2026',
+        clientRuntime: 'uxp',
         displayName: 'Photoshop 2026 · poster.psd',
         documentCount: 1,
         activeDocumentTitle: 'poster.psd',
@@ -76,9 +78,10 @@ function bridgeState(): AdobeBridgeStateView {
         lastSeenAt: '2026-06-18T00:00:01.000Z'
       },
       {
-        adobeClientId: 'ps-empty',
+        pluginInstanceId: 'ps-empty',
         hostApp: 'photoshop',
         hostVersion: '2026',
+        clientRuntime: 'uxp',
         displayName: 'Photoshop 2026 · No document open',
         documentCount: 0,
         activeDocumentTitle: null,
@@ -86,9 +89,10 @@ function bridgeState(): AdobeBridgeStateView {
         lastSeenAt: '2026-06-18T00:00:01.000Z'
       },
       {
-        adobeClientId: 'ps-unlinked',
+        pluginInstanceId: 'ps-unlinked',
         hostApp: 'photoshop',
         hostVersion: '2026',
+        clientRuntime: 'uxp',
         displayName: 'Unlinked Photoshop',
         documentCount: 1,
         activeDocumentTitle: 'other.psd',
@@ -98,8 +102,8 @@ function bridgeState(): AdobeBridgeStateView {
     ],
     projects: [],
     links: [
-      { linkId: 'link-open', projectId: 'project-1', adobeClientId: 'ps-open', createdAt: '2026-06-18T00:00:01.000Z', status: 'active' },
-      { linkId: 'link-empty', projectId: 'project-1', adobeClientId: 'ps-empty', createdAt: '2026-06-18T00:00:01.000Z', status: 'active' }
+      { linkId: 'link-open', projectId: 'project-1', pluginInstanceId: 'ps-open', createdAt: '2026-06-18T00:00:01.000Z', status: 'active' },
+      { linkId: 'link-empty', projectId: 'project-1', pluginInstanceId: 'ps-empty', createdAt: '2026-06-18T00:00:01.000Z', status: 'active' }
     ],
     transfers: []
   };

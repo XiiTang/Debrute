@@ -91,8 +91,11 @@ export interface WorkbenchActions {
   saveGlobalSettings: (input: SaveDebruteGlobalSettingsInput) => Promise<void>;
   rescanIntegrations: () => Promise<IntegrationSettingsView>;
   runIntegrationOperation: (input: RunIntegrationOperationInput) => Promise<RunIntegrationOperationResult>;
-  linkAdobeBridgePhotoshop: (input: { adobeClientId: string }) => Promise<void>;
-  unlinkAdobeBridgePhotoshop: (adobeClientId: string) => Promise<void>;
+  createAdobeBridgePairing: () => Promise<{ pairingId: string; code: string; expiresAt: string }>;
+  cancelAdobeBridgePairing: (pairingId: string) => Promise<void>;
+  removeAdobeBridgePairing: (pluginInstanceId: string) => Promise<void>;
+  linkAdobeBridgePhotoshop: (input: { pluginInstanceId: string }) => Promise<void>;
+  unlinkAdobeBridgePhotoshop: (pluginInstanceId: string) => Promise<void>;
   sendProjectFileToPhotoshop: (input: SendProjectFileToPhotoshopInput) => Promise<SendProjectFileToPhotoshopResult>;
   openSendToPhotoshopPicker: (projectRelativePath: string) => void;
   lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;

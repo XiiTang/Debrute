@@ -214,7 +214,6 @@ function snapshotFixture(input: {
         warnings: 0,
         infos: 0
       },
-      runtimeDataLocation: '/tmp/debrute',
       checkedAt: '2026-06-11T00:00:00.000Z'
     }
   };

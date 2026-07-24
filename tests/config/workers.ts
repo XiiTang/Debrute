@@ -1,20 +1,14 @@
-import { availableParallelism, totalmem } from 'node:os';
-
-const GIB = 1024 ** 3;
+import { availableParallelism } from 'node:os';
 
 export interface TestWorkerPlan {
   availableCpus: number;
-  totalMemoryBytes: number;
   unitWorkers: number;
   domWorkers: number;
-  integrationWorkers: number;
-  systemWorkers: 1;
-  referenceHardware: boolean;
+  releaseWorkers: 1;
 }
 
 export function resolveWorkerPlan(input: {
   availableCpus: number;
-  totalMemoryBytes: number;
   requestedWorkers?: string;
 }): TestWorkerPlan {
   const requestedWorkers = input.requestedWorkers === undefined
@@ -36,18 +30,14 @@ export function resolveWorkerPlan(input: {
 
   return {
     availableCpus: input.availableCpus,
-    totalMemoryBytes: input.totalMemoryBytes,
     unitWorkers,
     domWorkers: Math.min(2, unitWorkers),
-    integrationWorkers: Math.min(2, unitWorkers),
-    systemWorkers: 1,
-    referenceHardware: input.availableCpus >= 6 && input.totalMemoryBytes >= 8 * GIB
+    releaseWorkers: 1
   };
 }
 
 export const testWorkerPlan = resolveWorkerPlan({
   availableCpus: availableParallelism(),
-  totalMemoryBytes: totalmem(),
   ...(process.env.DEBRUTE_TEST_WORKERS === undefined
     ? {}
     : { requestedWorkers: process.env.DEBRUTE_TEST_WORKERS })

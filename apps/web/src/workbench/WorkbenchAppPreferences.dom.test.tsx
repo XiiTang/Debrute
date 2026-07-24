@@ -2,11 +2,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  buildWorkbenchTitleBarState,
   type AdobeBridgeStateView,
   type DebruteGlobalSettingsView,
   type ImageModelSettingsView,
-  unavailableWorkbenchTitleBarState,
   type WorkbenchApiClient,
   type WorkbenchEvent,
   type WorkbenchProjectSessionSnapshot
@@ -21,7 +19,8 @@ type WorkbenchAppComponent = (typeof import('./WorkbenchApp'))['WorkbenchApp'];
 const apiState = vi.hoisted(() => {
   const state = {
     api: undefined as WorkbenchApiClient | undefined,
-    listeners: new Set<(event: WorkbenchEvent) => void>()
+    listeners: new Set<(event: WorkbenchEvent) => void>(),
+    detachedListeners: new Set<() => void>()
   };
   const client = new Proxy({} as WorkbenchApiClient, {
     get(_target, property) {
@@ -71,7 +70,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
     ({ WorkbenchApp: WorkbenchAppWithMockedCanvas } = await import('./WorkbenchApp'));
     vi.doUnmock('./canvas/CanvasEditor');
-  });
+  }, 30_000);
 
   afterAll(() => {
     if (canvasGetContextDescriptor) {
@@ -83,6 +82,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
   beforeEach(() => {
     apiState.listeners.clear();
+    apiState.detachedListeners.clear();
     document.documentElement.removeAttribute('data-theme');
     window.sessionStorage.clear();
     delete window.debruteShell;
@@ -97,6 +97,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     apiState.listeners.clear();
+    apiState.detachedListeners.clear();
     apiState.api = undefined;
     canvasRuntimeState.runtime?.dispose();
     canvasRuntimeState.runtime = undefined;
@@ -153,13 +154,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     window.debruteShell = {
       getNativeWindowState: vi.fn().mockRejectedValue(new Error('native state unavailable'))
     };
-    const { container, root } = await renderWorkbenchApp('/', {
-      getWorkbenchTitleBarState: vi.fn(async () => buildWorkbenchTitleBarState({
-        platform: 'win32',
-        host: 'desktop',
-        recentProjectRoots: []
-      }))
-    });
+    const { container, root } = await renderWorkbenchApp('/');
 
     expect(container.textContent).toContain('Window state failed: native state unavailable');
     expect(requireButton(container, 'Minimize window').disabled).toBe(false);
@@ -262,75 +257,117 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(apiState.listeners.size).toBe(0);
   });
 
-  it('loads title-bar state once for the opened project', async () => {
-    const getWorkbenchTitleBarState = vi.fn(async (_input: Parameters<WorkbenchApiClient['getWorkbenchTitleBarState']>[0]) => unavailableWorkbenchTitleBarState());
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', { getWorkbenchTitleBarState });
+  it('keeps the Project visible behind a read-only overlay when another Workbench preempts it', async () => {
+    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+    await act(async () => {
+      await Promise.resolve();
+      for (const listener of apiState.detachedListeners) listener();
+      emitWorkbenchEvent({
+        type: 'project.opened',
+        projectId: 'project-1',
+        projectRevision: 2,
+        snapshot: snapshotFixture()
+      });
+    });
+
+    expect(container.querySelector('[data-testid="workbench-detached-overlay"]')?.textContent)
+      .toContain('active in another Workbench');
+    expect(container.textContent).toContain('Demo');
+    await unmount(root, container);
+    expect(apiState.detachedListeners.size).toBe(0);
+  });
+
+  it('requires an explicit Open Here action when Desktop opens a Project owned by Web', async () => {
+    const conflict = Object.assign(new Error('Project is active in Web.'), {
+      code: 'project_owned_by_web',
+      details: { projectId: 'project-1' }
+    });
+    const openProject = vi.fn(async (input: { projectId: string; forceOpenHere?: boolean }) => {
+      if (!input.forceOpenHere) {
+        throw conflict;
+      }
+      return {
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: snapshotFixture()
+      };
+    });
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
+
+    expect(container.querySelector('[data-testid="workbench-open-here-overlay"]')?.textContent)
+      .toContain('active in a Web Workbench');
 
     await act(async () => {
+      requireButton(container, 'Open Here').click();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(getWorkbenchTitleBarState.mock.calls.filter(([input]) => input?.projectId === 'project-1')).toHaveLength(1);
-
+    expect(openProject).toHaveBeenLastCalledWith({ projectId: 'project-1', forceOpenHere: true });
+    expect(container.querySelector('[data-testid="workbench-open-here-overlay"]')).toBeNull();
+    expect(container.textContent).toContain('Demo');
     await unmount(root, container);
   });
 
-  it('does not let an older title-bar response replace the current project title', async () => {
-    const { container, root, olderRequest } = await renderOverlappingTitleBarRequests();
+  it('routes a native macOS Project-open intent through the current document replacement transaction', async () => {
+    let openProjectRequested: ((projectRoot: string) => void) | undefined;
+    window.debruteShell = {
+      onOpenProjectRequested: (listener) => {
+        openProjectRequested = listener;
+        return () => { openProjectRequested = undefined; };
+      }
+    };
+    const openProject = vi.fn(async () => ({
+      projectId: 'project-2',
+      projectRevision: 1,
+      snapshot: snapshotFixture()
+    }));
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
 
-    olderRequest.resolve(titleBarState('Project A'));
     await act(async () => {
-      await olderRequest.promise;
+      for (const listener of apiState.detachedListeners) listener();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="workbench-detached-overlay"]')).not.toBeNull();
+
+    await act(async () => {
+      openProjectRequested?.('/projects/second');
+      await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Project B');
+    expect(openProject).toHaveBeenLastCalledWith({ projectRoot: '/projects/second' });
+    expect(container.querySelector('[data-testid="workbench-detached-overlay"]')).toBeNull();
     await unmount(root, container);
   });
 
-  it('does not let an older title-bar failure replace the current project title', async () => {
-    const { container, root, olderRequest } = await renderOverlappingTitleBarRequests();
+  it('derives current Project title and recent roots locally from ordered state', async () => {
+    const { container, root } = await renderWorkbenchApp('/');
 
-    olderRequest.reject(new Error('old title-bar failure'));
-    await act(async () => {
-      await olderRequest.promise.catch(() => undefined);
-      await Promise.resolve();
-    });
-
-    expect(container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Project B');
-    expect(container.textContent).not.toContain('old title-bar failure');
-    await unmount(root, container);
-  });
-
-  it('applies recent project events without letting an older title-bar response roll them back', async () => {
-    const { container, root, olderRequest } = await renderOverlappingTitleBarRequests();
+    expect(container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Debrute');
 
     await act(async () => {
       emitWorkbenchEvent({
+        type: 'project.opened',
+        projectId: 'project-b',
+        projectRevision: 2,
+        snapshot: snapshotFixture()
+      });
+      emitWorkbenchEvent({
         type: 'recentProjects.changed',
-        recentProjectRoots: ['/projects/current']
+        recentProjects: [{ projectId: 'current', projectRoot: '/projects/current' }]
       });
       await Promise.resolve();
     });
-    olderRequest.resolve(buildWorkbenchTitleBarState({
-      platform: 'darwin',
-      host: 'web',
-      projectTitle: 'Project A',
-      recentProjectRoots: ['/projects/stale']
-    }));
     await act(async () => {
-      await olderRequest.promise;
-      await Promise.resolve();
       requireButton(container, 'File').click();
     });
     await act(async () => {
       requireButton(container, 'Open Recent').click();
     });
 
-    expect(container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Project B');
+    expect(container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Demo');
     expect(container.textContent).toContain('/projects/current');
-    expect(container.textContent).not.toContain('/projects/stale');
     await unmount(root, container);
   });
 
@@ -351,7 +388,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       await Promise.resolve();
       emitWorkbenchEvent({
         type: 'recentProjects.changed',
-        recentProjectRoots: ['/tmp/first-open']
+        recentProjects: [{ projectId: 'first-open', projectRoot: '/tmp/first-open' }]
       });
     });
 
@@ -359,6 +396,31 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(container.textContent).toContain('Opened project: Demo');
     expect(container.textContent).not.toContain('No project open');
     expect(requireButton(container, 'Terminal').disabled).toBe(false);
+    await unmount(root, container);
+  });
+
+  it('opens the initial Project once during the StrictMode effect probe', async () => {
+    const openProject = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 1,
+      snapshot: snapshotFixture()
+    }));
+    const StrictWorkbenchApp = () => (
+      <React.StrictMode>
+        <WorkbenchApp />
+      </React.StrictMode>
+    );
+
+    const { container, root } = await renderWorkbenchApp(
+      '/open?path=%2Ftmp%2Fstrict-open',
+      { openProject },
+      StrictWorkbenchApp
+    );
+
+    expect(openProject).toHaveBeenCalledOnce();
+    expect(openProject).toHaveBeenCalledWith({ projectRoot: '/tmp/strict-open' });
+    expect(container.textContent).toContain('Opened project: Demo');
+    expect(container.textContent?.match(/Opened project: Demo/g)).toHaveLength(1);
     await unmount(root, container);
   });
 
@@ -445,7 +507,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
             links: [{
               linkId: 'link-1',
               projectId: 'project-1',
-              adobeClientId: 'photoshop-1',
+              pluginInstanceId: 'photoshop-1',
               createdAt: '2026-07-10T00:00:00.000Z',
               status: 'active'
             }]
@@ -611,53 +673,6 @@ async function renderWorkbenchApp(
   return { container, root };
 }
 
-async function renderOverlappingTitleBarRequests(): Promise<{
-  container: HTMLDivElement;
-  root: Root;
-  olderRequest: ReturnType<typeof deferred<ReturnType<typeof unavailableWorkbenchTitleBarState>>>;
-}> {
-  const olderRequest = deferred<ReturnType<typeof unavailableWorkbenchTitleBarState>>();
-  const currentRequest = deferred<ReturnType<typeof unavailableWorkbenchTitleBarState>>();
-  const getWorkbenchTitleBarState = vi.fn(async (input: Parameters<WorkbenchApiClient['getWorkbenchTitleBarState']>[0]) => {
-    if (input.projectId === 'project-a') {
-      return olderRequest.promise;
-    }
-    if (input.projectId === 'project-b') {
-      return currentRequest.promise;
-    }
-    return unavailableWorkbenchTitleBarState();
-  });
-  const rendered = await renderWorkbenchApp('/', { getWorkbenchTitleBarState });
-
-  for (const [projectId, projectRevision] of [['project-a', 1], ['project-b', 2]] as const) {
-    await act(async () => {
-      emitWorkbenchEvent({
-        type: 'project.opened',
-        projectId,
-        projectRevision,
-        snapshot: snapshotFixture()
-      });
-      await Promise.resolve();
-    });
-  }
-  currentRequest.resolve(titleBarState('Project B'));
-  await act(async () => {
-    await currentRequest.promise;
-    await Promise.resolve();
-  });
-  expect(rendered.container.querySelector('.workbench-titlebar__title')?.textContent).toBe('Project B');
-  return { ...rendered, olderRequest };
-}
-
-function titleBarState(projectTitle: string): ReturnType<typeof unavailableWorkbenchTitleBarState> {
-  return buildWorkbenchTitleBarState({
-    platform: 'darwin',
-    host: 'web',
-    projectTitle,
-    recentProjectRoots: []
-  });
-}
-
 async function unmount(root: Root, container: HTMLDivElement): Promise<void> {
   await act(async () => {
     root.unmount();
@@ -699,14 +714,17 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement | 
 
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
   return {
-    mode: 'web',
-    clientId: 'test-client',
     globalSettingsGet: vi.fn(async () => globalSettingsFixture()),
     globalSettingsSave: vi.fn(async () => globalSettingsFixture()),
     onEvent: vi.fn((listener: (event: WorkbenchEvent) => void) => {
       apiState.listeners.add(listener);
       return () => apiState.listeners.delete(listener);
     }),
+    onProjectDetached: vi.fn((listener: () => void) => {
+      apiState.detachedListeners.add(listener);
+      return () => apiState.detachedListeners.delete(listener);
+    }),
+    onConnectionEnded: vi.fn(() => () => undefined),
     getProductState: vi.fn(async () => ({
       productVersion: 'test',
       platform: 'darwin',
@@ -728,8 +746,6 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
         update: { type: 'idle', currentVersion: 'test', updateAvailable: false }
       }
     })),
-    getDesktopPlatform: vi.fn(async () => 'darwin'),
-    getWorkbenchTitleBarState: vi.fn(async () => unavailableWorkbenchTitleBarState()),
     integrationsRescan: vi.fn(async () => ({ integrations: [], backends: [] })),
     integrationsRunOperation: vi.fn(async () => ({
       ok: true,
@@ -738,6 +754,9 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       settings: { integrations: [], backends: [] }
     })),
     adobeBridgeGetState: vi.fn(async () => adobeBridgeStateFixture()),
+    adobeBridgeCreatePairing: vi.fn(async () => ({ pairingId: 'pairing-1', code: '123456', expiresAt: '2026-07-17T00:00:00Z' })),
+    adobeBridgeCancelPairing: vi.fn(async () => undefined),
+    adobeBridgeRemovePairing: vi.fn(async () => adobeBridgeStateFixture()),
     openProject: vi.fn(async () => ({
       projectId: 'project-1',
       projectRevision: 1,
@@ -745,6 +764,10 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     })),
     openProjectFromPicker: vi.fn(async () => ({ opened: false })),
     readCanvasFeedback: vi.fn(async () => ({ entries: {} })),
+    putTextWorkingCopy: vi.fn(async (_projectId, value) => value),
+    clearTextWorkingCopy: vi.fn(async () => undefined),
+    putFeedbackWorkingCopy: vi.fn(async (_projectId, value) => value),
+    clearFeedbackWorkingCopy: vi.fn(async () => undefined),
     clearRecentProjectRoots: vi.fn(async () => ({ ok: true })),
     listTerminalSessions: vi.fn(async () => ({ sessions: [] })),
     ...overrides
@@ -754,7 +777,7 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'dark', defaultFrontend: 'electron' },
-    chrome: { recentProjectRoots: [] },
+    chrome: { recentProjects: [] },
     models: {
       image: imageSettingsFixture(),
       video: { models: [] },
@@ -786,7 +809,8 @@ function imageSettingsFixture(): ImageModelSettingsView {
 function adobeBridgeStateFixture(overrides: Partial<AdobeBridgeStateView> = {}): AdobeBridgeStateView {
   return {
     settings: { enabled: true, discoveryStatus: 'available' },
-    adobeClients: [],
+    pairedPlugins: [],
+    clients: [],
     projects: [],
     links: [],
     transfers: [],
@@ -796,10 +820,11 @@ function adobeBridgeStateFixture(overrides: Partial<AdobeBridgeStateView> = {}):
 
 function adobeBridgeStateWithPhotoshopClient(overrides: Partial<AdobeBridgeStateView> = {}): AdobeBridgeStateView {
   return adobeBridgeStateFixture({
-    adobeClients: [{
-      adobeClientId: 'photoshop-1',
+    clients: [{
+      pluginInstanceId: 'photoshop-1',
       hostApp: 'photoshop',
       hostVersion: '2026',
+      clientRuntime: 'uxp',
       displayName: 'Photoshop 2026',
       documentCount: 0,
       activeDocumentTitle: null,
@@ -850,7 +875,6 @@ function snapshotFixture(): WorkbenchProjectSessionSnapshot {
       projectName: 'Demo',
       canvasCount: 0,
       diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
-      runtimeDataLocation: 'project',
       checkedAt: '2026-06-28T00:00:00.000Z'
     },
     canvasRegistry: { status: 'ready', canvasOrder: [] }

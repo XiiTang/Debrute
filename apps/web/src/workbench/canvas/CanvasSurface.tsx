@@ -45,6 +45,7 @@ import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { PendingCanvasFeedbackItem } from './canvasFeedbackDraft';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
+import { canvasPerfDiagnosticsEnabled } from './CanvasPerfDiagnostics';
 import { createCanvasPerfDebugBridge, type DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
@@ -233,10 +234,11 @@ function CanvasSurfaceRuntime({
   }, [videoHotkeyController]);
   const devicePixelRatio = devicePixelRatioValue();
   const perfMonitorEnabled = canvasPerfMonitorEnabled();
-  const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor }), [perfMonitor]);
-  const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({ perfMonitor }), [perfMonitor]);
+  const instrumentationMonitor = perfMonitorEnabled ? perfMonitor : undefined;
+  const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
+  const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const visibilityController = useMemo(() => createCanvasVisibilityController({ stageRuntime }), [stageRuntime]);
-  const renderCoordinator = useMemo(() => createCanvasRenderCoordinator({ projection, perfMonitor }), [perfMonitor]);
+  const renderCoordinator = useMemo(() => createCanvasRenderCoordinator({ projection, perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const currentLayoutOverrides = useCallback(() => canvasLayoutOverridesForCanvas({
     canvasId: canvas.id,
     active: activeLayoutDraftRef.current,
@@ -257,9 +259,9 @@ function CanvasSurfaceRuntime({
     devicePixelRatio,
     cameraState,
     dragActive: dragState !== undefined,
-    perfMonitor,
+    perfMonitor: instrumentationMonitor,
     previewResourceScheduler
-  }), [cameraState, devicePixelRatio, dragState, perfMonitor, previewResourceScheduler, resourceZoom]);
+  }), [cameraState, devicePixelRatio, dragState, instrumentationMonitor, previewResourceScheduler, resourceZoom]);
 
   selectionRef.current = selection;
   surfaceSizeRef.current = surfaceSize;
@@ -272,7 +274,9 @@ function CanvasSurfaceRuntime({
   };
 
   useEffect(() => {
-    reactCommitCountRef.current += 1;
+    if (perfMonitorEnabled) {
+      reactCommitCountRef.current += 1;
+    }
   });
 
   useEffect(() => {
@@ -343,9 +347,9 @@ function CanvasSurfaceRuntime({
     setRenderSnapshot(next);
   }, [currentLayoutOverrides, renderCoordinator, visibilityController]);
   const renderSnapshotScheduler = useMemo(() => createCanvasRenderSnapshotScheduler({
-    perfMonitor,
+    perfMonitor: instrumentationMonitor,
     commit: commitRenderSnapshot
-  }), [commitRenderSnapshot, perfMonitor]);
+  }), [commitRenderSnapshot, instrumentationMonitor]);
 
   const syncVisibility = useCallback((input?: {
     renderSnapshot?: CanvasRenderCoordinatorSnapshot;
@@ -440,7 +444,8 @@ function CanvasSurfaceRuntime({
     syncVisibility({
       renderSnapshot
     });
-  }, [renderSnapshot, syncVisibility]);
+    previewResourceScheduler.notifyVisibilityChanged();
+  }, [previewResourceScheduler, renderSnapshot, syncVisibility]);
 
   useEffect(() => {
     const snapshot = runtime.getSnapshot();
@@ -1126,7 +1131,8 @@ function CanvasSurfaceRuntime({
             devicePixelRatio={devicePixelRatio}
             culledNodePaths={renderSnapshot.culledNodePaths}
             styleDependencyKey={textPreviewStyleDependencyKey}
-            perfMonitor={perfMonitor}
+            perfMonitor={instrumentationMonitor}
+            previewResourceScheduler={previewResourceScheduler}
           >
             <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
               {renderedNodes.map((node) => (
@@ -1672,13 +1678,10 @@ function canvasPerfTimestamp(): number {
 }
 
 function canvasPerfMonitorEnabled(): boolean {
-  const env = (import.meta as ImportMeta & {
-    env?: {
-      DEV?: boolean;
-      MODE?: string;
-    };
-  }).env;
-  return env?.DEV === true || env?.MODE === 'test';
+  return canvasPerfDiagnosticsEnabled({
+    development: import.meta.env.DEV,
+    startupEnabled: import.meta.env.VITE_DEBRUTE_CANVAS_PERF === '1'
+  });
 }
 
 export function syncCanvasMovingCameraFrame(input: {
@@ -1724,10 +1727,10 @@ export function createCanvasRenderSnapshotScheduler<T>(input: {
   const cancelFrame = input.cancelFrame ?? globalThis.window?.cancelAnimationFrame?.bind(globalThis.window);
   let pendingFrame: number | undefined;
   let pendingInput: T | undefined;
-  let frameGeneration = 0;
+  let frameEpoch = 0;
 
-  const run = (generation: number) => {
-    if (generation !== frameGeneration || pendingFrame === undefined) {
+  const run = (epoch: number) => {
+    if (epoch !== frameEpoch || pendingFrame === undefined) {
       return;
     }
     pendingFrame = undefined;
@@ -1756,8 +1759,8 @@ export function createCanvasRenderSnapshotScheduler<T>(input: {
         input.commit(next);
         return;
       }
-      const generation = frameGeneration;
-      pendingFrame = requestFrame(() => run(generation));
+      const epoch = frameEpoch;
+      pendingFrame = requestFrame(() => run(epoch));
     },
     flush(next) {
       input.perfMonitor?.recordCounter({
@@ -1769,7 +1772,7 @@ export function createCanvasRenderSnapshotScheduler<T>(input: {
       });
       pendingInput = undefined;
       if (pendingFrame !== undefined) {
-        frameGeneration += 1;
+        frameEpoch += 1;
         cancelFrame?.(pendingFrame);
         pendingFrame = undefined;
       }
@@ -1777,7 +1780,7 @@ export function createCanvasRenderSnapshotScheduler<T>(input: {
     },
     dispose() {
       if (pendingFrame !== undefined) {
-        frameGeneration += 1;
+        frameEpoch += 1;
         cancelFrame?.(pendingFrame);
       }
       pendingFrame = undefined;

@@ -45,8 +45,8 @@ describe('test layout contract', () => {
     expect(validateTestLayout({
       configPaths: [broadContracts.configPath],
       projects: [broadContracts],
-      files: [{ path: 'tests/contracts/wrong.integration.test.ts', source: '' }]
-    })).toContain('tests/contracts/wrong.integration.test.ts: tests/contracts requires the .contract.test.ts suffix');
+      files: [{ path: 'tests/contracts/wrong.release.test.ts', source: '' }]
+    })).toContain('tests/contracts/wrong.release.test.ts: tests/contracts requires the .contract.test.ts suffix');
   });
 
   it('rejects file-level Vitest environment directives', () => {
@@ -128,7 +128,7 @@ describe('test layout contract', () => {
     expect(validateTestLayout({
       configPaths: [],
       projects: [],
-      files: [{ path: 'tests/helpers/imageModelTestRequests.ts', source: '' }]
+      files: [{ path: 'tests/helpers/support.ts', source: '' }]
     })).toEqual([]);
   });
 

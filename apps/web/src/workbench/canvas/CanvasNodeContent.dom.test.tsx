@@ -57,6 +57,7 @@ describe('CanvasImageNodePreview', () => {
 
     expect(html).toContain('src="/preview/low.jpg"');
     expect(html).toContain('data-canvas-image-layer="visible"');
+    expect(html).toContain('data-preview-width="256"');
     expect(html).not.toContain('src="/preview/high.jpg"');
     expect(html).not.toContain('data-canvas-image-layer="next"');
   });
@@ -106,6 +107,7 @@ describe('CanvasImageNodePreview', () => {
     expect(html).toContain('src="/preview/low.jpg"');
     expect(html).toContain('Unable to load flow/cover.png.');
     expect(html).toContain('db-button');
+    expect(html).toContain('canvas-node-error-presentation');
     expect(html).not.toContain('class="db-canvas-node-placeholder"');
   });
 });
@@ -474,6 +476,43 @@ describe('CanvasNodeContent', () => {
       }
     });
 
+    it('reuses the exact committed preview image before another animation frame when editing ends unchanged', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const exactPreview = textPreviewSource(640, 'sha256:unchanged');
+      const frameCallbacks: FrameRequestCallback[] = [];
+      const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
+
+      try {
+        await renderTextPreviewNode(root, exactPreview, {
+          selected: true,
+          textPreviewCommittedSourceKey: exactPreview.sourceKey
+        });
+
+        const retainedImage = textPreviewImage(container);
+        expect(retainedImage).not.toBeNull();
+        expect(container.querySelector('.canvas-text-preview-layers')?.getAttribute(
+          'data-canvas-text-preview-hidden'
+        )).toBe('true');
+
+        await renderTextPreviewNode(root, exactPreview, {
+          textPreviewCommittedSourceKey: exactPreview.sourceKey
+        });
+
+        expect(textPreviewImage(container)).toBe(retainedImage);
+        expect(container.querySelector('.canvas-text-preview-layers')?.getAttribute(
+          'data-canvas-text-preview-hidden'
+        )).toBe('false');
+        expect(container.querySelector('[data-canvas-text-editor="true"]')).toBeNull();
+        expect(frameCallbacks.length).toBeGreaterThan(0);
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+        restoreAnimationFrame();
+      }
+    });
+
     it('does not replace the editor with a preview for the previous scroll viewport', async () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
@@ -595,7 +634,7 @@ describe('CanvasNodeContent', () => {
       }
     });
 
-    it('renders text preview generation errors instead of an empty preview body', () => {
+    it('renders text preview render errors instead of an empty preview body', () => {
       const html = renderStaticWithI18n(
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
@@ -622,7 +661,7 @@ describe('CanvasNodeContent', () => {
       expect(html).not.toContain('data-canvas-text-editor="true"');
     });
 
-    it('renders selected text nodes as live CodeMirror editors instead of preview images', () => {
+    it('renders selected text nodes as live editors while keeping their current preview hidden', () => {
       const html = renderStaticWithI18n(
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
@@ -650,7 +689,8 @@ describe('CanvasNodeContent', () => {
       );
 
       expect(html).toContain('data-editor-engine="codemirror"');
-      expect(html).not.toContain('canvas-text-preview-image');
+      expect(html).toContain('canvas-text-preview-image');
+      expect(html).toContain('data-canvas-text-preview-hidden="true"');
     });
 
     it('opens the selected text editor at the persisted text viewport position', async () => {

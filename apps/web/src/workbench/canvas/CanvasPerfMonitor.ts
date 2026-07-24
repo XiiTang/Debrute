@@ -44,7 +44,6 @@ export type CanvasPerfCounterName =
   | 'text-preview-snapshot-built'
   | 'text-preview-raster-completed'
   | 'text-preview-source-upload-completed'
-  | 'text-preview-variant-fetched'
   | 'text-preview-pending-ready'
   | 'text-preview-published'
   | 'text-preview-failed'
@@ -53,6 +52,9 @@ export type CanvasPerfCounterName =
   | 'preview-resource-started'
   | 'preview-resource-skip-culled'
   | 'preview-resource-skip-stale'
+  | 'preview-publication-queued'
+  | 'preview-publication-coalesced'
+  | 'preview-publication-committed'
   | 'preview-resource-paused-moving';
 
 export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;

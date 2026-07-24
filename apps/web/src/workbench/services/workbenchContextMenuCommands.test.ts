@@ -52,7 +52,7 @@ describe('workbench context menu commands', () => {
     expect(trashEntries).not.toHaveBeenCalled();
   });
 
-  it('copies daemon-returned absolute paths for Copy Path', async () => {
+  it('copies Runtime-returned absolute paths for Copy Path', async () => {
     const copiedText: string[] = [];
     const copyAbsolutePaths = vi.fn(async () => [
       '/tmp/debrute-project/briefs/concept.md',
@@ -228,7 +228,7 @@ describe('workbench context menu commands', () => {
     ]);
   });
 
-  it('copies daemon-returned absolute paths for a Canvas Copy Path command', async () => {
+  it('copies Runtime-returned absolute paths for a Canvas Copy Path command', async () => {
     const copiedText: string[] = [];
     const copyAbsolutePaths = vi.fn(async () => ['/tmp/debrute-project/flow/cover.png']);
 
@@ -792,7 +792,6 @@ function snapshotFixture(overrides: Partial<WorkbenchProjectSessionSnapshot> = {
         warnings: 0,
         infos: 0
       },
-      runtimeDataLocation: 'debrute-home',
       checkedAt: '2026-06-05T00:00:00.000Z'
     },
     ...overrides

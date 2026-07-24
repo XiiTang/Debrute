@@ -16,13 +16,13 @@ export interface AvailableProjectLink {
 
 export function linkedProjectTrees(
   bridge: AdobeBridgeStateView | undefined,
-  adobeClientId: string
+  pluginInstanceId: string
 ): LinkedProjectTree[] {
   if (!bridge?.settings.enabled) {
     return [];
   }
   const linkedProjectIds = new Set(bridge.links
-    .filter((link) => link.adobeClientId === adobeClientId && link.status === 'active')
+    .filter((link) => link.pluginInstanceId === pluginInstanceId && link.status === 'active')
     .map((link) => link.projectId));
   return bridge.projects
     .filter((project) => linkedProjectIds.has(project.projectId))
@@ -35,13 +35,13 @@ export function linkedProjectTrees(
 
 export function availableProjectLinks(
   bridge: AdobeBridgeStateView | undefined,
-  adobeClientId: string
+  pluginInstanceId: string
 ): AvailableProjectLink[] {
   if (!bridge?.settings.enabled) {
     return [];
   }
   const linkedProjectIds = new Set(bridge.links
-    .filter((link) => link.adobeClientId === adobeClientId && link.status === 'active')
+    .filter((link) => link.pluginInstanceId === pluginInstanceId && link.status === 'active')
     .map((link) => link.projectId));
   return bridge.projects
     .filter((project) => !linkedProjectIds.has(project.projectId))

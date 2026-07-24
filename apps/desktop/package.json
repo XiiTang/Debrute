@@ -8,8 +8,8 @@
   "author": "Debrute",
   "main": "dist-electron/main.js",
   "scripts": {
-    "build": "pnpm --filter @debrute/web build && tsc -p tsconfig.electron.json --noEmit && node scripts/bundle-electron.mjs",
-    "build:electron": "node scripts/bundle-electron.mjs",
+    "build": "pnpm --filter @debrute/web build && node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins && tsc -p tsconfig.electron.json --noEmit && node scripts/bundle-electron.mjs",
+    "build:electron": "node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins && node scripts/bundle-electron.mjs",
     "build:electron:dev": "node scripts/bundle-electron.mjs --skip-web-dist",
     "pack": "pnpm build && electron-builder --dir",
     "dist": "pnpm build && electron-builder",
@@ -21,13 +21,7 @@
     "executableName": "debrute",
     "electronVersion": "42.4.0",
     "asar": true,
-    "asarUnpack": [
-      "dist-electron/runtime-host.cjs",
-      "dist-electron/canvas-feedback-artifact-worker.cjs",
-      "dist-electron/product-replacement-helper.cjs",
-      "dist-electron/runtime-product/**"
-    ],
-    "afterPack": "scripts/package-sharp-runtime.mjs",
+    "asarUnpack": [],
     "afterSign": "scripts/notarize-macos-app.cjs",
     "directories": {
       "buildResources": "build",
@@ -36,8 +30,15 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "!dist-electron/product-seed/**/*",
       "!dist-electron/**/*.map",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-electron/product-seed",
+        "to": "product-seed"
+      }
     ],
     "publish": [
       {
@@ -54,6 +55,10 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "signIgnore": [
+        "Resources/product-seed/runtime/Debrute Runtime\\.app/.*",
+        "Resources/product-seed/runtime/debrute"
+      ],
       "notarize": false,
       "target": [
         "dmg"
@@ -79,7 +84,7 @@
   },
   "dependencies": {
     "@debrute/app-protocol": "workspace:*",
-    "@debrute/workbench-runtime": "workspace:*"
+    "@debrute/runtime-control-client": "workspace:*"
   },
   "devDependencies": {
     "electron": "42.4.0",

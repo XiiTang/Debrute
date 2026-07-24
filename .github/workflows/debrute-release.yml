@@ -13,7 +13,7 @@ env:
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,9 +24,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - run: pnpm install --frozen-lockfile
+      - name: Prepare pinned native raster payload
+        run: pnpm native:raster:prepare
       - name: Validate tag version
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -47,18 +47,23 @@ jobs:
             platform: darwin
             publicPlatform: macos
             arch: arm64
+            required: true
           - os: macos-15-intel
             platform: darwin
             publicPlatform: macos
             arch: x64
+            required: true
           - os: windows-latest
             platform: win32
             publicPlatform: windows
             arch: x64
+            required: true
           - os: ubuntu-latest
             platform: linux
             publicPlatform: linux
             arch: x64
+            required: false
+    continue-on-error: ${{ matrix.required == false }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +76,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Prepare pinned native raster payload
+        if: matrix.platform == 'darwin' || matrix.platform == 'win32'
+        run: pnpm native:raster:prepare
+      - name: Test Windows Rust product commit primitives
+        if: matrix.platform == 'win32'
+        run: pnpm test:rust
       - run: pnpm build
       - name: Prepare Apple signing and notarization credentials
         if: matrix.platform == 'darwin'
@@ -129,6 +140,51 @@ jobs:
             echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
             echo "CSC_NAME=Hongrui Wu (FR25929R7Z)"
           } >> "$GITHUB_ENV"
+      - name: Sign macOS Product binaries and rebuild the strict seed
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for binary in target/release/debrute-runtime target/release/debrute target/release/native-raster/*.dylib; do
+            codesign --force --options runtime --timestamp --sign "$CSC_NAME" "$binary"
+            codesign --verify --strict --verbose=2 "$binary"
+          done
+          node scripts/assemble-product-seed.mjs
+          RUNTIME_APP="apps/desktop/dist-electron/product-seed/runtime/Debrute Runtime.app"
+          codesign --force --options runtime --timestamp --sign "$CSC_NAME" "$RUNTIME_APP"
+          codesign --verify --deep --strict --verbose=2 "$RUNTIME_APP"
+          node scripts/refresh-product-seed-manifest.mjs
+      - name: Sign Windows Product binaries and rebuild the strict seed
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        env:
+          WINDOWS_CSC_LINK_SECRET: ${{ secrets.WINDOWS_CSC_LINK }}
+          WINDOWS_CSC_KEY_PASSWORD_SECRET: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CSC_LINK_SECRET) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CSC_KEY_PASSWORD_SECRET)) {
+            throw 'WINDOWS_CSC_LINK and WINDOWS_CSC_KEY_PASSWORD are required.'
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'debrute-windows-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CSC_LINK_SECRET))
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signTool) { throw 'signtool.exe is unavailable.' }
+          foreach ($binary in @('target/release/debrute-runtime.exe', 'target/release/debrute.exe')) {
+            & $signTool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:WINDOWS_CSC_KEY_PASSWORD_SECRET $binary
+            if ($LASTEXITCODE -ne 0) { throw "Failed to sign $binary" }
+            & $signTool verify /pa /v $binary
+            if ($LASTEXITCODE -ne 0) { throw "Failed to verify $binary" }
+          }
+          "WIN_CSC_LINK=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WIN_CSC_KEY_PASSWORD=$env:WINDOWS_CSC_KEY_PASSWORD_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          node scripts/assemble-product-seed.mjs
+      - name: Archive signed Product seed
+        if: matrix.platform == 'darwin' || matrix.platform == 'win32'
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/archive-product-seed.mjs --platform "${{ matrix.publicPlatform }}" --arch "${{ matrix.arch }}" --version "$VERSION"
       - name: Build signed macOS Desktop assets
         if: matrix.platform == 'darwin'
         shell: bash
@@ -155,6 +211,40 @@ jobs:
           else
             pnpm --filter @debrute/desktop exec electron-builder --linux AppImage --x64 --publish never
           fi
+      - name: Smoke test packaged Windows Desktop and Runtime
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        run: |
+          $desktop = Resolve-Path 'apps/desktop/release/win-unpacked/debrute.exe'
+          $cli = Resolve-Path 'apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute.exe'
+          $desktopProcess = Start-Process -FilePath $desktop -PassThru
+          $ready = $false
+          $lastStatus = ''
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(30)
+            while ([DateTime]::UtcNow -lt $deadline) {
+              Start-Sleep -Milliseconds 500
+              if ($desktopProcess.HasExited) {
+                throw "Packaged Desktop exited before Runtime became ready with code $($desktopProcess.ExitCode)."
+              }
+              $statusLines = & $cli runtime status 2>&1
+              $statusCode = $LASTEXITCODE
+              $lastStatus = $statusLines | Out-String
+              if ($statusCode -eq 0 -and $lastStatus.Contains('runtime_state=ready') -and $lastStatus.Contains('native_tray=active')) {
+                $ready = $true
+                break
+              }
+            }
+            if (-not $ready) {
+              throw "Packaged Runtime did not become ready with its notification-area item. Last status: $lastStatus"
+            }
+          } finally {
+            & $cli runtime stop *> $null
+            if (-not $desktopProcess.HasExited) {
+              Stop-Process -Id $desktopProcess.Id -Force
+            }
+            Get-Process -Name 'debrute-runtime' -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
       - name: Verify Desktop assets
         shell: bash
         run: |
@@ -173,6 +263,7 @@ jobs:
             apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.dmg
             apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.exe
             apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.AppImage
+            apps/desktop/release/debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip
 
   publish-release:
     needs:
@@ -209,7 +300,7 @@ jobs:
       - name: Verify expected assets
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          node -e "import('./scripts/release-asset-contract.mjs').then(({expectedReleaseAssets}) => { const fs = require('fs'); const actual = fs.readdirSync('release-upload').sort(); const expected = expectedReleaseAssets(process.argv[1]).sort(); const missingAssets = expected.filter((name) => !actual.includes(name)); const unexpectedAssets = actual.filter((name) => !expected.includes(name)); if (missingAssets.length) { console.error('Missing release assets:', missingAssets.join(', ')); process.exit(1); } if (unexpectedAssets.length) { console.error('Unexpected release assets:', unexpectedAssets.join(', ')); process.exit(1); } })" "$VERSION"
+          node -e "import('./scripts/release-asset-contract.mjs').then(({allowedReleaseAssets, expectedReleaseAssets}) => { const fs = require('fs'); const actual = fs.readdirSync('release-upload').sort(); const expected = expectedReleaseAssets(process.argv[1]).sort(); const allowed = allowedReleaseAssets(process.argv[1]); const missingAssets = expected.filter((name) => !actual.includes(name)); const unexpectedAssets = actual.filter((name) => !allowed.includes(name)); if (missingAssets.length) { console.error('Missing release assets:', missingAssets.join(', ')); process.exit(1); } if (unexpectedAssets.length) { console.error('Unexpected release assets:', unexpectedAssets.join(', ')); process.exit(1); } })" "$VERSION"
       - name: Write release notes
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -219,7 +310,9 @@ jobs:
           Desktop assets:
           - macOS: signed and notarized DMG installers for Apple Silicon and Intel Macs.
           - Windows: NSIS installer for x64.
-          - Linux: AppImage for x64.
+          - Linux: x64 AppImage when the best-effort build succeeds.
+
+          Runtime update payloads for macOS and Windows are complete signed Product seeds; they are consumed by Debrute Runtime and are not separate user installers.
 
           Install Debrute by downloading the desktop installer for your platform. The runtime materializes the matching debrute CLI and official Skills on first launch, and product updates keep Desktop, runtime, CLI, and Skills on the same version.
           EOF

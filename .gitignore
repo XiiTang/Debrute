@@ -7,11 +7,13 @@ build/
 !apps/desktop/build/
 !apps/desktop/build/**
 release/
+!tests/release/
+!tests/release/**
 dist/
 **/dist/
+/target/
 apps/desktop/dist-electron/
 apps/desktop/release/
-apps/runtime-host/bundle/
 *.tsbuildinfo
 
 # Test and coverage output
@@ -64,3 +66,6 @@ Thumbs.db
 
 # Private documentation repository
 /debrute-docs-private/
+
+# Local agent issue tracker
+/.scratch/

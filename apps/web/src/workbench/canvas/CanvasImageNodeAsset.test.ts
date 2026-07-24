@@ -5,7 +5,8 @@ import {
   deriveCanvasImageNodeRenderState,
   resolveCanvasImageNodeSource,
   shouldPublishCanvasImageNodeSourceImmediately,
-  type CanvasImageNodeAssetState
+  type CanvasImageNodeAssetState,
+  type CanvasImageNodeResolvedSource
 } from './CanvasImageNodeAsset';
 
 describe('CanvasImageNodeAsset', () => {
@@ -277,6 +278,28 @@ describe('CanvasImageNodeAsset', () => {
     })).toBe(true);
   });
 
+  it('keeps an unchanged not-eligible source referentially stable', () => {
+    const state: CanvasImageNodeAssetState = {
+      sourceRevisionKey: 'flow/missing.png\u001frev-a',
+      retryKey: 0,
+      loaded: undefined,
+      next: undefined,
+      error: undefined
+    };
+    const source: CanvasImageNodeResolvedSource = {
+      kind: 'not-eligible',
+      reason: 'unavailable',
+      sourceRevisionKey: state.sourceRevisionKey
+    };
+
+    expect(canvasImageNodeAssetReducer(state, {
+      type: 'source-resolved',
+      source,
+      cameraState: 'idle',
+      culled: false
+    })).toBe(state);
+  });
+
   it('schedules direct image-node size churn instead of publishing immediately', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 300);
     const source = resolveCanvasImageNodeSource({
@@ -381,30 +404,6 @@ describe('CanvasImageNodeAsset', () => {
     expect(next.loaded).toEqual(state.loaded);
     expect(next.next).toBeUndefined();
     expect(next.error).toMatchObject({ message: 'Unable to load flow/cover.png.' });
-  });
-
-  it('cancels pending quality upgrades when interaction starts but keeps first loads', () => {
-    const nextImage = {
-      src: previewUrl('flow/cover.png', 'rev-a', 1200),
-      loadKey: `${previewUrl('flow/cover.png', 'rev-a', 1200)}:0`,
-      previewWidth: 1200
-    };
-    const upgrading: CanvasImageNodeAssetState = {
-      ...loadedState('flow/cover.png', 'rev-a', 300),
-      next: nextImage
-    };
-
-    const cancelledUpgrade = canvasImageNodeAssetReducer(upgrading, { type: 'interaction-started' });
-
-    expect(cancelledUpgrade.loaded).toEqual(upgrading.loaded);
-    expect(cancelledUpgrade.next).toBeUndefined();
-
-    const firstLoad: CanvasImageNodeAssetState = {
-      ...emptyState(),
-      next: nextImage
-    };
-
-    expect(canvasImageNodeAssetReducer(firstLoad, { type: 'interaction-started' })).toBe(firstLoad);
   });
 
   it('resets only the affected image state on source revision change', () => {

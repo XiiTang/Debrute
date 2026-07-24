@@ -42,27 +42,12 @@ describe('project icon assets', () => {
       'apps/desktop/build/icons/512x512.png',
       'apps/desktop/build/icons/64x64.png',
       'apps/desktop/build/logo.png',
-      'apps/desktop/build/tray_icon.png',
-      'apps/desktop/build/tray_icon_degraded.png',
-      'apps/desktop/build/tray_icon_error.png',
-      'apps/desktop/build/tray_icon_running.png',
-      'apps/desktop/build/tray_icon_starting.png',
-      'apps/desktop/build/tray_icon_stopped.png',
-      'apps/desktop/build/tray_icon_template.png',
-      'apps/desktop/build/tray_icon_template@2x.png',
       'apps/web/public/debrute.svg'
     ]);
 
     await expectPngDimensions(join(root, 'apps/desktop/build/logo.png'), 1024, 1024);
     await expectPngDimensions(join(root, 'apps/desktop/build/dock_icon.png'), 1024, 1024);
     await expectPngDimensions(join(root, 'apps/desktop/build/icon.png'), 1024, 1024);
-    await expectPngDimensions(join(root, 'apps/desktop/build/tray_icon.png'), 66, 66);
-    await expectPngDimensions(join(root, 'apps/desktop/build/tray_icon_template.png'), 18, 18);
-    await expectPngDimensions(join(root, 'apps/desktop/build/tray_icon_template@2x.png'), 36, 36);
-    for (const status of ['starting', 'running', 'degraded', 'stopped', 'error']) {
-      await expectPngDimensions(join(root, `apps/desktop/build/tray_icon_${status}.png`), 66, 66);
-      expect(await alphaAt(join(root, `apps/desktop/build/tray_icon_${status}.png`), 53, 53)).toBeGreaterThan(0);
-    }
     for (const size of [16, 24, 32, 48, 64, 128, 256, 512, 1024]) {
       await expectPngDimensions(join(root, `apps/desktop/build/icons/${size}x${size}.png`), size, size);
       expect(await alphaAt(join(root, `apps/desktop/build/icons/${size}x${size}.png`), 0, 0)).toBe(0);
@@ -94,31 +79,6 @@ describe('project icon assets', () => {
     expect(await dockAlphaCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeCloseTo(0.635, 2);
     expect(await darkPixelCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeLessThan(0.3);
     expect(await brightPixelCoverage(join(root, 'apps/desktop/build/dock_icon.png'))).toBeGreaterThan(0.35);
-    expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 0, 0)).toBe(0);
-    expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon.png'), 33, 33)).toBeGreaterThan(0);
-    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/tray_icon.png'))).toEqual({
-      left: 3,
-      top: 3,
-      right: 3,
-      bottom: 3
-    });
-    expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon_template.png'), 0, 0)).toBe(0);
-    expect(await alphaAt(join(root, 'apps/desktop/build/tray_icon_template.png'), 9, 9)).toBeGreaterThan(0);
-    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/tray_icon_template.png'))).toEqual({
-      left: 1,
-      top: 1,
-      right: 1,
-      bottom: 1
-    });
-    expect(await alphaEdgeMargins(join(root, 'apps/desktop/build/tray_icon_template@2x.png'))).toEqual({
-      left: 2,
-      top: 2,
-      right: 2,
-      bottom: 2
-    });
-    expect(await coloredOpaquePixelCoverage(join(root, 'apps/desktop/build/tray_icon_template.png'))).toBe(0);
-    expect(await brightOpaquePixelCoverage(join(root, 'apps/desktop/build/tray_icon_template.png'))).toBeGreaterThan(0.2);
-
     const icns = await readFile(join(root, 'apps/desktop/build/icon.icns'));
     expect(icns.subarray(0, 4).toString('ascii')).toBe('icns');
     const ico = await readFile(join(root, 'apps/desktop/build/icon.ico'));
@@ -138,15 +98,7 @@ describe('project icon assets', () => {
       'apps/desktop/build/dock_icon.png',
       'apps/desktop/build/icon.png',
       'apps/desktop/build/icon.icns',
-      'apps/desktop/build/icons/1024x1024.png',
-      'apps/desktop/build/tray_icon.png',
-      'apps/desktop/build/tray_icon_template@2x.png',
-      'apps/desktop/build/tray_icon_template.png',
-      'apps/desktop/build/tray_icon_starting.png',
-      'apps/desktop/build/tray_icon_running.png',
-      'apps/desktop/build/tray_icon_degraded.png',
-      'apps/desktop/build/tray_icon_stopped.png',
-      'apps/desktop/build/tray_icon_error.png'
+      'apps/desktop/build/icons/1024x1024.png'
     ]) {
       const result = spawnSync('git', ['check-ignore', '-q', asset], { cwd: process.cwd() });
       expect(result.status, asset).toBe(1);
@@ -176,8 +128,8 @@ describe('project icon assets', () => {
     expect(electronMain).toContain("const projectIconPath = join(__dirname, 'icon.png')");
     expect(electronMain).toContain("const dockIconPath = join(__dirname, 'dock_icon.png')");
     expect(electronMain).toContain('icon: projectIconPath');
-    expect(electronMain).toContain('app.dock!.setIcon(dockIconPath)');
-    expect(electronMain).toContain('nativeImage: electron.nativeImage');
+    expect(electronMain).toContain('app.dock?.setIcon(nativeImage.createFromPath(dockIconPath))');
+    expect(electronMain).toContain('nativeImage } = electron');
   });
 });
 
@@ -261,44 +213,6 @@ async function darkPixelCoverage(path: string): Promise<number> {
 
 async function brightPixelCoverage(path: string): Promise<number> {
   return luminanceCoverage(path, (luminance) => luminance > 170);
-}
-
-async function coloredOpaquePixelCoverage(path: string): Promise<number> {
-  const { data, info } = await sharp(path)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  let opaquePixels = 0;
-  let coloredPixels = 0;
-  for (let y = 0; y < info.height; y += 1) {
-    for (let x = 0; x < info.width; x += 1) {
-      const offset = (y * info.width + x) * info.channels;
-      if (data[offset + 3]! === 0) continue;
-      opaquePixels += 1;
-      if (data[offset]! !== data[offset + 1]! || data[offset + 1]! !== data[offset + 2]!) {
-        coloredPixels += 1;
-      }
-    }
-  }
-  return opaquePixels === 0 ? 0 : coloredPixels / opaquePixels;
-}
-
-async function brightOpaquePixelCoverage(path: string): Promise<number> {
-  const { data, info } = await sharp(path)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  let brightPixels = 0;
-  for (let y = 0; y < info.height; y += 1) {
-    for (let x = 0; x < info.width; x += 1) {
-      const offset = (y * info.width + x) * info.channels;
-      if (data[offset + 3]! === 0) continue;
-      if (data[offset]! > 240 && data[offset + 1]! > 240 && data[offset + 2]! > 240) {
-        brightPixels += 1;
-      }
-    }
-  }
-  return brightPixels / (info.width * info.height);
 }
 
 async function luminanceCoverage(path: string, predicate: (luminance: number) => boolean): Promise<number> {

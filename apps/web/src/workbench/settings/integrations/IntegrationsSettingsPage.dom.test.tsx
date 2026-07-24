@@ -331,7 +331,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
-    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
+    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -385,7 +385,7 @@ function installedImageMagickSettings(): IntegrationSettingsView {
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
-    chrome: { recentProjectRoots: [] },
+    chrome: { recentProjects: [] },
     models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
     integrations: integrationSettingsFixture(),
     adobeBridge: { enabled: true },

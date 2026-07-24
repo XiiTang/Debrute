@@ -116,7 +116,7 @@ function stateFixture(): WorkbenchState {
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: createEmptyProjectTreeSelection(),
-    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
+    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -144,7 +144,7 @@ function actionsFixture(): WorkbenchActions {
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
-    chrome: { recentProjectRoots: [] },
+    chrome: { recentProjects: [] },
     models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
     integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true },

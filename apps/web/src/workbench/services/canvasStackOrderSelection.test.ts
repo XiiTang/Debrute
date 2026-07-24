@@ -157,7 +157,6 @@ function snapshotFixture(nodeElements: CanvasNodeElement[]): WorkbenchProjectSes
         warnings: 0,
         infos: 0
       },
-      runtimeDataLocation: '/tmp/runtime'
     },
     diagnostics: []
   };

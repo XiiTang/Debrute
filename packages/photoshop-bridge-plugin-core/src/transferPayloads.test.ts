@@ -12,7 +12,8 @@ describe('createPhotoshopUploadRequest', () => {
   it('creates a PNG upload request scoped to a linked project directory', () => {
     expect(createPhotoshopUploadRequest({
       apiBaseUrl: 'http://127.0.0.1:41001/api/adobe-bridge',
-      adobeClientId: 'ps-1',
+      bearer: 'session-secret',
+      pluginInstanceId: 'ps-1',
       projectId: 'project-1',
       transferId: 'transfer-1',
       targetDirectoryProjectRelativePath: 'assets',
@@ -23,7 +24,8 @@ describe('createPhotoshopUploadRequest', () => {
       method: 'POST',
       headers: {
         'content-type': 'image/png',
-        'x-debrute-adobe-client-id': 'ps-1',
+        authorization: 'Bearer session-secret',
+        'x-debrute-plugin-instance': 'ps-1',
         'x-debrute-transfer-id': 'transfer-1',
         'x-debrute-target-directory': 'assets',
         'x-debrute-suggested-name': 'Hero'
@@ -34,7 +36,8 @@ describe('createPhotoshopUploadRequest', () => {
   it('percent-encodes project paths and Photoshop layer names for HTTP headers', () => {
     const request = createPhotoshopUploadRequest({
       apiBaseUrl: 'http://127.0.0.1:41001/api/adobe-bridge',
-      adobeClientId: 'ps-1',
+      bearer: 'session-secret',
+      pluginInstanceId: 'ps-1',
       projectId: 'project-1',
       transferId: 'transfer-1',
       targetDirectoryProjectRelativePath: '资产/参考',
@@ -47,7 +50,7 @@ describe('createPhotoshopUploadRequest', () => {
     expect(() => new Headers(request.headers)).not.toThrow();
   });
 
-  it('rejects structured daemon upload failures', async () => {
+  it('rejects structured Runtime upload failures', async () => {
     const response = new Response(JSON.stringify({
       error: {
         code: 'target_directory_missing',
@@ -63,26 +66,31 @@ describe('createPhotoshopUploadRequest', () => {
     );
   });
 
-  it('creates tokenless Photoshop-scoped link and unlink requests', () => {
+  it('creates bearer-scoped link and unlink requests', () => {
     expect(createPhotoshopProjectLinkRequest({
       apiBaseUrl: 'http://127.0.0.1:41001/api/adobe-bridge',
-      adobeClientId: 'ps-1',
+      bearer: 'session-secret',
+      pluginInstanceId: 'ps-1',
       projectId: 'project-1',
       linked: true
     })).toEqual({
       url: 'http://127.0.0.1:41001/api/adobe-bridge/plugin/projects/project-1/link',
       method: 'POST',
-      headers: { 'x-debrute-adobe-client-id': 'ps-1' }
+      headers: {
+        authorization: 'Bearer session-secret',
+        'x-debrute-plugin-instance': 'ps-1'
+      }
     });
     expect(createPhotoshopProjectLinkRequest({
       apiBaseUrl: 'http://127.0.0.1:41001/api/adobe-bridge',
-      adobeClientId: 'ps-1',
+      bearer: 'session-secret',
+      pluginInstanceId: 'ps-1',
       projectId: 'project-1',
       linked: false
     })).toMatchObject({ method: 'DELETE' });
   });
 
-  it('preserves stable daemon bridge error codes from failed import downloads', async () => {
+  it('preserves stable Runtime Bridge error codes from failed import downloads', async () => {
     const response = new Response(JSON.stringify({
       error: {
         code: 'transfer_url_expired',
@@ -95,6 +103,8 @@ describe('createPhotoshopUploadRequest', () => {
 
     await expect(downloadPhotoshopImportBytes({
       downloadUrl: 'http://127.0.0.1:41001/api/adobe-bridge/transfers/transfer-1/content',
+      bearer: 'session-secret',
+      pluginInstanceId: 'ps-1',
       fetch: async () => response
     })).rejects.toMatchObject({
       code: 'transfer_url_expired',
@@ -102,7 +112,7 @@ describe('createPhotoshopUploadRequest', () => {
     });
   });
 
-  it('maps daemon import download failures without replacing their bridge error codes', () => {
+  it('maps Runtime import download failures without replacing their Bridge error codes', () => {
     expect(photoshopImportFailurePayload(
       new PhotoshopBridgeTransferError('adobe_bridge_disabled', 'Adobe Bridge is disabled.'),
       { hasActiveDocument: true }

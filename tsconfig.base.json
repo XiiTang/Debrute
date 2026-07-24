@@ -22,17 +22,13 @@
       "@debrute/app-protocol": ["./packages/app-protocol/src/index.ts"],
       "@debrute/architecture-rules": ["./packages/architecture-rules/src/index.mjs"],
       "@debrute/capability-core": ["./packages/capability-core/src/index.ts"],
-      "@debrute/capability-runtime": ["./packages/capability-runtime/src/index.ts"],
       "@debrute/project-core/projectCacheKeys": ["./packages/project-core/src/projectCacheKeys.ts"],
       "@debrute/project-core/projectTextFileTypes": ["./packages/project-core/src/projectTextFileTypes.ts"],
       "@debrute/project-core": ["./packages/project-core/src/index.ts"],
+      "@debrute/runtime-control-client": ["./packages/runtime-control-client/src/index.ts"],
       "@debrute/canvas-core": ["./packages/canvas-core/src/index.ts"],
       "@debrute/canvas-map-core": ["./packages/canvas-map-core/src/index.ts"],
-      "@debrute/workbench-runtime": ["./packages/workbench-runtime/src/index.ts"],
-      "@debrute/photoshop-bridge-plugin-core": ["./packages/photoshop-bridge-plugin-core/src/index.ts"],
-      "@debrute/app-server": ["./apps/app-server/src/index.ts"],
-      "@debrute/daemon": ["./apps/daemon/src/index.ts"],
-      "@debrute/runtime-host": ["./apps/runtime-host/src/index.ts"]
+      "@debrute/photoshop-bridge-plugin-core": ["./packages/photoshop-bridge-plugin-core/src/index.ts"]
     }
   }
 }

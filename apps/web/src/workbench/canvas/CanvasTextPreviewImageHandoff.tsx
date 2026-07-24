@@ -7,17 +7,21 @@ export interface CanvasTextPreviewPresentation {
   visibleCommittedSourceKey?: string | undefined;
 }
 
+export type CanvasTextPreviewImageFailureKind = 'load' | 'decode';
+
 export function CanvasTextPreviewImageHandoff({
   presentation,
+  hidden = false,
   onPendingReady,
   onPendingFailure,
   onVisibleFailure,
   onVisibleCommitted
 }: {
   presentation: CanvasTextPreviewPresentation;
+  hidden?: boolean | undefined;
   onPendingReady(source: CanvasTextPreviewSource): void;
-  onPendingFailure(source: CanvasTextPreviewSource, error: unknown): void;
-  onVisibleFailure(source: CanvasTextPreviewSource, error: unknown): void;
+  onPendingFailure(source: CanvasTextPreviewSource, error: unknown, kind: CanvasTextPreviewImageFailureKind): void;
+  onVisibleFailure(source: CanvasTextPreviewSource, error: unknown, kind: CanvasTextPreviewImageFailureKind): void;
   onVisibleCommitted(source: CanvasTextPreviewSource): void;
 }): React.ReactElement {
   if (!presentation.visible && !presentation.pending) {
@@ -25,7 +29,11 @@ export function CanvasTextPreviewImageHandoff({
   }
 
   return (
-    <div className="canvas-text-preview-layers">
+    <div
+      className="canvas-text-preview-layers"
+      data-canvas-text-preview-hidden={hidden ? 'true' : 'false'}
+      aria-hidden={hidden}
+    >
       {presentation.visible ? (
         <CanvasTextPreviewImageLayer
           key={presentation.visible.sourceKey}
@@ -60,7 +68,7 @@ function CanvasTextPreviewImageLayer({
   layer: 'visible' | 'pending';
   source: CanvasTextPreviewSource;
   onReady(source: CanvasTextPreviewSource): void;
-  onFailure(source: CanvasTextPreviewSource, error: unknown): void;
+  onFailure(source: CanvasTextPreviewSource, error: unknown, kind: CanvasTextPreviewImageFailureKind): void;
   onVisibleCommitted(source: CanvasTextPreviewSource): void;
 }): React.ReactElement {
   const pendingLifecycleRef = useRef<{
@@ -126,7 +134,7 @@ function CanvasTextPreviewImageLayer({
         && image.isConnected
         && image.dataset.canvasTextPreviewSourceKey === source.sourceKey) {
         lifecycle.settled = true;
-        onFailure(source, error);
+        onFailure(source, error, 'decode');
       }
     });
   };
@@ -144,7 +152,7 @@ function CanvasTextPreviewImageLayer({
       onLoad={(event) => finishPendingLoad(event.currentTarget)}
       onError={(event) => {
         if (layer === 'visible') {
-          onFailure(source, event.nativeEvent);
+          onFailure(source, event.nativeEvent, 'load');
           return;
         }
         const lifecycle = pendingLifecycleRef.current;
@@ -152,7 +160,7 @@ function CanvasTextPreviewImageLayer({
           return;
         }
         lifecycle.settled = true;
-        onFailure(source, event.nativeEvent);
+        onFailure(source, event.nativeEvent, 'load');
       }}
     />
   );

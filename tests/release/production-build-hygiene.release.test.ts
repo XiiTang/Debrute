@@ -12,18 +12,13 @@ interface TsConfigFile {
 }
 
 const emitTsconfigPaths = [
-  'apps/app-server/tsconfig.json',
-  'apps/daemon/tsconfig.json',
-  'apps/debrute-cli/tsconfig.json',
-  'apps/runtime-host/tsconfig.json',
   'packages/app-protocol/tsconfig.json',
   'packages/canvas-core/tsconfig.json',
   'packages/canvas-map-core/tsconfig.json',
   'packages/capability-core/tsconfig.json',
-  'packages/capability-runtime/tsconfig.json',
   'packages/photoshop-bridge-plugin-core/tsconfig.json',
   'packages/project-core/tsconfig.json',
-  'packages/workbench-runtime/tsconfig.json'
+  'packages/runtime-control-client/tsconfig.json'
 ];
 
 describe('Production build hygiene', () => {
@@ -42,11 +37,8 @@ describe('Production build hygiene', () => {
     expect(missingExcludes).toEqual([]);
   });
 
-  it('does not generate source maps in the default Electron runtime bundles', () => {
-    const bundleScripts = [
-      'apps/runtime-host/scripts/bundle-runtime-host.mjs',
-      'apps/desktop/scripts/bundle-electron.mjs'
-    ];
+  it('does not generate source maps in the default Electron bundle', () => {
+    const bundleScripts = ['apps/desktop/scripts/bundle-electron.mjs'];
 
     const defaultSourcemapSettings = bundleScripts.flatMap((path) => {
       const source = readSource(path);
@@ -74,7 +66,6 @@ describe('Production build hygiene', () => {
     });
 
     expect(missingCleanPaths).toEqual([]);
-    expect(cleanScript).toContain("'apps/runtime-host/bundle'");
   });
 });
 

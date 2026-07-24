@@ -1,85 +1,90 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { closeSync, openSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import {
-  DEFAULT_WORKBENCH_DAEMON_PORT,
-  chooseLoopbackPort,
-  type WorkbenchRuntimeOwner,
-  type WorkbenchRuntimePaths,
-  type WorkbenchRuntimeState
-} from '@debrute/workbench-runtime';
-import type { DesktopProductRuntimeConfig } from './desktopProductRuntimeConfig.js';
+import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { dirname } from 'node:path';
 
-export async function launchPackagedDesktopRuntime(
-  paths: WorkbenchRuntimePaths,
-  owner: WorkbenchRuntimeOwner,
-  product: DesktopProductRuntimeConfig
-): Promise<WorkbenchRuntimeState> {
-  const daemonPort = await chooseLoopbackPort(DEFAULT_WORKBENCH_DAEMON_PORT);
-  const token = randomUUID();
-  await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
-  await writeFile(paths.tokenPath, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
-  const child = spawnRuntimeHost(paths, daemonPort, product);
-  const now = new Date().toISOString();
-  return {
-    runtimeKind: process.env.DEBRUTE_WORKBENCH_RUNTIME_KIND === 'desktop-dev' ? 'desktop-dev' : 'desktop-packaged',
-    processControl: 'managed',
-    owner,
-    daemonUrl: `http://127.0.0.1:${daemonPort}`,
-    webUrl: `http://127.0.0.1:${daemonPort}`,
-    token,
-    daemonPid: requirePid(child),
-    daemonLogPath: paths.daemonLogPath,
-    webLogPath: paths.webLogPath,
-    startedAt: now,
-    updatedAt: now
-  };
+import {
+  RuntimeControlError,
+  connectRuntimeControl,
+  type RuntimeControlClient
+} from '@debrute/runtime-control-client';
+
+const RUNTIME_STARTUP_TIMEOUT_MS = 10_000;
+const RUNTIME_CONNECT_INTERVAL_MS = 50;
+
+export interface DesktopRuntimeLaunchOptions {
+  productVersion: string;
+  runtimeEntrypoint: string;
+  runtimeArguments?: string[];
+  webAssetsDirectory: string;
+  runtimeLogPath: string;
+  desktopEntrypoint: string;
+  desktopArguments?: string[];
+  environment?: NodeJS.ProcessEnv;
 }
 
-function spawnRuntimeHost(
-  paths: WorkbenchRuntimePaths,
-  daemonPort: number,
-  product: DesktopProductRuntimeConfig
-): ChildProcess {
-  const logFd = openSync(paths.daemonLogPath, 'a');
+export async function connectOrLaunchDesktopRuntime(
+  options: DesktopRuntimeLaunchOptions
+): Promise<RuntimeControlClient> {
   try {
-    const child = spawn(process.execPath, [runtimeHostEntryPath()], {
-      cwd: dirname(process.execPath),
+    return await connectDesktopLauncher(options.productVersion);
+  } catch (error) {
+    if (!(error instanceof RuntimeControlError) || error.code !== 'runtime_unavailable') {
+      throw error;
+    }
+  }
+
+  const child = spawnRuntime(options);
+  const deadline = Date.now() + RUNTIME_STARTUP_TIMEOUT_MS;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null && child.exitCode !== 0) {
+      throw new Error(`Debrute Runtime exited during startup with code ${child.exitCode}.`);
+    }
+    try {
+      const control = await connectDesktopLauncher(options.productVersion);
+      child.unref();
+      return control;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof RuntimeControlError && error.code !== 'runtime_unavailable') {
+        throw error;
+      }
+      await delay(RUNTIME_CONNECT_INTERVAL_MS);
+    }
+  }
+  throw new Error('Debrute Runtime did not publish its Control endpoint in time.', {
+    cause: lastError
+  });
+}
+
+async function connectDesktopLauncher(productVersion: string): Promise<RuntimeControlClient> {
+  return await connectRuntimeControl({
+    role: 'launcher',
+    productVersion,
+    handshakeTimeoutMs: 5_000
+  });
+}
+
+function spawnRuntime(options: DesktopRuntimeLaunchOptions): ChildProcess {
+  mkdirSync(dirname(options.runtimeLogPath), { recursive: true });
+  const log = openSync(options.runtimeLogPath, 'a', 0o600);
+  try {
+    return spawn(options.runtimeEntrypoint, options.runtimeArguments ?? [], {
       detached: true,
-      stdio: ['ignore', logFd, logFd],
+      stdio: ['ignore', log, log],
       env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-        DEBRUTE_RUNTIME_HOST_DAEMON_PORT: String(daemonPort),
-        DEBRUTE_RUNTIME_HOST_TOKEN_FILE: paths.tokenPath,
-        DEBRUTE_RUNTIME_HOST_WEB_DIST_DIR: resolve(__dirname, '../dist'),
-        DEBRUTE_RUNTIME_HOST_PRODUCT_VERSION: product.productVersion,
-        DEBRUTE_RUNTIME_HOST_CLI_PAYLOAD_DIR: product.cliPayloadDir,
-        DEBRUTE_RUNTIME_HOST_SKILLS_PAYLOAD_DIR: product.skillsPayloadDir,
-        DEBRUTE_RUNTIME_HOST_MANAGED_BIN_DIR: product.managedBinDir,
-        DEBRUTE_RUNTIME_HOST_MANAGED_PRODUCT_ROOT: product.managedProductRoot,
-        DEBRUTE_RUNTIME_HOST_PRODUCT_MANIFEST_PATH: product.productManifestPath,
-        DEBRUTE_RUNTIME_HOST_DESKTOP_INSTALL_PATH: product.desktopInstallPath,
-        DEBRUTE_RUNTIME_HOST_REPLACEMENT_HELPER_PATH: product.replacementHelperPath,
-        DEBRUTE_RUNTIME_HOST_DESKTOP_PID: String(product.desktopPid)
+        ...options.environment,
+        DEBRUTE_RUNTIME_WEB_ASSETS_DIR: options.webAssetsDirectory,
+        DEBRUTE_RUNTIME_STABLE_ENTRYPOINT: options.runtimeEntrypoint,
+        DEBRUTE_DESKTOP_ENTRYPOINT: options.desktopEntrypoint,
+        DEBRUTE_DESKTOP_ARGUMENTS_JSON: JSON.stringify(options.desktopArguments ?? [])
       }
     });
-    child.unref();
-    return child;
   } finally {
-    closeSync(logFd);
+    closeSync(log);
   }
 }
 
-function runtimeHostEntryPath(): string {
-  return join(__dirname, 'runtime-host.cjs');
-}
-
-function requirePid(child: ChildProcess): number {
-  if (!child.pid) {
-    throw new Error('Debrute runtime host process did not report a pid.');
-  }
-  return child.pid;
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

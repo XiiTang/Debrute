@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   canvasRasterPreviewWidth,
@@ -21,7 +21,10 @@ import {
   canvasTextPreviewFailureFromUnknown,
   type CanvasTextPreviewFailureFields
 } from './CanvasTextPreviewFailure';
-import type { CanvasTextPreviewPresentation } from './CanvasTextPreviewImageHandoff';
+import type {
+  CanvasTextPreviewImageFailureKind,
+  CanvasTextPreviewPresentation
+} from './CanvasTextPreviewImageHandoff';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 import {
   canvasTextPreviewStyleKey,
@@ -33,6 +36,7 @@ import {
   type CanvasPerfCounterName,
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 
 export interface CanvasTextPreviewSource {
   projectRelativePath: string;
@@ -65,7 +69,26 @@ interface CanvasTextPreviewPresentationState {
 }
 
 interface CanvasTextPreviewPresentationWork extends CanvasTextPreviewLayerState {
-  generation: number;
+  epoch: number;
+}
+
+const CANVAS_TEXT_PREVIEW_PUBLICATION_PHASES = ['mount', 'promote', 'commit'] as const;
+type CanvasTextPreviewPublicationPhase = typeof CANVAS_TEXT_PREVIEW_PUBLICATION_PHASES[number];
+type CanvasTextPreviewPresentationQueues = Record<
+  CanvasTextPreviewPublicationPhase,
+  Map<string, CanvasTextPreviewPresentationWork>
+>;
+
+function forEachPresentationQueue(
+  queues: CanvasTextPreviewPresentationQueues,
+  visit: (
+    phase: CanvasTextPreviewPublicationPhase,
+    queue: Map<string, CanvasTextPreviewPresentationWork>
+  ) => void
+): void {
+  for (const phase of CANVAS_TEXT_PREVIEW_PUBLICATION_PHASES) {
+    visit(phase, queues[phase]);
+  }
 }
 
 interface CanvasTextPreviewErrorState {
@@ -74,18 +97,23 @@ interface CanvasTextPreviewErrorState {
   error: Error;
 }
 
-interface CanvasTextPreviewVariantFetchWork {
-  projectRelativePath: string;
-  controller: AbortController;
-}
-
 export interface CanvasTextPreviewRuntimeValue {
   registerTextBody(projectRelativePath: string, element: HTMLElement | null): void;
   presentationForNode(input: { node: ProjectedCanvasNode }): CanvasTextPreviewPresentation;
   previewErrorForNode(input: { node: ProjectedCanvasNode }): string | undefined;
   reportPendingReady(node: ProjectedCanvasNode, source: CanvasTextPreviewSource): void;
-  reportPendingFailure(node: ProjectedCanvasNode, source: CanvasTextPreviewSource, error: unknown): void;
-  reportVisibleFailure(node: ProjectedCanvasNode, source: CanvasTextPreviewSource, error: unknown): void;
+  reportPendingFailure(
+    node: ProjectedCanvasNode,
+    source: CanvasTextPreviewSource,
+    error: unknown,
+    kind: CanvasTextPreviewImageFailureKind
+  ): void;
+  reportVisibleFailure(
+    node: ProjectedCanvasNode,
+    source: CanvasTextPreviewSource,
+    error: unknown,
+    kind: CanvasTextPreviewImageFailureKind
+  ): void;
   reportVisibleCommitted(node: ProjectedCanvasNode, source: CanvasTextPreviewSource): void;
 }
 
@@ -118,6 +146,7 @@ export function CanvasTextPreviewProvider({
   culledNodePaths,
   styleDependencyKey,
   perfMonitor,
+  previewResourceScheduler,
   children
 }: {
   canvasId: string;
@@ -132,6 +161,7 @@ export function CanvasTextPreviewProvider({
   culledNodePaths: ReadonlySet<string>;
   styleDependencyKey: string;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
+  previewResourceScheduler: CanvasPreviewResourceScheduler;
   children: React.ReactNode;
 }): React.ReactElement {
   const [sourceAvailability, setSourceAvailability] = useState<Record<string, CanvasTextPreviewSourceAvailability>>({});
@@ -142,31 +172,31 @@ export function CanvasTextPreviewProvider({
   const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasTextPreviewTarget>>({});
   const [previewPresentations, setPreviewPresentations] = useState<Record<string, CanvasTextPreviewPresentationState>>({});
   const [availabilityCheckedTargetKeys, setAvailabilityCheckedTargetKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const [sourceWorkVersion, setSourceWorkVersion] = useState(0);
   const [styleKeyState, setStyleKeyState] = useState<{
     key?: CanvasTextPreviewStyleKey | undefined;
     error?: Error | undefined;
   }>({});
   const currentTargetKeysRef = useRef(new Map<string, string>());
   const currentTargetsRef = useRef<Record<string, CanvasTextPreviewTarget>>({});
+  const previewPresentationsRef = useRef<Record<string, CanvasTextPreviewPresentationState>>({});
   const currentResourceKeysRef = useRef(new Map<string, string>());
   const currentCanvasIdRef = useRef(canvasId);
   const interactionActive = cameraState !== 'idle' || dragState !== undefined;
-  const interactionActiveRef = useRef(interactionActive);
-  const runtimeGenerationRef = useRef(0);
+  const runtimeEpochRef = useRef(0);
   const mountedRef = useRef(true);
   const bodyRegistrationsRef = useRef(new Map<string, () => void>());
   const uploadingTargetKeysRef = useRef(new Set<string>());
-  const fetchingVariantsRef = useRef(new Map<string, CanvasTextPreviewVariantFetchWork>());
-  const pendingMountQueueRef = useRef(new Map<string, CanvasTextPreviewPresentationWork>());
-  const readyPromotionQueueRef = useRef(new Map<string, CanvasTextPreviewPresentationWork>());
-  const deferredVisibleCommitQueueRef = useRef(new Map<string, CanvasTextPreviewPresentationWork>());
+  const presentationQueuesRef = useRef<CanvasTextPreviewPresentationQueues>({
+    mount: new Map(),
+    promote: new Map(),
+    commit: new Map()
+  });
   const publishingSourceKeysRef = useRef(new Set<string>());
-  const publicationFrameRef = useRef<number | undefined>(undefined);
-  const publishNextFrameRef = useRef<() => void>(() => undefined);
+  const currentCulledNodePathsRef = useRef(culledNodePaths);
   currentCanvasIdRef.current = canvasId;
   currentTargetsRef.current = currentTargets;
-  interactionActiveRef.current = interactionActive;
+  previewPresentationsRef.current = previewPresentations;
+  currentCulledNodePathsRef.current = culledNodePaths;
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
 
   const recordTextPreviewCounter = useCallback((
@@ -182,9 +212,9 @@ export function CanvasTextPreviewProvider({
     });
   }, [perfMonitor]);
 
-  const isCurrentTarget = useCallback((generation: number, target: CanvasTextPreviewTarget): boolean => (
+  const isCurrentTarget = useCallback((epoch: number, target: CanvasTextPreviewTarget): boolean => (
     mountedRef.current
-    && generation === runtimeGenerationRef.current
+    && epoch === runtimeEpochRef.current
     && target.canvasId === currentCanvasIdRef.current
     && currentTargetKeysRef.current.get(target.projectRelativePath) === canvasTextPreviewTargetKey(target)
   ), []);
@@ -225,21 +255,37 @@ export function CanvasTextPreviewProvider({
     });
   }, []);
 
+  const presentationWorkMatchesCurrentIdentity = useCallback((work: CanvasTextPreviewPresentationWork): boolean => {
+    const path = work.source.projectRelativePath;
+    return mountedRef.current
+      && work.epoch === runtimeEpochRef.current
+      && currentTargetKeysRef.current.get(path) === work.targetKey
+      && currentResourceKeysRef.current.get(path) === work.sourceKey;
+  }, []);
+
+  const presentationWorkCanPublish = useCallback((work: CanvasTextPreviewPresentationWork): boolean => (
+    presentationWorkMatchesCurrentIdentity(work)
+    && !currentCulledNodePathsRef.current.has(work.source.projectRelativePath)
+  ), [presentationWorkMatchesCurrentIdentity]);
+
+  const presentationWorkIsQueued = useCallback((
+    phase: CanvasTextPreviewPublicationPhase,
+    work: CanvasTextPreviewPresentationWork
+  ): boolean => (
+    presentationQueuesRef.current[phase].get(work.sourceKey) === work
+    && presentationWorkMatchesCurrentIdentity(work)
+  ), [presentationWorkMatchesCurrentIdentity]);
+
   const commitVisiblePresentation = useCallback((work: CanvasTextPreviewPresentationWork) => {
     const path = work.source.projectRelativePath;
-    const target = currentTargets[path];
-    const visible = previewPresentations[path]?.visible;
-    if (!target
-      || work.generation !== runtimeGenerationRef.current
-      || work.targetKey !== canvasTextPreviewTargetKey(target)
-      || visible?.sourceKey !== work.sourceKey
-      || visible.committed
-      || currentResourceKeysRef.current.get(path) !== work.sourceKey) {
+    const target = currentTargetsRef.current[path];
+    if (!target || !presentationWorkCanPublish(work)) {
       return;
     }
     setPreviewPresentations((current) => {
       const existing = current[path];
-      if (!existing?.visible
+      if (!presentationWorkCanPublish(work)
+        || !existing?.visible
         || existing.visible.sourceKey !== work.sourceKey
         || existing.visible.committed) {
         return current;
@@ -254,110 +300,123 @@ export function CanvasTextPreviewProvider({
     });
     clearCurrentPreviewFailure(target, work.sourceKey);
     recordTextPreviewCounter('text-preview-published', {
-      projectRelativePath: work.source.projectRelativePath,
+      projectRelativePath: path,
       fingerprint: work.source.fingerprint,
       previewWidth: work.source.previewWidth
     });
-  }, [clearCurrentPreviewFailure, currentTargets, previewPresentations, recordTextPreviewCounter]);
+  }, [clearCurrentPreviewFailure, presentationWorkCanPublish, recordTextPreviewCounter]);
 
-  const firstCurrentPresentationWork = useCallback((
-    queue: Map<string, CanvasTextPreviewPresentationWork>
-  ): CanvasTextPreviewPresentationWork | undefined => {
-    for (const [sourceKey, work] of queue) {
-      const path = work.source.projectRelativePath;
-      if (work.generation === runtimeGenerationRef.current
-        && currentTargetKeysRef.current.get(path) === work.targetKey
-        && currentResourceKeysRef.current.get(path) === work.sourceKey) {
-        return work;
+  const publishPresentationWork = useCallback((
+    phase: CanvasTextPreviewPublicationPhase,
+    work: CanvasTextPreviewPresentationWork
+  ) => {
+    const queue = presentationQueuesRef.current[phase];
+    if (!presentationWorkIsQueued(phase, work)) {
+      queue.delete(work.sourceKey);
+      return;
+    }
+    if (!presentationWorkCanPublish(work)) {
+      return;
+    }
+    startTransition(() => {
+      if (phase === 'commit') {
+        commitVisiblePresentation(work);
+        return;
       }
-      queue.delete(sourceKey);
-    }
-    return undefined;
-  }, []);
-
-  const schedulePublicationFrame = useCallback(() => {
-    if (!mountedRef.current
-      || interactionActiveRef.current
-      || publicationFrameRef.current !== undefined
-      || (deferredVisibleCommitQueueRef.current.size === 0
-        && readyPromotionQueueRef.current.size === 0
-        && pendingMountQueueRef.current.size === 0)) {
-      return;
-    }
-    publicationFrameRef.current = window.requestAnimationFrame(() => publishNextFrameRef.current());
-  }, []);
-
-  publishNextFrameRef.current = () => {
-    publicationFrameRef.current = undefined;
-    if (!mountedRef.current || interactionActiveRef.current) {
-      return;
-    }
-    const visibleCommit = firstCurrentPresentationWork(deferredVisibleCommitQueueRef.current);
-    if (visibleCommit) {
-      deferredVisibleCommitQueueRef.current.delete(visibleCommit.sourceKey);
-      commitVisiblePresentation(visibleCommit);
-      schedulePublicationFrame();
-      return;
-    }
-    const promotion = firstCurrentPresentationWork(readyPromotionQueueRef.current);
-    if (promotion) {
-      readyPromotionQueueRef.current.delete(promotion.sourceKey);
-      publishingSourceKeysRef.current.add(promotion.sourceKey);
+      publishingSourceKeysRef.current.add(work.sourceKey);
       setPreviewPresentations((current) => {
-        const existing = current[promotion.source.projectRelativePath];
-        if (existing?.pending?.sourceKey !== promotion.sourceKey) {
+        const path = work.source.projectRelativePath;
+        const existing = current[path];
+        if (!presentationWorkCanPublish(work)) {
           return current;
+        }
+        if (phase === 'promote') {
+          if (existing?.pending?.sourceKey !== work.sourceKey) {
+            return current;
+          }
+          return {
+            ...current,
+            [path]: {
+              visible: canvasTextPreviewLayerFromWork(work),
+              pending: undefined
+            }
+          };
         }
         return {
           ...current,
-          [promotion.source.projectRelativePath]: {
-            visible: canvasTextPreviewLayerFromWork(promotion),
-            pending: undefined
+          [path]: {
+            visible: existing?.visible?.targetKey === work.targetKey ? existing.visible : undefined,
+            pending: canvasTextPreviewLayerFromWork(work)
           }
         };
       });
-      schedulePublicationFrame();
-      return;
-    }
-    const mount = firstCurrentPresentationWork(pendingMountQueueRef.current);
-    if (!mount) {
-      return;
-    }
-    pendingMountQueueRef.current.delete(mount.sourceKey);
-    publishingSourceKeysRef.current.add(mount.sourceKey);
-    setPreviewPresentations((current) => {
-      const existing = current[mount.source.projectRelativePath];
-      return {
-        ...current,
-        [mount.source.projectRelativePath]: {
-          visible: existing?.visible?.targetKey === mount.targetKey ? existing.visible : undefined,
-          pending: canvasTextPreviewLayerFromWork(mount)
-        }
-      };
     });
-    schedulePublicationFrame();
-  };
+  }, [commitVisiblePresentation, presentationWorkCanPublish, presentationWorkIsQueued]);
+
+  const enqueuePresentationWork = useCallback((
+    phase: CanvasTextPreviewPublicationPhase,
+    work: CanvasTextPreviewPresentationWork
+  ) => {
+    const queue = presentationQueuesRef.current[phase];
+    queue.set(work.sourceKey, work);
+    const request = {
+      kind: 'text',
+      nodeId: work.source.projectRelativePath,
+      sourceKey: `${phase}\u001f${work.sourceKey}`,
+      targetWidth: work.source.previewWidth,
+      isCurrent: () => presentationWorkIsQueued(phase, work),
+      isCulled: () => currentCulledNodePathsRef.current.has(work.source.projectRelativePath),
+      run: () => publishPresentationWork(phase, work)
+    } as const;
+    if (phase === 'mount') {
+      previewResourceScheduler.enqueue(request);
+    } else {
+      previewResourceScheduler.enqueuePublication(request);
+    }
+  }, [presentationWorkIsQueued, previewResourceScheduler, publishPresentationWork]);
+
+  useEffect(() => {
+    forEachPresentationQueue(presentationQueuesRef.current, (phase, queue) => {
+      for (const work of queue.values()) {
+        if (presentationWorkMatchesCurrentIdentity(work)
+          && !currentCulledNodePathsRef.current.has(work.source.projectRelativePath)) {
+          enqueuePresentationWork(phase, work);
+        }
+      }
+    });
+  }, [culledNodePaths, enqueuePresentationWork, presentationWorkMatchesCurrentIdentity]);
+
+  useEffect(() => {
+    forEachPresentationQueue(presentationQueuesRef.current, (phase, queue) => {
+      for (const [sourceKey, work] of queue) {
+        const presentation = previewPresentations[work.source.projectRelativePath];
+        const published = phase === 'mount'
+          ? presentation?.pending?.sourceKey === sourceKey
+          : phase === 'promote'
+            ? presentation?.visible?.sourceKey === sourceKey && presentation.pending === undefined
+            : presentation?.visible?.sourceKey === sourceKey && presentation.visible.committed;
+        if (published) {
+          queue.delete(sourceKey);
+        }
+      }
+    });
+  }, [previewPresentations]);
 
   useEffect(() => {
     mountedRef.current = true;
-    runtimeGenerationRef.current += 1;
-    const generation = runtimeGenerationRef.current;
+    runtimeEpochRef.current += 1;
+    const epoch = runtimeEpochRef.current;
     return () => {
-      if (runtimeGenerationRef.current === generation) {
-        runtimeGenerationRef.current += 1;
+      if (runtimeEpochRef.current === epoch) {
+        runtimeEpochRef.current += 1;
       }
       mountedRef.current = false;
-      if (publicationFrameRef.current !== undefined) {
-        window.cancelAnimationFrame(publicationFrameRef.current);
-        publicationFrameRef.current = undefined;
+      for (const projectRelativePath of currentTargetKeysRef.current.keys()) {
+        previewResourceScheduler.cancel('text', projectRelativePath);
       }
-      for (const work of fetchingVariantsRef.current.values()) {
-        work.controller.abort();
+      for (const queue of Object.values(presentationQueuesRef.current)) {
+        queue.clear();
       }
-      fetchingVariantsRef.current.clear();
-      pendingMountQueueRef.current.clear();
-      readyPromotionQueueRef.current.clear();
-      deferredVisibleCommitQueueRef.current.clear();
       publishingSourceKeysRef.current.clear();
       uploadingTargetKeysRef.current.clear();
       for (const cleanup of bodyRegistrationsRef.current.values()) {
@@ -365,7 +424,7 @@ export function CanvasTextPreviewProvider({
       }
       bodyRegistrationsRef.current.clear();
     };
-  }, [canvasId]);
+  }, [canvasId, previewResourceScheduler]);
 
   useEffect(() => {
     setCaptureLayerRoot(document.body);
@@ -406,28 +465,35 @@ export function CanvasTextPreviewProvider({
         }
       }
     }
-    currentResourceKeysRef.current.delete(path);
-    for (const [sourceKey, work] of fetchingVariantsRef.current) {
-      if (work.projectRelativePath === path) {
-        work.controller.abort();
-        fetchingVariantsRef.current.delete(sourceKey);
-      }
+    previewResourceScheduler.cancel('text', path);
+    const retainedPresentation = previewPresentationsRef.current[path];
+    if (retainedPresentation?.visible) {
+      currentResourceKeysRef.current.set(path, retainedPresentation.visible.sourceKey);
+    } else {
+      currentResourceKeysRef.current.delete(path);
     }
-    for (const queue of [
-      pendingMountQueueRef.current,
-      readyPromotionQueueRef.current,
-      deferredVisibleCommitQueueRef.current
-    ]) {
+    for (const queue of Object.values(presentationQueuesRef.current)) {
       for (const [sourceKey, work] of queue) {
         if (work.source.projectRelativePath === path) {
           queue.delete(sourceKey);
         }
       }
     }
-    setPreviewPresentations((current) => withoutRecordPath(current, path));
+    setPreviewPresentations((current) => {
+      const presentation = current[path];
+      if (!presentation?.visible) {
+        return withoutRecordPath(current, path);
+      }
+      if (!presentation.pending) {
+        return current;
+      }
+      return {
+        ...current,
+        [path]: { visible: presentation.visible, pending: undefined }
+      };
+    });
     setPreviewErrors((current) => withoutRecordPath(current, path));
-    setSourceWorkVersion((current) => current + 1);
-  }, [activeInlineTextPath]);
+  }, [activeInlineTextPath, previewResourceScheduler]);
 
   const commitTextBodyMeasurement = useCallback((projectRelativePath: string, element: HTMLElement) => {
     const measurement = canvasTextPreviewBodyMeasurement(element);
@@ -514,25 +580,13 @@ export function CanvasTextPreviewProvider({
       }));
       setPreviewPresentations((current) => canvasTextPreviewCurrentPresentations({ targets, presentations: current }));
       setPreviewErrors((current) => clearStaleCanvasTextPreviewErrors(current, targetKeys));
-      for (const [sourceKey, work] of fetchingVariantsRef.current) {
-        if (targetKeys.get(work.projectRelativePath) === undefined
-          || currentResourceKeysRef.current.get(work.projectRelativePath) !== sourceKey) {
-          work.controller.abort();
-          fetchingVariantsRef.current.delete(sourceKey);
-        }
-      }
-      for (const queue of [
-        pendingMountQueueRef.current,
-        readyPromotionQueueRef.current,
-        deferredVisibleCommitQueueRef.current
-      ]) {
+      for (const queue of Object.values(presentationQueuesRef.current)) {
         for (const [sourceKey, work] of queue) {
           if (targetKeys.get(work.source.projectRelativePath) !== work.targetKey) {
             queue.delete(sourceKey);
           }
         }
       }
-      setSourceWorkVersion((current) => current + 1);
     });
     return () => {
       cancelled = true;
@@ -594,7 +648,6 @@ export function CanvasTextPreviewProvider({
         ...current,
         ...currentResults.map(canvasTextPreviewTargetKey)
       ]));
-      setSourceWorkVersion((current) => current + 1);
     }, (error: unknown) => {
       if (cancelled) {
         return;
@@ -644,7 +697,12 @@ export function CanvasTextPreviewProvider({
       const path = target.projectRelativePath;
       const presentation = previewPresentations[path];
       if (path === activeInlineTextPath) {
-        currentResourceKeysRef.current.delete(path);
+        if (presentation?.visible) {
+          desiredSourceKeys.set(path, presentation.visible.sourceKey);
+          currentResourceKeysRef.current.set(path, presentation.visible.sourceKey);
+        } else {
+          currentResourceKeysRef.current.delete(path);
+        }
         continue;
       }
       if (culledNodePaths.has(path)) {
@@ -681,83 +739,44 @@ export function CanvasTextPreviewProvider({
       const error = previewErrors[target.projectRelativePath];
       if (presentation?.visible?.sourceKey === sourceKey
         || presentation?.pending?.sourceKey === sourceKey
-        || fetchingVariantsRef.current.has(sourceKey)
-        || pendingMountQueueRef.current.has(sourceKey)
-        || readyPromotionQueueRef.current.has(sourceKey)
+        || presentationQueuesRef.current.mount.has(sourceKey)
+        || presentationQueuesRef.current.promote.has(sourceKey)
         || publishingSourceKeysRef.current.has(sourceKey)
         || (error?.targetKey === targetKey && error.sourceKey === sourceKey)) {
         continue;
       }
-      const generation = runtimeGenerationRef.current;
-      const controller = new AbortController();
-      fetchingVariantsRef.current.set(sourceKey, {
-        projectRelativePath: target.projectRelativePath,
-        controller
-      });
-      const startedAt = performance.now();
-      void fetchCanvasTextPreviewVariant({
+      const epoch = runtimeEpochRef.current;
+      enqueuePresentationWork('mount', {
+        epoch,
+        targetKey,
+        sourceKey,
         source,
-        fields: failureFieldsForTarget(target),
-        signal: controller.signal
-      }).then(() => {
-        if (!isCurrentTarget(generation, target)
-          || currentResourceKeysRef.current.get(target.projectRelativePath) !== sourceKey) {
-          return;
-        }
-        pendingMountQueueRef.current.set(sourceKey, {
-          generation,
-          targetKey,
-          sourceKey,
-          source,
-          committed: false
-        });
-        clearCurrentPreviewFailure(target, sourceKey);
-        recordTextPreviewCounter('text-preview-variant-fetched', {
-          projectRelativePath: target.projectRelativePath,
-          fingerprint: target.fingerprint,
-          previewWidth: source.previewWidth,
-          durationMs: performance.now() - startedAt
-        });
-        setSourceWorkVersion((current) => current + 1);
-        schedulePublicationFrame();
-      }, (error: unknown) => {
-        if (!controller.signal.aborted && isCurrentTarget(generation, target)) {
-          setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
-            'variant_failed',
-            failureFieldsForTarget(target),
-            error
-          ), sourceKey);
-        }
-      }).finally(() => {
-        if (fetchingVariantsRef.current.get(sourceKey)?.controller === controller) {
-          fetchingVariantsRef.current.delete(sourceKey);
-        }
-        if (mountedRef.current) {
-          setSourceWorkVersion((current) => current + 1);
-        }
+        committed: false
       });
+      clearCurrentPreviewFailure(target, sourceKey);
     }
-    for (const [sourceKey, work] of fetchingVariantsRef.current) {
-      if (desiredSourceKeys.get(work.projectRelativePath) !== sourceKey) {
-        work.controller.abort();
-        fetchingVariantsRef.current.delete(sourceKey);
-      }
-    }
-    for (const queue of [
-      pendingMountQueueRef.current,
-      readyPromotionQueueRef.current,
-      deferredVisibleCommitQueueRef.current
-    ]) {
+    for (const queue of Object.values(presentationQueuesRef.current)) {
       for (const [sourceKey, work] of queue) {
         if (desiredSourceKeys.get(work.source.projectRelativePath) !== sourceKey) {
           queue.delete(sourceKey);
         }
       }
     }
-    setPreviewPresentations((current) => canvasTextPreviewPresentationsForDesiredSources({
-      current,
+    const desiredSourceKeySet = new Set(desiredSourceKeys.values());
+    for (const sourceKey of publishingSourceKeysRef.current) {
+      if (!desiredSourceKeySet.has(sourceKey)) {
+        publishingSourceKeysRef.current.delete(sourceKey);
+      }
+    }
+    if (canvasTextPreviewPresentationsForDesiredSources({
+      current: previewPresentations,
       desiredSourceKeys
-    }));
+    }) !== previewPresentations) {
+      setPreviewPresentations((current) => canvasTextPreviewPresentationsForDesiredSources({
+        current,
+        desiredSourceKeys
+      }));
+    }
   }, [
     canvasId,
     activeInlineTextPath,
@@ -765,28 +784,14 @@ export function CanvasTextPreviewProvider({
     culledNodePaths,
     currentTargets,
     devicePixelRatio,
-    isCurrentTarget,
     nodesByPath,
     previewErrors,
     previewPresentations,
-    recordTextPreviewCounter,
     resourceZoom,
-    schedulePublicationFrame,
+    enqueuePresentationWork,
     setCurrentPreviewFailure,
-    sourceAvailability,
-    sourceWorkVersion
+    sourceAvailability
   ]);
-
-  useEffect(() => {
-    if (interactionActive) {
-      if (publicationFrameRef.current !== undefined) {
-        window.cancelAnimationFrame(publicationFrameRef.current);
-        publicationFrameRef.current = undefined;
-      }
-      return;
-    }
-    schedulePublicationFrame();
-  }, [interactionActive, schedulePublicationFrame, sourceWorkVersion]);
 
   useEffect(() => {
     for (const target of Object.values(currentTargets)) {
@@ -800,10 +805,9 @@ export function CanvasTextPreviewProvider({
   useEffect(() => {
     if (interactionActive
       || captureTarget
-      || publicationFrameRef.current !== undefined
-      || deferredVisibleCommitQueueRef.current.size > 0
-      || readyPromotionQueueRef.current.size > 0
-      || pendingMountQueueRef.current.size > 0) {
+      || Object.values(presentationQueuesRef.current).some((queue) => (
+        [...queue.values()].some((work) => presentationWorkCanPublish(work))
+      ))) {
       return;
     }
     const failedTargetKeys = new Set(Object.values(previewErrors).map((error) => error.targetKey));
@@ -826,8 +830,8 @@ export function CanvasTextPreviewProvider({
     culledNodePaths,
     interactionActive,
     previewErrors,
-    sourceAvailability,
-    sourceWorkVersion
+    presentationWorkCanPublish,
+    sourceAvailability
   ]);
 
   const finishRasterizedTarget = useCallback((
@@ -835,22 +839,21 @@ export function CanvasTextPreviewProvider({
     raster: CanvasTextPreviewRasterResult
   ) => {
     const targetKey = canvasTextPreviewTargetKey(target);
-    const generation = runtimeGenerationRef.current;
-    if (!isCurrentTarget(generation, target)) {
+    const epoch = runtimeEpochRef.current;
+    if (!isCurrentTarget(epoch, target)) {
       return;
     }
     uploadingTargetKeysRef.current.add(targetKey);
     setCaptureTarget((current) => current && canvasTextPreviewTargetKey(current) === targetKey
       ? undefined
       : current);
-    setSourceWorkVersion((current) => current + 1);
     const startedAt = performance.now();
     void actions.saveCanvasTextPreviewSource({
       ...canvasTextPreviewSourceTargetForApi(target),
       canvasId: target.canvasId,
       sourcePng: raster.sourcePng
     }).then(() => {
-      if (!isCurrentTarget(generation, target)) {
+      if (!isCurrentTarget(epoch, target)) {
         uploadingTargetKeysRef.current.delete(targetKey);
         return;
       }
@@ -866,15 +869,12 @@ export function CanvasTextPreviewProvider({
       });
     }, (error: unknown) => {
       uploadingTargetKeysRef.current.delete(targetKey);
-      if (isCurrentTarget(generation, target)) {
+      if (isCurrentTarget(epoch, target)) {
         setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
           'source_upload_failed',
           failureFieldsForTarget(target),
           error
         ));
-      }
-      if (mountedRef.current) {
-        setSourceWorkVersion((current) => current + 1);
       }
     });
   }, [
@@ -895,7 +895,6 @@ export function CanvasTextPreviewProvider({
       ? undefined
       : current);
     setCurrentPreviewFailure(target, failure);
-    setSourceWorkVersion((current) => current + 1);
   }, [setCurrentPreviewFailure]);
 
   const recordCaptureStage = useCallback((event: CanvasTextPreviewCaptureStageEvent) => {
@@ -924,8 +923,8 @@ export function CanvasTextPreviewProvider({
       || currentResourceKeysRef.current.get(node.projectRelativePath) !== source.sourceKey) {
       return;
     }
-    readyPromotionQueueRef.current.set(source.sourceKey, {
-      generation: runtimeGenerationRef.current,
+    enqueuePresentationWork('promote', {
+      epoch: runtimeEpochRef.current,
       ...pending
     });
     recordTextPreviewCounter('text-preview-pending-ready', {
@@ -933,13 +932,13 @@ export function CanvasTextPreviewProvider({
       fingerprint: source.fingerprint,
       previewWidth: source.previewWidth
     });
-    schedulePublicationFrame();
-  }, [currentTargets, previewPresentations, recordTextPreviewCounter, schedulePublicationFrame]);
+  }, [currentTargets, enqueuePresentationWork, previewPresentations, recordTextPreviewCounter]);
 
   const reportPendingFailure = useCallback((
     node: ProjectedCanvasNode,
     source: CanvasTextPreviewSource,
-    error: unknown
+    error: unknown,
+    kind: CanvasTextPreviewImageFailureKind
   ) => {
     const target = currentTargets[node.projectRelativePath];
     const pending = previewPresentations[node.projectRelativePath]?.pending;
@@ -949,7 +948,7 @@ export function CanvasTextPreviewProvider({
       || currentResourceKeysRef.current.get(node.projectRelativePath) !== source.sourceKey) {
       return;
     }
-    readyPromotionQueueRef.current.delete(source.sourceKey);
+    presentationQueuesRef.current.promote.delete(source.sourceKey);
     setPreviewPresentations((current) => {
       const existing = current[node.projectRelativePath];
       if (existing?.pending?.sourceKey !== source.sourceKey) {
@@ -961,7 +960,7 @@ export function CanvasTextPreviewProvider({
       };
     });
     setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
-      'preview_decode_failed',
+      kind === 'load' ? 'variant_failed' : 'preview_decode_failed',
       failureFieldsForTarget(target),
       error
     ), source.sourceKey);
@@ -970,7 +969,8 @@ export function CanvasTextPreviewProvider({
   const reportVisibleFailure = useCallback((
     node: ProjectedCanvasNode,
     source: CanvasTextPreviewSource,
-    error: unknown
+    error: unknown,
+    kind: CanvasTextPreviewImageFailureKind
   ) => {
     const target = currentTargets[node.projectRelativePath];
     const visible = previewPresentations[node.projectRelativePath]?.visible;
@@ -979,7 +979,7 @@ export function CanvasTextPreviewProvider({
       || visible.targetKey !== canvasTextPreviewTargetKey(target)) {
       return;
     }
-    deferredVisibleCommitQueueRef.current.delete(source.sourceKey);
+    presentationQueuesRef.current.commit.delete(source.sourceKey);
     setPreviewPresentations((current) => {
       const existing = current[node.projectRelativePath];
       if (existing?.visible?.sourceKey !== source.sourceKey) {
@@ -991,7 +991,7 @@ export function CanvasTextPreviewProvider({
       };
     });
     setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
-      'preview_decode_failed',
+      kind === 'load' ? 'variant_failed' : 'preview_decode_failed',
       failureFieldsForTarget(target),
       error
     ), source.sourceKey);
@@ -1006,22 +1006,25 @@ export function CanvasTextPreviewProvider({
       return;
     }
     const work: CanvasTextPreviewPresentationWork = {
-      generation: runtimeGenerationRef.current,
+      epoch: runtimeEpochRef.current,
       ...visible
     };
-    if (interactionActiveRef.current) {
-      deferredVisibleCommitQueueRef.current.set(source.sourceKey, work);
-      return;
-    }
-    commitVisiblePresentation(work);
-  }, [commitVisiblePresentation, currentTargets, previewPresentations]);
+    enqueuePresentationWork('commit', work);
+  }, [currentTargets, enqueuePresentationWork, previewPresentations]);
 
   const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
     registerTextBody,
     presentationForNode: ({ node }) => {
       const target = currentTargets[node.projectRelativePath];
       const presentation = previewPresentations[node.projectRelativePath];
-      if (!target) {
+      if (!target || !canvasTextPreviewTargetMatchesCurrentInputs({
+        canvasId,
+        target,
+        node,
+        buffer: textFileBuffers[node.projectRelativePath],
+        measuredBody: measuredBodies.get(node.projectRelativePath),
+        styleKey: styleKeyState.key
+      })) {
         return {};
       }
       const targetKey = canvasTextPreviewTargetKey(target);
@@ -1050,14 +1053,18 @@ export function CanvasTextPreviewProvider({
     reportVisibleFailure,
     reportVisibleCommitted
   }), [
+    canvasId,
     currentTargets,
+    measuredBodies,
     previewErrors,
     previewPresentations,
     registerTextBody,
     reportPendingFailure,
     reportPendingReady,
     reportVisibleCommitted,
-    reportVisibleFailure
+    reportVisibleFailure,
+    styleKeyState.key,
+    textFileBuffers
   ]);
 
   const captureLayer = (
@@ -1158,28 +1165,6 @@ export function canvasTextPreviewTargetWidthForNode(input: {
     resourceZoom: input.resourceZoom,
     devicePixelRatio: input.devicePixelRatio
   });
-}
-
-export async function fetchCanvasTextPreviewVariant(input: {
-  source: CanvasTextPreviewSource;
-  fields: CanvasTextPreviewFailureFields;
-  signal: AbortSignal;
-  request?: typeof fetch | undefined;
-}): Promise<void> {
-  const request = input.request ?? fetch;
-  let response: Response;
-  try {
-    response = await request(input.source.src, {
-      signal: input.signal,
-      credentials: 'same-origin'
-    });
-    if (!response.ok) {
-      throw new Error(`Canvas text preview variant request failed with HTTP ${response.status}.`);
-    }
-    await response.blob();
-  } catch (error) {
-    throw canvasTextPreviewFailureFromUnknown('variant_failed', input.fields, error);
-  }
 }
 
 function compareCanvasTextPreviewNodeOrder(left: ProjectedCanvasNode, right: ProjectedCanvasNode): number {
@@ -1329,6 +1314,36 @@ function canvasTextPreviewSourceTargetForApi(target: CanvasTextPreviewTarget) {
 
 function canvasTextPreviewTargetKey(target: CanvasTextPreviewTarget): string {
   return `${target.canvasId}\u001f${target.projectRelativePath}\u001f${target.fingerprint}`;
+}
+
+function canvasTextPreviewTargetMatchesCurrentInputs(input: {
+  canvasId: string;
+  target: CanvasTextPreviewTarget;
+  node: ProjectedCanvasNode;
+  buffer: TextFileBuffer | undefined;
+  measuredBody: CanvasTextPreviewMeasuredBody | undefined;
+  styleKey: string | undefined;
+}): boolean {
+  const { target, node, buffer, measuredBody, styleKey } = input;
+  if (node.nodeKind !== 'file'
+    || node.mediaKind !== 'text'
+    || node.availability.state !== 'available'
+    || !buffer
+    || buffer.error
+    || !measuredBody
+    || !styleKey) {
+    return false;
+  }
+  return target.canvasId === input.canvasId
+    && target.projectRelativePath === node.projectRelativePath
+    && target.content === buffer.content
+    && target.language === buffer.language
+    && target.wordWrap === buffer.wordWrap
+    && target.contentCssWidth === measuredBody.width
+    && target.contentCssHeight === measuredBody.height
+    && target.scrollTop === (node.textViewport?.scrollTop ?? 0)
+    && target.scrollLeft === (node.textViewport?.scrollLeft ?? 0)
+    && target.styleKey === styleKey;
 }
 
 function canvasTextPreviewResourceSourceKey(targetKey: string, targetWidth: number): string {

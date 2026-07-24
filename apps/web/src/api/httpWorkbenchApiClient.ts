@@ -5,9 +5,8 @@ import type {
   CanvasVideoPreviewSourceResponse,
   DebruteGlobalSettingsView,
   DebruteProductState,
-  DebruteRuntimeInfo,
   DebruteHttpErrorBody,
-  DaemonProjectUploadImportPlan,
+  RuntimeProjectUploadImportPlan,
   GeneratedAssetView,
   GeneratedAssetsView,
   GeneratedAssetMetadataLookup,
@@ -15,12 +14,11 @@ import type {
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   ProductUpdateApplyResult,
-  ProjectHealthSummary,
+  WorkbenchProjectHealthSummary,
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
   SaveDebruteGlobalSettingsInput,
   SendProjectFileToPhotoshopResult,
-  TerminalEvent,
   TerminalEventSubscription,
   TerminalSessionList,
   TerminalSessionResult,
@@ -35,30 +33,29 @@ import type {
   WorkbenchProjectOpenResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
-  WorkbenchProjectPickerOpenResult,
   WorkbenchProjectRefreshResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
+  WorkbenchFeedbackWorkingCopy,
+  WorkbenchTextWorkingCopy,
+  WorkbenchWorkingCopies,
   WorkbenchProjectUploadImportInput,
   WorkbenchAddProjectPathToCanvasMapResult,
-  WorkbenchTitleBarState,
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
   UpdateCanvasFeedbackEntryInput
 } from '@debrute/canvas-core';
-import { getDebruteShellApi, type DebruteShellApi } from './shellApi';
+import { readJsonSseStream } from './streamingSse';
+import { createTerminalHubClient } from './terminalHubClient';
+import { getDebruteShellApi } from './shellApi';
 
 export interface HttpWorkbenchApiClientOptions {
   fetch?: typeof fetch;
-  shell?: DebruteShellApi;
-}
-
-interface RevisionedProjectResponse {
-  projectId: string;
-  projectRevision: number;
+  WebSocket?: typeof WebSocket;
+  origin?: string;
 }
 
 interface ProjectRequestScope {
@@ -79,27 +76,58 @@ class DebruteHttpRequestError extends Error {
 
 class ProjectChangedRequestError extends Error {}
 
-class ProjectResponseSupersededError extends Error {
-  readonly name = 'ProjectResponseSupersededError';
-
-  constructor(
-    readonly projectId: string,
-    readonly responseRevision: number,
-    readonly currentRevision: number
-  ) {
-    super(`Project response revision ${responseRevision} was superseded by revision ${currentRevision}.`);
-  }
+interface GlobalSnapshotFrame {
+  type: 'global.snapshot';
+  globalRevision: number;
+  snapshot: {
+    settings: DebruteGlobalSettingsView;
+    recentProjects: Array<{ projectId: string; projectRoot: string }>;
+    integrations: IntegrationSettingsView;
+    photoshop: AdobeBridgeStateView;
+    product: DebruteProductState | null;
+  };
 }
+
+interface ProjectBoundFrame {
+  type: 'project.bound';
+  project: WorkbenchProjectOpenResult;
+  workingCopies: WorkbenchWorkingCopies;
+}
+
+interface ProjectOpenFailedFrame {
+  type: 'project.open_failed';
+  projectId: string;
+  error: { code: string; message: string };
+}
+
+interface ProjectBindingCommandResult {
+  projectId: string;
+  outcome: 'bound' | 'focused_existing_desktop';
+}
+
+type ProjectPickerCommandResult =
+  | { opened: false }
+  | ({ opened: true } & ProjectBindingCommandResult);
 
 export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOptions = {}): WorkbenchApiClient {
   const transportFetch = options.fetch ?? fetch;
-  const shell = () => options.shell ?? getDebruteShellApi();
-  const eventClientId = browserEventClientId();
+  const terminalHub = createTerminalHubClient({
+    ...(options.WebSocket ? { WebSocket: options.WebSocket } : {}),
+    ...(options.origin ? { origin: options.origin } : {})
+  });
+  let connectionCredential: string | undefined;
 
-  const request = async <T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
+  const fetchResponse = async (method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> => {
+    await ensureConnection();
+    if (connectionEndedError) {
+      throw connectionEndedError;
+    }
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers['content-type'] = 'application/json';
+    }
+    if (connectionCredential) {
+      headers['x-debrute-workbench-connection'] = connectionCredential;
     }
     const response = await transportFetch(path, {
       method,
@@ -111,6 +139,10 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     if (!response.ok) {
       throw await responseError(response);
     }
+    return response;
+  };
+  const request = async <T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
+    const response = await fetchResponse(method, path, body, signal);
     if (response.status === 204) {
       return undefined as T;
     }
@@ -122,9 +154,16 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     body: FormData,
     signal?: AbortSignal
   ): Promise<T> => {
+    await ensureConnection();
+    if (connectionEndedError) {
+      throw connectionEndedError;
+    }
     const response = await transportFetch(path, {
       method,
       body,
+      headers: {
+        ...(connectionCredential ? { 'x-debrute-workbench-connection': connectionCredential } : {})
+      },
       credentials: 'same-origin',
       ...(signal === undefined ? {} : { signal })
     });
@@ -138,12 +177,20 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
   let currentProjectRevision: number | undefined;
   let currentProjectGeneration = 0;
   const projectRequestControllers = new Set<AbortController>();
-  let projectOpenRequestSequence = 0;
-  let latestAcceptedProjectOpenRequestId = 0;
-  let globalEventSource: EventSource | undefined;
-  let projectEventSource: EventSource | undefined;
-  let globalEventSourceRequestId = 0;
+  let connectionAbort: AbortController | undefined;
+  let connectionReady: Promise<void> | undefined;
+  let initialProject: WorkbenchProjectOpenResult | undefined;
+  let initialProjectError: DebruteHttpRequestError | undefined;
+  let connectionEndedError: Error | undefined;
+  let disposed = false;
+  const boundProjects = new Map<string, WorkbenchProjectOpenResult>();
+  const boundProjectWaiters = new Map<string, Array<{
+    resolve(project: WorkbenchProjectOpenResult): void;
+    reject(error: Error): void;
+  }>>();
   const eventListeners = new Set<(event: WorkbenchEvent) => void>();
+  const projectDetachedListeners = new Set<() => void>();
+  const connectionEndedListeners = new Set<(error: Error) => void>();
   const projectPathFor = (projectId: string, path: string) => `/api/projects/${encodeURIComponent(projectId)}${path}`;
   const projectPath = (path: string) => {
     if (!currentProjectId) {
@@ -184,116 +231,19 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       projectRequestControllers.delete(controller);
     }
   };
-  const rememberProjectRevision = (scope: ProjectRequestScope, result: RevisionedProjectResponse): void => {
-    if (result.projectId !== scope.projectId) {
-      throw new Error(`Project response ${result.projectId} does not match request project ${scope.projectId}.`);
-    }
-    if (currentProjectRevision !== undefined && result.projectRevision < currentProjectRevision) {
-      throw new ProjectResponseSupersededError(scope.projectId, result.projectRevision, currentProjectRevision);
-    }
-    currentProjectRevision = result.projectRevision;
-  };
-  const rememberStaleProjectRevision = (scope: ProjectRequestScope, error: unknown): void => {
-    if (
-      error instanceof DebruteHttpRequestError
-      && error.code === 'stale_project_revision'
-      && isRevisionedProjectResponse(error.details)
-      && error.details.projectId === scope.projectId
-      && (currentProjectRevision === undefined || error.details.projectRevision > currentProjectRevision)
-    ) {
-      currentProjectRevision = error.details.projectRevision;
-    }
-  };
-  const revisionedBody = (baseRevision: number, body: object = {}): Record<string, unknown> => {
-    return {
-      baseRevision,
-      ...body
-    };
-  };
-  let revisionedMutationQueue: Promise<void> = Promise.resolve();
-  const runRevisionedMutation = <T extends RevisionedProjectResponse>(
-    operation: (baseRevision: number) => Promise<T>
-  ): Promise<T> => {
-    const scope = captureProjectScope();
-    const queued = revisionedMutationQueue.then(async () => {
-      if (!isCurrentProjectScope(scope)) {
-        throw new ProjectChangedRequestError('Project changed before the request started.');
-      }
-      if (currentProjectRevision === undefined) {
-        throw new Error('Debrute project revision is not loaded.');
-      }
-      try {
-        const result = await operation(currentProjectRevision);
-        if (!isCurrentProjectScope(scope)) {
-          throw new ProjectChangedRequestError('Project changed while the request was in flight.');
-        }
-        rememberProjectRevision(scope, result);
-        return result;
-      } catch (error) {
-        if (!isCurrentProjectScope(scope)) {
-          throw error instanceof ProjectChangedRequestError
-            ? error
-            : new ProjectChangedRequestError('Project changed while the request was in flight.');
-        }
-        rememberStaleProjectRevision(scope, error);
-        throw error;
-      }
-    });
-    revisionedMutationQueue = queued.then(() => undefined, () => undefined);
-    return queued;
-  };
-  const requestRevisioned = <T extends RevisionedProjectResponse>(
+  const requestForCurrentProject = <T>(
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<T> => runProjectRequest((scope, signal) => (
+    request<T>(method, projectPathFor(scope.projectId, path), body, signal)
+  ));
+  const requestProjectMutation = <T>(
     method: string,
     path: string,
     body?: object
   ): Promise<T> => {
-    return runRevisionedMutation((baseRevision) => request<T>(method, path, revisionedBody(baseRevision, body)));
-  };
-  const requestRevisionedProjectState = async <T extends RevisionedProjectResponse>(
-    method: string,
-    path: string
-  ): Promise<T> => {
-    const scope = captureProjectScope();
-    try {
-      const result = await request<T>(method, path);
-      if (!isCurrentProjectScope(scope)) {
-        throw new ProjectChangedRequestError('Project changed while the request was in flight.');
-      }
-      rememberProjectRevision(scope, result);
-      return result;
-    } catch (error) {
-      if (!isCurrentProjectScope(scope)) {
-        throw error instanceof ProjectChangedRequestError
-          ? error
-          : new ProjectChangedRequestError('Project changed while the request was in flight.');
-      }
-      throw error;
-    }
-  };
-  const commitCurrentProject = (projectId: string, projectRevision: number): void => {
-    for (const controller of projectRequestControllers) {
-      controller.abort();
-    }
-    projectRequestControllers.clear();
-    currentProjectGeneration += 1;
-    currentProjectId = projectId;
-    currentProjectRevision = projectRevision;
-    revisionedMutationQueue = Promise.resolve();
-    reconnectProjectEventSource();
-  };
-  let projectOpenCommitQueue: Promise<void> = Promise.resolve();
-  const acceptOpenedProject = <T extends RevisionedProjectResponse>(requestId: number, opened: T): Promise<T> => {
-    if (requestId < latestAcceptedProjectOpenRequestId) {
-      throw new ProjectChangedRequestError('Another project open request completed first.');
-    }
-    latestAcceptedProjectOpenRequestId = requestId;
-    const committed = projectOpenCommitQueue.then(async () => {
-      await shell()?.bindProjectWindowToProject?.({ projectId: opened.projectId });
-      commitCurrentProject(opened.projectId, opened.projectRevision);
-      return opened;
-    });
-    projectOpenCommitQueue = committed.then(() => undefined, () => undefined);
-    return committed;
+    return runProjectRequest((_scope, signal) => request<T>(method, path, body, signal));
   };
   const dispatchWorkbenchEvent = (event: WorkbenchEvent): void => {
     if ('projectId' in event && 'projectRevision' in event) {
@@ -309,86 +259,286 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
       listener(event);
     }
   };
-  const openWorkbenchEventSource = (
-    url: string,
-    onEvent: (event: WorkbenchEvent) => void = dispatchWorkbenchEvent
-  ): EventSource => {
-    const source = new EventSource(url);
-    source.onmessage = (event) => {
-      onEvent(JSON.parse(event.data) as WorkbenchEvent);
-    };
-    return source;
+  const markProjectDetached = (): void => {
+    if (!currentProjectId) {
+      return;
+    }
+    currentProjectId = undefined;
+    currentProjectRevision = undefined;
+    initialProject = undefined;
+    boundProjects.clear();
+    currentProjectGeneration += 1;
+    for (const controller of projectRequestControllers) {
+      controller.abort();
+    }
+    projectRequestControllers.clear();
+    terminalHub.unbindProject();
+    for (const listener of projectDetachedListeners) {
+      listener();
+    }
   };
-  const reconnectGlobalEventSource = (): void => {
-    globalEventSourceRequestId += 1;
-    const requestId = globalEventSourceRequestId;
-    globalEventSource?.close();
-    globalEventSource = undefined;
-    if (eventListeners.size === 0) {
-      return;
+  const commitCurrentProject = (project: WorkbenchProjectOpenResult): void => {
+    if (!connectionCredential) {
+      throw new Error('Runtime bound a Project before opening the Workbench connection.');
     }
-    if (requestId !== globalEventSourceRequestId || eventListeners.size === 0) {
-      return;
+    for (const controller of projectRequestControllers) {
+      controller.abort();
     }
-    const eventUrl = new URL('/api/workbench/events', browserEventSourceBaseUrl());
-    eventUrl.searchParams.set('clientId', eventClientId);
-    globalEventSource = openWorkbenchEventSource(relativeUrlString(eventUrl));
+    projectRequestControllers.clear();
+    currentProjectGeneration += 1;
+    currentProjectId = project.projectId;
+    currentProjectRevision = project.projectRevision;
+    initialProjectError = undefined;
+    terminalHub.bindProject(project.projectId, connectionCredential);
   };
-  const reconnectProjectEventSource = (): void => {
-    projectEventSource?.close();
-    projectEventSource = undefined;
-    if (!currentProjectId || eventListeners.size === 0) {
-      return;
+  const acceptBoundProject = (project: WorkbenchProjectOpenResult): void => {
+    boundProjects.clear();
+    boundProjects.set(project.projectId, project);
+    for (const waiter of boundProjectWaiters.get(project.projectId) ?? []) {
+      waiter.resolve(project);
     }
-    const eventUrl = new URL(projectPath('/events'), browserEventSourceBaseUrl());
-    eventUrl.searchParams.set('clientId', eventClientId);
-    const scope = captureProjectScope();
-    projectEventSource = openWorkbenchEventSource(relativeUrlString(eventUrl), (event) => {
-      if (isCurrentProjectScope(scope) && 'projectId' in event && event.projectId === scope.projectId) {
-        dispatchWorkbenchEvent(event);
-      }
+    boundProjectWaiters.delete(project.projectId);
+  };
+  const waitForBoundProject = (projectId: string): Promise<WorkbenchProjectOpenResult> => {
+    const current = boundProjects.get(projectId);
+    if (current) {
+      return Promise.resolve(current);
+    }
+    if (connectionEndedError) {
+      return Promise.reject(connectionEndedError);
+    }
+    return new Promise((resolve, reject) => {
+      const waiters = boundProjectWaiters.get(projectId) ?? [];
+      waiters.push({ resolve, reject });
+      boundProjectWaiters.set(projectId, waiters);
     });
+  };
+  const ensureConnection = (): Promise<void> => {
+    if (connectionReady) {
+      return connectionReady;
+    }
+    const controller = new AbortController();
+    connectionAbort = controller;
+    let resolveReady!: () => void;
+    let rejectReady!: (error: unknown) => void;
+    let readySettled = false;
+    const requestedProjectId = requestedProjectIdFromLocation();
+    let globalSynchronized = false;
+    let projectSynchronized = requestedProjectId === undefined;
+    const ready = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    connectionReady = ready;
+    const settleReady = (): void => {
+      if (!readySettled && globalSynchronized && projectSynchronized) {
+        readySettled = true;
+        resolveReady();
+      }
+    };
+    void (async () => {
+      try {
+        const desktopLaunchTicket = await getDebruteShellApi()?.takeDesktopLaunchTicket?.();
+        const response = await transportFetch('/api/workbench/connection', {
+          method: 'POST',
+          headers: {
+            accept: 'text/event-stream',
+            'content-type': 'application/json'
+          },
+          credentials: 'same-origin',
+          signal: controller.signal,
+          body: JSON.stringify({
+            ...(requestedProjectId ? { requestedProjectId } : {}),
+            ...(desktopLaunchTicket ? { desktopLaunchTicket } : {})
+          })
+        });
+        if (!response.ok) {
+          throw await responseError(response);
+        }
+        await readJsonSseStream(response, (value) => {
+          if (isConnectionOpenedFrame(value)) {
+            connectionCredential = value.connectionCredential;
+            return;
+          }
+          if (isGlobalSnapshotFrame(value)) {
+            globalSynchronized = true;
+            dispatchWorkbenchEvent({ type: 'globalSettings.changed', settings: value.snapshot.settings });
+            dispatchWorkbenchEvent({
+              type: 'recentProjects.changed',
+              recentProjects: value.snapshot.recentProjects
+            });
+            dispatchWorkbenchEvent({ type: 'integrations.changed', integrations: value.snapshot.integrations });
+            dispatchWorkbenchEvent({ type: 'adobeBridge.state.changed', state: value.snapshot.photoshop });
+            if (value.snapshot.product) {
+              dispatchWorkbenchEvent({ type: 'product.changed', product: value.snapshot.product });
+            }
+            settleReady();
+            return;
+          }
+          if (isProjectBoundFrame(value)) {
+            const project = { ...value.project, workingCopies: value.workingCopies };
+            commitCurrentProject(project);
+            acceptBoundProject(project);
+            if (project.projectId === requestedProjectId) {
+              initialProject = project;
+              projectSynchronized = true;
+              settleReady();
+            }
+            return;
+          }
+          if (isProjectOpenFailedFrame(value)) {
+            initialProjectError = new DebruteHttpRequestError(
+              409,
+              value.error.code,
+              value.error.message,
+              { projectId: value.projectId }
+            );
+            projectSynchronized = true;
+            settleReady();
+            return;
+          }
+          if (isProjectPreemptedFrame(value)) {
+            markProjectDetached();
+            return;
+          }
+          if (isConnectionEndedFrame(value)) {
+            throw new Error(`Runtime ended the Workbench connection: ${value.code}`);
+          }
+          if (isWorkbenchEvent(value)) {
+            dispatchWorkbenchEvent(value);
+          }
+        });
+        if (!controller.signal.aborted && !disposed) {
+          throw new Error('Runtime Workbench connection ended unexpectedly.');
+        }
+      } catch (error) {
+        if (controller.signal.aborted || disposed) {
+          return;
+        }
+        connectionEndedError = error instanceof Error ? error : new Error(String(error));
+        connectionCredential = undefined;
+        terminalHub.unbindProject();
+        for (const requestController of projectRequestControllers) {
+          requestController.abort();
+        }
+        projectRequestControllers.clear();
+        for (const waiters of boundProjectWaiters.values()) {
+          for (const waiter of waiters) {
+            waiter.reject(connectionEndedError);
+          }
+        }
+        boundProjectWaiters.clear();
+        if (!readySettled) {
+          readySettled = true;
+          rejectReady(connectionEndedError);
+        }
+        for (const listener of connectionEndedListeners) {
+          listener(connectionEndedError);
+        }
+      }
+    })();
+    return ready;
   };
 
   return {
-    mode: 'web',
-    clientId: eventClientId,
     adobeBridgeGetState: () => request<AdobeBridgeStateView>('GET', '/api/adobe-bridge'),
-    adobeBridgeLinkPhotoshop: (input) => request<AdobeBridgeStateView>('POST', projectPath('/adobe-bridge/links'), input),
-    adobeBridgeUnlinkPhotoshop: (adobeClientId) => request<AdobeBridgeStateView>(
-      'DELETE',
-      projectPath(`/adobe-bridge/links/${encodeURIComponent(adobeClientId)}`)
-    ),
-    sendProjectFileToPhotoshop: (input) => request<SendProjectFileToPhotoshopResult>(
+    adobeBridgeCreatePairing: () => request<{ pairingId: string; code: string; expiresAt: string }>(
       'POST',
-      projectPath('/adobe-bridge/send-to-photoshop'),
+      '/api/adobe-bridge/pairings'
+    ),
+    adobeBridgeCancelPairing: (pairingId) => request<void>(
+      'DELETE',
+      `/api/adobe-bridge/pairings/${encodeURIComponent(pairingId)}`
+    ),
+    adobeBridgeRemovePairing: (pluginInstanceId) => request<AdobeBridgeStateView>(
+      'DELETE',
+      `/api/adobe-bridge/plugin-instances/${encodeURIComponent(pluginInstanceId)}/pairing`
+    ),
+    adobeBridgeLinkPhotoshop: (input) => requestForCurrentProject<AdobeBridgeStateView>('POST', '/adobe-bridge/links', input),
+    adobeBridgeUnlinkPhotoshop: (pluginInstanceId) => requestForCurrentProject<AdobeBridgeStateView>(
+      'DELETE',
+      `/adobe-bridge/links/${encodeURIComponent(pluginInstanceId)}`
+    ),
+    sendProjectFileToPhotoshop: (input) => requestForCurrentProject<SendProjectFileToPhotoshopResult>(
+      'POST',
+      '/adobe-bridge/send-to-photoshop',
       input
     ),
     openProject: async (input) => {
-      const requestId = projectOpenRequestSequence + 1;
-      projectOpenRequestSequence = requestId;
+      await ensureConnection();
       if ('projectId' in input) {
-        const opened = await request<WorkbenchProjectOpenResult>('GET', projectPathFor(input.projectId, ''));
-        return acceptOpenedProject(requestId, opened);
+        if (initialProject?.projectId === input.projectId) {
+          return initialProject;
+        }
+        if (initialProjectError && !input.forceOpenHere) {
+          throw initialProjectError;
+        }
+        if (currentProjectId === input.projectId) {
+          const current = boundProjects.get(input.projectId);
+          if (!current) {
+            throw new Error(`Runtime did not provide state for bound Project ${input.projectId}.`);
+          }
+          return current;
+        }
+        if (!currentProjectId) {
+          const opened = await request<ProjectBindingCommandResult>(
+            'POST',
+            '/api/projects/open',
+            {
+              projectId: input.projectId,
+              ...(input.forceOpenHere ? { forceOpenHere: true } : {})
+            }
+          );
+          if (opened.outcome === 'focused_existing_desktop') {
+            return { outcome: opened.outcome, projectId: opened.projectId };
+          }
+          return waitForBoundProject(opened.projectId);
+        }
+        throw new Error(`Workbench is already bound to Project ${currentProjectId}.`);
       }
-      const opened = await request<WorkbenchProjectOpenResult>('POST', '/api/projects/open', { projectRoot: input.projectRoot });
-      return acceptOpenedProject(requestId, opened);
+      if (!currentProjectId) {
+        const opened = await request<ProjectBindingCommandResult>(
+          'POST',
+          '/api/projects/open',
+          {
+            projectRoot: input.projectRoot,
+            ...(input.forceOpenHere ? { forceOpenHere: true } : {})
+          }
+        );
+        if (opened.outcome === 'focused_existing_desktop') {
+          return { outcome: opened.outcome, projectId: opened.projectId };
+        }
+        return waitForBoundProject(opened.projectId);
+      }
+      const opened = await request<ProjectBindingCommandResult>(
+        'POST',
+        '/api/projects/replace',
+        {
+          projectRoot: input.projectRoot,
+          ...(input.forceOpenHere ? { forceOpenHere: true } : {})
+        }
+      );
+      if (opened.outcome === 'focused_existing_desktop') {
+        return { outcome: opened.outcome, projectId: opened.projectId };
+      }
+      return waitForBoundProject(opened.projectId);
     },
     openProjectFromPicker: async () => {
-      const requestId = projectOpenRequestSequence + 1;
-      projectOpenRequestSequence = requestId;
-      const result = await request<WorkbenchProjectPickerOpenResult>('POST', '/api/projects/open-picker');
-      if (result.opened) {
-        return acceptOpenedProject(requestId, result);
+      await ensureConnection();
+      const result = await request<ProjectPickerCommandResult>('POST', '/api/projects/choose', {
+        mode: currentProjectId ? 'replace' : 'open'
+      });
+      if (!result.opened) {
+        return result;
       }
-      return result;
-    },
-    getWorkbenchTitleBarState: (input) => {
-      const params = new URLSearchParams({ host: input.host });
-      if (input.projectId) {
-        params.set('projectId', input.projectId);
+      if (result.outcome === 'focused_existing_desktop') {
+        return {
+          opened: true,
+          outcome: 'focused_existing_desktop',
+          projectId: result.projectId
+        };
       }
-      return request<WorkbenchTitleBarState>('GET', `/api/workbench/title-bar?${params.toString()}`);
+      return { opened: true, ...await waitForBoundProject(result.projectId) };
     },
     clearRecentProjectRoots: () => request<{ ok: true }>('DELETE', '/api/workbench/recent-projects'),
     getProductState: () => request<DebruteProductState>('GET', '/api/runtime/product'),
@@ -396,56 +546,46 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     applyProductUpdate: () => request<ProductUpdateApplyResult>('POST', '/api/runtime/product/update/apply'),
     globalSettingsGet: () => request<DebruteGlobalSettingsView>('GET', '/api/settings/global'),
     globalSettingsSave: (input: SaveDebruteGlobalSettingsInput) => request<DebruteGlobalSettingsView>('PATCH', '/api/settings/global', input),
-    getSnapshot: () => requestRevisionedProjectState<WorkbenchProjectRefreshResult>('GET', projectPath('')),
-    getProjectHealth: () => request<ProjectHealthSummary>('GET', projectPath('/health')),
-    listTerminalSessions: () => request<TerminalSessionList>('GET', projectPath('/terminals')),
-    createTerminalSession: (input = {}) => request<TerminalSessionResult>('POST', projectPath('/terminals'), input),
-    writeTerminalInput: (input) => request<{ ok: true }>(
-      'POST',
-      projectPath(`/terminals/${encodeURIComponent(input.terminalId)}/input`),
-      { data: input.data }
-    ),
-    resizeTerminal: (input) => request<TerminalSessionResult>(
-      'POST',
-      projectPath(`/terminals/${encodeURIComponent(input.terminalId)}/resize`),
-      { cols: input.cols, rows: input.rows }
-    ),
-    closeTerminalSession: (input) => request<{ ok: true }>(
+    getSnapshot: () => requestForCurrentProject<WorkbenchProjectRefreshResult>('GET', ''),
+    getProjectHealth: () => requestForCurrentProject<WorkbenchProjectHealthSummary>('GET', '/health'),
+    listTerminalSessions: () => requestForCurrentProject<TerminalSessionList>('GET', '/terminals'),
+    createTerminalSession: (input = {}) => requestForCurrentProject<TerminalSessionResult>('POST', '/terminals', input),
+    writeTerminalInput: (input) => terminalHub.writeInput(input.terminalId, input.data),
+    resizeTerminal: (input) => terminalHub.resize(input.terminalId, input.cols, input.rows),
+    closeTerminalSession: (input) => requestForCurrentProject<{ ok: true }>(
       'DELETE',
-      projectPath(`/terminals/${encodeURIComponent(input.terminalId)}`)
+      `/terminals/${encodeURIComponent(input.terminalId)}`
     ),
-    subscribeTerminalEvents: (terminalId, listener, onError): TerminalEventSubscription => {
-      const eventUrl = new URL(projectPath(`/terminals/${encodeURIComponent(terminalId)}/events`), browserEventSourceBaseUrl());
-      const source = new EventSource(relativeUrlString(eventUrl));
-      let streamClosed = false;
-      source.addEventListener('terminal', (event) => {
-        const terminalEvent = JSON.parse((event as MessageEvent).data) as TerminalEvent;
-        if (terminalEvent.type === 'closed') {
-          streamClosed = true;
-        }
-        listener(terminalEvent);
-        if (terminalEvent.type === 'closed') {
-          source.close();
-        }
-      });
-      source.onerror = () => {
-        if (streamClosed) {
-          return;
-        }
-        onError?.(new Error('Terminal event stream failed.'));
-      };
-      return {
-        close: () => {
-          streamClosed = true;
-          source.close();
-        }
-      };
-    },
-    readProjectTextFile: (projectRelativePath) => request<WorkbenchProjectTextFile>('GET', projectPath(`/files/text/${encodeProjectPath(projectRelativePath)}`)),
-    writeProjectTextFile: (input: WriteProjectTextFileInput) => requestRevisioned<WorkbenchProjectTextFileWriteResult>(
+    subscribeTerminalEvents: (terminalId, listener, onError): TerminalEventSubscription => (
+      terminalHub.subscribe(terminalId, listener, onError)
+    ),
+    readProjectTextFile: (projectRelativePath) => requestForCurrentProject<WorkbenchProjectTextFile>('GET', `/files/text/${encodeProjectPath(projectRelativePath)}`),
+    writeProjectTextFile: (input: WriteProjectTextFileInput) => requestProjectMutation<WorkbenchProjectTextFileWriteResult>(
       'PUT',
       projectPath(`/files/text/${encodeProjectPath(input.projectRelativePath)}`),
       { content: input.content, expectedRevision: input.expectedRevision }
+    ),
+    putTextWorkingCopy: (projectId: string, input: WorkbenchTextWorkingCopy) => request<WorkbenchTextWorkingCopy>(
+      'PUT',
+      projectPathFor(projectId, `/working-copies/text/${encodeProjectPath(input.projectRelativePath)}`),
+      {
+        content: input.content,
+        language: input.language,
+        baseRevision: input.baseRevision
+      }
+    ),
+    clearTextWorkingCopy: (projectId, projectRelativePath) => request<void>(
+      'DELETE',
+      projectPathFor(projectId, `/working-copies/text/${encodeProjectPath(projectRelativePath)}`)
+    ),
+    putFeedbackWorkingCopy: (projectId: string, input: WorkbenchFeedbackWorkingCopy) => request<WorkbenchFeedbackWorkingCopy>(
+      'PUT',
+      projectPathFor(projectId, '/working-copies/feedback'),
+      input
+    ),
+    clearFeedbackWorkingCopy: (projectId) => request<void>(
+      'DELETE',
+      projectPathFor(projectId, '/working-copies/feedback')
     ),
     saveCanvasTextPreviewSource: (input) => runProjectRequest((scope, signal) => (
       requestFormData<SaveCanvasTextPreviewSourceResult>(
@@ -455,7 +595,7 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
         signal
       )
     )),
-  readCanvasTextPreviewSources: (input) => runProjectRequest((scope, signal) => (
+    readCanvasTextPreviewSources: (input) => runProjectRequest((scope, signal) => (
       request<CanvasTextPreviewSourceAvailabilityResponse>(
         'POST',
         projectPathFor(scope.projectId, '/canvas-text-previews/sources'),
@@ -463,90 +603,88 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
         signal
       )
     )),
-    readCanvasVideoPreviewSources: (input) => request<CanvasVideoPreviewSourceResponse>(
+    readCanvasVideoPreviewSources: (input) => requestForCurrentProject<CanvasVideoPreviewSourceResponse>(
       'POST',
-      projectPath('/canvas-video-previews/sources'),
+      '/canvas-video-previews/sources',
       input
     ),
-    getDesktopPlatform: async () => (
-      await request<DebruteRuntimeInfo>('GET', '/api/runtime')
-    ).platform,
-    createProjectFile: (input) => requestRevisioned<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'file' }),
-    createProjectDirectory: (input) => requestRevisioned<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'directory' }),
-    renameProjectPath: (input) => requestRevisioned<WorkbenchProjectFileOperationResult>('PATCH', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`), {
+    createProjectFile: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'file' }),
+    createProjectDirectory: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'directory' }),
+    renameProjectPath: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('PATCH', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`), {
       operation: 'rename',
       name: input.name
     }),
-    copyProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/copy'), input),
-    moveProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/move'), input),
-    copyProjectAbsolutePaths: (input) => request<{ paths: string[] }>(
+    copyProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/copy'), input),
+    moveProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/move'), input),
+    copyProjectAbsolutePaths: (input) => requestForCurrentProject<{ paths: string[] }>(
       'POST',
-      projectPath('/files/path/batch/copy-path'),
+      '/files/path/batch/copy-path',
       input
     ),
-    trashProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>(
+    trashProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>(
       'POST',
       projectPath('/files/path/batch/trash'),
       input
     ),
-    deleteProjectPathsPermanently: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
-    importExternalLocalProjectPaths: (input) => requestRevisioned<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
-    importExternalProjectUploads: (input) => runRevisionedMutation((baseRevision) => (
+    deleteProjectPathsPermanently: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
+    importExternalLocalProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
+    importExternalProjectUploads: (input) => runProjectRequest((scope, signal) => (
       requestFormData<WorkbenchProjectFileBatchOperationResult>(
         'POST',
-        projectPath('/files/import/uploads'),
-        uploadImportFormData(input, baseRevision)
+        projectPathFor(scope.projectId, '/files/import/uploads'),
+        uploadImportFormData(input),
+        signal
       )
     )),
-    revealProjectPathInSystemFileManager: (input) => request<{ ok: true }>(
+    revealProjectPathInSystemFileManager: (input) => requestForCurrentProject<{ ok: true }>(
       'POST',
-      projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`),
+      `/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`,
       { kind: input.kind }
     ),
-    lookupGeneratedAssetMetadata: (input) => request<GeneratedAssetMetadataLookup>('POST', projectPath('/generated-assets/lookup'), input),
-    listGeneratedAssets: () => request<GeneratedAssetsView>('GET', projectPath('/generated-assets')),
-    readGeneratedAsset: (assetId) => request<GeneratedAssetView>('GET', projectPath(`/generated-assets/${encodeURIComponent(assetId)}`)),
-    readCanvasFeedback: () => request<CanvasFeedbackDocument>('GET', projectPath('/canvas-feedback')),
-    updateCanvasFeedbackEntry: (input) => requestRevisioned<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
-    refreshProject: () => requestRevisionedProjectState<WorkbenchProjectRefreshResult>('POST', projectPath('/refresh')),
-    createCanvas: () => requestRevisioned<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
-    renameCanvas: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
+    lookupGeneratedAssetMetadata: (input) => requestForCurrentProject<GeneratedAssetMetadataLookup>('POST', '/generated-assets/lookup', input),
+    listGeneratedAssets: () => requestForCurrentProject<GeneratedAssetsView>('GET', '/generated-assets'),
+    readGeneratedAsset: (assetId) => requestForCurrentProject<GeneratedAssetView>('GET', `/generated-assets/${encodeURIComponent(assetId)}`),
+    readCanvasFeedback: () => requestForCurrentProject<CanvasFeedbackDocument>('GET', '/canvas-feedback'),
+    updateCanvasFeedbackEntry: (input) => requestProjectMutation<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
+    refreshProject: () => requestProjectMutation<WorkbenchProjectRefreshResult>('POST', projectPath('/refresh')),
+    createCanvas: () => requestProjectMutation<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
+    renameCanvas: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`),
       { operation: 'rename', name: input.name }
     ),
-    deleteCanvas: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
+    deleteCanvas: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
       'DELETE',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`)
     ),
-    reorderCanvases: (input) => requestRevisioned<WorkbenchCanvasManagementResult>(
+    reorderCanvases: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
       'PUT',
       projectPath('/canvases/index'),
       input
     ),
-    repairCanvasIndex: () => requestRevisioned<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases/index/repair')),
-    addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => requestRevisioned<WorkbenchAddProjectPathToCanvasMapResult>(
+    repairCanvasIndex: () => requestProjectMutation<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases/index/repair')),
+    addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => requestProjectMutation<WorkbenchAddProjectPathToCanvasMapResult>(
       'POST',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/canvas-map/project-paths`),
       { projectRelativePath: input.projectRelativePath }
     ),
-    updateCanvasNodeLayouts: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layouts`), {
+    updateCanvasNodeLayouts: (input) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layouts`), {
       nodeLayouts: input.nodeLayouts
     }),
-    resetCanvasNodeLayouts: (input) => requestRevisioned<WorkbenchCanvasResetLayoutResult>(
+    resetCanvasNodeLayouts: (input) => requestProjectMutation<WorkbenchCanvasResetLayoutResult>(
       'POST',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/reset-layout`),
       'all' in input ? { all: true } : { pathRules: input.pathRules }
     ),
-    bringCanvasNodeToFront: (input) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>('POST', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-stack-order/bring-to-front`), {
+    bringCanvasNodeToFront: (input) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>('POST', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-stack-order/bring-to-front`), {
       projectRelativePath: input.projectRelativePath
     }),
-    updateCanvasVideoPlaybackState: (input: UpdateCanvasVideoPlaybackStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
+    updateCanvasVideoPlaybackState: (input: UpdateCanvasVideoPlaybackStateInput) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/video-playback`),
       { updates: input.updates }
     ),
-    updateCanvasTextViewportState: (input: UpdateCanvasTextViewportStateInput) => requestRevisioned<WorkbenchCanvasDocumentMutationResult>(
+    updateCanvasTextViewportState: (input: UpdateCanvasTextViewportStateInput) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
       { updates: input.updates }
@@ -559,55 +697,146 @@ export function createHttpWorkbenchApiClient(options: HttpWorkbenchApiClientOpti
     ),
     onEvent: (listener: (event: WorkbenchEvent) => void) => {
       eventListeners.add(listener);
-      reconnectGlobalEventSource();
-      reconnectProjectEventSource();
+      void ensureConnection().catch(() => undefined);
       return () => {
         eventListeners.delete(listener);
-        if (eventListeners.size === 0) {
-          globalEventSourceRequestId += 1;
-          globalEventSource?.close();
-          projectEventSource?.close();
-          globalEventSource = undefined;
-          projectEventSource = undefined;
-          return;
-        }
-        reconnectGlobalEventSource();
-        reconnectProjectEventSource();
       };
+    },
+    onProjectDetached: (listener) => {
+      projectDetachedListeners.add(listener);
+      return () => {
+        projectDetachedListeners.delete(listener);
+      };
+    },
+    onConnectionEnded: (listener) => {
+      connectionEndedListeners.add(listener);
+      if (connectionEndedError) {
+        listener(connectionEndedError);
+      }
+      return () => {
+        connectionEndedListeners.delete(listener);
+      };
+    },
+    dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      connectionAbort?.abort();
+      for (const controller of projectRequestControllers) {
+        controller.abort();
+      }
+      projectRequestControllers.clear();
+      terminalHub.unbindProject();
+      terminalHub.dispose();
+      connectionCredential = undefined;
+      const error = new Error('Workbench API client was disposed.');
+      for (const waiters of boundProjectWaiters.values()) {
+        for (const waiter of waiters) {
+          waiter.reject(error);
+        }
+      }
+      boundProjectWaiters.clear();
     }
   };
 }
 
-function browserEventSourceBaseUrl(): string {
-  return typeof window === 'undefined' ? 'http://debrute.local' : window.location.origin;
+function isWorkbenchEvent(value: unknown): value is WorkbenchEvent {
+  if (!isObject(value) || typeof value.type !== 'string') {
+    return false;
+  }
+  return WORKBENCH_EVENT_TYPES.has(value.type as WorkbenchEvent['type']);
 }
 
-function relativeUrlString(url: URL): string {
-  return `${url.pathname}${url.search}${url.hash}`;
+const WORKBENCH_EVENT_TYPES = new Set<WorkbenchEvent['type']>([
+  'project.opened',
+  'project.changed',
+  'project.fileChanged',
+  'canvas.changed',
+  'canvas.feedback.changed',
+  'generatedAsset.metadata.changed',
+  'recentProjects.changed',
+  'globalSettings.changed',
+  'integrations.changed',
+  'adobeBridge.state.changed',
+  'product.changed'
+]);
+
+function isConnectionOpenedFrame(value: unknown): value is {
+  type: 'connection.opened';
+  connectionCredential: string;
+} {
+  return isObject(value)
+    && value.type === 'connection.opened'
+    && typeof value.connectionCredential === 'string';
 }
 
-function browserEventClientId(): string {
-  const key = 'debrute.webClientId';
-  if (typeof window === 'undefined') {
-    return `web:${crypto.randomUUID()}`;
-  }
-  const existing = window.sessionStorage.getItem(key);
-  if (existing) {
-    return existing;
-  }
-  const next = `web:${crypto.randomUUID()}`;
-  window.sessionStorage.setItem(key, next);
-  return next;
+function isGlobalSnapshotFrame(value: unknown): value is GlobalSnapshotFrame {
+  return isObject(value)
+    && value.type === 'global.snapshot'
+    && typeof value.globalRevision === 'number'
+    && isObject(value.snapshot)
+    && Array.isArray(value.snapshot.recentProjects);
+}
+
+function isProjectBoundFrame(value: unknown): value is ProjectBoundFrame {
+  return isObject(value)
+    && value.type === 'project.bound'
+    && isObject(value.project)
+    && typeof value.project.projectId === 'string'
+    && typeof value.project.projectRevision === 'number'
+    && isWorkingCopies(value.workingCopies);
+}
+
+function isWorkingCopies(value: unknown): value is WorkbenchWorkingCopies {
+  return isObject(value)
+    && isObject(value.text)
+    && (value.feedback === null || isObject(value.feedback));
+}
+
+function isProjectOpenFailedFrame(value: unknown): value is ProjectOpenFailedFrame {
+  return isObject(value)
+    && value.type === 'project.open_failed'
+    && typeof value.projectId === 'string'
+    && isObject(value.error)
+    && typeof value.error.code === 'string'
+    && typeof value.error.message === 'string';
+}
+
+function isProjectPreemptedFrame(value: unknown): value is {
+  type: 'project.preempted';
+  projectId: string;
+} {
+  return isObject(value)
+    && value.type === 'project.preempted'
+    && typeof value.projectId === 'string';
+}
+
+function isConnectionEndedFrame(value: unknown): value is {
+  type: 'connection.ended';
+  code: string;
+} {
+  return isObject(value)
+    && value.type === 'connection.ended'
+    && typeof value.code === 'string';
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requestedProjectIdFromLocation(): string | undefined {
+  const match = globalThis.location?.pathname.match(/^\/projects\/([^/]+)$/);
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 
 function encodeProjectPath(projectRelativePath: string): string {
   return projectRelativePath.split('/').map(encodeURIComponent).join('/');
 }
 
-function uploadImportFormData(input: WorkbenchProjectUploadImportInput, baseRevision: number): FormData {
+function uploadImportFormData(input: WorkbenchProjectUploadImportInput): FormData {
   const formData = new FormData();
-  const plan: DaemonProjectUploadImportPlan = {
-    baseRevision,
+  const plan: RuntimeProjectUploadImportPlan = {
     targetDirectoryProjectRelativePath: input.targetDirectoryProjectRelativePath,
     entries: input.entries.map((entry, index) => (
       entry.kind === 'file'
@@ -646,7 +875,7 @@ function canvasTextPreviewSourceFormData(input: SaveCanvasTextPreviewSourceInput
 async function responseError(response: Response): Promise<DebruteHttpRequestError> {
   const text = await response.text();
   if (!text) {
-    return new DebruteHttpRequestError(response.status, undefined, `Debrute daemon request failed: ${response.status}`, undefined);
+    return new DebruteHttpRequestError(response.status, undefined, `Debrute Runtime request failed: ${response.status}`, undefined);
   }
   try {
     const parsed = JSON.parse(text) as Partial<DebruteHttpErrorBody>;
@@ -657,12 +886,4 @@ async function responseError(response: Response): Promise<DebruteHttpRequestErro
   } catch {
     return new DebruteHttpRequestError(response.status, undefined, text, undefined);
   }
-}
-
-function isRevisionedProjectResponse(value: unknown): value is RevisionedProjectResponse {
-  return typeof value === 'object'
-    && value !== null
-    && !Array.isArray(value)
-    && typeof (value as { projectId?: unknown }).projectId === 'string'
-    && typeof (value as { projectRevision?: unknown }).projectRevision === 'number';
 }

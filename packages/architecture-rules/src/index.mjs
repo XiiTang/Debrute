@@ -13,13 +13,6 @@ export const architectureScopes = [
   'apps/web/vite.config.ts',
   'apps/web/package.json',
   'apps/web/tsconfig.json',
-  'apps/daemon/src',
-  'apps/daemon/package.json',
-  'apps/daemon/tsconfig.json',
-  'apps/app-server/src',
-  'apps/debrute-cli/src',
-  'apps/debrute-cli/package.json',
-  'apps/debrute-cli/tsconfig.json',
   'scripts',
   'tests'
 ];
@@ -28,47 +21,42 @@ export const importMatrix = [
   {
     name: 'packages do not import apps',
     match: (file) => file.startsWith('packages/') && !file.startsWith('packages/architecture-rules/'),
-    forbiddenImports: [/^@debrute\/app-server$/, /^apps\//, /^\.\.\/\.\.\/apps\//]
+    forbiddenImports: [/^apps\//, /^\.\.\/\.\.\/apps\//]
   },
   {
     name: 'app-protocol stays free of orchestration and runtime execution',
     match: (file) => file.startsWith('packages/app-protocol/src/'),
-    forbiddenImports: [/^@debrute\/app-server$/, /^@debrute\/capability-core$/, /^@debrute\/capability-runtime$/, /^electron$/, /^react$/, /^node:/]
-  },
-  {
-    name: 'capability-runtime does not depend on app-server or workbench renderer',
-    match: (file) => file.startsWith('packages/capability-runtime/src/'),
-    forbiddenImports: [/^@debrute\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/capability-core$/, /^electron$/, /^react$/, /^node:/]
   },
   {
     name: 'project-core stays independent of app and runtime layers',
     match: (file) => file.startsWith('packages/project-core/src/'),
-    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\//, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /apps\//, /^electron$/, /^react$/]
   },
   {
     name: 'canvas-map-core stays independent of app and runtime layers',
     match: (file) => file.startsWith('packages/canvas-map-core/src/'),
-    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\//, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /apps\//, /^electron$/, /^react$/]
   },
   {
     name: 'capability-core stays dependency-light',
     match: (file) => file.startsWith('packages/capability-core/src/'),
-    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\//, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /apps\//, /^electron$/, /^react$/]
   },
   {
-    name: 'canvas-core does not depend on renderer or app-server',
+    name: 'canvas-core does not depend on renderer applications',
     match: (file) => file.startsWith('packages/canvas-core/src/'),
-    forbiddenImports: [/^@debrute\/app-protocol$/, /^@debrute\/capability-runtime$/, /^@debrute\/app-server$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
+    forbiddenImports: [/^@debrute\/app-protocol$/, /apps\/desktop/, /apps\/web/, /^electron$/, /^react$/]
   },
   {
-    name: 'workbench-runtime stays launch-free and app-independent',
-    match: (file) => file.startsWith('packages/workbench-runtime/src/'),
-    forbiddenImports: [/^@debrute\/daemon$/, /^@debrute\/app-server$/, /^electron$/]
+    name: 'runtime-control-client stays a native transport adapter',
+    match: (file) => file.startsWith('packages/runtime-control-client/src/'),
+    forbiddenImports: [/^electron$/, /^react$/]
   },
   {
-    name: 'web workbench does not import app-server',
+    name: 'web workbench does not import capability execution',
     match: (file) => file.startsWith('apps/web/src/'),
-    forbiddenImports: [/^@debrute\/app-server$/, /^apps\/app-server\//, /^@debrute\/capability-runtime$/, /^@debrute\/capability-core$/]
+    forbiddenImports: [/^@debrute\/capability-core$/]
   },
   {
     name: 'web workbench does not import electron',
@@ -81,23 +69,15 @@ export const importMatrix = [
     forbiddenImports: [/^node:fs$/, /^node:fs\/promises$/, /^fs$/, /^fs\/promises$/]
   },
   {
-    name: 'desktop electron stays a supervisor and client',
+    name: 'desktop electron stays a native host and client',
     match: (file) => file.startsWith('apps/desktop/src/electron/'),
     forbiddenImports: [
-      /^@debrute\/daemon(?:\/|$)/,
-      /^@debrute\/app-server(?:\/|$)/,
-      /^@debrute\/runtime-host(?:\/|$)/,
-      /^@debrute\/capability-runtime(?:\/|$)/,
       /^@debrute\/capability-core(?:\/|$)/,
       /^@debrute\/project-core(?:\/|$)/,
       /^@debrute\/canvas-core(?:\/|$)/,
       /^@debrute\/canvas-map-core(?:\/|$)/,
       /^@debrute\/web(?:\/|$)/,
-      /^apps\/app-server\//,
-      /^apps\/daemon\//,
-      /^apps\/runtime-host\//,
       /^apps\/web\//,
-      /^packages\/capability-runtime\/src\//,
       /^packages\/capability-core\/src\//,
       /^packages\/project-core\/src\//,
       /^packages\/canvas-core\/src\//,
@@ -105,25 +85,6 @@ export const importMatrix = [
       /^\.\.\/\.\.\/\.\.\/web\//,
       /^react(?:\/|$)/,
       /^react-dom(?:\/|$)/
-    ]
-  },
-  {
-    name: 'app-server does not import UI runtimes or react',
-    match: (file) => file.startsWith('apps/app-server/src/'),
-    forbiddenImports: [/apps\/desktop/, /apps\/web/, /^@debrute\/desktop$/, /^@debrute\/web$/, /^react$/]
-  },
-  {
-    name: 'cli stays behind app-server and protocol boundaries',
-    match: (file) => file.startsWith('apps/debrute-cli/src/'),
-    forbiddenImports: [
-      /^@debrute\/canvas-map-core$/,
-      /^@debrute\/project-core$/,
-      /^@debrute\/canvas-core$/,
-      /^@debrute\/capability-core$/,
-      /^packages\/canvas-map-core\/src\//,
-      /^packages\/project-core\/src\//,
-      /^packages\/canvas-core\/src\//,
-      /^packages\/capability-core\/src\//
     ]
   }
 ];
@@ -136,20 +97,7 @@ export const exportRules = [
   }
 ];
 
-export const publicBarrelRules = [
-  {
-    name: 'app-server public barrel stays small',
-    file: 'apps/app-server/src/index.ts',
-    maxNonEmptyLines: 120,
-    allowedExportSources: [
-      './server/DebruteAppServer.js',
-      './server/DebruteGlobalRuntimeServer.js',
-      './config/GlobalConfigStore.js',
-      '@debrute/app-protocol',
-      '@debrute/canvas-core'
-    ]
-  }
-];
+export const publicBarrelRules = [];
 
 export function architectureRuleKinds() {
   return ['imports', 'exports', 'package-json', 'tsconfig', 'vite-alias', 'public-barrel'];
@@ -257,28 +205,17 @@ function exportViolations(file, text) {
 function packageJsonViolations(file, text) {
   if (file === 'apps/desktop/package.json') {
     const pkg = JSON.parse(text);
-    return allowedPackageDependencyViolations(file, pkg, 'desktop electron stays a supervisor and client', {
-      dependencies: new Set(['@debrute/app-protocol', '@debrute/workbench-runtime']),
+    return allowedPackageDependencyViolations(file, pkg, 'desktop electron stays a native host and client', {
+      dependencies: new Set([
+        '@debrute/app-protocol',
+        '@debrute/runtime-control-client'
+      ]),
       devDependencies: new Set(['electron', 'electron-builder', 'esbuild', 'typescript', 'vite']),
       optionalDependencies: new Set(),
       peerDependencies: new Set()
     });
   }
-  if (file !== 'apps/debrute-cli/package.json') {
-    return [];
-  }
-  const pkg = JSON.parse(text);
-  const forbiddenDependencies = new Set([
-    '@debrute/daemon',
-    '@debrute/app-server',
-    '@debrute/project-core',
-    '@debrute/canvas-map-core',
-    '@debrute/canvas-core',
-    '@debrute/capability-core'
-  ]);
-  return packageDependencySections.flatMap((sectionName) => Object.keys(pkg[sectionName] ?? {})
-    .filter((dependency) => forbiddenDependencies.has(dependency))
-    .map((dependency) => `cli stays behind app-server and protocol boundaries: ${file} declares ${dependency} in ${sectionName}`));
+  return [];
 }
 
 function tsconfigViolations(file, text) {
@@ -286,10 +223,6 @@ function tsconfigViolations(file, text) {
     const config = JSON.parse(text);
     const references = (config.references ?? []).map((reference) => reference.path);
     return [
-      '../../apps/daemon',
-      '../../apps/app-server',
-      '../../apps/runtime-host',
-      '../../packages/capability-runtime',
       '../../packages/capability-core',
       '../../packages/project-core',
       '../../packages/canvas-core',
@@ -297,23 +230,9 @@ function tsconfigViolations(file, text) {
       '../../apps/web'
     ]
       .filter((reference) => references.includes(reference))
-      .map((reference) => `desktop electron stays a supervisor and client: ${file} references ${reference}`);
+      .map((reference) => `desktop electron stays a native host and client: ${file} references ${reference}`);
   }
-  if (file !== 'apps/debrute-cli/tsconfig.json') {
-    return [];
-  }
-  const config = JSON.parse(text);
-  const references = (config.references ?? []).map((reference) => reference.path);
-  return [
-    '../../apps/daemon',
-    '../../apps/app-server',
-    '../../packages/project-core',
-    '../../packages/canvas-map-core',
-    '../../packages/canvas-core',
-    '../../packages/capability-core'
-  ]
-    .filter((reference) => references.includes(reference))
-    .map((reference) => `cli stays behind app-server and protocol boundaries: ${file} references ${reference}`);
+  return [];
 }
 
 const packageDependencySections = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];

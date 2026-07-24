@@ -31,4 +31,30 @@ describe('executeTitleBarMenuCommand', () => {
     expect(execCommand).not.toHaveBeenCalled();
     expect(notifications).toEqual(['Paste and Match Style is not available in this host.']);
   });
+
+  it('keeps current-window Project opens in the renderer and delegates only new-window opens', async () => {
+    const executeNativeMenuCommand = vi.fn(async () => ({ ok: true as const }));
+    const openProjectFromPicker = vi.fn(async () => undefined);
+    const context = {
+      api: {} as WorkbenchApiClient,
+      shell: { executeNativeMenuCommand },
+      notify: vi.fn(),
+      openProjectFromPicker,
+      openProjectRoot: vi.fn(async () => undefined),
+      refreshTitleBarState: vi.fn(async () => undefined),
+      commandUnavailableMessage: (label: string) => label
+    };
+
+    await executeTitleBarMenuCommand({
+      kind: 'command', id: 'open', label: 'Open Project', commandId: 'project.open-picker', enabled: true
+    }, context);
+    await executeTitleBarMenuCommand({
+      kind: 'command', id: 'open-new', label: 'Open Project in New Window', commandId: 'project.open-picker-new-window', enabled: true
+    }, context);
+
+    expect(openProjectFromPicker).toHaveBeenCalledTimes(1);
+    expect(executeNativeMenuCommand).toHaveBeenCalledWith({
+      commandId: 'project.open-picker-new-window'
+    });
+  });
 });

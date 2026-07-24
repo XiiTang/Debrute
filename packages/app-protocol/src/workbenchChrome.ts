@@ -72,7 +72,7 @@ export function titleBarPresentationForPlatform(input: {
     platform: input.platform,
     host: input.host,
     showWebMenus: !desktop || input.platform !== 'darwin',
-    showWindowControls: desktop && (input.platform === 'win32' || input.platform === 'linux'),
+    showWindowControls: desktop && input.platform === 'win32',
     trafficLightSpacer: desktop && input.platform === 'darwin'
   };
 }

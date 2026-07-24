@@ -16,6 +16,19 @@ describe('Canvas raster preview sizing', () => {
     expect(canvasRasterPreviewSteppedScale(0.51)).toBeCloseTo(Math.SQRT2 / 2);
   });
 
+  it('uses source width rather than a fixed cross-media maximum', () => {
+    expect(canvasRasterPreviewWidth({
+      nodeDisplayWidth: 8256,
+      sourceWidth: 8256,
+      resourceZoom: 1,
+      devicePixelRatio: 2
+    })).toBe(8256);
+    expect(canvasRasterPreviewWidthsForSource({
+      sourceWidth: 10_000,
+      devicePixelRatio: 2
+    }).at(-1)).toBe(10_000);
+  });
+
   it('selects a preview width from displayed size, source width, zoom, and DPR', () => {
     expect(canvasRasterPreviewWidth({
       nodeDisplayWidth: 1200,

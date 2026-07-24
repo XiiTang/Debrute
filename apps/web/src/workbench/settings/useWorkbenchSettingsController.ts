@@ -26,6 +26,9 @@ export type WorkbenchSettingsActions = Pick<WorkbenchActions,
   | 'saveGlobalSettings'
   | 'rescanIntegrations'
   | 'runIntegrationOperation'
+  | 'createAdobeBridgePairing'
+  | 'cancelAdobeBridgePairing'
+  | 'removeAdobeBridgePairing'
   | 'linkAdobeBridgePhotoshop'
   | 'unlinkAdobeBridgePhotoshop'
 >;
@@ -43,7 +46,7 @@ export interface WorkbenchSettingsController {
 interface PendingAdobeClientCommand {
   token: number;
   projectId: string | undefined;
-  adobeClientId: string;
+  pluginInstanceId: string;
   kind: 'link' | 'unlink';
   activeLinkIds: readonly string[];
   confirmed: boolean;
@@ -72,7 +75,7 @@ export function useWorkbenchSettingsController(input: {
     for (const pending of pendingAdobeClientCommandsRef.current.values()) {
       if (adobeClientCommandTargetReached(
         pending,
-        activeAdobeLinkIds(bridge, pending.projectId, pending.adobeClientId)
+        activeAdobeLinkIds(bridge, pending.projectId, pending.pluginInstanceId)
       )) {
         pending.confirmed = true;
       }
@@ -85,30 +88,30 @@ export function useWorkbenchSettingsController(input: {
     setAdobeBridge({ status: 'ready', value: bridge });
   }, [confirmAdobeClientCommands]);
 
-  const beginAdobeClientCommand = useCallback((adobeClientId: string, kind: 'link' | 'unlink') => {
+  const beginAdobeClientCommand = useCallback((pluginInstanceId: string, kind: 'link' | 'unlink') => {
     const token = adobeClientCommandTokenRef.current + 1;
     adobeClientCommandTokenRef.current = token;
     const command: PendingAdobeClientCommand = {
       token,
       projectId: input.projectId,
-      adobeClientId,
+      pluginInstanceId,
       kind,
-      activeLinkIds: activeAdobeLinkIds(adobeBridgeValueRef.current, input.projectId, adobeClientId),
+      activeLinkIds: activeAdobeLinkIds(adobeBridgeValueRef.current, input.projectId, pluginInstanceId),
       confirmed: false
     };
-    pendingAdobeClientCommandsRef.current.set(adobeClientCommandKey(input.projectId, adobeClientId), command);
+    pendingAdobeClientCommandsRef.current.set(adobeClientCommandKey(input.projectId, pluginInstanceId), command);
     return command;
   }, [input.projectId]);
 
   const completeAdobeClientCommand = useCallback((command: PendingAdobeClientCommand) => {
-    const key = adobeClientCommandKey(command.projectId, command.adobeClientId);
+    const key = adobeClientCommandKey(command.projectId, command.pluginInstanceId);
     if (pendingAdobeClientCommandsRef.current.get(key)?.token === command.token) {
       pendingAdobeClientCommandsRef.current.delete(key);
     }
   }, []);
 
   const shouldSuppressAdobeClientCommandError = useCallback((command: PendingAdobeClientCommand) => {
-    const key = adobeClientCommandKey(command.projectId, command.adobeClientId);
+    const key = adobeClientCommandKey(command.projectId, command.pluginInstanceId);
     const pending = pendingAdobeClientCommandsRef.current.get(key);
     if (!pending || pending.token !== command.token) {
       return true;
@@ -244,8 +247,14 @@ export function useWorkbenchSettingsController(input: {
       }
       return result;
     },
+    createAdobeBridgePairing: () => input.api.adobeBridgeCreatePairing(),
+    cancelAdobeBridgePairing: (pairingId) => input.api.adobeBridgeCancelPairing(pairingId),
+    removeAdobeBridgePairing: async (pluginInstanceId) => {
+      const bridge = await input.api.adobeBridgeRemovePairing(pluginInstanceId);
+      applyAdobeBridgeState(bridge);
+    },
     linkAdobeBridgePhotoshop: async (linkInput) => {
-      const command = beginAdobeClientCommand(linkInput.adobeClientId, 'link');
+      const command = beginAdobeClientCommand(linkInput.pluginInstanceId, 'link');
       const linkVersion = adobeBridgeLoadVersionRef.current + 1;
       adobeBridgeLoadVersionRef.current = linkVersion;
       try {
@@ -260,12 +269,12 @@ export function useWorkbenchSettingsController(input: {
         }
       }
     },
-    unlinkAdobeBridgePhotoshop: async (adobeClientId) => {
-      const command = beginAdobeClientCommand(adobeClientId, 'unlink');
+    unlinkAdobeBridgePhotoshop: async (pluginInstanceId) => {
+      const command = beginAdobeClientCommand(pluginInstanceId, 'unlink');
       const unlinkVersion = adobeBridgeLoadVersionRef.current + 1;
       adobeBridgeLoadVersionRef.current = unlinkVersion;
       try {
-        const bridge = await input.api.adobeBridgeUnlinkPhotoshop(adobeClientId);
+        const bridge = await input.api.adobeBridgeUnlinkPhotoshop(pluginInstanceId);
         if (adobeBridgeLoadVersionRef.current === unlinkVersion) {
           applyAdobeBridgeState(bridge);
         }
@@ -319,20 +328,20 @@ function errorMessage(error: unknown): string {
 function activeAdobeLinkIds(
   bridge: AdobeBridgeStateView | undefined,
   projectId: string | undefined,
-  adobeClientId: string
+  pluginInstanceId: string
 ): string[] {
   return (bridge?.links ?? [])
     .filter((link) => (
       link.projectId === projectId
-      && link.adobeClientId === adobeClientId
+      && link.pluginInstanceId === pluginInstanceId
       && link.status === 'active'
     ))
     .map((link) => link.linkId)
     .sort();
 }
 
-function adobeClientCommandKey(projectId: string | undefined, adobeClientId: string): string {
-  return JSON.stringify([projectId, adobeClientId]);
+function adobeClientCommandKey(projectId: string | undefined, pluginInstanceId: string): string {
+  return JSON.stringify([projectId, pluginInstanceId]);
 }
 
 function adobeClientCommandTargetReached(

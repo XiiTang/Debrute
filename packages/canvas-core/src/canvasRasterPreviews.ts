@@ -41,7 +41,10 @@ export function canvasRasterPreviewWidthsForSource(input: {
   const widths = new Set<number>();
   for (let stepIndex = -10; stepIndex <= 0; stepIndex += 1) {
     const scale = 2 ** (stepIndex / 2);
-    const width = Math.ceil(Math.min(input.sourceWidth * scale * input.devicePixelRatio, input.sourceWidth));
+    const width = Math.ceil(Math.min(
+      input.sourceWidth * scale * input.devicePixelRatio,
+      input.sourceWidth
+    ));
     assertPositiveInteger(width, 'Canvas raster preview width must be a positive integer.');
     widths.add(width);
   }

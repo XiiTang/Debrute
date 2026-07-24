@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 import rootVitestConfig from '../../vitest.config.js';
 import { testTags } from '../config/shared.js';
-import { shouldKeepFailedRuntimeHome } from '../helpers/managedRuntimeHarness.js';
 
 const packageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
@@ -45,15 +44,9 @@ describe('local test command surface', () => {
     });
   });
 
-  it('preserves failed runtime homes only when explicitly requested', () => {
-    expect(shouldKeepFailedRuntimeHome({})).toBe(false);
-    expect(shouldKeepFailedRuntimeHome({ DEBRUTE_TEST_KEEP_TEMP: '0' })).toBe(false);
-    expect(shouldKeepFailedRuntimeHome({ DEBRUTE_TEST_KEEP_TEMP: '1' })).toBe(true);
-  });
-
   it('selects only coverage-contributing projects for local V8 coverage', () => {
     expect(packageJson.scripts['test:coverage']).toBe(
-      'vitest run --coverage --project=unit-* --project=dom-web --project=contracts --project=integration'
+      'vitest run --coverage --project=unit-* --project=dom-web --project=contracts'
     );
   });
 
@@ -72,12 +65,9 @@ describe('local test command surface', () => {
     }).test?.coverage;
 
     expect(coverage?.exclude).toEqual(expect.arrayContaining([
-      'apps/daemon/src/cli.ts',
-      'apps/runtime-host/src/cli.ts',
       'apps/web/src/main.tsx'
     ]));
     expect(coverage?.exclude).not.toEqual(expect.arrayContaining([
-      'apps/debrute-cli/src/index.ts',
       'apps/desktop/src/electron/main.ts',
       'apps/photoshop-cep-plugin/src/main.ts',
       'apps/photoshop-uxp-plugin/src/main.ts'

@@ -60,22 +60,6 @@ export function domTestConfig(name: string): UserConfig {
   };
 }
 
-export function integrationTestConfig(name: string): UserConfig {
-  const config = sharedTestConfig(name);
-
-  return {
-    ...config,
-    test: {
-      ...config.test,
-      pool: 'forks',
-      sequence: { groupOrder: 3 },
-      maxWorkers: testWorkerPlan.integrationWorkers,
-      testTimeout: 15_000,
-      slowTestThreshold: 2_000
-    }
-  };
-}
-
 export function serialTestConfig(name: string): UserConfig {
   const config = sharedTestConfig(name);
 
@@ -84,8 +68,8 @@ export function serialTestConfig(name: string): UserConfig {
     test: {
       ...config.test,
       pool: 'forks',
-      sequence: { groupOrder: 4 },
-      maxWorkers: testWorkerPlan.systemWorkers,
+      sequence: { groupOrder: 3 },
+      maxWorkers: testWorkerPlan.releaseWorkers,
       testTimeout: 30_000,
       slowTestThreshold: 5_000
     }

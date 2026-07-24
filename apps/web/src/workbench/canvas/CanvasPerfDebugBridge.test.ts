@@ -188,6 +188,28 @@ describe('CanvasPerfDebugBridge', () => {
     expect(second).not.toBe(first);
   });
 
+  it('keeps the stopped capture frozen while the process-level monitor continues', () => {
+    const fakeMonitor = monitor();
+    const bridge = createCanvasPerfDebugBridge({
+      enabled: true,
+      globalObject: {},
+      perfMonitor: fakeMonitor,
+      getCanvasSnapshot: snapshot,
+      now: times(100, 120, 180)
+    });
+
+    bridge.api.startCapture({ label: 'finished' });
+    fakeMonitor.counters = { 'stage-camera-write': 1 };
+    const stopped = bridge.api.stopCapture();
+    fakeMonitor.counters = { 'stage-camera-write': 2 };
+    const exported = bridge.api.exportCapture();
+
+    expect(exported).toEqual(stopped);
+    expect(exported).not.toBe(stopped);
+    expect(exported.endedAt).toBe(120);
+    expect(exported.counterTotals).toEqual({ 'stage-camera-write': 1 });
+  });
+
   it('returns an empty capture when stopCapture is called before any capture started', () => {
     const bridge = createCanvasPerfDebugBridge({
       enabled: true,

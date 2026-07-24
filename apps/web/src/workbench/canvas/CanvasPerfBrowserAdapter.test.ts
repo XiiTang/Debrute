@@ -87,7 +87,7 @@ describe('CanvasPerfBrowserAdapter', () => {
     });
     adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
 
-    expect(observed).toEqual([{ type: 'long-animation-frame', buffered: true }]);
+    expect(observed).toEqual([{ type: 'long-animation-frame', buffered: false }]);
     expect(longAnimationFrames).toEqual([{
       sessionId: 'camera-pan:1',
       timestamp: expect.any(Number),
@@ -106,7 +106,7 @@ describe('CanvasPerfBrowserAdapter', () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('attributes delayed long animation frame callbacks to the session time window', () => {
+  it('drops delayed long animation frame callbacks after the observed session ends', () => {
     const callbacks: Array<(list: { getEntries(): unknown[] }) => void> = [];
     const longAnimationFrames: unknown[] = [];
     const adapter = createCanvasPerfBrowserAdapter({
@@ -133,17 +133,7 @@ describe('CanvasPerfBrowserAdapter', () => {
       }]
     });
 
-    expect(longAnimationFrames).toEqual([{
-      sessionId: 'camera-pan:1',
-      timestamp: expect.any(Number),
-      source: 'CanvasPerfBrowserAdapter',
-      entry: {
-        startTime: 120,
-        duration: 60,
-        blockingDuration: 35,
-        scripts: []
-      }
-    }]);
+    expect(longAnimationFrames).toEqual([]);
   });
 
   it('ignores high-volume frame and counter events unless explicitly enabled', () => {

@@ -25,13 +25,13 @@ describe('linkedProjectTrees', () => {
 function bridgeState(): AdobeBridgeStateView {
   return {
     settings: { enabled: true, discoveryStatus: 'available' },
-    adobeClients: [],
+    pairedPlugins: [],
+    clients: [],
     projects: [
       {
         projectId: 'project-1',
         projectName: 'Campaign',
         projectRevision: 1,
-        connectedWorkbenchClientCount: 1,
         directories: [
           { projectRelativePath: 'assets', name: 'assets', depth: 1 },
           { projectRelativePath: 'assets/refs', name: 'refs', depth: 2 }
@@ -41,11 +41,10 @@ function bridgeState(): AdobeBridgeStateView {
         projectId: 'project-2',
         projectName: 'Unlinked',
         projectRevision: 1,
-        connectedWorkbenchClientCount: 1,
         directories: [{ projectRelativePath: 'out', name: 'out', depth: 1 }]
       }
     ],
-    links: [{ linkId: 'link-1', projectId: 'project-1', adobeClientId: 'ps-1', createdAt: '2026-06-18T00:00:00.000Z', status: 'active' }],
+    links: [{ linkId: 'link-1', projectId: 'project-1', pluginInstanceId: 'ps-1', createdAt: '2026-06-18T00:00:00.000Z', status: 'active' }],
     transfers: []
   };
 }

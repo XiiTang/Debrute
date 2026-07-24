@@ -16,6 +16,7 @@ import type { CanvasTextEditorFocusRequest } from './CanvasTextEditorRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
+import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
 import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 
@@ -309,6 +310,7 @@ export function CanvasImageNodePreview({
           <img
             key={imageState.visible.loadKey}
             data-canvas-image-layer="visible"
+            data-preview-width={imageState.visible.previewWidth}
             src={imageState.visible.src}
             alt={node.projectRelativePath}
             draggable={false}
@@ -321,7 +323,7 @@ export function CanvasImageNodePreview({
           <CanvasImagePlaceholder node={node} />
         )}
         {imageState.error ? (
-          <CanvasNodeMediaErrorOverlay
+          <CanvasNodeErrorPresentation
             message={imageState.error.message}
             onRetry={imageState.retry}
           />
@@ -374,31 +376,6 @@ function CanvasGenericNodeContent({
 
 function genericNodeAllowsLabelWrap(node: Pick<ProjectedCanvasNode, 'height'>): boolean {
   return node.height / FIXED_NODE_PRESENTATION_SCALE >= GENERIC_NODE_WRAP_VISUAL_HEIGHT;
-}
-
-function CanvasNodeMediaErrorOverlay({
-  message,
-  onRetry
-}: {
-  message: string;
-  onRetry: () => void;
-}): React.ReactElement {
-  const i18n = useI18n();
-  return (
-    <div className="db-canvas-node-error-overlay">
-      <AlertTriangle size={16} />
-      <span>{message}</span>
-      <Button
-        className="db-canvas-node-retry"
-        size="xs"
-        iconStart={<RefreshCw size={12} />}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={onRetry}
-      >
-        {i18n.t('canvas.node.retry')}
-      </Button>
-    </div>
-  );
 }
 
 function CanvasImagePlaceholder({
@@ -476,6 +453,13 @@ function CanvasTextNodeContent({
   const [handoffViewport, setHandoffViewport] = useState<CanvasTextViewportState>();
   const nextFocusRequestIdRef = useRef(0);
   const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
+  const currentViewport = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
+  const handoffViewportIsCurrent = handoffViewport !== undefined
+    && handoffViewport.scrollTop === currentViewport.scrollTop
+    && handoffViewport.scrollLeft === currentViewport.scrollLeft;
+  const previewHandoffReady = handoffViewportIsCurrent
+    && (textPreviewError
+      || (textPreview !== undefined && textPreview.sourceKey === textPreviewCommittedSourceKey));
   const textPreviewProblem = !active && textPreviewError
     ? { title: i18n.t('canvas.node.textPreviewError'), message: textPreviewError }
     : undefined;
@@ -522,29 +506,20 @@ function CanvasTextNodeContent({
   }, [active]);
 
   useEffect(() => {
-    const currentViewport = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
-    const handoffViewportIsCurrent = handoffViewport !== undefined
-      && handoffViewport.scrollTop === currentViewport.scrollTop
-      && handoffViewport.scrollLeft === currentViewport.scrollLeft;
     if (!active
       && visibleTextLayer === 'editor'
-      && handoffViewportIsCurrent
-      && (textPreviewError
-        || (textPreview !== undefined && textPreview.sourceKey === textPreviewCommittedSourceKey))) {
+      && previewHandoffReady) {
       setVisibleTextLayer('preview');
     }
   }, [
     active,
-    handoffViewport,
-    node.textViewport,
-    textPreview,
-    textPreviewCommittedSourceKey,
-    textPreviewError,
+    previewHandoffReady,
     visibleTextLayer
   ]);
 
   const showTextEditor = Boolean(buffer && (active || visibleTextLayer === 'editor'));
-  const showTextPreviewHandoff = !active;
+  const showTextPreviewHandoff = !active || textPreview !== undefined;
+  const textPreviewHidden = active || (visibleTextLayer === 'editor' && !previewHandoffReady);
 
   return (
     <section className="canvas-text-node">
@@ -632,9 +607,10 @@ function CanvasTextNodeContent({
             {showTextPreviewHandoff ? (
               <CanvasTextPreviewImageHandoff
                 presentation={{ visible: textPreview, pending: pendingTextPreview }}
+                hidden={textPreviewHidden}
                 onPendingReady={(source) => reportPendingReady(node, source)}
-                onPendingFailure={(source, error) => reportPendingFailure(node, source, error)}
-                onVisibleFailure={(source, error) => reportVisibleFailure(node, source, error)}
+                onPendingFailure={(source, error, kind) => reportPendingFailure(node, source, error, kind)}
+                onVisibleFailure={(source, error, kind) => reportVisibleFailure(node, source, error, kind)}
                 onVisibleCommitted={(source) => reportVisibleCommitted(node, source)}
               />
             ) : null}

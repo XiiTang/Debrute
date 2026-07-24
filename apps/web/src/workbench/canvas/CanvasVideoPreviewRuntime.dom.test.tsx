@@ -241,8 +241,14 @@ function createImmediateScheduler(): CanvasPreviewResourceScheduler {
         request.run();
       }
     },
+    enqueuePublication: (request: CanvasPreviewResourceRequest) => {
+      if (request.isCurrent() && !request.isCulled()) {
+        request.run();
+      }
+    },
     cancel: () => undefined,
     setInteractionState: () => undefined,
+    notifyVisibilityChanged: () => undefined,
     dispose: () => undefined
   };
 }

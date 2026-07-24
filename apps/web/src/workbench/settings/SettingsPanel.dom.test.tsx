@@ -202,7 +202,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
                 globalSettings: {
                   status: 'ready',
                   value: globalSettingsFixture({
-                    chrome: { recentProjectRoots: ['/projects/alpha'] }
+                    chrome: { recentProjects: [{ projectId: 'alpha', projectRoot: '/projects/alpha' }] }
                   })
                 }
               }).globalSettings).models.image}
@@ -345,7 +345,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           initialProductState={productState()}
           settings={{
             workbench: { locale: 'zh-CN', themePreference: 'system', defaultFrontend: 'browser' },
-            chrome: { recentProjectRoots: [] },
+            chrome: { recentProjects: [] },
             models: { image: { models: [] }, video: { models: [] }, audio: { models: [] } },
             integrations: { integrations: [], backends: [] },
             adobeBridge: { enabled: true }
@@ -709,19 +709,22 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         status: 'ready',
         value: {
           settings: { enabled: true, discoveryStatus: 'available' },
-          adobeClients: [{
-            adobeClientId: 'photoshop-1',
+          pairedPlugins: [],
+          clients: [{
+            pluginInstanceId: 'photoshop-1',
             hostApp: 'photoshop',
             hostVersion: '2026',
+            clientRuntime: 'uxp',
             displayName: 'Photoshop 2026',
             documentCount: 0,
             activeDocumentTitle: null,
             connectedAt: '2026-07-10T00:00:00.000Z',
             lastSeenAt: '2026-07-10T00:00:00.000Z'
           }, {
-            adobeClientId: 'photoshop-2',
+            pluginInstanceId: 'photoshop-2',
             hostApp: 'photoshop',
             hostVersion: '2026',
+            clientRuntime: 'uxp',
             displayName: 'Photoshop 2026 · Second client',
             documentCount: 0,
             activeDocumentTitle: null,
@@ -793,7 +796,7 @@ function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchSt
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: createEmptyProjectTreeSelection(),
-    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
+    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -805,7 +808,7 @@ function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchSt
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
-    chrome: { recentProjectRoots: [] },
+    chrome: { recentProjects: [] },
     models: {
       image: {
         models: [{

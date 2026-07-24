@@ -86,7 +86,34 @@ describe('CanvasTextPreviewImageHandoff', { tags: ['canvas-text'] }, () => {
     await renderHandoff(root, { visible: pending }, { onPendingReady, onVisibleFailure });
     await act(async () => pendingElement?.dispatchEvent(new Event('error')));
 
-    expect(onVisibleFailure).toHaveBeenCalledWith(pending, expect.any(Event));
+    expect(onVisibleFailure).toHaveBeenCalledWith(pending, expect.any(Event), 'load');
+  });
+
+  it('reports a pending image decode failure separately from a load failure', async () => {
+    const pending = source(640);
+    const decodeFailure = new Error('decode failed');
+    const onPendingFailure = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <CanvasTextPreviewImageHandoff
+          presentation={{ pending }}
+          onPendingReady={() => undefined}
+          onPendingFailure={onPendingFailure}
+          onVisibleFailure={() => undefined}
+          onVisibleCommitted={() => undefined}
+        />
+      );
+    });
+    const pendingElement = imageFor(container, 'pending');
+    Object.defineProperty(pendingElement, 'decode', {
+      configurable: true,
+      value: async () => Promise.reject(decodeFailure)
+    });
+
+    await act(async () => pendingElement?.dispatchEvent(new Event('load')));
+
+    expect(onPendingFailure).toHaveBeenCalledWith(pending, decodeFailure, 'decode');
   });
 
   it('reports one visible commit only after a rendering opportunity', async () => {

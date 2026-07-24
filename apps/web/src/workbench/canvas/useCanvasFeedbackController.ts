@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { WorkbenchApiClient, WorkbenchEvent } from '@debrute/app-protocol';
+import type {
+  WorkbenchApiClient,
+  WorkbenchEvent,
+  WorkbenchFeedbackWorkingCopy
+} from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
   UpdateCanvasFeedbackEntryInput
@@ -34,6 +38,7 @@ export interface CanvasFeedbackController {
   handleDraft(draft: CanvasLocalFeedbackDraft): void;
   cancelPending(): void;
   savePending(): Promise<boolean>;
+  restoreWorkingCopy(workingCopy: WorkbenchFeedbackWorkingCopy | null | undefined): void;
   load(): Promise<void>;
   reset(): void;
   applyEvent(event: WorkbenchEvent): void;
@@ -41,6 +46,7 @@ export interface CanvasFeedbackController {
 
 export function useCanvasFeedbackController(input: {
   api: WorkbenchApiClient;
+  projectId: string | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   notifyUnavailable(message: string): void;
 }): CanvasFeedbackController {
@@ -51,31 +57,76 @@ export function useCanvasFeedbackController(input: {
   const [pendingComment, setPendingComment] = useState('');
   const targetClearTimerRef = useRef<number | undefined>(undefined);
   const hoveredRef = useRef(false);
-  const requestGenerationRef = useRef(0);
+  const requestEpochRef = useRef(0);
   const draftVersionRef = useRef(0);
   const pendingItemRef = useRef<PendingCanvasFeedbackItem | undefined>(undefined);
   const pendingCommentRef = useRef('');
+  const projectIdRef = useRef(input.projectId);
+  const workingCopyCoordinatorsRef = useRef(new Map<string, {
+    desired: WorkbenchFeedbackWorkingCopy | null | undefined;
+    running: Promise<boolean>;
+  }>());
+  projectIdRef.current = input.projectId;
+
+  const persistWorkingCopy = useCallback((workingCopy: WorkbenchFeedbackWorkingCopy | null) => {
+    const projectId = projectIdRef.current;
+    if (!projectId) {
+      return Promise.resolve(false);
+    }
+    const active = workingCopyCoordinatorsRef.current.get(projectId);
+    if (active) {
+      active.desired = workingCopy;
+      return active.running;
+    }
+    const coordinator = {
+      desired: workingCopy as WorkbenchFeedbackWorkingCopy | null | undefined,
+      running: Promise.resolve(true)
+    };
+    workingCopyCoordinatorsRef.current.set(projectId, coordinator);
+    coordinator.running = (async () => {
+      let succeeded = true;
+      while (coordinator.desired !== undefined) {
+        const desired = coordinator.desired;
+        coordinator.desired = undefined;
+        try {
+          if (desired) {
+            await input.api.putFeedbackWorkingCopy(projectId, desired);
+          } else {
+            await input.api.clearFeedbackWorkingCopy(projectId);
+          }
+        } catch (error) {
+          succeeded = false;
+          if (projectIdRef.current === projectId) {
+            input.notifyUnavailable(errorMessage(error));
+          }
+        }
+      }
+      workingCopyCoordinatorsRef.current.delete(projectId);
+      return succeeded;
+    })();
+    return coordinator.running;
+  }, [input.api, input.notifyUnavailable]);
 
   const beginRequest = useCallback(() => {
-    const generation = requestGenerationRef.current + 1;
-    requestGenerationRef.current = generation;
-    return generation;
+    const epoch = requestEpochRef.current + 1;
+    requestEpochRef.current = epoch;
+    return epoch;
   }, []);
 
   const invalidateRequests = useCallback(() => {
-    requestGenerationRef.current += 1;
+    requestEpochRef.current += 1;
   }, []);
 
   const updateEntry = useCallback(async (updateInput: UpdateCanvasFeedbackEntryInput) => {
-    const generation = beginRequest();
+    const epoch = beginRequest();
     try {
       const result = await input.api.updateCanvasFeedbackEntry(updateInput);
-      if (requestGenerationRef.current === generation) {
+      if (requestEpochRef.current === epoch) {
         setFeedback(result.feedback);
       }
       return true;
     } catch (error) {
-      if (requestGenerationRef.current === generation) {
+      if (requestEpochRef.current === epoch) {
         input.notifyUnavailable(errorMessage(error));
       }
       return false;
@@ -89,7 +140,14 @@ export function useCanvasFeedbackController(input: {
     pendingCommentRef.current = value;
     draftVersionRef.current += 1;
     setPendingComment(value);
-  }, []);
+    if (pendingItemRef.current) {
+      persistWorkingCopy({
+        pendingItem: pendingItemRef.current,
+        pendingComment: value,
+        localMode: localMode ?? null
+      });
+    }
+  }, [localMode, persistWorkingCopy]);
 
   const clearTargetTimer = useCallback(() => {
     if (targetClearTimerRef.current !== undefined) {
@@ -131,13 +189,18 @@ export function useCanvasFeedbackController(input: {
   }, [clearTarget, clearTargetTimer]);
 
   const handleModeChange = useCallback((mode: CanvasMediaFeedbackMode) => {
-    draftVersionRef.current += 1;
-    pendingItemRef.current = undefined;
-    pendingCommentRef.current = '';
-    setLocalMode(mode);
-    setPendingItem(undefined);
-    setPendingComment('');
-  }, []);
+    void (async () => {
+      if (!await persistWorkingCopy(null)) {
+        return;
+      }
+      draftVersionRef.current += 1;
+      pendingItemRef.current = undefined;
+      pendingCommentRef.current = '';
+      setLocalMode(mode);
+      setPendingItem(undefined);
+      setPendingComment('');
+    })();
+  }, [persistWorkingCopy]);
 
   const handleDraft = useCallback((draft: CanvasLocalFeedbackDraft) => {
     clearTargetTimer();
@@ -166,18 +229,28 @@ export function useCanvasFeedbackController(input: {
       pendingCommentRef.current = '';
       setPendingComment('');
     }
-  }, [clearTargetTimer, feedback]);
+    persistWorkingCopy({
+      pendingItem: nextPendingItem,
+      pendingComment: shouldKeepComment ? pendingCommentRef.current : '',
+      localMode: draft.kind === 'pin' ? 'pin' : draft.kind === 'region' ? 'rect' : null
+    });
+  }, [clearTargetTimer, feedback, persistWorkingCopy]);
 
   const cancelPending = useCallback(() => {
-    draftVersionRef.current += 1;
-    pendingItemRef.current = undefined;
-    pendingCommentRef.current = '';
-    if (pendingItem?.scope === 'moment') {
-      setLocalMode(undefined);
-    }
-    setPendingItem(undefined);
-    setPendingComment('');
-  }, [pendingItem]);
+    void (async () => {
+      if (!await persistWorkingCopy(null)) {
+        return;
+      }
+      draftVersionRef.current += 1;
+      pendingItemRef.current = undefined;
+      pendingCommentRef.current = '';
+      if (pendingItem?.scope === 'moment') {
+        setLocalMode(undefined);
+      }
+      setPendingItem(undefined);
+      setPendingComment('');
+    })();
+  }, [pendingItem, persistWorkingCopy]);
 
   const savePending = useCallback(async () => {
     if (!pendingItem) {
@@ -203,6 +276,9 @@ export function useCanvasFeedbackController(input: {
     if (draftVersionRef.current !== savedDraftVersion) {
       return true;
     }
+    if (!await persistWorkingCopy(null)) {
+      return false;
+    }
     draftVersionRef.current += 1;
     pendingItemRef.current = undefined;
     pendingCommentRef.current = '';
@@ -212,17 +288,27 @@ export function useCanvasFeedbackController(input: {
     setPendingItem(undefined);
     setPendingComment('');
     return true;
-  }, [pendingComment, pendingItem, updateEntry]);
+  }, [pendingComment, pendingItem, persistWorkingCopy, updateEntry]);
+
+  const restoreWorkingCopy = useCallback((workingCopy: WorkbenchFeedbackWorkingCopy | null | undefined) => {
+    draftVersionRef.current += 1;
+    const pending = workingCopy?.pendingItem;
+    pendingItemRef.current = pending;
+    pendingCommentRef.current = workingCopy?.pendingComment ?? '';
+    setPendingItem(pending);
+    setPendingComment(workingCopy?.pendingComment ?? '');
+    setLocalMode(workingCopy?.localMode ?? undefined);
+  }, []);
 
   const load = useCallback(async () => {
-    const generation = beginRequest();
+    const epoch = beginRequest();
     try {
       const loadedFeedback = await input.api.readCanvasFeedback();
-      if (requestGenerationRef.current === generation) {
+      if (requestEpochRef.current === epoch) {
         setFeedback(loadedFeedback);
       }
     } catch (error) {
-      if (requestGenerationRef.current === generation) {
+      if (requestEpochRef.current === epoch) {
         setFeedback(undefined);
         input.notifyUnavailable(errorMessage(error));
       }
@@ -276,6 +362,7 @@ export function useCanvasFeedbackController(input: {
     handleDraft,
     cancelPending,
     savePending,
+    restoreWorkingCopy,
     load,
     reset,
     applyEvent
@@ -294,6 +381,7 @@ export function useCanvasFeedbackController(input: {
     pendingComment,
     pendingItem,
     reset,
+    restoreWorkingCopy,
     savePending,
     target,
     updatePendingComment,

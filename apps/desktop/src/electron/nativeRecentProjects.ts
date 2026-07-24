@@ -3,7 +3,8 @@ import type { JumpListCategory } from 'electron';
 
 export type DesktopOpenIntent =
   | { kind: 'new-window' }
-  | { kind: 'open-project'; projectRoot: string };
+  | { kind: 'open-project-path'; projectRoot: string }
+  | { kind: 'open-project-id'; projectId: string };
 
 export interface NativeRecentProjectHost {
   addRecentDocument?(path: string): void;
@@ -22,15 +23,23 @@ export function parseDesktopOpenIntent(argv: string[]): DesktopOpenIntent | unde
     return { kind: 'new-window' };
   }
   let openProjectValue: string | undefined;
+  let projectIdValue: string | undefined;
   for (let index = argv.length - 1; index >= 0; index -= 1) {
     const value = argv[index];
     if (value?.startsWith('--open-project=')) {
       openProjectValue = value.slice('--open-project='.length);
       break;
     }
+    if (value?.startsWith('--debrute-project-id=')) {
+      projectIdValue = value.slice('--debrute-project-id='.length);
+      break;
+    }
+  }
+  if (projectIdValue) {
+    return { kind: 'open-project-id', projectId: projectIdValue };
   }
   if (openProjectValue) {
-    return { kind: 'open-project', projectRoot: openProjectValue };
+    return { kind: 'open-project-path', projectRoot: openProjectValue };
   }
   return undefined;
 }

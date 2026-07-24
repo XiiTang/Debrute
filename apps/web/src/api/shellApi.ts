@@ -1,16 +1,10 @@
-import type {
-  WorkbenchMenuCommandId,
-  WorkbenchTitleBarState
-} from '@debrute/app-protocol';
+import type { WorkbenchMenuCommandId } from '@debrute/app-protocol';
 
 export interface NativeWindowState {
   maximized: boolean;
 }
 
 export interface DebruteShellApi {
-  bindProjectWindowToProject?(input: { projectId: string }): Promise<{ ok: true }>;
-  getWorkbenchTitleBarState?(input: { projectId?: string | undefined }): Promise<WorkbenchTitleBarState>;
-  clearRecentProjectRoots?(): Promise<{ ok: true }>;
   getNativeWindowState?(): Promise<NativeWindowState>;
   minimizeNativeWindow?(): Promise<NativeWindowState>;
   toggleMaximizeNativeWindow?(): Promise<NativeWindowState>;
@@ -19,7 +13,9 @@ export interface DebruteShellApi {
     commandId: WorkbenchMenuCommandId;
     payload?: Record<string, string | boolean> | undefined;
   }): Promise<{ ok: true }>;
+  takeDesktopLaunchTicket?(): Promise<string | undefined>;
   onNativeWindowStateChanged?(listener: (state: NativeWindowState) => void): () => void;
+  onOpenProjectRequested?(listener: (projectRoot: string) => void): () => void;
   getDroppedFilePath?(file: File): string | undefined;
 }
 

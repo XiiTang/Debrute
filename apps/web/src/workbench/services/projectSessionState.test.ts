@@ -62,6 +62,29 @@ describe('project session startup', () => {
     expect(calls).toEqual([{ projectId: 'missing-project' }]);
   });
 
+  it('turns a Desktop-versus-Web ownership conflict into an explicit Open Here choice', async () => {
+    const error = Object.assign(new Error('Project is active in Web.'), {
+      code: 'project_owned_by_web',
+      details: { projectId: 'project-in-web' }
+    });
+    const api = {
+      openProject: async () => { throw error; }
+    } as unknown as WorkbenchApiClient;
+
+    await expect(openInitialProject(api, {
+      kind: 'project',
+      projectId: 'project-in-web'
+    })).resolves.toMatchObject({
+      snapshot: undefined,
+      projectOpen: {
+        error: {
+          code: 'project-open-here-required',
+          projectId: 'project-in-web'
+        }
+      }
+    });
+  });
+
   it('keeps the Workbench root empty until a project is explicitly opened', async () => {
     const calls: unknown[] = [];
     const api = {
@@ -111,6 +134,7 @@ describe('project session startup', () => {
 
     await expect(openInitialProject(api)).resolves.toEqual({
       projectId: 'project-live-id',
+      projectRevision: 1,
       snapshot,
       route: { kind: 'project-open', projectRoot: '/Users/me/Project A' },
       projectOpen: { attemptedPath: '/Users/me/Project A' }
@@ -123,7 +147,7 @@ describe('project session startup', () => {
     );
   });
 
-  it('rejects a relative project-open path without calling the daemon', async () => {
+  it('rejects a relative project-open path without calling Runtime', async () => {
     const calls: unknown[] = [];
     const api = {
       openProject: async (input: unknown) => {

@@ -5,16 +5,11 @@
     { "path": "packages/project-core" },
     { "path": "packages/canvas-core" },
     { "path": "packages/app-protocol" },
-    { "path": "packages/capability-runtime" },
     { "path": "packages/canvas-map-core" },
-    { "path": "packages/workbench-runtime" },
-    { "path": "apps/app-server" },
-    { "path": "apps/daemon" },
-    { "path": "apps/runtime-host" },
+    { "path": "packages/runtime-control-client" },
     { "path": "apps/web" },
     { "path": "packages/photoshop-bridge-plugin-core" },
     { "path": "apps/photoshop-uxp-plugin" },
-    { "path": "apps/photoshop-cep-plugin" },
-    { "path": "apps/debrute-cli" }
+    { "path": "apps/photoshop-cep-plugin" }
   ]
 }

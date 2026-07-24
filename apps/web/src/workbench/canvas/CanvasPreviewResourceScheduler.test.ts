@@ -3,10 +3,119 @@ import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceSch
 import type { CanvasPerfMonitor } from './CanvasPerfMonitor';
 
 describe('CanvasPreviewResourceScheduler', () => {
+  it('shares one three-operation frame budget between result publications and request starts', () => {
+    const frames: FrameRequestCallback[] = [];
+    const published: string[] = [];
+    const scheduler = createCanvasPreviewResourceScheduler({
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: vi.fn()
+    });
+
+    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    for (const nodeId of ['a', 'b']) {
+      scheduler.enqueuePublication({
+        kind: 'text',
+        nodeId,
+        sourceKey: `${nodeId}:source`,
+        targetWidth: 640,
+        isCurrent: () => true,
+        isCulled: () => false,
+        run: () => published.push(nodeId)
+      });
+    }
+    for (const nodeId of ['c', 'd']) {
+      scheduler.enqueue({
+        kind: 'image',
+        nodeId,
+        sourceKey: `${nodeId}:source`,
+        targetWidth: 640,
+        isCurrent: () => true,
+        isCulled: () => false,
+        run: () => published.push(nodeId)
+      });
+    }
+
+    frames[0]?.(16);
+
+    expect(published).toEqual(['a', 'b', 'c']);
+    expect(frames).toHaveLength(2);
+
+    frames[1]?.(32);
+
+    expect(published).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('defers a culled publication until a later idle visibility check makes it current', () => {
+    const frames: FrameRequestCallback[] = [];
+    const published: string[] = [];
+    let culled = true;
+    const scheduler = createCanvasPreviewResourceScheduler({
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: vi.fn()
+    });
+
+    scheduler.enqueuePublication({
+      kind: 'text',
+      nodeId: 'notes.md',
+      sourceKey: 'notes:source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      isCulled: () => culled,
+      run: () => published.push('notes.md')
+    });
+
+    expect(frames).toEqual([]);
+
+    culled = false;
+    scheduler.notifyVisibilityChanged();
+    frames[0]?.(16);
+
+    expect(published).toEqual(['notes.md']);
+  });
+
+  it('cancels a pending publication frame when interaction resumes', () => {
+    const frames: FrameRequestCallback[] = [];
+    const canceled: number[] = [];
+    const published: string[] = [];
+    const scheduler = createCanvasPreviewResourceScheduler({
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: (handle) => canceled.push(handle)
+    });
+
+    scheduler.enqueuePublication({
+      kind: 'image',
+      nodeId: 'cover.png',
+      sourceKey: 'cover:source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      isCulled: () => false,
+      run: () => published.push('cover.png')
+    });
+    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
+    frames[0]?.(16);
+
+    expect(canceled).toEqual([1]);
+    expect(published).toEqual([]);
+
+    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    frames[1]?.(32);
+
+    expect(published).toEqual(['cover.png']);
+  });
+
   it('starts at most three current visible requests per frame while idle', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createTestScheduler({
+    const scheduler = createCanvasPreviewResourceScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -37,24 +146,15 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(started).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('waits for each idle request enqueue time to settle before starting work', () => {
+  it('starts an idle request on the next animation frame', () => {
     const frames: FrameRequestCallback[] = [];
-    const timers: Array<{ callback: () => void; delay: number }> = [];
     const started: string[] = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
-      settleMs: 500,
+    const scheduler = createCanvasPreviewResourceScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
       },
-      cancelFrame: vi.fn(),
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimeout: vi.fn()
+      cancelFrame: vi.fn()
     });
 
     scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
@@ -68,12 +168,8 @@ describe('CanvasPreviewResourceScheduler', () => {
       run: () => started.push('cover.png')
     });
 
-    expect(frames).toEqual([]);
-    expect(timers[0]?.delay).toBe(500);
-
-    time = 500;
-    timers[0]?.callback();
-    frames[0]?.(516);
+    expect(frames).toHaveLength(1);
+    frames[0]?.(16);
 
     expect(started).toEqual(['cover.png']);
   });
@@ -81,7 +177,7 @@ describe('CanvasPreviewResourceScheduler', () => {
   it('coalesces by preview kind and node id with newest request winning', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createTestScheduler({
+    const scheduler = createCanvasPreviewResourceScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -116,21 +212,13 @@ describe('CanvasPreviewResourceScheduler', () => {
 
   it('pauses queued starts while camera movement or drag is active', () => {
     const frames: FrameRequestCallback[] = [];
-    const timers: Array<{ callback: () => void; delay: number }> = [];
     const started: string[] = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
-      settleMs: 500,
+    const scheduler = createCanvasPreviewResourceScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
       },
-      cancelFrame: vi.fn(),
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      }
+      cancelFrame: vi.fn()
     });
 
     scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
@@ -149,13 +237,8 @@ describe('CanvasPreviewResourceScheduler', () => {
     scheduler.setInteractionState({ cameraState: 'idle', dragActive: true });
     expect(frames).toEqual([]);
 
-    time = 64;
     scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
-    expect(frames).toEqual([]);
-    expect(timers[0]?.delay).toBe(436);
-
-    time = 500;
-    timers[0]?.callback();
+    expect(frames).toHaveLength(1);
     frames[0]?.(16);
 
     expect(started).toEqual(['notes.md']);
@@ -165,9 +248,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     const frames: FrameRequestCallback[] = [];
     const canceled: number[] = [];
     const started: string[] = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
+    const scheduler = createCanvasPreviewResourceScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -194,220 +275,16 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(canceled).toEqual([1]);
     expect(started).toEqual([]);
 
-    time = 500;
     scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
     frames[1]?.(32);
 
     expect(started).toEqual(['cover.png']);
   });
 
-  it('waits for the preview settle window after movement before starting queued requests', () => {
-    const frames: FrameRequestCallback[] = [];
-    const timers: Array<{ callback: () => void; delay: number }> = [];
-    const started: string[] = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
-      settleMs: 500,
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: vi.fn(),
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimeout: vi.fn()
-    });
-
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    scheduler.enqueue({
-      kind: 'text',
-      nodeId: 'notes.md',
-      sourceKey: 'source',
-      targetWidth: 640,
-      isCurrent: () => true,
-      isCulled: () => false,
-      run: () => started.push('notes.md')
-    });
-
-    expect(frames).toEqual([]);
-    expect(timers).toEqual([]);
-
-    time = 64;
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
-
-    expect(frames).toEqual([]);
-    expect(timers).toHaveLength(1);
-    expect(timers[0]?.delay).toBe(436);
-
-    time = 500;
-    timers[0]?.callback();
-    frames[0]?.(516);
-
-    expect(started).toEqual(['notes.md']);
-  });
-
-  it('refreshes the settle window while movement continues', () => {
-    const frames: FrameRequestCallback[] = [];
-    const timers: Array<{ callback: () => void; delay: number }> = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
-      settleMs: 500,
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: vi.fn(),
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimeout: vi.fn()
-    });
-
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    scheduler.enqueue({
-      kind: 'text',
-      nodeId: 'notes.md',
-      sourceKey: 'source',
-      targetWidth: 640,
-      isCurrent: () => true,
-      isCulled: () => false,
-      run: vi.fn()
-    });
-    time = 250;
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    time = 314;
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
-
-    expect(frames).toEqual([]);
-    expect(timers[0]?.delay).toBe(436);
-  });
-
-  it('settles requests queued after movement before starting them', () => {
-    const frames: FrameRequestCallback[] = [];
-    const timers: Array<{ callback: () => void; delay: number }> = [];
-    const started: string[] = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
-      settleMs: 500,
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: vi.fn(),
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimeout: vi.fn()
-    });
-
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    time = 500;
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
-    scheduler.enqueue({
-      kind: 'image',
-      nodeId: 'cover.png',
-      sourceKey: 'source',
-      targetWidth: 640,
-      isCurrent: () => true,
-      isCulled: () => false,
-      run: () => started.push('cover.png')
-    });
-
-    expect(frames).toEqual([]);
-    expect(timers[0]?.delay).toBe(500);
-
-    time = 1000;
-    timers[0]?.callback();
-    frames[0]?.(1016);
-
-    expect(started).toEqual(['cover.png']);
-  });
-
-  it('cancels the preview settle timer when movement resumes', () => {
-    const frames: FrameRequestCallback[] = [];
-    const timers: Array<{ callback: () => void; delay: number }> = [];
-    const clearedTimers: number[] = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
-      settleMs: 500,
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
-      },
-      cancelFrame: vi.fn(),
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimeout: (handle) => clearedTimers.push(handle)
-    });
-
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    scheduler.enqueue({
-      kind: 'image',
-      nodeId: 'cover.png',
-      sourceKey: 'source',
-      targetWidth: 640,
-      isCurrent: () => true,
-      isCulled: () => false,
-      run: vi.fn()
-    });
-    time = 64;
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
-    time = 120;
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    timers[0]?.callback();
-
-    expect(clearedTimers).toEqual([1]);
-    expect(frames).toEqual([]);
-  });
-
-  it('cancels the preview settle timer when the final queued request is canceled', () => {
-    const timers: Array<{ callback: () => void; delay: number }> = [];
-    const clearedTimers: number[] = [];
-    let time = 0;
-    const scheduler = createTestScheduler({
-      now: () => time,
-      settleMs: 500,
-      requestFrame: vi.fn(),
-      cancelFrame: vi.fn(),
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimeout: (handle) => clearedTimers.push(handle)
-    });
-
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    scheduler.enqueue({
-      kind: 'image',
-      nodeId: 'cover.png',
-      sourceKey: 'source',
-      targetWidth: 640,
-      isCurrent: () => true,
-      isCulled: () => false,
-      run: vi.fn()
-    });
-    time = 64;
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
-    scheduler.cancel('image', 'cover.png');
-
-    expect(timers).toHaveLength(1);
-    expect(clearedTimers).toEqual([1]);
-  });
-
   it('skips stale and culled requests at start time', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createTestScheduler({
+    const scheduler = createCanvasPreviewResourceScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -446,7 +323,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     const perfMonitor = {
       recordCounter: (input) => counters.push(input.name)
     } satisfies Pick<CanvasPerfMonitor, 'recordCounter'>;
-    const scheduler = createTestScheduler({
+    const scheduler = createCanvasPreviewResourceScheduler({
       perfMonitor,
       now: () => 10,
       requestFrame: (callback) => {
@@ -484,24 +361,50 @@ describe('CanvasPreviewResourceScheduler', () => {
     ]);
   });
 
-  it('does not report an idle settle wait as paused moving work', () => {
+  it('records publication queue and commit counters separately from request starts', () => {
+    const frames: FrameRequestCallback[] = [];
     const counters: string[] = [];
     const perfMonitor = {
       recordCounter: (input) => counters.push(input.name)
     } satisfies Pick<CanvasPerfMonitor, 'recordCounter'>;
-    let time = 0;
-    const scheduler = createTestScheduler({
+    const scheduler = createCanvasPreviewResourceScheduler({
       perfMonitor,
-      now: () => time,
-      settleMs: 500,
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: vi.fn()
+    });
+
+    scheduler.enqueuePublication({
+      kind: 'image',
+      nodeId: 'cover.png',
+      sourceKey: 'cover:source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      isCulled: () => false,
+      run: vi.fn()
+    });
+    frames[0]?.(16);
+
+    expect(counters).toEqual([
+      'preview-publication-queued',
+      'preview-publication-committed'
+    ]);
+  });
+
+  it('does not report idle queued work as paused moving work', () => {
+    const counters: string[] = [];
+    const perfMonitor = {
+      recordCounter: (input) => counters.push(input.name)
+    } satisfies Pick<CanvasPerfMonitor, 'recordCounter'>;
+    const scheduler = createCanvasPreviewResourceScheduler({
+      perfMonitor,
       requestFrame: vi.fn(),
-      cancelFrame: vi.fn(),
-      setTimeout: vi.fn(() => 1),
-      clearTimeout: vi.fn()
+      cancelFrame: vi.fn()
     });
 
     scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    time = 64;
     scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
     scheduler.enqueue({
       kind: 'text',
@@ -516,16 +419,3 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(counters).toEqual(['preview-resource-queued']);
   });
 });
-
-function createTestScheduler(
-  input: Parameters<typeof createCanvasPreviewResourceScheduler>[0]
-): ReturnType<typeof createCanvasPreviewResourceScheduler> {
-  return createCanvasPreviewResourceScheduler({
-    settleMs: 0,
-    setTimeout: () => {
-      throw new Error('Unexpected preview resource settle timer.');
-    },
-    clearTimeout: vi.fn(),
-    ...input
-  });
-}

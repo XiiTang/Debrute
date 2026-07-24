@@ -13,10 +13,7 @@ import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../typ
 import { CanvasEditor } from './CanvasEditor';
 import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasMediaHandoff';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import {
-  CANVAS_PREVIEW_RESOURCE_SETTLE_MS,
-  createCanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler';
+import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import { areCanvasNodeShellPropsEqual, CanvasNodeShell, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface,
@@ -37,7 +34,7 @@ import {
   type CanvasPerfRuntimeSession
 } from './CanvasSurface';
 import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from './CanvasPerfMonitor';
-import type { CanvasCamera } from './runtime/canvasCamera';
+import { CANVAS_CAMERA_IDLE_MS, type CanvasCamera } from './runtime/canvasCamera';
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime, type CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
@@ -252,6 +249,38 @@ describe('CanvasSurface', () => {
     expect(html).toContain('db-canvas-node-frame');
     expect(html).toContain('class="canvas-node-resize nw"');
     expect(html).not.toContain('Delete');
+  });
+
+  it('uses the fixed Canvas presentation for unavailable image text without scaling available image pixels', () => {
+    const canvas = createCanvasDocument({ id: 'image-availability-presentation' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        nodeFixture('flow/available.png', 0, 0),
+        {
+          ...nodeFixture('flow/unavailable.jpg', 240, 0),
+          availability: {
+            state: 'unreadable',
+            message: 'Unable to read image metadata.'
+          }
+        }
+      ],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection));
+    const availableMarkup = html.slice(
+      html.indexOf('data-canvas-node-path="flow/available.png"'),
+      html.indexOf('data-canvas-node-path="flow/unavailable.jpg"')
+    );
+    const unavailableMarkup = html.slice(html.indexOf('data-canvas-node-path="flow/unavailable.jpg"'));
+
+    expect(availableMarkup).not.toContain('fixed-presentation');
+    expect(availableMarkup).not.toContain('canvas-node-presentation');
+    expect(unavailableMarkup).toContain('fixed-presentation');
+    expect(unavailableMarkup).toContain('canvas-node-presentation');
+    expect(unavailableMarkup).toContain('Unable to read image metadata.');
   });
 
   it('keeps image and text nodes mounted while still virtualizing other offscreen nodes', () => {
@@ -620,9 +649,6 @@ describe('CanvasSurface', () => {
         );
       });
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(CANVAS_PREVIEW_RESOURCE_SETTLE_MS + 20);
-      });
       for (let frame = 0; frame < 5; frame += 1) {
         await act(async () => {
           await vi.advanceTimersByTimeAsync(20);
@@ -1006,6 +1032,85 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('/files/raw/flow/image-0.png');
   });
 
+  it('replaces the visible image preview after the camera settles at a higher zoom', async () => {
+    vi.useFakeTimers();
+    const ImageMock = function ImageMock() {
+      return {
+        decoding: 'auto',
+        src: '',
+        complete: true,
+        naturalWidth: 1,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        decode: async () => undefined
+      } as unknown as HTMLImageElement;
+    } as unknown as typeof Image;
+    vi.stubGlobal('Image', ImageMock);
+    const devicePixelRatioDescriptor = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    Object.defineProperty(window, 'devicePixelRatio', {
+      configurable: true,
+      value: 1
+    });
+    const restoreAnimationFrame = installAnimationFrame();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'image-preview-zoom' });
+    const node = largePreviewNodeFixture('flow/large.png');
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [node],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = createCanvasEditorRuntime({
+      camera: { x: 0, y: 0, z: 0.1 },
+      selection: { kind: 'node', projectRelativePath: node.projectRelativePath }
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              overlayRuntime={createCanvasOverlayRuntime()}
+              feedbackPlacementContext={feedbackPlacementContextFixture()}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+      await settleCanvasImageHandoff();
+
+      expect(canvasVisibleImagePreviewWidth(container)).toBe('300');
+
+      await act(async () => {
+        runtime.camera.setCamera({ x: 0, y: 0, z: 1 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CANVAS_CAMERA_IDLE_MS);
+      });
+      await settleCanvasImageHandoff();
+
+      expect(canvasVisibleImagePreviewWidth(container)).toBe('2400');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      restoreAnimationFrame();
+      restorePropertyDescriptor(window, 'devicePixelRatio', devicePixelRatioDescriptor);
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('resolves a loaded next image only after a paint opportunity', () => {
     const frameCallbacks: FrameRequestCallback[] = [];
     const resolve = vi.fn();
@@ -1164,22 +1269,13 @@ describe('CanvasSurface', () => {
 
   it('updates preview resource scheduler interaction state from camera and drag state', () => {
     const frames: FrameRequestCallback[] = [];
-    const timers: Array<{ callback: () => void; delay: number }> = [];
     const started: string[] = [];
-    let time = 0;
     const scheduler = createCanvasPreviewResourceScheduler({
-      now: () => time,
-      settleMs: 500,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
       },
-      cancelFrame: () => undefined,
-      setTimeout: (callback, delay) => {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimeout: () => undefined
+      cancelFrame: () => undefined
     });
 
     syncCanvasPreviewResourceSchedulerForInteraction({
@@ -1215,11 +1311,7 @@ describe('CanvasSurface', () => {
       cameraState: 'idle',
       dragState: undefined
     });
-    expect(frames).toEqual([]);
-    expect(timers[0]?.delay).toBe(500);
-
-    time = 500;
-    timers[0]?.callback();
+    expect(frames).toHaveLength(1);
     frames[0]?.(16);
 
     expect(started).toEqual(['cover.png']);
@@ -1675,6 +1767,20 @@ function installAnimationFrame(): () => void {
   };
 }
 
+async function settleCanvasImageHandoff(): Promise<void> {
+  for (let frame = 0; frame < 4; frame += 1) {
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(20);
+    });
+  }
+}
+
+function canvasVisibleImagePreviewWidth(container: HTMLElement): string | null {
+  const image = container.querySelector<HTMLImageElement>('img[data-canvas-image-layer="visible"]');
+  return image ? new URL(image.src).searchParams.get('w') : null;
+}
+
 function largePreviewNodeFixture(path: string): CanvasProjection['nodes'][number] {
   const node = nodeFixture(path, 0, 0);
   if (node.availability.state !== 'available') {
@@ -1770,7 +1876,6 @@ function workbenchStateFixture(
         projectName: 'Project',
         canvasCount: 1,
         diagnosticCounts: { errors: 0, warnings: 0, infos: 0 },
-        runtimeDataLocation: '/runtime',
         checkedAt: '2026-05-26T00:00:00.000Z'
       }
     },
@@ -1788,7 +1893,7 @@ function workbenchStateFixture(
       status: 'ready',
       value: {
         workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'electron' },
-        chrome: { recentProjectRoots: [] },
+        chrome: { recentProjects: [] },
         models: {
           image: { models: [] },
           video: { models: [] },
@@ -1798,7 +1903,7 @@ function workbenchStateFixture(
         adobeBridge: { enabled: true }
       }
     },
-    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, adobeClients: [], projects: [], links: [], transfers: [] } },
+    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
     resolvedTheme: 'dark',
     canvasFeedback: undefined,
     textFileBuffers: {},
@@ -1821,6 +1926,9 @@ const actions: WorkbenchActions = {
     operation: input.operation,
     settings: emptyIntegrationsSettings
   }),
+  createAdobeBridgePairing: async () => ({ pairingId: 'pairing-1', code: '123456', expiresAt: '2026-07-17T00:00:00Z' }),
+  cancelAdobeBridgePairing: async () => undefined,
+  removeAdobeBridgePairing: async () => undefined,
   linkAdobeBridgePhotoshop: async () => undefined,
   unlinkAdobeBridgePhotoshop: async () => undefined,
   sendProjectFileToPhotoshop: async () => {

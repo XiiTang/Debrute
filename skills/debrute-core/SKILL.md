@@ -56,32 +56,31 @@ debrute commands
 
 Use the Workbench when visual inspection helps: Canvas layout, image previews, generated assets, or project file structure.
 
-Start or discover the local Workbench runtime:
+Start the Runtime and activate the configured default Workbench frontend:
 
 ```sh
 debrute workbench start
 ```
 
-Read `launch_url` from stdout. Interactive users open projects from the Workbench `Open Project` picker. Agents and automation start or discover the runtime with a same-origin next path built from the absolute local project path:
+Open a Project directly in a specific frontend by passing its absolute local path:
 
 ```sh
-debrute workbench start --next "/open?path=<encodeURIComponent(absProjectPath)>"
+debrute workbench start /absolute/path/to/project --frontend browser
+debrute workbench start /absolute/path/to/project --frontend desktop
 ```
 
-Open `launch_url` with the current agent environment's own GUI/browser capability. Debrute CLI returns the stable Workbench origin, one-time launch URL, and ports; it does not open browsers or projects.
+`--frontend browser` opens the Project in the system browser. `--frontend desktop` opens or focuses the Debrute Desktop window. Without `--frontend`, Runtime uses the Workbench default frontend setting. Interactive users can also open projects from the Workbench `Open Project` picker.
 
-Examples:
+After browser activation, use the current agent environment's GUI/browser capability to inspect the opened Debrute tab. After Desktop activation, use its desktop-app capability.
 
 ```text
-Qoder: /browser Open <launch_url>
-Antigravity: /browser Open <launch_url>
-Cline: Use the browser to check <launch_url>
-Codex app:
-  await (await browser.capabilities.get("visibility")).set(true)
-  await tab.goto(launchUrl)
+Qoder: use /browser to inspect the opened Debrute Workbench tab
+Antigravity: use /browser to inspect the opened Debrute Workbench tab
+Cline: use the browser to inspect the opened Debrute Workbench tab
+Codex app: use Browser for Web or Computer Use for Desktop
 ```
 
-If the agent cannot control a browser, report `launch_url` to the user.
+If the agent cannot control the selected frontend, report that limitation instead of claiming the activation was visually verified.
 
 ## Canvas Maps
 

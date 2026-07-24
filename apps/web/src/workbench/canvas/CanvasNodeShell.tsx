@@ -264,7 +264,8 @@ export function areCanvasNodeShellPropsEqual(
 }
 
 function usesFixedNodePresentation(node: ProjectedCanvasNode): boolean {
-  return node.nodeKind === 'directory'
+  return node.availability.state !== 'available'
+    || node.nodeKind === 'directory'
     || node.mediaKind === 'text'
     || node.mediaKind === 'audio'
     || node.mediaKind === 'unknown'

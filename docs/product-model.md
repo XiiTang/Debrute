@@ -1,12 +1,22 @@
 # Product Model
 
 This page describes Debrute's project, Canvas, capability, integration, Skill, and storage boundaries.
+Canonical domain vocabulary and context relationships are indexed in the
+[Context Map](../CONTEXT-MAP.md).
 
 ## Project
 
 A project is the local file workspace plus `.debrute/` metadata, generated assets, and health diagnostics.
 
-The local folder remains the source of truth for project files. Debrute stores its own metadata under `.debrute/` and uses daemon/App Server boundaries for privileged operations.
+The local folder remains the source of truth for project files. Debrute stores its own metadata under `.debrute/`; Rust Runtime is the privileged persistence and operation boundary.
+
+### Project Documents
+
+Structured Debrute state under `.debrute/` is registered as Project Documents
+with one of four roles: source, pushed, metadata, or cache. Source documents
+express editable intent; pushed documents are persisted projections; metadata
+preserves durable facts; cache documents are rebuildable. The executable
+descriptor registry remains the authority for exact paths and allowed writers.
 
 ## Canvas Map
 
@@ -42,46 +52,55 @@ Canvas ids are stable internal keys. They are filesystem-safe slugs used as the 
 
 Canvas names are editable display labels stored inside Canvas JSON. Names can use Unicode text and are not used in filesystem paths, URLs, registry ids, Canvas Map ids, or preview cache keys.
 
-Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores the Canvas id, display name, node layout, stack order, annotations, and preferences. File and folder hierarchy is derived from the project filesystem.
+Canvas JSON under `.debrute/canvases/<canvas-id>.json` stores the Canvas id, display name, node layout, stack order, annotations, and preferences. File and folder hierarchy is derived from the project filesystem. Camera, selection, drag state, and render visibility are transient Workbench state rather than Canvas fields.
 
-Push copies the current Canvas Map membership into Canvas JSON, while Canvas display always derives default structure from filesystem paths.
+Push reconciles the current Canvas Map membership into Canvas JSON, preserving surviving manual layout and stack order while recomputing automatic nodes. Canvas display derives current availability and default structure from Project paths. See [Canvas architecture](./canvas.md) for registry, layout, and interaction boundaries.
 
 ## Capabilities
 
-Capabilities are discrete operations that the daemon-backed Web workbench or the `debrute` command can invoke: project semantics, image generation, video generation, and generated asset metadata lookup.
+Capabilities are discrete operations that the Runtime-backed Web Workbench or the `debrute` command can invoke: Project semantics, image, video, TTS, music, and sound-effect generation, and generated asset metadata lookup. Debrute does not expose a generic text-LLM capability or a provider-level model abstraction.
 
 External Agents use their own filesystem tools for generic file access.
 
+Model catalogs, Configured Models, execution, structured results, Model Runs,
+and generated-file provenance are documented in
+[`model-generation.md`](./model-generation.md) and
+[`generated-assets.md`](./generated-assets.md).
+
 ## Integrations
 
-Integrations are optional local capabilities that the daemon detects and the Web Settings surface manages through runtime-owned install, update, and uninstall actions.
+Integrations are optional local capabilities that Runtime detects and the Web Settings surface manages through Runtime-owned install, update, and uninstall actions.
 
 The first supported integrations are FFmpeg, ImageMagick, MediaInfo, ExifTool, and the `remove-ai-watermarks` CLI.
 
 Integrations are not required for Debrute startup and are not exposed through the `debrute` command. Third-party tools are optional local dependencies; Debrute does not bundle or redistribute them, and users are responsible for complying with each tool's license.
 
+The fixed catalog, platform backends, status model, and runtime-owned operation
+boundary are documented in [`integrations.md`](./integrations.md). Adobe Bridge
+is a separate link-scoped protocol between open Projects and Photoshop plugin
+clients; see [`photoshop-bridge.md`](./photoshop-bridge.md).
+
 ## Skills
 
 Skills are standard packages installed under `~/.agents/skills`.
 
-The Desktop product payload includes the official `skills/debrute-*` bundle. Runtime materializes those official Skills from the current product payload during startup, alongside the managed `debrute` CLI.
+The Desktop Product seed includes the official `skills/debrute-*` bundle. Runtime materializes those official Skills and the stable `debrute` entrypoint from the selected immutable Product version.
 
 ## Storage Boundaries
 
 Project metadata and canvas state live under `.debrute/`.
 
-Generated asset metadata, generation model settings, and generation model secrets live in Debrute-owned runtime storage.
+Generated asset metadata is Project-owned structured state under `.debrute/assets/`. Generation model settings and API-key secrets are runtime-global state under the Debrute home directory.
 
-Renderer code does not read or write project files, generated asset metadata, model secret files, or Skills directories directly. Project and settings operations use the daemon/App Server boundary, while official Skills materialization is owned by the runtime.
+Renderer code does not read or write Project files, generated asset metadata, model secret files, or Skills directories directly. Project and settings operations use Runtime's role-partitioned transport, while official Skills materialization is owned by Runtime bootstrap.
 
 The CLI and Skills product posture is command-first: Debrute provides commands, structured output, safety guidance, and Skills for external Agents while not being the Agent itself.
 
-`debrute workbench start` starts or reuses the local Workbench runtime and returns the stable Workbench origin, one-time launch URL, and ports without opening a browser. Interactive users open projects through the Workbench `Open Project` picker. Agents open projects by requesting the same-origin `/open` route as the launch target:
+These surfaces share one local runtime authority. See
+[`runtime-architecture.md`](./runtime-architecture.md) for runtime discovery,
+browser authentication, global state, project sessions, terminal ownership, and
+whole-product versioning.
 
-```sh
-debrute workbench start --next "/open?path=<encodeURIComponent(absProjectPath)>"
-```
+`debrute workbench start [<project>] --frontend default|desktop|browser` sends one native Control activation and reports the accepted target as an Agent Record. It does not print or persist an authenticated URL. Interactive users can also open Projects through the Workbench picker.
 
-Agents then open the returned `launch_url`.
-
-Project, Canvas Map, and generation commands are runtime-backed. The CLI starts or reuses the local runtime for those operations so project state, settings, generated asset metadata, managed CLI diagnostics, and official Skills status stay behind the daemon boundary.
+Project, Canvas Map, and generation commands are Runtime-backed. During a command, the CLI keeps its native Control connection alive so the corresponding HTTP authorization cannot outlive that command. Project state, settings, generated asset metadata, CLI diagnostics, and official Skills status remain behind Runtime authority.

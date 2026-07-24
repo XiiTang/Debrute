@@ -4,7 +4,11 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   desktopReleaseTargets,
+  optionalDesktopReleaseAssets,
   expectedDesktopReleaseAssets,
+  expectedProductReleaseAssets,
+  productReleaseAssetName,
+  productReleaseTargets,
   updateManifestName,
   updateManifestSignatureName
 } from './release-asset-contract.mjs';
@@ -20,9 +24,12 @@ export async function generateUpdateManifest(input) {
   } = parseGeneratorOptions(input);
   const resolvedReleaseDir = resolve(releaseDir);
   const expectedDesktopAssets = expectedDesktopReleaseAssets(version);
+  const expectedProductAssets = expectedProductReleaseAssets(version);
   const releaseFiles = await readdir(resolvedReleaseDir);
   const allowedInputFiles = new Set([
     ...expectedDesktopAssets,
+    ...optionalDesktopReleaseAssets(version),
+    ...expectedProductAssets,
     updateManifestName,
     updateManifestSignatureName
   ]);
@@ -31,7 +38,7 @@ export async function generateUpdateManifest(input) {
     throw new Error(`Unexpected release assets: ${unexpected.join(', ')}`);
   }
   const missing = [];
-  for (const assetName of expectedDesktopAssets) {
+  for (const assetName of [...expectedDesktopAssets, ...expectedProductAssets]) {
     try {
       await stat(join(resolvedReleaseDir, assetName));
     } catch {
@@ -45,10 +52,24 @@ export async function generateUpdateManifest(input) {
     throw new Error('DEBRUTE_UPDATE_SIGNING_PRIVATE_KEY_PEM is required.');
   }
   const releaseTag = `v${version}`;
-  const assets = await Promise.all(desktopReleaseTargets.map(async (target) => {
+  const desktopAssets = await Promise.all(desktopReleaseTargets.map(async (target) => {
     const name = `debrute-desktop-${version}-${target.platform}-${target.arch}.${target.extension}`;
     const bytes = await readFile(join(resolvedReleaseDir, name));
     return {
+      kind: 'desktop',
+      platform: target.platform,
+      arch: target.arch,
+      name,
+      url: `https://github.com/xiitang/debrute/releases/download/${releaseTag}/${name}`,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      sizeBytes: bytes.byteLength
+    };
+  }));
+  const productAssets = await Promise.all(productReleaseTargets.map(async (target) => {
+    const name = productReleaseAssetName(version, target.platform, target.arch);
+    const bytes = await readFile(join(resolvedReleaseDir, name));
+    return {
+      kind: 'product',
       platform: target.platform,
       arch: target.arch,
       name,
@@ -59,11 +80,11 @@ export async function generateUpdateManifest(input) {
   }));
   const manifestBytes = Buffer.from(`${JSON.stringify({
     schemaVersion: 1,
-    product: 'debrute-desktop',
+    product: 'debrute',
     version,
     releaseTag,
     publishedAt,
-    assets
+    assets: [...desktopAssets, ...productAssets]
   }, null, 2)}\n`, 'utf8');
   const signature = sign(null, manifestBytes, createPrivateKey(privateKeyPem)).toString('base64');
   await writeFile(join(resolvedReleaseDir, updateManifestName), manifestBytes);

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
+import React, { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from './CanvasPerfMonitor';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
@@ -48,14 +48,20 @@ export function useCanvasImageNodeAsset(input: {
   culled: boolean;
 }): CanvasImageNodeAssetHookState {
   const context = useCanvasImageNodeAssetContext();
-  const [state, dispatch] = useReducer(canvasImageNodeAssetReducer, undefined, initialCanvasImageNodeAssetState);
+  const [state, setState] = useState(initialCanvasImageNodeAssetState);
+  const dispatch = useCallback((event: Parameters<typeof canvasImageNodeAssetReducer>[1]) => {
+    setState((current) => canvasImageNodeAssetReducer(current, event));
+  }, []);
   const didResolveUrlRef = useRef(false);
   const retryRequestedRef = useRef(false);
   const previousRevisionKeyRef = useRef<string | undefined>(undefined);
   const previousCulledRef = useRef(input.culled);
   const latestScheduleKeyRef = useRef<string | undefined>(undefined);
   const latestCulledRef = useRef(input.culled);
+  const latestNextLoadKeyRef = useRef<string | undefined>(state.next?.loadKey);
+  const decodedNextLoadKeysRef = useRef(new Set<string>());
   latestCulledRef.current = input.culled;
+  latestNextLoadKeyRef.current = state.next?.loadKey;
   const source = useMemo(() => resolveCanvasImageNodeSource({
     node: input.node,
     resourceZoom: context.resourceZoom,
@@ -149,12 +155,6 @@ export function useCanvasImageNodeAsset(input: {
     context.previewResourceScheduler.cancel('image', input.node.projectRelativePath);
   }, [context.previewResourceScheduler, input.node.projectRelativePath]);
 
-  useEffect(() => {
-    if (context.cameraState !== 'idle' || context.dragActive) {
-      dispatch({ type: 'interaction-started' });
-    }
-  }, [context.cameraState, context.dragActive]);
-
   const retry = useCallback(() => {
     retryRequestedRef.current = true;
     recordImageNodeCounter(context, 'image-node-retry', {
@@ -163,19 +163,64 @@ export function useCanvasImageNodeAsset(input: {
     dispatch({ type: 'retry' });
   }, [context, input.node.projectRelativePath]);
 
+  const enqueueDecodedHandoff = useCallback((next: { loadKey: string; previewWidth: number }) => {
+    const { loadKey } = next;
+    context.previewResourceScheduler.enqueuePublication({
+      kind: 'image',
+      nodeId: input.node.projectRelativePath,
+      sourceKey: loadKey,
+      targetWidth: next.previewWidth,
+      isCurrent: () => latestNextLoadKeyRef.current === loadKey,
+      isCulled: () => latestCulledRef.current,
+      run: () => {
+        if (latestNextLoadKeyRef.current !== loadKey || latestCulledRef.current) {
+          return;
+        }
+        recordImageNodeCounter(context, 'image-node-handoff-promote', {
+          projectRelativePath: input.node.projectRelativePath,
+          loadKey
+        });
+        startTransition(() => {
+          setState((current) => {
+            if (latestNextLoadKeyRef.current !== loadKey || latestCulledRef.current) {
+              return current;
+            }
+            return canvasImageNodeAssetReducer(current, { type: 'next-loaded', loadKey });
+          });
+        });
+      }
+    });
+  }, [context, input.node.projectRelativePath]);
+
   const resolveNext = useCallback((loadKey: string) => {
+    const next = state.next;
+    if (!next || next.loadKey !== loadKey) {
+      return;
+    }
     recordImageNodeCounter(context, 'image-node-next-load-resolve', {
       projectRelativePath: input.node.projectRelativePath,
       loadKey
     });
-    recordImageNodeCounter(context, 'image-node-handoff-promote', {
-      projectRelativePath: input.node.projectRelativePath,
-      loadKey
-    });
-    dispatch({ type: 'next-loaded', loadKey });
-  }, [context, input.node.projectRelativePath]);
+    decodedNextLoadKeysRef.current.add(loadKey);
+    enqueueDecodedHandoff(next);
+  }, [context, enqueueDecodedHandoff, input.node.projectRelativePath, state.next]);
+
+  useEffect(() => {
+    const next = state.next;
+    for (const decodedLoadKey of decodedNextLoadKeysRef.current) {
+      if (decodedLoadKey !== next?.loadKey) {
+        decodedNextLoadKeysRef.current.delete(decodedLoadKey);
+      }
+    }
+    if (next && !input.culled && decodedNextLoadKeysRef.current.has(next.loadKey)) {
+      enqueueDecodedHandoff(next);
+    }
+  }, [enqueueDecodedHandoff, input.culled, state.next]);
 
   const rejectNext = useCallback((loadKey: string) => {
+    if (latestNextLoadKeyRef.current !== loadKey) {
+      return;
+    }
     recordImageNodeCounter(context, 'image-node-next-load-reject', {
       projectRelativePath: input.node.projectRelativePath,
       loadKey

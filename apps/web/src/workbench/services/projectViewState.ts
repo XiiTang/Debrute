@@ -10,16 +10,15 @@ export interface ProjectViewStateStorage {
   setItem(key: string, value: string): void;
 }
 
-export function projectViewStateStorageKey(projectId: string, clientId: string): string {
-  return `debrute:project-view:${encodeURIComponent(projectId)}:${encodeURIComponent(clientId)}`;
+export function projectViewStateStorageKey(projectId: string): string {
+  return `debrute:project-view:${encodeURIComponent(projectId)}`;
 }
 
 export function loadProjectViewState(input: {
   storage: ProjectViewStateStorage | undefined;
   projectId: string;
-  clientId: string;
 }): ProjectViewState {
-  const raw = input.storage?.getItem(projectViewStateStorageKey(input.projectId, input.clientId));
+  const raw = input.storage?.getItem(projectViewStateStorageKey(input.projectId));
   if (!raw) {
     return {};
   }
@@ -30,8 +29,7 @@ export function loadProjectViewState(input: {
 export function saveProjectViewState(input: {
   storage: ProjectViewStateStorage | undefined;
   projectId: string;
-  clientId: string;
   state: ProjectViewState;
 }): void {
-  input.storage?.setItem(projectViewStateStorageKey(input.projectId, input.clientId), JSON.stringify(input.state));
+  input.storage?.setItem(projectViewStateStorageKey(input.projectId), JSON.stringify(input.state));
 }

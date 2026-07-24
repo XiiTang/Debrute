@@ -7,6 +7,6 @@
   "include": ["src/electron/**/*.ts"],
   "references": [
     { "path": "../../packages/app-protocol" },
-    { "path": "../../packages/workbench-runtime" }
+    { "path": "../../packages/runtime-control-client" }
   ]
 }

@@ -18,7 +18,7 @@ export function SendToPhotoshopDialog({
   enabled: boolean;
   bridge: AdobeBridgeStateView | undefined;
   sending: boolean;
-  onSend: (adobeClientId: string) => void;
+  onSend: (pluginInstanceId: string) => void;
   onClose: () => void;
 }): React.ReactElement {
   const i18n = useI18n();
@@ -41,11 +41,11 @@ export function SendToPhotoshopDialog({
               const disabled = sending || client.activeDocumentTitle === null;
               return (
                 <button
-                  key={client.adobeClientId}
+                  key={client.pluginInstanceId}
                   type="button"
                   className="db-record-row"
                   disabled={disabled}
-                  onClick={() => onSend(client.adobeClientId)}
+                  onClick={() => onSend(client.pluginInstanceId)}
                 >
                   <span>{client.displayName}</span>
                   {client.activeDocumentTitle ? <StatusPill tone="neutral">{i18n.t('adobeBridge.sendToPhotoshop.ready')}</StatusPill> : null}
@@ -71,6 +71,6 @@ export function linkedPhotoshopClients(
   }
   const linkedClientIds = new Set(bridge.links
     .filter((link) => link.projectId === projectId && link.status === 'active')
-    .map((link) => link.adobeClientId));
-  return bridge.adobeClients.filter((client) => linkedClientIds.has(client.adobeClientId));
+    .map((link) => link.pluginInstanceId));
+  return bridge.clients.filter((client) => linkedClientIds.has(client.pluginInstanceId));
 }

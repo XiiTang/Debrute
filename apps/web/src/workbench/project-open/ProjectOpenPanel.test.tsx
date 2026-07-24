@@ -5,7 +5,7 @@ import { I18nProvider } from '../i18n';
 import { ProjectOpenPanel } from './ProjectOpenPanel';
 
 describe('ProjectOpenPanel', () => {
-  it('renders the daemon picker open form action', () => {
+  it('renders the Runtime picker open form action', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <ProjectOpenPanel

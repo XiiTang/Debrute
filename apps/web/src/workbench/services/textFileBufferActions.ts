@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { WorkbenchApiClient } from '@debrute/app-protocol';
+import type { WorkbenchApiClient, WorkbenchTextWorkingCopy } from '@debrute/app-protocol';
 import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types';
 import { textBufferFromFile } from './textFileBuffers';
 import { clearTextBufferError } from './textEditorWindows';
@@ -21,6 +21,15 @@ interface TextFileSaveCoordinator {
   running: Promise<void>;
 }
 
+type TextWorkingCopyAction =
+  | { kind: 'put'; value: WorkbenchTextWorkingCopy }
+  | { kind: 'clear' };
+
+interface TextWorkingCopyCoordinator {
+  desired: TextWorkingCopyAction | undefined;
+  running: Promise<boolean>;
+}
+
 export function useTextFileBufferActions(input: {
   api: WorkbenchApiClient;
   projectId: string | undefined;
@@ -32,7 +41,48 @@ export function useTextFileBufferActions(input: {
   const { api, projectId, textFileBuffers, setTextFileBuffers, textFileBuffersRef, textEditorWindowsRef } = input;
   const projectIdRef = useRef(projectId);
   const saveCoordinatorsRef = useRef(new Map<string, TextFileSaveCoordinator>());
+  const workingCopyCoordinatorsRef = useRef(new Map<string, TextWorkingCopyCoordinator>());
   projectIdRef.current = projectId;
+
+  const enqueueWorkingCopy = useCallback((
+    workingCopyProjectId: string,
+    projectRelativePath: string,
+    action: TextWorkingCopyAction
+  ): Promise<boolean> => {
+    const key = textFileSaveCoordinatorKey(workingCopyProjectId, projectRelativePath);
+    const active = workingCopyCoordinatorsRef.current.get(key);
+    if (active) {
+      active.desired = action;
+      return active.running;
+    }
+    const coordinator: TextWorkingCopyCoordinator = {
+      desired: action,
+      running: Promise.resolve(true)
+    };
+    workingCopyCoordinatorsRef.current.set(key, coordinator);
+    coordinator.running = (async () => {
+      let succeeded = true;
+      while (coordinator.desired) {
+        const next = coordinator.desired;
+        coordinator.desired = undefined;
+        try {
+          if (next.kind === 'put') {
+            await api.putTextWorkingCopy(workingCopyProjectId, next.value);
+          } else {
+            await api.clearTextWorkingCopy(workingCopyProjectId, projectRelativePath);
+          }
+        } catch (error) {
+          succeeded = false;
+          if (projectIdRef.current === workingCopyProjectId) {
+            setTextFileBufferSaveError(setTextFileBuffers, projectRelativePath, error);
+          }
+        }
+      }
+      workingCopyCoordinatorsRef.current.delete(key);
+      return succeeded;
+    })();
+    return coordinator.running;
+  }, [api, setTextFileBuffers]);
 
   const ensureTextFileBuffer = useCallback(async (projectRelativePath: string) => {
     const ensureProjectId = projectIdRef.current;
@@ -77,6 +127,18 @@ export function useTextFileBufferActions(input: {
     if (activeSave) {
       activeSave.contentVersion += 1;
     }
+    const current = textFileBuffersRef.current[projectRelativePath];
+    if (currentProjectId && current?.baseRevision) {
+      void enqueueWorkingCopy(currentProjectId, projectRelativePath, {
+        kind: 'put',
+        value: {
+          projectRelativePath,
+          content,
+          language: current.language,
+          baseRevision: current.baseRevision
+        }
+      });
+    }
     setTextFileBuffers((buffers) => {
       const current = buffers[projectRelativePath];
       return {
@@ -93,7 +155,7 @@ export function useTextFileBufferActions(input: {
         }
       };
     });
-  }, [setTextFileBuffers]);
+  }, [enqueueWorkingCopy, setTextFileBuffers, textFileBuffersRef]);
 
   const saveTextFileBuffer = useCallback((projectRelativePath: string): Promise<void> => {
     const saveProjectId = projectIdRef.current;
@@ -185,6 +247,31 @@ export function useTextFileBufferActions(input: {
             && coordinator.observedDiskRevision !== expectedRevision
             && coordinator.observedDiskRevision !== saved.revision;
           const continueSaving = coordinator.queued && contentChanged && !externalChangeObserved;
+          if (!contentChanged && !externalChangeObserved) {
+            const cleared = await enqueueWorkingCopy(
+              saveProjectId,
+              projectRelativePath,
+              { kind: 'clear' }
+            );
+            if (!cleared) {
+              setTextFileBuffers((buffers) => {
+                const latest = buffers[projectRelativePath];
+                return latest
+                  ? {
+                      ...buffers,
+                      [projectRelativePath]: {
+                        ...latest,
+                        dirty: true,
+                        saving: false,
+                        baseRevision: saved.revision,
+                        externalChange: false
+                      }
+                    }
+                  : buffers;
+              });
+              return;
+            }
+          }
           setTextFileBuffers((buffers) => {
             const latest = buffers[projectRelativePath];
             if (!latest) {
@@ -225,7 +312,7 @@ export function useTextFileBufferActions(input: {
       }
     })();
     return coordinator.running;
-  }, [api, setTextFileBuffers, textFileBuffersRef]);
+  }, [api, enqueueWorkingCopy, setTextFileBuffers, textFileBuffersRef]);
 
   const reloadTextFileBuffer = useCallback(async (projectRelativePath: string) => {
     const reloadProjectId = projectIdRef.current;
@@ -268,8 +355,19 @@ export function useTextFileBufferActions(input: {
   }, [api, setTextFileBuffers]);
 
   const discardTextFileBuffer = useCallback(async (projectRelativePath: string) => {
+    const discardProjectId = projectIdRef.current;
+    if (discardProjectId) {
+      const cleared = await enqueueWorkingCopy(
+        discardProjectId,
+        projectRelativePath,
+        { kind: 'clear' }
+      );
+      if (!cleared) {
+        return;
+      }
+    }
     await reloadTextFileBuffer(projectRelativePath);
-  }, [reloadTextFileBuffer]);
+  }, [enqueueWorkingCopy, reloadTextFileBuffer]);
 
   const refreshTextFileBuffer = useCallback(async (projectRelativePath: string) => {
     const refreshProjectId = projectIdRef.current;

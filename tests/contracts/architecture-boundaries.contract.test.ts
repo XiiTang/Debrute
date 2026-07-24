@@ -23,10 +23,9 @@ describe('Debrute architecture boundaries', () => {
     try {
       mkdirSync(join(fixtureRoot, 'packages/project-core/src'), { recursive: true });
       mkdirSync(join(fixtureRoot, 'apps/desktop/src/electron/ipc'), { recursive: true });
-      mkdirSync(join(fixtureRoot, 'apps/debrute-cli/src/commands'), { recursive: true });
       writeFileSync(
         join(fixtureRoot, 'packages/project-core/src/violates-package-boundary.ts'),
-        "import '../../../apps/app-server/src/index.js';\n",
+        "import '../../../apps/desktop/src/electron/main.js';\n",
         'utf8'
       );
       writeFileSync(
@@ -36,26 +35,18 @@ describe('Debrute architecture boundaries', () => {
       );
       mkdirSync(join(fixtureRoot, 'apps/web/src/workbench'), { recursive: true });
       writeFileSync(
-        join(fixtureRoot, 'apps/web/src/workbench/violates-renderer-app-server-boundary.ts'),
-        "import '../../../../apps/app-server/src/index.js';\n",
+        join(fixtureRoot, 'apps/web/src/workbench/violates-capability-boundary.ts'),
+        "import '@debrute/capability-core';\n",
         'utf8'
       );
-      writeFileSync(
-        join(fixtureRoot, 'apps/debrute-cli/src/commands/violates-cli-package-boundary.ts'),
-        "import '../../../../packages/project-core/src/index.js';\n",
-        'utf8'
-      );
-
       await expect(architectureBoundaryViolations(fixtureRoot, [
         'packages/project-core/src/violates-package-boundary.ts',
         'apps/desktop/src/electron/ipc/violates-electron-boundary.ts',
-        'apps/web/src/workbench/violates-renderer-app-server-boundary.ts',
-        'apps/debrute-cli/src/commands/violates-cli-package-boundary.ts'
+        'apps/web/src/workbench/violates-capability-boundary.ts'
       ])).resolves.toEqual([
-        'packages do not import apps: packages/project-core/src/violates-package-boundary.ts imports "apps/app-server/src/index.js"',
-        'desktop electron stays a supervisor and client: apps/desktop/src/electron/ipc/violates-electron-boundary.ts imports "apps/web/src/workbench/WorkbenchApp.js"',
-        'web workbench does not import app-server: apps/web/src/workbench/violates-renderer-app-server-boundary.ts imports "apps/app-server/src/index.js"',
-        'cli stays behind app-server and protocol boundaries: apps/debrute-cli/src/commands/violates-cli-package-boundary.ts imports "packages/project-core/src/index.js"'
+        'packages do not import apps: packages/project-core/src/violates-package-boundary.ts imports "apps/desktop/src/electron/main.js"',
+        'desktop electron stays a native host and client: apps/desktop/src/electron/ipc/violates-electron-boundary.ts imports "apps/web/src/workbench/WorkbenchApp.js"',
+        'web workbench does not import capability execution: apps/web/src/workbench/violates-capability-boundary.ts imports "@debrute/capability-core"'
       ]);
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
@@ -83,7 +74,7 @@ describe('Debrute architecture boundaries', () => {
     }
   });
 
-  it('keeps protocol, App Server, and runtime imports in the intended direction', () => {
+  it('keeps protocol and Runtime imports in the intended direction', () => {
     expect(architectureImportSpecifiers(
       'apps/web/src/workbench/example.ts',
       "import type { ProjectSessionSnapshot } from '@debrute/app-protocol';\n"
@@ -116,7 +107,7 @@ describe('Debrute architecture boundaries', () => {
     }
   });
 
-  it('keeps backend, runtime-host, domain core, renderer, and capability packages out of Electron boundaries', async () => {
+  it('keeps domain core, renderer, and capability packages out of Electron boundaries', async () => {
     const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-electron-domain-core-'));
     try {
       mkdirSync(join(fixtureRoot, 'apps/desktop/src/electron'), { recursive: true });
@@ -124,7 +115,7 @@ describe('Debrute architecture boundaries', () => {
         join(fixtureRoot, 'apps/desktop/src/electron/violates-domain-core-boundary.ts'),
         [
           "import { projectCacheKey } from '@debrute/project-core/projectCacheKeys';",
-          "import '../../../../packages/capability-runtime/src/index.js';",
+          "import '../../../../packages/capability-core/src/index.js';",
           "import 'react/jsx-runtime';"
         ].join('\n'),
         'utf8'
@@ -134,13 +125,11 @@ describe('Debrute architecture boundaries', () => {
         JSON.stringify({
           dependencies: {
             '@debrute/app-protocol': 'workspace:*',
-            '@debrute/runtime-host': 'workspace:*',
             '@debrute/project-core': 'workspace:*',
             '@debrute/canvas-core': 'workspace:*',
             '@debrute/capability-core': 'workspace:*',
-            '@debrute/capability-runtime': 'workspace:*',
             '@debrute/web': 'workspace:*',
-            '@debrute/workbench-runtime': 'workspace:*'
+            '@debrute/runtime-control-client': 'workspace:*'
           },
           devDependencies: {
             react: '^19.0.0'
@@ -153,11 +142,9 @@ describe('Debrute architecture boundaries', () => {
         JSON.stringify({
           references: [
             { path: '../../packages/app-protocol' },
-            { path: '../../apps/runtime-host' },
             { path: '../../packages/project-core' },
             { path: '../../packages/canvas-core' },
-            { path: '../../packages/capability-runtime' },
-            { path: '../../packages/workbench-runtime' }
+            { path: '../../apps/web' }
           ]
         }, null, 2),
         'utf8'
@@ -167,8 +154,7 @@ describe('Debrute architecture boundaries', () => {
         JSON.stringify({
           references: [
             { path: '../../packages/app-protocol' },
-            { path: '../../packages/canvas-map-core' },
-            { path: '../../packages/workbench-runtime' }
+            { path: '../../packages/canvas-map-core' }
           ]
         }, null, 2),
         'utf8'
@@ -180,21 +166,18 @@ describe('Debrute architecture boundaries', () => {
         'apps/desktop/tsconfig.json',
         'apps/desktop/tsconfig.electron.json'
       ])).resolves.toEqual([
-        'desktop electron stays a supervisor and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "@debrute/project-core/projectCacheKeys"',
-        'desktop electron stays a supervisor and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "packages/capability-runtime/src/index.js"',
-        'desktop electron stays a supervisor and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "react/jsx-runtime"',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/runtime-host in dependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/project-core in dependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/canvas-core in dependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/capability-core in dependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/capability-runtime in dependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/web in dependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares react in devDependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../apps/runtime-host',
-        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../packages/capability-runtime',
-        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../packages/project-core',
-        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.json references ../../packages/canvas-core',
-        'desktop electron stays a supervisor and client: apps/desktop/tsconfig.electron.json references ../../packages/canvas-map-core'
+        'desktop electron stays a native host and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "@debrute/project-core/projectCacheKeys"',
+        'desktop electron stays a native host and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "packages/capability-core/src/index.js"',
+        'desktop electron stays a native host and client: apps/desktop/src/electron/violates-domain-core-boundary.ts imports "react/jsx-runtime"',
+        'desktop electron stays a native host and client: apps/desktop/package.json declares @debrute/project-core in dependencies',
+        'desktop electron stays a native host and client: apps/desktop/package.json declares @debrute/canvas-core in dependencies',
+        'desktop electron stays a native host and client: apps/desktop/package.json declares @debrute/capability-core in dependencies',
+        'desktop electron stays a native host and client: apps/desktop/package.json declares @debrute/web in dependencies',
+        'desktop electron stays a native host and client: apps/desktop/package.json declares react in devDependencies',
+        'desktop electron stays a native host and client: apps/desktop/tsconfig.json references ../../packages/project-core',
+        'desktop electron stays a native host and client: apps/desktop/tsconfig.json references ../../packages/canvas-core',
+        'desktop electron stays a native host and client: apps/desktop/tsconfig.json references ../../apps/web',
+        'desktop electron stays a native host and client: apps/desktop/tsconfig.electron.json references ../../packages/canvas-map-core'
       ]);
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
@@ -224,46 +207,9 @@ describe('Debrute architecture boundaries', () => {
       await expect(architectureBoundaryViolations(fixtureRoot, [
         'apps/desktop/package.json'
       ])).resolves.toEqual([
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/project-core in devDependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares @debrute/web in optionalDependencies',
-        'desktop electron stays a supervisor and client: apps/desktop/package.json declares react in peerDependencies'
-      ]);
-    } finally {
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('keeps CLI manifests and build references behind public boundaries', async () => {
-    const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-cli-manifest-'));
-    try {
-      mkdirSync(join(fixtureRoot, 'apps/debrute-cli'), { recursive: true });
-      writeFileSync(
-        join(fixtureRoot, 'apps/debrute-cli/package.json'),
-        JSON.stringify({
-          dependencies: { '@debrute/daemon': 'workspace:*' },
-          devDependencies: { '@debrute/app-server': 'workspace:*' }
-        }),
-        'utf8'
-      );
-      writeFileSync(
-        join(fixtureRoot, 'apps/debrute-cli/tsconfig.json'),
-        JSON.stringify({
-          references: [
-            { path: '../../apps/daemon' },
-            { path: '../../apps/app-server' }
-          ]
-        }),
-        'utf8'
-      );
-
-      await expect(architectureBoundaryViolations(fixtureRoot, [
-        'apps/debrute-cli/package.json',
-        'apps/debrute-cli/tsconfig.json'
-      ])).resolves.toEqual([
-        'cli stays behind app-server and protocol boundaries: apps/debrute-cli/package.json declares @debrute/daemon in dependencies',
-        'cli stays behind app-server and protocol boundaries: apps/debrute-cli/package.json declares @debrute/app-server in devDependencies',
-        'cli stays behind app-server and protocol boundaries: apps/debrute-cli/tsconfig.json references ../../apps/daemon',
-        'cli stays behind app-server and protocol boundaries: apps/debrute-cli/tsconfig.json references ../../apps/app-server'
+        'desktop electron stays a native host and client: apps/desktop/package.json declares @debrute/project-core in devDependencies',
+        'desktop electron stays a native host and client: apps/desktop/package.json declares @debrute/web in optionalDependencies',
+        'desktop electron stays a native host and client: apps/desktop/package.json declares react in peerDependencies'
       ]);
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });

@@ -1,671 +1,480 @@
-import { randomUUID } from 'node:crypto';
 import electron from 'electron';
 import { join } from 'node:path';
-import { executeDefaultFrontend as executeConfiguredDefaultFrontend } from './defaultFrontend.js';
-import { createAttachedDesktopRuntimeClient, type DesktopRuntimeClient } from './desktopRuntimeClient.js';
-import { loadDebruteProjectShellWindow, waitForDebruteShellUrl, type DebruteShellNavigation } from './desktopShellLoad.js';
-import { createApplicationMenuController } from './menu/registerApplicationMenu.js';
-import type { ApplicationMenuCommand } from './menu/applicationMenu.js';
+
+import type {
+  ActivationIntent,
+  ControlEvent,
+  RecentProject
+} from '@debrute/app-protocol';
+import type { RuntimeControlClient } from '@debrute/runtime-control-client';
+
+import {
+  DesktopWindowControlAdapter,
+  type DesktopNativeWindow
+} from './desktopWindowControlAdapter.js';
 import {
   desktopBrowserWindowChromeOptions,
   nativeWindowIpcChannels,
   nativeWindowState,
   registerNativeWindowIpc
 } from './nativeWindowShell.js';
-import { parseDesktopOpenIntent, syncNativeRecentProjects, type DesktopOpenIntent } from './nativeRecentProjects.js';
-import { desktopProductRuntimeConfig } from './runtime/desktopProductRuntimeConfig.js';
-import { RuntimeSupervisor } from './runtime/runtimeSupervisor.js';
-import { TrayController } from './tray/trayController.js';
-import { workbenchStartupBackgroundColorForRuntime } from './workbenchAppearance.js';
-import { runProjectWindowOpenOnce, selectProjectWindowOpenTarget } from './windowProjectRouting.js';
+import {
+  parseDesktopOpenIntent,
+  syncNativeRecentProjects,
+  type DesktopOpenIntent
+} from './nativeRecentProjects.js';
+import { connectOrLaunchDesktopRuntime } from './runtime/desktopRuntimeLauncher.js';
+import { desktopRuntimeLaunchConfiguration } from './runtime/desktopProductBootstrap.js';
 
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } = electron;
-let runtimeSupervisor: RuntimeSupervisor | undefined;
-let runtimeClient: DesktopRuntimeClient | undefined;
-let trayController: TrayController | undefined;
-let trueQuitRequested = false;
-const projectWindowsByProjectId = new Map<string, Electron.BrowserWindow>();
-const projectIdsByWindowId = new Map<number, string>();
-const projectRootsByWindowId = new Map<number, string>();
-const releaseProjectWindowByWindowId = new Map<number, () => Promise<void>>();
-const detachedProjectWindowLeaseIds = new Set<number>();
-const pendingProjectWindowOpens = new Map<string, Promise<void>>();
-const pendingDesktopOpenIntents: DesktopOpenIntent[] = [];
-
-if (!app.requestSingleInstanceLock()) {
-  console.error(
-    'Debrute desktop is already running. Quit the existing Debrute desktop instance before running pnpm dev:electron again.'
-  );
-  app.quit();
-}
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
-    detachProjectWindowLeasesFromStoppedRuntime();
-    void requestTrueQuit();
-  });
-}
-
-const applicationMenu = createApplicationMenuController({
-  menu: Menu,
-  platform: process.platform,
-  readTitleBarState: async () => runtimeClient?.getWorkbenchTitleBarState(),
-  onCommand: async (sourceWindow, command) => {
-    await executeNativeMenuCommand(sourceWindow, command);
-  }
-});
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } = electron;
 const projectIconPath = join(__dirname, 'icon.png');
 const dockIconPath = join(__dirname, 'dock_icon.png');
 
-async function createWindow(initialNavigation?: DebruteShellNavigation, projectId?: string, projectRoot?: string): Promise<Electron.BrowserWindow> {
-  const client = requireRuntimeClient();
-  const backgroundColor = await workbenchStartupBackgroundColorForRuntime(client, nativeTheme);
-  const window = new BrowserWindow({
+let control: RuntimeControlClient | undefined;
+let windows: DesktopWindowControlAdapter<ElectronDesktopWindow> | undefined;
+let appQuitAllowed = false;
+let productQuitRequested = false;
+let runtimeLossReported = false;
+let recentProjects: RecentProject[] = [];
+const pendingOpenIntents: DesktopOpenIntent[] = [];
+const nativeWindows = new Map<string, ElectronDesktopWindow>();
+
+if (app.requestSingleInstanceLock()) {
+  registerDesktopLifecycle();
+} else {
+  appQuitAllowed = true;
+  app.quit();
+}
+
+function registerDesktopLifecycle(): void {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      appQuitAllowed = true;
+      control?.close();
+      app.quit();
+    });
+  }
+
+  app.on('open-file', (event, projectRoot) => {
+    event.preventDefault();
+    void dispatchOpenIntent({ kind: 'open-project-path', projectRoot });
+  });
+
+  app.on('second-instance', (_event, argv) => {
+    void dispatchOpenIntent(parseDesktopOpenIntent(argv) ?? { kind: 'new-window' })
+      .catch(reportDesktopError);
+  });
+
+  app.on('window-all-closed', () => {
+    // DesktopWindowControlAdapter reports the final close to Runtime before
+    // performing the Desktop-only app exit.
+  });
+
+  app.on('before-quit', (event) => {
+    if (appQuitAllowed) {
+      return;
+    }
+    event.preventDefault();
+    void requestProductQuit();
+  });
+
+  void app.whenReady().then(startDesktop).catch((error: unknown) => {
+    dialog.showErrorBox('Debrute Desktop could not start', messageFromUnknown(error));
+    appQuitAllowed = true;
+    app.quit();
+  });
+}
+
+async function startDesktop(): Promise<void> {
+  if (process.platform === 'darwin') {
+    app.dock?.setIcon(nativeImage.createFromPath(dockIconPath));
+  }
+  registerNativeWindowIpc<Electron.WebContents, Electron.BrowserWindow>({
+    ipcMain,
+    browserWindow: BrowserWindow,
+    executeNativeMenuCommand,
+    takeDesktopLaunchTicket: (browserWindow) => (
+      findNativeWindow(browserWindow)?.takeDesktopLaunchTicket()
+    )
+  });
+  const runtime = runtimeLaunchConfiguration();
+  control = await connectOrLaunchDesktopRuntime({
+    productVersion: app.getVersion(),
+    runtimeEntrypoint: runtime.entrypoint,
+    runtimeArguments: runtime.arguments,
+    webAssetsDirectory: runtime.webAssetsDirectory,
+    runtimeLogPath: join(app.getPath('logs'), 'debrute-runtime.log'),
+    desktopEntrypoint: process.execPath,
+    desktopArguments: app.isPackaged ? [] : [app.getAppPath()],
+    environment: process.env
+  });
+  const activeControl = control;
+  windows = new DesktopWindowControlAdapter({
+    control: activeControl,
+    createWindow: createNativeWindow,
+    quitDesktop: () => {
+      appQuitAllowed = true;
+      control = undefined;
+      app.quit();
+    },
+    onError: reportDesktopError
+  });
+  activeControl.onEvent(handleControlEvent);
+  activeControl.onRuntimeLost((error) => {
+    if (appQuitAllowed || productQuitRequested || runtimeLossReported) {
+      return;
+    }
+    runtimeLossReported = true;
+    dialog.showErrorBox('Debrute Runtime connection ended', error.message);
+    appQuitAllowed = true;
+    app.quit();
+  });
+  installApplicationMenu();
+
+  const initialIntent = parseDesktopOpenIntent(process.argv) ?? { kind: 'new-window' };
+  const handledElsewhere = await dispatchOpenIntent(initialIntent);
+  if (handledElsewhere) {
+    appQuitAllowed = true;
+    activeControl.close();
+    app.quit();
+    return;
+  }
+  while (pendingOpenIntents.length > 0) {
+    await dispatchOpenIntent(pendingOpenIntents.shift());
+  }
+}
+
+async function createNativeWindow(input: {
+  windowKey: string;
+  ticket: string;
+  url: string;
+}): Promise<ElectronDesktopWindow> {
+  const browserWindow = new BrowserWindow({
     width: 1440,
     height: 940,
     minWidth: 1100,
     minHeight: 720,
     show: false,
     ...desktopBrowserWindowChromeOptions(process.platform),
-    backgroundColor,
+    backgroundColor: '#111318',
     icon: projectIconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      partition: `debrute-${input.windowKey}`
     }
   });
-
-  window.on('close', (event) => {
-    if (process.platform === 'win32' && !trueQuitRequested) {
-      event.preventDefault();
-      window.hide();
-    }
+  const nativeWindow = new ElectronDesktopWindow(
+    input.windowKey,
+    browserWindow,
+    input.ticket
+  );
+  nativeWindows.set(input.windowKey, nativeWindow);
+  nativeWindow.onClosed(() => nativeWindows.delete(input.windowKey));
+  browserWindow.webContents.on('render-process-gone', (_event, details) => {
+    dialog.showErrorBox(
+      'Debrute Workbench stopped',
+      `The window renderer ended (${details.reason}). Use View > Reload Workbench to start a fresh connection.`
+    );
   });
-  window.once('closed', () => {
-    void releaseProjectWindow(window.id).catch((error) => {
-      if (trueQuitRequested) {
-        return;
-      }
-      console.error(`Debrute Electron window lease release failed: ${messageFromUnknown(error)}`);
-    });
-  });
-  const sendNativeWindowState = () => {
-    if (!window.isDestroyed()) {
-      window.webContents.send(nativeWindowIpcChannels.stateChanged, nativeWindowState(window));
-    }
-  };
-  window.on('maximize', sendNativeWindowState);
-  window.on('unmaximize', sendNativeWindowState);
-  window.on('restore', sendNativeWindowState);
-
-  const navigation = initialNavigation ?? client.shellNavigation();
-  await revealLoadedWorkbenchWindow(window, async () => {
-    if (projectId) {
-      await loadDebruteProjectShellWindow(window, navigation, () => prepareProjectWindowBinding(window, projectId, projectRoot));
-    } else {
-      await waitForDebruteShellUrl(navigation.readyUrl);
-      await window.loadURL(navigation.loadUrl);
-    }
-  });
-  return window;
+  await nativeWindow.load(input.url);
+  nativeWindow.show();
+  return nativeWindow;
 }
 
-async function revealLoadedWorkbenchWindow(window: Electron.BrowserWindow, load: () => Promise<void>): Promise<void> {
-  try {
-    await load();
-    if (!window.isDestroyed()) {
-      window.show();
+class ElectronDesktopWindow implements DesktopNativeWindow {
+  private launchTicket: string | undefined;
+
+  constructor(
+    readonly windowKey: string,
+    readonly window: Electron.BrowserWindow,
+    launchTicket: string
+  ) {
+    this.launchTicket = launchTicket;
+  }
+
+  isDestroyed(): boolean {
+    return this.window.isDestroyed();
+  }
+
+  show(): void {
+    this.window.show();
+  }
+
+  focus(): void {
+    this.window.focus();
+  }
+
+  setLaunchTicket(ticket: string): void {
+    this.launchTicket = ticket;
+  }
+
+  takeDesktopLaunchTicket(): string | undefined {
+    const ticket = this.launchTicket;
+    this.launchTicket = undefined;
+    return ticket;
+  }
+
+  async load(url: string): Promise<void> {
+    await this.window.loadURL(rewriteRuntimeUrlForDevelopment(url));
+  }
+
+  destroy(): void {
+    this.launchTicket = undefined;
+    if (!this.window.isDestroyed()) {
+      this.window.destroy();
     }
-  } catch (error) {
-    if (!window.isDestroyed()) {
-      window.destroy();
-    }
-    throw error;
   }
-}
 
-app.on('open-file', (event, projectRoot) => {
-  event.preventDefault();
-  void handleDesktopOpenIntent({ kind: 'open-project', projectRoot });
-});
-
-app.on('second-instance', (_event, argv) => {
-  void handleDesktopOpenIntent(parseDesktopOpenIntent(argv));
-});
-
-app.whenReady().then(async () => {
-  if (process.platform === 'darwin') {
-    app.dock!.setIcon(dockIconPath);
-  }
-  runtimeSupervisor = new RuntimeSupervisor({
-    owner: {
-      kind: 'desktop',
-      ownerId: randomUUID(),
-      pid: process.pid
-    },
-    productRuntimeConfig: desktopProductRuntimeConfig({
-      appVersion: app.getVersion(),
-      electronDistDir: __dirname,
-      userHome: app.getPath('home'),
-      platform: process.platform,
-      execPath: process.execPath,
-      ...(process.env.APPIMAGE ? { appImagePath: process.env.APPIMAGE } : {}),
-      appIsPackaged: app.isPackaged,
-      desktopPid: process.pid
-    })
-  });
-  trayController = new TrayController({
-    Tray: electron.Tray,
-    Menu,
-    nativeImage: electron.nativeImage,
-    runtimeSupervisor,
-    readRecentProjectRoots: async () => (
-      runtimeClient ? (await runtimeClient.getWorkbenchTitleBarState()).recentProjectRoots : []
-    ),
-    onInteraction: refreshProjectHistoryAfterInteraction,
-    actions: {
-      openDebrute: () => {
-        void executeDefaultFrontend('tray-open-debrute');
-      },
-      openInElectron: () => {
-        void openDebruteRootWindow();
-      },
-      openInBrowser: () => {
-        void openDebruteInBrowser();
-      },
-      copyBrowserUrl: () => {
-        copyDebruteBrowserUrl();
-      },
-      openProjectInElectron: () => {
-        void openProjectFromPickerInElectron();
-      },
-      openRecentInElectron: (projectRoot) => {
-        void openProjectRootFromDesktop(projectRoot, { forceNewWindow: false });
-      },
-      showRuntimeStatus: () => {
-        void showRuntimeStatus();
-      },
-      restartRuntime: () => {
-        void restartRuntimeAndReloadWindows();
-      },
-      quitDebrute: () => {
-        void requestTrueQuit();
-      }
-    }
-  });
-  await trayController.start();
-  registerShellIpc();
-  await applicationMenu.refreshApplicationMenu();
-  try {
-    const runtimeState = await runtimeSupervisor.start();
-    runtimeClient = createAttachedDesktopRuntimeClient({
-      daemonUrl: runtimeState.daemonUrl,
-      webBaseUrl: runtimeState.webUrl,
-      token: runtimeState.token,
-      platform: process.platform
-    });
-    await refreshProjectHistorySurfaces();
-  } catch (error) {
-    console.error(`Debrute runtime failed to start: ${messageFromUnknown(error)}`);
-    await refreshTray();
-    await applicationMenu.refreshApplicationMenu();
-    return;
-  }
-  const initialIntent = parseDesktopOpenIntent(process.argv);
-  if (initialIntent) {
-    await handleDesktopOpenIntent(initialIntent);
-  } else if (pendingDesktopOpenIntents.length === 0) {
-    await executeDefaultFrontend('startup');
-  }
-  await flushPendingDesktopOpenIntents();
-});
-
-app.on('window-all-closed', () => {
-  // Debrute remains present in the menu bar or tray until a true quit action.
-});
-
-app.on('activate', () => {
-  refreshProjectHistoryAfterInteraction();
-  if (BrowserWindow.getAllWindows().length === 0) {
-    void executeDefaultFrontend('app-activate');
-  }
-});
-
-app.on('browser-window-focus', () => {
-  refreshProjectHistoryAfterInteraction();
-});
-
-app.on('before-quit', (event) => {
-  if (trueQuitRequested) {
-    return;
-  }
-  event.preventDefault();
-  void requestTrueQuit();
-});
-
-function registerShellIpc(): void {
-  ipcMain.handle('debrute-shell:bindProjectWindowToProject', async (event, input: { projectId: string }) => {
-    const window = BrowserWindow.fromWebContents(event.sender);
-    if (!window) {
-      throw new Error('Debrute project window is not available.');
-    }
-    await bindProjectWindow(window, input.projectId);
-    return { ok: true };
-  });
-  ipcMain.handle('debrute-shell:getWorkbenchTitleBarState', async (_event, input: { projectId?: string } | undefined) => (
-    requireRuntimeClient().getWorkbenchTitleBarState(input?.projectId)
-  ));
-  ipcMain.handle('debrute-shell:clearRecentProjectRoots', async () => {
-    const result = await requireRuntimeClient().clearRecentProjectRoots();
-    await refreshProjectHistorySurfaces();
-    return result;
-  });
-  registerNativeWindowIpc<Electron.WebContents, Electron.BrowserWindow>({
-    ipcMain,
-    browserWindow: BrowserWindow,
-    executeNativeMenuCommand
-  });
-}
-
-async function executeNativeMenuCommand(
-  sourceWindow: Electron.BrowserWindow | undefined,
-  command: ApplicationMenuCommand
-): Promise<void> {
-  switch (command.commandId) {
-    case 'window.new':
-      await createWindow();
-      return;
-    case 'project.open-picker':
-      await openProjectFromPickerFromShell({
-        ...(sourceWindow ? { sourceWindow } : {}),
-        forceNewWindow: false
-      });
-      return;
-    case 'project.open-picker-new-window':
-      await openProjectFromPickerFromShell({
-        ...(sourceWindow ? { sourceWindow } : {}),
-        forceNewWindow: true
-      });
-      return;
-    case 'project.open-recent': {
-      const projectRoot = typeof command.payload?.projectRoot === 'string' ? command.payload.projectRoot : '';
-      if (!projectRoot) {
-        throw new Error('Recent project command requires projectRoot.');
-      }
-      await openProjectRootFromDesktop(projectRoot, {
-        ...(sourceWindow ? { sourceWindow } : {}),
-        forceNewWindow: false
-      });
-      return;
-    }
-    case 'project.clear-recent':
-      await requireRuntimeClient().clearRecentProjectRoots();
-      await refreshProjectHistorySurfaces();
-      return;
-    case 'window.close':
-      requireNativeMenuWindow(sourceWindow, command.commandId).close();
-      return;
-    case 'view.reload':
-      requireNativeMenuWindow(sourceWindow, command.commandId).reload();
-      return;
-    case 'view.toggle-devtools':
-      requireNativeMenuWindow(sourceWindow, command.commandId).webContents.toggleDevTools();
-      return;
-    default:
-      executeFocusedEditCommand(requireNativeMenuWindow(sourceWindow, command.commandId), command.commandId);
+  onClosed(listener: () => void): () => void {
+    this.window.once('closed', listener);
+    return () => this.window.removeListener('closed', listener);
   }
 }
 
-function requireNativeMenuWindow(
-  window: Electron.BrowserWindow | undefined,
-  commandId: ApplicationMenuCommand['commandId']
-): Electron.BrowserWindow {
-  if (!window || window.isDestroyed()) {
-    throw new Error(`Debrute native menu command requires a window: ${commandId}`);
-  }
-  return window;
-}
-
-function executeFocusedEditCommand(window: Electron.BrowserWindow, commandId: ApplicationMenuCommand['commandId']): void {
-  const webContents = window.webContents;
-  if (commandId === 'edit.undo') webContents.undo();
-  else if (commandId === 'edit.redo') webContents.redo();
-  else if (commandId === 'edit.cut') webContents.cut();
-  else if (commandId === 'edit.copy') webContents.copy();
-  else if (commandId === 'edit.paste') webContents.paste();
-  else if (commandId === 'edit.paste-and-match-style') webContents.pasteAndMatchStyle();
-  else if (commandId === 'edit.delete') webContents.delete();
-  else if (commandId === 'edit.select-all') webContents.selectAll();
-}
-
-async function handleDesktopOpenIntent(intent: DesktopOpenIntent | undefined): Promise<void> {
+async function dispatchOpenIntent(intent: DesktopOpenIntent | undefined): Promise<boolean> {
   if (!intent) {
-    return;
+    return false;
   }
-  if (!runtimeClient) {
-    pendingDesktopOpenIntents.push(intent);
-    return;
+  if (!control) {
+    pendingOpenIntents.push(intent);
+    return false;
   }
-  if (intent.kind === 'new-window') {
-    await createWindow();
-    return;
+  const activation: ActivationIntent = intent.kind === 'open-project-path'
+    ? { kind: 'open_project', project_root: intent.projectRoot, frontend: 'desktop' }
+    : intent.kind === 'open-project-id'
+      ? { kind: 'open_known_project', project_id: intent.projectId, frontend: 'desktop' }
+      : { kind: 'open_desktop' };
+  const response = await control.activate(activation);
+  if (response.result === 'rejected') {
+    throw new Error(`Runtime rejected Desktop activation: ${response.code}`);
   }
-  await openProjectRootFromDesktop(intent.projectRoot, { forceNewWindow: false });
+  if (response.result !== 'activation') {
+    throw new Error(`Runtime returned an unexpected activation response: ${response.result}`);
+  }
+  return response.outcome === 'handled_by_existing_desktop';
 }
 
-async function flushPendingDesktopOpenIntents(): Promise<void> {
-  while (pendingDesktopOpenIntents.length > 0) {
-    await handleDesktopOpenIntent(pendingDesktopOpenIntents.shift());
+function handleControlEvent(event: ControlEvent): void {
+  if (event.event !== 'desktop_recent_projects_changed') {
+    return;
   }
+  recentProjects = event.recent_projects;
+  syncNativeRecentProjects(
+    app,
+    process.platform,
+    process.execPath,
+    recentProjects.map((project) => project.projectRoot)
+  );
+  installApplicationMenu();
 }
 
-async function openProjectRootFromDesktop(
-  projectRoot: string,
-  options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean } = {}
+function installApplicationMenu(): void {
+  const recentItems: Electron.MenuItemConstructorOptions[] = recentProjects.length === 0
+    ? [{ label: 'No Recent Projects', enabled: false }]
+    : recentProjects.map((project) => ({
+        label: project.projectRoot,
+        click: (_item, window) => void openProjectInWindow(
+          window as Electron.BrowserWindow | undefined,
+          project
+        )
+      }));
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === 'darwin' ? [{
+      label: 'Debrute',
+      submenu: [
+        { role: 'about' as const },
+        { type: 'separator' as const },
+        { role: 'services' as const },
+        { type: 'separator' as const },
+        { role: 'hide' as const },
+        { role: 'hideOthers' as const },
+        { role: 'unhide' as const },
+        { type: 'separator' as const },
+        { role: 'quit' as const }
+      ]
+    }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => void dispatchOpenIntent({ kind: 'new-window' }) },
+        { type: 'separator' },
+        { label: 'Open Project…', accelerator: 'CmdOrCtrl+O', click: (_item, window) => void chooseProject(window as Electron.BrowserWindow | undefined) },
+        { label: 'Open Project in New Window…', accelerator: 'CmdOrCtrl+Shift+O', click: () => void chooseProject(undefined, true) },
+        { label: 'Open Recent', submenu: recentItems },
+        { type: 'separator' },
+        { role: 'close' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+        ...(process.platform === 'darwin' ? [{ role: 'pasteAndMatchStyle' as const }] : []),
+        { role: 'delete' }, { role: 'selectAll' },
+        ...(process.platform === 'darwin' ? [
+          { type: 'separator' as const },
+          {
+            label: 'Speech',
+            submenu: [
+              { role: 'startSpeaking' as const },
+              { role: 'stopSpeaking' as const }
+            ]
+          }
+        ] : [])
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Reload Workbench', accelerator: 'CmdOrCtrl+R', click: (_item, window) => void reloadWindow(window as Electron.BrowserWindow | undefined) },
+        { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' },
+        { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }
+      ]
+    },
+    { role: 'windowMenu' }
+  ]));
+}
+
+async function chooseProject(
+  window: Electron.BrowserWindow | undefined,
+  openInNewWindow = false
 ): Promise<void> {
-  const opened = await requireRuntimeClient().openProject(projectRoot);
-  await refreshProjectHistorySurfaces();
-  await runProjectWindowOpenOnce({
-    projectId: opened.projectId,
-    pendingProjectOpens: pendingProjectWindowOpens,
-    open: () => openProjectInWindow({ ...opened, projectRoot }, options),
-    reusePending: () => {
-      projectWindowsByProjectId.get(opened.projectId)?.focus();
+  const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] };
+  const result = window && !window.isDestroyed()
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+  const projectRoot = result.filePaths[0];
+  if (!result.canceled && projectRoot) {
+    if (openInNewWindow) {
+      await dispatchOpenIntent({ kind: 'open-project-path', projectRoot });
+    } else {
+      await openProjectInWindow(window, { projectId: '', projectRoot });
     }
-  });
-}
-
-async function openProjectFromPickerFromShell(
-  options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean } = {}
-): Promise<void> {
-  const opened = await requireRuntimeClient().openProjectFromPicker();
-  if (!opened.opened) {
-    return;
   }
-  await refreshProjectHistorySurfaces();
-  await runProjectWindowOpenOnce({
-    projectId: opened.projectId,
-    pendingProjectOpens: pendingProjectWindowOpens,
-    open: () => openProjectInWindow(opened, options),
-    reusePending: () => {
-      projectWindowsByProjectId.get(opened.projectId)?.focus();
-    }
-  });
 }
 
 async function openProjectInWindow(
-  opened: { projectId: string; navigation: DebruteShellNavigation; projectRoot?: string },
-  options: { sourceWindow?: Electron.BrowserWindow; forceNewWindow?: boolean }
+  window: Electron.BrowserWindow | undefined,
+  project: RecentProject
 ): Promise<void> {
-  const liveWindowIds = new Set(BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).map((window) => window.id));
-  const windowIdByProjectId = new Map(
-    [...projectWindowsByProjectId.entries()]
-      .filter(([, window]) => !window.isDestroyed())
-      .map(([projectId, window]) => [projectId, window.id])
-  );
-  const target = selectProjectWindowOpenTarget({
-    projectId: opened.projectId,
-    forceNewWindow: options.forceNewWindow === true,
-    windowIdByProjectId,
-    liveWindowIds,
-    ...(options.sourceWindow ? { sourceWindowId: options.sourceWindow.id } : {})
-  });
-  if (target.kind === 'focus') {
-    BrowserWindow.fromId(target.windowId)?.focus();
+  if (window && !window.isDestroyed()) {
+    window.webContents.send(nativeWindowIpcChannels.openProjectRequested, project.projectRoot);
     return;
   }
-  if (target.kind === 'reuse') {
-    const window = BrowserWindow.fromId(target.windowId);
-    if (window && !window.isDestroyed()) {
-      await loadDebruteProjectShellWindow(window, opened.navigation, () => prepareProjectWindowBinding(window, opened.projectId, opened.projectRoot));
-      window.focus();
-      return;
-    }
-  }
-  await createWindow(opened.navigation, opened.projectId, opened.projectRoot);
+  await dispatchOpenIntent(project.projectId
+    ? { kind: 'open-project-id', projectId: project.projectId }
+    : { kind: 'open-project-path', projectRoot: project.projectRoot });
 }
 
-function requireRuntimeClient(): DesktopRuntimeClient {
-  if (!runtimeClient) {
-    throw new Error('Debrute desktop runtime client is not ready.');
+async function reloadWindow(window: Electron.BrowserWindow | undefined): Promise<void> {
+  const nativeWindow = findNativeWindow(window);
+  if (nativeWindow) {
+    await windows?.reloadWindow(nativeWindow.windowKey);
   }
-  return runtimeClient;
 }
 
-function requireRuntimeSupervisor(): RuntimeSupervisor {
-  if (!runtimeSupervisor) {
-    throw new Error('Debrute runtime supervisor is not ready.');
-  }
-  return runtimeSupervisor;
-}
-
-async function openDebruteRootWindow(): Promise<void> {
-  const rootWindow = BrowserWindow.getAllWindows().find((window) => (
-    !window.isDestroyed() && !projectIdsByWindowId.has(window.id)
-  ));
-  if (rootWindow) {
-    rootWindow.show();
-    rootWindow.focus();
+async function executeNativeMenuCommand(
+  window: Electron.BrowserWindow | undefined,
+  command: { commandId: string }
+): Promise<void> {
+  if (!window || window.isDestroyed()) {
     return;
   }
-  await createWindow();
+  if (command.commandId === 'window.new') await dispatchOpenIntent({ kind: 'new-window' });
+  else if (command.commandId === 'project.open-picker-new-window') await chooseProject(undefined, true);
+  else if (command.commandId === 'window.close') window.close();
+  else if (command.commandId === 'view.reload') await reloadWindow(window);
+  else if (command.commandId === 'view.toggle-devtools') window.webContents.toggleDevTools();
+  else if (command.commandId === 'edit.undo') window.webContents.undo();
+  else if (command.commandId === 'edit.redo') window.webContents.redo();
+  else if (command.commandId === 'edit.cut') window.webContents.cut();
+  else if (command.commandId === 'edit.copy') window.webContents.copy();
+  else if (command.commandId === 'edit.paste') window.webContents.paste();
+  else if (command.commandId === 'edit.select-all') window.webContents.selectAll();
 }
 
-async function executeDefaultFrontend(source: string): Promise<void> {
-  await executeConfiguredDefaultFrontend({
-    runtimeClient: requireRuntimeClient(),
-    openElectron: openDebruteRootWindow,
-    openBrowser: openDebruteInBrowser,
-    source,
-    recordFailure: (failure) => {
-      const message = `Default frontend ${failure.source} failed: ${failure.message}`;
-      requireRuntimeSupervisor().recordActionFailure(message);
-      console.error(`Debrute ${message}`);
-      void refreshTray();
+async function requestProductQuit(): Promise<void> {
+  if (productQuitRequested || appQuitAllowed) {
+    return;
+  }
+  productQuitRequested = true;
+  try {
+    const response = await control?.quitProduct();
+    if (!response) {
+      appQuitAllowed = true;
+      app.quit();
+    } else if (response.result === 'rejected') {
+      productQuitRequested = false;
+      dialog.showErrorBox('Debrute could not quit', `Runtime rejected Product Quit: ${response.code}`);
+    } else if (response.result !== 'ok') {
+      throw new Error(`Runtime returned an unexpected Product Quit response: ${response.result}`);
     }
-  });
+  } catch (error) {
+    productQuitRequested = false;
+    reportDesktopError(error);
+  }
 }
 
-async function openDebruteInBrowser(): Promise<void> {
-  await shell.openExternal(requireRuntimeClient().browserLaunchUrl());
+function findNativeWindow(
+  browserWindow: Electron.BrowserWindow | undefined
+): ElectronDesktopWindow | undefined {
+  return [...nativeWindows.values()].find((candidate) => candidate.window === browserWindow);
 }
 
-function copyDebruteBrowserUrl(): void {
-  clipboard.writeText(requireRuntimeClient().browserLaunchUrl());
-}
-
-async function openProjectFromPickerInElectron(): Promise<void> {
-  await openProjectFromPickerFromShell({ forceNewWindow: false });
-}
-
-async function restartRuntimeAndReloadWindows(): Promise<void> {
-  const windows = BrowserWindow.getAllWindows()
-    .filter((window) => !window.isDestroyed())
-    .map((window) => {
-      const projectRoot = projectRootsByWindowId.get(window.id);
-      return { window, projectRoot };
-    });
-  detachProjectWindowLeasesFromStoppedRuntime();
-  const state = await requireRuntimeSupervisor().restart();
-  runtimeClient = createAttachedDesktopRuntimeClient({
-    daemonUrl: state.daemonUrl,
-    webBaseUrl: state.webUrl,
-    token: state.token,
+function runtimeLaunchConfiguration(): {
+  entrypoint: string;
+  arguments: string[];
+  webAssetsDirectory: string;
+} {
+  return desktopRuntimeLaunchConfiguration({
+    ...(process.env.DEBRUTE_RUNTIME_ENTRYPOINT
+      ? { configuredEntrypoint: process.env.DEBRUTE_RUNTIME_ENTRYPOINT }
+      : {}),
+    configuredArguments: environmentArguments('DEBRUTE_RUNTIME_ARGUMENTS_JSON'),
+    ...(process.env.DEBRUTE_RUNTIME_WEB_ASSETS_DIR
+      ? { configuredWebAssetsDirectory: process.env.DEBRUTE_RUNTIME_WEB_ASSETS_DIR }
+      : {}),
+    sourceWebAssetsDirectory: join(__dirname, '../dist'),
+    resourcesPath: process.resourcesPath,
+    homePath: app.getPath('home'),
+    executablePath: process.execPath,
+    applicationPath: app.getAppPath(),
+    packaged: app.isPackaged,
     platform: process.platform
   });
-  for (const { window, projectRoot } of windows) {
-    if (window.isDestroyed()) {
-      continue;
-    }
-    if (projectRoot) {
-      const opened = await runtimeClient.openProject(projectRoot);
-      await loadDebruteProjectShellWindow(window, opened.navigation, () => prepareProjectWindowBinding(window, opened.projectId, projectRoot));
-    } else {
-      const navigation = runtimeClient.shellNavigation();
-      await waitForDebruteShellUrl(navigation.readyUrl);
-      await window.loadURL(navigation.loadUrl);
-      dropProjectWindowBinding(window.id);
-    }
+}
+
+function environmentArguments(name: string): string[] {
+  const value = process.env[name];
+  if (!value) {
+    return [];
   }
-  await refreshProjectHistorySurfaces();
-}
-
-async function showRuntimeStatus(): Promise<void> {
-  await dialog.showMessageBox({
-    type: 'info',
-    title: 'Debrute Runtime Status',
-    message: runtimeStatusMessage(requireRuntimeSupervisor().snapshot())
-  });
-}
-
-function runtimeStatusMessage(snapshot: ReturnType<RuntimeSupervisor['snapshot']>): string {
-  const state = snapshot.state;
-  return [
-    `Status: ${snapshot.status}`,
-    `Runtime kind: ${state?.runtimeKind ?? 'none'}`,
-    `Process control: ${state?.processControl ?? 'none'}`,
-    `Owner: ${state ? `${state.owner.kind}:${state.owner.ownerId} pid=${state.owner.pid}` : 'none'}`,
-    `Daemon URL: ${state?.daemonUrl ?? 'none'}`,
-    `Web URL: ${state?.webUrl ?? 'none'}`,
-    `Daemon pid: ${state?.daemonPid ?? 'none'}`,
-    `Web pid: ${state?.webPid ?? 'none'}`,
-    `Daemon log: ${state?.daemonLogPath ?? 'none'}`,
-    `Web log: ${state?.webLogPath ?? 'none'}`,
-    `Last health: ${snapshot.lastHealth ?? 'none'}`,
-    `Last error: ${snapshot.lastError ?? 'none'}`
-  ].join('\n');
-}
-
-async function requestTrueQuit(): Promise<void> {
-  if (trueQuitRequested) {
-    return;
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed) || parsed.some((argument) => typeof argument !== 'string')) {
+    throw new Error(`${name} must be a JSON array of strings.`);
   }
-  trueQuitRequested = true;
-  if (runtimeSupervisor) {
-    await runtimeSupervisor.stopOwnedRuntime();
+  return parsed;
+}
+
+function rewriteRuntimeUrlForDevelopment(url: string): string {
+  const developmentOrigin = process.env.DEBRUTE_DESKTOP_VITE_ORIGIN;
+  if (!developmentOrigin) {
+    return url;
   }
-  trayController?.destroy();
-  runtimeClient = undefined;
-  app.quit();
+  const source = new URL(url);
+  const target = new URL(developmentOrigin);
+  target.pathname = source.pathname;
+  return target.toString();
 }
 
-async function refreshProjectHistorySurfaces(): Promise<void> {
-  const state = await requireRuntimeClient().getWorkbenchTitleBarState();
-  syncNativeRecentProjects(app, process.platform, process.execPath, state.recentProjectRoots);
-  await applicationMenu.refreshApplicationMenu();
-  await refreshTray();
-}
-
-function refreshProjectHistoryAfterInteraction(): void {
-  if (!runtimeClient || trueQuitRequested) {
-    return;
-  }
-  void refreshProjectHistorySurfaces().catch((error) => {
-    console.error(`Debrute recent project refresh failed: ${messageFromUnknown(error)}`);
-  });
-}
-
-async function refreshTray(): Promise<void> {
-  await trayController?.refresh();
+function reportDesktopError(error: unknown): void {
+  dialog.showErrorBox('Debrute Desktop error', messageFromUnknown(error));
 }
 
 function messageFromUnknown(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function bindProjectWindow(window: Electron.BrowserWindow, projectId: string, projectRoot?: string): Promise<void> {
-  const binding = await prepareProjectWindowBinding(window, projectId, projectRoot);
-  await binding.commit();
-}
-
-async function prepareProjectWindowBinding(window: Electron.BrowserWindow, projectId: string, projectRoot?: string) {
-  const currentProjectId = projectIdsByWindowId.get(window.id);
-  const hasActiveLease = releaseProjectWindowByWindowId.has(window.id);
-  const hasDetachedLease = detachedProjectWindowLeaseIds.has(window.id);
-  if (
-    currentProjectId === projectId
-    && (hasActiveLease || (hasDetachedLease && !projectRoot))
-  ) {
-    return {
-      commit: () => {
-        if (projectRoot) {
-          projectRootsByWindowId.set(window.id, projectRoot);
-          void refreshProjectHistorySurfaces().catch((error) => {
-            if (!trueQuitRequested) {
-              console.error(`Debrute recent project update failed: ${messageFromUnknown(error)}`);
-            }
-          });
-        }
-      },
-      rollback: () => undefined
-    };
-  }
-  const lease = await requireRuntimeClient().registerElectronProjectWindow(projectId, window.id);
-  const release = lease.release;
-  const boundProjectRoot = projectRoot ?? lease.projectRoot;
-  let finalized = false;
-  return {
-    commit: async () => {
-      if (finalized) {
-        return;
-      }
-      finalized = true;
-      try {
-        await releaseProjectWindow(window.id);
-      } catch (error) {
-        await release();
-        throw error;
-      }
-      projectWindowsByProjectId.set(projectId, window);
-      projectIdsByWindowId.set(window.id, projectId);
-      if (boundProjectRoot) {
-        projectRootsByWindowId.set(window.id, boundProjectRoot);
-        void refreshProjectHistorySurfaces().catch((error) => {
-          if (!trueQuitRequested) {
-            console.error(`Debrute recent project update failed: ${messageFromUnknown(error)}`);
-          }
-        });
-      }
-      detachedProjectWindowLeaseIds.delete(window.id);
-      releaseProjectWindowByWindowId.set(window.id, release);
-    },
-    rollback: async () => {
-      if (finalized) {
-        return;
-      }
-      finalized = true;
-      await release();
-    }
-  };
-}
-
-async function releaseProjectWindow(windowId: number): Promise<void> {
-  const release = releaseProjectWindowByWindowId.get(windowId);
-  try {
-    if (release) {
-      await release();
-    }
-  } finally {
-    dropProjectWindowBinding(windowId);
-  }
-}
-
-function detachProjectWindowLeasesFromStoppedRuntime(): void {
-  for (const windowId of releaseProjectWindowByWindowId.keys()) {
-    releaseProjectWindowByWindowId.delete(windowId);
-    detachedProjectWindowLeaseIds.add(windowId);
-  }
-}
-
-function dropProjectWindowBinding(windowId: number): void {
-  const projectId = projectIdsByWindowId.get(windowId);
-  if (projectId && projectWindowsByProjectId.get(projectId)?.id === windowId) {
-    projectWindowsByProjectId.delete(projectId);
-  }
-  projectRootsByWindowId.delete(windowId);
-  projectIdsByWindowId.delete(windowId);
-  releaseProjectWindowByWindowId.delete(windowId);
-  detachedProjectWindowLeaseIds.delete(windowId);
 }

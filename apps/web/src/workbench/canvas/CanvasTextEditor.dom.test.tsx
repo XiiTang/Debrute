@@ -166,6 +166,59 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
     expect(transaction?.scrollIntoView).toBe(false);
   });
 
+  it('leaves edit focus immediately when the editor enters preview handoff', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextEditor
+            value="# Notes"
+            language="markdown"
+            wordWrap={false}
+            onChange={() => undefined}
+            onSave={() => undefined}
+            onToggleWordWrap={() => undefined}
+          />
+        );
+      });
+
+      const editorHost = container.querySelector<HTMLElement>('.canvas-text-editor');
+      const content = container.querySelector<HTMLElement>('.cm-content');
+      expect(editorHost).not.toBeNull();
+      expect(content).not.toBeNull();
+      await act(async () => {
+        editorHost?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        content?.focus();
+      });
+      expect(editorHost?.dataset.pointerFocus).toBe('true');
+      expect(document.activeElement).toBe(content);
+
+      await act(async () => {
+        root.render(
+          <CanvasTextEditor
+            value="# Notes"
+            language="markdown"
+            wordWrap={false}
+            readOnly
+            onChange={() => undefined}
+            onSave={() => undefined}
+            onToggleWordWrap={() => undefined}
+          />
+        );
+      });
+
+      expect(editorHost?.dataset.editorMode).toBe('handoff');
+      expect(editorHost?.dataset.pointerFocus).toBe('false');
+      expect(document.activeElement).not.toBe(content);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('restores the initial scroll after the first layout frame before pointer focus settles', async () => {
     const frameCallbacks: Array<FrameRequestCallback | undefined> = [];
     const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);

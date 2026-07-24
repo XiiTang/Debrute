@@ -21,16 +21,13 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
-  node-pty: true
   sharp: true
 
 onlyBuiltDependencies:
-  - "@yao-pkg/pkg"
   - electron
   - electron-builder
   - electron-winstaller
   - esbuild
-  - node-pty
   - sharp
 
 minimumReleaseAgeExclude:

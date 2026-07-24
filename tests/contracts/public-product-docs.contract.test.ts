@@ -12,10 +12,10 @@ describe('public product documentation contract', () => {
     }));
   const combined = docs.map((doc) => `# ${doc.name}\n${doc.content}`).join('\n');
 
-  it('describes Debrute as one Desktop product with runtime-managed CLI and Skills', () => {
-    expect(combined).toContain('runtime materializes the matching `debrute` CLI and official Skills');
-    expect(combined).toContain('pnpm package:runtime-cli');
-    expect(combined).toContain('Project, Canvas Map, and generation commands are runtime-backed');
+  it('describes Debrute as one Product with a Rust Runtime and Agent-facing CLI', () => {
+    expect(combined).toContain('external Agent-facing `debrute` CLI');
+    expect(combined).toContain('node scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --bin debrute');
+    expect(combined).toContain('Project, Canvas Map, and generation commands are Runtime-backed');
   });
 
   it('describes Canvas node ordering as stack order, not layers', () => {

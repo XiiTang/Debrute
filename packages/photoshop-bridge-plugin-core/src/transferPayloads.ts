@@ -6,7 +6,8 @@ import {
 
 export interface PhotoshopUploadRequestInput {
   apiBaseUrl: string;
-  adobeClientId: string;
+  bearer: string;
+  pluginInstanceId: string;
   projectId: string;
   transferId: string;
   targetDirectoryProjectRelativePath: string;
@@ -23,7 +24,8 @@ export interface PhotoshopUploadRequest {
 
 export interface PhotoshopProjectLinkRequestInput {
   apiBaseUrl: string;
-  adobeClientId: string;
+  bearer: string;
+  pluginInstanceId: string;
   projectId: string;
   linked: boolean;
 }
@@ -55,8 +57,9 @@ export function createPhotoshopUploadRequest(input: PhotoshopUploadRequestInput)
     url: `${input.apiBaseUrl}/plugin/projects/${encodeURIComponent(input.projectId)}/uploads`,
     method: 'POST',
     headers: {
+      authorization: `Bearer ${input.bearer}`,
       'content-type': 'image/png',
-      'x-debrute-adobe-client-id': input.adobeClientId,
+      'x-debrute-plugin-instance': input.pluginInstanceId,
       'x-debrute-transfer-id': input.transferId,
       'x-debrute-target-directory': encodeURIComponent(input.targetDirectoryProjectRelativePath),
       'x-debrute-suggested-name': encodeURIComponent(input.suggestedName)
@@ -73,7 +76,8 @@ export function createPhotoshopProjectLinkRequest(input: PhotoshopProjectLinkReq
     url: `${input.apiBaseUrl}/plugin/projects/${encodeURIComponent(input.projectId)}/link`,
     method: input.linked ? 'POST' : 'DELETE',
     headers: {
-      'x-debrute-adobe-client-id': input.adobeClientId
+      authorization: `Bearer ${input.bearer}`,
+      'x-debrute-plugin-instance': input.pluginInstanceId
     }
   };
 }
@@ -91,9 +95,16 @@ export async function assertPhotoshopUploadSucceeded(response: Response): Promis
 
 export async function downloadPhotoshopImportBytes(input: {
   downloadUrl: string;
+  bearer: string;
+  pluginInstanceId: string;
   fetch?: typeof fetch;
 }): Promise<Uint8Array> {
-  const response = await (input.fetch ?? fetch)(input.downloadUrl);
+  const response = await (input.fetch ?? fetch)(input.downloadUrl, {
+    headers: {
+      authorization: `Bearer ${input.bearer}`,
+      'x-debrute-plugin-instance': input.pluginInstanceId
+    }
+  });
   if (!response.ok) {
     throw await photoshopBridgeTransferErrorFromResponse(response);
   }

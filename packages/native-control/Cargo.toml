@@ -1,0 +1,18 @@
+[package]
+name = "debrute-native-control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys.workspace = true
+
+# This crate is the reviewed native safety capsule for the Windows Control
+# named pipe, SID authorization, and user-scoped single-instance mutex.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

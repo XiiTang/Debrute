@@ -1,53 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createPhotoshopHelloMessage,
   createPhotoshopStatusMessage,
-  parseDaemonBridgeMessage
+  parsePhotoshopBridgeMessage
 } from './bridgeClient';
 
 describe('bridgeClient pure helpers', () => {
-  it('creates Photoshop hello messages with stable client identity', () => {
-    expect(createPhotoshopHelloMessage({
-      adobeClientId: 'ps-1',
-      hostVersion: '2026',
-      documentTitle: null,
-      documentCount: 3
-    })).toEqual({
-      type: 'hello',
-      adobeClientId: 'ps-1',
-      hostApp: 'photoshop',
-      hostVersion: '2026',
-      documentCount: 3,
-      activeDocumentTitle: null
-    });
-  });
-
-  it('includes optional client runtime metadata in hello messages', () => {
-    expect(createPhotoshopHelloMessage({
-      adobeClientId: 'ps-1',
-      hostVersion: '26.0.0',
-      clientRuntime: 'cep',
-      documentTitle: 'poster.psd',
-      documentCount: 1
-    })).toMatchObject({
-      type: 'hello',
-      adobeClientId: 'ps-1',
-      hostApp: 'photoshop',
-      hostVersion: '26.0.0',
-      clientRuntime: 'cep',
-      documentCount: 1,
-      activeDocumentTitle: 'poster.psd'
-    });
-  });
-
-  it('parses daemon bridge messages and rejects unrelated payloads', () => {
-    expect(parseDaemonBridgeMessage(JSON.stringify({
+  it('parses challenge, ready and error messages and rejects unrelated payloads', () => {
+    expect(parsePhotoshopBridgeMessage(JSON.stringify({
+      type: 'bridge.challenge',
+      bridgeVersion: 1,
+      productVersion: '1.0.0',
+      runtimeInstanceId: 'runtime-1',
+      challenge: 'proof'
+    }))).toMatchObject({ type: 'bridge.challenge', runtimeInstanceId: 'runtime-1' });
+    expect(parsePhotoshopBridgeMessage(JSON.stringify({
+      type: 'bridge.ready',
+      pluginSessionId: 'session-1',
+      bearer: 'secret',
+      state: {}
+    }))).toMatchObject({ type: 'bridge.ready', bearer: 'secret' });
+    expect(parsePhotoshopBridgeMessage(JSON.stringify({
       type: 'bridge.error',
       code: 'project_not_linked',
       message: 'not linked'
     }))).toMatchObject({ type: 'bridge.error', code: 'project_not_linked' });
 
-    expect(() => parseDaemonBridgeMessage(JSON.stringify({ type: 'unsupported' }))).toThrow('Unsupported daemon bridge message');
+    expect(() => parsePhotoshopBridgeMessage(JSON.stringify({ type: 'unsupported' }))).toThrow('Unsupported Photoshop Bridge message');
   });
 
   it('creates Photoshop status messages from the current document title', () => {

@@ -53,11 +53,11 @@ describe('native recent projects', () => {
   it('parses desktop open intents from native launch arguments', () => {
     expect(parseDesktopOpenIntent(['Debrute.exe', '--new-window'])).toEqual({ kind: 'new-window' });
     expect(parseDesktopOpenIntent(['Debrute.exe', '--open-project=C:\\Projects\\Alpha Project'])).toEqual({
-      kind: 'open-project',
+      kind: 'open-project-path',
       projectRoot: 'C:\\Projects\\Alpha Project'
     });
     expect(parseDesktopOpenIntent(['Electron', '.', '--allow-file-access-from-files', '--open-project=/tmp/Alpha Project'])).toEqual({
-      kind: 'open-project',
+      kind: 'open-project-path',
       projectRoot: '/tmp/Alpha Project'
     });
     expect(parseDesktopOpenIntent(['Debrute.exe', '--open-project', 'C:\\Projects\\Alpha Project'])).toBeUndefined();

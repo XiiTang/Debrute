@@ -39,8 +39,6 @@ export default defineConfig({
         '**/build/**',
         'apps/web/src/types.ts',
         'apps/web/src/workbench/i18n/types.ts',
-        'apps/daemon/src/cli.ts',
-        'apps/runtime-host/src/cli.ts',
         'apps/web/src/main.tsx'
       ],
       excludeAfterRemap: true

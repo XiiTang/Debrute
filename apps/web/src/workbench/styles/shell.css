@@ -36,6 +36,26 @@
   pointer-events: auto;
 }
 
+.workbench-detached-overlay {
+  position: fixed;
+  inset: var(--db-titlebar-height, 38px) 0 0;
+  z-index: var(--db-z-overlays);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: color-mix(in srgb, var(--db-bg) 82%, transparent);
+  backdrop-filter: blur(6px);
+  text-align: center;
+  pointer-events: auto;
+}
+
+.workbench-detached-overlay span {
+  color: var(--db-text-muted);
+}
+
 .db-notification-stack {
   position: fixed;
   right: 14px;

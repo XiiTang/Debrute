@@ -526,6 +526,13 @@
   transform-origin: top left;
 }
 
+.canvas-node-error-presentation {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+}
+
 .canvas-node-shell.fixed-presentation.text > .canvas-node-presentation {
   position: relative;
   left: calc(-1px * var(--canvas-chrome-scale, 1));
@@ -884,6 +891,10 @@
   pointer-events: none;
 }
 
+.canvas-text-preview-layers[data-canvas-text-preview-hidden="true"] {
+  visibility: hidden;
+}
+
 .canvas-text-preview-image--visible {
   z-index: 1;
 }
@@ -958,6 +969,12 @@
 
 .canvas-text-editor[data-pointer-focus="true"] .cm-cursor {
   display: block;
+}
+
+.canvas-text-editor[data-editor-mode="handoff"] .cm-cursorLayer,
+.canvas-text-editor[data-editor-mode="handoff"] .cm-cursor {
+  display: none;
+  animation: none;
 }
 
 .canvas-text-editor .cm-line {

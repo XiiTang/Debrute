@@ -20,7 +20,6 @@ interface CanvasPerfLongAnimationFrameObserverConstructor {
 interface CanvasPerfObservedSession {
   sessionId: CanvasPerfSessionId;
   startedAt: number;
-  endedAt?: number | undefined;
 }
 
 export interface CanvasPerfBrowserAdapter {
@@ -40,7 +39,6 @@ export function createCanvasPerfBrowserAdapter(input: {
   const observerFactory = input.performanceObserverFactory
     ?? (observerConstructor ? (callback: CanvasPerfLongAnimationFrameObserverCallback) => new observerConstructor(callback) : undefined);
   const supportedEntryTypes = input.supportedEntryTypes ?? observerConstructor?.supportedEntryTypes ?? [];
-  let activeSessionCount = 0;
   let observer: CanvasPerfLongAnimationFrameObserver | undefined;
   const observedSessions = new Map<CanvasPerfSessionId, CanvasPerfObservedSession>();
 
@@ -67,30 +65,25 @@ export function createCanvasPerfBrowserAdapter(input: {
     }
     try {
       observer = observerFactory((list) => {
+        if (observedSessions.size === 0) {
+          return;
+        }
         for (const entry of list.getEntries()) {
           const longAnimationFrame = canvasPerfLongAnimationFrame(entry);
           if (longAnimationFrame) {
             const sessionIds = canvasPerfSessionIdsForLongAnimationFrame(longAnimationFrame, observedSessions);
-            if (sessionIds.length === 0) {
+            for (const sessionId of sessionIds) {
               input.onLongAnimationFrame?.({
+                sessionId,
                 timestamp: canvasPerfBrowserTimestamp(),
                 source: 'CanvasPerfBrowserAdapter',
                 entry: longAnimationFrame
               });
-            } else {
-              for (const sessionId of sessionIds) {
-                input.onLongAnimationFrame?.({
-                  sessionId,
-                  timestamp: canvasPerfBrowserTimestamp(),
-                  source: 'CanvasPerfBrowserAdapter',
-                  entry: longAnimationFrame
-                });
-              }
             }
           }
         }
       });
-      observer.observe({ type: 'long-animation-frame', buffered: true });
+      observer.observe({ type: 'long-animation-frame', buffered: false });
     } catch {
       disconnectObserver();
     }
@@ -99,7 +92,6 @@ export function createCanvasPerfBrowserAdapter(input: {
   return {
     recordEvent(event) {
       if (event.kind === 'session-start') {
-        activeSessionCount += 1;
         observedSessions.set(event.sessionId, {
           sessionId: event.sessionId,
           startedAt: event.timestamp
@@ -113,10 +105,7 @@ export function createCanvasPerfBrowserAdapter(input: {
         return;
       }
       if (event.kind === 'session-end') {
-        const observed = observedSessions.get(event.sessionId);
-        if (observed) {
-          observed.endedAt = event.timestamp;
-        }
+        observedSessions.delete(event.sessionId);
         if (performanceApi) {
           const start = sessionMarkName(event.summary.type, event.sessionId, 'start');
           const end = sessionMarkName(event.summary.type, event.sessionId, 'end');
@@ -133,8 +122,7 @@ export function createCanvasPerfBrowserAdapter(input: {
             // Browser performance APIs must never break Canvas interaction.
           }
         }
-        activeSessionCount = Math.max(0, activeSessionCount - 1);
-        if (activeSessionCount === 0) {
+        if (observedSessions.size === 0) {
           disconnectObserver();
         }
         return;
@@ -144,7 +132,6 @@ export function createCanvasPerfBrowserAdapter(input: {
       }
     },
     dispose() {
-      activeSessionCount = 0;
       observedSessions.clear();
       disconnectObserver();
     }
@@ -204,12 +191,10 @@ function canvasPerfSessionIdsForLongAnimationFrame(
   entry: CanvasPerfLongAnimationFrameInput['entry'],
   sessions: ReadonlyMap<CanvasPerfSessionId, CanvasPerfObservedSession>
 ): CanvasPerfSessionId[] {
-  const entryStart = entry.startTime;
   const entryEnd = entry.startTime + entry.duration;
   return [...sessions.values()]
     .filter((session) => {
-      const sessionEnd = session.endedAt ?? Number.POSITIVE_INFINITY;
-      return entryStart <= sessionEnd && entryEnd >= session.startedAt;
+      return entryEnd >= session.startedAt;
     })
     .map((session) => session.sessionId);
 }

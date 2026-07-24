@@ -7,10 +7,9 @@ import {
 } from './nativeWindowShell.js';
 
 describe('native window shell', () => {
-  it('uses native inset chrome on macOS and custom frames on Windows and Linux', () => {
+  it('uses native inset chrome on macOS and custom frames on Windows', () => {
     expect(desktopBrowserWindowChromeOptions('darwin')).toEqual({ titleBarStyle: 'hiddenInset' });
     expect(desktopBrowserWindowChromeOptions('win32')).toEqual({ frame: false, titleBarStyle: 'hidden' });
-    expect(desktopBrowserWindowChromeOptions('linux')).toEqual({ frame: false, titleBarStyle: 'hidden' });
   });
 
   it('maps the preload native-window API to the public IPC channels', async () => {

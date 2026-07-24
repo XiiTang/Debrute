@@ -98,7 +98,7 @@ describe('useCanvasFeedbackController', () => {
     await probe.unmount();
   });
 
-  it('uses one generation so a newer update invalidates an older load', async () => {
+  it('uses one epoch so a newer update invalidates an older load', async () => {
     const load = deferred<CanvasFeedbackDocument>();
     const update = deferred<WorkbenchCanvasFeedbackMutationResult>();
     const api = apiFixture({
@@ -205,6 +205,74 @@ describe('useCanvasFeedbackController', () => {
 
     expect(notifyUnavailable).not.toHaveBeenCalled();
   });
+
+  it('persists the feedback draft, restores it without rewriting, and clears it on cancel', async () => {
+    const putFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['putFeedbackWorkingCopy']>(async (_projectId, value) => value);
+    const clearFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['clearFeedbackWorkingCopy']>(async () => undefined);
+    const api = apiFixture({ putFeedbackWorkingCopy, clearFeedbackWorkingCopy });
+    const probe = await renderController(api);
+
+    await act(async () => {
+      probe.current.restoreWorkingCopy({
+        pendingItem: {
+          projectRelativePath: 'restored.png',
+          kind: 'comment',
+          scope: 'file'
+        },
+        pendingComment: 'Restored comment',
+        localMode: null
+      });
+    });
+    expect(probe.current.pendingItem?.projectRelativePath).toBe('restored.png');
+    expect(probe.current.pendingComment).toBe('Restored comment');
+    expect(putFeedbackWorkingCopy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      probe.current.setPendingComment('Updated comment');
+      await vi.waitFor(() => expect(putFeedbackWorkingCopy).toHaveBeenLastCalledWith('project-1', {
+        pendingItem: {
+          projectRelativePath: 'restored.png',
+          kind: 'comment',
+          scope: 'file'
+        },
+        pendingComment: 'Updated comment',
+        localMode: null
+      }));
+      probe.current.cancelPending();
+      await vi.waitFor(() => expect(clearFeedbackWorkingCopy).toHaveBeenCalledOnce());
+    });
+
+    expect(probe.current.pendingItem).toBeUndefined();
+    expect(probe.current.pendingComment).toBe('');
+    await probe.unmount();
+  });
+
+  it('keeps a saved draft visible when its Working Copy cannot be cleared', async () => {
+    const notifyUnavailable = vi.fn();
+    const clearFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['clearFeedbackWorkingCopy']>(async () => {
+      throw new Error('Working Copy storage is unavailable');
+    });
+    const api = apiFixture({ clearFeedbackWorkingCopy });
+    const probe = await renderController(api, notifyUnavailable);
+
+    await act(async () => {
+      probe.current.handleDraft({
+        projectRelativePath: 'image.png',
+        kind: 'comment',
+        scope: 'file',
+        feedbackBarTarget: feedbackTarget()
+      });
+      probe.current.setPendingComment('Review this');
+    });
+    await act(async () => {
+      expect(await probe.current.savePending()).toBe(false);
+    });
+
+    expect(probe.current.pendingItem?.projectRelativePath).toBe('image.png');
+    expect(probe.current.pendingComment).toBe('Review this');
+    expect(notifyUnavailable).toHaveBeenCalledWith('Working Copy storage is unavailable');
+    await probe.unmount();
+  });
 });
 
 function ControllerProbe({
@@ -220,6 +288,7 @@ function ControllerProbe({
 }): null {
   const controller = useCanvasFeedbackController({
     api,
+    projectId: 'project-1',
     overlayRuntime,
     notifyUnavailable
   });
@@ -264,6 +333,8 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
   return {
     readCanvasFeedback: vi.fn(async () => feedbackDocumentFixture()),
     updateCanvasFeedbackEntry: vi.fn(async () => feedbackMutationResult(feedbackDocumentFixture())),
+    putFeedbackWorkingCopy: vi.fn(async (_projectId, value) => value),
+    clearFeedbackWorkingCopy: vi.fn(async () => undefined),
     ...overrides
   } as unknown as WorkbenchApiClient;
 }
