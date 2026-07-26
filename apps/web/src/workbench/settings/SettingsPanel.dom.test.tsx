@@ -3,14 +3,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { DebruteGlobalSettingsView, DebruteProductState } from '@debrute/app-protocol';
-import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../../types';
-import { I18nProvider } from '../i18n';
-import { createEmptyProjectTreeSelection } from '../project-explorer/projectTreeInteraction';
-import { SettingsPanel } from './SettingsPanel';
-import { AudioModelSettings, ImageModelSettings } from './MediaModelSettingsPage';
-import { GeneralSettingsPage } from './general/GeneralSettingsPage';
+import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../../types.js';
+import { I18nProvider } from '../i18n/index.js';
+import { createEmptyProjectTreeSelection } from '../project-explorer/projectTreeInteraction.js';
+import { SettingsPanel } from './SettingsPanel.js';
+import { AudioModelSettings, ImageModelSettings } from './MediaModelSettingsPage.js';
+import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
-import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState';
+import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState.js';
 
 describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
   it('groups Settings navigation into General, Models, and Integrations', () => {

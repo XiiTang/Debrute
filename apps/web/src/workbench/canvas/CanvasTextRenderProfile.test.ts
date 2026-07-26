@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCanvasTextFontResource,
   createCanvasTextRenderProfile,
-  type CanvasTextFontDigest,
-  type CanvasTextFontSource,
+  type CanvasTextFontFaceDefinition,
   type CanvasTextRenderProfileDefinition
 } from './CanvasTextRenderProfile.js';
+
+type CanvasTextFontDigest = CanvasTextFontFaceDefinition['sha256'];
 
 const ONE_BYTE_SHA256 = (
   'sha256:4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a'
@@ -16,7 +17,7 @@ afterEach(() => {
 });
 
 describe('CanvasTextRenderProfile', { tags: ['canvas-text'] }, () => {
-  it('resolves every supported typography and editor-geometry value into one binding', () => {
+  it('resolves the supported appearance and fixed editor contract into one binding', () => {
     const profile = createCanvasTextRenderProfile(profileDefinition());
 
     expect(profile.resolvedTypography).toEqual({
@@ -33,7 +34,7 @@ describe('CanvasTextRenderProfile', { tags: ['canvas-text'] }, () => {
       fontFeatureSettings: 'normal',
       fontVariationSettings: 'normal',
       fontOpticalSizing: 'auto',
-      fontSynthesis: 'weight style'
+      fontSynthesis: 'none'
     });
     expect(profile.editorGeometry).toEqual({
       linePaddingInlinePx: 8,
@@ -61,10 +62,7 @@ describe('CanvasTextRenderProfile', { tags: ['canvas-text'] }, () => {
     const changedTypographyDefinition = profileDefinition();
     const changedTypography = createCanvasTextRenderProfile({
       ...changedTypographyDefinition,
-      typography: {
-        ...changedTypographyDefinition.typography,
-        letterSpacingPx: 2
-      }
+      letterSpacingPx: 2
     });
 
     expect(first.identity).not.toBe(changedFont.identity);
@@ -87,14 +85,14 @@ describe('CanvasTextRenderProfile', { tags: ['canvas-text'] }, () => {
     expect(installedFaces).toHaveLength(1);
     expect(installedFaces[0]).toMatchObject({
       family,
-      descriptors: { weight: '300 500', style: 'normal', stretch: '75% 125%' }
+      descriptors: { weight: '400', style: 'normal', stretch: '100%' }
     });
     expect(documentToken.fonts.add).toHaveBeenCalledTimes(1);
     expect(preparedFont.identity).toBe(profileDefinition({ read }).font.identity);
     expect(preparedFont.faces).toHaveLength(1);
     expect(preparedFont.faces[0]).toMatchObject({
       family,
-      descriptors: { weight: '300 500', style: 'normal', stretch: '75% 125%' }
+      descriptors: { weight: '400', style: 'normal', stretch: '100%' }
     });
     expect(new Uint8Array(preparedFont.faces[0]!.bytes)).toEqual(new Uint8Array([1]));
   });
@@ -121,54 +119,20 @@ describe('CanvasTextRenderProfile', { tags: ['canvas-text'] }, () => {
 
 function profileDefinition(input: {
   digest?: CanvasTextFontDigest;
-  read?: CanvasTextFontSource['read'];
+  read?: CanvasTextFontFaceDefinition['source']['read'];
 } = {}): CanvasTextRenderProfileDefinition {
-  const font = createCanvasTextFontResource({
-    families: [{
-      faces: [{
-        asset: {
-          source: { read: input.read ?? (async () => new Uint8Array([1]).buffer) },
-          sha256: input.digest ?? ONE_BYTE_SHA256,
-          format: 'woff2'
-        },
-        weight: [300, 500],
-        style: 'normal',
-        stretchPercent: [75, 125]
-      }]
-    }]
-  });
+  const font = createCanvasTextFontResource([{
+    source: { read: input.read ?? (async () => new Uint8Array([1]).buffer) },
+    sha256: input.digest ?? ONE_BYTE_SHA256,
+    weight: 400
+  }]);
   return {
     font,
-    typography: {
-      fontSizePx: 12,
-      lineHeight: { kind: 'ratio', value: 1.4 },
-      fontWeight: 400,
-      fontStyle: 'normal',
-      fontStretchPercent: 100,
-      letterSpacingPx: 0,
-      wordSpacingPx: 0,
-      tabSize: 4,
-      kerning: 'normal',
-      ligatures: {
-        common: true,
-        discretionary: false,
-        historical: false,
-        contextual: true
-      },
-      features: {},
-      variations: {},
-      opticalSizing: 'auto',
-      synthesis: {
-        weight: true,
-        style: true,
-        smallCaps: false
-      }
-    },
-    editorGeometry: {
-      linePaddingInlinePx: 8,
-      gutterPaddingLeftPx: 5,
-      gutterPaddingRightPx: 3
-    }
+    fontSizePx: 12,
+    lineHeightRatio: 1.4,
+    fontWeight: 400,
+    letterSpacingPx: 0,
+    ligatures: true
   };
 }
 

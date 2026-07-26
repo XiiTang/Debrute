@@ -1,11 +1,11 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
-import { I18nProvider } from '../i18n';
+import { I18nProvider } from '../i18n/index.js';
 import {
   PendingWorkbenchContextMenuDismissal,
   WorkbenchContextMenu
-} from './WorkbenchContextMenu';
+} from './WorkbenchContextMenu.js';
 
 describe('WorkbenchContextMenu lazy items', () => {
   it('focuses the first enabled command when lazy items become ready', async () => {

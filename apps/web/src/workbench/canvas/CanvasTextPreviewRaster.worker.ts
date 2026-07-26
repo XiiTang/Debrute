@@ -70,6 +70,8 @@ function assertRasterRequest(request: CanvasTextPreviewRasterWorkerRequest): voi
   if (!Number.isInteger(request.id)
     || request.id <= 0
     || !request.scene
+    || typeof request.scene.background !== 'string'
+    || request.scene.background.trim() === ''
     || !Array.isArray(request.scene.commands)
     || request.fontResourceKey.trim() === ''
     || !Number.isFinite(request.width)
@@ -79,6 +81,51 @@ function assertRasterRequest(request: CanvasTextPreviewRasterWorkerRequest): voi
     || !Number.isInteger(request.scale)
     || request.scale <= 0) {
     throw new Error('Canvas text preview raster Worker received an invalid request.');
+  }
+  for (const command of request.scene.commands) {
+    assertRasterCommand(command);
+  }
+}
+
+function assertRasterCommand(command: CanvasTextPreviewRasterCommand): void {
+  if (!command
+    || (command.kind !== 'rect' && command.kind !== 'text')
+    || ![command.x, command.y, command.width, command.height].every(Number.isFinite)
+    || command.width < 0
+    || command.height < 0) {
+    throw new Error('Canvas text preview raster Worker received an invalid scene command.');
+  }
+  if (command.kind === 'rect') {
+    if (typeof command.fill !== 'string'
+      || command.fill.trim() === ''
+      || typeof command.stroke !== 'string'
+      || command.stroke.trim() === ''
+      || !Number.isFinite(command.strokeWidth)
+      || command.strokeWidth < 0) {
+      throw new Error('Canvas text preview raster Worker received an invalid rectangle command.');
+    }
+    return;
+  }
+  if (!Number.isFinite(command.textX)
+    || !['left', 'center', 'right'].includes(command.textAlign)
+    || typeof command.text !== 'string'
+    || command.text.length === 0
+    || command.text.includes('\t')
+    || [
+      command.color,
+      command.background,
+      command.fontFamily,
+      command.fontSize,
+      command.fontWeight,
+      command.fontVariantLigatures,
+      command.fontVariantNumeric,
+      command.letterSpacing,
+      command.wordSpacing,
+      command.textDecorationLine,
+      command.textDecorationColor,
+      command.textDecorationStyle
+    ].some((value) => typeof value !== 'string' || value.trim() === '')) {
+    throw new Error('Canvas text preview raster Worker received an incomplete text command.');
   }
 }
 
@@ -103,11 +150,9 @@ async function resolveFontProfile(
   command: CanvasTextPreviewRasterText
 ): Promise<ReadonlyMap<string, string>> {
   const featureSettings = canvasTextFeatureSettings(command);
-  const variationSettings = command.fontVariationSettings || 'normal';
   const profileKey = JSON.stringify([
     fontResourceKey,
-    featureSettings,
-    variationSettings
+    featureSettings
   ]);
   const current = fontProfiles.get(profileKey);
   if (current) {
@@ -129,8 +174,7 @@ async function resolveFontProfile(
     face.bytes,
     {
       ...face.descriptors,
-      ...(featureSettings === 'normal' ? {} : { featureSettings }),
-      ...(variationSettings === 'normal' ? {} : { variationSettings })
+      ...(featureSettings === 'normal' ? {} : { featureSettings })
     }
   ).load()));
   for (const face of loadedFaces) {
@@ -178,24 +222,16 @@ function drawText(
   fill(context, command.background, command.x, command.y, command.width, command.height);
   context.fillStyle = command.color;
   context.font = [
-    command.fontStyle || 'normal',
-    command.fontWeight || '400',
-    command.fontSize || '16px',
+    'normal',
+    command.fontWeight,
+    command.fontSize,
     workerFontFamily(command.fontFamily, fontFamilies)
   ].join(' ');
   context.textAlign = command.textAlign === 'left' ? 'start' : command.textAlign;
   context.textBaseline = 'alphabetic';
-  setTextContextProperty(context, 'fontKerning', command.fontKerning);
-  setTextContextProperty(context, 'fontStretch', command.fontStretch);
-  setTextContextProperty(context, 'fontVariantCaps', command.fontVariantCaps);
-  setTextContextProperty(context, 'fontVariantLigatures', command.fontVariantLigatures);
-  setTextContextProperty(context, 'fontVariantNumeric', command.fontVariantNumeric);
-  setTextContextProperty(context, 'fontFeatureSettings', command.fontFeatureSettings);
-  setTextContextProperty(context, 'fontVariationSettings', command.fontVariationSettings);
-  setTextContextProperty(context, 'fontOpticalSizing', command.fontOpticalSizing);
-  setTextContextProperty(context, 'fontSynthesis', command.fontSynthesis);
-  setTextContextProperty(context, 'letterSpacing', command.letterSpacing);
-  setTextContextProperty(context, 'wordSpacing', command.wordSpacing);
+  setRequiredTextContextProperty(context, 'fontKerning', 'normal');
+  setRequiredTextContextProperty(context, 'letterSpacing', command.letterSpacing);
+  setRequiredTextContextProperty(context, 'wordSpacing', command.wordSpacing);
   if (command.text.includes('\t')) {
     throw new Error('Canvas text preview raster scene contains an unresolved tab.');
   }
@@ -214,11 +250,21 @@ function workerFontFamily(
   fontFamily: string,
   familyMap: ReadonlyMap<string, string>
 ): string {
-  let result = fontFamily || 'monospace';
-  for (const [source, target] of familyMap) {
-    result = result.replaceAll(`"${source}"`, `"${target}"`);
+  const sourceFamilies = fontFamily.split(',').map((value) => {
+    const trimmed = value.trim();
+    const quoted = trimmed.match(/^(["'])(.*)\1$/u);
+    return quoted?.[2] ?? trimmed;
+  });
+  if (sourceFamilies.length === 0 || sourceFamilies.some((family) => family === '')) {
+    throw new Error('Canvas text preview raster scene is missing its managed font family.');
   }
-  return result;
+  return sourceFamilies.map((source) => {
+    const target = familyMap.get(source);
+    if (!target) {
+      throw new Error(`Canvas text preview raster scene contains an unmanaged font: ${source}.`);
+    }
+    return `"${target}"`;
+  }).join(', ');
 }
 
 function canvasTextFeatureSettings(command: CanvasTextPreviewRasterText): string {
@@ -249,17 +295,6 @@ function canvasTextFeatureSettings(command: CanvasTextPreviewRasterText): string
   setVariantFeature(settings, 'onum', numeric, 'oldstyle-nums', 'lining-nums');
   setVariantFeature(settings, 'zero', numeric, 'slashed-zero', 'normal');
 
-  if (command.fontFeatureSettings !== '' && command.fontFeatureSettings !== 'normal') {
-    for (const match of command.fontFeatureSettings.matchAll(
-      /["']([^"']{4})["']\s+(on|off|-?(?:\d+\.?\d*|\.\d+))/gu
-    )) {
-      const tag = match[1];
-      const value = match[2];
-      if (tag && value) {
-        settings.set(tag, value === 'on' ? '1' : value === 'off' ? '0' : value);
-      }
-    }
-  }
   return settings.size === 0
     ? 'normal'
     : [...settings].map(([tag, value]) => `"${tag}" ${value}`).join(', ');
@@ -297,7 +332,7 @@ function drawTextDecoration(
     : command.textAlign === 'center'
       ? anchorX - textWidth / 2
       : anchorX;
-  context.strokeStyle = command.textDecorationColor || command.color;
+  context.strokeStyle = command.textDecorationColor;
   context.lineWidth = Math.max(1, Number.parseFloat(command.fontSize) / 16);
   context.setLineDash(command.textDecorationStyle === 'dashed'
     ? [3, 2]
@@ -315,14 +350,15 @@ function drawTextDecoration(
   }
 }
 
-function setTextContextProperty(
+function setRequiredTextContextProperty(
   context: OffscreenCanvasRenderingContext2D,
   property: string,
   value: string
 ): void {
-  if (value !== '' && property in context) {
-    (context as unknown as Record<string, string>)[property] = value;
+  if (!(property in context)) {
+    throw new Error(`Canvas text preview raster Worker requires 2D context.${property}.`);
   }
+  (context as unknown as Record<string, string>)[property] = value;
 }
 
 function fill(
@@ -333,7 +369,7 @@ function fill(
   width: number,
   height: number
 ): void {
-  if (color === '' || color === 'transparent' || color === 'rgba(0, 0, 0, 0)') {
+  if (color === 'transparent' || color === 'rgba(0, 0, 0, 0)') {
     return;
   }
   context.fillStyle = color;

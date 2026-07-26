@@ -3,16 +3,17 @@ import { AudioLines, Cable, Eye, Image as ImageIcon, Music, Settings, Video, Wan
 import type {
   AdobeBridgeStateView,
   DebruteGlobalAdobeBridgeSettings,
-  DebruteGlobalSettingsView
+  DebruteGlobalSettingsView,
+  IntegrationSettingsView
 } from '@debrute/app-protocol';
-import type { EventProjection, SettingsResource, WorkbenchActions, WorkbenchState } from '../../types';
-import { GeneralSettingsPage } from './general/GeneralSettingsPage';
+import type { EventProjection, SettingsResource, WorkbenchActions, WorkbenchState } from '../../types.js';
+import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
-import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
-import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage';
-import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage';
-import { SettingsResourcePanel } from './SettingsResourcePanel';
-import { useI18n } from '../i18n';
+import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage.js';
+import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage.js';
+import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage.js';
+import { SettingsResourcePanel } from './SettingsResourcePanel.js';
+import { useI18n } from '../i18n/index.js';
 
 const SETTINGS_NAV_GROUPS = [
   {
@@ -45,14 +46,20 @@ const SETTINGS_NAV_GROUPS = [
 
 type SettingsPageId = typeof SETTINGS_NAV_GROUPS[number]['items'][number]['id'];
 
+interface SettingsPanelState {
+  globalSettings: WorkbenchState['globalSettings'];
+  integrations: SettingsResource<IntegrationSettingsView>;
+  product: WorkbenchState['product'];
+  adobeBridge: WorkbenchState['adobeBridge'];
+  projectId?: WorkbenchState['projectId'];
+  resolvedTheme: WorkbenchState['resolvedTheme'];
+}
+
 export function SettingsPanel({
   state,
   actions
 }: {
-  state: Pick<
-    WorkbenchState,
-    'globalSettings' | 'integrations' | 'product' | 'adobeBridge' | 'projectId' | 'resolvedTheme'
-  >;
+  state: SettingsPanelState;
   actions: WorkbenchActions;
 }): React.ReactElement {
   const i18n = useI18n();
@@ -154,6 +161,9 @@ export function SettingsPanel({
           <SettingsResourcePanel
             title={i18n.t('settings.integrations.title')}
             resource={state.integrations}
+            {...(state.integrations.status === 'error'
+              ? { onRetry: actions.rescanIntegrations }
+              : {})}
           >
             {(settings) => <IntegrationsSettingsPage settings={settings} actions={actions} />}
           </SettingsResourcePanel>

@@ -18,9 +18,9 @@ describe('Workbench startup timeline', () => {
     timeline.mark('global-snapshot-ready');
     timeline.mark('global-snapshot-ready');
 
-    expect(timeline.snapshot()).toEqual([
-      { milestone: 'main-evaluated', elapsedMs: 12 },
-      { milestone: 'global-snapshot-ready', elapsedMs: 40 }
+    expect(publish.mock.calls).toEqual([
+      [{ milestone: 'main-evaluated', elapsedMs: 12 }],
+      [{ milestone: 'global-snapshot-ready', elapsedMs: 40 }]
     ]);
     expect(mark).toHaveBeenCalledTimes(2);
     expect(publish).toHaveBeenCalledTimes(2);
@@ -40,7 +40,6 @@ describe('Workbench startup timeline', () => {
     timeline.markFeatureRequested('settings');
     timeline.markFeatureReady('settings');
 
-    expect(timeline.snapshot()).toEqual([]);
     expect(mark).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
     expect(now).not.toHaveBeenCalled();

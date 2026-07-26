@@ -29,7 +29,6 @@ export interface WorkbenchStartupTimeline {
   mark(milestone: WorkbenchStartupMilestone): void;
   markFeatureRequested(feature: WorkbenchStartupFeature): void;
   markFeatureReady(feature: WorkbenchStartupFeature): void;
-  snapshot(): readonly WorkbenchStartupRecord[];
 }
 
 export function createWorkbenchStartupTimeline(input: {
@@ -40,7 +39,6 @@ export function createWorkbenchStartupTimeline(input: {
   publish(record: WorkbenchStartupRecord): void;
 }): WorkbenchStartupTimeline {
   const origin = input.originMs ?? 0;
-  const records: WorkbenchStartupRecord[] = [];
   const milestones = new Set<WorkbenchStartupMilestone>();
   const record = (milestone: WorkbenchStartupMilestone): void => {
     if (!input.enabled || milestones.has(milestone)) {
@@ -48,7 +46,6 @@ export function createWorkbenchStartupTimeline(input: {
     }
     milestones.add(milestone);
     const entry = { milestone, elapsedMs: input.now() - origin };
-    records.push(entry);
     input.mark(`debrute:startup:${milestone}`);
     input.publish(entry);
   };
@@ -56,8 +53,7 @@ export function createWorkbenchStartupTimeline(input: {
     enabled: input.enabled,
     mark: record,
     markFeatureRequested: (feature) => record(`feature-requested:${feature}`),
-    markFeatureReady: (feature) => record(`feature-ready:${feature}`),
-    snapshot: () => records
+    markFeatureReady: (feature) => record(`feature-ready:${feature}`)
   };
 }
 

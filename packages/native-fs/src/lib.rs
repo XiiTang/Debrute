@@ -175,7 +175,7 @@ fn windows_path(path: &Path) -> io::Result<Vec<u16>> {
     Ok(encoded)
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
 mod tests {
     use std::fs;
 
@@ -183,7 +183,10 @@ mod tests {
 
     #[test]
     fn rename_no_replace_preserves_an_existing_destination() {
-        let root = std::env::temp_dir().join(format!("debrute-native-fs-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "debrute-native-fs-collision-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("fixture root should exist");
         let source = root.join("source");
@@ -209,6 +212,36 @@ mod tests {
             .expect_err("directory collision must fail atomically");
         assert!(source_directory.is_dir());
         assert!(destination_directory.is_dir());
+        fs::remove_dir_all(root).expect("fixture should clean up");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn rename_no_replace_applies_case_only_file_and_directory_renames() {
+        let root =
+            std::env::temp_dir().join(format!("debrute-native-fs-case-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("fixture root should exist");
+        fs::write(root.join("note.txt"), "note").expect("file fixture should exist");
+        fs::create_dir(root.join("assets")).expect("directory fixture should exist");
+
+        rename_no_replace(&root.join("note.txt"), &root.join("Note.txt"))
+            .expect("case-only file rename should succeed");
+        rename_no_replace(&root.join("assets"), &root.join("Assets"))
+            .expect("case-only directory rename should succeed");
+
+        let names = fs::read_dir(&root)
+            .expect("fixture root should be readable")
+            .map(|entry| {
+                entry
+                    .expect("fixture entry should be readable")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name == "Note.txt"));
+        assert!(names.iter().any(|name| name == "Assets"));
         fs::remove_dir_all(root).expect("fixture should clean up");
     }
 }

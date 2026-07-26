@@ -382,6 +382,8 @@ fn explicit_canvas_and_explorer_paths_bypass_only_background_exclusions() {
             .iter()
             .any(|node| { node.node.project_relative_path == "dist/nested/render.png" })
     );
+    assert!(service.is_explicit_watch_path("dist"));
+    assert!(service.is_explicit_watch_path("dist/nested"));
     assert!(service.is_explicit_watch_path("dist/nested/render.png"));
     assert!(!service.is_explicit_watch_path("node_modules/unrelated.js"));
 
@@ -1967,6 +1969,28 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
             .expect("uploaded file should be readable"),
         "uploaded"
     );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn project_rename_supports_case_only_file_and_directory_names() {
+    let project = TemporaryDirectory::new("case-only-rename");
+    fs::write(project.as_ref().join("note.txt"), "note").expect("file fixture should exist");
+    fs::create_dir(project.as_ref().join("assets")).expect("directory fixture should exist");
+
+    let file = rename_project_path(project.as_ref(), "note.txt", "Note.txt")
+        .expect("case-only file rename should succeed");
+    let directory = rename_project_path(project.as_ref(), "assets", "Assets")
+        .expect("case-only directory rename should succeed");
+
+    assert_eq!(file.project_relative_path, "Note.txt");
+    assert_eq!(directory.project_relative_path, "Assets");
+    let names = fs::read_dir(project.as_ref())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(names.iter().any(|name| name == "Note.txt"));
+    assert!(names.iter().any(|name| name == "Assets"));
 }
 
 #[test]

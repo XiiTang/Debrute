@@ -7,7 +7,7 @@ import type {
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import type { HttpWorkbenchApiClient } from '../api/httpWorkbenchApiClient';
+import type { HttpWorkbenchApiClient } from '../api/httpWorkbenchApiClient.js';
 import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
@@ -19,7 +19,7 @@ import {
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
-import { useCanvasSurfaceReady } from './canvas/runtime/useCanvasRuntimeSnapshot';
+import { useCanvasSurfaceReady } from './canvas/runtime/useCanvasRuntimeSnapshot.js';
 import { getCanvasById } from './services/canvasState';
 import { createCanvasSelectionStackOrderSync } from './services/canvasStackOrderSelection';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
@@ -43,12 +43,12 @@ import { useTextFileBufferActions } from './services/textFileBufferActions';
 import {
   createProjectPathCommandCoordinator,
   type ProjectPathCommandCoordinator
-} from './services/projectPathCommandCoordinator';
+} from './services/projectPathCommandCoordinator.js';
 import { SendToPhotoshopDialog } from './adobe-bridge/SendToPhotoshopDialog';
 import {
   PendingWorkbenchContextMenuDismissal,
   WorkbenchContextMenu
-} from './shell/WorkbenchContextMenu';
+} from './shell/WorkbenchContextMenu.js';
 import { WorkbenchTitleBar } from './shell/WorkbenchTitleBar';
 import { executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands';
 import {
@@ -69,7 +69,7 @@ import {
   permanentDeleteConfirmationMessageForEntries,
   projectTreeSelectionFromPaths
 } from './project-explorer/workbenchFileCommands';
-import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController';
+import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController.js';
 import {
   canvasCardBarRect,
   feedbackBarPlacementForCanvasTarget,
@@ -126,7 +126,7 @@ import { waitForWorkbenchShellFonts } from '../startup/workbenchShellFonts.js';
 const productPlatform: DebruteProductPlatform = __DEBRUTE_PLATFORM__;
 const TerminalPanel = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('terminal');
-  const module = await import('./terminal/TerminalPanel');
+  const module = await import('./terminal/TerminalPanel.js');
   workbenchStartupTimeline.markFeatureReady('terminal');
   return { default: module.TerminalPanel };
 });
@@ -1448,6 +1448,39 @@ function WorkbenchProjectGenerationApp({
     );
   }
 
+  const canvasEditor = (
+    <CanvasEditor
+      canvasId={activeCanvasId}
+      state={state}
+      actions={actions}
+      runtimeScopeKey={canvasRuntimeScopeKey}
+      minimapOpen={canvasMinimapOpen}
+      onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
+      feedbackInteraction={feedbackInteraction.canvas}
+      onRuntimeChange={setActiveCanvasRuntime}
+      onOpenContextMenu={openWorkbenchContextMenu}
+      interactionBlocked={projectPresentationBlocked}
+    />
+  );
+  const profiledCanvasEditor = activeCanvasHasText ? (
+    <CanvasTextRenderProfileGate
+      profile={canvasTextRenderProfile}
+      onReady={() => workbenchStartupTimeline.mark('canvas-text-ready')}
+      pending={(
+        <div className="empty-editor" role="status" aria-busy="true">
+          <Loader2 className="spin" size={22} />
+          <span>Preparing Canvas text rendering…</span>
+        </div>
+      )}
+    >
+      {canvasEditor}
+    </CanvasTextRenderProfileGate>
+  ) : activeCanvas ? (
+    <CanvasTextRenderProfileProvider profile={canvasTextRenderProfile}>
+      {canvasEditor}
+    </CanvasTextRenderProfileProvider>
+  ) : canvasEditor;
+
   return (
     <>
       {explorerFeatureRequested ? (
@@ -1529,58 +1562,8 @@ function WorkbenchProjectGenerationApp({
                   {i18n.t('canvas.registry.autoRepair')}
                 </Button>
               </div>
-            ) : activeCanvas && activeCanvasHasText ? (
-              <CanvasTextRenderProfileGate
-                profile={canvasTextRenderProfile}
-                onReady={() => workbenchStartupTimeline.mark('canvas-text-ready')}
-                pending={(
-                  <div className="empty-editor" role="status" aria-busy="true">
-                    <Loader2 className="spin" size={22} />
-                    <span>Preparing Canvas text rendering…</span>
-                  </div>
-                )}
-              >
-                <CanvasEditor
-                  canvasId={activeCanvasId}
-                  state={state}
-                  actions={actions}
-                  runtimeScopeKey={canvasRuntimeScopeKey}
-                  minimapOpen={canvasMinimapOpen}
-                  onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
-                  feedbackInteraction={feedbackInteraction.canvas}
-                  onRuntimeChange={setActiveCanvasRuntime}
-                  onOpenContextMenu={openWorkbenchContextMenu}
-                  interactionBlocked={projectPresentationBlocked}
-                />
-              </CanvasTextRenderProfileGate>
-            ) : activeCanvas ? (
-              <CanvasTextRenderProfileProvider profile={canvasTextRenderProfile}>
-                <CanvasEditor
-                  canvasId={activeCanvasId}
-                  state={state}
-                  actions={actions}
-                  runtimeScopeKey={canvasRuntimeScopeKey}
-                  minimapOpen={canvasMinimapOpen}
-                  onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
-                  feedbackInteraction={feedbackInteraction.canvas}
-                  onRuntimeChange={setActiveCanvasRuntime}
-                  onOpenContextMenu={openWorkbenchContextMenu}
-                  interactionBlocked={projectPresentationBlocked}
-                />
-              </CanvasTextRenderProfileProvider>
             ) : (
-              <CanvasEditor
-                canvasId={activeCanvasId}
-                state={state}
-                actions={actions}
-                runtimeScopeKey={canvasRuntimeScopeKey}
-                minimapOpen={canvasMinimapOpen}
-                onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
-                feedbackInteraction={feedbackInteraction.canvas}
-                onRuntimeChange={setActiveCanvasRuntime}
-                onOpenContextMenu={openWorkbenchContextMenu}
-                interactionBlocked={projectPresentationBlocked}
-              />
+              profiledCanvasEditor
             )}
           </div>
           <div className="floating-bar-layer" data-testid="floating-bar-layer" inert={projectPresentationBlocked}>

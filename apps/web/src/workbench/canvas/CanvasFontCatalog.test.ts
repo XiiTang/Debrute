@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANVAS_FONT_CATALOG,
-  DEFAULT_CANVAS_TEXT_APPEARANCE,
   canvasTextRenderProfileForAppearance
 } from './CanvasFontCatalog.js';
+
+const TEST_CANVAS_TEXT_APPEARANCE = {
+  fontId: 'noto-sans-mono-cjk-sc',
+  fontSizePx: 12,
+  lineHeightRatio: 1.4,
+  fontWeight: 400,
+  letterSpacingPx: 0,
+  ligatures: true
+} as const;
 
 describe('CanvasFontCatalog', { tags: ['canvas-text'] }, () => {
   it('exposes the five managed Canvas Font selections in stable order', () => {
@@ -16,9 +24,9 @@ describe('CanvasFontCatalog', { tags: ['canvas-text'] }, () => {
     ]);
   });
 
-  it('keeps requested appearance values while disabling synthetic faces', () => {
+  it('keeps the six supported appearance values while synthetic faces stay disabled', () => {
     const profile = canvasTextRenderProfileForAppearance({
-      ...DEFAULT_CANVAS_TEXT_APPEARANCE,
+      ...TEST_CANVAS_TEXT_APPEARANCE,
       fontId: 'lilex',
       fontSizePx: 15.5,
       lineHeightRatio: 1.35,
@@ -39,13 +47,13 @@ describe('CanvasFontCatalog', { tags: ['canvas-text'] }, () => {
   });
 
   it('changes render identity for the selected managed bytes or any appearance value', () => {
-    const initial = canvasTextRenderProfileForAppearance(DEFAULT_CANVAS_TEXT_APPEARANCE);
+    const initial = canvasTextRenderProfileForAppearance(TEST_CANVAS_TEXT_APPEARANCE);
     const changedFont = canvasTextRenderProfileForAppearance({
-      ...DEFAULT_CANVAS_TEXT_APPEARANCE,
+      ...TEST_CANVAS_TEXT_APPEARANCE,
       fontId: 'jetbrains-mono'
     });
     const changedWeight = canvasTextRenderProfileForAppearance({
-      ...DEFAULT_CANVAS_TEXT_APPEARANCE,
+      ...TEST_CANVAS_TEXT_APPEARANCE,
       fontWeight: 500
     });
 

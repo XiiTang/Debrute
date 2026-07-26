@@ -34,16 +34,8 @@ export interface CanvasTextPreviewRasterText {
   fontFamily: string;
   fontSize: string;
   fontWeight: string;
-  fontStyle: string;
-  fontStretch: string;
-  fontKerning: string;
-  fontVariantCaps: string;
   fontVariantLigatures: string;
   fontVariantNumeric: string;
-  fontFeatureSettings: string;
-  fontVariationSettings: string;
-  fontOpticalSizing: string;
-  fontSynthesis: string;
   letterSpacing: string;
   wordSpacing: string;
   textDecorationLine: string;

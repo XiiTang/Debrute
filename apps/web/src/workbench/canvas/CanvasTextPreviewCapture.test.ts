@@ -4,11 +4,11 @@ import {
   captureCanvasTextPreviewSource,
   canvasTextPreviewFingerprint
 } from './CanvasTextPreviewCapture';
-import { rasterizeCanvasTextPreviewInWorker } from './CanvasTextPreviewRasterWorkerClient';
-import type { CanvasTextPreviewBuiltScene } from './CanvasTextPreviewScene';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
+import { rasterizeCanvasTextPreviewInWorker } from './CanvasTextPreviewRasterWorkerClient.js';
+import type { CanvasTextPreviewBuiltScene } from './CanvasTextPreviewScene.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
-vi.mock('./CanvasTextPreviewRasterWorkerClient', () => ({
+vi.mock('./CanvasTextPreviewRasterWorkerClient.js', () => ({
   rasterizeCanvasTextPreviewInWorker: vi.fn(async () => new Blob(['png'], { type: 'image/png' }))
 }));
 

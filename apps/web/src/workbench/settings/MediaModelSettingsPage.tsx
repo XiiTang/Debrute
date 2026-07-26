@@ -7,9 +7,9 @@ import type {
   SaveModelSettingInput,
   VideoModelSettingRecord
 } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../types';
+import type { WorkbenchActions } from '../../types.js';
 import { Card, CloseButton, EmptyState, Field, IconButton, Input, SecretInput } from '../ui/index.js';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/index.js';
 
 export interface ModelDraft {
   baseUrlOverride: string;

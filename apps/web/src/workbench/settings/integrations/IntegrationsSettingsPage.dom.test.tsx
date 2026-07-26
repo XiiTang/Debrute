@@ -4,11 +4,11 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { DebruteGlobalSettingsView, IntegrationSettingsView } from '@debrute/app-protocol';
-import { SettingsPanel } from '../SettingsPanel';
-import { IntegrationsSettingsPage } from './IntegrationsSettingsPage';
-import { I18nProvider } from '../../i18n';
-import type { WorkbenchActions, WorkbenchState } from '../../../types';
-import { buildWorkbenchTitleBarState } from '../../shell/workbenchTitleBarState';
+import { SettingsPanel } from '../SettingsPanel.js';
+import { IntegrationsSettingsPage } from './IntegrationsSettingsPage.js';
+import { I18nProvider } from '../../i18n/index.js';
+import type { WorkbenchActions, WorkbenchState } from '../../../types.js';
+import { buildWorkbenchTitleBarState } from '../../shell/workbenchTitleBarState.js';
 
 describe('web Integrations settings page', { tags: ['settings'] }, () => {
   it('adds Integrations to the Settings directory', () => {

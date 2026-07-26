@@ -460,7 +460,9 @@ impl WorkbenchRuntimeServices {
     }
 
     pub fn ensure_accepting_workbench_connections(&self) -> Result<(), RuntimeHttpServiceError> {
-        if self.runtime_state.status() == crate::control::RuntimeStatus::Ready {
+        if self.runtime_state.status() == crate::control::RuntimeStatus::Ready
+            && self.connections.is_accepting()
+        {
             return Ok(());
         }
         Err(RuntimeHttpServiceError::new(
@@ -623,6 +625,10 @@ impl WorkbenchRuntimeServices {
 
     pub fn request_workbench_connection_close(&self, connection_credential: String) {
         self.connection_closer.request_close(connection_credential);
+    }
+
+    pub fn close_workbench_connection_admission(&self) {
+        self.connections.close_admission();
     }
 
     pub fn close_all_workbench_connections(&self) {

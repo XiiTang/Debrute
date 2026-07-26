@@ -117,7 +117,7 @@ interface DebruteGlobalWorkbenchSettings {
   defaultFrontend: DebruteDefaultFrontend;
 }
 
-export interface DebruteGlobalCanvasSettings {
+interface DebruteGlobalCanvasSettings {
   textAppearance: CanvasTextAppearance;
 }
 

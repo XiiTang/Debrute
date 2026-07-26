@@ -26,8 +26,9 @@ use super::{
     create_canvas_document, debrute_project_paths, expand_canvas_map, expand_canvas_map_path_rules,
     is_project_indexed_path, is_valid_stable_project_id, list_explicit_project_path,
     list_project_directory, list_project_files, list_project_subtree_files, normalize_canvas_name,
-    parse_canvas_map, project_canvas, project_canvas_with_known_projection, project_content_hash,
-    project_document_directory_hash, project_document_file_hash, project_file_revision,
+    open_no_symlink_existing_project_file, parse_canvas_map, project_canvas,
+    project_canvas_with_known_projection, project_content_hash, project_document_directory_hash,
+    project_document_file_hash, project_file_metadata_revision, project_media_revision,
     project_text_file_type_for_path, read_canvas_feedback_state, reconcile_canvas_nodes,
     replace_file, resolve_existing_project_path, resolve_no_symlink_project_path_for_write,
     resolve_project_path, serialize_canvas_map_with_rule, update_canvas_feedback_document,
@@ -62,6 +63,17 @@ struct ExplicitCanvasWatchRule {
 struct ExplicitCanvasIndex {
     rules: Vec<ExplicitCanvasWatchRule>,
     files: Vec<ProjectPathEntry>,
+}
+
+struct SnapshotLoadCheckpoint {
+    registry_hash: Option<String>,
+    canvas_hashes: HashMap<String, String>,
+    canvas_map_hashes: HashMap<String, String>,
+    explicit_canvas_watch_rules: Vec<ExplicitCanvasWatchRule>,
+    explicit_canvas_indexes: HashMap<String, ExplicitCanvasIndex>,
+    feedback_document: CanvasFeedbackDocument,
+    feedback_hash: Option<String>,
+    feedback_valid: bool,
 }
 
 pub trait ProjectNodeAdapter: Send + Sync {
@@ -250,9 +262,8 @@ impl ProjectService {
             .map_or("", |(parent, _)| parent);
         self.loaded_project_directories.contains(parent)
             || self.explicit_canvas_watch_rules.iter().any(|rule| {
-                project_relative_path == rule.path
-                    || (rule.recursive
-                        && project_relative_path.starts_with(&format!("{}/", rule.path)))
+                is_same_or_ancestor(project_relative_path, &rule.path)
+                    || (rule.recursive && is_same_or_ancestor(&rule.path, project_relative_path))
             })
     }
 
@@ -456,26 +467,12 @@ impl ProjectService {
         let previous_indexed_files =
             std::mem::replace(&mut self.indexed_files, list_project_files(&self.root)?);
         let previous_file_index_complete = std::mem::replace(&mut self.file_index_complete, true);
-        let previous_registry_hash = self.registry_hash.clone();
-        let previous_canvas_hashes = self.canvas_hashes.clone();
-        let previous_canvas_map_hashes = self.canvas_map_hashes.clone();
-        let previous_explicit_canvas_watch_rules = self.explicit_canvas_watch_rules.clone();
-        let previous_explicit_canvas_indexes = self.explicit_canvas_indexes.clone();
-        let previous_feedback_document = self.feedback_document.clone();
-        let previous_feedback_hash = self.feedback_hash.clone();
-        let previous_feedback_valid = self.feedback_valid;
+        let checkpoint = self.snapshot_load_checkpoint();
         self.explicit_canvas_indexes.clear();
         let result = self.load_snapshot(false);
         self.indexed_files = previous_indexed_files;
         self.file_index_complete = previous_file_index_complete;
-        self.registry_hash = previous_registry_hash;
-        self.canvas_hashes = previous_canvas_hashes;
-        self.canvas_map_hashes = previous_canvas_map_hashes;
-        self.explicit_canvas_watch_rules = previous_explicit_canvas_watch_rules;
-        self.explicit_canvas_indexes = previous_explicit_canvas_indexes;
-        self.feedback_document = previous_feedback_document;
-        self.feedback_hash = previous_feedback_hash;
-        self.feedback_valid = previous_feedback_valid;
+        self.restore_snapshot_load_checkpoint(checkpoint);
         result
     }
 
@@ -1276,28 +1273,38 @@ impl ProjectService {
         &mut self,
         write_canvas_changes: bool,
     ) -> Result<ProjectSnapshot, ProjectError> {
-        let previous_registry_hash = self.registry_hash.clone();
-        let previous_canvas_hashes = self.canvas_hashes.clone();
-        let previous_canvas_map_hashes = self.canvas_map_hashes.clone();
-        let previous_explicit_canvas_watch_rules = self.explicit_canvas_watch_rules.clone();
-        let previous_explicit_canvas_indexes = self.explicit_canvas_indexes.clone();
-        let previous_feedback_document = self.feedback_document.clone();
-        let previous_feedback_hash = self.feedback_hash.clone();
-        let previous_feedback_valid = self.feedback_valid;
+        let checkpoint = self.snapshot_load_checkpoint();
         match self.load_snapshot(write_canvas_changes) {
             Ok(snapshot) => Ok(snapshot),
             Err(error) => {
-                self.registry_hash = previous_registry_hash;
-                self.canvas_hashes = previous_canvas_hashes;
-                self.canvas_map_hashes = previous_canvas_map_hashes;
-                self.explicit_canvas_watch_rules = previous_explicit_canvas_watch_rules;
-                self.explicit_canvas_indexes = previous_explicit_canvas_indexes;
-                self.feedback_document = previous_feedback_document;
-                self.feedback_hash = previous_feedback_hash;
-                self.feedback_valid = previous_feedback_valid;
+                self.restore_snapshot_load_checkpoint(checkpoint);
                 Err(error)
             }
         }
+    }
+
+    fn snapshot_load_checkpoint(&self) -> SnapshotLoadCheckpoint {
+        SnapshotLoadCheckpoint {
+            registry_hash: self.registry_hash.clone(),
+            canvas_hashes: self.canvas_hashes.clone(),
+            canvas_map_hashes: self.canvas_map_hashes.clone(),
+            explicit_canvas_watch_rules: self.explicit_canvas_watch_rules.clone(),
+            explicit_canvas_indexes: self.explicit_canvas_indexes.clone(),
+            feedback_document: self.feedback_document.clone(),
+            feedback_hash: self.feedback_hash.clone(),
+            feedback_valid: self.feedback_valid,
+        }
+    }
+
+    fn restore_snapshot_load_checkpoint(&mut self, checkpoint: SnapshotLoadCheckpoint) {
+        self.registry_hash = checkpoint.registry_hash;
+        self.canvas_hashes = checkpoint.canvas_hashes;
+        self.canvas_map_hashes = checkpoint.canvas_map_hashes;
+        self.explicit_canvas_watch_rules = checkpoint.explicit_canvas_watch_rules;
+        self.explicit_canvas_indexes = checkpoint.explicit_canvas_indexes;
+        self.feedback_document = checkpoint.feedback_document;
+        self.feedback_hash = checkpoint.feedback_hash;
+        self.feedback_valid = checkpoint.feedback_valid;
     }
 
     fn load_canvas_documents(
@@ -1773,11 +1780,11 @@ impl ProjectService {
         &self,
         node: &CanvasNodeElement,
     ) -> (CanvasNodeAvailability, Option<CanvasVideoPresentation>) {
-        let (metadata, mtime_ms) = match self.inspect_canvas_metadata(node) {
-            Ok(inspected) => inspected,
-            Err(availability) => return (availability, None),
-        };
         if node.node_kind == CanvasNodeKind::Directory {
+            let (metadata, mtime_ms) = match self.inspect_canvas_metadata(node) {
+                Ok(inspected) => inspected,
+                Err(availability) => return (availability, None),
+            };
             if !metadata.is_dir() {
                 return (
                     CanvasNodeAvailability::Unreadable {
@@ -1797,19 +1804,15 @@ impl ProjectService {
                     canvas_image_previewable: None,
                     canvas_image_preview_source_width: None,
                     mtime_ms: Some(mtime_ms),
-                    revision: project_file_revision(0, mtime_ms),
+                    revision: project_file_metadata_revision(0, mtime_ms),
                 },
                 None,
             );
         }
-        if !metadata.is_file() {
-            return (
-                CanvasNodeAvailability::Unreadable {
-                    message: format!("Project path is not a file: {}", node.project_relative_path),
-                },
-                None,
-            );
-        }
+        let (metadata, mtime_ms, revision) = match self.inspect_revisioned_canvas_file(node) {
+            Ok(inspected) => inspected,
+            Err(availability) => return (availability, None),
+        };
         let (preview, presentation) = match self.inspect_node_adapter_data(node) {
             Ok(data) => data,
             Err(availability) => return (availability, None),
@@ -1833,7 +1836,7 @@ impl ProjectService {
                 canvas_image_previewable: preview.map(|(previewable, _)| previewable),
                 canvas_image_preview_source_width: preview.and_then(|(_, width)| width),
                 mtime_ms: Some(mtime_ms),
-                revision: project_file_revision(metadata.len(), mtime_ms),
+                revision,
             },
             presentation,
         )
@@ -1858,19 +1861,52 @@ impl ProjectService {
                 }
             }
         })?;
-        let mtime_ms = metadata
-            .modified()
-            .and_then(|modified| {
-                modified
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(std::io::Error::other)
-            })
+        let mtime_ms =
+            metadata_mtime_ms(&metadata).map_err(|error| CanvasNodeAvailability::Unreadable {
+                message: error.to_string(),
+            })?;
+        Ok((metadata, mtime_ms))
+    }
+
+    fn inspect_revisioned_canvas_file(
+        &self,
+        node: &CanvasNodeElement,
+    ) -> Result<(fs::Metadata, f64, String), CanvasNodeAvailability> {
+        let mut file =
+            open_no_symlink_existing_project_file(&self.root, &node.project_relative_path)
+                .map_err(|error| match &error {
+                    ProjectError::Io(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        CanvasNodeAvailability::Missing {
+                            message: format!(
+                                "Project path is missing: {}",
+                                node.project_relative_path
+                            ),
+                        }
+                    }
+                    _ => CanvasNodeAvailability::Unreadable {
+                        message: error.to_string(),
+                    },
+                })?;
+        let metadata = file
+            .metadata()
             .map_err(|error| CanvasNodeAvailability::Unreadable {
                 message: error.to_string(),
-            })?
-            .as_secs_f64()
-            * 1000.0;
-        Ok((metadata, mtime_ms))
+            })?;
+        if !metadata.is_file() {
+            return Err(CanvasNodeAvailability::Unreadable {
+                message: format!("Project path is not a file: {}", node.project_relative_path),
+            });
+        }
+        let mtime_ms =
+            metadata_mtime_ms(&metadata).map_err(|error| CanvasNodeAvailability::Unreadable {
+                message: error.to_string(),
+            })?;
+        let revision = project_media_revision(&mut file).map_err(|error| {
+            CanvasNodeAvailability::Unreadable {
+                message: error.to_string(),
+            }
+        })?;
+        Ok((metadata, mtime_ms, revision))
     }
 
     fn inspect_node_adapter_data(
@@ -2365,6 +2401,19 @@ fn explicit_canvas_watch_rules(
         }),
         super::CanvasMapRuleKind::FileGlob => None,
     })
+}
+
+fn is_same_or_ancestor(ancestor: &str, path: &str) -> bool {
+    ancestor == path || path.starts_with(&format!("{ancestor}/"))
+}
+
+fn metadata_mtime_ms(metadata: &fs::Metadata) -> std::io::Result<f64> {
+    Ok(metadata
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .map_err(std::io::Error::other)?
+        .as_secs_f64()
+        * 1000.0)
 }
 
 fn collect_explicit_canvas_watch_rules(

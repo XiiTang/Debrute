@@ -16,7 +16,7 @@ import {
   canvasTextEditorUpdateListener,
   type CanvasTextEditorCallbackRef
 } from './CanvasTextEditorRuntime';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
 describe('CanvasTextEditorRuntime', { tags: ['canvas-text'] }, () => {
   it('configures the cursor scroll margin from the resolved render profile', () => {

@@ -207,13 +207,17 @@ pub(crate) fn rename_project_path(
     let kind = project_path_kind(root, &source)?;
     let target = join_project_path(&parent_project_path(&source)?, name)?;
     assert_project_tree_visible_mutation_path(&target)?;
+    let source_absolute = resolve_project_path(root, &source)?;
     let target_absolute = resolve_project_path_for_write(root, &target)?;
-    if target_absolute.exists() {
+    if target_absolute.exists()
+        && debrute_native_fs::path_identity(&source_absolute)?
+            != debrute_native_fs::path_identity(&target_absolute)?
+    {
         return Err(ProjectError::Validation(format!(
             "Project path already exists: {target}"
         )));
     }
-    rename_no_replace(&resolve_project_path(root, &source)?, &target_absolute)?;
+    rename_no_replace(&source_absolute, &target_absolute)?;
     Ok(ProjectPathEntry {
         project_relative_path: target,
         kind,

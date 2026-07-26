@@ -10,7 +10,7 @@ use std::{
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
-use super::{ProjectError, is_project_indexed_path, is_project_visible_path};
+use super::{ProjectError, is_gitignore_path, is_project_indexed_path, is_project_visible_path};
 
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(40);
 
@@ -108,13 +108,16 @@ fn watch_worker(
             });
         match receiver.recv_timeout(timeout) {
             Ok(WatchMessage::Event(Ok(event))) => {
-                queue_event(
+                if let Err(error) = queue_event(
                     root,
                     event,
                     is_explicit_dependency,
                     &mut pending,
                     &mut indexed_directories,
-                );
+                ) {
+                    indexed_directories.clear();
+                    on_change(ProjectWatchSignal::RescanRequired(error.to_string()));
+                }
             }
             Ok(WatchMessage::Event(Err(error))) => {
                 on_change(ProjectWatchSignal::RescanRequired(error.to_string()));
@@ -153,7 +156,7 @@ fn queue_event(
     is_explicit_dependency: &Arc<dyn Fn(&str) -> bool + Send + Sync>,
     pending: &mut HashMap<String, Instant>,
     indexed_directories: &mut HashMap<String, bool>,
-) {
+) -> Result<(), ProjectError> {
     let deadline = Instant::now() + WATCH_DEBOUNCE;
     for path in event.paths {
         let Some(relative) = project_relative_path(root, &path) else {
@@ -163,16 +166,17 @@ fn queue_event(
             indexed_directories.clear();
         }
         let indexed = if is_gitignore_path(&relative) {
-            relative
-                .rsplit_once('/')
-                .is_none_or(|(parent, _)| is_indexed_directory(root, parent, indexed_directories))
+            relative.rsplit_once('/').map_or(Ok(true), |(parent, _)| {
+                is_indexed_directory(root, parent, indexed_directories)
+            })?
         } else {
-            is_indexed_event_path(root, &relative, path.is_dir(), indexed_directories)
+            is_indexed_event_path(root, &relative, path.is_dir(), indexed_directories)?
         };
         if is_project_visible_path(&relative) && (indexed || is_explicit_dependency(&relative)) {
             pending.insert(relative, deadline);
         }
     }
+    Ok(())
 }
 
 fn is_indexed_event_path(
@@ -180,36 +184,30 @@ fn is_indexed_event_path(
     relative: &str,
     is_dir: bool,
     indexed_directories: &mut HashMap<String, bool>,
-) -> bool {
+) -> Result<bool, ProjectError> {
     if let Some((parent, _)) = relative.rsplit_once('/')
-        && !is_indexed_directory(root, parent, indexed_directories)
+        && !is_indexed_directory(root, parent, indexed_directories)?
     {
-        return false;
+        return Ok(false);
     }
-    let indexed = is_project_indexed_path(root, relative, is_dir).unwrap_or(false);
+    let indexed = is_project_indexed_path(root, relative, is_dir)?;
     if is_dir {
         indexed_directories.insert(relative.to_owned(), indexed);
     }
-    indexed
+    Ok(indexed)
 }
 
 fn is_indexed_directory(
     root: &Path,
     relative: &str,
     indexed_directories: &mut HashMap<String, bool>,
-) -> bool {
-    indexed_directories
-        .get(relative)
-        .copied()
-        .unwrap_or_else(|| {
-            let indexed = is_project_indexed_path(root, relative, true).unwrap_or(false);
-            indexed_directories.insert(relative.to_owned(), indexed);
-            indexed
-        })
-}
-
-fn is_gitignore_path(path: &str) -> bool {
-    path == ".gitignore" || path.ends_with("/.gitignore")
+) -> Result<bool, ProjectError> {
+    if let Some(indexed) = indexed_directories.get(relative).copied() {
+        return Ok(indexed);
+    }
+    let indexed = is_project_indexed_path(root, relative, true)?;
+    indexed_directories.insert(relative.to_owned(), indexed);
+    Ok(indexed)
 }
 
 fn project_relative_path(root: &Path, path: &Path) -> Option<String> {
@@ -239,30 +237,23 @@ mod tests {
         fs::write(root.join("repo/.gitignore"), "vendor-cache/\n").unwrap();
         let mut cache = HashMap::new();
 
-        assert!(is_indexed_event_path(
-            &root,
-            "repo/src/main.rs",
-            false,
-            &mut cache
-        ));
-        assert!(!is_indexed_event_path(
-            &root,
-            "repo/vendor-cache/large.bin",
-            false,
-            &mut cache
-        ));
-        assert!(!is_indexed_event_path(
-            &root,
-            "repo/.git/objects/pack",
-            false,
-            &mut cache
-        ));
-        assert!(!is_indexed_event_path(
-            &root,
-            "repo/node_modules/package/index.js",
-            false,
-            &mut cache
-        ));
+        assert!(is_indexed_event_path(&root, "repo/src/main.rs", false, &mut cache).unwrap());
+        assert!(
+            !is_indexed_event_path(&root, "repo/vendor-cache/large.bin", false, &mut cache)
+                .unwrap()
+        );
+        assert!(
+            !is_indexed_event_path(&root, "repo/.git/objects/pack", false, &mut cache).unwrap()
+        );
+        assert!(
+            !is_indexed_event_path(
+                &root,
+                "repo/node_modules/package/index.js",
+                false,
+                &mut cache
+            )
+            .unwrap()
+        );
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -288,10 +279,63 @@ mod tests {
             &dependency,
             &mut pending,
             &mut cache,
-        );
+        )
+        .unwrap();
 
         assert!(pending.contains_key("dist/render.png"));
         assert!(!pending.contains_key("dist/noise.tmp"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn event_filter_propagates_ignore_errors_without_caching_a_false_result() {
+        let root = std::env::temp_dir().join(format!("debrute-watch-error-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("repo/src")).unwrap();
+        fs::write(root.join("repo/.gitignore"), "invalid\\\n").unwrap();
+        let mut cache = HashMap::new();
+
+        let error = is_indexed_event_path(&root, "repo/src/main.rs", false, &mut cache)
+            .expect_err("invalid ignore rules must not become an excluded path");
+
+        assert_eq!(error.code(), "project_ignore_invalid");
+        assert!(!cache.contains_key("repo/src"));
+        fs::write(root.join("repo/.gitignore"), "generated/\n").unwrap();
+        assert!(is_indexed_event_path(&root, "repo/src/main.rs", false, &mut cache).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ignore_filter_errors_request_a_full_rescan() {
+        let root = std::env::temp_dir().join(format!("debrute-watch-rescan-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("repo/src")).unwrap();
+        fs::write(root.join("repo/.gitignore"), "invalid\\\n").unwrap();
+        let (message_sender, message_receiver) = mpsc::channel();
+        let (signal_sender, signal_receiver) = mpsc::channel();
+        let dependency: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(|_| false);
+        let on_change: Arc<dyn Fn(ProjectWatchSignal) + Send + Sync> =
+            Arc::new(move |signal| signal_sender.send(signal).unwrap());
+        let worker_root = root.clone();
+        let worker = thread::spawn(move || {
+            watch_worker(&worker_root, &message_receiver, &dependency, &on_change);
+        });
+
+        message_sender
+            .send(WatchMessage::Event(Ok(Event {
+                kind: notify::EventKind::Any,
+                paths: vec![root.join("repo/src/main.rs")],
+                attrs: notify::event::EventAttributes::default(),
+            })))
+            .unwrap();
+        match signal_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+        {
+            ProjectWatchSignal::RescanRequired(message) => assert!(message.contains("invalid")),
+            ProjectWatchSignal::Paths(paths) => panic!("unexpected filtered paths: {paths:?}"),
+        }
+
+        message_sender.send(WatchMessage::Stop).unwrap();
+        worker.join().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

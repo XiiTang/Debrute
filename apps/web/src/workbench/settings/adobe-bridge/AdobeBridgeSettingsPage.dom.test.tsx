@@ -2,9 +2,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AdobeBridgeStateView } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../../types';
-import { I18nProvider } from '../../i18n';
-import { AdobeBridgeSettingsPage } from './AdobeBridgeSettingsPage';
+import type { WorkbenchActions } from '../../../types.js';
+import { I18nProvider } from '../../i18n/index.js';
+import { AdobeBridgeSettingsPage } from './AdobeBridgeSettingsPage.js';
 
 describe('Adobe Bridge pairing UI', () => {
   let container: HTMLDivElement;

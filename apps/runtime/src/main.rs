@@ -520,27 +520,6 @@ fn stable_runtime_entrypoint(arguments: &[OsString]) -> Result<PathBuf, Box<dyn 
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-struct RuntimeServicesConnectionDrainGuard(Arc<WorkbenchRuntimeServices>);
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-impl Drop for RuntimeServicesConnectionDrainGuard {
-    fn drop(&mut self) {
-        self.0.close_all_workbench_connections();
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-struct RuntimeServicesFinalShutdownGuard(Arc<WorkbenchRuntimeServices>);
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-impl Drop for RuntimeServicesFinalShutdownGuard {
-    fn drop(&mut self) {
-        self.0.finish_workbench_connection_closer();
-        self.0.shutdown_owned_work();
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[allow(clippy::too_many_lines)]
 fn run_runtime_services(
     owner: PlatformControlOwner,
@@ -556,6 +535,8 @@ fn run_runtime_services(
         Arc::clone(stop_accepting),
         endpoint_failure_sender,
     )?;
+    let mut shutdown_services = None;
+    let mut shutdown_workbench = None;
 
     let service_result = (|| {
         initialize_raster_preview_engine().map_err(io::Error::other)?;
@@ -563,8 +544,7 @@ fn run_runtime_services(
         let active_product = active_product_directory(&debrute_home);
         let runtime_services = WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state))
             .map_err(|error| io::Error::other(error.message))?;
-        let _runtime_final_shutdown =
-            RuntimeServicesFinalShutdownGuard(Arc::clone(&runtime_services));
+        shutdown_services = Some(Arc::clone(&runtime_services));
         let assets_directory = std::env::var_os(WEB_ASSETS_DIRECTORY_ENV)
             .map(PathBuf::from)
             .or_else(|| active_product.as_ref().map(|product| product.join("web")))
@@ -658,15 +638,16 @@ fn run_runtime_services(
             product.clone(),
             active_product.clone(),
         ));
-        let mut workbench = WorkbenchHttpServer::start(
+        shutdown_workbench = Some(WorkbenchHttpServer::start(
             assets_directory,
             Arc::clone(state),
             Arc::clone(&runtime_services),
             cli,
             product,
-        )?;
-        let _runtime_connection_drain =
-            RuntimeServicesConnectionDrainGuard(Arc::clone(&runtime_services));
+        )?);
+        let workbench = shutdown_workbench
+            .as_mut()
+            .expect("Workbench HTTP server was just installed");
         state.install_workbench(workbench.launch_service())?;
         let activation: Arc<dyn RuntimeActivationService> = Arc::new(PlatformRuntimeActivation {
             state: Arc::clone(state),
@@ -753,7 +734,6 @@ fn run_runtime_services(
         loop {
             workbench.check_running()?;
             if state.is_stopping() {
-                workbench.stop_accepting();
                 return Ok(());
             }
             match endpoint_failure_receiver.recv_timeout(SUPERVISION_POLL_INTERVAL) {
@@ -769,6 +749,25 @@ fn run_runtime_services(
             }
         }
     })();
+
+    if let Some(runtime_services) = shutdown_services.as_ref() {
+        runtime_services.close_workbench_connection_admission();
+    }
+    if let Some(workbench) = shutdown_workbench.as_mut() {
+        workbench.stop_accepting();
+    }
+    if let Some(runtime_services) = shutdown_services.as_ref() {
+        runtime_services.close_all_workbench_connections();
+    }
+    if let Some(workbench) = shutdown_workbench.as_mut() {
+        workbench.join();
+    }
+    drop(shutdown_workbench.take());
+    if let Some(runtime_services) = shutdown_services.take() {
+        runtime_services.finish_workbench_connection_closer();
+        runtime_services.shutdown_owned_work();
+        drop(runtime_services);
+    }
 
     stop_accepting.store(true, Ordering::Release);
     if !stop_control_accept_worker(endpoint, &accept_worker) {

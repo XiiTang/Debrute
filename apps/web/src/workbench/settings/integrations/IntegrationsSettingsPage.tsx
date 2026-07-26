@@ -9,9 +9,9 @@ import type {
   IntegrationOperationKind,
   IntegrationStatus
 } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../../types';
+import type { WorkbenchActions } from '../../../types.js';
 import { Button, EmptyState, StatusPill, Toolbar } from '../../ui/index.js';
-import { useI18n, type WorkbenchI18n } from '../../i18n';
+import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
 
 export function IntegrationsSettingsPage({
   settings,

@@ -965,10 +965,14 @@ fn is_windows_absolute(path: &str) -> bool {
 
 /// Lists the deterministic visible Project file tree.
 ///
+/// # Panics
+/// Panics if the traversal reports cancellation even though this entry point disables it.
+///
 /// # Errors
 /// Returns an error when the root cannot be traversed safely.
 pub fn list_project_files(root: &Path) -> Result<Vec<ProjectPathEntry>, ProjectError> {
-    Ok(list_project_files_until(root, || false)?.unwrap_or_default())
+    Ok(list_project_files_until(root, || false)?
+        .expect("a traversal with cancellation disabled must complete"))
 }
 
 /// Lists the deterministic visible Project tree until cancellation is requested.
@@ -1340,12 +1344,17 @@ fn is_background_index_path(path: &str) -> bool {
 }
 
 #[must_use]
+pub(crate) fn is_gitignore_path(path: &str) -> bool {
+    path == ".gitignore" || path.ends_with("/.gitignore")
+}
+
+#[must_use]
 pub fn project_content_hash(content: impl AsRef<[u8]>) -> String {
     format!("sha256:{:x}", Sha256::digest(content.as_ref()))
 }
 
 #[must_use]
-pub fn project_file_revision(size: u64, mtime_ms: f64) -> String {
+pub(crate) fn project_file_metadata_revision(size: u64, mtime_ms: f64) -> String {
     format!("{}:{size}", mtime_ms.round())
 }
 

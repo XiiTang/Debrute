@@ -147,10 +147,17 @@ pub(super) async fn workbench_connection(
             (browser_session, None, input.requested_project_id)
         };
     let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
-    let (context, cancellation) =
+    let Some((context, cancellation)) =
         services
             .connections()
-            .open(browser_session.clone(), desktop, sender.clone());
+            .open(browser_session.clone(), desktop, sender.clone())
+    else {
+        return service_error_response(RuntimeHttpServiceError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "runtime_not_ready",
+            "Runtime is not accepting new Workbench connections.",
+        ));
+    };
     if sender
         .try_send(json!({
             "type": "connection.opened",

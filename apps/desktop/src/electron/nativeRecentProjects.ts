@@ -44,7 +44,7 @@ export function syncNativeRecentProjects(
   platform: DebruteProductPlatform,
   execPath: string,
   recentProjectRoots: string[]
-): void {
+): ReturnType<Electron.App['setJumpList']> | undefined {
   if (platform === 'darwin') {
     host.clearRecentDocuments();
     for (const projectRoot of [...recentProjectRoots].reverse()) {
@@ -52,10 +52,7 @@ export function syncNativeRecentProjects(
     }
     return;
   }
-  const result = host.setJumpList(windowsJumpList(execPath, recentProjectRoots));
-  if (result !== 'ok') {
-    throw new Error(`Windows rejected the Debrute Jump List: ${result}`);
-  }
+  return host.setJumpList(windowsJumpList(execPath, recentProjectRoots));
 }
 
 function windowsJumpList(execPath: string, recentProjectRoots: string[]): JumpListCategory[] {

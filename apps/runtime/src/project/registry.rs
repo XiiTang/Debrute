@@ -23,7 +23,7 @@ use super::{
     ProjectPathKind, ProjectPathOperationStatus, ProjectService, ProjectSnapshot,
     ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackEntryInput,
     copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
-    import_upload_project_entries, list_project_files_until, move_project_paths,
+    import_upload_project_entries, is_gitignore_path, list_project_files_until, move_project_paths,
     rename_project_path,
     watcher::{ProjectFileWatcher, ProjectWatchSignal},
     write_project_text_file,
@@ -1782,10 +1782,6 @@ impl Drop for ProjectSubscription {
     fn drop(&mut self) {
         self.release_once();
     }
-}
-
-fn is_gitignore_path(path: &str) -> bool {
-    path == ".gitignore" || path.ends_with("/.gitignore")
 }
 
 fn add_use(

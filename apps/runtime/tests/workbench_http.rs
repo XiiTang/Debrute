@@ -1,4 +1,4 @@
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "windows"))]
 
 use std::{
     fs,
@@ -10,7 +10,6 @@ use std::{
 use debrute_runtime::{
     cli::RuntimeCliService,
     control::RuntimeControlState,
-    project::project_file_revision_from_metadata,
     workbench::{
         RuntimeCliHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
         WorkbenchHttpServer, WorkbenchRuntimeServices,
@@ -22,6 +21,7 @@ use reqwest::{
     header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, COOKIE, ORIGIN, SET_COOKIE},
 };
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 #[test]
@@ -204,14 +204,38 @@ fn runtime_shutdown_closes_a_live_workbench_stream_before_http_join() {
         "product.changed"
     );
 
+    runtime.services.close_workbench_connection_admission();
     runtime.server.stop_accepting();
     runtime.services.close_all_workbench_connections();
+    runtime.server.join();
     drop(runtime);
 
     assert!(
         events
             .lines
             .all(|line| line.expect("remaining SSE line should read").is_empty())
+    );
+}
+
+#[test]
+fn closed_workbench_admission_rejects_late_connections_while_listener_drains() {
+    let runtime = TestRuntime::start();
+    runtime.services.close_workbench_connection_admission();
+
+    let response = Client::new()
+        .post(format!("{}/api/workbench/connection", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(ACCEPT, "text/event-stream")
+        .json(&json!({}))
+        .send()
+        .expect("late connection rejection should respond");
+
+    assert_eq!(response.status().as_u16(), 503);
+    assert_eq!(
+        response
+            .json::<Value>()
+            .expect("late connection rejection should be JSON")["error"]["code"],
+        "runtime_not_ready"
     );
 }
 
@@ -396,14 +420,8 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
     let second_file = Path::new(&second_project.root).join("second.txt");
     fs::write(&first_file, b"first tab").expect("first file should be written");
     fs::write(&second_file, b"second tab").expect("second file should be written");
-    let first_revision = project_file_revision_from_metadata(
-        &fs::metadata(&first_file).expect("first metadata should read"),
-    )
-    .expect("first revision should resolve");
-    let second_revision = project_file_revision_from_metadata(
-        &fs::metadata(&second_file).expect("second metadata should read"),
-    )
-    .expect("second revision should resolve");
+    let first_revision = media_revision(&first_file);
+    let second_revision = media_revision(&second_file);
     let client = Client::new();
 
     let (cookie, first_credential, mut first_events) = open_unbound_connection(&client, &runtime);
@@ -525,10 +543,7 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
     image::RgbaImage::new(8, 4)
         .save(&image_path)
         .expect("image fixture should be written");
-    let revision = project_file_revision_from_metadata(
-        &fs::metadata(&image_path).expect("image metadata should read"),
-    )
-    .expect("image revision should resolve");
+    let revision = media_revision(&image_path);
     let client = Client::new();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
@@ -997,10 +1012,7 @@ fn video_preview_sources_are_keyed_by_project_path() {
     image::RgbaImage::new(8, 4)
         .save(project_root.join("media/clip.poster.png"))
         .expect("poster fixture should be written");
-    let video_revision = project_file_revision_from_metadata(
-        &fs::metadata(&video).expect("video metadata should read"),
-    )
-    .expect("video revision should resolve");
+    let video_revision = media_revision(&video);
     let client = Client::new();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
@@ -1261,4 +1273,9 @@ fn write_json(path: &Path, value: &Value) {
         format!("{}\n", serde_json::to_string_pretty(value).unwrap()),
     )
     .expect("JSON fixture should be written");
+}
+
+fn media_revision(path: &Path) -> String {
+    let bytes = fs::read(path).expect("media fixture should read");
+    format!("sha256:{:x}", Sha256::digest(bytes))
 }

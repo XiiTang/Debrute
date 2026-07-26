@@ -6,7 +6,7 @@ import { EditorView } from '@codemirror/view';
 import { CanvasTextEditor } from './CanvasTextEditor';
 import { canvasTextEditorApplyFocusRequest } from './CanvasTextEditorRuntime';
 import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
 const TEST_CANVAS_TEXT_RENDER_PROFILE = {
   ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE,

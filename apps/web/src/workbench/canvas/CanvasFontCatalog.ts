@@ -9,20 +9,11 @@ import {
   type CanvasTextRenderProfileDefinition
 } from './CanvasTextRenderProfile.js';
 
-export interface CanvasFontCatalogEntry {
+interface CanvasFontCatalogEntry {
   readonly id: CanvasFontId;
   readonly displayName: string;
   readonly resource: CanvasTextFontResource;
 }
-
-export const DEFAULT_CANVAS_TEXT_APPEARANCE = {
-  fontId: 'noto-sans-mono-cjk-sc',
-  fontSizePx: 12,
-  lineHeightRatio: 1.4,
-  fontWeight: 400,
-  letterSpacingPx: 0,
-  ligatures: true
-} as const satisfies CanvasTextAppearance;
 
 const NOTO_SANS_MONO_CJK_SC = fontResource([
   managedWoff2Face(
@@ -126,7 +117,7 @@ const CATALOG_BY_ID = new Map<CanvasFontId, CanvasFontCatalogEntry>(
   CANVAS_FONT_CATALOG.map((entry) => [entry.id, entry])
 );
 
-export function canvasFontCatalogEntry(fontId: CanvasFontId): CanvasFontCatalogEntry {
+function canvasFontCatalogEntry(fontId: CanvasFontId): CanvasFontCatalogEntry {
   const entry = CATALOG_BY_ID.get(fontId);
   if (!entry) {
     throw new Error(`Unknown managed Canvas Font: ${String(fontId)}`);
@@ -134,41 +125,16 @@ export function canvasFontCatalogEntry(fontId: CanvasFontId): CanvasFontCatalogE
   return entry;
 }
 
-export function canvasTextRenderProfileDefinition(
+function canvasTextRenderProfileDefinition(
   appearance: CanvasTextAppearance
 ): CanvasTextRenderProfileDefinition {
   return {
     font: canvasFontCatalogEntry(appearance.fontId).resource,
-    typography: {
-      fontSizePx: appearance.fontSizePx,
-      lineHeight: { kind: 'ratio', value: appearance.lineHeightRatio },
-      fontWeight: appearance.fontWeight,
-      fontStyle: 'normal',
-      fontStretchPercent: 100,
-      letterSpacingPx: appearance.letterSpacingPx,
-      wordSpacingPx: 0,
-      tabSize: 4,
-      kerning: 'normal',
-      ligatures: {
-        common: appearance.ligatures,
-        discretionary: false,
-        historical: false,
-        contextual: appearance.ligatures
-      },
-      features: {},
-      variations: {},
-      opticalSizing: 'auto',
-      synthesis: {
-        weight: false,
-        style: false,
-        smallCaps: false
-      }
-    },
-    editorGeometry: {
-      linePaddingInlinePx: 8,
-      gutterPaddingLeftPx: 5,
-      gutterPaddingRightPx: 3
-    }
+    fontSizePx: appearance.fontSizePx,
+    lineHeightRatio: appearance.lineHeightRatio,
+    fontWeight: appearance.fontWeight,
+    letterSpacingPx: appearance.letterSpacingPx,
+    ligatures: appearance.ligatures
   };
 }
 
@@ -184,19 +150,14 @@ function managedWoff2Face(
   weight: number
 ): CanvasTextFontFaceDefinition {
   return {
-    asset: {
-      source: canvasTextFontUrlSource(url),
-      sha256: `sha256:${sha256}`,
-      format: 'woff2'
-    },
-    weight,
-    style: 'normal',
-    stretchPercent: 100
+    source: canvasTextFontUrlSource(url),
+    sha256: `sha256:${sha256}`,
+    weight
   };
 }
 
 function fontResource(faces: readonly CanvasTextFontFaceDefinition[]): CanvasTextFontResource {
-  return createCanvasTextFontResource({ families: [{ faces }] });
+  return createCanvasTextFontResource(faces);
 }
 
 function fontResourceWithFallback(

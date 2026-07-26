@@ -141,6 +141,20 @@ impl WorkbenchHttpServer {
             let _ = shutdown.send(());
         }
     }
+
+    /// Waits for the listener thread after admission has closed and active
+    /// connections have been cancelled.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the Workbench HTTP server thread panics during shutdown.
+    pub fn join(&mut self) {
+        if let Some(server_thread) = self.thread.take() {
+            server_thread
+                .join()
+                .expect("Workbench HTTP server thread panicked");
+        }
+    }
 }
 
 fn run_workbench_http_thread(
@@ -199,16 +213,13 @@ fn run_workbench_http_thread(
             }
         }
     });
+    runtime.shutdown_timeout(WORKBENCH_HTTP_DRAIN_TIMEOUT);
 }
 
 impl Drop for WorkbenchHttpServer {
     fn drop(&mut self) {
         self.stop_accepting();
-        if let Some(server_thread) = self.thread.take() {
-            server_thread
-                .join()
-                .expect("Workbench HTTP server thread panicked");
-        }
+        self.join();
     }
 }
 
@@ -251,5 +262,76 @@ impl Error for WorkbenchHttpServerError {
 impl From<io::Error> for WorkbenchHttpServerError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::Write as _,
+        net::TcpStream,
+        time::{Duration, Instant},
+    };
+
+    use axum::{Router, routing::get};
+
+    use super::*;
+
+    #[test]
+    fn listener_thread_join_is_bounded_when_blocking_work_ignores_cancellation() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (blocking_started_sender, blocking_started_receiver) = mpsc::sync_channel(0);
+        let router = Router::new().route(
+            "/block",
+            get(move || {
+                let blocking_started = blocking_started_sender.clone();
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        blocking_started.send(()).unwrap();
+                        thread::sleep(WORKBENCH_HTTP_DRAIN_TIMEOUT.saturating_mul(6));
+                    })
+                    .await
+                    .unwrap();
+                    "done"
+                }
+            }),
+        );
+        let (startup_sender, startup_receiver) = mpsc::sync_channel(0);
+        let (terminal_sender, _terminal_receiver) = mpsc::sync_channel(1);
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+        let server_thread = thread::spawn(move || {
+            run_workbench_http_thread(
+                listener,
+                router,
+                startup_sender,
+                terminal_sender,
+                shutdown_receiver,
+            );
+        });
+        startup_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+
+        let mut stream = TcpStream::connect(address).unwrap();
+        write!(
+            stream,
+            "GET /block HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        blocking_started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+
+        let shutdown_started = Instant::now();
+        shutdown_sender.send(()).unwrap();
+        server_thread.join().unwrap();
+
+        assert!(
+            shutdown_started.elapsed() < WORKBENCH_HTTP_DRAIN_TIMEOUT.saturating_mul(4),
+            "listener join exceeded its bounded drain and Runtime shutdown budgets"
+        );
     }
 }

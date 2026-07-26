@@ -13,7 +13,7 @@ import type {
 import type {
   CanvasTextPreviewSceneBuild,
   CanvasTextPreviewBuiltScene
-} from './CanvasTextPreviewScene';
+} from './CanvasTextPreviewScene.js';
 
 const mocks = vi.hoisted(() => ({
   createSceneBuild: vi.fn(),
@@ -21,11 +21,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./CanvasTextRenderProfileContext.js', async () => {
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./DefaultCanvasTextRenderProfile.js');
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
   return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
 });
 
-vi.mock('./CanvasTextPreviewScene', () => ({
+vi.mock('./CanvasTextPreviewScene.js', () => ({
   createCanvasTextPreviewSceneBuild: mocks.createSceneBuild
 }));
 
