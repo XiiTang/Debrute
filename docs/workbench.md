@@ -413,6 +413,26 @@ Runtime cancellation. After replacement, an old generation cannot update the
 new Project's selection, internal clipboard, Canvas presentation, dialogs, or
 notifications.
 
+Product Quit has a narrower completion boundary. Runtime first stops accepting
+new work and signals every Workbench connection and Project request lifetime.
+An HTTP request still reading or awaiting its body, preview, or another
+pre-command stage is dropped and never enters a Project command. A synchronous
+Project command that has already begun remains an accepted atomic transaction
+and finishes normally; Quit does not kill, roll back, retry, or redirect it.
+
+HTTP-originated connection retirement and Product Quit drain through one
+Runtime-owned `ConnectionCloser` thread. An SSE response guard only enqueues its
+connection credential, so dropping that guard on the single-thread Workbench
+HTTP runtime cannot synchronously wait for another future on the same runtime
+to release its Project binding lease. Product Quit waits at most 500 ms for the
+connection drain. A timeout records one redacted numeric diagnostic containing
+only the duration, connection count, and bound-Project count, then Quit
+continues successfully. The accepted transaction and queued close continue on
+the owned closer, which is joined during Runtime service teardown. The
+Workbench HTTP runtime likewise gives graceful connection drain at most 500 ms
+before dropping remaining request futures; neither deadline hard-kills a
+Project transaction or changes an accepted modification.
+
 Integrations Settings behavior and the Photoshop transfer boundary are
 documented in [`integrations.md`](./integrations.md) and
 [`photoshop-bridge.md`](./photoshop-bridge.md).

@@ -514,6 +514,33 @@ describe('workbench context menu commands', () => {
     expect(setCamera).toHaveBeenCalledWith({ x: 250, y: 175, z: 1 });
   });
 
+  it('rechecks live Canvas surface readiness before revealing a node', () => {
+    const setCamera = vi.fn<CanvasEditorRuntime['camera']['setCamera']>();
+    const activeProjection = canvasProjectionFixture('canvas-1', {
+      projectRelativePath: 'briefs/concept.md',
+      x: 200,
+      y: 100,
+      width: 100,
+      height: 50
+    });
+
+    runProjectPathCommand(commandInput({
+      command: 'reveal-in-canvas',
+      activeProjection,
+      activeCanvasRuntime: canvasRuntimeFixture({ setCamera, surfaceReady: false }),
+      actions: {}
+    }));
+    expect(setCamera).not.toHaveBeenCalled();
+
+    runProjectPathCommand(commandInput({
+      command: 'reveal-in-canvas',
+      activeProjection,
+      activeCanvasRuntime: canvasRuntimeFixture({ setCamera, surfaceReady: true }),
+      actions: {}
+    }));
+    expect(setCamera).toHaveBeenCalledOnce();
+  });
+
   it('resets a manual Canvas directory with a recursive Canvas Map path rule', async () => {
     const resetCanvasNodeLayouts = vi.fn(async () => ({
       projectId: 'project-live-id',
@@ -671,6 +698,7 @@ function commandInput(overrides: {
 function canvasRuntimeFixture(input: {
   setSelection?: CanvasEditorRuntime['setSelection'];
   setCamera?: CanvasEditorRuntime['camera']['setCamera'];
+  surfaceReady?: boolean;
 } = {}): Partial<CanvasEditorRuntime> {
   const setSelection = input.setSelection ?? (() => undefined);
   const setCamera = input.setCamera ?? (() => undefined);
@@ -679,7 +707,9 @@ function canvasRuntimeFixture(input: {
       setSelection(selection);
     },
     getSnapshot: () => ({
-      surfaceSize: { width: 1000, height: 600 },
+      surfaceSize: input.surfaceReady === false
+        ? undefined
+        : { width: 1000, height: 600 },
       camera: { x: 0, y: 0, z: 1 },
       cameraState: 'idle' as const,
       selection: undefined,

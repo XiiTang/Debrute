@@ -128,7 +128,11 @@ internal audio execution family and verify their distinct Artifact Roles.
 Revisioned-file route tests verify `200` for a complete file, `206` plus exact
 range headers for a satisfiable single range, and `416` for an unsatisfiable
 range. Service-error tests verify the typed status selected at error creation is
-the status returned by the adapter.
+the status returned by the adapter. Workbench shutdown coverage holds an
+accepted Project lease past the 500 ms connection-drain boundary, proves that
+the pending connection lifetime is cancelled without aborting that lease, then
+releases it and requires the Runtime-owned closer to finish. HTTP integration
+coverage proves live SSE streams close before listener join.
 
 ## Raster Preview Engine Acceptance
 
@@ -143,6 +147,9 @@ format contract rather than byte-identical encoder output across platforms.
 Route-level tests prove that quantized derived widths create the requested
 variant, a browser-displayable source at intrinsic width is returned directly
 without an equal-width cache file, and TIFF remains derived. They also prove
+that an exact image-preview response is private immutable while a stale source
+revision remains rejected. Text and video routes retain their revalidation
+policy in the closed route implementation. Tests further prove
 that the shared Raster Preview Pool admits at most three active jobs,
 equivalent requests share one job, consumerless queued work is removed, active
 native work has no request timeout or force-cancel path, and a stale source or
@@ -207,7 +214,13 @@ the diagnostic chain.
    and ready text/image publications must advance in bounded groups of at most
    three operations per animation frame until every current visible result is
    mounted.
-5. Require a clean browser error/warning log and no React maximum-update-depth,
+5. While a Project Path context menu is open, verify that surface readiness can
+   enable or disable Reveal in Canvas. Camera, selection, drag, and same-ready
+   resize changes must not rerender the Workbench composition root or restart
+   image resource effects; closing the menu removes its surface subscription.
+   Capture `window.__debruteCanvasPerf` around zoom and drag interactions and
+   compare resource and render counters before and after the interaction.
+6. Require a clean browser error/warning log and no React maximum-update-depth,
    failed media request, or silent placeholder state.
 
 The Electron run also verifies that the single Rust process launched from the

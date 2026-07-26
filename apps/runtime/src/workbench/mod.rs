@@ -17,7 +17,7 @@ pub use connections::WORKBENCH_CONNECTION_HEADER;
 pub use connections::WorkbenchConnectionRegistry;
 pub(crate) use connections::{
     ProjectBindError, ProjectBindOutcome, ProjectBindingCommit, ProjectBindingLease,
-    WorkbenchConnectionContext,
+    WorkbenchConnectionCloser, WorkbenchConnectionContext, WorkbenchConnectionDrainOutcome,
 };
 pub use http::{WorkbenchHttpServer, WorkbenchHttpServerError};
 pub use services::{

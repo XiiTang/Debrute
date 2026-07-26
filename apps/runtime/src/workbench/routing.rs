@@ -354,6 +354,7 @@ async fn authorize_workbench_api(
         .extensions_mut()
         .insert(BrowserSession(session.clone()));
     request.extensions_mut().insert(context.clone());
+    let mut project_lifetime = None;
     if let Some(project_id) = project_id {
         if context.project_id.as_deref() != Some(project_id.as_str()) {
             return forbidden();
@@ -362,13 +363,18 @@ async fn authorize_workbench_api(
             // The first closed Terminal frame binds the Workbench connection
             // because browser WebSocket constructors cannot set custom headers.
         } else {
-            let Some(lease) = services.connections().acquire_project_binding(
-                &context.credential,
-                &project_id,
-                context.binding_generation,
-            ) else {
+            let Some((lease, lifetime)) = services
+                .connections()
+                .acquire_project_binding_with_lifetime(
+                    &session,
+                    &context.credential,
+                    &project_id,
+                    context.binding_generation,
+                )
+            else {
                 return forbidden();
             };
+            project_lifetime = Some(lifetime);
             request.extensions_mut().insert(ProjectAuthorization {
                 project_id,
                 _binding_generation: context.binding_generation,
@@ -390,7 +396,14 @@ async fn authorize_workbench_api(
     {
         return forbidden();
     }
-    next.run(request).await
+    if let Some(mut lifetime) = project_lifetime {
+        tokio::select! {
+            response = next.run(request) => response,
+            _ = lifetime.recv() => forbidden(),
+        }
+    } else {
+        next.run(request).await
+    }
 }
 
 async fn authorize_cli_api(

@@ -3,6 +3,23 @@ import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceSch
 import type { CanvasPerfMonitor } from './CanvasPerfMonitor';
 
 describe('CanvasPreviewResourceScheduler', () => {
+  it('exposes the current interaction state to resource consumers', () => {
+    const scheduler = createCanvasPreviewResourceScheduler({
+      requestFrame: () => 1,
+      cancelFrame: vi.fn()
+    });
+
+    expect(scheduler.getInteractionState()).toEqual({
+      cameraState: 'idle',
+      dragActive: false
+    });
+    scheduler.setInteractionState({ cameraState: 'moving', dragActive: true });
+    expect(scheduler.getInteractionState()).toEqual({
+      cameraState: 'moving',
+      dragActive: true
+    });
+  });
+
   it('shares one three-operation frame budget between result publications and request starts', () => {
     const frames: FrameRequestCallback[] = [];
     const published: string[] = [];

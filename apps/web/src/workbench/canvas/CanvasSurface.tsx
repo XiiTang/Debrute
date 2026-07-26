@@ -295,11 +295,9 @@ function CanvasSurfaceRuntime({
   const imageNodeAssetContext = useMemo<CanvasImageNodeAssetContextValue>(() => ({
     resourceZoom,
     devicePixelRatio,
-    cameraState,
-    dragActive: dragState !== undefined,
     perfMonitor: instrumentationMonitor,
     previewResourceScheduler
-  }), [cameraState, devicePixelRatio, dragState, instrumentationMonitor, previewResourceScheduler, resourceZoom]);
+  }), [devicePixelRatio, instrumentationMonitor, previewResourceScheduler, resourceZoom]);
 
   selectionRef.current = selection;
   canvasPerfDebugContextRef.current = {

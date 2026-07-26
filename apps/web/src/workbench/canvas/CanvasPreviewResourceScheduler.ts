@@ -22,6 +22,7 @@ export interface CanvasPreviewResourceScheduler {
   enqueuePublication(request: CanvasPreviewResourceRequest): void;
   cancel(kind: CanvasPreviewResourceKind, nodeId: string): void;
   setInteractionState(input: { cameraState: CanvasCameraState; dragActive: boolean }): void;
+  getInteractionState(): { cameraState: CanvasCameraState; dragActive: boolean };
   notifyVisibilityChanged(): void;
   dispose(): void;
 }
@@ -168,6 +169,9 @@ export function createCanvasPreviewResourceScheduler(input: {
         return;
       }
       scheduleFrame();
+    },
+    getInteractionState() {
+      return { cameraState, dragActive };
     },
     notifyVisibilityChanged() {
       scheduleFrame();

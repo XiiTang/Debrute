@@ -330,6 +330,96 @@ describe('CanvasRenderCoordinator', () => {
     ]);
   });
 
+  it('composes one local Manual Layout overlay without pulling distant nodes or edges into the snapshot', () => {
+    const distantNodes = Array.from({ length: 2_000 }, (_, index) => (
+      directoryNode(`far/node-${index}`, 20_000 + index * 200, 20_000, index + 10)
+    ));
+    const distantEdges = Array.from({ length: 1_000 }, (_, index) => ({
+      id: `far-edge-${index}`,
+      sourceProjectRelativePath: `far/node-${index * 2}`,
+      targetProjectRelativePath: `far/node-${index * 2 + 1}`
+    }));
+    const localEdges = [{
+      id: 'local-unrelated',
+      sourceProjectRelativePath: 'local/a',
+      targetProjectRelativePath: 'local/b'
+    }, {
+      id: 'local-affected',
+      sourceProjectRelativePath: 'local/source',
+      targetProjectRelativePath: 'local/target'
+    }];
+    const coordinator = createCanvasRenderCoordinator({
+      projection: projection([
+        directoryNode('local/a', 0, 200, 1),
+        directoryNode('local/b', 300, 200, 2),
+        directoryNode('local/source', 0, 0, 3),
+        directoryNode('local/target', 300, 0, 4),
+        ...distantNodes
+      ], [...localEdges, ...distantEdges])
+    });
+
+    const snapshot = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: [],
+      layoutOverrides: [{
+        projectRelativePath: 'local/source',
+        x: 100,
+        y: 20,
+        width: 120,
+        height: 100
+      }]
+    });
+
+    expect([...snapshot.nodesByPath.keys()].sort()).toEqual([
+      'local/a',
+      'local/b',
+      'local/source',
+      'local/target'
+    ]);
+    expect(snapshot.edges.map((edge) => edge.id)).toEqual([
+      'local-unrelated',
+      'local-affected'
+    ]);
+    expect(snapshot.edges[1]?.points[0]).toEqual({ x: 220, y: 70 });
+  });
+
+  it('rebuilds edge ordering when a projection reorders the same edge membership', () => {
+    const nodes = [
+      directoryNode('local/a', 0, 0, 1),
+      directoryNode('local/b', 300, 0, 2),
+      directoryNode('local/c', 0, 200, 3),
+      directoryNode('local/d', 300, 200, 4)
+    ];
+    const firstEdge = {
+      id: 'first',
+      sourceProjectRelativePath: 'local/a',
+      targetProjectRelativePath: 'local/b'
+    };
+    const secondEdge = {
+      id: 'second',
+      sourceProjectRelativePath: 'local/c',
+      targetProjectRelativePath: 'local/d'
+    };
+    const coordinator = createCanvasRenderCoordinator({
+      projection: projection(nodes, [firstEdge, secondEdge])
+    });
+    const input = {
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle' as const,
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: [],
+      layoutOverrides: []
+    };
+
+    expect(coordinator.update(input).edges.map((edge) => edge.id)).toEqual(['first', 'second']);
+    coordinator.setProjection(projection(nodes, [secondEdge, firstEdge]));
+    expect(coordinator.update(input).edges.map((edge) => edge.id)).toEqual(['second', 'first']);
+  });
+
   it('keeps a resized draft node mounted when its durable rect is outside the virtual rect', () => {
     const coordinator = createCanvasRenderCoordinator({ projection: projection([
       imageNode('flow/a.png', 5000, 0, 1)

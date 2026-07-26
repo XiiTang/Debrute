@@ -923,6 +923,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       enqueuePublication: () => undefined,
       cancel: () => undefined,
       setInteractionState: () => undefined,
+      getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
       notifyVisibilityChanged: () => undefined,
       dispose: () => undefined
     };
@@ -1007,6 +1008,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       enqueuePublication: () => undefined,
       cancel: () => undefined,
       setInteractionState: () => undefined,
+      getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
       notifyVisibilityChanged: () => undefined,
       dispose: () => undefined
     };

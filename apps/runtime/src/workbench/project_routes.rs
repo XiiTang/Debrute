@@ -866,15 +866,13 @@ pub(super) async fn image_preview(
     let project_root = session.root().to_path_buf();
     let path = path.to_owned();
     let revision = revision.to_owned();
-    blocking_preview_response(method == Method::HEAD, move || {
-        previews.resolve_image_preview(
-            &project_root,
-            &path,
-            &revision,
-            width,
-            &PreviewCancellation::default(),
-        )
-    })
+    blocking_preview_response(
+        method == Method::HEAD,
+        PreviewCachePolicy::Immutable,
+        move |cancellation| {
+            previews.resolve_image_preview(&project_root, &path, &revision, width, cancellation)
+        },
+    )
     .await
 }
 
@@ -1026,15 +1024,19 @@ pub(super) async fn text_preview(
     };
     let previews = Arc::clone(runtime.previews());
     let project_root = session.root().to_path_buf();
-    blocking_preview_response(method == Method::HEAD, move || {
-        previews.resolve_text_preview_variant(
-            &project_root,
-            &canvas_id,
-            &target,
-            width,
-            &PreviewCancellation::default(),
-        )
-    })
+    blocking_preview_response(
+        method == Method::HEAD,
+        PreviewCachePolicy::Revalidate,
+        move |cancellation| {
+            previews.resolve_text_preview_variant(
+                &project_root,
+                &canvas_id,
+                &target,
+                width,
+                cancellation,
+            )
+        },
+    )
     .await
 }
 
@@ -1084,16 +1086,12 @@ pub(super) async fn video_preview_sources(
     let previews = Arc::clone(runtime.previews());
     let project_root = session.root().to_path_buf();
     let canvas_id = input.canvas_id;
-    let sources = match tokio::task::spawn_blocking(move || {
-        previews.video().read_sources(
-            &project_root,
-            &canvas_id,
-            &targets,
-            &PreviewCancellation::default(),
-        )
+    let sources = match blocking_preview_task(move |cancellation| {
+        previews
+            .video()
+            .read_sources(&project_root, &canvas_id, &targets, cancellation)
     })
     .await
-    .expect("Canvas video preview worker must complete")
     {
         Ok(sources) => sources,
         Err(error) => return project_error(error),
@@ -1179,16 +1177,20 @@ pub(super) async fn video_preview(
     };
     let previews = Arc::clone(runtime.previews());
     let project_root = session.root().to_path_buf();
-    blocking_preview_response(method == Method::HEAD, move || {
-        previews.video().resolve_variant(
-            &project_root,
-            &canvas_id,
-            &target,
-            &source_key,
-            width,
-            &PreviewCancellation::default(),
-        )
-    })
+    blocking_preview_response(
+        method == Method::HEAD,
+        PreviewCachePolicy::Revalidate,
+        move |cancellation| {
+            previews.video().resolve_variant(
+                &project_root,
+                &canvas_id,
+                &target,
+                &source_key,
+                width,
+                cancellation,
+            )
+        },
+    )
     .await
 }
 
@@ -1891,7 +1893,26 @@ fn revisioned_file_response(mut plan: RevisionedFilePlan, head: bool) -> Respons
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-fn preview_file_response(mut preview: crate::project::CanvasPreviewFile, head: bool) -> Response {
+#[derive(Clone, Copy)]
+enum PreviewCachePolicy {
+    Revalidate,
+    Immutable,
+}
+
+impl PreviewCachePolicy {
+    fn header_value(self) -> &'static str {
+        match self {
+            Self::Revalidate => "no-cache",
+            Self::Immutable => "private, max-age=31536000, immutable",
+        }
+    }
+}
+
+fn preview_file_response(
+    mut preview: crate::project::CanvasPreviewFile,
+    head: bool,
+    cache_policy: PreviewCachePolicy,
+) -> Response {
     let length = match preview.file.metadata() {
         Ok(metadata) => metadata.len(),
         Err(error) => return project_error(ProjectError::from(error)),
@@ -1903,7 +1924,7 @@ fn preview_file_response(mut preview: crate::project::CanvasPreviewFile, head: b
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, preview.content_type)
         .header(header::CONTENT_LENGTH, length)
-        .header(header::CACHE_CONTROL, "no-cache");
+        .header(header::CACHE_CONTROL, cache_policy.header_value());
     if head {
         return builder.body(Body::empty()).unwrap();
     }
@@ -1914,14 +1935,33 @@ fn preview_file_response(mut preview: crate::project::CanvasPreviewFile, head: b
 
 async fn blocking_preview_response(
     head: bool,
-    task: impl FnOnce() -> Result<crate::project::CanvasPreviewFile, ProjectError> + Send + 'static,
+    cache_policy: PreviewCachePolicy,
+    task: impl FnOnce(&PreviewCancellation) -> Result<crate::project::CanvasPreviewFile, ProjectError>
+    + Send
+    + 'static,
 ) -> Response {
-    match tokio::task::spawn_blocking(task)
+    match blocking_preview_task(task).await {
+        Ok(preview) => preview_file_response(preview, head, cache_policy),
+        Err(error) => project_error(error),
+    }
+}
+
+async fn blocking_preview_task<T: Send + 'static>(
+    task: impl FnOnce(&PreviewCancellation) -> Result<T, ProjectError> + Send + 'static,
+) -> Result<T, ProjectError> {
+    let cancellation = PreviewCancellation::default();
+    let worker_cancellation = cancellation.clone();
+    let _request_cancellation = PreviewRequestCancellation(cancellation);
+    tokio::task::spawn_blocking(move || task(&worker_cancellation))
         .await
         .expect("Canvas preview worker must complete")
-    {
-        Ok(preview) => preview_file_response(preview, head),
-        Err(error) => project_error(error),
+}
+
+struct PreviewRequestCancellation(PreviewCancellation);
+
+impl Drop for PreviewRequestCancellation {
+    fn drop(&mut self) {
+        self.0.cancel();
     }
 }
 
@@ -2021,6 +2061,45 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn dropping_a_preview_request_cancels_its_blocking_worker() {
+        let started = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_started = Arc::clone(&started);
+        let worker_cancelled = Arc::clone(&cancelled);
+        let request = tokio::spawn(blocking_preview_response(
+            false,
+            PreviewCachePolicy::Revalidate,
+            move |cancellation| {
+                worker_started.store(true, Ordering::Release);
+                while cancellation.check().is_ok() {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                worker_cancelled.store(true, Ordering::Release);
+                Err(cancellation
+                    .check()
+                    .expect_err("dropped request must cancel the preview worker"))
+            },
+        ));
+        for _ in 0..100 {
+            if started.load(Ordering::Acquire) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(started.load(Ordering::Acquire));
+
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        for _ in 0..100 {
+            if cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        panic!("preview worker did not observe request cancellation");
+    }
+
+    #[tokio::test]
     async fn preview_file_response_streams_the_complete_file_from_its_start() {
         let path = std::env::temp_dir().join(format!(
             "debrute-preview-response-{}.png",
@@ -2038,6 +2117,7 @@ mod tests {
                 content_type: "image/png",
             },
             false,
+            PreviewCachePolicy::Revalidate,
         );
         let body = axum::body::to_bytes(response.into_body(), expected.len())
             .await

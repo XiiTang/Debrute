@@ -16,8 +16,6 @@ import type { CanvasCameraState } from './runtime/canvasCamera';
 export interface CanvasImageNodeAssetContextValue {
   resourceZoom: number;
   devicePixelRatio: number;
-  cameraState: CanvasCameraState;
-  dragActive: boolean;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
 }
@@ -84,6 +82,7 @@ export function useCanvasImageNodeAsset(input: {
     const becameVisibleAfterCull = previousCulledRef.current && !input.culled;
     previousCulledRef.current = input.culled;
     const retryRequested = retryRequestedRef.current;
+    const interaction = context.previewResourceScheduler.getInteractionState();
     const shouldRunImmediately = shouldPublishCanvasImageNodeSourceImmediately({
       source,
       didResolveUrl: didResolveUrlRef.current,
@@ -92,12 +91,13 @@ export function useCanvasImageNodeAsset(input: {
       hasLoadedImage: Boolean(state.loaded),
       culled: input.culled,
       becameVisibleAfterCull,
-      dragActive: context.dragActive,
+      dragActive: interaction.dragActive,
       loadedLoadKey: state.loaded?.loadKey
     });
     retryRequestedRef.current = false;
 
     const publishSource = () => {
+      const currentInteraction = context.previewResourceScheduler.getInteractionState();
       if (source.kind === 'source') {
         didResolveUrlRef.current = true;
       }
@@ -107,13 +107,13 @@ export function useCanvasImageNodeAsset(input: {
         source,
         loadedLoadKey: state.loaded?.loadKey,
         culled: input.culled,
-        cameraState: context.cameraState,
+        cameraState: currentInteraction.cameraState,
         revisionChanged
       });
       dispatch({
         type: 'source-resolved',
         source,
-        cameraState: context.cameraState,
+        cameraState: currentInteraction.cameraState,
         culled: input.culled
       });
     };

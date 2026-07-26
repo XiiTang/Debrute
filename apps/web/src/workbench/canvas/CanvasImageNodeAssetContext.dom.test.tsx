@@ -34,6 +34,7 @@ describe('CanvasImageNodeAssetContext', () => {
       enqueuePublication: (request) => publications.push(request),
       cancel: () => undefined,
       setInteractionState: () => undefined,
+      getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
       notifyVisibilityChanged: () => undefined,
       dispose: () => undefined
     };
@@ -44,8 +45,6 @@ describe('CanvasImageNodeAssetContext', () => {
         <CanvasImageNodeAssetProvider value={{
           resourceZoom: 0.1,
           devicePixelRatio: 1,
-          cameraState: 'idle',
-          dragActive: false,
           previewResourceScheduler: scheduler
         }}>
           <ImageAssetProbe node={imageNode()} onState={(state) => observed.push(state)} />
@@ -67,38 +66,53 @@ describe('CanvasImageNodeAssetContext', () => {
     expect(latestImage(observed)?.visible?.loadKey).toBe(loadKey);
   });
 
-  it('retains an already decoded handoff when camera interaction starts', async () => {
+  it('does not rerun image resource effects when only interaction state changes', async () => {
     const publications: CanvasPreviewResourceRequest[] = [];
+    let interaction: ReturnType<CanvasPreviewResourceScheduler['getInteractionState']> = {
+      cameraState: 'idle',
+      dragActive: false
+    };
+    let sourceStarts = 0;
     const scheduler: CanvasPreviewResourceScheduler = {
-      enqueue: () => undefined,
+      enqueue: () => { sourceStarts += 1; },
       enqueuePublication: (request) => publications.push(request),
       cancel: () => undefined,
-      setInteractionState: () => undefined,
+      setInteractionState: (next) => {
+        interaction = next.cameraState === 'idle'
+          ? { cameraState: 'idle', dragActive: next.dragActive }
+          : { cameraState: 'moving', dragActive: next.dragActive };
+      },
+      getInteractionState: () => interaction,
       notifyVisibilityChanged: () => undefined,
       dispose: () => undefined
     };
     const observed: CanvasImageNodeAssetHookState[] = [];
-    const render = (cameraState: 'idle' | 'moving') => (
-      <CanvasImageNodeAssetProvider value={{
-        resourceZoom: 0.1,
-        devicePixelRatio: 1,
-        cameraState,
-        dragActive: false,
-        previewResourceScheduler: scheduler
-      }}>
-        <ImageAssetProbe node={imageNode()} onState={(state) => observed.push(state)} />
+    const node = imageNode();
+    const context = {
+      resourceZoom: 0.1,
+      devicePixelRatio: 1,
+      previewResourceScheduler: scheduler
+    };
+    const render = () => (
+      <CanvasImageNodeAssetProvider value={context}>
+        <ImageAssetProbe node={node} onState={(state) => observed.push(state)} />
       </CanvasImageNodeAssetProvider>
     );
 
-    await act(async () => root.render(render('idle')));
+    await act(async () => root.render(render()));
     await waitFor(() => latestImage(observed)?.next !== undefined);
     const loadKey = latestImage(observed)?.next?.loadKey;
     await act(async () => latest(observed)?.resolveNext(loadKey!));
+    const sourceStartsBeforeInteraction = sourceStarts;
+    const publicationsBeforeInteraction = publications.length;
 
-    await act(async () => root.render(render('moving')));
+    scheduler.setInteractionState({ cameraState: 'moving', dragActive: true });
+    await act(async () => root.render(render()));
 
     expect(publications[0]?.isCurrent()).toBe(true);
     expect(latestImage(observed)?.next?.loadKey).toBe(loadKey);
+    expect(sourceStarts).toBe(sourceStartsBeforeInteraction);
+    expect(publications).toHaveLength(publicationsBeforeInteraction);
   });
 });
 

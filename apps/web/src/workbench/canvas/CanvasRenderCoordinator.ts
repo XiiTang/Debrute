@@ -8,7 +8,7 @@ import {
   type CanvasEdgeSegment,
   type VirtualizedCanvasRenderState
 } from './canvasVirtualization';
-import { canvasNodesWithLayoutOverrides, type CanvasLayoutOverride } from './canvasManualLayoutDraft';
+import type { CanvasLayoutOverride } from './canvasManualLayoutDraft';
 import type { CanvasCamera, CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { rectsIntersect } from './runtime/canvasGeometry';
@@ -55,6 +55,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
     nodes: projection.nodes,
     edges: projection.edges
   });
+  let edgeOverlayIndex = createCanvasEdgeOverlayIndex(projection.edges);
   let snapshot: CanvasRenderCoordinatorSnapshot | undefined;
   let mountedInputKey: string | undefined;
 
@@ -76,16 +77,19 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
       activeNodeProjectRelativePaths: input.activeNodePaths
     });
     const layoutOverrides = input.layoutOverrides;
-    const draftAwareNodes = canvasNodesWithLayoutOverrides({
-      nodes: [...latestNodesByPath.values()],
-      layoutOverrides
-    });
-    const draftAwareNodesByPath = new Map(draftAwareNodes.map((node) => [node.projectRelativePath, node]));
+    const layoutByPath = new Map(
+      layoutOverrides.map((layout) => [layout.projectRelativePath, layout])
+    );
+    const currentNodeForPath = (path: string): ProjectedCanvasNode | undefined => {
+      const node = latestNodesByPath.get(path);
+      const layout = layoutByPath.get(path);
+      return node && layout ? canvasNodeWithLayoutOverride(node, layout) : node;
+    };
     const overrideNodes = layoutOverrides
-      .map((layout) => draftAwareNodesByPath.get(layout.projectRelativePath))
+      .map((layout) => currentNodeForPath(layout.projectRelativePath))
       .filter((node): node is ProjectedCanvasNode => Boolean(node));
     const nodes = rendered.nodes
-      .map((node) => draftAwareNodesByPath.get(node.projectRelativePath) ?? node)
+      .map((node) => currentNodeForPath(node.projectRelativePath) ?? node)
       .concat(overrideNodes)
       .filter(uniqueNodePathPredicate())
       .sort((left, right) => left.projectRelativePath.localeCompare(right.projectRelativePath));
@@ -96,10 +100,10 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
         .map((node) => node.projectRelativePath)
     );
     const edges = renderSnapshotEdges({
-      projectionEdges: projection.edges,
       renderedEdges: rendered.edges,
-      draftAwareNodes,
-      layoutOverrides
+      currentNodeForPath,
+      layoutOverrides,
+      edgeOverlayIndex
     });
     return {
       visibleRect: rendered.visibleRect,
@@ -122,6 +126,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
           nodes: projection.nodes,
           edges: projection.edges
         });
+        edgeOverlayIndex = createCanvasEdgeOverlayIndex(projection.edges);
         snapshot = undefined;
         mountedInputKey = undefined;
         recordCounter('render-virtual-refresh', { reason: 'projection-membership-change' });
@@ -180,7 +185,6 @@ export function canvasRenderProjectionMembershipKey(projection: CanvasProjection
         edge.sourceProjectRelativePath,
         edge.targetProjectRelativePath
       ].join('\u001f'))
-      .sort()
       .join('\u001e')
   ].join('\u001d');
 }
@@ -205,34 +209,88 @@ function canvasRenderCoordinatorMountedInputKey(input: CanvasRenderCoordinatorUp
 }
 
 function renderSnapshotEdges(input: {
-  projectionEdges: CanvasProjection['edges'];
   renderedEdges: CanvasEdgeSegment[];
-  draftAwareNodes: ProjectedCanvasNode[];
+  currentNodeForPath(path: string): ProjectedCanvasNode | undefined;
   layoutOverrides: readonly CanvasLayoutOverride[];
+  edgeOverlayIndex: CanvasEdgeOverlayIndex;
 }): CanvasEdgeSegment[] {
   if (input.layoutOverrides.length === 0) {
     return input.renderedEdges;
   }
   const overridePaths = new Set(input.layoutOverrides.map((layout) => layout.projectRelativePath));
-  const connectedEdges = input.projectionEdges.filter((edge) => (
-    overridePaths.has(edge.sourceProjectRelativePath) || overridePaths.has(edge.targetProjectRelativePath)
-  ));
+  const connectedEdgeIds = new Set<string>();
+  const connectedEdges = [...overridePaths]
+    .flatMap((path) => input.edgeOverlayIndex.edgesByNodePath.get(path) ?? [])
+    .filter((edge) => {
+      if (connectedEdgeIds.has(edge.id)) {
+        return false;
+      }
+      connectedEdgeIds.add(edge.id);
+      return true;
+    })
+    .sort((left, right) => (
+      input.edgeOverlayIndex.orderById.get(left.id)!
+      - input.edgeOverlayIndex.orderById.get(right.id)!
+    ));
   if (connectedEdges.length === 0) {
     return input.renderedEdges;
   }
-  const connectedEdgeIds = new Set(connectedEdges.map((edge) => edge.id));
-  const edgeById = new Map(
-    input.renderedEdges
-      .filter((edge) => !connectedEdgeIds.has(edge.id))
-      .map((edge) => [edge.id, edge])
+  const connectedNodePaths = new Set(
+    connectedEdges.flatMap((edge) => [
+      edge.sourceProjectRelativePath,
+      edge.targetProjectRelativePath
+    ])
   );
-  for (const edge of canvasEdgeSegmentsForProjectionEdges({
-    nodes: input.draftAwareNodes,
+  const routedConnectedEdges = canvasEdgeSegmentsForProjectionEdges({
+    nodes: [...connectedNodePaths]
+      .flatMap((path) => input.currentNodeForPath(path) ?? []),
     edges: connectedEdges
-  })) {
-    edgeById.set(edge.id, edge);
-  }
-  return input.projectionEdges.flatMap((edge) => edgeById.get(edge.id) ?? []);
+  });
+  return input.renderedEdges
+    .filter((edge) => !connectedEdgeIds.has(edge.id))
+    .concat(routedConnectedEdges)
+    .sort((left, right) => (
+      input.edgeOverlayIndex.orderById.get(left.id)!
+      - input.edgeOverlayIndex.orderById.get(right.id)!
+    ));
+}
+
+interface CanvasEdgeOverlayIndex {
+  edgesByNodePath: ReadonlyMap<string, CanvasProjection['edges']>;
+  orderById: ReadonlyMap<string, number>;
+}
+
+function createCanvasEdgeOverlayIndex(edges: CanvasProjection['edges']): CanvasEdgeOverlayIndex {
+  const edgesByNodePath = new Map<string, CanvasProjection['edges']>();
+  const orderById = new Map<string, number>();
+  edges.forEach((edge, order) => {
+    orderById.set(edge.id, order);
+    for (const path of new Set([
+      edge.sourceProjectRelativePath,
+      edge.targetProjectRelativePath
+    ])) {
+      const connected = edgesByNodePath.get(path);
+      if (connected) {
+        connected.push(edge);
+      } else {
+        edgesByNodePath.set(path, [edge]);
+      }
+    }
+  });
+  return { edgesByNodePath, orderById };
+}
+
+function canvasNodeWithLayoutOverride(
+  node: ProjectedCanvasNode,
+  layout: CanvasLayoutOverride
+): ProjectedCanvasNode {
+  return {
+    ...node,
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height
+  };
 }
 
 function uniqueNodePathPredicate(): (node: ProjectedCanvasNode) => boolean {

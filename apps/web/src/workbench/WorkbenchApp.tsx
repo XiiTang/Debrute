@@ -19,6 +19,7 @@ import {
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
+import { useCanvasSurfaceReady } from './canvas/runtime/useCanvasRuntimeSnapshot';
 import { getCanvasById } from './services/canvasState';
 import { createCanvasSelectionStackOrderSync } from './services/canvasStackOrderSelection';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
@@ -39,7 +40,10 @@ import {
   resizeTextEditorWindowState
 } from './services/textEditorWindows';
 import { useTextFileBufferActions } from './services/textFileBufferActions';
-import { createProjectPathCommandCoordinator } from './services/projectPathCommandCoordinator';
+import {
+  createProjectPathCommandCoordinator,
+  type ProjectPathCommandCoordinator
+} from './services/projectPathCommandCoordinator';
 import { SendToPhotoshopDialog } from './adobe-bridge/SendToPhotoshopDialog';
 import {
   PendingWorkbenchContextMenuDismissal,
@@ -53,7 +57,6 @@ import {
 } from './shell/workbenchTitleBarState';
 import {
   cameraCenteredOnNode,
-  type ProjectPathCommand,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
@@ -512,7 +515,6 @@ function WorkbenchProjectGenerationApp({
     initialProjectPresentation.activeCanvasId
   );
   const [activeCanvasRuntime, setActiveCanvasRuntime] = useState<CanvasEditorRuntime>();
-  const [activeCanvasRuntimeSnapshot, setActiveCanvasRuntimeSnapshot] = useState<CanvasRuntimeSnapshot>();
   const [activeCanvasCurrentNodes, setActiveCanvasCurrentNodes] = useState<{
     canvasId: string;
     nodes: ProjectedCanvasNode[];
@@ -695,19 +697,6 @@ function WorkbenchProjectGenerationApp({
       globalThis.window.removeEventListener('resize', reconcileCurrentWorkbenchViewportLayout);
     };
   }, [reconcileCurrentWorkbenchViewportLayout]);
-
-  useEffect(() => {
-    if (!activeCanvasRuntime) {
-      setActiveCanvasRuntimeSnapshot(undefined);
-      return;
-    }
-    setActiveCanvasRuntimeSnapshot(activeCanvasRuntime.getSnapshot());
-    return activeCanvasRuntime.subscribe((snapshot) => {
-      setActiveCanvasRuntimeSnapshot((current) => (
-        sameWorkbenchRuntimeSnapshot(current, snapshot) ? current : snapshot
-      ));
-    });
-  }, [activeCanvasRuntime]);
 
   useEffect(() => () => {
     canvasOverlayRuntime.dispose();
@@ -1329,7 +1318,6 @@ function WorkbenchProjectGenerationApp({
       notify(i18n.t('shell.notifications.resetCanvasLayoutFailed', { message: errorMessage(error) }));
     });
   }, [actions, activeCanvasId, i18n, notify]);
-  const canRevealInCanvas = Boolean(activeCanvasRuntime && activeCanvasRuntimeSnapshot?.surfaceSize);
   const persistedAdobeBridgeEnabled = globalProjection.settings.adobeBridge.enabled;
   const readyAdobeBridge = globalProjection.adobeBridge.status === 'ready'
     ? globalProjection.adobeBridge.value
@@ -1374,7 +1362,6 @@ function WorkbenchProjectGenerationApp({
     menuContext: {
       projection: activeProjection,
       canSelectCanvasNode: Boolean(activeCanvasRuntime),
-      canRevealInCanvas,
       fileClipboard,
       adobeBridgeEnabled: persistedAdobeBridgeEnabled
     },
@@ -1398,7 +1385,6 @@ function WorkbenchProjectGenerationApp({
     actions,
     activeCanvasRuntime,
     activeProjection,
-    canRevealInCanvas,
     canStartProjectPathCommand,
     closeWorkbenchContextMenu,
     confirmMoveOverwrite,
@@ -1413,12 +1399,6 @@ function WorkbenchProjectGenerationApp({
     openInspectorPanel,
     persistedAdobeBridgeEnabled
   ]);
-  const contextMenuItems = useMemo(() => contextMenu
-    ? projectPathCommandCoordinator?.contextMenuItems(contextMenu.target) ?? []
-    : [], [contextMenu, projectPathCommandCoordinator]);
-  const handleProjectPathContextMenuCommand = useCallback((command: ProjectPathCommand) => {
-    projectPathCommandCoordinator?.run(command, contextMenu);
-  }, [contextMenu, projectPathCommandCoordinator]);
   const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
     projectPathCommandCoordinator?.run(command, {
       target,
@@ -1763,17 +1743,14 @@ function WorkbenchProjectGenerationApp({
               ) : null
             ))}
           </div>
-          {!projectPresentationBlocked && contextMenu && projectPathCommandCoordinator ? (
-            <WorkbenchContextMenu
-              items={contextMenuItems}
-              position={contextMenu.position}
+          {!projectPresentationBlocked && contextMenu ? (
+            <ProjectPathContextMenuHost
+              contextMenu={contextMenu}
+              coordinator={projectPathCommandCoordinator}
+              runtime={activeCanvasRuntime}
               productPlatform={productPlatform}
-              onCommand={handleProjectPathContextMenuCommand}
               onClose={closeWorkbenchContextMenu}
             />
-          ) : null}
-          {!projectPresentationBlocked && contextMenu && !projectPathCommandCoordinator ? (
-            <PendingWorkbenchContextMenuDismissal onClose={closeWorkbenchContextMenu} />
           ) : null}
           {!projectPresentationBlocked && sendToPhotoshopPath && runtimeProjectId ? (
             <SendToPhotoshopDialog
@@ -1813,6 +1790,41 @@ function WorkbenchProjectGenerationApp({
       </WorkbenchIconProvider>
       </I18nProvider>
     </>
+  );
+}
+
+export function ProjectPathContextMenuHost({
+  contextMenu,
+  coordinator,
+  runtime,
+  productPlatform,
+  onClose
+}: {
+  contextMenu: {
+    target: WorkbenchContextMenuTarget;
+    position: WorkbenchContextMenuPosition;
+  };
+  coordinator: ProjectPathCommandCoordinator | undefined;
+  runtime: CanvasEditorRuntime | undefined;
+  productPlatform: DebruteProductPlatform;
+  onClose(): void;
+}): React.ReactElement {
+  const canRevealInCanvas = useCanvasSurfaceReady(runtime);
+  const items = useMemo(
+    () => coordinator?.contextMenuItems(contextMenu.target, canRevealInCanvas) ?? [],
+    [canRevealInCanvas, contextMenu.target, coordinator]
+  );
+  if (!coordinator) {
+    return <PendingWorkbenchContextMenuDismissal onClose={onClose} />;
+  }
+  return (
+    <WorkbenchContextMenu
+      items={items}
+      position={contextMenu.position}
+      productPlatform={productPlatform}
+      onCommand={(command) => coordinator.run(command, contextMenu)}
+      onClose={onClose}
+    />
   );
 }
 
@@ -1896,22 +1908,6 @@ function createInitialProjectPresentation(
     ),
     viewStateInvalid: restoredViewState.status === 'invalid'
   };
-}
-
-function sameWorkbenchRuntimeSnapshot(
-  current: CanvasRuntimeSnapshot | undefined,
-  next: CanvasRuntimeSnapshot
-): boolean {
-  return Boolean(
-    current
-    && current.camera.x === next.camera.x
-    && current.camera.y === next.camera.y
-    && current.camera.z === next.camera.z
-    && current.cameraState === next.cameraState
-    && current.selection === next.selection
-    && current.surfaceSize?.width === next.surfaceSize?.width
-    && current.surfaceSize?.height === next.surfaceSize?.height
-  );
 }
 
 function errorMessage(error: unknown): string {

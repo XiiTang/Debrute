@@ -520,12 +520,22 @@ fn stable_runtime_entrypoint(arguments: &[OsString]) -> Result<PathBuf, Box<dyn 
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-struct RuntimeServicesShutdownGuard(Arc<WorkbenchRuntimeServices>);
+struct RuntimeServicesConnectionDrainGuard(Arc<WorkbenchRuntimeServices>);
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-impl Drop for RuntimeServicesShutdownGuard {
+impl Drop for RuntimeServicesConnectionDrainGuard {
     fn drop(&mut self) {
         self.0.close_all_workbench_connections();
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+struct RuntimeServicesFinalShutdownGuard(Arc<WorkbenchRuntimeServices>);
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Drop for RuntimeServicesFinalShutdownGuard {
+    fn drop(&mut self) {
+        self.0.finish_workbench_connection_closer();
         self.0.shutdown_owned_work();
     }
 }
@@ -553,7 +563,8 @@ fn run_runtime_services(
         let active_product = active_product_directory(&debrute_home);
         let runtime_services = WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state))
             .map_err(|error| io::Error::other(error.message))?;
-        let runtime_shutdown = RuntimeServicesShutdownGuard(Arc::clone(&runtime_services));
+        let _runtime_final_shutdown =
+            RuntimeServicesFinalShutdownGuard(Arc::clone(&runtime_services));
         let assets_directory = std::env::var_os(WEB_ASSETS_DIRECTORY_ENV)
             .map(PathBuf::from)
             .or_else(|| active_product.as_ref().map(|product| product.join("web")))
@@ -654,7 +665,8 @@ fn run_runtime_services(
             cli,
             product,
         )?;
-        let _runtime_shutdown = runtime_shutdown;
+        let _runtime_connection_drain =
+            RuntimeServicesConnectionDrainGuard(Arc::clone(&runtime_services));
         state.install_workbench(workbench.launch_service())?;
         let activation: Arc<dyn RuntimeActivationService> = Arc::new(PlatformRuntimeActivation {
             state: Arc::clone(state),

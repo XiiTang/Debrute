@@ -518,6 +518,58 @@ fn passive_media_routes_reject_missing_or_empty_identity_values() {
 }
 
 #[test]
+fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("image-preview-cache-contract");
+    let image_path = Path::new(&project.root).join("image.png");
+    image::RgbaImage::new(8, 4)
+        .save(&image_path)
+        .expect("image fixture should be written");
+    let revision = project_file_revision_from_metadata(
+        &fs::metadata(&image_path).expect("image metadata should read"),
+    )
+    .expect("image revision should resolve");
+    let client = Client::new();
+    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+
+    let response = client
+        .get(format!(
+            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&v={revision}",
+            runtime.origin(),
+            project.id
+        ))
+        .header(COOKIE, &cookie)
+        .send()
+        .expect("image preview request should complete");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, max-age=31536000, immutable")
+    );
+
+    let stale = client
+        .get(format!(
+            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&v=stale",
+            runtime.origin(),
+            project.id
+        ))
+        .header(COOKIE, &cookie)
+        .send()
+        .expect("stale image preview request should complete");
+    assert_ne!(stale.status().as_u16(), 200);
+    assert_eq!(
+        stale
+            .json::<Value>()
+            .expect("stale response should be JSON")["error"]["code"],
+        "canvas_preview_revision_mismatch"
+    );
+}
+
+#[test]
 fn project_path_entries_reject_unknown_fields_at_the_http_boundary() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("project-path-entry-contract");

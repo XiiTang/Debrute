@@ -47,10 +47,12 @@ use crate::{
 
 use super::{
     FeedbackWorkingCopy, ProjectBindError, ProjectBindOutcome, ProjectBindingCommit,
-    TextWorkingCopy, WorkbenchConnectionRegistry, WorkingCopyStore,
+    TextWorkingCopy, WorkbenchConnectionCloser, WorkbenchConnectionDrainOutcome,
+    WorkbenchConnectionRegistry, WorkingCopyStore,
 };
 
 const GLOBAL_EVENT_CAPACITY: usize = 256;
+pub(crate) const WORKBENCH_HTTP_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
 type PhotoshopSocketRegistry = HashMap<String, tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>>;
 
@@ -159,6 +161,7 @@ pub struct WorkbenchRuntimeServices {
     photoshop: Arc<PhotoshopBridgeService>,
     photoshop_sockets: Arc<Mutex<PhotoshopSocketRegistry>>,
     connections: Arc<WorkbenchConnectionRegistry>,
+    connection_closer: WorkbenchConnectionCloser,
     global_events: broadcast::Sender<GlobalRuntimeEvent>,
     working_copies: WorkingCopyStore,
 }
@@ -321,6 +324,8 @@ impl WorkbenchRuntimeServices {
             ));
         }
 
+        let connections = Arc::new(WorkbenchConnectionRegistry::new());
+        let connection_closer = WorkbenchConnectionCloser::start(Arc::clone(&connections));
         let services = Arc::new(Self {
             runtime_state,
             models: catalog,
@@ -333,7 +338,8 @@ impl WorkbenchRuntimeServices {
             model_operations,
             photoshop,
             photoshop_sockets,
-            connections: Arc::new(WorkbenchConnectionRegistry::new()),
+            connections,
+            connection_closer,
             global_events,
             working_copies: WorkingCopyStore::new(&debrute_home),
         });
@@ -615,8 +621,26 @@ impl WorkbenchRuntimeServices {
         self.connections.close(connection_credential);
     }
 
+    pub fn request_workbench_connection_close(&self, connection_credential: String) {
+        self.connection_closer.request_close(connection_credential);
+    }
+
     pub fn close_all_workbench_connections(&self) {
-        self.connections.close_all();
+        let outcome = self
+            .connection_closer
+            .close_all(WORKBENCH_HTTP_DRAIN_TIMEOUT);
+        if let WorkbenchConnectionDrainOutcome::TimedOut(counts) = outcome {
+            eprintln!(
+                "Debrute Runtime Workbench HTTP drain timed out after {}ms (connections={}, bound_projects={})",
+                WORKBENCH_HTTP_DRAIN_TIMEOUT.as_millis(),
+                counts.connections,
+                counts.bound_projects
+            );
+        }
+    }
+
+    pub fn finish_workbench_connection_closer(&self) {
+        self.connection_closer.shutdown();
     }
 
     pub fn shutdown_owned_work(&self) {
@@ -981,6 +1005,8 @@ impl WorkbenchRuntimeServices {
 
 impl Drop for WorkbenchRuntimeServices {
     fn drop(&mut self) {
+        self.close_all_workbench_connections();
+        self.finish_workbench_connection_closer();
         self.shutdown_owned_work();
     }
 }

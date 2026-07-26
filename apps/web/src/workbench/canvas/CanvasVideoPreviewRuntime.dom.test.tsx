@@ -275,6 +275,7 @@ function createImmediateScheduler(): CanvasPreviewResourceScheduler {
     },
     cancel: () => undefined,
     setInteractionState: () => undefined,
+    getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
     notifyVisibilityChanged: () => undefined,
     dispose: () => undefined
   };

@@ -1,6 +1,8 @@
 use std::{
     error::Error,
-    fmt, fs, io,
+    fmt, fs,
+    future::IntoFuture,
+    io,
     net::{Ipv4Addr, SocketAddr, TcpListener},
     path::PathBuf,
     sync::{Arc, mpsc},
@@ -12,6 +14,7 @@ use tokio::{runtime::Builder, sync::oneshot};
 use super::{
     CliAuthorizationVerifier, RuntimeCliHttpService, RuntimeProductHttpService,
     WorkbenchLaunchService, WorkbenchRuntimeServices, routing::workbench_router,
+    services::WORKBENCH_HTTP_DRAIN_TIMEOUT,
 };
 
 pub struct WorkbenchHttpServer {
@@ -73,40 +76,13 @@ impl WorkbenchHttpServer {
         let server_thread = thread::Builder::new()
             .name("debrute-workbench-http".to_owned())
             .spawn(move || {
-                let runtime = match Builder::new_current_thread()
-                    .enable_io()
-                    .enable_time()
-                    .build()
-                {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        let _ = startup_sender.send(Err(WorkbenchHttpServerError::Io(error)));
-                        return;
-                    }
-                };
-                runtime.block_on(async move {
-                    let listener = match tokio::net::TcpListener::from_std(listener) {
-                        Ok(listener) => listener,
-                        Err(error) => {
-                            let _ = startup_sender.send(Err(WorkbenchHttpServerError::Io(error)));
-                            return;
-                        }
-                    };
-                    if startup_sender.send(Ok(())).is_err() {
-                        return;
-                    }
-                    if let Err(error) = axum::serve(
-                        listener,
-                        router.into_make_service_with_connect_info::<SocketAddr>(),
-                    )
-                    .with_graceful_shutdown(async {
-                        let _ = shutdown_receiver.await;
-                    })
-                    .await
-                    {
-                        let _ = terminal_sender.send(WorkbenchHttpServerError::Io(error));
-                    }
-                });
+                run_workbench_http_thread(
+                    listener,
+                    router,
+                    startup_sender,
+                    terminal_sender,
+                    shutdown_receiver,
+                );
             })?;
         match startup_receiver.recv() {
             Ok(Ok(())) => {}
@@ -165,6 +141,64 @@ impl WorkbenchHttpServer {
             let _ = shutdown.send(());
         }
     }
+}
+
+fn run_workbench_http_thread(
+    listener: TcpListener,
+    router: axum::Router,
+    startup: mpsc::SyncSender<Result<(), WorkbenchHttpServerError>>,
+    terminal: mpsc::SyncSender<WorkbenchHttpServerError>,
+    shutdown: oneshot::Receiver<()>,
+) {
+    let runtime = match Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = startup.send(Err(WorkbenchHttpServerError::Io(error)));
+            return;
+        }
+    };
+    runtime.block_on(async move {
+        let listener = match tokio::net::TcpListener::from_std(listener) {
+            Ok(listener) => listener,
+            Err(error) => {
+                let _ = startup.send(Err(WorkbenchHttpServerError::Io(error)));
+                return;
+            }
+        };
+        if startup.send(Ok(())).is_err() {
+            return;
+        }
+        let (graceful_shutdown, graceful_shutdown_requested) = oneshot::channel();
+        let server = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = graceful_shutdown_requested.await;
+        })
+        .into_future();
+        tokio::pin!(server);
+        tokio::select! {
+            result = &mut server => {
+                if let Err(error) = result {
+                    let _ = terminal.send(WorkbenchHttpServerError::Io(error));
+                }
+            }
+            _ = shutdown => {
+                let _ = graceful_shutdown.send(());
+                if let Ok(Err(error)) = tokio::time::timeout(
+                    WORKBENCH_HTTP_DRAIN_TIMEOUT,
+                    &mut server,
+                ).await {
+                    let _ = terminal.send(WorkbenchHttpServerError::Io(error));
+                }
+            }
+        }
+    });
 }
 
 impl Drop for WorkbenchHttpServer {

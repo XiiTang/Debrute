@@ -46,7 +46,12 @@ only changes update current node data without rebuilding spatial membership.
 Selection, active move/resize paths, and Manual Layout Drafts pin the affected
 nodes into the snapshot. Edges are queried independently of endpoint-node
 mounting and are rerouted from draft geometry when an endpoint moves or
-resizes.
+resizes. Ordinary snapshot composition maps only the nodes returned by the
+virtualization query through the current Projection. Manual Layout is a small
+path-keyed overlay: the coordinator fetches those nodes directly, uses a
+membership-time node-to-edge adjacency index to find only connected edges, and
+merges rerouted segments in Projection order. It does not copy every Projected
+node or scan every edge for each local draft update.
 
 Image and text nodes retain stable component identity while they belong to the
 active Canvas, even when offscreen. Other node types can be omitted outside the
@@ -98,8 +103,13 @@ progress; it does not authorize an immediate quality replacement.
 ## Node-Local Image Lifecycle
 
 Each mounted image node owns its source revision, retry key, loaded image, next
-image, and local error. Canvas Surface provides only shared resolution and
-interaction context.
+image, and local error. Canvas Surface provides shared resolution inputs, the
+performance monitor, and the preview-resource scheduler. Canvas Editor Runtime
+remains the authority for camera and drag state; the scheduler caches only the
+read-only interaction projection needed to prioritize preview work. That
+projection is not copied into every image provider value. An image node reads
+it only when its desired source actually changes or queued work runs, so pan
+and drag state edges do not rerun every image resource effect.
 
 The first eligible display-visible image may begin immediately. Once an image
 is loaded, camera movement and culling retain it and suppress replacement
@@ -367,6 +377,16 @@ implied by its persisted Playback Position or initial poster. Video source-
 identity changes remove superseded frame identities. Current-identity width
 variants remain reusable across zoom changes, displays, and sessions. This
 policy does not add a user-facing cache setting or cleanup command.
+
+The loopback image-preview response is also revision-addressed by Project path,
+source revision, and quantized width. After Runtime validates that identity, it
+returns `Cache-Control: private, max-age=31536000, immutable`, allowing the
+local browser profile to reuse that exact byte response without another
+loopback request. A changed file produces a different revision URL, and a
+request with a stale revision still fails at Runtime. This browser cache is not
+a second Project authority and does not replace the structurally reconciled
+Runtime disk cache. Text and video preview responses remain `no-cache` because
+their current source identities have different publication lifecycles.
 
 ## Performance Diagnostics
 

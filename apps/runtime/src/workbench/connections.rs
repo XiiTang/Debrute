@@ -1,6 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Condvar, Mutex, MutexGuard},
+    sync::{Arc, Condvar, Mutex, MutexGuard, mpsc as std_mpsc},
+    thread,
+    time::Duration,
 };
 
 use serde_json::{Value, json};
@@ -12,6 +14,30 @@ use crate::project::ProjectUse;
 use super::DesktopLaunchBinding;
 
 pub const WORKBENCH_CONNECTION_HEADER: &str = "x-debrute-workbench-connection";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WorkbenchConnectionCounts {
+    pub(crate) connections: usize,
+    pub(crate) bound_projects: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkbenchConnectionDrainOutcome {
+    Completed(WorkbenchConnectionCounts),
+    TimedOut(WorkbenchConnectionCounts),
+}
+
+pub(crate) struct WorkbenchConnectionCloser {
+    connections: Arc<WorkbenchConnectionRegistry>,
+    sender: std_mpsc::Sender<WorkbenchConnectionCloseCommand>,
+    thread: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+enum WorkbenchConnectionCloseCommand {
+    Connection(String),
+    All(std_mpsc::SyncSender<()>),
+    Shutdown,
+}
 
 pub struct WorkbenchConnectionRegistry {
     binding_transaction: Mutex<()>,
@@ -34,6 +60,7 @@ struct ConnectionRecord {
     events: mpsc::Sender<Value>,
     cancellation: Option<oneshot::Sender<()>>,
     project_cancellation: broadcast::Sender<()>,
+    closing: bool,
 }
 
 struct ConnectionProjectBinding {
@@ -211,6 +238,7 @@ impl WorkbenchConnectionRegistry {
             events,
             cancellation: Some(cancellation),
             project_cancellation,
+            closing: false,
         };
         let mut inner = self.lock_inner();
         inner
@@ -246,6 +274,9 @@ impl WorkbenchConnectionRegistry {
             return None;
         }
         let record = inner.records.get(credential)?;
+        if record.closing {
+            return None;
+        }
         Some(WorkbenchConnectionContext {
             credential: credential.to_owned(),
             browser_session: record.browser_session.clone(),
@@ -283,7 +314,8 @@ impl WorkbenchConnectionRegistry {
         let inner = self.lock_inner();
         let credential = inner.owner_by_project.get(project_id)?;
         let record = inner.records.get(credential)?;
-        if record.browser_session != browser_session
+        if record.closing
+            || record.browser_session != browser_session
             || record
                 .binding
                 .as_ref()
@@ -303,10 +335,27 @@ impl WorkbenchConnectionRegistry {
 
     #[must_use]
     pub(crate) fn browser_session_is_live(&self, browser_session: &str) -> bool {
-        self.lock_inner()
+        let inner = self.lock_inner();
+        inner
             .credentials_by_browser_session
             .get(browser_session)
-            .is_some_and(|credentials| !credentials.is_empty())
+            .is_some_and(|credentials| {
+                credentials.iter().any(|credential| {
+                    inner
+                        .records
+                        .get(credential)
+                        .is_some_and(|record| !record.closing)
+                })
+            })
+    }
+
+    #[must_use]
+    pub(crate) fn counts(&self) -> WorkbenchConnectionCounts {
+        let inner = self.lock_inner();
+        WorkbenchConnectionCounts {
+            connections: inner.records.len(),
+            bound_projects: inner.owner_by_project.len(),
+        }
     }
 
     #[must_use]
@@ -328,19 +377,28 @@ impl WorkbenchConnectionRegistry {
     }
 
     #[must_use]
-    pub(crate) fn acquire_project_binding(
+    pub(crate) fn acquire_project_binding_with_lifetime(
         &self,
+        browser_session: &str,
         credential: &str,
         project_id: &str,
         generation: u64,
-    ) -> Option<ProjectBindingLease> {
+    ) -> Option<(ProjectBindingLease, broadcast::Receiver<()>)> {
         let inner = self.lock_inner();
-        let record = inner.records.get(credential)?;
-        let binding = record.binding.as_ref()?;
-        if binding.project_id != project_id || record.binding_generation != generation {
+        if inner
+            .credentials_by_browser_session
+            .get(browser_session)
+            .is_none_or(|credentials| !credentials.contains(credential))
+        {
             return None;
         }
-        record.command_gate.try_acquire()
+        let record = inner.records.get(credential)?;
+        if record.closing || !binding_matches(record, project_id, generation) {
+            return None;
+        }
+        let lifetime = record.project_cancellation.subscribe();
+        let lease = record.command_gate.try_acquire()?;
+        Some((lease, lifetime))
     }
 
     #[must_use]
@@ -359,6 +417,9 @@ impl WorkbenchConnectionRegistry {
             return None;
         }
         let record = inner.records.get(credential)?;
+        if record.closing {
+            return None;
+        }
         if record
             .binding
             .as_ref()
@@ -394,7 +455,7 @@ impl WorkbenchConnectionRegistry {
                 .records
                 .get(credential)
                 .ok_or(ProjectBindError::Stale)?;
-            if record.binding_generation != expected_generation {
+            if record.closing || record.binding_generation != expected_generation {
                 return Err(ProjectBindError::Stale);
             }
             if record
@@ -434,7 +495,10 @@ impl WorkbenchConnectionRegistry {
             .records
             .get(credential)
             .ok_or(ProjectBindError::Stale)?;
-        if record.binding_generation != expected_generation || record.binding.is_some() {
+        if record.closing
+            || record.binding_generation != expected_generation
+            || record.binding.is_some()
+        {
             return Err(ProjectBindError::Stale);
         }
         if record.events.is_closed() {
@@ -500,7 +564,7 @@ impl WorkbenchConnectionRegistry {
                 .records
                 .get(credential)
                 .ok_or(ProjectBindError::Stale)?;
-            if !binding_matches(record, source_project_id, expected_generation) {
+            if record.closing || !binding_matches(record, source_project_id, expected_generation) {
                 return Err(ProjectBindError::Stale);
             }
             if source_project_id == target_project_id {
@@ -536,7 +600,7 @@ impl WorkbenchConnectionRegistry {
             .records
             .get(credential)
             .ok_or(ProjectBindError::Stale)?;
-        if !binding_matches(record, source_project_id, expected_generation) {
+        if record.closing || !binding_matches(record, source_project_id, expected_generation) {
             return Err(ProjectBindError::Stale);
         }
         if record.events.is_closed() {
@@ -588,11 +652,12 @@ impl WorkbenchConnectionRegistry {
 
     pub(crate) fn close(&self, credential: &str) -> Option<WorkbenchConnectionContext> {
         let binding_transaction = self.lock_binding_transaction();
-        let gate = self
-            .lock_inner()
-            .records
-            .get(credential)
-            .map(|record| Arc::clone(&record.command_gate))?;
+        let gate = {
+            let mut inner = self.lock_inner();
+            let record = inner.records.get_mut(credential)?;
+            signal_connection_close(record);
+            Arc::clone(&record.command_gate)
+        };
         let transition = gate.begin_transition();
         let context = self.remove_connection(credential);
         drop(transition);
@@ -608,13 +673,14 @@ impl WorkbenchConnectionRegistry {
     ) -> bool {
         let binding_transaction = self.lock_binding_transaction();
         let gate = {
-            let inner = self.lock_inner();
-            let Some(record) = inner.records.get(credential) else {
+            let mut inner = self.lock_inner();
+            let Some(record) = inner.records.get_mut(credential) else {
                 return false;
             };
             if !binding_matches(record, project_id, generation) {
                 return false;
             }
+            signal_connection_close(record);
             Arc::clone(&record.command_gate)
         };
         let transition = gate.begin_transition();
@@ -656,10 +722,6 @@ impl WorkbenchConnectionRegistry {
         {
             inner.owner_by_project.remove(project_id);
         }
-        if let Some(cancellation) = record.cancellation.take() {
-            let _ = cancellation.send(());
-        }
-        let _ = record.project_cancellation.send(());
         let context = WorkbenchConnectionContext {
             credential: credential.to_owned(),
             browser_session: record.browser_session,
@@ -674,12 +736,17 @@ impl WorkbenchConnectionRegistry {
 
     pub(crate) fn close_all(&self) {
         let binding_transaction = self.lock_binding_transaction();
-        let gates = self
-            .lock_inner()
-            .records
-            .values()
-            .map(|record| Arc::clone(&record.command_gate))
-            .collect::<Vec<_>>();
+        let gates = {
+            let mut inner = self.lock_inner();
+            inner
+                .records
+                .values_mut()
+                .map(|record| {
+                    signal_connection_close(record);
+                    Arc::clone(&record.command_gate)
+                })
+                .collect::<Vec<_>>()
+        };
         let transitions = gates
             .iter()
             .map(ConnectionCommandGate::begin_transition)
@@ -690,14 +757,22 @@ impl WorkbenchConnectionRegistry {
             inner.owner_by_project.clear();
             std::mem::take(&mut inner.records)
         };
-        for (_, mut record) in records {
-            if let Some(cancellation) = record.cancellation.take() {
-                let _ = cancellation.send(());
-            }
-            let _ = record.project_cancellation.send(());
-        }
+        drop(records);
         drop(transitions);
         drop(binding_transaction);
+    }
+
+    pub(crate) fn request_close(&self, credential: &str) -> bool {
+        self.lock_inner()
+            .records
+            .get_mut(credential)
+            .is_some_and(signal_connection_close)
+    }
+
+    pub(crate) fn request_close_all(&self) {
+        for record in self.lock_inner().records.values_mut() {
+            signal_connection_close(record);
+        }
     }
 
     fn binding_gates<'a>(
@@ -735,6 +810,106 @@ impl WorkbenchConnectionRegistry {
         self.inner
             .lock()
             .expect("Workbench connection registry lock poisoned")
+    }
+}
+
+impl WorkbenchConnectionCloser {
+    #[must_use]
+    pub(crate) fn start(connections: Arc<WorkbenchConnectionRegistry>) -> Self {
+        let (sender, receiver) = std_mpsc::channel();
+        let worker_connections = Arc::clone(&connections);
+        let worker = thread::Builder::new()
+            .name("debrute-workbench-connection-closer".to_owned())
+            .spawn(move || {
+                while let Ok(command) = receiver.recv() {
+                    match command {
+                        WorkbenchConnectionCloseCommand::Connection(credential) => {
+                            worker_connections.close(&credential);
+                        }
+                        WorkbenchConnectionCloseCommand::All(completed) => {
+                            worker_connections.close_all();
+                            let _ = completed.send(());
+                        }
+                        WorkbenchConnectionCloseCommand::Shutdown => return,
+                    }
+                }
+            })
+            .expect("Workbench connection closer thread must start");
+        Self {
+            connections,
+            sender,
+            thread: Mutex::new(Some(worker)),
+        }
+    }
+
+    pub(crate) fn request_close(&self, credential: String) {
+        if !self.connections.request_close(&credential) {
+            return;
+        }
+        self.sender
+            .send(WorkbenchConnectionCloseCommand::Connection(credential))
+            .expect("Workbench connection closer must remain available");
+    }
+
+    pub(crate) fn shutdown(&self) {
+        let worker = self
+            .thread
+            .lock()
+            .expect("Workbench connection closer thread lock poisoned")
+            .take();
+        let Some(worker) = worker else {
+            return;
+        };
+        let _ = self.sender.send(WorkbenchConnectionCloseCommand::Shutdown);
+        worker
+            .join()
+            .expect("Workbench connection closer thread panicked");
+    }
+
+    #[must_use]
+    pub(crate) fn close_all(&self, timeout: Duration) -> WorkbenchConnectionDrainOutcome {
+        let counts = self.connections.counts();
+        self.connections.request_close_all();
+        let worker_running = self
+            .thread
+            .lock()
+            .expect("Workbench connection closer thread lock poisoned")
+            .is_some();
+        if !worker_running {
+            self.connections.close_all();
+            return WorkbenchConnectionDrainOutcome::Completed(counts);
+        }
+        let (completed, completion) = std_mpsc::sync_channel(0);
+        self.sender
+            .send(WorkbenchConnectionCloseCommand::All(completed))
+            .expect("Workbench connection closer must remain available");
+        match completion.recv_timeout(timeout) {
+            Ok(()) => WorkbenchConnectionDrainOutcome::Completed(counts),
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                WorkbenchConnectionDrainOutcome::TimedOut(counts)
+            }
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("Workbench connection closer stopped before completing the drain")
+            }
+        }
+    }
+}
+
+fn signal_connection_close(record: &mut ConnectionRecord) -> bool {
+    if record.closing {
+        return false;
+    }
+    record.closing = true;
+    if let Some(cancellation) = record.cancellation.take() {
+        let _ = cancellation.send(());
+    }
+    let _ = record.project_cancellation.send(());
+    true
+}
+
+impl Drop for WorkbenchConnectionCloser {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -842,7 +1017,10 @@ mod tests {
 
     use crate::project::ProjectUse;
 
-    use super::{ProjectBindError, ProjectBindingCommit, WorkbenchConnectionRegistry};
+    use super::{
+        ProjectBindError, ProjectBindingCommit, WorkbenchConnectionCloser,
+        WorkbenchConnectionDrainOutcome, WorkbenchConnectionRegistry,
+    };
 
     fn project_use(project_id: &str) -> ProjectUse {
         ProjectUse::detached_for_test(project_id)
@@ -913,6 +1091,100 @@ mod tests {
         assert!(registry.context(&second.credential).is_none());
         assert!(registry.project_owner("project-1").is_none());
         assert!(registry.project_owner("project-2").is_none());
+    }
+
+    #[test]
+    fn connection_closer_deadline_does_not_abort_an_accepted_project_request() {
+        let registry = Arc::new(WorkbenchConnectionRegistry::new());
+        let closer = WorkbenchConnectionCloser::start(Arc::clone(&registry));
+        let (events, _receiver) = mpsc::channel::<Value>(4);
+        let (connection, mut connection_closed) =
+            registry.open("browser-1".to_owned(), None, events);
+        registry
+            .bind_project(&connection.credential, 0, binding("project-1"))
+            .expect("Project should bind");
+        let lease = registry
+            .acquire_project_binding_with_lifetime(
+                "browser-1",
+                &connection.credential,
+                "project-1",
+                1,
+            )
+            .map(|(lease, _lifetime)| lease)
+            .expect("accepted Project request should own a lease");
+
+        assert_eq!(
+            closer.close_all(Duration::from_millis(10)),
+            WorkbenchConnectionDrainOutcome::TimedOut(super::WorkbenchConnectionCounts {
+                connections: 1,
+                bound_projects: 1,
+            })
+        );
+        assert!(connection_closed.try_recv().is_ok());
+        assert!(registry.context(&connection.credential).is_some());
+
+        drop(lease);
+        for _ in 0..50 {
+            if registry.context(&connection.credential).is_none() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("connection closer did not finish after the accepted request ended");
+    }
+
+    #[test]
+    fn close_all_signals_every_connection_before_a_queued_retirement_can_finish() {
+        let registry = Arc::new(WorkbenchConnectionRegistry::new());
+        let closer = WorkbenchConnectionCloser::start(Arc::clone(&registry));
+        let (first_events, _first_receiver) = mpsc::channel::<Value>(4);
+        let (first, mut first_closed) = registry.open("browser-1".to_owned(), None, first_events);
+        registry
+            .bind_project(&first.credential, 0, binding("project-1"))
+            .expect("first Project should bind");
+        let lease = registry
+            .acquire_project_binding_with_lifetime("browser-1", &first.credential, "project-1", 1)
+            .map(|(lease, _lifetime)| lease)
+            .expect("accepted Project request should own a lease");
+
+        let (second_events, _second_receiver) = mpsc::channel::<Value>(4);
+        let (second, mut second_closed) =
+            registry.open("browser-2".to_owned(), None, second_events);
+        registry
+            .bind_project(&second.credential, 0, binding("project-2"))
+            .expect("second Project should bind");
+        let mut second_project_closed = registry
+            .subscribe_project_lifetime("browser-2", &second.credential, "project-2")
+            .expect("second Project lifetime should exist");
+
+        closer.request_close(first.credential.clone());
+        assert_eq!(
+            closer.close_all(Duration::from_millis(10)),
+            WorkbenchConnectionDrainOutcome::TimedOut(super::WorkbenchConnectionCounts {
+                connections: 2,
+                bound_projects: 2,
+            })
+        );
+        assert!(first_closed.try_recv().is_ok());
+        assert!(second_closed.try_recv().is_ok());
+        assert!(second_project_closed.try_recv().is_ok());
+        assert!(
+            registry
+                .authorize("browser-2", &second.credential)
+                .is_none(),
+            "a signalled connection must stop admitting new work"
+        );
+
+        drop(lease);
+        for _ in 0..100 {
+            if registry.context(&first.credential).is_none()
+                && registry.context(&second.credential).is_none()
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("queued connection retirements did not finish after the accepted request ended");
     }
 
     #[test]
@@ -1022,7 +1294,13 @@ mod tests {
             .expect("source Project should bind");
         assert!(receiver.try_recv().is_ok());
         let lease = registry
-            .acquire_project_binding(&connection.credential, "project-a", 1)
+            .acquire_project_binding_with_lifetime(
+                "browser-1",
+                &connection.credential,
+                "project-a",
+                1,
+            )
+            .map(|(lease, _lifetime)| lease)
             .expect("current generation should authorize a Project request");
 
         let (started_sender, started_receiver) = std_mpsc::channel();
@@ -1065,7 +1343,12 @@ mod tests {
         assert_eq!(context.binding_generation, 2);
         assert!(
             registry
-                .acquire_project_binding(&connection.credential, "project-a", 1)
+                .acquire_project_binding_with_lifetime(
+                    "browser-1",
+                    &connection.credential,
+                    "project-a",
+                    1,
+                )
                 .is_none()
         );
         assert!(

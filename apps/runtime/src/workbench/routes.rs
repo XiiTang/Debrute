@@ -158,7 +158,7 @@ pub(super) async fn workbench_connection(
         }))
         .is_err()
     {
-        services.close_workbench_connection(&context.credential);
+        services.request_workbench_connection_close(context.credential.clone());
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "workbench_connection_unavailable",
@@ -169,7 +169,7 @@ pub(super) async fn workbench_connection(
     let (global_revision, settings, product) = match services.global().sync_snapshot() {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            services.close_workbench_connection(&context.credential);
+            services.request_workbench_connection_close(context.credential.clone());
             return service_error_response(RuntimeHttpServiceError::from_global(error));
         }
     };
@@ -183,7 +183,7 @@ pub(super) async fn workbench_connection(
         }))
         .is_err()
     {
-        services.close_workbench_connection(&context.credential);
+        services.request_workbench_connection_close(context.credential.clone());
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "workbench_connection_unavailable",
@@ -203,14 +203,15 @@ pub(super) async fn workbench_connection(
         }));
     }
     let global_sender = sender.clone();
-    let global_connections = Arc::clone(services.connections());
+    let global_services = Arc::clone(&services);
     let global_credential = context.credential.clone();
     tokio::spawn(async move {
         loop {
             match global_subscription.recv().await {
                 Ok(event) if event.revision > global_revision => {
                     if global_sender.try_send(global_event_value(event)).is_err() {
-                        global_connections.close(&global_credential);
+                        global_services
+                            .request_workbench_connection_close(global_credential.clone());
                         return;
                     }
                 }
@@ -219,7 +220,7 @@ pub(super) async fn workbench_connection(
                     tokio::sync::broadcast::error::RecvError::Lagged(_)
                     | tokio::sync::broadcast::error::RecvError::Closed,
                 ) => {
-                    global_connections.close(&global_credential);
+                    global_services.request_workbench_connection_close(global_credential.clone());
                     return;
                 }
             }
@@ -270,7 +271,8 @@ struct WorkbenchConnectionGuard {
 
 impl Drop for WorkbenchConnectionGuard {
     fn drop(&mut self) {
-        self.services.close_workbench_connection(&self.credential);
+        self.services
+            .request_workbench_connection_close(std::mem::take(&mut self.credential));
     }
 }
 

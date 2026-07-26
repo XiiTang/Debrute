@@ -2,6 +2,45 @@ import { describe, expect, it, vi } from 'vitest';
 import { createProjectPathCommandCoordinator } from './projectPathCommandCoordinator';
 
 describe('Project Path Command coordinator', () => {
+  it('derives Reveal in Canvas availability from the menu host live readiness', () => {
+    const coordinator = createProjectPathCommandCoordinator({
+      canStartCommand: () => true,
+      isCurrentScope: () => true,
+      menuContext: {
+        projection: {
+          canvasId: 'canvas-1',
+          nodes: [{
+            projectRelativePath: 'brief.md',
+            nodeKind: 'file',
+            mediaKind: 'text',
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            z: 0,
+            availability: {
+              state: 'available',
+              fileUrl: '/brief.md',
+              revision: '1',
+              size: 1,
+              mimeType: 'text/markdown'
+            }
+          }],
+          edges: [],
+          diagnostics: []
+        },
+        canSelectCanvasNode: true,
+        fileClipboard: undefined,
+        adobeBridgeEnabled: false
+      },
+      commandContext: commandContextFixture()
+    });
+    const target = projectFileTarget();
+
+    expect(revealItem(coordinator.contextMenuItems(target, false))?.disabled).toBe(true);
+    expect(revealItem(coordinator.contextMenuItems(target, true))?.disabled).toBe(false);
+  });
+
   it('disables and refuses commands once Project switching begins', () => {
     const closeContextMenu = vi.fn();
     const confirmPermanentDelete = vi.fn(() => true);
@@ -12,7 +51,6 @@ describe('Project Path Command coordinator', () => {
       menuContext: {
         projection: undefined,
         canSelectCanvasNode: false,
-        canRevealInCanvas: false,
         fileClipboard: undefined,
         adobeBridgeEnabled: false
       },
@@ -54,7 +92,7 @@ describe('Project Path Command coordinator', () => {
       targetDirectoryPath: ''
     };
 
-    expect(coordinator.contextMenuItems(target).every((item) => (
+    expect(coordinator.contextMenuItems(target, false).every((item) => (
       item.kind === 'separator' || item.disabled === true
     ))).toBe(true);
     coordinator.run('delete-permanently', {
@@ -80,7 +118,6 @@ describe('Project Path Command coordinator', () => {
       menuContext: {
         projection: undefined,
         canSelectCanvasNode: false,
-        canRevealInCanvas: false,
         fileClipboard: undefined,
         adobeBridgeEnabled: false
       },
@@ -153,3 +190,51 @@ describe('Project Path Command coordinator', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+function commandContextFixture() {
+  return {
+    activeProjection: undefined,
+    activeCanvasRuntime: undefined,
+    fileClipboard: undefined,
+    actions: {} as never,
+    explorerCommands: {
+      beginCreateFile: vi.fn(),
+      beginCreateDirectory: vi.fn(),
+      beginRename: vi.fn(),
+      copyEntries: vi.fn(),
+      cutEntries: vi.fn(),
+      pasteEntries: vi.fn(),
+      copyAbsolutePaths: vi.fn(),
+      revealEntry: vi.fn(),
+      trashEntries: vi.fn(),
+      deleteEntriesPermanently: vi.fn()
+    },
+    copyText: vi.fn(),
+    notify: vi.fn(),
+    closeContextMenu: vi.fn(),
+    openInspectorPanel: vi.fn(),
+    confirmPermanentDelete: vi.fn(() => true),
+    getProjectSnapshot: () => undefined,
+    confirmMoveOverwrite: vi.fn(() => true),
+    errorLabels: {
+      copyPathFailed: 'Copy Path failed',
+      resetAutoLayoutFailed: 'Reset auto layout failed'
+    }
+  };
+}
+
+function projectFileTarget() {
+  return {
+    source: 'explorer' as const,
+    targetKind: 'item' as const,
+    paths: [{ projectRelativePath: 'brief.md', kind: 'file' as const }],
+    primaryPath: 'brief.md',
+    targetDirectoryPath: ''
+  };
+}
+
+function revealItem(items: ReturnType<ReturnType<typeof createProjectPathCommandCoordinator>['contextMenuItems']>) {
+  return items.find((item): item is Extract<(typeof items)[number], { kind: 'action' }> => (
+    item.kind === 'action' && item.command === 'reveal-in-canvas'
+  ));
+}
