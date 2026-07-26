@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use fs2::FileExt;
+use fs2::{FileExt, lock_contended_error};
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -374,7 +374,7 @@ fn acquire_document_locks(
             // allow a waiter on the old inode and a newcomer on a recreated inode to hold two
             // independent exclusive locks at the same time.
             Ok(()) => locks.push(handle),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(error) if error.kind() == lock_contended_error().kind() => {
                 return Err(document_error(
                     "document_push_conflict",
                     "Project document is locked by another writer.",

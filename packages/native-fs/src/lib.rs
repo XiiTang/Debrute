@@ -41,7 +41,7 @@ pub fn file_identity(file: &File) -> io::Result<PathIdentity> {
     let result = unsafe {
         GetFileInformationByHandle(
             file.as_raw_handle().cast::<core::ffi::c_void>() as HANDLE,
-            &mut information,
+            &raw mut information,
         )
     };
     if result == 0 {
@@ -98,7 +98,7 @@ pub fn path_identity(path: &Path) -> io::Result<PathIdentity> {
     let result = unsafe {
         GetFileInformationByHandle(
             handle.as_raw_handle().cast::<core::ffi::c_void>() as HANDLE,
-            &mut information,
+            &raw mut information,
         )
     };
     if result == 0 {

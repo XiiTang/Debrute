@@ -847,7 +847,9 @@ mod tests {
         commit_files(&service, &root, &[("one.png", b"original")]).unwrap();
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
         fs::write(&path, b"changed!").unwrap();
-        fs::File::open(&path)
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(modified))
             .unwrap();

@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { posix, win32 } from 'node:path';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 
 export interface DesktopRuntimeLaunchConfiguration {
@@ -27,21 +27,22 @@ export function desktopRuntimeLaunchConfiguration(input: {
       webAssetsDirectory: input.configuredWebAssetsDirectory
     };
   }
+  const path = input.platform === 'darwin' ? posix : win32;
   const runtimeExecutable = input.platform === 'darwin'
-    ? join('runtime', 'Debrute Runtime.app', 'Contents', 'MacOS', 'debrute-runtime')
-    : join('runtime', 'debrute-runtime.exe');
-  const seed = join(input.resourcesPath, 'product-seed');
-  const debruteHome = join(input.homePath, '.debrute');
+    ? path.join('runtime', 'Debrute Runtime.app', 'Contents', 'MacOS', 'debrute-runtime')
+    : path.join('runtime', 'debrute-runtime.exe');
+  const seed = path.join(input.resourcesPath, 'product-seed');
+  const debruteHome = path.join(input.homePath, '.debrute');
   return {
-    entrypoint: join(seed, runtimeExecutable),
+    entrypoint: path.join(seed, runtimeExecutable),
     arguments: [
       'bootstrap',
       '--seed', seed,
-      '--product-root', join(debruteHome, 'products'),
-      '--bin-directory', join(debruteHome, 'bin'),
+      '--product-root', path.join(debruteHome, 'products'),
+      '--bin-directory', path.join(debruteHome, 'bin'),
       '--desktop-entrypoint', input.executablePath,
       '--desktop-arguments-json', '[]'
     ],
-    webAssetsDirectory: join(seed, 'web')
+    webAssetsDirectory: path.join(seed, 'web')
   };
 }

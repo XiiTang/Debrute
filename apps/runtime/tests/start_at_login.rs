@@ -10,10 +10,11 @@ use uuid::Uuid;
 
 #[test]
 fn stable_runtime_entrypoint_must_be_absolute() {
+    let absolute = std::env::current_exe().expect("current test entrypoint should resolve");
     assert_eq!(
-        require_stable_runtime_entrypoint(PathBuf::from("/stable/debrute-runtime"))
+        require_stable_runtime_entrypoint(absolute.clone())
             .expect("absolute stable entrypoint should be accepted"),
-        PathBuf::from("/stable/debrute-runtime")
+        absolute
     );
     assert!(require_stable_runtime_entrypoint(PathBuf::from("debrute-runtime")).is_err());
 }

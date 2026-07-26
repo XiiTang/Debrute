@@ -14,6 +14,12 @@ use super::{
 pub struct WindowsControlEndpoint(NativeWindowsControlEndpoint);
 
 impl WindowsControlEndpoint {
+    /// Resolves the named-pipe endpoint scoped to the current Windows user.
+    ///
+    /// # Errors
+    ///
+    /// Returns an endpoint error when the current user identity or pipe name
+    /// cannot be resolved.
     pub fn for_current_user() -> Result<Self, EndpointError> {
         NativeWindowsControlEndpoint::for_current_user()
             .map(Self)
@@ -25,6 +31,12 @@ impl WindowsControlEndpoint {
         self.0.pipe_name()
     }
 
+    /// Connects to the endpoint to wake a blocked owner accept.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when the wake connection cannot be
+    /// opened.
     pub fn wake_accept(&self) -> io::Result<WindowsControlConnection> {
         self.0.wake_accept()
     }

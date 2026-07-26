@@ -1162,7 +1162,7 @@ fn sync_tree(root: &Path) -> Result<(), ProductStoreError> {
         if entry.file_type()?.is_dir() {
             sync_tree(&path)?;
         } else {
-            File::open(path)?.sync_all()?;
+            fs::OpenOptions::new().write(true).open(path)?.sync_all()?;
         }
     }
     sync_directory(root)

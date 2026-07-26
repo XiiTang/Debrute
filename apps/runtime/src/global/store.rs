@@ -742,6 +742,10 @@ fn set_directory_permissions(path: &Path) -> Result<(), GlobalSettingsError> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the shared persistence path has one fallible permission contract"
+)]
 fn set_directory_permissions(_path: &Path) -> Result<(), GlobalSettingsError> {
     Ok(())
 }
@@ -753,6 +757,10 @@ fn set_secret_permissions(path: &Path) -> Result<(), GlobalSettingsError> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the shared persistence path has one fallible permission contract"
+)]
 fn set_secret_permissions(_path: &Path) -> Result<(), GlobalSettingsError> {
     Ok(())
 }

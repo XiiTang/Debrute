@@ -1820,10 +1820,11 @@ fn windows_terminal_command()
     Ok((command, barrier))
 }
 
-/// Runs the inert Windows ConPTY bootstrap when the Runtime executable was
+/// Runs the inert Windows `ConPTY` bootstrap when the Runtime executable was
 /// launched through the internal Terminal command. The bootstrap cannot spawn
 /// its shell until the owning Runtime has assigned it to a Job Object.
 #[cfg(target_os = "windows")]
+#[must_use]
 pub fn run_windows_terminal_bootstrap() -> Option<std::io::Result<i32>> {
     let mut arguments = std::env::args_os();
     let _program = arguments.next()?;

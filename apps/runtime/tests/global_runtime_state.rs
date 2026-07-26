@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Barrier, Condvar, Mutex, mpsc},
     thread,
     time::Duration,
@@ -36,16 +36,14 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     assert_eq!(initial.models.audio.len(), 16);
 
     for index in 0..14 {
+        let root = project_root(&home, &index.to_string());
         store
-            .remember_recent_project(
-                &format!("project-{index}"),
-                &format!("/projects/{index}"),
-                &catalog,
-            )
+            .remember_recent_project(&format!("project-{index}"), &root, &catalog)
             .expect("recent Project should persist");
     }
+    let project_five = project_root(&home, "5");
     store
-        .remember_recent_project("project-5", "/projects/5", &catalog)
+        .remember_recent_project("project-5", &project_five, &catalog)
         .expect("duplicate should move to the front");
     let recent = store
         .read_view(&catalog)
@@ -53,8 +51,8 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
         .chrome
         .recent_projects;
     assert_eq!(recent.len(), 12);
-    assert_eq!(recent[0].project_root, "/projects/5");
-    assert_eq!(recent[1].project_root, "/projects/13");
+    assert_eq!(recent[0].project_root, project_five);
+    assert_eq!(recent[1].project_root, project_root(&home, "13"));
     assert_eq!(
         recent
             .iter()
@@ -71,12 +69,14 @@ fn stable_project_id_cannot_be_remapped_to_another_recent_root() {
     let home = temporary_home("stable-project-id");
     let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
     let store = GlobalConfigStore::new(&home);
+    let alpha = project_root(&home, "alpha");
+    let copied_alpha = project_root(&home, "copied-alpha");
 
     store
-        .remember_recent_project("project-alpha", "/projects/alpha", &catalog)
+        .remember_recent_project("project-alpha", &alpha, &catalog)
         .expect("initial stable Project mapping should persist");
     let error = store
-        .remember_recent_project("project-alpha", "/projects/copied-alpha", &catalog)
+        .remember_recent_project("project-alpha", &copied_alpha, &catalog)
         .expect_err("one stable Project id must not move to another root");
     assert!(matches!(error, GlobalSettingsError::Validation(_)));
 
@@ -87,7 +87,7 @@ fn stable_project_id_cannot_be_remapped_to_another_recent_root() {
         .recent_projects;
     assert_eq!(recent.len(), 1);
     assert_eq!(recent[0].project_id, "project-alpha");
-    assert_eq!(recent[0].project_root, "/projects/alpha");
+    assert_eq!(recent[0].project_root, alpha);
 
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
@@ -371,6 +371,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
         ModelCatalog::bundled().expect("bundled model catalog should parse"),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     );
+    let alpha = project_root(&home, "alpha");
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
     assert!(service.install_observer(Arc::new(move |event| {
@@ -391,7 +392,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
         .settings_save(&json!({ "workbench": { "locale": "zh-CN" } }))
         .expect("no-op patch should succeed");
     service
-        .remember_recent_project("project-alpha", "/projects/alpha")
+        .remember_recent_project("project-alpha", &alpha)
         .expect("recent Project should persist");
     service.integrations_rescan();
 
@@ -408,7 +409,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
         GlobalRuntimeChange::RecentProjectsChanged(ref entries)
             if entries.len() == 1
                 && entries[0].project_id == "project-alpha"
-                && entries[0].project_root == "/projects/alpha"
+                && entries[0].project_root == alpha
     ));
     assert_eq!(events[2].revision, 3);
     assert!(matches!(
@@ -622,8 +623,10 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
             .expect("event recorder should lock")
             .push(event);
     })));
+    let alpha = project_root(&home, "alpha");
+    let beta = project_root(&home, "beta");
     service
-        .remember_recent_project("project-alpha", "/projects/alpha")
+        .remember_recent_project("project-alpha", &alpha)
         .expect("seed Project should persist");
     events.lock().expect("event recorder should lock").clear();
 
@@ -641,7 +644,7 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     let remember = thread::spawn(move || {
         remember_barrier.wait();
         remember_service
-            .remember_recent_project("project-beta", "/projects/beta")
+            .remember_recent_project("project-beta", &beta)
             .expect("remember should commit")
     });
     barrier.wait();
@@ -726,10 +729,12 @@ fn an_external_integration_scan_does_not_block_recent_project_commits() {
     });
     adapter.wait_until_started();
 
+    let alpha = project_root(&home, "alpha");
+    let expected_alpha = alpha.clone();
     let recent_service = Arc::clone(&service);
     let (recent_done, recent_completion) = mpsc::sync_channel(1);
     let recent = thread::spawn(move || {
-        let result = recent_service.remember_recent_project("project-alpha", "/projects/alpha");
+        let result = recent_service.remember_recent_project("project-alpha", &alpha);
         recent_done
             .send(result)
             .expect("recent mutation result should be observable");
@@ -748,7 +753,7 @@ fn an_external_integration_scan_does_not_block_recent_project_commits() {
         view.chrome.recent_projects,
         [debrute_runtime::global::RecentProjectEntry {
             project_id: "project-alpha".to_owned(),
-            project_root: "/projects/alpha".to_owned(),
+            project_root: expected_alpha,
         }]
     );
     fs::remove_dir_all(home).expect("temporary home should be removed");
@@ -848,4 +853,11 @@ fn temporary_home(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!("debrute-runtime-global-{label}-{}", Uuid::new_v4()));
     fs::create_dir_all(&path).expect("temporary home should be created");
     path
+}
+
+fn project_root(home: &Path, name: &str) -> String {
+    home.join("projects")
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
 }

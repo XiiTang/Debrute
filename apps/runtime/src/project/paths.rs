@@ -1055,7 +1055,23 @@ mod tests {
                 .next()
                 .is_none()
         );
+        drop(capability);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn capability_root_denies_ambient_path_replacement_until_released() {
+        let root = std::env::temp_dir().join(format!("debrute-cap-root-{}", Uuid::new_v4()));
+        let moved = root.with_extension("moved");
+        fs::create_dir_all(&root).unwrap();
+        let capability = ProjectCapabilityFs::open_current(&root).unwrap();
+
+        assert!(fs::rename(&root, &moved).is_err());
+        drop(capability);
+        fs::rename(&root, &moved).unwrap();
+
+        fs::remove_dir_all(moved).unwrap();
     }
 
     #[cfg(target_os = "macos")]

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { access, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -92,9 +92,9 @@ export function localProductPreflightArguments(seed, productRoot) {
   return [
     'preflight-desktop-seed',
     '--seed',
-    resolve(seed),
+    posix.resolve(seed),
     '--product-root',
-    resolve(productRoot)
+    posix.resolve(productRoot)
   ];
 }
 

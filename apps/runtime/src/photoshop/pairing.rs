@@ -690,6 +690,10 @@ fn set_directory_permissions(path: &Path) -> Result<(), PhotoshopBridgeError> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the shared registry write path has one fallible permission contract"
+)]
 fn set_directory_permissions(_path: &Path) -> Result<(), PhotoshopBridgeError> {
     Ok(())
 }
@@ -702,6 +706,10 @@ fn set_secret_permissions(path: &Path) -> Result<(), PhotoshopBridgeError> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the shared registry write path has one fallible permission contract"
+)]
 fn set_secret_permissions(_path: &Path) -> Result<(), PhotoshopBridgeError> {
     Ok(())
 }

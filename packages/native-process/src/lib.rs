@@ -49,11 +49,19 @@ pub fn output_pipe_readiness(_reader: &impl std::os::fd::AsRawFd) -> io::Result<
 }
 
 #[cfg(target_os = "windows")]
+/// Accepts a Windows worker output pipe for the cross-platform readiness API.
+///
+/// # Errors
+/// This Windows implementation is infallible; the result shape is cross-platform.
 pub fn configure_output_pipe(_reader: &impl std::os::windows::io::AsRawHandle) -> io::Result<()> {
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
+/// Reports whether a Windows worker output pipe is ready, pending, or closed.
+///
+/// # Errors
+/// Returns an operating-system error when the pipe state cannot be inspected.
 pub fn output_pipe_readiness(
     reader: &impl std::os::windows::io::AsRawHandle,
 ) -> io::Result<PipeReadiness> {
@@ -78,7 +86,7 @@ pub fn output_pipe_readiness(
     } == 0
     {
         let error = io::Error::last_os_error();
-        return match error.raw_os_error().map(|code| code.cast_unsigned()) {
+        return match error.raw_os_error().map(i32::cast_unsigned) {
             Some(ERROR_BROKEN_PIPE | ERROR_NO_DATA) => Ok(PipeReadiness::Closed),
             _ => Err(error),
         };
@@ -296,7 +304,7 @@ fn resume_process(process: std::os::windows::io::RawHandle) -> io::Result<()> {
     }
 }
 
-/// A named Windows event that keeps the ConPTY bootstrap from spawning its
+/// A named Windows event that keeps the `ConPTY` bootstrap from spawning its
 /// shell until the bootstrap process belongs to its kill-on-close Job Object.
 #[cfg(target_os = "windows")]
 pub struct WindowsSpawnBarrier {
@@ -362,7 +370,7 @@ impl WindowsSpawnBarrier {
     }
 }
 
-/// Waits for the named ConPTY spawn barrier created by the Runtime.
+/// Waits for the named `ConPTY` spawn barrier created by the Runtime.
 ///
 /// # Errors
 /// Returns an operating-system error for an invalid event or wait failure.
