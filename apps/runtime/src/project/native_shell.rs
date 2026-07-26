@@ -7,6 +7,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "windows")]
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+
 use crate::{
     process::{BoundedProcessSupervisor, ProcessCancellation, ProcessRequest, WorkerKind},
     workers::RuntimeWorkerServices,
@@ -48,8 +51,10 @@ impl ProjectNativeShellService {
             &ProcessCancellation::default(),
         );
         if output.ok {
-            let selected = output.stdout.trim();
-            return Ok((!selected.is_empty()).then(|| PathBuf::from(selected)));
+            #[cfg(target_os = "macos")]
+            return Ok(decode_directory_picker_output(&output.stdout));
+            #[cfg(target_os = "windows")]
+            return decode_directory_picker_output(&output.stdout);
         }
         let error = output.stderr.trim();
         if output.exit_code == Some(1) && error.to_ascii_lowercase().contains("cancel") {
@@ -170,6 +175,12 @@ fn directory_picker_command() -> (PathBuf, Vec<String>) {
     )
 }
 
+#[cfg(target_os = "macos")]
+fn decode_directory_picker_output(output: &str) -> Option<PathBuf> {
+    let selected = output.trim();
+    (!selected.is_empty()).then(|| PathBuf::from(selected))
+}
+
 #[cfg(target_os = "windows")]
 fn directory_picker_command() -> (PathBuf, Vec<String>) {
     (
@@ -178,9 +189,30 @@ fn directory_picker_command() -> (PathBuf, Vec<String>) {
             "-NoProfile".to_owned(),
             "-NonInteractive".to_owned(),
             "-Command".to_owned(),
-            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Open Debrute Project'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }".to_owned(),
+            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Open Debrute Project'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $bytes = [System.Text.Encoding]::UTF8.GetBytes($d.SelectedPath); [Console]::Out.Write([Convert]::ToBase64String($bytes)) }".to_owned(),
         ],
     )
+}
+
+#[cfg(target_os = "windows")]
+fn decode_directory_picker_output(output: &str) -> Result<Option<PathBuf>, ProjectError> {
+    let selected = output.trim();
+    if selected.is_empty() {
+        return Ok(None);
+    }
+    let decoded = STANDARD.decode(selected).map_err(|error| {
+        ProjectError::service(
+            "native_project_picker_invalid_output",
+            format!("Native Project picker returned invalid encoded output: {error}"),
+        )
+    })?;
+    let selected = String::from_utf8(decoded).map_err(|error| {
+        ProjectError::service(
+            "native_project_picker_invalid_output",
+            format!("Native Project picker returned a non-UTF-8 path: {error}"),
+        )
+    })?;
+    Ok(Some(PathBuf::from(selected)))
 }
 
 fn preflight_trash_staging(
@@ -561,6 +593,50 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_directory_picker_output_handles_empty_and_selected_paths() {
+        assert_eq!(decode_directory_picker_output("  \n"), None);
+        assert_eq!(
+            decode_directory_picker_output("/Users/debrute/Project\n"),
+            Some(PathBuf::from("/Users/debrute/Project"))
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_directory_picker_output_preserves_unicode_project_paths() {
+        let selected = r"E:\onedrive\城启设计\CQ奖项申报";
+        let encoded = STANDARD.encode(selected.as_bytes());
+
+        assert_eq!(
+            decode_directory_picker_output(&encoded).expect("picker output should decode"),
+            Some(PathBuf::from(selected))
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_directory_picker_output_rejects_invalid_encoding() {
+        assert_eq!(
+            decode_directory_picker_output("  \n").expect("empty output is cancellation"),
+            None
+        );
+        assert_eq!(
+            decode_directory_picker_output("not-base64")
+                .expect_err("invalid base64 should fail")
+                .code(),
+            "native_project_picker_invalid_output"
+        );
+        let invalid_utf8 = STANDARD.encode([0xff, 0xfe]);
+        assert_eq!(
+            decode_directory_picker_output(&invalid_utf8)
+                .expect_err("invalid UTF-8 should fail")
+                .code(),
+            "native_project_picker_invalid_output"
+        );
+    }
 
     #[test]
     fn full_batch_is_validated_and_nested_entries_are_removed_before_effects() {

@@ -62,6 +62,13 @@ use super::{
 };
 
 const FILE_STREAM_CHUNK: usize = 64 * 1024;
+const TERMINAL_HUB_OUTBOUND_CAPACITY: usize = 64;
+const TERMINAL_HUB_AUXILIARY_RESERVE_TIMEOUT: Duration = Duration::from_secs(5);
+const TERMINAL_HUB_WRITER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(not(test))]
+const TERMINAL_HUB_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const TERMINAL_HUB_WRITE_TIMEOUT: Duration = Duration::from_millis(50);
 
 pub(super) async fn text_file(
     State(state): State<WorkbenchRouterState>,
@@ -1274,7 +1281,8 @@ async fn run_terminal_websocket(
         }
     };
     let observations = Arc::new(Mutex::new(HashMap::<String, Arc<AtomicBool>>::new()));
-    let (sender, mut receiver) = mpsc::channel::<TerminalServerFrame>(64);
+    let (sender, receiver) =
+        mpsc::channel::<TerminalOutboundMessage>(TERMINAL_HUB_OUTBOUND_CAPACITY);
     let outbound_loss = Arc::new(tokio::sync::Notify::new());
     let mut checkpoints = Vec::new();
     for session in &topology.snapshot.sessions {
@@ -1302,6 +1310,11 @@ async fn run_terminal_websocket(
     if write_terminal_frame(&mut writer, &sync).await.is_err() {
         return;
     }
+    let mut writer_task = tokio::spawn(run_terminal_writer(
+        writer,
+        receiver,
+        Arc::clone(&outbound_loss),
+    ));
     let topology_sender = sender.clone();
     let topology_outbound_loss = Arc::clone(&outbound_loss);
     let topology_stop = Arc::new(AtomicBool::new(false));
@@ -1311,10 +1324,12 @@ async fn run_terminal_websocket(
             match topology.recv_timeout(Duration::from_millis(100)) {
                 Ok(snapshot) => {
                     if topology_sender
-                        .try_send(TerminalServerFrame::Topology {
-                            topology_revision: snapshot.revision,
-                            sessions: snapshot.sessions,
-                        })
+                        .try_send(TerminalOutboundMessage::Frame(
+                            TerminalServerFrame::Topology {
+                                topology_revision: snapshot.revision,
+                                sessions: snapshot.sessions,
+                            },
+                        ))
                         .is_err()
                     {
                         topology_outbound_loss.notify_one();
@@ -1328,17 +1343,14 @@ async fn run_terminal_websocket(
     });
     loop {
         tokio::select! {
-            frame = receiver.recv() => {
-                let Some(frame) = frame else { break; };
-                if write_terminal_frame(&mut writer, &frame).await.is_err() {
-                    break;
-                }
-            }
             incoming = read_message(&mut reader, MAX_WEBSOCKET_FRAME_BYTES) => {
                 let incoming = match incoming {
                     Ok(Some(WebSocketMessage::Text(incoming))) => incoming,
                     Ok(Some(WebSocketMessage::Ping(payload))) => {
-                        if write_pong(&mut writer, &payload).await.is_err() { break; }
+                        if !send_terminal_outbound(
+                            &sender,
+                            TerminalOutboundMessage::Pong(payload),
+                        ).await { break; }
                         continue;
                     }
                     Ok(Some(WebSocketMessage::Pong)) => continue,
@@ -1347,11 +1359,20 @@ async fn run_terminal_websocket(
                 let frame = match serde_json::from_str::<TerminalClientFrame>(&incoming) {
                     Ok(frame) => frame,
                     Err(error) => {
-                        let _ = sender.try_send(terminal_protocol_error(None, "terminal_frame_invalid", error.to_string()));
-                        continue;
+                        let frame = terminal_protocol_error(
+                            None,
+                            None,
+                            "terminal_frame_invalid",
+                            error.to_string(),
+                        );
+                        let _ = send_terminal_outbound(
+                            &sender,
+                            TerminalOutboundMessage::Frame(frame),
+                        ).await;
+                        break;
                     }
                 };
-                let result = handle_terminal_client_frame(
+                if handle_terminal_client_frame(
                     &runtime,
                     &project_id,
                     &observer_id,
@@ -1359,10 +1380,7 @@ async fn run_terminal_websocket(
                     &sender,
                     &observations,
                     &outbound_loss,
-                );
-                if let Err(frame) = result
-                    && sender.try_send(frame).is_err()
-                {
+                ).await == TerminalClientFrameOutcome::CloseHub {
                     break;
                 }
             }
@@ -1381,53 +1399,88 @@ async fn run_terminal_websocket(
     let _ = runtime
         .terminals()
         .detach_attachment(&project_id, &observer_id);
-    let _ = write_close(&mut writer).await;
+    let _ = tokio::time::timeout(
+        TERMINAL_HUB_WRITER_SHUTDOWN_TIMEOUT,
+        sender.send(TerminalOutboundMessage::Close),
+    )
+    .await;
+    drop(sender);
+    if tokio::time::timeout(TERMINAL_HUB_WRITER_SHUTDOWN_TIMEOUT, &mut writer_task)
+        .await
+        .is_err()
+    {
+        writer_task.abort();
+        let _ = writer_task.await;
+    }
 }
 
-fn handle_terminal_client_frame(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalClientFrameOutcome {
+    Continue,
+    CloseHub,
+}
+
+enum TerminalOutboundMessage {
+    Frame(TerminalServerFrame),
+    Pong(Vec<u8>),
+    Close,
+}
+
+async fn handle_terminal_client_frame(
     runtime: &WorkbenchRuntimeServices,
     project_id: &str,
     observer_id: &str,
     frame: TerminalClientFrame,
-    sender: &mpsc::Sender<TerminalServerFrame>,
+    sender: &mpsc::Sender<TerminalOutboundMessage>,
     observations: &Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     outbound_loss: &Arc<tokio::sync::Notify>,
-) -> Result<(), TerminalServerFrame> {
+) -> TerminalClientFrameOutcome {
     match frame {
-        TerminalClientFrame::Bind { .. } => Err(terminal_protocol_error(
-            None,
-            "terminal_already_bound",
-            "Terminal hub is already bound.",
-        )),
+        TerminalClientFrame::Bind { .. } => {
+            let _ = send_terminal_outbound(
+                sender,
+                TerminalOutboundMessage::Frame(terminal_protocol_error(
+                    None,
+                    None,
+                    "terminal_already_bound",
+                    "Terminal hub is already bound.",
+                )),
+            )
+            .await;
+            TerminalClientFrameOutcome::CloseHub
+        }
         TerminalClientFrame::Observe { terminal_id } => {
             if observations
                 .lock()
                 .expect("Terminal observation registry lock poisoned")
                 .contains_key(&terminal_id)
             {
-                return Ok(());
+                return TerminalClientFrameOutcome::Continue;
             }
-            let observation = runtime
-                .terminals()
-                .observe(project_id, &terminal_id, observer_id)
-                .map_err(|error| {
-                    terminal_protocol_error(
-                        Some(terminal_id.clone()),
-                        error.code(),
-                        error.to_string(),
-                    )
-                })?;
-            sender
-                .try_send(TerminalServerFrame::Observed {
+            let Some(permit) = reserve_terminal_control_outbound(sender).await else {
+                return TerminalClientFrameOutcome::CloseHub;
+            };
+            let observation =
+                match runtime
+                    .terminals()
+                    .observe(project_id, &terminal_id, observer_id)
+                {
+                    Ok(observation) => observation,
+                    Err(error) => {
+                        permit.send(TerminalOutboundMessage::Frame(terminal_protocol_error(
+                            None,
+                            Some(terminal_id.clone()),
+                            error.code(),
+                            error.to_string(),
+                        )));
+                        return TerminalClientFrameOutcome::Continue;
+                    }
+                };
+            permit.send(TerminalOutboundMessage::Frame(
+                TerminalServerFrame::Observed {
                     checkpoint: observation.checkpoint.clone(),
-                })
-                .map_err(|_| {
-                    terminal_protocol_error(
-                        Some(terminal_id.clone()),
-                        "terminal_backpressure",
-                        "Terminal outbound queue is full.",
-                    )
-                })?;
+                },
+            ));
             spawn_terminal_observation(
                 terminal_id,
                 observation,
@@ -1435,7 +1488,7 @@ fn handle_terminal_client_frame(
                 Arc::clone(observations),
                 Arc::clone(outbound_loss),
             );
-            Ok(())
+            TerminalClientFrameOutcome::Continue
         }
         TerminalClientFrame::Unobserve { terminal_id } => {
             if let Some(stop) = observations
@@ -1445,64 +1498,133 @@ fn handle_terminal_client_frame(
             {
                 stop.store(true, Ordering::Release);
             }
-            Ok(())
+            TerminalClientFrameOutcome::Continue
         }
         TerminalClientFrame::Input {
+            request_id,
             terminal_id,
             sequence,
             data,
         } => {
-            let acknowledged = runtime
-                .terminals()
-                .write_input(project_id, &terminal_id, observer_id, sequence, data)
-                .map_err(|error| {
-                    terminal_protocol_error(
+            execute_terminal_control(sender, || {
+                match runtime.terminals().write_input(
+                    project_id,
+                    &terminal_id,
+                    observer_id,
+                    sequence,
+                    data,
+                ) {
+                    Ok(acknowledged) => TerminalServerFrame::InputAck {
+                        request_id,
+                        terminal_id: terminal_id.clone(),
+                        sequence: acknowledged,
+                    },
+                    Err(error) => terminal_protocol_error(
+                        Some(request_id),
                         Some(terminal_id.clone()),
                         error.code(),
                         error.to_string(),
-                    )
-                })?;
-            sender
-                .try_send(TerminalServerFrame::InputAck {
-                    terminal_id: terminal_id.clone(),
-                    sequence: acknowledged,
-                })
-                .map_err(|_| {
-                    terminal_protocol_error(
-                        Some(terminal_id),
-                        "terminal_backpressure",
-                        "Terminal outbound queue is full.",
-                    )
-                })
+                    ),
+                }
+            })
+            .await
         }
         TerminalClientFrame::Resize {
+            request_id,
             terminal_id,
             cols,
             rows,
         } => {
-            let session = runtime
-                .terminals()
-                .resize(project_id, &terminal_id, observer_id, cols, rows)
-                .map_err(|error| {
-                    terminal_protocol_error(
+            execute_terminal_control(sender, || {
+                match runtime
+                    .terminals()
+                    .resize(project_id, &terminal_id, observer_id, cols, rows)
+                {
+                    Ok(session) => TerminalServerFrame::Resized {
+                        request_id,
+                        terminal_id: terminal_id.clone(),
+                        cols: session.cols,
+                        rows: session.rows,
+                    },
+                    Err(error) => terminal_protocol_error(
+                        Some(request_id),
                         Some(terminal_id.clone()),
                         error.code(),
                         error.to_string(),
-                    )
-                })?;
-            sender
-                .try_send(TerminalServerFrame::Resized {
-                    terminal_id: terminal_id.clone(),
-                    cols: session.cols,
-                    rows: session.rows,
-                })
-                .map_err(|_| {
-                    terminal_protocol_error(
-                        Some(terminal_id),
-                        "terminal_backpressure",
-                        "Terminal outbound queue is full.",
-                    )
-                })
+                    ),
+                }
+            })
+            .await
+        }
+    }
+}
+
+async fn execute_terminal_control(
+    sender: &mpsc::Sender<TerminalOutboundMessage>,
+    operation: impl FnOnce() -> TerminalServerFrame,
+) -> TerminalClientFrameOutcome {
+    let Some(permit) = reserve_terminal_control_outbound(sender).await else {
+        return TerminalClientFrameOutcome::CloseHub;
+    };
+    let response = operation();
+    permit.send(TerminalOutboundMessage::Frame(response));
+    TerminalClientFrameOutcome::Continue
+}
+
+async fn reserve_terminal_control_outbound(
+    sender: &mpsc::Sender<TerminalOutboundMessage>,
+) -> Option<mpsc::OwnedPermit<TerminalOutboundMessage>> {
+    sender.clone().reserve_owned().await.ok()
+}
+
+async fn reserve_terminal_auxiliary_outbound(
+    sender: &mpsc::Sender<TerminalOutboundMessage>,
+) -> Option<mpsc::OwnedPermit<TerminalOutboundMessage>> {
+    tokio::time::timeout(
+        TERMINAL_HUB_AUXILIARY_RESERVE_TIMEOUT,
+        sender.clone().reserve_owned(),
+    )
+    .await
+    .ok()?
+    .ok()
+}
+
+async fn send_terminal_outbound(
+    sender: &mpsc::Sender<TerminalOutboundMessage>,
+    message: TerminalOutboundMessage,
+) -> bool {
+    let Some(permit) = reserve_terminal_auxiliary_outbound(sender).await else {
+        return false;
+    };
+    permit.send(message);
+    true
+}
+
+async fn run_terminal_writer<Writer>(
+    mut writer: Writer,
+    mut receiver: mpsc::Receiver<TerminalOutboundMessage>,
+    outbound_loss: Arc<tokio::sync::Notify>,
+) where
+    Writer: tokio::io::AsyncWrite + Unpin,
+{
+    while let Some(message) = receiver.recv().await {
+        let closing = matches!(message, TerminalOutboundMessage::Close);
+        let result = tokio::time::timeout(TERMINAL_HUB_WRITE_TIMEOUT, async {
+            match message {
+                TerminalOutboundMessage::Frame(frame) => {
+                    write_terminal_frame(&mut writer, &frame).await
+                }
+                TerminalOutboundMessage::Pong(payload) => write_pong(&mut writer, &payload).await,
+                TerminalOutboundMessage::Close => write_close(&mut writer).await,
+            }
+        })
+        .await;
+        if !matches!(result, Ok(Ok(()))) {
+            outbound_loss.notify_one();
+            return;
+        }
+        if closing {
+            return;
         }
     }
 }
@@ -1510,7 +1632,7 @@ fn handle_terminal_client_frame(
 fn spawn_terminal_observation(
     terminal_id: String,
     observation: TerminalObservation,
-    sender: mpsc::Sender<TerminalServerFrame>,
+    sender: mpsc::Sender<TerminalOutboundMessage>,
     observations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     outbound_loss: Arc<tokio::sync::Notify>,
 ) {
@@ -1523,7 +1645,10 @@ fn spawn_terminal_observation(
         while !stop.load(Ordering::Acquire) {
             match observation.recv_timeout(Duration::from_millis(100)) {
                 Ok(event) => {
-                    if sender.try_send(terminal_event_frame(event)).is_err() {
+                    if sender
+                        .try_send(TerminalOutboundMessage::Frame(terminal_event_frame(event)))
+                        .is_err()
+                    {
                         outbound_loss.notify_one();
                         break;
                     }
@@ -1565,6 +1690,7 @@ fn terminal_event_frame(event: TerminalEvent) -> TerminalServerFrame {
             code,
             message,
         } => TerminalServerFrame::Error {
+            request_id: None,
             terminal_id: Some(terminal_id),
             code,
             message,
@@ -1573,11 +1699,13 @@ fn terminal_event_frame(event: TerminalEvent) -> TerminalServerFrame {
 }
 
 fn terminal_protocol_error(
+    request_id: Option<u64>,
     terminal_id: Option<String>,
     code: impl Into<String>,
     message: impl Into<String>,
 ) -> TerminalServerFrame {
     TerminalServerFrame::Error {
+        request_id,
         terminal_id,
         code: code.into(),
         message: message.into(),
@@ -1894,5 +2022,133 @@ mod tests {
 
         assert_eq!(body.as_ref(), expected);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn terminal_control_reserves_response_capacity_before_side_effect() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        sender
+            .try_send(TerminalOutboundMessage::Frame(
+                TerminalServerFrame::Topology {
+                    topology_revision: 0,
+                    sessions: Vec::new(),
+                },
+            ))
+            .unwrap();
+        let side_effect_executed = Arc::new(AtomicBool::new(false));
+        let operation_marker = Arc::clone(&side_effect_executed);
+
+        let outcome = {
+            let handling = execute_terminal_control(&sender, move || {
+                operation_marker.store(true, Ordering::Release);
+                TerminalServerFrame::Resized {
+                    request_id: 7,
+                    terminal_id: "terminal-1".to_owned(),
+                    cols: 100,
+                    rows: 40,
+                }
+            });
+            tokio::pin!(handling);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(25), &mut handling)
+                    .await
+                    .is_err(),
+                "control handling should wait until its response slot is reserved"
+            );
+            assert!(!side_effect_executed.load(Ordering::Acquire));
+            assert!(matches!(
+                receiver.recv().await,
+                Some(TerminalOutboundMessage::Frame(
+                    TerminalServerFrame::Topology { .. }
+                ))
+            ));
+            handling.as_mut().await
+        };
+        assert_eq!(outcome, TerminalClientFrameOutcome::Continue);
+        assert!(side_effect_executed.load(Ordering::Acquire));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(TerminalOutboundMessage::Frame(
+                TerminalServerFrame::Resized {
+                    request_id: 7,
+                    terminal_id,
+                    cols: 100,
+                    rows: 40,
+                }
+            )) if terminal_id == "terminal-1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn terminal_control_skips_side_effect_when_writer_is_gone() {
+        let (sender, receiver) = mpsc::channel(1);
+        drop(receiver);
+        let side_effect_executed = Arc::new(AtomicBool::new(false));
+        let operation_marker = Arc::clone(&side_effect_executed);
+
+        let outcome = execute_terminal_control(&sender, move || {
+            operation_marker.store(true, Ordering::Release);
+            TerminalServerFrame::Resized {
+                request_id: 8,
+                terminal_id: "terminal-2".to_owned(),
+                cols: 120,
+                rows: 50,
+            }
+        })
+        .await;
+
+        assert_eq!(outcome, TerminalClientFrameOutcome::CloseHub);
+        assert!(!side_effect_executed.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn terminal_writer_times_out_a_stalled_connection() {
+        let (sender, receiver) = mpsc::channel(1);
+        sender
+            .send(TerminalOutboundMessage::Frame(
+                TerminalServerFrame::Topology {
+                    topology_revision: 0,
+                    sessions: Vec::new(),
+                },
+            ))
+            .await
+            .unwrap();
+        drop(sender);
+        let outbound_loss = Arc::new(tokio::sync::Notify::new());
+
+        run_terminal_writer(PendingTerminalWriter, receiver, Arc::clone(&outbound_loss)).await;
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), outbound_loss.notified())
+                .await
+                .is_ok(),
+            "a stalled writer should publish outbound loss"
+        );
+    }
+
+    struct PendingTerminalWriter;
+
+    impl tokio::io::AsyncWrite for PendingTerminalWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            _buffer: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            Poll::Pending
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
     }
 }

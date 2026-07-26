@@ -9,6 +9,10 @@ import {
   stopRustRuntime,
   workspaceRoot
 } from './rust-runtime-dev.js';
+import {
+  stopDevelopmentChild,
+  throwDevelopmentCleanupFailures
+} from './stop-development-child.mjs';
 import { parseWorkbenchDevelopmentOptions } from './workbench-development-options.js';
 
 const developmentOptions = parseWorkbenchDevelopmentOptions(process.argv.slice(2));
@@ -18,7 +22,13 @@ let shutdown: Promise<void> | undefined;
 const stopRuntimeOnExit = process.env.DEBRUTE_DEV_STOP_RUNTIME_ON_EXIT === '1';
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => void stopDevelopment().finally(() => process.exit(0)));
+  process.once(signal, () => void stopDevelopment().then(
+    () => process.exit(0),
+    (error) => {
+      console.error(error);
+      process.exit(1);
+    }
+  ));
 }
 
 const runtimeRebuilt = await buildRustRuntime();
@@ -69,24 +79,21 @@ try {
 }
 
 function stopDevelopment(): Promise<void> {
-  shutdown ??= stopVite().then(async () => {
-    if (stopRuntimeOnExit) {
-      await stopRustRuntime(control);
-    } else {
-      control.close();
-    }
-  });
-  return shutdown;
-}
-
-async function stopVite(): Promise<void> {
   stopping = true;
-  const child = vite;
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  await new Promise<void>((resolveExit) => {
-    child.once('exit', () => resolveExit());
-    child.kill('SIGTERM');
-  });
+  shutdown ??= (async () => {
+    const results = await Promise.allSettled([
+      stopDevelopmentChild(vite, { label: 'Vite development server' }),
+      (async () => {
+        try {
+          if (stopRuntimeOnExit) {
+            await stopRustRuntime(control);
+          }
+        } finally {
+          control.close();
+        }
+      })()
+    ]);
+    throwDevelopmentCleanupFailures(results, 'Workbench development cleanup failed.');
+  })();
+  return shutdown;
 }

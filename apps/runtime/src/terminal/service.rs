@@ -913,6 +913,7 @@ enum ActorCommand {
     Output(Vec<u8>),
     ReaderFailed(String),
     ReaderClosed,
+    WriterFailed(String),
     ChildExited(Result<portable_pty::ExitStatus, String>),
     Observe {
         observer_id: String,
@@ -955,10 +956,13 @@ struct ObserverState {
     active: Arc<AtomicBool>,
 }
 
-struct InputWrite {
-    bytes: Vec<u8>,
-    sequence: u64,
-    reply: mpsc::Sender<Result<u64, TerminalError>>,
+enum PtyWrite {
+    Input {
+        bytes: Vec<u8>,
+        sequence: u64,
+        reply: mpsc::Sender<Result<u64, TerminalError>>,
+    },
+    DeviceResponse(Vec<u8>),
 }
 
 struct ExitNotice {
@@ -968,7 +972,8 @@ struct ExitNotice {
 
 struct PtyRuntime {
     master: Box<dyn portable_pty::MasterPty + Send>,
-    input: mpsc::SyncSender<InputWrite>,
+    input: mpsc::SyncSender<PtyWrite>,
+    writer_failure: Arc<Mutex<Option<String>>>,
     tree: Arc<debrute_native_process::ChildProcessTree>,
     exit_notice: Arc<ExitNotice>,
     #[cfg(target_os = "windows")]
@@ -988,6 +993,7 @@ struct TerminalActor {
     pending_exit: Option<Result<portable_pty::ExitStatus, String>>,
     retirement_deadline: Option<Instant>,
     tree_cleanup_error: Option<String>,
+    writer_failed: bool,
     exit_published: bool,
     project_use: Option<ProjectUse>,
 }
@@ -1103,11 +1109,12 @@ fn start_terminal_actor(
     let (mut command, spawn_barrier) = windows_terminal_command()?;
     #[cfg(not(target_os = "windows"))]
     let mut command = CommandBuilder::new(default_shell());
-    command.cwd(&cwd);
+    let process_cwd = terminal_process_cwd(&cwd);
+    command.cwd(&process_cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "debrute");
-    command.env("PWD", &cwd);
+    command.env("PWD", &process_cwd);
     let mut child = pair
         .slave
         .spawn_command(command)
@@ -1156,9 +1163,14 @@ fn start_terminal_actor(
         }
     };
     let (input, input_receiver) = mpsc::sync_channel(TERMINAL_INPUT_CAPACITY);
+    let writer_failure = Arc::new(Mutex::new(None));
+    let input_failure = Arc::clone(&writer_failure);
+    let input_commands = commands.clone();
     if let Err(error) = thread::Builder::new()
         .name(format!("debrute-terminal-input-{}", view.id))
-        .spawn(move || write_terminal_input(writer, input_receiver))
+        .spawn(move || {
+            write_terminal_input(writer, input_receiver, &input_commands, &input_failure);
+        })
     {
         let _ = tree.force_kill();
         let _ = wait_for_pty_child(&mut *child, TERMINAL_CLOSE_GRACE);
@@ -1216,6 +1228,7 @@ fn start_terminal_actor(
         pty: PtyRuntime {
             master: pair.master,
             input,
+            writer_failure,
             tree,
             exit_notice,
             #[cfg(target_os = "windows")]
@@ -1228,24 +1241,56 @@ fn start_terminal_actor(
         pending_exit: None,
         retirement_deadline: None,
         tree_cleanup_error: None,
+        writer_failed: false,
         exit_published: false,
         project_use: None,
     })
 }
 
 #[allow(clippy::needless_pass_by_value)] // The dedicated writer thread owns its queue receiver.
-fn write_terminal_input(mut writer: Box<dyn Write + Send>, receiver: mpsc::Receiver<InputWrite>) {
+fn write_terminal_input(
+    mut writer: Box<dyn Write + Send>,
+    receiver: mpsc::Receiver<PtyWrite>,
+    commands: &mpsc::SyncSender<ActorCommand>,
+    writer_failure: &Mutex<Option<String>>,
+) {
+    let mut failure = None;
     while let Ok(input) = receiver.recv() {
-        let result = writer
-            .write_all(&input.bytes)
-            .and_then(|()| writer.flush())
-            .map(|()| input.sequence)
-            .map_err(|error| TerminalError::new("terminal_input_failed", error.to_string()));
-        let failed = result.is_err();
-        let _ = input.reply.send(result);
-        if failed {
-            break;
+        match input {
+            PtyWrite::Input {
+                bytes,
+                sequence,
+                reply,
+            } => match writer.write_all(&bytes).and_then(|()| writer.flush()) {
+                Ok(()) => {
+                    let _ = reply.send(Ok(sequence));
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    let _ = reply.send(Err(TerminalError::new(
+                        "terminal_input_failed",
+                        message.clone(),
+                    )));
+                    failure = Some(message);
+                    break;
+                }
+            },
+            PtyWrite::DeviceResponse(bytes) => {
+                if let Err(error) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
+                    failure = Some(error.to_string());
+                    break;
+                }
+            }
         }
+    }
+    if let Some(message) = failure {
+        *writer_failure
+            .lock()
+            .expect("Terminal writer failure lock poisoned") = Some(message.clone());
+        drop(receiver);
+        let _ = commands.send(ActorCommand::WriterFailed(message));
+    } else {
+        drop(receiver);
     }
 }
 
@@ -1306,7 +1351,7 @@ fn run_terminal_actor(mut actor: TerminalActor, receiver: mpsc::Receiver<ActorCo
         actor.reap_inactive_observers();
         match command {
             ActorCommand::Output(bytes) => {
-                actor.publish_output(bytes);
+                actor.publish_output(&bytes);
                 let deadline = Instant::now() + TERMINAL_OUTPUT_COALESCE;
                 let mut coalesced = Vec::new();
                 for _ in 1..TERMINAL_OUTPUT_COALESCE_MAX_CHUNKS {
@@ -1324,7 +1369,7 @@ fn run_terminal_actor(mut actor: TerminalActor, receiver: mpsc::Receiver<ActorCo
                     }
                 }
                 if !coalesced.is_empty() {
-                    actor.publish_output(coalesced);
+                    actor.publish_output(&coalesced);
                 }
             }
             ActorCommand::ReaderClosed => {
@@ -1339,6 +1384,9 @@ fn run_terminal_actor(mut actor: TerminalActor, receiver: mpsc::Receiver<ActorCo
                     code: "terminal_output_failed".to_owned(),
                     message,
                 });
+            }
+            ActorCommand::WriterFailed(message) => {
+                actor.fail_writer(message);
             }
             ActorCommand::ChildExited(status) => {
                 actor.pending_exit = Some(status);
@@ -1439,8 +1487,23 @@ fn run_terminal_actor(mut actor: TerminalActor, receiver: mpsc::Receiver<ActorCo
 }
 
 impl TerminalActor {
-    fn publish_output(&mut self, bytes: Vec<u8>) {
-        let sequence = self.emulator.process_output(&bytes);
+    fn publish_output(&mut self, bytes: &[u8]) {
+        let processed = self.emulator.process_output(bytes);
+        if !processed.device_response.is_empty() {
+            match self
+                .pty
+                .input
+                .try_send(PtyWrite::DeviceResponse(processed.device_response))
+            {
+                Ok(()) => {}
+                Err(mpsc::TrySendError::Full(_)) => {
+                    self.fail_writer("Terminal PTY writer queue is full.".to_owned());
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    self.fail_writer("Terminal PTY writer is unavailable.".to_owned());
+                }
+            }
+        }
         let title = self.emulator.title(&self.view.title);
         if title != self.view.title {
             self.view.title = title;
@@ -1448,11 +1511,13 @@ impl TerminalActor {
             self.publish(TerminalEvent::Status(self.view.clone()));
             self.sync_shared_view();
         }
-        self.publish(TerminalEvent::Output {
-            terminal_id: self.view.id.clone(),
-            sequence,
-            data_base64: STANDARD.encode(bytes),
-        });
+        if !processed.observer_bytes.is_empty() {
+            self.publish(TerminalEvent::Output {
+                terminal_id: self.view.id.clone(),
+                sequence: processed.sequence,
+                data_base64: STANDARD.encode(processed.observer_bytes),
+            });
+        }
     }
 
     fn write_input(
@@ -1496,7 +1561,7 @@ impl TerminalActor {
         };
         self.input_sequences
             .insert(observer_id.to_owned(), sequence);
-        if let Err(error) = self.pty.input.try_send(InputWrite {
+        if let Err(error) = self.pty.input.try_send(PtyWrite::Input {
             bytes,
             sequence,
             reply,
@@ -1507,24 +1572,47 @@ impl TerminalActor {
                 self.input_sequences
                     .insert(observer_id.to_owned(), previous);
             }
-            let (reply, error) = match error {
-                mpsc::TrySendError::Full(input) => (
-                    input.reply,
-                    TerminalError::new(
-                        "terminal_input_backpressure",
-                        format!("Terminal input queue is full: {}", self.view.id),
-                    ),
+            let (reply, message) = match error {
+                mpsc::TrySendError::Full(PtyWrite::Input { reply, .. }) => (
+                    reply,
+                    format!("Terminal PTY writer queue is full: {}", self.view.id),
                 ),
-                mpsc::TrySendError::Disconnected(input) => (
-                    input.reply,
-                    TerminalError::new(
-                        "terminal_input_failed",
-                        format!("Terminal input writer is unavailable: {}", self.view.id),
-                    ),
+                mpsc::TrySendError::Disconnected(PtyWrite::Input { reply, .. }) => (
+                    reply,
+                    format!("Terminal PTY writer is unavailable: {}", self.view.id),
                 ),
+                mpsc::TrySendError::Full(PtyWrite::DeviceResponse(_))
+                | mpsc::TrySendError::Disconnected(PtyWrite::DeviceResponse(_)) => {
+                    unreachable!("write_input only enqueues user input")
+                }
             };
-            let _ = reply.send(Err(error));
+            let _ = reply.send(Err(TerminalError::new(
+                "terminal_input_failed",
+                message.clone(),
+            )));
+            self.fail_writer(message);
         }
+    }
+
+    fn fail_writer(&mut self, message: String) {
+        if self.writer_failed {
+            return;
+        }
+        self.writer_failed = true;
+        let message = if let Err(error) = self.pty.tree.force_kill() {
+            format!("{message} Process-tree cleanup failed: {error}")
+        } else {
+            message
+        };
+        self.view.status = TerminalSessionStatus::Failed;
+        self.view.updated_at = crate::now_rfc3339();
+        self.sync_shared_view();
+        self.publish(TerminalEvent::Error {
+            terminal_id: self.view.id.clone(),
+            code: "terminal_pty_write_failed".to_owned(),
+            message,
+        });
+        self.publish(TerminalEvent::Status(self.view.clone()));
     }
 
     fn resize(
@@ -1575,12 +1663,25 @@ impl TerminalActor {
         };
         self.exit_published = true;
         self.retirement_deadline = None;
+        let writer_failure = self
+            .pty
+            .writer_failure
+            .lock()
+            .expect("Terminal writer failure lock poisoned")
+            .clone();
+        if !self.writer_failed
+            && let Some(message) = writer_failure
+        {
+            self.fail_writer(message);
+        }
         match (
+            self.writer_failed,
             status,
             self.tree_cleanup_error.take(),
             force_output_drain && !self.reader_closed,
         ) {
-            (_, Some(error), _) => {
+            (true, _, _, _) => {}
+            (false, _, Some(error), _) => {
                 self.view.status = TerminalSessionStatus::Failed;
                 self.view.updated_at = crate::now_rfc3339();
                 self.sync_shared_view();
@@ -1591,7 +1692,7 @@ impl TerminalActor {
                 });
                 self.publish(TerminalEvent::Status(self.view.clone()));
             }
-            (_, None, true) => {
+            (false, _, None, true) => {
                 self.view.status = TerminalSessionStatus::Failed;
                 self.view.updated_at = crate::now_rfc3339();
                 self.sync_shared_view();
@@ -1602,7 +1703,7 @@ impl TerminalActor {
                 });
                 self.publish(TerminalEvent::Status(self.view.clone()));
             }
-            (Ok(status), None, false) => {
+            (false, Ok(status), None, false) => {
                 self.view.status = TerminalSessionStatus::Exited;
                 self.view.exit_code = Some(status.exit_code());
                 self.view.signal = status.signal().map(str::to_owned);
@@ -1615,7 +1716,7 @@ impl TerminalActor {
                 });
                 self.publish(TerminalEvent::Status(self.view.clone()));
             }
-            (Err(message), None, false) => {
+            (false, Err(message), None, false) => {
                 self.view.status = TerminalSessionStatus::Failed;
                 self.view.updated_at = crate::now_rfc3339();
                 self.sync_shared_view();
@@ -1807,6 +1908,48 @@ fn default_shell() -> PathBuf {
 }
 
 #[cfg(target_os = "windows")]
+fn terminal_process_cwd(path: &Path) -> PathBuf {
+    use std::{
+        ffi::OsString,
+        os::windows::ffi::{OsStrExt as _, OsStringExt as _},
+    };
+
+    let encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    let is_verbatim = encoded.starts_with(&[
+        u16::from(b'\\'),
+        u16::from(b'\\'),
+        u16::from(b'?'),
+        u16::from(b'\\'),
+    ]);
+    if !is_verbatim {
+        return path.to_path_buf();
+    }
+    let is_verbatim_unc = encoded.get(4..8).is_some_and(|prefix| {
+        prefix.len() == 4
+            && matches!(prefix[0], value if value == u16::from(b'U') || value == u16::from(b'u'))
+            && matches!(prefix[1], value if value == u16::from(b'N') || value == u16::from(b'n'))
+            && matches!(prefix[2], value if value == u16::from(b'C') || value == u16::from(b'c'))
+            && prefix[3] == u16::from(b'\\')
+    });
+    let simplified = if is_verbatim_unc {
+        [u16::from(b'\\'), u16::from(b'\\')]
+            .into_iter()
+            .chain(encoded[8..].iter().copied())
+            .collect::<Vec<_>>()
+    } else if encoded.get(5) == Some(&u16::from(b':')) {
+        encoded[4..].to_vec()
+    } else {
+        return path.to_path_buf();
+    };
+    PathBuf::from(OsString::from_wide(&simplified))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn terminal_process_cwd(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+#[cfg(target_os = "windows")]
 fn windows_terminal_command()
 -> Result<(CommandBuilder, debrute_native_process::WindowsSpawnBarrier), TerminalError> {
     let barrier = debrute_native_process::WindowsSpawnBarrier::new()
@@ -1901,46 +2044,337 @@ fn actor_unavailable(terminal_id: &str) -> TerminalError {
     )
 }
 
-#[cfg(all(test, target_os = "macos"))]
-mod tests {
-    use std::{fs, time::Duration};
-
+#[cfg(test)]
+fn terminal_test_project_service() -> (PathBuf, ProjectSessionRegistry, String, ProjectUse) {
     use crate::{
         project::{
             CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, MediaToolPaths,
-            ProjectPreviewService, ProjectUseKind,
+            ProjectPreviewService,
         },
         workers::RuntimeWorkerServices,
     };
 
+    let root = std::env::temp_dir().join(format!("debrute-terminal-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("fixture should exist");
+    let workers = RuntimeWorkerServices::new();
+    let previews = Arc::new(ProjectPreviewService::new(
+        &workers,
+        MediaToolPaths::unavailable(),
+    ));
+    let feedback =
+        Arc::new(CanvasFeedbackArtifacts::new(previews).expect("feedback scheduler should start"));
+    let registry = ProjectSessionRegistry::new(
+        root.join("home"),
+        Arc::new(DefaultProjectNodeAdapter),
+        feedback,
+    );
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .expect("project should open");
+    let project_id = opened.session.project_id().to_owned();
+    (root, registry, project_id, opened.project_use)
+}
+
+#[cfg(test)]
+mod writer_tests {
+    use std::{io, time::Duration};
+
     use super::*;
 
-    fn project_service() -> (PathBuf, ProjectSessionRegistry, String, ProjectUse) {
-        let root = std::env::temp_dir().join(format!("debrute-terminal-{}", Uuid::new_v4()));
-        fs::create_dir_all(&root).expect("fixture should exist");
-        let workers = RuntimeWorkerServices::new();
-        let previews = Arc::new(ProjectPreviewService::new(
-            &workers,
-            MediaToolPaths::unavailable(),
-        ));
-        let feedback = Arc::new(
-            CanvasFeedbackArtifacts::new(previews).expect("feedback scheduler should start"),
-        );
-        let registry = ProjectSessionRegistry::new(
-            root.join("home"),
-            Arc::new(DefaultProjectNodeAdapter),
-            feedback,
-        );
-        let opened = registry
-            .open_project(&root, ProjectUseKind::Workbench)
-            .expect("project should open");
-        let project_id = opened.session.project_id().to_owned();
-        (root, registry, project_id, opened.project_use)
+    struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("recording writer should lock")
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("fixture write failed"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
+    fn terminal_writer_preserves_every_write_under_bounded_queue_pressure() {
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (commands, command_receiver) = mpsc::sync_channel(1);
+        let (input, input_receiver) = mpsc::sync_channel(1);
+        let writer_output = Arc::clone(&output);
+        let writer_commands = commands.clone();
+        let writer = thread::spawn(move || {
+            let writer_failure = Mutex::new(None);
+            write_terminal_input(
+                Box::new(RecordingWriter(writer_output)),
+                input_receiver,
+                &writer_commands,
+                &writer_failure,
+            );
+        });
+
+        let mut expected = Vec::new();
+        for index in 0_u8..64 {
+            expected.push(index);
+            input
+                .send(PtyWrite::DeviceResponse(vec![index]))
+                .expect("bounded queue should drain without losing a response");
+        }
+        let (reply, result) = mpsc::channel();
+        input
+            .send(PtyWrite::Input {
+                bytes: b"input".to_vec(),
+                sequence: 7,
+                reply,
+            })
+            .expect("user input should share the ordered writer");
+        expected.extend_from_slice(b"input");
+        drop(input);
+
+        assert_eq!(
+            result.recv().expect("input acknowledgement should arrive"),
+            Ok(7)
+        );
+        writer
+            .join()
+            .expect("writer should stop after its queue closes");
+        assert_eq!(
+            *output.lock().expect("recording writer should lock"),
+            expected
+        );
+        assert!(matches!(
+            command_receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn terminal_writer_reports_failure_and_rejects_the_failed_input() {
+        let (commands, command_receiver) = mpsc::sync_channel(1);
+        let (input, input_receiver) = mpsc::sync_channel(1);
+        let (reply, result) = mpsc::channel();
+        input
+            .send(PtyWrite::Input {
+                bytes: b"input".to_vec(),
+                sequence: 1,
+                reply,
+            })
+            .expect("fixture input should enter the bounded queue");
+        drop(input);
+
+        let writer_failure = Mutex::new(None);
+        write_terminal_input(
+            Box::new(FailingWriter),
+            input_receiver,
+            &commands,
+            &writer_failure,
+        );
+
+        assert_eq!(
+            result
+                .recv()
+                .expect("failed input acknowledgement should arrive")
+                .expect_err("write failure should reject input")
+                .code(),
+            "terminal_input_failed"
+        );
+        let ActorCommand::WriterFailed(message) = command_receiver
+            .recv()
+            .expect("actor should receive the writer failure")
+        else {
+            panic!("writer should report exactly one failure command");
+        };
+        assert_eq!(message, "fixture write failed");
+        assert_eq!(
+            writer_failure
+                .lock()
+                .expect("writer failure should lock")
+                .as_deref(),
+            Some("fixture write failed")
+        );
+        assert!(matches!(
+            command_receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn terminal_actor_remains_closable_when_the_pty_writer_queue_is_full() {
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let service = TerminalService::new(registry.clone());
+        let session = service
+            .create(&project_id, "")
+            .expect("terminal should start");
+        let _observation = service
+            .observe(&project_id, &session.id, "hub")
+            .expect("terminal should be observed");
+        service
+            .write_input(
+                &project_id,
+                &session.id,
+                "hub",
+                1,
+                "ping -n 6 127.0.0.1 >nul\r".to_owned(),
+            )
+            .expect("fixture command should enter cmd.exe");
+        let terminal = service
+            .terminal(&project_id, &session.id)
+            .expect("terminal should remain registered");
+        let input = "x".repeat(MAX_TERMINAL_INPUT_BYTES);
+        for sequence in 2..=80 {
+            let (reply, _result) = mpsc::channel();
+            terminal
+                .send(ActorCommand::Input {
+                    observer_id: "hub".to_owned(),
+                    sequence,
+                    data: input.clone(),
+                    reply,
+                })
+                .expect("fixture input should reach the actor queue");
+        }
+        let (reply, close_result) = mpsc::channel();
+        terminal
+            .send(ActorCommand::Close { reply })
+            .expect("close should reach the actor queue");
+
+        let close_progressed = close_result
+            .recv_timeout(Duration::from_millis(500))
+            .is_ok();
+        if !close_progressed {
+            if let Some(tree) = terminal
+                .tree
+                .lock()
+                .expect("Terminal process tree lock poisoned")
+                .clone()
+            {
+                let _ = tree.force_kill();
+            }
+            let _ = close_result.recv_timeout(Duration::from_secs(3));
+        }
+
+        drop(service);
+        drop(open_use);
+        registry.close().expect("registry should close");
+        std::fs::remove_dir_all(root).expect("fixture should clean up");
+        assert!(
+            close_progressed,
+            "a full PTY writer queue must not block the Terminal actor"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn writer_failure_marks_the_terminal_failed_and_terminates_its_process_tree() {
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let service = TerminalService::new(registry.clone());
+        let session = service
+            .create(&project_id, "")
+            .expect("terminal should start");
+        let observation = service
+            .observe(&project_id, &session.id, "hub")
+            .expect("terminal should be observed");
+        let terminal = service
+            .terminal(&project_id, &session.id)
+            .expect("terminal should remain registered");
+
+        terminal
+            .send(ActorCommand::WriterFailed(
+                "fixture write failed".to_owned(),
+            ))
+            .expect("writer failure should reach the actor");
+
+        let mut saw_error = false;
+        let mut saw_failed_status = false;
+        for _ in 0..50 {
+            match observation
+                .receiver
+                .recv_timeout(Duration::from_millis(100))
+            {
+                Ok(TerminalEvent::Error { code, .. }) if code == "terminal_pty_write_failed" => {
+                    saw_error = true;
+                }
+                Ok(TerminalEvent::Status(view)) if view.status == TerminalSessionStatus::Failed => {
+                    saw_failed_status = true;
+                }
+                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            if saw_error && saw_failed_status {
+                break;
+            }
+        }
+        assert!(saw_error, "writer failure should publish its typed error");
+        assert!(
+            saw_failed_status,
+            "writer failure should publish the Failed session"
+        );
+        assert_eq!(terminal.view().status, TerminalSessionStatus::Failed);
+        let process_tree_exited = (0..50).any(|_| {
+            if terminal.final_checkpoint().is_some() {
+                true
+            } else {
+                thread::sleep(Duration::from_millis(100));
+                false
+            }
+        });
+        assert!(
+            process_tree_exited,
+            "writer failure should terminate and retire the PTY process tree"
+        );
+
+        service
+            .close(&project_id, &session.id)
+            .expect("failed terminal should close");
+        drop(open_use);
+        registry.close().expect("registry should close");
+        std::fs::remove_dir_all(root).expect("fixture should clean up");
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_process_cwd_uses_drive_syntax_for_verbatim_disk_paths() {
+        assert_eq!(
+            terminal_process_cwd(Path::new(r"\\?\E:\onedrive\城启设计")),
+            PathBuf::from(r"E:\onedrive\城启设计")
+        );
+    }
+
+    #[test]
+    fn terminal_process_cwd_preserves_unc_semantics_without_the_verbatim_marker() {
+        assert_eq!(
+            terminal_process_cwd(Path::new(r"\\?\UNC\server\share\project")),
+            PathBuf::from(r"\\server\share\project")
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use std::{fs, time::Duration};
+
+    use super::*;
+
+    #[test]
     fn terminal_requires_observation_and_acks_ordered_input() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
             .create(&project_id, "")
@@ -2003,7 +2437,7 @@ mod tests {
 
     #[test]
     fn natural_exit_retires_the_actor_and_releases_the_running_project_use() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
             .create(&project_id, "")
@@ -2046,7 +2480,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn natural_exit_retires_even_when_a_background_child_held_the_pty() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
             .create(&project_id, "")
@@ -2085,7 +2519,7 @@ mod tests {
 
     #[test]
     fn terminal_capacity_is_reserved_before_spawning_and_released_on_failure() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let reservations = (0..MAX_TERMINALS_PER_PROJECT)
             .map(|_| service.reserve_terminal(&project_id).unwrap())
@@ -2103,7 +2537,7 @@ mod tests {
 
     #[test]
     fn topology_is_independently_revisioned() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let topology = service
             .subscribe_topology(&project_id)
@@ -2128,7 +2562,7 @@ mod tests {
 
     #[test]
     fn observer_replacement_is_generation_safe_and_attachment_detach_releases_sequence() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
             .create(&project_id, "")
@@ -2187,7 +2621,7 @@ mod tests {
 
     #[test]
     fn terminal_dimensions_and_input_frames_are_bounded() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         assert_eq!(
             service
@@ -2222,7 +2656,7 @@ mod tests {
 
     #[test]
     fn dropping_the_service_closes_terminal_project_uses() {
-        let (root, registry, project_id, open_use) = project_service();
+        let (root, registry, project_id, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         service
             .create(&project_id, "")

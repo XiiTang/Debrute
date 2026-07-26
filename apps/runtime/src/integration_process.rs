@@ -1,12 +1,14 @@
 //! Native integration execution through the Runtime's one bounded supervisor.
 
 use std::{
+    ffi::OsStr,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
 use crate::{
+    executable_path::resolve_executable,
     integrations::{
         CommandResult, IntegrationCommand, IntegrationDiagnostic, IntegrationProcessAdapter,
         Platform, ProbeResult,
@@ -32,22 +34,11 @@ impl IntegrationProcessAdapter for NativeIntegrationProcessAdapter {
     fn resolve_executable(
         &self,
         name: &str,
-        env_path: &str,
+        env_path: &OsStr,
         platform: Platform,
-        path_ext: &str,
+        path_ext: &OsStr,
     ) -> Option<PathBuf> {
-        if name.is_empty()
-            || Path::new(name).file_name().and_then(|value| value.to_str()) != Some(name)
-        {
-            return None;
-        }
-        split_path(env_path, platform)
-            .flat_map(|directory| {
-                executable_candidate_names(name, platform, path_ext)
-                    .into_iter()
-                    .map(move |candidate| Path::new(directory).join(candidate))
-            })
-            .find(|candidate| is_executable(candidate, platform))
+        resolve_executable(name, env_path, platform, path_ext)
     }
 
     fn run_probe(&self, file: &Path, args: &[String], timeout_ms: u64) -> ProbeResult {
@@ -100,60 +91,6 @@ fn command_result(output: ProcessOutput) -> CommandResult {
     }
 }
 
-fn split_path(value: &str, platform: Platform) -> impl Iterator<Item = &str> {
-    value
-        .split(if platform == Platform::Windows {
-            ';'
-        } else {
-            ':'
-        })
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-}
-
-fn executable_candidate_names(name: &str, platform: Platform, path_ext: &str) -> Vec<String> {
-    if platform != Platform::Windows {
-        return vec![name.to_owned()];
-    }
-    let extensions = path_ext
-        .split(';')
-        .map(str::trim)
-        .filter(|extension| !extension.is_empty())
-        .collect::<Vec<_>>();
-    if extensions.iter().any(|extension| {
-        name.to_ascii_lowercase()
-            .ends_with(&extension.to_ascii_lowercase())
-    }) {
-        return vec![name.to_owned()];
-    }
-    std::iter::once(name.to_owned())
-        .chain(
-            extensions
-                .into_iter()
-                .map(|extension| format!("{name}{extension}")),
-        )
-        .collect()
-}
-
-fn is_executable(path: &Path, platform: Platform) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    if platform == Platform::Windows {
-        return true;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    false
-}
-
 fn tail(value: &str, limit: usize) -> String {
     if value.len() <= limit {
         return value.to_owned();
@@ -171,32 +108,7 @@ fn non_empty(value: String) -> Option<String> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use std::{fs, os::unix::fs::PermissionsExt as _};
-
     use super::*;
-
-    #[test]
-    fn executable_resolution_obeys_platform_path_and_permissions() {
-        let root =
-            std::env::temp_dir().join(format!("debrute-integration-path-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&root).expect("fixture directory should exist");
-        let executable = root.join("ffprobe");
-        fs::write(&executable, "fixture").expect("fixture should be written");
-        let adapter = NativeIntegrationProcessAdapter::from_supervisor(Arc::new(
-            BoundedProcessSupervisor::new(1),
-        ));
-        assert_eq!(
-            adapter.resolve_executable("ffprobe", root.to_str().unwrap(), Platform::MacOs, ""),
-            None
-        );
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
-            .expect("fixture should become executable");
-        assert_eq!(
-            adapter.resolve_executable("ffprobe", root.to_str().unwrap(), Platform::MacOs, ""),
-            Some(executable)
-        );
-        fs::remove_dir_all(root).expect("fixture should clean up");
-    }
 
     #[test]
     fn native_probe_reports_closed_nonzero_and_timeout_diagnostics() {

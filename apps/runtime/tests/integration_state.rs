@@ -356,9 +356,9 @@ impl IntegrationProcessAdapter for MissingProcessAdapter {
     fn resolve_executable(
         &self,
         _name: &str,
-        _env_path: &str,
+        _env_path: &std::ffi::OsStr,
         _platform: Platform,
-        _path_ext: &str,
+        _path_ext: &std::ffi::OsStr,
     ) -> Option<PathBuf> {
         None
     }
@@ -412,9 +412,9 @@ impl IntegrationProcessAdapter for OutOfOrderScanAdapter {
     fn resolve_executable(
         &self,
         name: &str,
-        _env_path: &str,
+        _env_path: &std::ffi::OsStr,
         _platform: Platform,
-        _path_ext: &str,
+        _path_ext: &std::ffi::OsStr,
     ) -> Option<PathBuf> {
         let current_thread = thread::current().id();
         let mut state = self.state.lock().expect("scan state should lock");
@@ -481,9 +481,9 @@ impl IntegrationProcessAdapter for RecordingProcessAdapter {
     fn resolve_executable(
         &self,
         name: &str,
-        _env_path: &str,
+        _env_path: &std::ffi::OsStr,
         _platform: Platform,
-        _path_ext: &str,
+        _path_ext: &std::ffi::OsStr,
     ) -> Option<PathBuf> {
         self.resolutions.fetch_add(1, Ordering::SeqCst);
         match name {
@@ -561,9 +561,9 @@ impl IntegrationProcessAdapter for BlockingProcessAdapter {
     fn resolve_executable(
         &self,
         name: &str,
-        _env_path: &str,
+        _env_path: &std::ffi::OsStr,
         _platform: Platform,
-        _path_ext: &str,
+        _path_ext: &std::ffi::OsStr,
     ) -> Option<PathBuf> {
         match name {
             "brew" => Some(PathBuf::from("/opt/homebrew/bin/brew")),
@@ -641,9 +641,9 @@ impl IntegrationProcessAdapter for BlockingValidationAdapter {
     fn resolve_executable(
         &self,
         name: &str,
-        _env_path: &str,
+        _env_path: &std::ffi::OsStr,
         _platform: Platform,
-        _path_ext: &str,
+        _path_ext: &std::ffi::OsStr,
     ) -> Option<PathBuf> {
         if name == "brew" && self.blocking.load(Ordering::SeqCst) {
             let mut state = self.state.lock().expect("validation state should lock");

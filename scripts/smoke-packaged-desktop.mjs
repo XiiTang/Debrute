@@ -1,13 +1,17 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { dirname, join } from 'node:path';
 import process from 'node:process';
 
 import { chromium } from 'playwright';
+import { terminateWindowsProcessTree } from './terminate-windows-process-tree.mjs';
 
 const options = parseArguments(process.argv.slice(2));
 await access(options.desktop);
 await access(options.cli);
+verifyPackagedRuntimeSubsystem(options);
 verifyDesktopSignature(options);
 
 const port = await reserveLoopbackPort();
@@ -161,7 +165,7 @@ async function cleanupFailedLaunch(cli, child, exitPromise) {
   }
   if (Number.isInteger(child.pid) && child.exitCode === null && child.signalCode === null) {
     try {
-      terminateExactChildTree(child.pid);
+      await terminateExactChildTree(child);
       await withDeadline(exitPromise, 5_000, 'Exact Desktop child tree did not stop.');
     } catch (error) {
       failures.push(error);
@@ -198,15 +202,30 @@ function verifyDesktopSignature({ desktop, platform }) {
   if (result.status !== 0) throw new Error(`Windows signature is invalid:\n${result.stderr}`);
 }
 
-function terminateExactChildTree(pid) {
+function verifyPackagedRuntimeSubsystem({ cli, platform }) {
+  if (platform !== 'win32') return;
+  const runtime = join(dirname(cli), 'debrute-runtime.exe');
+  const executable = readFileSync(runtime);
+  if (executable.length < 0x40 || executable.toString('ascii', 0, 2) !== 'MZ') {
+    throw new Error(`Bundled Runtime is not a valid Windows executable: ${runtime}`);
+  }
+  const peOffset = executable.readUInt32LE(0x3c);
+  const optionalHeaderOffset = peOffset + 24;
+  if (optionalHeaderOffset + 70 > executable.length
+    || executable.toString('ascii', peOffset, peOffset + 4) !== 'PE\0\0') {
+    throw new Error(`Bundled Runtime has an invalid PE header: ${runtime}`);
+  }
+  const subsystem = executable.readUInt16LE(optionalHeaderOffset + 68);
+  if (subsystem !== 2) {
+    throw new Error(`Bundled Runtime must use the Windows GUI subsystem; found ${subsystem}.`);
+  }
+}
+
+async function terminateExactChildTree(child) {
   if (process.platform === 'win32') {
-    const result = spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-      encoding: 'utf8',
-      timeout: 5_000
-    });
-    if (result.status !== 0) throw new Error(`taskkill failed for PID ${pid}: ${result.stderr}`);
+    await terminateWindowsProcessTree(child, { label: 'packaged Desktop' });
   } else {
-    process.kill(-pid, 'SIGKILL');
+    process.kill(-child.pid, 'SIGKILL');
   }
 }
 

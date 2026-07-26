@@ -12,18 +12,19 @@ mod windows {
         mem::size_of,
         os::windows::{
             ffi::{OsStrExt as _, OsStringExt as _},
+            fs::OpenOptionsExt as _,
             io::FromRawHandle as _,
         },
-        ptr, thread,
+        ptr,
         time::{Duration, Instant},
     };
 
     use windows_sys::{
         Win32::{
             Foundation::{
-                CloseHandle, ERROR_ALREADY_EXISTS, ERROR_BROKEN_PIPE, ERROR_FILE_NOT_FOUND,
-                ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GetLastError, HANDLE,
-                INVALID_HANDLE_VALUE, LocalFree,
+                CloseHandle, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING,
+                ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
+                LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
             },
             Security::{
                 Authorization::{
@@ -33,17 +34,17 @@ mod windows {
                 EqualSid, GetTokenInformation, PSECURITY_DESCRIPTOR, PSID, RevertToSelf,
                 SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
             },
-            Storage::FileSystem::PIPE_ACCESS_DUPLEX,
+            Storage::FileSystem::{FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile},
             System::{
-                IO::CancelIoEx,
+                IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
                 Pipes::{
                     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe,
                     ImpersonateNamedPipeClient, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
-                    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, PeekNamedPipe, WaitNamedPipeW,
+                    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, WaitNamedPipeW,
                 },
                 Threading::{
-                    CreateMutexW, GetCurrentProcess, GetCurrentThread, OpenProcessToken,
-                    OpenThreadToken,
+                    CreateEventW, CreateMutexW, GetCurrentProcess, GetCurrentThread, INFINITE,
+                    OpenProcessToken, OpenThreadToken, WaitForSingleObject,
                 },
             },
         },
@@ -163,12 +164,14 @@ mod windows {
     }
 
     impl WindowsControlOwner {
-        /// Accepts one local client and authorizes its impersonation SID.
+        /// Accepts one local client into a connection that authorizes its
+        /// impersonation SID before exposing the first client bytes.
         ///
         /// # Errors
         ///
-        /// Returns an operating-system error when pipe creation, connection,
-        /// impersonation, or SID authorization fails.
+        /// Returns an operating-system error when pipe creation or connection
+        /// fails. First-read authorization failures are returned by the
+        /// connection's [`io::Read`] implementation.
         pub fn accept_current_user(&self) -> io::Result<WindowsControlConnection> {
             let security = SecurityDescriptor::for_user(&self.current_user_sid)?;
             let attributes = security.attributes();
@@ -178,7 +181,7 @@ mod windows {
             let handle = unsafe {
                 CreateNamedPipeW(
                     pipe_name.as_ptr(),
-                    PIPE_ACCESS_DUPLEX,
+                    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                     PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                     PIPE_UNLIMITED_INSTANCES,
                     PIPE_BUFFER_BYTES,
@@ -191,20 +194,11 @@ mod windows {
                 return Err(io::Error::last_os_error());
             }
             let owned = OwnedHandle(handle);
-            // SAFETY: `owned` is a live server pipe. A null OVERLAPPED pointer
-            // requests the synchronous connection mode used by this adapter.
-            let connected = unsafe { ConnectNamedPipe(owned.0, ptr::null_mut()) };
-            if connected == 0 {
-                // A client may connect between CreateNamedPipeW and
-                // ConnectNamedPipe; Windows reports that successful race as
-                // ERROR_PIPE_CONNECTED.
-                let error = unsafe { GetLastError() };
-                if error != ERROR_PIPE_CONNECTED {
-                    return Err(io::Error::from_raw_os_error(error.cast_signed()));
-                }
-            }
-            authorize_pipe_client(owned.0, &self.current_user_sid)?;
-            Ok(WindowsControlConnection::from_owned_handle(owned))
+            connect_named_pipe(&owned)?;
+            Ok(WindowsControlConnection::from_owned_handle(
+                owned,
+                self.current_user_sid.clone(),
+            ))
         }
     }
 
@@ -212,16 +206,26 @@ mod windows {
     pub struct WindowsControlConnection {
         file: File,
         read_timeout: Option<Duration>,
+        peer_authorization: PeerAuthorization,
+    }
+
+    #[derive(Debug, Clone)]
+    enum PeerAuthorization {
+        NotRequired,
+        Pending(Sid),
+        Authorized,
+        Rejected,
     }
 
     impl WindowsControlConnection {
-        fn from_owned_handle(handle: OwnedHandle) -> Self {
+        fn from_owned_handle(handle: OwnedHandle, expected_user_sid: Sid) -> Self {
             let raw = handle.into_raw();
             // SAFETY: `raw` is a uniquely owned, valid pipe HANDLE and File
             // becomes its sole owner.
             Self {
                 file: unsafe { File::from_raw_handle(raw.cast::<c_void>()) },
                 read_timeout: None,
+                peer_authorization: PeerAuthorization::Pending(expected_user_sid),
             }
         }
 
@@ -231,9 +235,16 @@ mod windows {
         ///
         /// Returns an operating-system error when the HANDLE cannot be cloned.
         pub fn try_clone(&self) -> io::Result<Self> {
+            if matches!(
+                self.peer_authorization,
+                PeerAuthorization::Pending(_) | PeerAuthorization::Rejected
+            ) {
+                return Err(peer_not_authorized());
+            }
             self.file.try_clone().map(|file| Self {
                 file,
                 read_timeout: self.read_timeout,
+                peer_authorization: self.peer_authorization.clone(),
             })
         }
 
@@ -257,73 +268,231 @@ mod windows {
 
     impl io::Read for WindowsControlConnection {
         fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-            let Some(timeout) = self.read_timeout else {
-                return io::Read::read(&mut self.file, buffer);
-            };
-            let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "read timeout is too large")
-            })?;
-            loop {
-                if pipe_has_bytes(&self.file)? {
-                    return io::Read::read(&mut self.file, buffer);
-                }
-                if Instant::now() >= deadline {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "Control pipe read timed out",
-                    ));
-                }
-                thread::sleep(Duration::from_millis(2));
+            use std::os::windows::io::AsRawHandle as _;
+
+            if matches!(self.peer_authorization, PeerAuthorization::Rejected) {
+                return Err(peer_not_authorized());
             }
+            let handle = self.file.as_raw_handle().cast::<c_void>() as HANDLE;
+            let read = overlapped_read(handle, buffer, self.read_timeout)?;
+            if read > 0
+                && let PeerAuthorization::Pending(expected) = &self.peer_authorization
+            {
+                let expected = expected.clone();
+                if let Err(error) = authorize_pipe_client(handle, &expected) {
+                    self.peer_authorization = PeerAuthorization::Rejected;
+                    return Err(error);
+                }
+                self.peer_authorization = PeerAuthorization::Authorized;
+            }
+            Ok(read)
         }
     }
 
     impl io::Write for WindowsControlConnection {
         fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-            io::Write::write(&mut self.file, buffer)
+            use std::os::windows::io::AsRawHandle as _;
+
+            if matches!(
+                self.peer_authorization,
+                PeerAuthorization::Pending(_) | PeerAuthorization::Rejected
+            ) {
+                return Err(peer_not_authorized());
+            }
+            let handle = self.file.as_raw_handle().cast::<c_void>() as HANDLE;
+            overlapped_write(handle, buffer)
         }
 
         fn flush(&mut self) -> io::Result<()> {
-            io::Write::flush(&mut self.file)
+            if matches!(
+                self.peer_authorization,
+                PeerAuthorization::Pending(_) | PeerAuthorization::Rejected
+            ) {
+                return Err(peer_not_authorized());
+            }
+            Ok(())
         }
     }
 
     fn connect_pipe(pipe_name: &str) -> io::Result<WindowsControlConnection> {
-        OpenOptions::new()
+        let mut options = OpenOptions::new();
+        options
             .read(true)
             .write(true)
+            .custom_flags(FILE_FLAG_OVERLAPPED);
+        options
             .open(pipe_name)
             .map(|file| WindowsControlConnection {
                 file,
                 read_timeout: None,
+                peer_authorization: PeerAuthorization::NotRequired,
             })
     }
 
-    fn pipe_has_bytes(file: &File) -> io::Result<bool> {
-        use std::os::windows::io::AsRawHandle as _;
+    fn peer_not_authorized() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Control peer is not authorized",
+        )
+    }
 
-        let mut available = 0_u32;
-        let handle = file.as_raw_handle().cast::<c_void>() as HANDLE;
-        // SAFETY: `handle` is a live pipe and only the available byte count is
-        // requested into a valid u32 output.
-        if unsafe {
-            PeekNamedPipe(
-                handle,
-                ptr::null_mut(),
-                0,
-                ptr::null_mut(),
-                &raw mut available,
-                ptr::null_mut(),
-            )
-        } == 0
-        {
-            let error = io::Error::last_os_error();
-            return match error.raw_os_error().map(i32::cast_unsigned) {
-                Some(ERROR_BROKEN_PIPE | ERROR_NO_DATA) => Ok(true),
-                _ => Err(error),
-            };
+    fn connect_named_pipe(pipe: &OwnedHandle) -> io::Result<()> {
+        let (event, mut overlapped) = new_overlapped()?;
+        // SAFETY: `pipe` is a live overlapped server pipe. `overlapped` and
+        // its event remain live until this connection operation completes.
+        if unsafe { ConnectNamedPipe(pipe.0, &raw mut overlapped) } != 0 {
+            return Ok(());
         }
-        Ok(available > 0)
+        match unsafe { GetLastError() } {
+            ERROR_IO_PENDING => wait_for_overlapped(pipe.0, &overlapped, &event, None).map(|_| ()),
+            // A client may connect between CreateNamedPipeW and
+            // ConnectNamedPipe; Windows reports that successful race here.
+            ERROR_PIPE_CONNECTED => Ok(()),
+            error => Err(io::Error::from_raw_os_error(error.cast_signed())),
+        }
+    }
+
+    fn overlapped_read(
+        handle: HANDLE,
+        buffer: &mut [u8],
+        timeout: Option<Duration>,
+    ) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let length = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
+        let (event, mut overlapped) = new_overlapped()?;
+        let mut transferred = 0_u32;
+        // SAFETY: `handle` is a live overlapped pipe. `buffer`, `overlapped`,
+        // and the event remain live until the operation has completed or has
+        // been cancelled and reaped by `wait_for_overlapped`.
+        if unsafe {
+            ReadFile(
+                handle,
+                buffer.as_mut_ptr(),
+                length,
+                &raw mut transferred,
+                &raw mut overlapped,
+            )
+        } != 0
+        {
+            return Ok(transferred as usize);
+        }
+        if unsafe { GetLastError() } != ERROR_IO_PENDING {
+            return Err(io::Error::last_os_error());
+        }
+        wait_for_overlapped(handle, &overlapped, &event, timeout)
+            .map(|transferred| transferred as usize)
+    }
+
+    fn overlapped_write(handle: HANDLE, buffer: &[u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let length = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
+        let (event, mut overlapped) = new_overlapped()?;
+        let mut transferred = 0_u32;
+        // SAFETY: `handle` is a live overlapped pipe. `buffer`, `overlapped`,
+        // and the event remain live until the operation completes.
+        if unsafe {
+            WriteFile(
+                handle,
+                buffer.as_ptr(),
+                length,
+                &raw mut transferred,
+                &raw mut overlapped,
+            )
+        } != 0
+        {
+            return Ok(transferred as usize);
+        }
+        if unsafe { GetLastError() } != ERROR_IO_PENDING {
+            return Err(io::Error::last_os_error());
+        }
+        wait_for_overlapped(handle, &overlapped, &event, None)
+            .map(|transferred| transferred as usize)
+    }
+
+    fn new_overlapped() -> io::Result<(OwnedHandle, OVERLAPPED)> {
+        // SAFETY: this creates an unnamed, manual-reset event with no security
+        // descriptor. The returned unique HANDLE is owned below.
+        let event = OwnedHandle(unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) });
+        if event.0.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let overlapped = OVERLAPPED {
+            hEvent: event.0,
+            ..OVERLAPPED::default()
+        };
+        Ok((event, overlapped))
+    }
+
+    fn wait_for_overlapped(
+        handle: HANDLE,
+        overlapped: &OVERLAPPED,
+        event: &OwnedHandle,
+        timeout: Option<Duration>,
+    ) -> io::Result<u32> {
+        let wait_milliseconds = wait_milliseconds(timeout)?;
+        // SAFETY: `event` remains a live synchronization handle for this
+        // operation throughout the wait.
+        match unsafe { WaitForSingleObject(event.0, wait_milliseconds) } {
+            WAIT_OBJECT_0 => overlapped_result(handle, overlapped),
+            WAIT_TIMEOUT => {
+                cancel_and_reap(handle, overlapped);
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Control pipe read timed out",
+                ))
+            }
+            _ => {
+                let error = io::Error::last_os_error();
+                cancel_and_reap(handle, overlapped);
+                Err(error)
+            }
+        }
+    }
+
+    fn overlapped_result(handle: HANDLE, overlapped: &OVERLAPPED) -> io::Result<u32> {
+        let mut transferred = 0_u32;
+        // SAFETY: the operation event has signalled, and `overlapped` remains
+        // live while Windows publishes its final byte count.
+        if unsafe { GetOverlappedResult(handle, overlapped, &raw mut transferred, 0) } == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(transferred)
+        }
+    }
+
+    fn cancel_and_reap(handle: HANDLE, overlapped: &OVERLAPPED) {
+        // SAFETY: the operation and its OVERLAPPED are still live. Cancellation
+        // is best-effort because the I/O may have completed at the timeout
+        // boundary; the blocking result call then guarantees that Windows no
+        // longer references the stack OVERLAPPED or caller buffer.
+        unsafe {
+            CancelIoEx(handle, overlapped);
+            let mut transferred = 0_u32;
+            GetOverlappedResult(handle, overlapped, &raw mut transferred, 1);
+        }
+    }
+
+    fn wait_milliseconds(timeout: Option<Duration>) -> io::Result<u32> {
+        let Some(timeout) = timeout else {
+            return Ok(INFINITE);
+        };
+        if timeout.is_zero() {
+            return Ok(0);
+        }
+        let milliseconds = u32::try_from(timeout.as_millis().max(1)).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "read timeout is too large")
+        })?;
+        if milliseconds == INFINITE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "read timeout is too large",
+            ));
+        }
+        Ok(milliseconds)
     }
 
     fn endpoint_is_starting(error: &io::Error) -> bool {
@@ -559,6 +728,101 @@ mod windows {
 
     fn wide_null(value: &str) -> Vec<u16> {
         OsStr::new(value).encode_wide().chain([0]).collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::{
+            io::{Read as _, Write as _},
+            sync::{
+                Arc, Barrier,
+                atomic::{AtomicU64, Ordering},
+            },
+            time::Duration,
+        };
+
+        use super::{WindowsControlEndpoint, WindowsEndpointClaim, process_user_sid};
+
+        #[test]
+        fn same_user_connection_supports_concurrent_reads_and_writes_after_authorization() {
+            let endpoint = test_endpoint();
+            let WindowsEndpointClaim::Owner(owner) = endpoint
+                .claim_or_connect(Duration::ZERO)
+                .expect("first claimant should own the test endpoint")
+            else {
+                panic!("first claimant unexpectedly connected to an existing endpoint");
+            };
+            let client_endpoint = endpoint.clone();
+            let client = std::thread::spawn(move || {
+                let WindowsEndpointClaim::Existing(mut connection) = client_endpoint
+                    .claim_or_connect(Duration::from_secs(1))
+                    .expect("same-user client should connect to the test endpoint")
+                else {
+                    panic!("same-user client unexpectedly owned the test endpoint");
+                };
+                connection
+                    .write_all(b"hello")
+                    .expect("same-user client bytes should be written");
+                connection.set_read_timeout(Some(Duration::from_secs(1)));
+                let mut reply = [0_u8; 5];
+                connection
+                    .read_exact(&mut reply)
+                    .expect("authorized server reply should be readable");
+                connection
+                    .write_all(b"again")
+                    .expect("client should write while the server read is pending");
+                reply
+            });
+
+            let mut connection = owner
+                .accept_current_user()
+                .expect("same-user connection should be authorized");
+            let mut bytes = [0_u8; 5];
+            connection
+                .read_exact(&mut bytes)
+                .expect("authorized client bytes should be readable");
+
+            assert_eq!(&bytes, b"hello");
+            let mut writer = connection
+                .try_clone()
+                .expect("authorized connection should be cloneable for writing");
+            let reader_started = Arc::new(Barrier::new(2));
+            let reader_barrier = Arc::clone(&reader_started);
+            let reader = std::thread::spawn(move || {
+                let mut connection = connection;
+                let mut next = [0_u8; 5];
+                reader_barrier.wait();
+                connection
+                    .read_exact(&mut next)
+                    .expect("next client bytes should be readable");
+                next
+            });
+            reader_started.wait();
+            std::thread::sleep(Duration::from_millis(50));
+            writer
+                .write_all(b"world")
+                .expect("server should write while its read is pending");
+            assert_eq!(
+                client.join().expect("same-user client should finish"),
+                *b"world"
+            );
+            assert_eq!(
+                reader.join().expect("server reader should finish"),
+                *b"again"
+            );
+        }
+
+        fn test_endpoint() -> WindowsControlEndpoint {
+            static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let process_id = std::process::id();
+            WindowsControlEndpoint {
+                pipe_name: format!(r"\\.\pipe\debrute-control-test-{process_id}-{id}"),
+                mutex_name: format!(r"Local\DebruteRuntimeTest-{process_id}-{id}"),
+                current_user_sid: process_user_sid()
+                    .expect("current test user SID should be available"),
+            }
+        }
     }
 }
 

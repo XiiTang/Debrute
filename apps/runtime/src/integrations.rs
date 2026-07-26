@@ -2,6 +2,7 @@
 
 use std::{
     error::Error,
+    ffi::{OsStr, OsString},
     fmt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
@@ -431,9 +432,9 @@ pub trait IntegrationProcessAdapter: Send + Sync {
     fn resolve_executable(
         &self,
         name: &str,
-        env_path: &str,
+        env_path: &OsStr,
         platform: Platform,
-        path_ext: &str,
+        path_ext: &OsStr,
     ) -> Option<PathBuf>;
 
     fn run_probe(&self, file: &Path, args: &[String], timeout_ms: u64) -> ProbeResult;
@@ -525,8 +526,8 @@ pub struct IntegrationOperationResult {
 
 pub struct IntegrationService {
     platform: Platform,
-    env_path: String,
-    path_ext: String,
+    env_path: OsString,
+    path_ext: OsString,
     adapter: Arc<dyn IntegrationProcessAdapter>,
     catalog: IntegrationCatalog,
     scan_sequence: Mutex<u64>,
@@ -545,8 +546,8 @@ impl IntegrationService {
     #[must_use]
     pub fn new(
         platform: Platform,
-        env_path: impl Into<String>,
-        path_ext: impl Into<String>,
+        env_path: impl Into<OsString>,
+        path_ext: impl Into<OsString>,
         adapter: Arc<dyn IntegrationProcessAdapter>,
     ) -> Self {
         Self {

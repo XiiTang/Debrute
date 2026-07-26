@@ -698,13 +698,13 @@ export interface TerminalCheckpoint {
 export type TerminalServerFrame =
   | { type: 'sync'; protocolVersion: number; topologyRevision: number; sessions: TerminalSessionView[]; checkpoints: TerminalCheckpoint[] }
   | { type: 'observed'; checkpoint: TerminalCheckpoint }
-  | { type: 'input-ack'; terminalId: string; sequence: number }
-  | { type: 'resized'; terminalId: string; cols: number; rows: number }
+  | { type: 'input-ack'; requestId: number; terminalId: string; sequence: number }
+  | { type: 'resized'; requestId: number; terminalId: string; cols: number; rows: number }
   | { type: 'topology'; topologyRevision: number; sessions: TerminalSessionView[] }
   | { type: 'output'; terminalId: string; sequence: number; dataBase64: string }
   | { type: 'status'; session: TerminalSessionView }
   | { type: 'exit'; terminalId: string; exitCode: number | null; signal: string | null }
-  | { type: 'error'; terminalId: string | null; code: string; message: string };
+  | { type: 'error'; requestId: number | null; terminalId: string | null; code: string; message: string };
 
 export interface AddProjectPathToCanvasMapInput {
   canvasId: string;

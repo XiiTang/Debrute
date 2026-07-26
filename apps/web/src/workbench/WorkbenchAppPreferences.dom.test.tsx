@@ -176,6 +176,21 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(second.root, second.container);
   });
 
+  it('delegates the Desktop Project-open surface to the native picker', async () => {
+    const executeNativeMenuCommand = vi.fn(async () => ({ ok: true as const }));
+    window.debruteShell = shellApiFixture({ executeNativeMenuCommand });
+    const { container, root } = await renderWorkbenchApp('/');
+
+    await act(async () => {
+      requireButton(container, 'Open Project').click();
+      await Promise.resolve();
+    });
+
+    expect(executeNativeMenuCommand).toHaveBeenCalledWith({ commandId: 'project.open-picker' });
+    expect(apiState.api!.openProjectFromPicker).not.toHaveBeenCalled();
+    await unmount(root, container);
+  });
+
   it('disables the Terminal panel before a project is open', async () => {
     const { container, root } = await renderWorkbenchApp('/');
 

@@ -29,7 +29,7 @@ describe('executeTitleBarMenuCommand', () => {
     expect(execCommand).not.toHaveBeenCalled();
   });
 
-  it('keeps current-window Project opens in the renderer and delegates only new-window opens', async () => {
+  it('uses the Workbench action for current-window opens and the shell for new windows', async () => {
     const executeNativeMenuCommand = vi.fn(async () => ({ ok: true as const }));
     const openProjectFromPicker = vi.fn(async () => undefined);
     const context = {

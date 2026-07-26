@@ -286,6 +286,15 @@ production build. `pnpm build` is the sole Desktop production build path and
 includes the Web build, Rust binaries, Desktop type check, Electron bundle, and
 complete Product seed. The package exposes no weaker build alias or unused
 sourcemap switch that can produce a product-looking partial result.
+
+The source-development launchers own their direct Vite and Electron children.
+On macOS they send `SIGTERM` and wait for the child to exit. On Windows they run
+the host's exact `%WINDIR%\System32\taskkill.exe /T /F` against that child's PID
+and wait for the owned process tree to exit; a missing or invalid `WINDIR` is an
+error, not a guessed `C:\Windows` path or direct-child fallback. Shutdown attempts
+every owned child and closes the Runtime Control connection even when another
+cleanup fails, then reports all cleanup failures together.
+
 On macOS the development scripts ad-hoc sign the freshly assembled Runtime app
 and, only when its downloaded signature is not accepted by the host, the
 unpacked Electron app with the repository's development entitlements. This is
@@ -303,11 +312,13 @@ One Runtime can host multiple live Project sessions. The stable public Project
 id comes only from `.debrute/project.json.project.id`; Runtime maps recent ids to
 canonical roots and rejects duplicates. Browser tabs and Electron windows have
 one live Workbench connection and at most one bound Project. Interactive users
-open Projects with the Workbench `Open Project` action, which asks Runtime to
-present the native directory picker. Agents and automation open an explicit
-absolute path with `debrute workbench start <project> --frontend browser`; the
-command sends a native Control activation and never prints an authentication
-URL. Runtime acquisition, optional launch, handshake, and Ready polling share
+open Projects with the Workbench `Open Project` action. Desktop Workbenches ask
+Electron to present the native directory picker owned by their current window;
+browser Workbenches ask Runtime to present the host picker. Agents and automation
+open an explicit absolute path with
+`debrute workbench start <project> --frontend browser`; the command sends a native
+Control activation and never prints an authentication URL. Runtime acquisition,
+optional launch, handshake, and Ready polling share
 one absolute fifteen-second deadline in development and packaged clients; a
 wrapper does not add or restart another Ready timer. The root Workbench route
 does not reopen the last Project.

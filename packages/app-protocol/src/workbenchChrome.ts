@@ -1,5 +1,6 @@
 export type NativeMenuCommandId =
   | 'window.new'
+  | 'project.open-picker'
   | 'project.open-picker-new-window'
   | 'window.close'
   | 'edit.undo'

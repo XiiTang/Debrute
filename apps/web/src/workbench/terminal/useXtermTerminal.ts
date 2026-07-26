@@ -57,8 +57,6 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
         }).then((result) => input.onSessionUpdate(result.session)).catch(input.onError);
       }
     };
-    resizeToFit();
-
     const dataDisposable = terminal.onData((data) => {
       if (sessionStatusRef.current !== 'running') {
         return;
@@ -72,6 +70,7 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
       onError: input.onError
     });
     const subscription = input.api.subscribeTerminalEvents(session.id, renderTerminalEvent, input.onError);
+    resizeToFit();
 
     const resizeObserver = new ResizeObserver(resizeToFit);
     resizeObserver.observe(container);

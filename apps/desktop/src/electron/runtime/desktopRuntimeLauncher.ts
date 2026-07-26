@@ -80,6 +80,7 @@ function spawnRuntime(options: DesktopRuntimeLaunchOptions): ChildProcess {
     return spawn(options.runtimeEntrypoint, options.runtimeArguments, {
       detached: true,
       stdio: ['ignore', log, log],
+      windowsHide: process.platform === 'win32',
       env: {
         ...options.environment,
         DEBRUTE_RUNTIME_WEB_ASSETS_DIR: options.webAssetsDirectory,

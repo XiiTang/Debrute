@@ -28,7 +28,11 @@ process exits, whether service supervision ended through Product Quit or an
 internal Runtime error. Terminal destruction sends one shutdown request; if
 that request cannot complete, the owner force-kills the exact process tree and
 still joins the actor. It never retries the actor command or detaches the owned
-thread.
+thread. PTY writes use bounded, non-blocking admission; saturation fails only
+that Terminal and terminates its process tree so its actor remains available
+for shutdown. Multiplexed Terminal controls carry request identities, and a
+Terminal-scoped control failure settles only that request without closing the
+shared hub.
 
 Source code classifies each known work type; work is never promoted because it
 crossed an elapsed-time threshold. A future non-model Operation requires

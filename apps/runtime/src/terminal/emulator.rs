@@ -11,6 +11,7 @@ const MAX_CHECKPOINT_ANSI_BYTES: usize = 32 * 1024;
 #[derive(Default)]
 struct TerminalCallbacks {
     title: String,
+    device_response: Vec<u8>,
 }
 
 impl vt100::Callbacks for TerminalCallbacks {
@@ -18,12 +19,40 @@ impl vt100::Callbacks for TerminalCallbacks {
         let end = title.len().min(MAX_TITLE_BYTES);
         self.title = String::from_utf8_lossy(&title[..end]).into_owned();
     }
+
+    fn unhandled_csi(
+        &mut self,
+        screen: &mut vt100::Screen,
+        intermediate_1: Option<u8>,
+        intermediate_2: Option<u8>,
+        params: &[&[u16]],
+        final_char: char,
+    ) {
+        if intermediate_1.is_none()
+            && intermediate_2.is_none()
+            && final_char == 'n'
+            && params.len() == 1
+            && params[0] == [6]
+        {
+            let (row, col) = screen.cursor_position();
+            self.device_response.extend_from_slice(
+                format!("\x1b[{};{}R", row.saturating_add(1), col.saturating_add(1)).as_bytes(),
+            );
+        }
+    }
+}
+
+pub(crate) struct ProcessedTerminalOutput {
+    pub(crate) sequence: u64,
+    pub(crate) observer_bytes: Vec<u8>,
+    pub(crate) device_response: Vec<u8>,
 }
 
 pub(crate) struct TerminalEmulator {
     terminal_id: String,
     parser: vt100::Parser<TerminalCallbacks>,
     normal_shadow: NormalScreenShadow,
+    observer_output: ObserverOutputFilter,
     output_sequence: u64,
 }
 
@@ -38,15 +67,22 @@ impl TerminalEmulator {
                 TerminalCallbacks::default(),
             ),
             normal_shadow: NormalScreenShadow::new(rows, cols),
+            observer_output: ObserverOutputFilter::default(),
             output_sequence: 0,
         }
     }
 
-    pub(crate) fn process_output(&mut self, bytes: &[u8]) -> u64 {
+    pub(crate) fn process_output(&mut self, bytes: &[u8]) -> ProcessedTerminalOutput {
+        let observer_bytes = self.observer_output.process(bytes);
         self.normal_shadow.process(bytes);
         self.parser.process(bytes);
         self.output_sequence = self.output_sequence.saturating_add(1);
-        self.output_sequence
+        let device_response = std::mem::take(&mut self.parser.callbacks_mut().device_response);
+        ProcessedTerminalOutput {
+            sequence: self.output_sequence,
+            observer_bytes,
+            device_response,
+        }
     }
 
     pub(crate) fn resize(&mut self, rows: u16, cols: u16) {
@@ -96,6 +132,58 @@ impl TerminalEmulator {
             ansi_base64: STANDARD.encode(ansi),
         })
     }
+}
+
+struct ObserverOutputFilter {
+    escape: EscapeState,
+}
+
+impl Default for ObserverOutputFilter {
+    fn default() -> Self {
+        Self {
+            escape: EscapeState::Ground,
+        }
+    }
+}
+
+impl ObserverOutputFilter {
+    fn process(&mut self, bytes: &[u8]) -> Vec<u8> {
+        let mut output = Vec::with_capacity(bytes.len());
+        for &byte in bytes {
+            let state = std::mem::replace(&mut self.escape, EscapeState::Ground);
+            match state {
+                EscapeState::Ground if byte == 0x1b => self.escape = EscapeState::Escape,
+                EscapeState::Ground => output.push(byte),
+                EscapeState::Escape if byte == b'[' => {
+                    self.escape = EscapeState::Csi(vec![0x1b, b'[']);
+                }
+                EscapeState::Escape => output.extend_from_slice(&[0x1b, byte]),
+                EscapeState::Csi(mut sequence) => {
+                    sequence.push(byte);
+                    if sequence.len() > MAX_PENDING_CSI_BYTES {
+                        output.extend_from_slice(&sequence);
+                    } else if (0x40..=0x7e).contains(&byte) {
+                        if !is_cursor_position_query(&sequence) {
+                            output.extend_from_slice(&sequence);
+                        }
+                    } else {
+                        self.escape = EscapeState::Csi(sequence);
+                    }
+                }
+            }
+        }
+        output
+    }
+}
+
+fn is_cursor_position_query(sequence: &[u8]) -> bool {
+    if !sequence.starts_with(b"\x1b[") || sequence.last() != Some(&b'n') {
+        return false;
+    }
+    std::str::from_utf8(&sequence[2..sequence.len() - 1])
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        == Some(6)
 }
 
 fn ansi_reconstruction(
@@ -288,6 +376,29 @@ mod tests {
             emulator.checkpoint("fallback").unwrap().title,
             "Debrute Shell"
         );
+    }
+
+    #[test]
+    fn cursor_position_queries_are_answered_once_by_the_runtime() {
+        let mut emulator = TerminalEmulator::new("terminal-1", 24, 80);
+        let processed = emulator.process_output(b"abc\x1b[6nvisible\x1b[6n");
+
+        assert_eq!(processed.sequence, 1);
+        assert_eq!(processed.observer_bytes, b"abcvisible");
+        assert_eq!(processed.device_response, b"\x1b[1;4R\x1b[1;11R");
+        assert_eq!(emulator.parser.screen().contents(), "abcvisible");
+    }
+
+    #[test]
+    fn cursor_position_queries_survive_output_chunk_boundaries() {
+        let mut emulator = TerminalEmulator::new("terminal-1", 24, 80);
+        let first = emulator.process_output(b"abc\x1b[");
+        let second = emulator.process_output(b"6nvisible");
+
+        assert_eq!(first.observer_bytes, b"abc");
+        assert!(first.device_response.is_empty());
+        assert_eq!(second.observer_bytes, b"visible");
+        assert_eq!(second.device_response, b"\x1b[1;4R");
     }
 
     #[test]

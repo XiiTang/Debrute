@@ -13,6 +13,10 @@ import {
   runtimeEntrypoint,
   workspaceRoot
 } from './rust-runtime-dev.js';
+import {
+  stopDevelopmentChild,
+  throwDevelopmentCleanupFailures
+} from './stop-development-child.mjs';
 import { parseWorkbenchDevelopmentOptions } from './workbench-development-options.js';
 
 const developmentOptions = parseWorkbenchDevelopmentOptions(process.argv.slice(2));
@@ -33,7 +37,13 @@ const control = await ensureRustRuntime({
   restartExisting: runtimeRebuilt
 });
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => void requestShutdown().finally(() => process.exit(0)));
+  process.once(signal, () => void requestShutdown().then(
+    () => process.exit(0),
+    (error) => {
+      console.error(error);
+      process.exit(1);
+    }
+  ));
 }
 const vitePort = await chooseDevelopmentPort();
 const viteOrigin = `http://127.0.0.1:${vitePort}`;
@@ -107,9 +117,14 @@ try {
 }
 
 function requestShutdown(): Promise<void> {
-  shutdown ??= Promise.all([stopChild(electron), stopChild(vite)]).then(() => {
-    control.close();
-  });
+  shutdown ??= (async () => {
+    const results = await Promise.allSettled([
+      stopDevelopmentChild(electron, { label: 'Electron development host' }),
+      stopDevelopmentChild(vite, { label: 'Vite development server' }),
+      Promise.resolve().then(() => control.close())
+    ]);
+    throwDevelopmentCleanupFailures(results, 'Electron development cleanup failed.');
+  })();
   return shutdown;
 }
 
@@ -167,16 +182,6 @@ function codesign(arguments_: string[]): void {
   if (result.status !== 0) {
     throw new Error(`macOS development signing failed with code ${result.status ?? 'unknown'}.`);
   }
-}
-
-async function stopChild(child: ChildProcess | undefined): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  await new Promise<void>((resolveExit) => {
-    child.once('exit', () => resolveExit());
-    child.kill('SIGTERM');
-  });
 }
 
 async function waitForVite(origin: string): Promise<void> {

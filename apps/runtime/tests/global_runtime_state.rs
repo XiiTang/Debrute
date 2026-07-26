@@ -765,9 +765,9 @@ impl IntegrationProcessAdapter for MissingAdapter {
     fn resolve_executable(
         &self,
         _name: &str,
-        _env_path: &str,
+        _env_path: &std::ffi::OsStr,
         _platform: Platform,
-        _path_ext: &str,
+        _path_ext: &std::ffi::OsStr,
     ) -> Option<PathBuf> {
         None
     }
@@ -818,9 +818,9 @@ impl IntegrationProcessAdapter for BlockingScanAdapter {
     fn resolve_executable(
         &self,
         _name: &str,
-        _env_path: &str,
+        _env_path: &std::ffi::OsStr,
         _platform: Platform,
-        _path_ext: &str,
+        _path_ext: &std::ffi::OsStr,
     ) -> Option<PathBuf> {
         let mut state = self.state.lock().expect("scan state should lock");
         state.0 = true;

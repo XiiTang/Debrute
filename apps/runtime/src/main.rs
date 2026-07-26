@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use std::{error::Error, ffi::OsString, process::ExitCode};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

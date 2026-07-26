@@ -2,6 +2,7 @@
 
 pub mod cli;
 pub mod control;
+mod executable_path;
 pub mod generation;
 pub mod global;
 mod integration_process;

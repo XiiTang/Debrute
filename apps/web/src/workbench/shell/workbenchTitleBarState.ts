@@ -6,7 +6,6 @@ type WorkbenchHostKind = 'web' | 'desktop';
 export type WorkbenchMenuId = 'file' | 'edit' | 'view';
 
 export type WorkbenchMenuCommandId = NativeMenuCommandId
-  | 'project.open-picker'
   | 'project.open-recent'
   | 'project.clear-recent';
 

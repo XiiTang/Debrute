@@ -1,6 +1,6 @@
 //! Runtime-wide owner of the one bounded native helper-process supervisor.
 
-use std::sync::Arc;
+use std::{ffi::OsString, sync::Arc};
 
 use crate::integrations::{IntegrationService, Platform};
 use crate::{
@@ -31,8 +31,8 @@ impl RuntimeWorkerServices {
     pub fn integration_service(
         &self,
         platform: Platform,
-        env_path: impl Into<String>,
-        path_ext: impl Into<String>,
+        env_path: impl Into<OsString>,
+        path_ext: impl Into<OsString>,
     ) -> IntegrationService {
         IntegrationService::new(
             platform,

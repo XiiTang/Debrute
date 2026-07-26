@@ -11,6 +11,7 @@ import {
   connectRuntimeControl
 } from '@debrute/runtime-control-client';
 import { packageManagerCommand } from './package-manager-command.mjs';
+import { terminateWindowsProcessTree } from './terminate-windows-process-tree.mjs';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
@@ -172,7 +173,7 @@ async function writeJson(path, value) {
 
 function startWorkbenchRuntime() {
   const command = packageManagerCommand(workspaceRoot, ['dev']);
-  const toolHome = process.env.HOME;
+  const toolHome = process.env.HOME ?? process.env.USERPROFILE;
   const child = spawn(command.command, command.args, {
     cwd: workspaceRoot,
     env: {
@@ -185,7 +186,11 @@ function startWorkbenchRuntime() {
       ...(toolHome ? {
         CARGO_HOME: process.env.CARGO_HOME ?? join(toolHome, '.cargo'),
         RUSTUP_HOME: process.env.RUSTUP_HOME ?? join(toolHome, '.rustup'),
-        COREPACK_HOME: process.env.COREPACK_HOME ?? join(toolHome, '.cache', 'node', 'corepack')
+        COREPACK_HOME: process.env.COREPACK_HOME ?? (
+          process.platform === 'win32' && process.env.LOCALAPPDATA
+            ? join(process.env.LOCALAPPDATA, 'node', 'corepack')
+            : join(toolHome, '.cache', 'node', 'corepack')
+        )
       } : {})
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -224,6 +229,13 @@ function startWorkbenchRuntime() {
         await stopIsolatedRuntime();
       } finally {
         if (child.exitCode !== null || child.signalCode !== null) {
+          await exited;
+          return;
+        }
+        if (process.platform === 'win32') {
+          await terminateWindowsProcessTree(child, {
+            label: 'browser-verification Workbench process'
+          });
           await exited;
           return;
         }
@@ -275,10 +287,6 @@ async function stopIsolatedRuntime() {
 }
 
 function killChildTree(child, signal) {
-  if (process.platform === 'win32') {
-    child.kill(signal);
-    return;
-  }
   try {
     process.kill(-child.pid, signal);
   } catch {

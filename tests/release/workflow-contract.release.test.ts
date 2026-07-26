@@ -78,8 +78,10 @@ describe('GitHub release workflow contract', () => {
     expect(packagedDesktopSmoke).toContain('window.debruteShell');
     expect(packagedDesktopSmoke).toContain('workbench-connection-ended');
     expect(packagedDesktopSmoke).toContain("runCli(options.cli, ['runtime', 'stop'], Date.now() + 15_000)");
-    expect(packagedDesktopSmoke).toContain("spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F']");
-    expect(packagedDesktopSmoke).toContain("process.kill(-pid, 'SIGKILL')");
+    expect(packagedDesktopSmoke).toContain("import { terminateWindowsProcessTree } from './terminate-windows-process-tree.mjs'");
+    expect(packagedDesktopSmoke).toContain('await terminateWindowsProcessTree(child');
+    expect(packagedDesktopSmoke).not.toContain("spawnSync('taskkill.exe'");
+    expect(packagedDesktopSmoke).toContain("process.kill(-child.pid, 'SIGKILL')");
     expect(packagedDesktopSmoke).toContain('AbortSignal.timeout');
     expect(packagedDesktopSmoke).toContain("child.kill('SIGKILL')");
     expect(packagedDesktopSmoke).not.toMatch(/(?:pkill|killall|Get-Process)/);

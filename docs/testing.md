@@ -84,6 +84,14 @@ initialization, including libvips startup, use an isolated Runtime process; they
 do not call a native shutdown function and attempt to reinitialize it in the
 same test process.
 
+Development-launcher contract tests execute the shared direct-child stop
+boundary and verify that both launchers attempt all cleanup, always close their
+Control connection, and aggregate failures. The Windows contract additionally
+spawns a real parent and grandchild, terminates them through the production
+`taskkill /T /F` path, and requires both PIDs to disappear. The test uses the
+host's real `WINDIR`; production and teardown contain no guessed Windows path or
+direct-child success fallback.
+
 The resource-ownership rationale is recorded in
 [`0013-tests-own-their-external-resources.md`](./adr/0013-tests-own-their-external-resources.md).
 

@@ -7,7 +7,7 @@
 use std::{
     collections::HashMap,
     env,
-    path::{Path, PathBuf},
+    path::Path,
     pin::Pin,
     sync::{Arc, Mutex, MutexGuard, Weak},
     task::{Context, Poll},
@@ -22,6 +22,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     control::RuntimeControlState,
+    executable_path::resolve_executable,
     generation::GenerationService,
     global::{
         GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent, GlobalRuntimeService,
@@ -180,9 +181,12 @@ impl WorkbenchRuntimeServices {
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         let debrute_home = debrute_home.as_ref().to_path_buf();
         let workers = RuntimeWorkerServices::new();
+        let platform = current_platform();
+        let env_path = env::var_os("PATH").unwrap_or_default();
+        let path_ext = env::var_os("PATHEXT").unwrap_or_default();
         let media_tools = MediaToolPaths {
-            ffmpeg: resolve_executable("ffmpeg"),
-            ffprobe: resolve_executable("ffprobe"),
+            ffmpeg: resolve_executable("ffmpeg", &env_path, platform, &path_ext),
+            ffprobe: resolve_executable("ffprobe", &env_path, platform, &path_ext),
         };
         let previews = Arc::new(crate::project::ProjectPreviewService::new(
             &workers,
@@ -207,11 +211,7 @@ impl WorkbenchRuntimeServices {
             )
         })?);
         let global_store = Arc::new(GlobalConfigStore::new(&debrute_home));
-        let integrations = workers.integration_service(
-            current_platform(),
-            env::var("PATH").unwrap_or_default(),
-            env::var("PATHEXT").unwrap_or_default(),
-        );
+        let integrations = workers.integration_service(platform, env_path, path_ext);
         let global = Arc::new(GlobalRuntimeService::new(
             Arc::clone(&global_store),
             Arc::clone(&catalog),
@@ -1222,13 +1222,6 @@ fn current_platform() -> Platform {
     {
         Platform::Windows
     }
-}
-
-fn resolve_executable(name: &str) -> Option<PathBuf> {
-    env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
-        let candidate = directory.join(name);
-        candidate.is_file().then_some(candidate)
-    })
 }
 
 fn lock_photoshop_socket_registry(

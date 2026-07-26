@@ -265,6 +265,7 @@ async function executeNativeMenuCommand(
   }
   switch (command.commandId) {
     case 'window.new': await dispatchOpenIntent({ kind: 'new-window' }); return;
+    case 'project.open-picker': await chooseProject(window); return;
     case 'project.open-picker-new-window': await chooseProject(undefined, true); return;
     case 'window.close': window.close(); return;
     case 'view.reload': await reloadWindow(window); return;

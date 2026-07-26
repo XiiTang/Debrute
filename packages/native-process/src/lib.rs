@@ -108,9 +108,11 @@ pub fn configure_process_group(command: &mut Command) {
 #[cfg(target_os = "windows")]
 pub fn configure_process_group(command: &mut Command) {
     use std::os::windows::process::CommandExt as _;
-    use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_SUSPENDED};
+    use windows_sys::Win32::System::Threading::{
+        CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, CREATE_SUSPENDED,
+    };
 
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED);
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_SUSPENDED);
 }
 
 pub struct ChildProcessTree {
@@ -182,12 +184,7 @@ impl ChildProcessTree {
     pub fn attach(child: &Child) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle as _;
 
-        let tree = Self::attach_raw_handle(child.as_raw_handle())?;
-        if let Err(error) = resume_process(child.as_raw_handle()) {
-            let _ = tree.force_kill();
-            return Err(error);
-        }
-        Ok(tree)
+        Self::attach_raw_handle(child.as_raw_handle())
     }
 
     /// Attaches a freshly spawned PTY child to a kill-on-close Windows Job Object.
@@ -237,7 +234,12 @@ impl ChildProcessTree {
             unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
             return Err(error);
         }
-        Ok(Self { job: job as isize })
+        let tree = Self { job: job as isize };
+        if let Err(error) = resume_process(child) {
+            let _ = tree.force_kill();
+            return Err(error);
+        }
+        Ok(tree)
     }
 
     /// Requests owned process-group or Job Object termination.

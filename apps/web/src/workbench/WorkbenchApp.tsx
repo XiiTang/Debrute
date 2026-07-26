@@ -767,6 +767,22 @@ function WorkbenchProjectGenerationApp({
   }, [activeCanvasId]);
 
   const openProject = useCallback<WorkbenchActions['openProject']>(async () => {
+    const shell = getDebruteShellApi();
+    if (shell) {
+      setProjectOpenError(undefined);
+      setProjectOpenAttemptedPath(undefined);
+      try {
+        await shell.executeNativeMenuCommand({ commandId: 'project.open-picker' });
+      } catch (error) {
+        const message = i18n.t('projectOpen.openFailed', { message: errorMessage(error) });
+        if (hasAcceptedProject) {
+          notify(message);
+        } else {
+          setProjectOpenError(message);
+        }
+      }
+      return;
+    }
     if (!beginProjectOpening()) {
       return;
     }
@@ -793,7 +809,7 @@ function WorkbenchProjectGenerationApp({
     } finally {
       finishProjectOpening(!projectBindingChanged);
     }
-  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, i18n, setProjectOpenAttemptedPath, setProjectOpenError, setProjectOpenHereTargetId]);
+  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, hasAcceptedProject, i18n, notify, setProjectOpenAttemptedPath, setProjectOpenError, setProjectOpenHereTargetId]);
 
   const openProjectRoot = useCallback(async (projectRoot: string): Promise<void> => {
     if (!beginProjectOpening()) {

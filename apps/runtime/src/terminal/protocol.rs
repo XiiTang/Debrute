@@ -70,11 +70,13 @@ pub enum TerminalClientFrame {
         terminal_id: String,
     },
     Input {
+        request_id: u64,
         terminal_id: String,
         sequence: u64,
         data: String,
     },
     Resize {
+        request_id: u64,
         terminal_id: String,
         cols: u16,
         rows: u16,
@@ -99,10 +101,12 @@ pub enum TerminalServerFrame {
         checkpoint: TerminalCheckpoint,
     },
     InputAck {
+        request_id: u64,
         terminal_id: String,
         sequence: u64,
     },
     Resized {
+        request_id: u64,
         terminal_id: String,
         cols: u16,
         rows: u16,
@@ -125,6 +129,7 @@ pub enum TerminalServerFrame {
         signal: Option<String>,
     },
     Error {
+        request_id: Option<u64>,
         terminal_id: Option<String>,
         code: String,
         message: String,
@@ -138,6 +143,7 @@ mod tests {
     #[test]
     fn hub_frames_use_one_closed_versioned_json_vocabulary() {
         let frame = TerminalClientFrame::Input {
+            request_id: 11,
             terminal_id: "terminal-1".to_owned(),
             sequence: 7,
             data: "hello".to_owned(),
@@ -145,7 +151,7 @@ mod tests {
         let json = serde_json::to_string(&frame).expect("frame should serialize");
         assert_eq!(
             json,
-            r#"{"type":"input","terminalId":"terminal-1","sequence":7,"data":"hello"}"#
+            r#"{"type":"input","requestId":11,"terminalId":"terminal-1","sequence":7,"data":"hello"}"#
         );
         assert_eq!(
             serde_json::from_str::<TerminalClientFrame>(&json).expect("frame should parse"),
@@ -154,9 +160,24 @@ mod tests {
         assert!(serde_json::from_str::<TerminalClientFrame>(r#"{"type":"command"}"#).is_err());
         assert!(
             serde_json::from_str::<TerminalClientFrame>(
-                r#"{"type":"input","terminalId":"terminal-1","sequence":7,"data":"hello","extra":true}"#,
+                r#"{"type":"input","requestId":11,"terminalId":"terminal-1","sequence":7,"data":"hello","extra":true}"#,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn request_errors_preserve_the_control_request_id() {
+        let frame = TerminalServerFrame::Error {
+            request_id: Some(11),
+            terminal_id: Some("terminal-1".to_owned()),
+            code: "terminal_input_failed".to_owned(),
+            message: "Fixture input failed.".to_owned(),
+        };
+
+        assert_eq!(
+            serde_json::to_string(&frame).expect("frame should serialize"),
+            r#"{"type":"error","requestId":11,"terminalId":"terminal-1","code":"terminal_input_failed","message":"Fixture input failed."}"#
         );
     }
 }

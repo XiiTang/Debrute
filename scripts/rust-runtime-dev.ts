@@ -180,29 +180,50 @@ function optionalFileText(path: string): string | undefined {
 }
 
 export async function stopRustRuntime(control: RuntimeControlClient): Promise<void> {
+  let runtimeLossObserved = false;
+  let removeRuntimeLost = () => undefined;
   const stopped = new Promise<void>((resolveStopped) => {
-    control.onRuntimeLost(() => resolveStopped());
+    removeRuntimeLost = control.onRuntimeLost(() => {
+      runtimeLossObserved = true;
+      resolveStopped();
+    });
   });
-  const response = await control.quitProduct();
-  if (response.result !== 'ok') {
-    control.close();
-    throw new Error(`Existing Debrute Runtime rejected its development restart: ${response.result}.`);
-  }
-  let timeout: NodeJS.Timeout | undefined;
   try {
-    await Promise.race([
-      stopped,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error('Existing Debrute Runtime did not stop for the development rebuild.')),
-          RUNTIME_READY_TIMEOUT_MS
-        );
-      })
-    ]);
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
+    let response: Awaited<ReturnType<RuntimeControlClient['quitProduct']>>;
+    try {
+      response = await control.quitProduct();
+    } catch (error) {
+      if (
+        runtimeLossObserved
+        && error instanceof RuntimeControlError
+        && error.code === 'runtime_lost'
+      ) {
+        return;
+      }
+      throw error;
     }
+    if (response.result !== 'ok') {
+      control.close();
+      throw new Error(`Existing Debrute Runtime rejected its development restart: ${response.result}.`);
+    }
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        stopped,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('Existing Debrute Runtime did not stop for the development rebuild.')),
+            RUNTIME_READY_TIMEOUT_MS
+          );
+        })
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  } finally {
+    removeRuntimeLost();
   }
 }
 
@@ -294,6 +315,7 @@ function spawnRuntime(options: RustRuntimeDevelopmentOptions): ChildProcess {
       cwd: workspaceRoot,
       detached: process.env.DEBRUTE_DEV_STOP_RUNTIME_ON_EXIT !== '1',
       stdio: ['ignore', log, log],
+      windowsHide: process.platform === 'win32',
       env: {
         ...process.env,
         DEBRUTE_RUNTIME_WEB_ASSETS_DIR: runtimeAssetsDirectory,
