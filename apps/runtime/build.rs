@@ -17,7 +17,10 @@ fn main() {
         "cargo::rustc-link-search=native={}",
         library_directory.display()
     );
-    if target == "macos" {
+    if target == "windows" {
+        println!("cargo::rustc-link-lib=dylib=libglib-2.0");
+        println!("cargo::rustc-link-lib=dylib=libgobject-2.0");
+    } else {
         println!("cargo::rustc-link-arg=-Wl,-rpath,@loader_path/../libvips");
         println!("cargo::rustc-link-arg-bins=-Wl,-rpath,@loader_path/libvips");
         println!(

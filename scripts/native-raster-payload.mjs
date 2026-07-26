@@ -20,12 +20,19 @@ export function nativeRasterTargetLock(identity = platformIdentity()) {
   return target;
 }
 
+export function nativeRasterLinkFileNames(identity = platformIdentity()) {
+  const target = nativeRasterTargetLock(identity);
+  return target.platform === 'windows'
+    ? target.importLibraryPaths.map((path) => basename(path))
+    : ['libvips.dylib', 'libglib-2.0.dylib', 'libgobject-2.0.dylib'];
+}
+
 export function validateNativeRasterLock() {
   const lock = NATIVE_RASTER_PAYLOAD_LOCK;
   const expectedTargets = ['macos-arm64', 'macos-x64', 'windows-x64'];
   if (
     lock.schemaVersion !== 1
-    || lock.payloadRevision !== 2
+    || lock.payloadRevision !== 3
     || lock.rsVipsVersion !== '0.7.0'
     || lock.libvipsVersion !== '8.18.4'
     || JSON.stringify(lock.rasterFormats) !== JSON.stringify(['jpeg', 'png', 'webp', 'avif', 'tiff'])
@@ -43,6 +50,13 @@ export function validateNativeRasterLock() {
     ) {
       throw new Error(`Native raster payload lock target is invalid: ${identity}`);
     }
+  }
+  if (JSON.stringify(lock.targets['windows-x64'].importLibraryPaths) !== JSON.stringify([
+    'vips-dev-8.18/lib/libvips.lib',
+    'vips-dev-8.18/lib/libglib-2.0.lib',
+    'vips-dev-8.18/lib/libgobject-2.0.lib'
+  ])) {
+    throw new Error('Native raster payload Windows import-library closure is invalid.');
   }
   return lock;
 }
@@ -101,40 +115,52 @@ export async function validateNativeRasterPayload({ root: configuredRoot } = {})
     || manifest.architecture !== process.arch
     || manifest.sourceArchiveSha256 !== nativeRasterTargetLock().sha256
     || JSON.stringify(manifest.rasterFormats) !== JSON.stringify(NATIVE_RASTER_PAYLOAD_LOCK.rasterFormats)
-    || typeof manifest.linkDirectory !== 'string'
+    || manifest.linkDirectory !== 'link'
     || !Array.isArray(manifest.runtimeFiles)
     || !Array.isArray(manifest.linkFiles)
   ) {
     throw new Error(`Native raster payload identity is invalid: ${manifestPath}`);
   }
   const declaredPaths = new Set();
-  for (const file of [...manifest.runtimeFiles, ...manifest.linkFiles]) {
-    if (
-      typeof file?.path !== 'string'
-      || !/^[a-zA-Z0-9._/-]+$/.test(file.path)
-      || file.path.startsWith('/')
-      || file.path.includes('..')
-      || declaredPaths.has(file.path)
-      || !/^[a-f0-9]{64}$/.test(file.sha256)
-      || !Number.isSafeInteger(file.sizeBytes)
-      || file.sizeBytes <= 0
-    ) {
-      throw new Error(`Native raster payload file declaration is invalid: ${manifestPath}`);
-    }
-    declaredPaths.add(file.path);
-    const path = join(root, file.path);
-    const metadata = await stat(path);
-    if (!metadata.isFile() || metadata.size !== file.sizeBytes) {
-      throw new Error(`Native raster payload file size does not match its lock: ${path}`);
-    }
-    const bytes = await readFile(path);
-    const actual = createHash('sha256').update(bytes).digest('hex');
-    if (actual !== file.sha256) {
-      throw new Error(`Native raster payload checksum does not match its lock: ${path}`);
+  for (const [directory, files] of [
+    ['runtime', manifest.runtimeFiles],
+    ['link', manifest.linkFiles]
+  ]) {
+    for (const file of files) {
+      const prefix = `${directory}/`;
+      const name = typeof file?.path === 'string' && file.path.startsWith(prefix)
+        ? file.path.slice(prefix.length)
+        : '';
+      if (
+        !/^[a-zA-Z0-9._+-]+$/.test(name)
+        || name.includes('..')
+        || declaredPaths.has(file.path)
+        || !/^[a-f0-9]{64}$/.test(file.sha256)
+        || !Number.isSafeInteger(file.sizeBytes)
+        || file.sizeBytes <= 0
+      ) {
+        throw new Error(`Native raster payload file declaration is invalid: ${manifestPath}`);
+      }
+      declaredPaths.add(file.path);
+      const path = join(root, file.path);
+      const metadata = await stat(path);
+      if (!metadata.isFile() || metadata.size !== file.sizeBytes) {
+        throw new Error(`Native raster payload file size does not match its lock: ${path}`);
+      }
+      const bytes = await readFile(path);
+      const actual = createHash('sha256').update(bytes).digest('hex');
+      if (actual !== file.sha256) {
+        throw new Error(`Native raster payload checksum does not match its lock: ${path}`);
+      }
     }
   }
+  const expectedLinkPaths = nativeRasterLinkFileNames().map((name) => `link/${name}`).sort();
+  const declaredLinkPaths = manifest.linkFiles.map((file) => file.path).sort();
+  if (JSON.stringify(declaredLinkPaths) !== JSON.stringify(expectedLinkPaths)) {
+    throw new Error(`Native raster payload identity is invalid: ${manifestPath}`);
+  }
   await assertClosedInventory(root, 'runtime', manifest.runtimeFiles, manifestPath);
-  await assertClosedInventory(root, manifest.linkDirectory, manifest.linkFiles, manifestPath);
+  await assertClosedInventory(root, 'link', manifest.linkFiles, manifestPath);
   return { root, manifest };
 }
 
