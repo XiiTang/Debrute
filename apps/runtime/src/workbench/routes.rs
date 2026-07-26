@@ -195,44 +195,12 @@ pub(super) async fn workbench_connection(
         "revision": global_revision,
         "product": product
     }));
-    let adobe_bridge_event = match services.photoshop().state() {
-        Ok(photoshop) => match serde_json::to_value(photoshop) {
-            Ok(photoshop) => json!({
-                "type": "adobeBridge.state.changed",
-                "revision": global_revision,
-                "state": photoshop
-            }),
-            Err(error) => json!({
-                "type": "adobeBridge.state.failed",
-                "revision": global_revision,
-                "error": {
-                    "code": "adobe_bridge_state_invalid",
-                    "message": error.to_string()
-                }
-            }),
-        },
-        Err(error) => {
-            let error = RuntimeHttpServiceError::from_photoshop(error);
-            json!({
-                "type": "adobeBridge.state.failed",
-                "revision": global_revision,
-                "error": {
-                    "code": error.code,
-                    "message": error.message
-                }
-            })
-        }
-    };
-    let _ = sender.try_send(adobe_bridge_event);
     if let Some(integrations) = services.global().integration_snapshot() {
         let _ = sender.try_send(json!({
             "type": "integrations.changed",
             "revision": global_revision,
             "integrations": integrations
         }));
-    } else if services.global().begin_initial_integration_load() {
-        let global = Arc::clone(services.global());
-        tokio::task::spawn_blocking(move || global.integrations_rescan());
     }
     let global_sender = sender.clone();
     let global_connections = Arc::clone(services.connections());
@@ -322,7 +290,7 @@ pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
         .route("/projects/open", post(project_open))
         .route("/projects/choose", post(project_choose))
         .route("/projects/replace", post(project_replace))
-        .route("/adobe-bridge", get(photoshop_state))
+        .route("/adobe-bridge/state/refresh", post(photoshop_state_refresh))
         .route("/adobe-bridge/pairings", post(photoshop_pairing_create))
         .route(
             "/adobe-bridge/pairings/{pairing_id}",
@@ -764,24 +732,11 @@ async fn project_open(
     result.map_or_else(service_error_response, project_binding_response)
 }
 
-async fn project_choose(
-    State(state): State<WorkbenchRouterState>,
-    Extension(browser): Extension<BrowserSession>,
-    Extension(connection): Extension<super::WorkbenchConnectionContext>,
-    request: Request,
-) -> Response {
+async fn project_choose(State(state): State<WorkbenchRouterState>, request: Request) -> Response {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        mode: ProjectChooseMode,
-    }
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum ProjectChooseMode {
-        Open,
-        Replace,
-    }
-    let input: Input = match json_body(request).await {
+    struct Input {}
+    let _: Input = match json_body(request).await {
         Ok(input) => input,
         Err(response) => return response,
     };
@@ -797,7 +752,7 @@ async fn project_choose(
         }
     };
     let Some(selected) = selected else {
-        return Json(json!({"opened": false})).into_response();
+        return Json(json!({"selected": false})).into_response();
     };
     let Some(selected) = selected.to_str() else {
         return service_error_response(RuntimeHttpServiceError::new(
@@ -806,35 +761,11 @@ async fn project_choose(
             "Selected Project path is not valid UTF-8.",
         ));
     };
-    let result = match input.mode {
-        ProjectChooseMode::Open => services.bind_connection_project_root(
-            &browser.0,
-            &connection.credential,
-            selected,
-            false,
-        ),
-        ProjectChooseMode::Replace => services.replace_connection_project_root(
-            &browser.0,
-            &connection.credential,
-            selected,
-            false,
-        ),
-    };
-    match result {
-        Ok(WorkbenchProjectBindingOutcome::Bound(opened)) => Json(json!({
-            "opened": true,
-            "outcome": "bound",
-            "projectId": opened.project_id
-        }))
-        .into_response(),
-        Ok(WorkbenchProjectBindingOutcome::FocusedExistingDesktop { project_id }) => Json(json!({
-            "opened": true,
-            "outcome": "focused_existing_desktop",
-            "projectId": project_id
-        }))
-        .into_response(),
-        Err(error) => service_error_response(error),
-    }
+    Json(json!({
+        "selected": true,
+        "projectRoot": selected
+    }))
+    .into_response()
 }
 
 async fn project_replace(
@@ -881,11 +812,24 @@ fn project_binding_response(outcome: WorkbenchProjectBindingOutcome) -> Response
     }
 }
 
-async fn photoshop_state(State(state): State<WorkbenchRouterState>) -> Response {
+async fn photoshop_state_refresh(State(state): State<WorkbenchRouterState>) -> Response {
     let services = Arc::clone(&state.services);
-    match services.photoshop().state() {
-        Ok(view) => Json(view).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
+    match tokio::task::spawn_blocking(move || {
+        let view = services.photoshop().state()?;
+        services
+            .global()
+            .publish_external(GlobalRuntimeChange::PhotoshopBridgeChanged(view.clone()));
+        Ok::<_, crate::photoshop::PhotoshopBridgeError>(view)
+    })
+    .await
+    {
+        Ok(Ok(_)) => Json(json!({ "ok": true })).into_response(),
+        Ok(Err(error)) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
+        Err(error) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "adobe_bridge_state_unavailable",
+            error.to_string(),
+        ),
     }
 }
 
@@ -918,7 +862,7 @@ async fn photoshop_pairing_remove(
 ) -> Response {
     let services = Arc::clone(&state.services);
     match services.photoshop().remove_pairing(&plugin_instance_id) {
-        Ok(view) => Json(view).into_response(),
+        Ok(_) => Json(json!({ "ok": true })).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
     }
 }
@@ -942,7 +886,7 @@ async fn photoshop_link(
         .photoshop()
         .link_project_for_browser(&scope.project_id, &input.plugin_instance_id)
     {
-        Ok(view) => Json(view).into_response(),
+        Ok(_) => Json(json!({ "ok": true })).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
     }
 }
@@ -957,7 +901,7 @@ async fn photoshop_unlink(
         .photoshop()
         .unlink_project_for_browser(&scope.project_id, &plugin_instance_id)
     {
-        Ok(view) => Json(view).into_response(),
+        Ok(_) => Json(json!({ "ok": true })).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
     }
 }

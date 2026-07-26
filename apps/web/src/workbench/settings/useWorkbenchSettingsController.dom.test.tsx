@@ -13,9 +13,15 @@ import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
 } from './useWorkbenchSettingsController';
+import {
+  createWorkbenchGlobalProjection,
+  type WorkbenchGlobalEvent,
+  type WorkbenchGlobalProjection
+} from '../services/WorkbenchGlobalProjection.js';
+import { createI18n } from '../i18n/index.js';
 
 describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
-  it('starts from the bootstrapped Global settings without probing Adobe Bridge', async () => {
+  it('starts from Global settings and requests optional resources on Settings intent', async () => {
     const api = apiFixture();
     const initialSettings = settingsFixture({
       locale: 'zh-CN',
@@ -25,33 +31,71 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     const probe = await renderController(api, 'project-1', initialSettings);
 
     expect(probe.current.globalSettings).toEqual({ status: 'ready', value: initialSettings });
-    expect(probe.current.locale).toBe('zh-CN');
-    expect(probe.current.resolvedTheme).toBe('light');
     expect(probe.current.adobeBridge.status).toBe('loading');
-    expect(api.adobeBridgeGetState).not.toHaveBeenCalled();
+    expect(api.adobeBridgeRefreshState).toHaveBeenCalledTimes(1);
+    expect(api.integrationsRescan).toHaveBeenCalledTimes(1);
     await act(async () => {
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: adobeBridgeFixture() });
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: adobeBridgeFixture() });
     });
 
     expect(probe.current.adobeBridge.status).toBe('ready');
     await probe.unmount();
   });
 
-  it('turns an initial Adobe Bridge resource failure into retryable error state', async () => {
-    const probe = await renderController(apiFixture());
+  it('turns an intent-driven Adobe query failure into retryable local state', async () => {
+    const probe = await renderController(apiFixture({
+      adobeBridgeRefreshState: vi.fn(async () => {
+        throw new Error('bridge state unavailable');
+      })
+    }));
 
-    await act(async () => {
-      probe.current.applyEvent({
-        type: 'adobeBridge.state.failed',
-        error: { code: 'adobe_bridge_state_invalid', message: 'bridge state unavailable' }
-      });
-    });
-
-    expect(probe.current.adobeBridge).toEqual({
+    await vi.waitFor(() => expect(probe.current.adobeBridge).toEqual({
       status: 'error',
       message: 'bridge state unavailable'
-    });
+    }));
+
     await probe.unmount();
+  });
+
+  it('observes projection hydration that lands while its subscription is being installed', async () => {
+    const writer = createWorkbenchGlobalProjection();
+    writer.acceptSnapshot({ revision: 0, settings: settingsFixture() });
+    const hydrated = integrationSettingsFixture('Hydrated in subscription gap');
+    let injected = false;
+    const projection: WorkbenchGlobalProjection = {
+      getState: writer.getState,
+      subscribe(listener) {
+        if (!injected) {
+          injected = true;
+          writer.acceptEvent({
+            type: 'integrations.changed',
+            revision: 0,
+            integrations: hydrated
+          });
+        }
+        return writer.subscribe(listener);
+      }
+    };
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    let current!: WorkbenchSettingsController;
+
+    await act(async () => {
+      root.render(
+        <ControllerProbe
+          api={apiFixture()}
+          globalProjection={projection}
+          projectId="project-1"
+          onValue={(value) => { current = value; }}
+        />
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(current.integrations).toEqual({ status: 'ready', value: hydrated });
+    await unmount(root, container);
   });
 
   it('keeps command acknowledgement separate from the settings event', async () => {
@@ -62,16 +106,14 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     let pending!: Promise<void>;
     await act(async () => {
       pending = probe.current.actions.saveGlobalSettings({ workbench: { defaultFrontend: 'browser' } });
-      probe.current.applyEvent({
-        type: 'globalSettings.changed',
+      probe.acceptEvent({
+        type: 'globalSettings.changed', revision: 1,
         settings: settingsFixture({ locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'runtime-only' })
       });
       save.resolve({ ok: true });
       await pending;
     });
 
-    expect(probe.current.locale).toBe('zh-CN');
-    expect(probe.current.resolvedTheme).toBe('light');
     expect(probe.current.globalSettings).toMatchObject({
       status: 'ready',
       value: { workbench: { defaultFrontend: 'runtime-only' } }
@@ -87,7 +129,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       .mockImplementationOnce(() => latestSave.promise);
     const probe = await renderController(apiFixture({ globalSettingsSave }));
     await act(async () => {
-      probe.current.applyEvent({ type: 'globalSettings.changed', settings: settingsFixture() });
+      probe.acceptEvent({ type: 'globalSettings.changed', revision: 1, settings: settingsFixture() });
     });
 
     const first = {
@@ -110,8 +152,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     expect(globalSettingsSave).toHaveBeenNthCalledWith(1, { canvas: { textAppearance: first } });
 
     await act(async () => {
-      probe.current.applyEvent({
-        type: 'globalSettings.changed',
+      probe.acceptEvent({
+        type: 'globalSettings.changed', revision: 1,
         settings: { ...settingsFixture(), canvas: { textAppearance: first } }
       });
       firstSave.resolve({ ok: true });
@@ -121,8 +163,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     expect(globalSettingsSave).toHaveBeenNthCalledWith(2, { canvas: { textAppearance: latest } });
 
     await act(async () => {
-      probe.current.applyEvent({
-        type: 'globalSettings.changed',
+      probe.acceptEvent({
+        type: 'globalSettings.changed', revision: 1,
         settings: { ...settingsFixture(), canvas: { textAppearance: latest } }
       });
       latestSave.resolve({ ok: true });
@@ -139,7 +181,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     }));
     const confirmed = settingsFixture();
     await act(async () => {
-      probe.current.applyEvent({ type: 'globalSettings.changed', settings: confirmed });
+      probe.acceptEvent({ type: 'globalSettings.changed', revision: 1, settings: confirmed });
     });
     const changed = { ...confirmed.canvas.textAppearance, fontWeight: 600 };
     let pending!: Promise<void>;
@@ -170,22 +212,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     await probe.unmount();
   });
 
-  it('exposes the new locale synchronously after applying a settings event', async () => {
-    const probe = await renderController(apiFixture());
-
-    await act(async () => {
-      probe.current.applyEvent({
-        type: 'globalSettings.changed',
-        settings: settingsFixture({ locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'browser' })
-      });
-      expect(probe.current.getCurrentI18n().locale).toBe('zh-CN');
-    });
-
-    await probe.unmount();
-  });
-
-  it('keeps a newer Adobe event when an older link response resolves', async () => {
-    const link = deferred<AdobeBridgeStateView>();
+  it('keeps Adobe display state event-owned when a link acknowledgement resolves', async () => {
+    const link = deferred<{ ok: true }>();
     const api = apiFixture({ adobeBridgeLinkPhotoshop: vi.fn(() => link.promise) });
     const probe = await renderController(api);
     const eventState = adobeBridgeFixture('Event project');
@@ -193,8 +221,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     let pending!: Promise<void>;
     await act(async () => {
       pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-1' });
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
-      link.resolve(adobeBridgeFixture('Stale link project'));
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: eventState });
+      link.resolve({ ok: true });
       await pending;
     });
 
@@ -206,7 +234,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   });
 
   it('suppresses an older Adobe link rejection after a newer linked event', async () => {
-    const link = deferred<AdobeBridgeStateView>();
+    const link = deferred<{ ok: true }>();
     const api = apiFixture({ adobeBridgeLinkPhotoshop: vi.fn(() => link.promise) });
     const probe = await renderController(api);
     const eventState = linkedAdobeBridgeFixture();
@@ -214,7 +242,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     let pending!: Promise<void>;
     await act(async () => {
       pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-1' });
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: eventState });
       link.reject(new Error('stale link failure'));
       await expect(pending).resolves.toBeUndefined();
     });
@@ -227,8 +255,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   });
 
   it('does not suppress a client rejection when another client starts a link command', async () => {
-    const firstLink = deferred<AdobeBridgeStateView>();
-    const secondLink = deferred<AdobeBridgeStateView>();
+    const firstLink = deferred<{ ok: true }>();
+    const secondLink = deferred<{ ok: true }>();
     const api = apiFixture({
       adobeBridgeLinkPhotoshop: vi.fn((linkInput) => (
         linkInput.pluginInstanceId === 'photoshop-a' ? firstLink.promise : secondLink.promise
@@ -241,14 +269,14 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       const secondPending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-b' });
       firstLink.reject(new Error('Photoshop A link failed'));
       await expect(firstPending).rejects.toThrow('Photoshop A link failed');
-      secondLink.resolve(adobeBridgeFixture('Second client result'));
+      secondLink.resolve({ ok: true });
       await secondPending;
     });
     await probe.unmount();
   });
 
   it('does not suppress a client rejection after an unrelated Adobe event', async () => {
-    const link = deferred<AdobeBridgeStateView>();
+    const link = deferred<{ ok: true }>();
     const api = apiFixture({ adobeBridgeLinkPhotoshop: vi.fn(() => link.promise) });
     const probe = await renderController(api);
     const eventState: AdobeBridgeStateView = {
@@ -258,7 +286,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     const pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
     await act(async () => {
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: eventState });
       link.reject(new Error('Photoshop A link failed'));
       await expect(pending).rejects.toThrow('Photoshop A link failed');
     });
@@ -271,7 +299,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   });
 
   it('does not confirm a client command when an event links another client', async () => {
-    const link = deferred<AdobeBridgeStateView>();
+    const link = deferred<{ ok: true }>();
     const api = apiFixture({ adobeBridgeLinkPhotoshop: vi.fn(() => link.promise) });
     const probe = await renderController(api);
     const eventState: AdobeBridgeStateView = {
@@ -287,7 +315,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     const pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
     await act(async () => {
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: eventState });
       link.reject(new Error('Photoshop A link failed'));
       await expect(pending).rejects.toThrow('Photoshop A link failed');
     });
@@ -300,7 +328,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   });
 
   it('does not confirm a command when the same client links another project', async () => {
-    const link = deferred<AdobeBridgeStateView>();
+    const link = deferred<{ ok: true }>();
     const api = apiFixture({ adobeBridgeLinkPhotoshop: vi.fn(() => link.promise) });
     const probe = await renderController(api, 'project-1');
     const eventState: AdobeBridgeStateView = {
@@ -316,7 +344,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     const pending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
     await act(async () => {
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: eventState });
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: eventState });
       link.reject(new Error('Project 1 link failed'));
       await expect(pending).rejects.toThrow('Project 1 link failed');
     });
@@ -329,7 +357,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   });
 
   it('suppresses an old project rejection after the controller switches projects', async () => {
-    const link = deferred<AdobeBridgeStateView>();
+    const link = deferred<{ ok: true }>();
     const api = apiFixture({ adobeBridgeLinkPhotoshop: vi.fn(() => link.promise) });
     const probe = await renderController(api, 'project-1');
 
@@ -342,8 +370,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   });
 
   it('suppresses a rejection replaced by a newer command for the same client', async () => {
-    const firstLink = deferred<AdobeBridgeStateView>();
-    const secondLink = deferred<AdobeBridgeStateView>();
+    const firstLink = deferred<{ ok: true }>();
+    const secondLink = deferred<{ ok: true }>();
     const adobeBridgeLinkPhotoshop = vi.fn()
       .mockImplementationOnce(() => firstLink.promise)
       .mockImplementationOnce(() => secondLink.promise);
@@ -354,26 +382,26 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       const secondPending = probe.current.actions.linkAdobeBridgePhotoshop({ pluginInstanceId: 'photoshop-a' });
       firstLink.reject(new Error('replaced link failure'));
       await expect(firstPending).resolves.toBeUndefined();
-      secondLink.resolve(adobeBridgeFixture('Current command result'));
+      secondLink.resolve({ ok: true });
       await secondPending;
     });
     await probe.unmount();
   });
 
   it('suppresses an unlink rejection after an event removes the original active link', async () => {
-    const unlink = deferred<AdobeBridgeStateView>();
+    const unlink = deferred<{ ok: true }>();
     const api = apiFixture({
       adobeBridgeUnlinkPhotoshop: vi.fn(() => unlink.promise)
     });
     const probe = await renderController(api);
     await act(async () => {
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: linkedAdobeBridgeFixture() });
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: linkedAdobeBridgeFixture() });
     });
 
     let pending!: Promise<void>;
     await act(async () => {
       pending = probe.current.actions.unlinkAdobeBridgePhotoshop('photoshop-1');
-      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: adobeBridgeFixture() });
+      probe.acceptEvent({ type: 'adobeBridge.state.changed', revision: 1, state: adobeBridgeFixture() });
       unlink.reject(new Error('stale unlink failure'));
       await expect(pending).resolves.toBeUndefined();
     });
@@ -387,8 +415,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     const api = apiFixture({ integrationsRescan: vi.fn(() => rescan.promise) });
     const probe = await renderController(api);
     await act(async () => {
-      probe.current.applyEvent({
-        type: 'integrations.changed',
+      probe.acceptEvent({
+        type: 'integrations.changed', revision: 1,
         integrations: integrationSettingsFixture('Initial settings')
       });
     });
@@ -396,8 +424,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     let pending!: Promise<void>;
     await act(async () => {
       pending = probe.current.actions.rescanIntegrations();
-      probe.current.applyEvent({
-        type: 'integrations.changed',
+      probe.acceptEvent({
+        type: 'integrations.changed', revision: 1,
         integrations: integrationSettingsFixture('Event settings')
       });
       rescan.resolve({ ok: true });
@@ -415,8 +443,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     });
     const probe = await renderController(api);
     await act(async () => {
-      probe.current.applyEvent({
-        type: 'integrations.changed',
+      probe.acceptEvent({
+        type: 'integrations.changed', revision: 1,
         integrations: integrationSettingsFixture('Initial settings')
       });
     });
@@ -427,8 +455,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
         integrationId: 'ffmpeg',
         operation: 'update'
       });
-      probe.current.applyEvent({
-        type: 'integrations.changed',
+      probe.acceptEvent({
+        type: 'integrations.changed', revision: 1,
         integrations: integrationSettingsFixture('Settled event')
       });
       operation.resolve({
@@ -446,20 +474,30 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
 function ControllerProbe({
   api,
-  initialGlobalSettings,
+  globalProjection,
   projectId,
   onValue
 }: {
   api: WorkbenchApiClient;
-  initialGlobalSettings: DebruteGlobalSettingsView;
+  globalProjection: WorkbenchGlobalProjection;
   projectId: string | undefined;
   onValue(value: WorkbenchSettingsController): void;
 }): null {
   const controller = useWorkbenchSettingsController({
     api,
-    initialGlobalSettings,
+    globalProjection,
     projectId,
-    notify: vi.fn()
+    ensureAdobeBridgeState: async () => {
+      await api.adobeBridgeRefreshState();
+    },
+    notify: vi.fn(),
+    getCurrentI18n: () => {
+      const state = globalProjection.getState();
+      if (state.status === 'uninitialized') {
+        throw new Error('Global test projection is not initialized.');
+      }
+      return createI18n(state.settings.workbench.locale);
+    }
   });
   useEffect(() => onValue(controller), [controller, onValue]);
   return null;
@@ -471,12 +509,15 @@ async function renderController(
   initialGlobalSettings = settingsFixture()
 ): Promise<{
   readonly current: WorkbenchSettingsController;
+  acceptEvent(event: WorkbenchGlobalEvent): void;
   rerender(projectId: string | undefined): Promise<void>;
   unmount(): Promise<void>;
 }> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
+  const globalProjection = createWorkbenchGlobalProjection();
+  globalProjection.acceptSnapshot({ revision: 0, settings: initialGlobalSettings });
   let current!: WorkbenchSettingsController;
   const onValue = (value: WorkbenchSettingsController) => { current = value; };
   const render = async (projectId: string | undefined) => {
@@ -484,7 +525,7 @@ async function renderController(
       root.render(
         <ControllerProbe
           api={api}
-          initialGlobalSettings={initialGlobalSettings}
+          globalProjection={globalProjection}
           projectId={projectId}
           onValue={onValue}
         />
@@ -496,6 +537,16 @@ async function renderController(
   await render(initialProjectId);
   return {
     get current() { return current; },
+    acceptEvent(event) {
+      const state = globalProjection.getState();
+      if (state.status === 'uninitialized') {
+        throw new Error('Global test projection is not initialized.');
+      }
+      globalProjection.acceptEvent({
+        ...event,
+        revision: state.revision + 1
+      });
+    },
     rerender: render,
     unmount: () => unmount(root, container)
   };
@@ -504,13 +555,13 @@ async function renderController(
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
   return {
     globalSettingsSave: vi.fn(async () => ({ ok: true as const })),
-    adobeBridgeGetState: vi.fn(async () => adobeBridgeFixture()),
+    adobeBridgeRefreshState: vi.fn(async () => ({ ok: true as const })),
     checkProductUpdate: vi.fn(async () => ({ ok: true as const })),
     applyProductUpdate: vi.fn(async () => ({ ok: true as const })),
     integrationsRescan: vi.fn(async () => ({ ok: true as const })),
     integrationsRunOperation: vi.fn(),
-    adobeBridgeLinkPhotoshop: vi.fn(async () => adobeBridgeFixture()),
-    adobeBridgeUnlinkPhotoshop: vi.fn(async () => adobeBridgeFixture()),
+    adobeBridgeLinkPhotoshop: vi.fn(async () => ({ ok: true as const })),
+    adobeBridgeUnlinkPhotoshop: vi.fn(async () => ({ ok: true as const })),
     ...overrides
   } as unknown as WorkbenchApiClient;
 }

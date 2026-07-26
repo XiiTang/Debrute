@@ -9,6 +9,11 @@ capture budgets, and cache algorithms remain source-owned.
 Runtime owns one editor-independent text format registry. It classifies
 paths by exact filename, path or filename pattern, extension, and selected
 first-line signatures, and returns a Debrute text language ID plus MIME type.
+Static filename-pattern matchers are compiled once for the Runtime process;
+classification never recompiles glob-derived regular expressions per file.
+Canvas MIME projection resolves registered filenames, patterns, and extensions
+without opening the file, and reads a first line only when static classification
+cannot decide the text type.
 The registry covers plain text, Markdown and prompt files, structured data,
 configuration, logs, web formats, programming languages, scripts, patches,
 tables, subtitles, and additional document-oriented text formats. Binary office,
@@ -218,7 +223,9 @@ animation frame. Camera movement or node dragging cancels the pending
 measurement frame without discarding its eligible paths; the batch resumes
 after interaction becomes idle. Culled and actively edited text bodies do not
 enter the batch, retain their last valid measurement, and receive one new
-measurement when they next become eligible. Target reconciliation retains the
+measurement when they next become eligible. A culled text node with no loaded
+buffer also issues no file-content request; becoming visible or entering edit
+intent performs the first read. Target reconciliation retains the
 resolved fingerprint for every path whose content, language, wrap, measured
 geometry, persisted viewport, and style key remain unchanged; changed paths
 replace pending work instead of creating a historical queue.

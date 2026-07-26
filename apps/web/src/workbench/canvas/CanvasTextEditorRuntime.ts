@@ -19,8 +19,6 @@ import {
 import { search, searchKeymap } from '@codemirror/search';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 
-export const CANVAS_TEXT_EDITOR_SYNTAX_HIGHLIGHT_STYLE_ID = 'codemirror-default-highlight-style-v1';
-
 export interface CanvasTextEditorCallbacks {
   onChange: (value: string) => void;
   onSave: () => void;

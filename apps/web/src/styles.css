@@ -9,9 +9,4 @@
 @import "./workbench/styles/shell.css";
 @import "./workbench/styles/titlebar.css";
 @import "./workbench/styles/project-open.css";
-@import "./workbench/styles/explorer.css";
 @import "./workbench/styles/canvas.css";
-@import "./workbench/styles/inspector.css";
-@import "./workbench/styles/settings.css";
-@import "./workbench/styles/terminal.css";
-@import "./workbench/styles/integrations.css";

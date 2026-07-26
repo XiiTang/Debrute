@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import '../styles/terminal.css';
 import { Plus } from '../ui/index.js';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
 import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui/index.js';

@@ -13,6 +13,8 @@ describe('SendToPhotoshopDialog', () => {
         projectRelativePath: 'assets/cover.png',
         enabled: true,
         bridge: bridgeState(),
+        loading: false,
+        loadError: undefined,
         sending: false,
         onSend: () => undefined,
         onClose: () => undefined
@@ -32,6 +34,8 @@ describe('SendToPhotoshopDialog', () => {
         projectRelativePath: 'assets/cover.png',
         enabled: false,
         bridge: bridgeState(),
+        loading: false,
+        loadError: undefined,
         sending: false,
         onSend: () => undefined,
         onClose: () => undefined
@@ -49,6 +53,8 @@ describe('SendToPhotoshopDialog', () => {
         projectRelativePath: 'assets/cover.png',
         enabled: true,
         bridge: { ...bridgeState(), links: [] },
+        loading: false,
+        loadError: undefined,
         sending: false,
         onSend: () => undefined,
         onClose: () => undefined

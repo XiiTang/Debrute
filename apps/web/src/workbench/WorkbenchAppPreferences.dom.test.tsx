@@ -16,9 +16,14 @@ import {
   type CanvasEditorRuntime
 } from './canvas/runtime/CanvasEditorRuntime';
 import {
+  createWorkbenchGlobalProjection,
+  type WorkbenchGlobalProjectionWriter
+} from './services/WorkbenchGlobalProjection.js';
+import {
   createWorkbenchProjectProjection,
   type WorkbenchProjectProjection
 } from './services/WorkbenchProjectProjection.js';
+import type { WorkbenchActions } from '../types.js';
 
 vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
   const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/DefaultCanvasTextRenderProfile.js');
@@ -34,6 +39,7 @@ type WorkbenchAppComponent = (typeof import('./WorkbenchApp'))['WorkbenchApp'];
 const apiState = vi.hoisted(() => {
   const state = {
     api: undefined as WorkbenchApiClient | undefined,
+    globalProjection: undefined as WorkbenchGlobalProjectionWriter | undefined,
     projectProjection: undefined as WorkbenchProjectProjection | undefined,
     listeners: new Set<(event: WorkbenchEvent) => void>(),
     connectionListeners: new Set<(error: Error) => void>()
@@ -48,6 +54,17 @@ const apiState = vi.hoisted(() => {
           throw new Error('WorkbenchApp test Project Projection was not configured.');
         }
         return state.projectProjection;
+      }
+      if (property === 'globalProjection') {
+        if (!state.globalProjection) {
+          throw new Error('WorkbenchApp test Global Projection was not configured.');
+        }
+        return state.globalProjection;
+      }
+      if (property === 'ensureAdobeBridgeState') {
+        return async () => {
+          await state.api!.adobeBridgeRefreshState();
+        };
       }
       const value = Reflect.get(state.api, property, state.api);
       if ((property === 'openProject' || property === 'openProjectFromPicker') && typeof value === 'function') {
@@ -71,7 +88,8 @@ const apiState = vi.hoisted(() => {
   return Object.assign(state, { client });
 });
 const canvasRuntimeState = vi.hoisted(() => ({
-  runtime: undefined as CanvasEditorRuntime | undefined
+  runtime: undefined as CanvasEditorRuntime | undefined,
+  actions: undefined as WorkbenchActions | undefined
 }));
 let WorkbenchApp: WorkbenchAppComponent;
 let WorkbenchAppWithMockedCanvas: WorkbenchAppComponent;
@@ -94,11 +112,21 @@ describe('WorkbenchApp preferences and project behavior', () => {
     vi.doMock('./canvas/CanvasEditor', async () => {
       const { useEffect } = await import('react');
       return {
-        CanvasEditor: ({ onRuntimeChange }: { onRuntimeChange(runtime: CanvasEditorRuntime | undefined): void }) => {
+        CanvasEditor: ({
+          actions,
+          onRuntimeChange
+        }: {
+          actions: WorkbenchActions;
+          onRuntimeChange(runtime: CanvasEditorRuntime | undefined): void;
+        }) => {
           useEffect(() => {
+            canvasRuntimeState.actions = actions;
             onRuntimeChange(canvasRuntimeState.runtime);
-            return () => onRuntimeChange(undefined);
-          }, [onRuntimeChange]);
+            return () => {
+              canvasRuntimeState.actions = undefined;
+              onRuntimeChange(undefined);
+            };
+          }, [actions, onRuntimeChange]);
           return null;
         }
       };
@@ -116,6 +144,23 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   beforeEach(() => {
+    apiState.globalProjection = createWorkbenchGlobalProjection();
+    apiState.globalProjection.acceptSnapshot({ revision: 0, settings: globalSettingsFixture() });
+    apiState.globalProjection.acceptEvent({
+      type: 'integrations.changed',
+      revision: 0,
+      integrations: { integrations: [], backends: [] }
+    });
+    apiState.globalProjection.acceptEvent({
+      type: 'product.changed',
+      revision: 0,
+      product: productStateFixture()
+    });
+    apiState.globalProjection.acceptEvent({
+      type: 'adobeBridge.state.changed',
+      revision: 0,
+      state: adobeBridgeStateFixture()
+    });
     apiState.projectProjection = createWorkbenchProjectProjection();
     apiState.listeners.clear();
     apiState.connectionListeners.clear();
@@ -136,9 +181,11 @@ describe('WorkbenchApp preferences and project behavior', () => {
     vi.unstubAllGlobals();
     apiState.listeners.clear();
     apiState.api = undefined;
+    apiState.globalProjection = undefined;
     apiState.projectProjection = undefined;
     canvasRuntimeState.runtime?.dispose();
     canvasRuntimeState.runtime = undefined;
+    canvasRuntimeState.actions = undefined;
     document.documentElement.removeAttribute('data-theme');
     document.documentElement.style.removeProperty('--db-text');
     document.documentElement.style.removeProperty('--db-text-muted');
@@ -153,7 +200,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await act(async () => {
         emitWorkbenchEvent({
-          type: 'globalSettings.changed',
+          type: 'globalSettings.changed', revision: 1,
           settings: globalSettingsFixture({
             workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'browser' }
           })
@@ -163,6 +210,12 @@ describe('WorkbenchApp preferences and project behavior', () => {
       expect(container.textContent).toContain('打开项目');
       expect(document.documentElement.getAttribute('data-theme')).toBe('light');
       expect(apiState.api!.onEvent).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        requireButton(container, '设置').click();
+      });
+      await waitForButton(container, '通用');
+      expect(container.querySelector('.settings-panel')?.textContent).toContain('通用');
 
       await unmount(root, container);
     });
@@ -227,6 +280,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       requireButton(container, 'Explorer').click();
       await Promise.resolve();
     });
+    await waitForButton(container, 'assets');
     await act(async () => {
       requireButton(container, 'assets').click();
       await Promise.resolve();
@@ -259,6 +313,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
         settingsButton.click();
         await Promise.resolve();
       });
+      await waitForButton(container, 'Image Models');
 
       expect(container.querySelectorAll('.settings-directory-group')).toHaveLength(3);
       expect(container.querySelector('.settings-page')?.querySelectorAll('h2')).toHaveLength(1);
@@ -277,8 +332,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   it('uses streamed Adobe live state without a duplicate REST load', async () => {
-    const adobeBridgeGetState = vi.fn(async () => adobeBridgeStateFixture());
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', { adobeBridgeGetState });
+    const adobeBridgeRefreshState = vi.fn(async () => ({ ok: true as const }));
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', { adobeBridgeRefreshState });
 
     await act(async () => {
       await Promise.resolve();
@@ -286,7 +341,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
-    expect(adobeBridgeGetState).not.toHaveBeenCalled();
+    expect(adobeBridgeRefreshState).not.toHaveBeenCalled();
 
     await unmount(root, container);
   });
@@ -597,7 +652,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
     await act(async () => {
       emitWorkbenchEvent({
-        type: 'recentProjects.changed',
+        type: 'recentProjects.changed', revision: 1,
         recentProjects: [{ projectId: 'current', projectRoot: '/projects/current' }]
       });
       await Promise.resolve();
@@ -631,7 +686,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       await Promise.resolve();
       await Promise.resolve();
       emitWorkbenchEvent({
-        type: 'recentProjects.changed',
+        type: 'recentProjects.changed', revision: 1,
         recentProjects: [{ projectId: 'first-open', projectRoot: '/tmp/first-open' }]
       });
     });
@@ -720,21 +775,82 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
+  it('loads Adobe state on first Send to Photoshop intent without opening Settings', async () => {
+    apiState.globalProjection = createWorkbenchGlobalProjection();
+    apiState.globalProjection.acceptSnapshot({ revision: 0, settings: globalSettingsFixture() });
+    apiState.globalProjection.acceptEvent({
+      type: 'integrations.changed',
+      revision: 0,
+      integrations: { integrations: [], backends: [] }
+    });
+    apiState.globalProjection.acceptEvent({
+      type: 'product.changed',
+      revision: 0,
+      product: productStateFixture()
+    });
+    const adobeBridgeRefreshState = vi.fn(async () => ({ ok: true as const }));
+    const projectSnapshot = stackOrderSnapshotFixture();
+    const projection = projectSnapshot.projections[0]!;
+    canvasRuntimeState.runtime = createCanvasEditorRuntime({
+      canvasId: projection.canvasId,
+      initialProjection: projection,
+      submitManualLayout: async () => undefined
+    });
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+      adobeBridgeRefreshState,
+      openProject: vi.fn(async () => ({
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: projectSnapshot,
+        workingCopies: emptyWorkingCopies()
+      }))
+    }, WorkbenchAppWithMockedCanvas);
+
+    await vi.waitFor(() => expect(canvasRuntimeState.actions).toBeDefined());
+    await act(async () => {
+      canvasRuntimeState.actions!.openSendToPhotoshopPicker('flow/a.png');
+      await Promise.resolve();
+    });
+
+    expect(adobeBridgeRefreshState).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('Loading Photoshop clients');
+
+    await act(async () => {
+      emitWorkbenchEvent({
+        type: 'adobeBridge.state.changed',
+        revision: 1,
+        state: adobeBridgeStateWithPhotoshopClient({
+          links: [{
+            linkId: 'link-1',
+            projectId: 'project-1',
+            pluginInstanceId: 'photoshop-1',
+            createdAt: '2026-07-10T00:00:00.000Z',
+            status: 'active'
+          }]
+        })
+      });
+    });
+
+    expect(container.textContent).toContain('Photoshop 2026');
+    await unmount(root, container);
+  });
+
   describe('Adobe Bridge settings state', { tags: ['settings'] }, () => {
     it('opens the streamed Adobe state without issuing a duplicate REST request', async () => {
-      const adobeBridgeGetState = vi.fn(async () => adobeBridgeStateFixture());
-      const { container, root } = await renderWorkbenchApp('/', { adobeBridgeGetState });
+      const adobeBridgeRefreshState = vi.fn(async () => ({ ok: true as const }));
+      const { container, root } = await renderWorkbenchApp('/', { adobeBridgeRefreshState });
 
       await act(async () => {
         requireButton(container, 'Settings').click();
         await Promise.resolve();
       });
+      await waitForButton(container, 'Adobe Bridge');
       await act(async () => {
         requireButton(container, 'Adobe Bridge').click();
         await Promise.resolve();
       });
       expect(container.querySelector('.adobe-bridge-settings-page')).not.toBeNull();
-      expect(adobeBridgeGetState).not.toHaveBeenCalled();
+      expect(adobeBridgeRefreshState).not.toHaveBeenCalled();
 
       await unmount(root, container);
     });
@@ -744,7 +860,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await act(async () => {
         emitWorkbenchEvent({
-          type: 'adobeBridge.state.changed',
+          type: 'adobeBridge.state.changed', revision: 1,
           state: adobeBridgeStateWithPhotoshopClient({
             links: [{
               linkId: 'link-1',
@@ -771,7 +887,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await act(async () => {
         emitWorkbenchEvent({
-          type: 'adobeBridge.state.changed',
+          type: 'adobeBridge.state.changed', revision: 1,
           state: adobeBridgeStateWithPhotoshopClient({
             settings: { enabled: true, discoveryStatus: 'unavailable' }
           })
@@ -795,7 +911,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await act(async () => {
         emitWorkbenchEvent({
-          type: 'globalSettings.changed',
+          type: 'globalSettings.changed', revision: 1,
           settings: globalSettingsFixture({
             workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'runtime-only' }
           })
@@ -816,7 +932,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await act(async () => {
         emitWorkbenchEvent({
-          type: 'globalSettings.changed',
+          type: 'globalSettings.changed', revision: 1,
           settings: globalSettingsFixture({
             workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'runtime-only' }
           })
@@ -847,6 +963,7 @@ async function startPendingDefaultFrontendSave(): Promise<{
     requireButton(container, 'Settings').click();
     await Promise.resolve();
   });
+  await waitForButton(container, 'General');
   const defaultFrontend = Array.from(container.querySelectorAll('select'))
     .find((select) => select.textContent?.includes('Runtime only'));
   if (!(defaultFrontend instanceof HTMLSelectElement)) {
@@ -862,18 +979,18 @@ async function startPendingDefaultFrontendSave(): Promise<{
 }
 
 async function startPendingAdobeLink(): Promise<{
-  link: ReturnType<typeof deferred<AdobeBridgeStateView>>;
+  link: ReturnType<typeof deferred<{ ok: true }>>;
   container: HTMLDivElement;
   root: Root;
 }> {
-  const link = deferred<AdobeBridgeStateView>();
+  const link = deferred<{ ok: true }>();
   const { container, root } = await renderWorkbenchApp('/projects/project-1', {
     adobeBridgeLinkPhotoshop: vi.fn(() => link.promise)
   });
 
   await act(async () => {
     emitWorkbenchEvent({
-      type: 'adobeBridge.state.changed',
+      type: 'adobeBridge.state.changed', revision: 1,
       state: adobeBridgeStateWithPhotoshopClient()
     });
   });
@@ -910,7 +1027,6 @@ async function renderWorkbenchApp(
     root.render(
       <App
         api={apiState.client as Parameters<WorkbenchAppComponent>[0]['api']}
-        initialGlobalSettings={globalSettingsFixture()}
       />
     );
     await Promise.resolve();
@@ -929,6 +1045,12 @@ async function unmount(root: Root, container: HTMLDivElement): Promise<void> {
 function emitWorkbenchEvent(event: WorkbenchEvent): void {
   if ('projectId' in event && 'projectRevision' in event) {
     apiState.projectProjection?.acceptProjectEvent(event);
+  } else {
+    const projection = apiState.globalProjection?.getState();
+    if (projection && projection.status !== 'uninitialized') {
+      event = { ...event, revision: projection.revision + 1 };
+      apiState.globalProjection?.acceptEvent(event);
+    }
   }
   for (const listener of apiState.listeners) {
     listener(event);
@@ -943,6 +1065,7 @@ function detachCurrentProject(): void {
 }
 
 function endCurrentConnection(error: Error): void {
+  apiState.globalProjection?.endConnection(error);
   apiState.projectProjection?.endConnection(error);
   for (const listener of apiState.connectionListeners) {
     listener(error);
@@ -958,13 +1081,14 @@ function requireButton(container: HTMLElement, label: string): HTMLButtonElement
 }
 
 async function waitForButton(container: HTMLElement, label: string): Promise<HTMLButtonElement> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     const button = findButton(container, label);
     if (button) {
       return button;
     }
     await act(async () => {
       await Promise.resolve();
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
   }
   throw new Error(`Expected ${label} button.`);
@@ -984,11 +1108,6 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     globalSettingsSave: vi.fn(async () => ({ ok: true as const })),
     onEvent: vi.fn((listener: (event: WorkbenchEvent) => void) => {
       apiState.listeners.add(listener);
-      const settings = globalSettingsFixture();
-      listener({ type: 'globalSettings.changed', settings });
-      listener({ type: 'integrations.changed', integrations: { integrations: [], backends: [] } });
-      listener({ type: 'product.changed', product: productStateFixture() });
-      listener({ type: 'adobeBridge.state.changed', state: adobeBridgeStateFixture() });
       return () => apiState.listeners.delete(listener);
     }),
     onConnectionEnded: vi.fn((listener: (error: Error) => void) => {
@@ -1003,10 +1122,10 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       integrationId: 'imagemagick',
       operation: 'install'
     })),
-    adobeBridgeGetState: vi.fn(async () => adobeBridgeStateFixture()),
+    adobeBridgeRefreshState: vi.fn(async () => ({ ok: true as const })),
     adobeBridgeCreatePairing: vi.fn(async () => ({ pairingId: 'pairing-1', code: '123456', expiresAt: '2026-07-17T00:00:00Z' })),
     adobeBridgeCancelPairing: vi.fn(async () => undefined),
-    adobeBridgeRemovePairing: vi.fn(async () => adobeBridgeStateFixture()),
+    adobeBridgeRemovePairing: vi.fn(async () => ({ ok: true as const })),
     openProject: vi.fn(async () => ({
       projectId: 'project-1',
       projectRevision: 1,

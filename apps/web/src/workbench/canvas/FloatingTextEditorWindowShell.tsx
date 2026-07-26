@@ -1,33 +1,42 @@
 import React, { useEffect } from 'react';
+import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types.js';
+import { useI18n } from '../i18n/index.js';
+import { basenameFromProjectPath, textBufferStatus } from '../services/textEditorWindows.js';
 import {
-  AlertTriangle,
-  FileText,
-  RefreshCw,
-  Save,
-  X
-} from '../ui/index.js';
-import { CanvasTextEditor } from './CanvasTextEditor';
-import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types';
+  FloatingPanelResizeHandles,
+  floatingPanelDragHandleProps
+} from '../shell/floatingPanelInteractions.js';
+import type { FloatingPanelResizeInput } from '../shell/floatingPanels.js';
 import {
   textEditorWindowIdentity,
   workbenchWindowZIndex,
   type WorkbenchWindowOrderState
-} from '../shell/workbenchWindowOrder';
-import { FloatingPanelResizeHandles, floatingPanelDragHandleProps } from '../shell/FloatingPanel';
-import type { FloatingPanelResizeInput } from '../shell/floatingPanels';
-import { basenameFromProjectPath, textBufferStatus } from '../services/textEditorWindows';
-import { DiscardChangesIcon, IconButton, Panel, PanelBody, PanelHeader, PanelTitle, StatusPill } from '../ui/index.js';
+} from '../shell/workbenchWindowOrder.js';
 import {
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE
-} from '../shell/windowBounds';
-import { useI18n } from '../i18n';
+} from '../shell/windowBounds.js';
+import {
+  AlertTriangle,
+  DiscardChangesIcon,
+  FileText,
+  IconButton,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  PanelTitle,
+  RefreshCw,
+  Save,
+  StatusPill,
+  X
+} from '../ui/index.js';
 
-export function FloatingTextEditorWindow({
+export function FloatingTextEditorWindowShell({
   windowState,
   orderState,
   buffer,
   actions,
+  editor,
   onBringToFront,
   onClose,
   onDrag,
@@ -37,18 +46,15 @@ export function FloatingTextEditorWindow({
   orderState: WorkbenchWindowOrderState;
   buffer: TextFileBuffer | undefined;
   actions: WorkbenchActions;
-  onBringToFront: () => void;
-  onClose: () => void;
-  onDrag: (dx: number, dy: number) => void;
-  onResize: (input: FloatingPanelResizeInput) => void;
+  editor: React.ReactElement;
+  onBringToFront(): void;
+  onClose(): void;
+  onDrag(dx: number, dy: number): void;
+  onResize(input: FloatingPanelResizeInput): void;
 }): React.ReactElement {
   const i18n = useI18n();
   const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
-  const dragHandleProps = floatingPanelDragHandleProps({
-    dragStart,
-    onBringToFront,
-    onDrag
-  });
+  const dragHandleProps = floatingPanelDragHandleProps({ dragStart, onBringToFront, onDrag });
   const status = textBufferStatus(buffer, {
     loading: i18n.t('canvas.node.loading'),
     error: i18n.t('canvas.node.error'),
@@ -118,16 +124,7 @@ export function FloatingTextEditorWindow({
             <strong>{i18n.t('canvas.node.textError')}</strong>
             <span>{buffer.error}</span>
           </div>
-        ) : buffer ? (
-          <CanvasTextEditor
-            value={buffer.content}
-            language={buffer.language}
-            wordWrap={buffer.wordWrap}
-            onChange={(content) => actions.updateTextFileBuffer(windowState.projectRelativePath, content)}
-            onSave={() => void actions.saveTextFileBuffer(windowState.projectRelativePath)}
-            onToggleWordWrap={() => actions.toggleTextFileWordWrap(windowState.projectRelativePath)}
-          />
-        ) : (
+        ) : buffer ? editor : (
           <div className="canvas-text-message" data-canvas-text-editor="true">
             <FileText size={18} />
             <span>{i18n.t('canvas.node.loadingText')}</span>

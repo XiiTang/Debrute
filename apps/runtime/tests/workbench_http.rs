@@ -203,14 +203,6 @@ fn runtime_shutdown_closes_a_live_workbench_stream_before_http_join() {
         events.next_of_type("product.changed")["type"],
         "product.changed"
     );
-    assert_eq!(
-        events.next_of_type("adobeBridge.state.changed")["type"],
-        "adobeBridge.state.changed"
-    );
-    assert_eq!(
-        events.next_of_type("integrations.changed")["type"],
-        "integrations.changed"
-    );
 
     runtime.server.stop_accepting();
     runtime.services.close_all_workbench_connections();

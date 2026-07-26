@@ -56,6 +56,7 @@ Workbench listener, and one narrow fixed Photoshop discovery listener.
 - [Desktop Windows Use One-Use Launch Tickets](./0031-desktop-windows-use-one-use-launches.md)
 - [Desktop Does Not Recover Lost Connections](./0032-desktop-does-not-recover-lost-connections.md)
 - [Workbench Connection Lifetime Follows Its Document](./0033-workbench-session-lifetime-follows-its-container.md)
+- [Workbench Optional Features Activate On Intent](./0060-workbench-optional-features-activate-on-intent.md)
 - [Unexpected Runtime Panics Fail The Process](./0056-unexpected-runtime-panics-fail-the-process.md)
 - [Model API Key Reveal Is Explicit And Transient](./0057-model-api-key-reveal-is-explicit-and-transient.md)
 

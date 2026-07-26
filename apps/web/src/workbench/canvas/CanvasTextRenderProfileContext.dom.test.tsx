@@ -17,19 +17,26 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
     const root = createRoot(container);
     const preparation = deferred<void>();
     const profile = profileWithPreparation(preparation.promise);
+    const onReady = vi.fn();
 
     try {
       await act(async () => {
         root.render(
-          <CanvasTextRenderProfileGate profile={profile} pending={<span>loading</span>}>
+          <CanvasTextRenderProfileGate
+            profile={profile}
+            pending={<span>loading</span>}
+            onReady={onReady}
+          >
             <ProfileProbe />
           </CanvasTextRenderProfileGate>
         );
       });
       expect(container.textContent).toBe('loading');
+      expect(onReady).not.toHaveBeenCalled();
 
       await act(async () => preparation.resolve());
       expect(container.textContent).toBe('12px');
+      expect(onReady).toHaveBeenCalledOnce();
     } finally {
       await act(async () => root.unmount());
       container.remove();

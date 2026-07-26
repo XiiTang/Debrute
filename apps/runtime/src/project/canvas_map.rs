@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::cell::Cell;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
@@ -182,12 +184,11 @@ pub fn expand_canvas_map(
         .iter()
         .map(|entry| (entry.project_relative_path.as_str(), entry.kind))
         .collect();
-    let mut files: Vec<_> = entries
+    let files: Vec<_> = entries
         .iter()
         .filter(|entry| entry.kind == ProjectPathKind::File)
-        .map(|entry| entry.project_relative_path.clone())
+        .map(|entry| entry.project_relative_path.as_str())
         .collect();
-    files.sort_by(|left, right| natural_path_cmp(left, right));
     let mut matched = HashSet::new();
     for rule in &map.paths {
         match rule.kind {
@@ -218,7 +219,7 @@ pub fn expand_canvas_map(
                 }
                 for file in &files {
                     if file.starts_with(&format!("{}/", rule.pattern)) {
-                        matched.insert(file.clone());
+                        matched.insert((*file).to_owned());
                     }
                 }
             }
@@ -226,7 +227,7 @@ pub fn expand_canvas_map(
                 let glob_regex = controlled_glob(&rule.pattern)?;
                 for file in &files {
                     if glob_regex.is_match(file) {
-                        matched.insert(file.clone());
+                        matched.insert((*file).to_owned());
                     }
                 }
             }
@@ -727,6 +728,12 @@ fn compare_tree_nodes(left: &CanvasMapNodeProjection, right: &CanvasMapNodeProje
 }
 
 fn natural_path_cmp(left: &str, right: &str) -> Ordering {
+    #[cfg(test)]
+    NATURAL_PATH_COMPARISON_COUNT.with(|count| {
+        if let Some(current) = count.get() {
+            count.set(Some(current + 1));
+        }
+    });
     let left: Vec<_> = left.split('/').collect();
     let right: Vec<_> = right.split('/').collect();
     for (left, right) in left.iter().zip(&right) {
@@ -798,4 +805,63 @@ fn is_windows_absolute(path: &str) -> bool {
 
 fn canvas_map_error(code: &'static str, message: impl Into<String>) -> ProjectError {
     ProjectError::service(code, message)
+}
+
+#[cfg(test)]
+thread_local! {
+    static NATURAL_PATH_COMPARISON_COUNT: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+
+    #[test]
+    fn expansion_only_naturally_sorts_files_selected_by_the_map() {
+        let map = parse_canvas_map(
+            "canvas-1",
+            ".debrute/canvas-maps/canvas-1.yaml",
+            "paths:\n  - selected/\n",
+        )
+        .expect("Canvas Map should parse");
+        let entries = (0..4_096)
+            .map(|index| ProjectPathEntry {
+                project_relative_path: format!("unrelated/file-{index}.txt"),
+                kind: ProjectPathKind::File,
+            })
+            .chain(
+                [
+                    "selected/shot10.png",
+                    "selected/shot2.png",
+                    "selected/shot1.png",
+                ]
+                .map(|path| ProjectPathEntry {
+                    project_relative_path: path.to_owned(),
+                    kind: ProjectPathKind::File,
+                }),
+            )
+            .collect::<Vec<_>>();
+
+        NATURAL_PATH_COMPARISON_COUNT.with(|count| count.set(Some(0)));
+        let expanded = expand_canvas_map(&map, &entries).expect("Canvas Map should expand");
+        let comparisons = NATURAL_PATH_COMPARISON_COUNT.with(|count| count.replace(None));
+
+        assert_eq!(
+            expanded
+                .nodes
+                .iter()
+                .filter(|node| node.node_kind == CanvasNodeKind::File)
+                .map(|node| node.project_relative_path.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "selected/shot1.png",
+                "selected/shot2.png",
+                "selected/shot10.png"
+            ]
+        );
+        assert!(
+            comparisons.is_some_and(|count| count < 32),
+            "unselected Project files must not participate in natural sorting; observed {comparisons:?} comparisons"
+        );
+    }
 }

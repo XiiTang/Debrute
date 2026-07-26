@@ -4,6 +4,7 @@ import { createHttpWorkbenchApiClient } from './httpWorkbenchApiClient.js';
 describe('Runtime Workbench connection', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    StubWebSocket.created = 0;
   });
 
   it('resolves Global Settings bootstrap without waiting for a Project binding', async () => {
@@ -17,6 +18,17 @@ describe('Runtime Workbench connection', () => {
     expect(harness.calls.map((call) => call.path)).toEqual(['/api/workbench/connection']);
     client.dispose();
   });
+
+  it.each([-1, 1.5, Number.NaN])(
+    'rejects an invalid Global snapshot revision (%s)',
+    async (globalRevision) => {
+      createHarness(globalRevision);
+      const client = createHttpWorkbenchApiClient();
+
+      await expect(client.bootstrapGlobalSettings()).rejects.toThrow('invalid global.snapshot');
+      client.dispose();
+    }
+  );
 
   it('uses one connection credential for commands and never puts it in a URL', async () => {
     const harness = createHarness();
@@ -37,6 +49,58 @@ describe('Runtime Workbench connection', () => {
     ]);
     expect(header(harness.calls[1]?.init, 'x-debrute-workbench-connection')).toBe('connection-1');
     expect(harness.calls.every((call) => !call.path.includes('connection-1'))).toBe(true);
+    client.dispose();
+  });
+
+  it('marks the actual path-based Project binding request without activating Terminal transport', async () => {
+    createHarness();
+    const mark = vi.fn();
+    const client = createHttpWorkbenchApiClient({ startupTimeline: { mark } });
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+
+    expect(mark).toHaveBeenCalledWith('project-open-requested');
+    expect(StubWebSocket.created).toBe(0);
+    client.dispose();
+  });
+
+  it('marks a Project binding carried by the initial Workbench connection', async () => {
+    createHarness();
+    vi.stubGlobal('location', {
+      origin: 'http://127.0.0.1:41001',
+      pathname: '/projects/project-initial'
+    });
+    const mark = vi.fn();
+    const client = createHttpWorkbenchApiClient({ startupTimeline: { mark } });
+
+    await client.bootstrapGlobalSettings();
+
+    expect(mark).toHaveBeenCalledWith('project-open-requested');
+    client.dispose();
+  });
+
+  it('excludes cancelled picker time from the first Project binding mark', async () => {
+    const harness = createHarness();
+    const mark = vi.fn();
+    const client = createHttpWorkbenchApiClient({ startupTimeline: { mark } });
+
+    await expect(client.openProjectFromPicker()).resolves.toEqual({ opened: false });
+    expect(mark).not.toHaveBeenCalledWith('project-open-requested');
+
+    harness.selectNextProjectRoot('/tmp/picked-project');
+    await expect(client.openProjectFromPicker()).resolves.toMatchObject({
+      opened: true,
+      projectId: 'project-1'
+    });
+
+    expect(mark).toHaveBeenCalledTimes(1);
+    expect(mark).toHaveBeenCalledWith('project-open-requested');
+    expect(harness.calls.map((call) => call.path)).toEqual([
+      '/api/workbench/connection',
+      '/api/projects/choose',
+      '/api/projects/choose',
+      '/api/projects/open'
+    ]);
     client.dispose();
   });
 
@@ -149,7 +213,7 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
-  it('delivers the initial snapshot events when the connection starts before subscription', async () => {
+  it('retains the initial Global resources when the connection starts before subscription', async () => {
     createHarness();
     const client = createHttpWorkbenchApiClient();
     await client.checkProductUpdate();
@@ -158,11 +222,21 @@ describe('Runtime Workbench connection', () => {
     client.onEvent(listener);
 
     expect(listener.mock.calls.map(([event]) => event.type)).toEqual([
-      'globalSettings.changed',
       'adobeBridge.state.changed',
       'product.changed'
     ]);
-    expect(listener.mock.calls.at(-1)?.[0]).toEqual({ type: 'product.changed', product: null });
+    expect(listener.mock.calls.at(-1)?.[0]).toEqual({
+      type: 'product.changed',
+      revision: 1,
+      product: null
+    });
+    expect(client.globalProjection.getState()).toMatchObject({
+      status: 'active',
+      revision: 1,
+      settings: {},
+      adobeBridge: { status: 'ready' },
+      product: { status: 'ready', value: null }
+    });
     client.dispose();
   });
 
@@ -306,12 +380,13 @@ describe('Runtime Workbench connection', () => {
   });
 });
 
-function createHarness() {
+function createHarness(globalRevision = 1) {
   const calls: Array<{ path: string; init: RequestInit | undefined }> = [];
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   const encoder = new TextEncoder();
   let projectNumber = 0;
   let focusNext = false;
+  let pickerSelection: string | undefined;
   const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const path = String(input);
     calls.push({ path, init });
@@ -325,13 +400,14 @@ function createHarness() {
           }));
           controller.enqueue(sse(encoder, {
             type: 'global.snapshot',
-            globalRevision: 1,
+            globalRevision,
             snapshot: {
               settings: {}
             }
           }));
           controller.enqueue(sse(encoder, {
             type: 'adobeBridge.state.changed',
+            revision: 1,
             state: {
               settings: { enabled: true, discoveryStatus: 'available' },
               pairedPlugins: [],
@@ -341,7 +417,7 @@ function createHarness() {
               transfers: []
             }
           }));
-          controller.enqueue(sse(encoder, { type: 'product.changed', product: null }));
+          controller.enqueue(sse(encoder, { type: 'product.changed', revision: 1, product: null }));
         }
       });
       return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
@@ -375,6 +451,13 @@ function createHarness() {
         }
       }));
       return Response.json({ outcome: 'bound', projectId });
+    }
+    if (path === '/api/projects/choose') {
+      const selected = pickerSelection;
+      pickerSelection = undefined;
+      return Response.json(selected
+        ? { selected: true, projectRoot: selected }
+        : { selected: false });
     }
     if (path === '/api/runtime/product/update/check') {
       return Response.json({ ok: true });
@@ -432,6 +515,9 @@ function createHarness() {
     },
     focusNextProject() {
       focusNext = true;
+    },
+    selectNextProjectRoot(projectRoot: string) {
+      pickerSelection = projectRoot;
     }
   };
 }
@@ -470,7 +556,12 @@ function header(init: RequestInit | undefined, name: string): string | null {
 
 class StubWebSocket {
   static readonly OPEN = 1;
+  static created = 0;
   readonly readyState = 0;
+
+  constructor() {
+    StubWebSocket.created += 1;
+  }
 
   addEventListener(): void {}
   send(): void {}

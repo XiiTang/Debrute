@@ -45,7 +45,16 @@ const SETTINGS_NAV_GROUPS = [
 
 type SettingsPageId = typeof SETTINGS_NAV_GROUPS[number]['items'][number]['id'];
 
-export function SettingsPanel({ state, actions }: { state: WorkbenchState; actions: WorkbenchActions }): React.ReactElement {
+export function SettingsPanel({
+  state,
+  actions
+}: {
+  state: Pick<
+    WorkbenchState,
+    'globalSettings' | 'integrations' | 'product' | 'adobeBridge' | 'projectId' | 'resolvedTheme'
+  >;
+  actions: WorkbenchActions;
+}): React.ReactElement {
   const i18n = useI18n();
   const [activePage, setActivePage] = useState<SettingsPageId>('general');
   const adobeBridgePage = adobeBridgeSettingsPageResource(state.globalSettings, state.adobeBridge);

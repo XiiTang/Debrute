@@ -92,6 +92,7 @@ impl<T> ProjectMutation<T> {
 /// the filesystem without the session deriving the matching revision and event.
 pub enum ProjectCommand {
     Refresh,
+    Validate,
     LoadDirectory {
         project_relative_directory: String,
     },
@@ -361,13 +362,33 @@ impl ProjectSessionRegistry {
         }
     }
 
-    /// Opens a canonical Project root and atomically issues its first typed Project use.
+    /// Opens a canonical Project root, atomically issues its first typed Project use,
+    /// and starts its complete file index in the background.
     ///
     /// # Errors
     ///
     /// Returns an error if the registry is closed, the root cannot be initialized,
     /// or its Project watcher cannot be established.
     pub fn open_project(
+        &self,
+        project_root: impl AsRef<Path>,
+        use_kind: ProjectUseKind,
+    ) -> Result<OpenProjectSession, ProjectError> {
+        let opened = self.open_project_deferred(project_root, use_kind)?;
+        opened.session.start_background_file_index();
+        Ok(opened)
+    }
+
+    /// Opens a canonical Project root without starting its complete file index.
+    ///
+    /// The caller must start the idempotent background index after publishing the
+    /// shallow snapshot, unless its operation intentionally needs only that snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the registry is closed, the root cannot be initialized,
+    /// or its Project watcher cannot be established.
+    pub fn open_project_deferred(
         &self,
         project_root: impl AsRef<Path>,
         use_kind: ProjectUseKind,
@@ -421,7 +442,7 @@ impl ProjectSessionRegistry {
         canonical_root: PathBuf,
         use_kind: ProjectUseKind,
     ) -> Result<OpenProjectSession, ProjectError> {
-        let opened = ProjectService::open(
+        let opened = ProjectService::prepare_unloaded(
             &canonical_root,
             &self.inner.debrute_home,
             Arc::clone(&self.inner.node_adapter),
@@ -469,7 +490,6 @@ impl ProjectSessionRegistry {
                 let project_use = add_use(&self.inner, &mut state, &project_id, use_kind)?;
                 session.publish();
                 self.inner.feedback_artifacts.attach(&session);
-                session.start_background_file_index();
                 drop(state);
                 transition.finish(None, None);
                 (self.inner.on_change)();
@@ -666,7 +686,7 @@ pub struct ProjectSession {
     delivery: Mutex<()>,
     state: Mutex<ProjectSessionState>,
     watcher: Mutex<Option<ProjectFileWatcher>>,
-    background_file_index: Mutex<Option<BackgroundFileIndex>>,
+    background_file_index: Mutex<BackgroundFileIndexLifecycle>,
     published: Mutex<bool>,
     publication_ready: Condvar,
 }
@@ -674,6 +694,13 @@ pub struct ProjectSession {
 struct BackgroundFileIndex {
     cancelled: Arc<AtomicBool>,
     worker: thread::JoinHandle<()>,
+}
+
+enum BackgroundFileIndexLifecycle {
+    NotStarted,
+    Running(BackgroundFileIndex),
+    Unavailable,
+    Closed,
 }
 
 struct ProjectSessionState {
@@ -695,7 +722,7 @@ impl ProjectSession {
             feedback_artifacts,
             delivery: Mutex::new(()),
             watcher: Mutex::new(None),
-            background_file_index: Mutex::new(None),
+            background_file_index: Mutex::new(BackgroundFileIndexLifecycle::NotStarted),
             published: Mutex::new(false),
             publication_ready: Condvar::new(),
             state: Mutex::new(ProjectSessionState {
@@ -867,7 +894,18 @@ impl ProjectSession {
         Ok(result)
     }
 
-    fn start_background_file_index(self: &Arc<Self>) {
+    pub(crate) fn start_background_file_index(self: &Arc<Self>) {
+        let mut background_file_index = lock(&self.background_file_index);
+        if !matches!(
+            *background_file_index,
+            BackgroundFileIndexLifecycle::NotStarted
+        ) {
+            return;
+        }
+        if lock(&self.state).closed {
+            *background_file_index = BackgroundFileIndexLifecycle::Closed;
+            return;
+        }
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = Arc::clone(&cancelled);
         let session = Arc::clone(self);
@@ -917,10 +955,15 @@ impl ProjectSession {
             });
         match worker {
             Ok(worker) => {
-                *lock(&self.background_file_index) =
-                    Some(BackgroundFileIndex { cancelled, worker });
+                *background_file_index =
+                    BackgroundFileIndexLifecycle::Running(BackgroundFileIndex {
+                        cancelled,
+                        worker,
+                    });
             }
             Err(error) => {
+                *background_file_index = BackgroundFileIndexLifecycle::Unavailable;
+                drop(background_file_index);
                 self.publish_background_file_index_failure(&error.to_string());
             }
         }
@@ -1029,8 +1072,18 @@ impl ProjectSession {
 
     fn prepare_for_publication(self: &Arc<Self>) -> Result<(), ProjectError> {
         let weak = Arc::downgrade(self);
+        let explicit_dependency_session = Arc::downgrade(self);
         let watcher = ProjectFileWatcher::start(
             &self.root,
+            Arc::new(move |project_relative_path| {
+                explicit_dependency_session
+                    .upgrade()
+                    .is_some_and(|session| {
+                        lock(&session.state)
+                            .service
+                            .is_explicit_watch_path(project_relative_path)
+                    })
+            }),
             Arc::new(move |signal| {
                 if let Some(session) = weak.upgrade() {
                     session.wait_until_published();
@@ -1111,7 +1164,14 @@ impl ProjectSession {
             ProjectWatchSignal::Paths(paths) => paths.first().map_or("", String::as_str),
             ProjectWatchSignal::RescanRequired(_) => "",
         };
+        let requires_full_index = match &signal {
+            ProjectWatchSignal::RescanRequired(_) => true,
+            ProjectWatchSignal::Paths(paths) => paths.iter().any(|path| is_gitignore_path(path)),
+        };
         let snapshot_result = match &signal {
+            ProjectWatchSignal::Paths(_) if requires_full_index => {
+                state.service.complete_file_index()
+            }
             ProjectWatchSignal::Paths(paths) => state.service.refresh_watched_paths(paths),
             ProjectWatchSignal::RescanRequired(_) => state.service.complete_file_index(),
         };
@@ -1240,8 +1300,8 @@ impl ProjectSession {
     }
 
     fn finalize_close(&self) -> Result<(), ProjectError> {
-        self.close_watcher();
         let background_index_result = self.close_background_file_index();
+        self.close_watcher();
         let detach_result = self.feedback_artifacts.detach(&self.root);
         if detach_result.is_ok() {
             lock(&self.state).service.release_capability_binding();
@@ -1250,13 +1310,23 @@ impl ProjectSession {
     }
 
     fn close_watcher(&self) {
-        if let Some(mut watcher) = lock(&self.watcher).take() {
+        let watcher = { lock(&self.watcher).take() };
+        if let Some(mut watcher) = watcher {
             watcher.close();
         }
     }
 
     fn close_background_file_index(&self) -> Result<(), ProjectError> {
-        let Some(index) = lock(&self.background_file_index).take() else {
+        let index = {
+            let mut lifecycle = lock(&self.background_file_index);
+            match std::mem::replace(&mut *lifecycle, BackgroundFileIndexLifecycle::Closed) {
+                BackgroundFileIndexLifecycle::Running(index) => Some(index),
+                BackgroundFileIndexLifecycle::NotStarted
+                | BackgroundFileIndexLifecycle::Unavailable
+                | BackgroundFileIndexLifecycle::Closed => None,
+            }
+        };
+        let Some(index) = index else {
             return Ok(());
         };
         index.cancelled.store(true, Ordering::Release);
@@ -1338,6 +1408,12 @@ fn execute_project_command(
         ProjectCommand::Refresh => {
             let snapshot = service.refresh()?;
             Ok(project_snapshot_mutation(snapshot))
+        }
+        ProjectCommand::Validate => {
+            let snapshot = service.validate_complete_snapshot()?;
+            Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
+                snapshot,
+            )))
         }
         ProjectCommand::LoadDirectory {
             project_relative_directory,
@@ -1706,6 +1782,10 @@ impl Drop for ProjectSubscription {
     fn drop(&mut self) {
         self.release_once();
     }
+}
+
+fn is_gitignore_path(path: &str) -> bool {
+    path == ".gitignore" || path.ends_with("/.gitignore")
 }
 
 fn add_use(

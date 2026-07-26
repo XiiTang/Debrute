@@ -19,7 +19,6 @@ describe('workbenchEvents', () => {
       'globalSettings.changed',
       'integrations.changed',
       'adobeBridge.state.changed',
-      'adobeBridge.state.failed',
       'product.changed'
     ];
 

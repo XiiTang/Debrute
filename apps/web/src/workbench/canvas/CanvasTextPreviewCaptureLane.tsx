@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { CanvasTextEditor } from './CanvasTextEditor';
 import {
   captureCanvasTextPreviewSource,
   type CanvasTextPreviewRasterResult,
@@ -17,10 +16,17 @@ import {
 } from './CanvasTextPreviewScene';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
+import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
 
 const CANVAS_TEXT_PREVIEW_CAPTURE_SLICE_MS = 16;
 const CANVAS_TEXT_PREVIEW_LAYOUT_FRAME_LIMIT = 30;
 const CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
+const CanvasTextEditor = React.lazy(async () => {
+  workbenchStartupTimeline.markFeatureRequested('text-editor');
+  const module = await import('./CanvasTextEditor.js');
+  workbenchStartupTimeline.markFeatureReady('text-editor');
+  return { default: module.CanvasTextEditor };
+});
 
 export type CanvasTextPreviewCaptureStage =
   | 'capture-ready'
@@ -300,20 +306,22 @@ export function CanvasTextPreviewCaptureLane({
           overflow: 'hidden'
         }}
       >
-        <CanvasTextEditor
-          key={targetKey}
-          value={target.content}
-          language={target.language}
-          wordWrap={target.wordWrap}
-          visible
-          readOnly
-          initialScrollTop={target.scrollTop}
-          initialScrollLeft={target.scrollLeft}
-          onChange={() => undefined}
-          onSave={() => undefined}
-          onToggleWordWrap={() => undefined}
-          onLayoutReady={markEditorLayoutReady}
-        />
+        <React.Suspense fallback={null}>
+          <CanvasTextEditor
+            key={targetKey}
+            value={target.content}
+            language={target.language}
+            wordWrap={target.wordWrap}
+            visible
+            readOnly
+            initialScrollTop={target.scrollTop}
+            initialScrollLeft={target.scrollLeft}
+            onChange={() => undefined}
+            onSave={() => undefined}
+            onToggleWordWrap={() => undefined}
+            onLayoutReady={markEditorLayoutReady}
+          />
+        </React.Suspense>
       </div>
     </div>
   );

@@ -79,7 +79,7 @@ export interface ProjectExplorerController {
   }): void;
 }
 
-export function useProjectExplorerController(input: {
+export interface ProjectExplorerControllerInput {
   api: WorkbenchApiClient;
   projectId: string | undefined;
   projectGeneration: number;
@@ -90,7 +90,11 @@ export function useProjectExplorerController(input: {
   i18n: WorkbenchI18n;
   canStartProjectPathCommand(): boolean;
   isCurrentProjectPathCommandScope(): boolean;
-}): ProjectExplorerController {
+}
+
+export function useProjectExplorerController(
+  input: ProjectExplorerControllerInput
+): ProjectExplorerController {
   const { canStartProjectPathCommand, isCurrentProjectPathCommandScope } = input;
   const [selection, setSelectionState] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
   const [fileClipboard, setFileClipboard] = useState<WorkbenchFileClipboard>();

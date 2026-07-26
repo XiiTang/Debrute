@@ -1,0 +1,136 @@
+import { describe, expect, it } from 'vitest';
+import type {
+  AdobeBridgeStateView,
+  DebruteGlobalSettingsView,
+  IntegrationSettingsView
+} from '@debrute/app-protocol';
+import { createWorkbenchGlobalProjection } from './WorkbenchGlobalProjection.js';
+
+describe('WorkbenchGlobalProjection', () => {
+  it('retains initial resources before any presentation subscribes', () => {
+    const projection = createWorkbenchGlobalProjection();
+    const settings = settingsFixture();
+
+    projection.acceptSnapshot({ revision: 4, settings });
+    projection.acceptEvent({
+      type: 'product.changed',
+      revision: 4,
+      product: null
+    });
+    projection.acceptEvent({
+      type: 'adobeBridge.state.changed',
+      revision: 4,
+      state: adobeBridgeFixture()
+    });
+    projection.acceptEvent({
+      type: 'integrations.changed',
+      revision: 4,
+      integrations: integrationsFixture()
+    });
+
+    expect(projection.getState()).toEqual({
+      status: 'active',
+      revision: 4,
+      settings,
+      integrations: { status: 'ready', value: integrationsFixture() },
+      adobeBridge: { status: 'ready', value: adobeBridgeFixture() },
+      product: { status: 'ready', value: null }
+    });
+  });
+
+  it('accepts one contiguous revision for every later Global change', () => {
+    const projection = createWorkbenchGlobalProjection();
+    projection.acceptSnapshot({ revision: 7, settings: settingsFixture() });
+
+    projection.acceptEvent({
+      type: 'globalSettings.changed',
+      revision: 8,
+      settings: settingsFixture('zh-CN')
+    });
+    projection.acceptEvent({
+      type: 'recentProjects.changed',
+      revision: 9,
+      recentProjects: [{
+        projectId: 'project-1',
+        projectRoot: '/project-one'
+      }]
+    });
+
+    const state = projection.getState();
+    expect(state).toMatchObject({
+      status: 'active',
+      revision: 9,
+      settings: {
+        workbench: { locale: 'zh-CN' },
+        chrome: { recentProjects: [{ projectId: 'project-1' }] }
+      }
+    });
+  });
+
+  it('fails closed on a Global revision gap and retains the last accepted projection', () => {
+    const projection = createWorkbenchGlobalProjection();
+    projection.acceptSnapshot({ revision: 3, settings: settingsFixture() });
+
+    expect(() => projection.acceptEvent({
+      type: 'globalSettings.changed',
+      revision: 5,
+      settings: settingsFixture('zh-CN')
+    })).toThrow('Expected Global revision 4, received 5.');
+
+    expect(projection.getState()).toMatchObject({
+      status: 'failed',
+      revision: 3,
+      settings: { workbench: { locale: 'en' } },
+      error: { message: 'Expected Global revision 4, received 5.' }
+    });
+  });
+
+  it('hydrates Adobe state only through its ordered event', () => {
+    const projection = createWorkbenchGlobalProjection();
+    projection.acceptSnapshot({ revision: 10, settings: settingsFixture() });
+    projection.acceptEvent({
+      type: 'adobeBridge.state.changed',
+      revision: 10,
+      state: adobeBridgeFixture()
+    });
+    expect(projection.getState()).toMatchObject({
+      status: 'active',
+      revision: 10,
+      adobeBridge: { status: 'ready' }
+    });
+  });
+});
+
+function settingsFixture(locale: 'en' | 'zh-CN' = 'en'): DebruteGlobalSettingsView {
+  return {
+    workbench: { locale, themePreference: 'dark', defaultFrontend: 'desktop' },
+    canvas: {
+      textAppearance: {
+        fontId: 'noto-sans-mono-cjk-sc',
+        fontSizePx: 12,
+        lineHeightRatio: 1.4,
+        fontWeight: 400,
+        letterSpacingPx: 0,
+        ligatures: true
+      }
+    },
+    chrome: { recentProjects: [] },
+    models: { image: [], video: [], audio: [] },
+    adobeBridge: { enabled: true }
+  };
+}
+
+function adobeBridgeFixture(): AdobeBridgeStateView {
+  return {
+    settings: { enabled: true, discoveryStatus: 'available' },
+    pairedPlugins: [],
+    clients: [],
+    projects: [],
+    links: [],
+    transfers: []
+  };
+}
+
+function integrationsFixture(): IntegrationSettingsView {
+  return { backends: [], integrations: [] };
+}

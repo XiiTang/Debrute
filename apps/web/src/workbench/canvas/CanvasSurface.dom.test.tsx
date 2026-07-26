@@ -359,7 +359,10 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('renders selected text nodes as live editors and leaves inactive text as preview bodies', () => {
+  it('loads selected text nodes as live editors and leaves inactive text as preview bodies', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
     const canvas = createCanvasDocument({ id: 'selected-text-canvas' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -371,17 +374,24 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
-      selection: { kind: 'node', projectRelativePath: 'flow/selected.md' },
-      textFileBuffers: {
-        'flow/selected.md': textBufferFixture('flow/selected.md', '# Selected', 'rev-selected'),
-        'flow/inactive.md': textBufferFixture('flow/inactive.md', '# Inactive', 'rev-inactive')
-      }
-    }));
-
-    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(1);
-    expect(html.match(/canvas-text-preview-empty/g) ?? []).toHaveLength(1);
-    expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, {
+          selection: { kind: 'node', projectRelativePath: 'flow/selected.md' },
+          textFileBuffers: {
+            'flow/selected.md': textBufferFixture('flow/selected.md', '# Selected', 'rev-selected'),
+            'flow/inactive.md': textBufferFixture('flow/inactive.md', '# Inactive', 'rev-inactive')
+          }
+        }));
+      });
+      await waitForCanvasSurfaceElement(container, '[data-editor-mode="edit"]');
+      expect(container.querySelectorAll('[data-editor-mode="edit"]')).toHaveLength(1);
+      expect(container.querySelectorAll('.canvas-text-preview-empty')).toHaveLength(1);
+      expect(container.querySelector('[data-editor-mode="preview"]')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it('renders every text node as a preview when text nodes are multi-selected', () => {
@@ -1774,6 +1784,22 @@ function surface(
       />
     </I18nProvider>
   );
+}
+
+async function waitForCanvasSurfaceElement(
+  container: ParentNode,
+  selector: string
+): Promise<Element> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const element = container.querySelector(selector);
+    if (element) {
+      return element;
+    }
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+  }
+  throw new Error(`Expected ${selector}.`);
 }
 
 function feedbackInteractionFixture(

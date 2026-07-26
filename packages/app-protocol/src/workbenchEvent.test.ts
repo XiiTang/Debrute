@@ -115,17 +115,15 @@ describe('Workbench event decoding', () => {
     expect(decodeWorkbenchEvent(event)).toEqual(event);
   });
 
-  it('accepts only a complete typed Adobe Bridge resource failure', () => {
+  it('rejects the removed Adobe Bridge bootstrap-failure event', () => {
     const event = {
       type: 'adobeBridge.state.failed',
+      revision: 4,
       error: { code: 'adobe_bridge_state_invalid', message: 'state unavailable' }
     };
 
-    expect(decodeWorkbenchEvent(event)).toEqual(event);
-    expect(decodeWorkbenchEvent({
-      type: 'adobeBridge.state.failed',
-      error: { message: 'state unavailable' }
-    })).toBeUndefined();
+    expect(isRecognizedWorkbenchEventFrame(event)).toBe(false);
+    expect(decodeWorkbenchEvent(event)).toBeUndefined();
   });
 
   it('recognizes but rejects incomplete authoritative Project payloads', () => {

@@ -261,33 +261,43 @@ describe('CanvasNodeContent', () => {
   });
 
   describe('Canvas text editor chrome', { tags: ['canvas-text'] }, () => {
-    it('renders available text nodes as live CodeMirror editors', () => {
-      const html = renderStaticWithI18n(
-        <CanvasNodeContent
-          node={textNode('flow/readme.md', 'rev-a')}
-          selected
-          culled={false}
-          actions={actionsFixture()}
-          textBuffer={textBuffer('flow/readme.md', 'rev-a')}
-          onVideoPlayerMounted={() => undefined}
-          onVideoPlayingChange={() => undefined}
-          onRegisterVideoTarget={() => undefined}
-          onUpdateVideoPlaybackTime={() => undefined}
-          onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
-        />
-      );
-
-      expect(html).toContain('db-canvas-node-titlebar');
-      expect(html).toContain('data-canvas-local-wheel="focus"');
-      expect(html).not.toContain('data-canvas-local-wheel="true"');
-      expect(html).toContain('Open large editor');
-      expect(html).toContain('data-editor-engine="codemirror"');
-      expect(html).toContain('data-editor-mode="edit"');
-      expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
+    it('loads available text nodes as live CodeMirror editors on demand', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => {
+          root.render(
+            <TestProviders>
+              <CanvasNodeContent
+                node={textNode('flow/readme.md', 'rev-a')}
+                selected
+                culled={false}
+                actions={actionsFixture()}
+                textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+                onVideoPlayerMounted={() => undefined}
+                onVideoPlayingChange={() => undefined}
+                onRegisterVideoTarget={() => undefined}
+                onUpdateVideoPlaybackTime={() => undefined}
+                onUpdateTextViewport={() => undefined}
+                onSelectNode={() => undefined}
+                onTitlePointerDown={() => undefined}
+                onTitlePointerMove={() => undefined}
+                onTitlePointerUp={() => undefined}
+              />
+            </TestProviders>
+          );
+        });
+        const editor = await waitForElement(container, '.canvas-text-editor');
+        expect(container.querySelector('.db-canvas-node-titlebar')).not.toBeNull();
+        expect(container.querySelector('.canvas-text-body')?.getAttribute('data-canvas-local-wheel')).toBe('focus');
+        expect(container.querySelector('[title="Open large editor"]')).not.toBeNull();
+        expect(editor.getAttribute('data-editor-engine')).toBe('codemirror');
+        expect(editor.getAttribute('data-editor-mode')).toBe('edit');
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+      }
     });
   });
 
@@ -441,6 +451,7 @@ describe('CanvasNodeContent', () => {
         expect(posAtCoords).not.toHaveBeenCalled();
 
         await renderNode(true);
+        await waitForElement(container, '.canvas-text-editor');
 
         await act(async () => {
           flushAnimationFrames(frameCallbacks);
@@ -1095,12 +1106,22 @@ describe('CanvasNodeContent', () => {
 
 describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] }, () => {
   it('returns the path only while an available text node has no buffer', () => {
-    expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-a'), undefined)).toBe('flow/readme.md');
+    expect(canvasTextBufferEnsureKey(
+      textNode('flow/readme.md', 'rev-a'),
+      undefined,
+      true
+    )).toBe('flow/readme.md');
+  });
+
+  it('does not read text content for a culled node until visibility or edit intent requests it', () => {
+    const node = textNode('flow/readme.md', 'rev-a');
+    expect(canvasTextBufferEnsureKey(node, undefined, false)).toBeUndefined();
+    expect(canvasTextBufferEnsureKey(node, undefined, true)).toBe('flow/readme.md');
   });
 
   it('skips ensure whenever the current text buffer is already loaded', () => {
-    expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-a'), textBuffer('flow/readme.md', 'rev-a'))).toBeUndefined();
-    expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-b'), textBuffer('flow/readme.md', 'rev-a'))).toBeUndefined();
+    expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-a'), textBuffer('flow/readme.md', 'rev-a'), true)).toBeUndefined();
+    expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-b'), textBuffer('flow/readme.md', 'rev-a'), true)).toBeUndefined();
   });
 });
 
@@ -1252,6 +1273,22 @@ function installAnimationFrameQueue(frameCallbacks: FrameRequestCallback[]): () 
 function flushAnimationFrames(frameCallbacks: FrameRequestCallback[]): void {
   const callbacks = frameCallbacks.splice(0);
   callbacks.forEach((callback) => callback(0));
+}
+
+async function waitForElement<T extends Element>(
+  container: ParentNode,
+  selector: string
+): Promise<T> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const element = container.querySelector<T>(selector);
+    if (element) {
+      return element;
+    }
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+  }
+  throw new Error(`Expected ${selector}.`);
 }
 
 function renderImagePreview(imageState: CanvasImageNodeAssetHookState): string {

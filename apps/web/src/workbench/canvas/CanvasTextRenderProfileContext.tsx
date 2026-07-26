@@ -20,10 +20,12 @@ export function CanvasTextRenderProfileProvider({
 export function CanvasTextRenderProfileGate({
   profile,
   pending,
+  onReady,
   children
 }: {
   profile: CanvasTextRenderProfile;
   pending: React.ReactNode;
+  onReady?: (() => void) | undefined;
   children: React.ReactNode;
 }): React.ReactElement {
   const inheritedProfile = React.useContext(CanvasTextRenderProfileContext);
@@ -75,6 +77,11 @@ export function CanvasTextRenderProfileGate({
   const currentState = state.requestedIdentity === profile.identity
     ? state
     : { requestedIdentity: profile.identity, active: state.active };
+  React.useLayoutEffect(() => {
+    if (currentState.active?.identity === profile.identity && !currentState.error) {
+      onReady?.();
+    }
+  }, [currentState.active?.identity, currentState.error, onReady, profile.identity]);
   if (currentState?.error) {
     return (
       <main className="boot-screen" role="alert" data-testid="canvas-text-render-profile-error">

@@ -9,6 +9,8 @@ export function SendToPhotoshopDialog({
   projectRelativePath,
   enabled,
   bridge,
+  loading,
+  loadError,
   sending,
   onSend,
   onClose
@@ -17,6 +19,8 @@ export function SendToPhotoshopDialog({
   projectRelativePath: string;
   enabled: boolean;
   bridge: AdobeBridgeStateView | undefined;
+  loading: boolean;
+  loadError: string | undefined;
   sending: boolean;
   onSend: (pluginInstanceId: string) => void;
   onClose: () => void;
@@ -34,7 +38,11 @@ export function SendToPhotoshopDialog({
         </header>
         <small>{projectRelativePath}</small>
         <div className="db-record-list">
-          {linkedClients.length === 0 ? (
+          {loadError ? (
+            <EmptyState title={i18n.t('adobeBridge.sendToPhotoshop.loadFailed', { message: loadError })} />
+          ) : loading ? (
+            <EmptyState title={i18n.t('adobeBridge.sendToPhotoshop.loading')} />
+          ) : linkedClients.length === 0 ? (
             <EmptyState title={i18n.t('adobeBridge.sendToPhotoshop.noLinkedClients')} />
           ) : (
             linkedClients.map((client) => {

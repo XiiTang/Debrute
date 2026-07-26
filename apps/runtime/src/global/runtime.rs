@@ -64,7 +64,6 @@ struct GlobalEventState {
 struct IntegrationProjectionState {
     generation: u64,
     view: Option<IntegrationSettingsView>,
-    initial_load_started: bool,
 }
 
 impl GlobalRuntimeService {
@@ -276,24 +275,6 @@ impl GlobalRuntimeService {
             .clone()
     }
 
-    /// Claims the single initial background integration load.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the integration projection lock is poisoned.
-    #[must_use]
-    pub fn begin_initial_integration_load(&self) -> bool {
-        let mut projection = self
-            .integration_projection
-            .lock()
-            .expect("integration projection lock poisoned");
-        if projection.view.is_some() || projection.initial_load_started {
-            return false;
-        }
-        projection.initial_load_started = true;
-        true
-    }
-
     /// Runs one closed integration operation with start and settled revisions.
     ///
     #[must_use]
@@ -339,7 +320,6 @@ impl GlobalRuntimeService {
                 .checked_add(1)
                 .expect("Global integration projection generation exhausted");
             projection.view = Some(view.clone());
-            projection.initial_load_started = false;
             return view;
         }
         projection
@@ -361,7 +341,6 @@ impl GlobalRuntimeService {
                 .checked_add(1)
                 .expect("Global integration projection generation exhausted");
             projection.view = Some(view.clone());
-            projection.initial_load_started = false;
             drop(projection);
             GlobalRuntimeChange::IntegrationsChanged(view)
         };

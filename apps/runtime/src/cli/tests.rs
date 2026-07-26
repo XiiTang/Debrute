@@ -369,6 +369,54 @@ fn project_status_never_initializes_an_uninitialized_directory() {
 }
 
 #[test]
+fn project_validate_completes_the_file_index_before_checking_canvas_map_drift() {
+    let fixture = CliFixture::new();
+    let project = fixture.root.join("validation-project");
+    fs::create_dir(&project).expect("Project root should exist");
+    let initialized = fixture
+        .service
+        .run(&json!({
+            "command": "project.init",
+            "positional": [project.to_string_lossy()],
+            "options": {},
+            "projectRoot": project
+        }))
+        .expect("Project init should return");
+    assert_eq!(initialized["status"], "ok", "{initialized}");
+    fs::create_dir(project.join("nested")).expect("nested fixture should exist");
+    fs::write(project.join("nested/asset.txt"), "asset").expect("asset should write");
+    fs::write(
+        project.join(".debrute/canvas-maps/canvas-1.yaml"),
+        "paths:\n  - nested/asset.txt\n",
+    )
+    .expect("Canvas Map should drift");
+
+    let validated = fixture
+        .service
+        .run(&json!({
+            "command": "project.validate",
+            "positional": [project.to_string_lossy()],
+            "options": {},
+            "projectRoot": project
+        }))
+        .expect("Project validation should return");
+
+    assert_eq!(validated["status"], "ok", "{validated}");
+    assert_eq!(validated["fields"]["warnings"], 1);
+    assert!(validated["records"].as_array().is_some_and(|records| {
+        records
+            .iter()
+            .any(|record| record["fields"]["code"] == "document_drift")
+    }));
+    let canvas = fs::read_to_string(project.join(".debrute/canvases/canvas-1.json"))
+        .expect("Canvas should remain readable");
+    assert!(
+        !canvas.contains("nested/asset.txt"),
+        "validation must not push Canvas Map drift"
+    );
+}
+
+#[test]
 fn model_describe_uses_the_request_command() {
     let fixture = CliFixture::new();
     let described = fixture

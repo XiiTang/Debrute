@@ -40,12 +40,20 @@ preemption.
 
 The document does not mount React from guessed defaults. Bootstrap first waits
 for the Runtime-owned Global Settings snapshot, applies its resolved theme,
-and passes its locale and Canvas Text Appearance as authoritative initial
-values when it imports and mounts the Workbench composition root. During that
-wait the renderer is transparent, so
+and accepts that frame into `WorkbenchGlobalProjection` before it imports and
+mounts the Workbench composition root. Bootstrap keeps following ordered theme
+events and remains transparent until the presentation controller commits the
+current projection, then hands document-theme ownership to that controller.
+Theme, locale, recent Projects, Canvas
+Text Appearance, Product, Integration, and Adobe presentation read that same
+ordered in-memory projection rather than receiving copied bootstrap props or
+maintaining a second frontend settings store. During that wait the renderer is transparent, so
 Electron's authoritative native launch background remains visible. Product,
 Integration discovery, and Adobe live state are separate Global resources;
-their slower work cannot delay settings or the first Workbench shell. A
+Integration work starts only when Settings is activated. Adobe live state starts
+when Settings or Send to Photoshop first expresses intent. Accepted results enter
+the projection through ordered Global events. Their slower work
+cannot delay settings or the first Workbench shell. A
 requested Project binding is also prepared after the Global Settings frame and
 cannot delay it.
 
@@ -87,11 +95,20 @@ publish their accepted results through the same ordered Project event stream.
 
 Focused units own cohesive state:
 
-- `useWorkbenchSettingsController` owns the already-bootstrapped global
-  settings, separate Integration and Adobe Bridge live resources, locale,
-  resolved theme, and settings commands.
-- `useProjectExplorerController` owns Explorer selection, clipboard, inline
-  edits, file commands, and invalidation when the project changes.
+- `WorkbenchGlobalProjection` accepts the initial Runtime Global snapshot and
+  every ordered Global event, fails closed on a revision gap, and preserves the
+  last accepted value when the connection ends.
+- Bootstrap writes the pre-mount document theme and follows ordered Global
+  changes until React commits. It then unsubscribes and
+  `useWorkbenchPresentationController` becomes the only document theme writer,
+  deriving theme and locale from that projection.
+- `useWorkbenchSettingsController` exists only after Settings activation. It
+  owns settings commands and their local in-flight UI state, then reconciles
+  accepted values from `WorkbenchGlobalProjection`; it does not own theme,
+  locale, or another accepted Global snapshot.
+- `useProjectExplorerController` loads only after Explorer or a file-command
+  surface expresses intent, then owns selection, clipboard, inline edits, file
+  commands, and invalidation when the project changes.
 - Canvas controllers own Canvas feedback, overlays, and runtime interaction.
 - Text services own editor buffers and floating editor windows.
 - Shell modules own panel geometry, viewport reconciliation, and window order.
@@ -103,13 +120,38 @@ not converted into successful empty data, and failed saves leave the relevant
 draft available with an owning error state.
 
 The initial JavaScript graph contains only the bootstrap and critical
-Workbench shell. Terminal, Canvas video controls, and each CodeMirror language
-parser load from separate chunks when their owning surface first needs them.
+Workbench shell. Settings, Explorer presentation, Inspector, Terminal panel
+and WebSocket Hub,
+floating text windows, Canvas video controls, the CodeMirror engine, and each
+CodeMirror language parser load from separate chunks when their owning surface
+first needs them. Optional features mount from the current Global and Project
+projections, so events accepted before activation are not replayed or lost.
 Canvas managed fonts gate only active Canvas text surfaces and floating text
 windows; they never block the shell, Explorer, Settings, or a Project-open
 result. The production build manifest enforces gzip ceilings of 80 KiB for the
-bootstrap graph and 320 KiB for the critical Workbench graph, and rejects an
-eager Terminal, video-control, or language-parser dependency.
+bootstrap graph and 250 KiB for the critical Workbench graph, and rejects an
+eager Settings, Explorer, Inspector, Terminal panel or Hub, floating-text-window,
+video-control, CodeMirror-engine, or language-parser dependency.
+
+Development startup instrumentation is explicit. `pnpm dev -- --startup-perf`
+or `pnpm dev:electron -- --startup-perf` records bounded Performance marks and
+console entries from the navigation performance origin for main evaluation,
+Global snapshot, theme, Workbench chunk, React commit, first surface commit,
+first Project-open request and Project-surface commit, and first optional-feature
+request and readiness. `shell-fonts-ready` waits only for the Smiley display
+face and Noto Sans SC 400/600/700 faces used by the committed shell, while
+`canvas-text-ready` records completion of the
+managed Font Resource for the first active text Canvas. A text Project is not
+reported as fully interactive merely because its shell committed while that
+resource is still preparing. The Project request mark is recorded at the HTTP binding
+boundary, including initial `/projects/<project-id>` and `/open?path=...`
+navigation rather than only post-mount UI actions. Text-editor readiness means
+the actual CodeMirror engine chunk is loaded, not merely its floating-window
+shell. The native directory picker is a separate selection command: cancellation
+records no Project-open mark, and the binding mark begins only after a path is
+selected, so human picker time is excluded. Without the flag it records and
+publishes nothing, and it never
+registers a production debugging global.
 
 Workbench has exactly three page-path shapes: `/`, `/open`, and
 `/projects/<project-id>`. Those paths select the application entry document;
@@ -286,8 +328,9 @@ background before loading the document. It does not persist another settings
 copy or fall back to a default background when that snapshot is absent or
 invalid. After bootstrap, the ordinary Runtime global snapshot and event path
 continue to own live theme changes. The renderer remains transparent until the
-authoritative Global Settings snapshot has applied the same resolved theme,
-then removes its bootstrap marker and paints normal content.
+authoritative Global Settings projection has applied its latest ordered theme
+and the React presentation controller commits that same projection; only then
+does bootstrap remove its marker and paint normal content.
 
 Workbench product copy supports `en` and `zh-CN`. Translation keys are semantic
 identifiers shared by complete typed dictionaries. Missing keys and missing
@@ -308,11 +351,18 @@ Opening a Project loads only the root's direct visible children. Expanding a
 collapsed directory issues one revisioned Runtime directory-load command and
 adds only that directory's direct children to the current snapshot without
 reloading unrelated Project documents; repeated expansion is a no-op. Creating
-inside a collapsed directory first loads that parent. Runtime may build its
-complete Canvas/file index in a session-owned background task, but that private
-index is not serialized into Explorer and does not inflate the initial tree.
+inside a collapsed directory first loads that parent. After the shallow
+`project.bound` snapshot is queued and its event stream is running, Runtime may
+build its complete Canvas/file index in a session-owned background task. That
+private index is not serialized into Explorer, does not inflate the initial
+tree, and never delays the first bound Project view.
 Closing the Project cancels and joins the task; scan failure keeps the shallow
-tree usable and appears as a retryable Project diagnostic.
+tree usable and appears as a retryable Project diagnostic. Automatic indexing
+and filesystem events share one filter: nested `.gitignore` rules and standard
+dependency, cache, and build directories are excluded. An explicit Explorer
+expansion still reads one requested directory and keeps its direct children as
+session watch dependencies, so exclusion removes background work rather than
+making the path inaccessible or stale.
 Its selection model owns selected paths, focus, and range anchor. Pointer and
 keyboard behavior supports single, toggle, range, and context-menu selection,
 as well as platform-appropriate copy, cut, paste, delete, and permanent-delete

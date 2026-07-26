@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
-import { CanvasTextEditor } from './CanvasTextEditor';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
@@ -19,9 +18,16 @@ import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
 import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../i18n';
+import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
 
 const FIXED_NODE_PRESENTATION_SCALE = 10;
 const GENERIC_NODE_WRAP_VISUAL_HEIGHT = 88;
+const CanvasTextEditor = React.lazy(async () => {
+  workbenchStartupTimeline.markFeatureRequested('text-editor');
+  const module = await import('./CanvasTextEditor.js');
+  workbenchStartupTimeline.markFeatureReady('text-editor');
+  return { default: module.CanvasTextEditor };
+});
 
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
@@ -94,7 +100,11 @@ export function CanvasNodeContent({
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0);
   const requestedTextBufferKeyRef = useRef<string | undefined>(undefined);
   const ensureTextFileBufferRef = useRef(actions.ensureTextFileBuffer);
-  const textBufferEnsureKey = canvasTextBufferEnsureKey(node, textBuffer);
+  const textBufferEnsureKey = canvasTextBufferEnsureKey(
+    node,
+    textBuffer,
+    !culled || selected
+  );
   const mediaSrc = node.mediaKind === 'image'
     ? undefined
     : node.availability.state === 'available'
@@ -258,9 +268,12 @@ function imageSpatialFeedbackItems(entry: CanvasFeedbackEntry | undefined): Canv
 
 export function canvasTextBufferEnsureKey(
   node: ProjectedCanvasNode,
-  textBuffer: TextFileBuffer | undefined
+  textBuffer: TextFileBuffer | undefined,
+  contentRequested: boolean
 ): string | undefined {
-  if (node.mediaKind !== 'text' || node.availability.state !== 'available') {
+  if (!contentRequested
+    || node.mediaKind !== 'text'
+    || node.availability.state !== 'available') {
     return undefined;
   }
   if (textBuffer?.projectRelativePath === node.projectRelativePath) {
@@ -593,24 +606,26 @@ function CanvasTextNodeContent({
         ) : buffer ? (
           <>
             {showTextEditor ? (
-              <CanvasTextEditor
-                value={buffer.content}
-                language={buffer.language}
-                wordWrap={buffer.wordWrap}
-                readOnly={!active}
-                visible={!culled || selected}
-                focusRequest={active ? focusRequest : undefined}
-                initialScrollTop={node.textViewport?.scrollTop}
-                initialScrollLeft={node.textViewport?.scrollLeft}
-                onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
-                onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
-                onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
-                onScrollPositionCommit={commitTextViewport}
-                onReadOnlyTransition={setHandoffViewport}
-                onFocusRequestConsumed={(requestId) => {
-                  setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
-                }}
-              />
+              <React.Suspense fallback={<div className="canvas-text-preview-empty" aria-busy="true" />}>
+                <CanvasTextEditor
+                  value={buffer.content}
+                  language={buffer.language}
+                  wordWrap={buffer.wordWrap}
+                  readOnly={!active}
+                  visible={!culled || selected}
+                  focusRequest={active ? focusRequest : undefined}
+                  initialScrollTop={node.textViewport?.scrollTop}
+                  initialScrollLeft={node.textViewport?.scrollLeft}
+                  onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
+                  onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
+                  onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+                  onScrollPositionCommit={commitTextViewport}
+                  onReadOnlyTransition={setHandoffViewport}
+                  onFocusRequestConsumed={(requestId) => {
+                    setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
+                  }}
+                />
+              </React.Suspense>
             ) : null}
             {showTextPreviewHandoff ? (
               <CanvasTextPreviewImageHandoff

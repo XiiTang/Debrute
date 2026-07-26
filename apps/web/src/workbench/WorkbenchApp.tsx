@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Loader2 } from './ui/index.js';
 import type {
   DebruteProductPlatform,
-  DebruteGlobalSettingsView,
   DebruteWorkbenchRoute,
   ProjectPathEntry,
   WorkbenchProjectSessionSnapshot
@@ -42,7 +41,10 @@ import {
 import { useTextFileBufferActions } from './services/textFileBufferActions';
 import { createProjectPathCommandCoordinator } from './services/projectPathCommandCoordinator';
 import { SendToPhotoshopDialog } from './adobe-bridge/SendToPhotoshopDialog';
-import { WorkbenchContextMenu } from './shell/WorkbenchContextMenu';
+import {
+  PendingWorkbenchContextMenuDismissal,
+  WorkbenchContextMenu
+} from './shell/WorkbenchContextMenu';
 import { WorkbenchTitleBar } from './shell/WorkbenchTitleBar';
 import { executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands';
 import {
@@ -64,7 +66,7 @@ import {
   permanentDeleteConfirmationMessageForEntries,
   projectTreeSelectionFromPaths
 } from './project-explorer/workbenchFileCommands';
-import { useProjectExplorerController } from './project-explorer/useProjectExplorerController';
+import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController';
 import {
   canvasCardBarRect,
   feedbackBarPlacementForCanvasTarget,
@@ -86,7 +88,6 @@ import {
 } from './shell/floatingPanels';
 import { FloatingDock } from './shell/FloatingDock';
 import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/FloatingPanel';
-import { FloatingTextEditorWindow } from './canvas/FloatingTextEditorWindow';
 import { NotificationStack } from './shell/NotificationStack';
 import { Button, WorkbenchIconProvider } from './ui/index.js';
 import { FIXED_TOP_FLOATING_BAR_RECTS, TITLE_BAR_RESERVED_RECT } from './shell/workbenchLayers';
@@ -103,52 +104,112 @@ import {
 import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
 import { I18nProvider, createI18n, type WorkbenchI18n } from './i18n';
-import { useWorkbenchSettingsController } from './settings/useWorkbenchSettingsController';
+import type {
+  WorkbenchSettingsActions,
+  WorkbenchSettingsController
+} from './settings/useWorkbenchSettingsController.js';
+import {
+  useWorkbenchPresentationController,
+  type WorkbenchPresentationController
+} from './services/useWorkbenchPresentationController.js';
 import { canvasTextRenderProfileForAppearance } from './canvas/CanvasFontCatalog.js';
 import {
   CanvasTextRenderProfileGate,
   CanvasTextRenderProfileProvider
 } from './canvas/CanvasTextRenderProfileContext.js';
+import { workbenchStartupTimeline } from '../startup/workbenchStartupTimeline.js';
+import { waitForWorkbenchShellFonts } from '../startup/workbenchShellFonts.js';
 
 const productPlatform: DebruteProductPlatform = __DEBRUTE_PLATFORM__;
 const TerminalPanel = React.lazy(async () => {
+  workbenchStartupTimeline.markFeatureRequested('terminal');
   const module = await import('./terminal/TerminalPanel');
+  workbenchStartupTimeline.markFeatureReady('terminal');
   return { default: module.TerminalPanel };
+});
+const loadSettingsFeature = async () => {
+  workbenchStartupTimeline.markFeatureRequested('settings');
+  const module = await import('./settings/SettingsFeature.js');
+  workbenchStartupTimeline.markFeatureReady('settings');
+  return module;
+};
+const WorkbenchSettingsFeatureHost = React.lazy(async () => {
+  const module = await loadSettingsFeature();
+  return { default: module.WorkbenchSettingsFeatureHost };
+});
+const WorkbenchSettingsPanelFeature = React.lazy(async () => {
+  const module = await loadSettingsFeature();
+  return { default: module.WorkbenchSettingsPanelFeature };
+});
+const loadExplorerFeature = async () => {
+  workbenchStartupTimeline.markFeatureRequested('explorer');
+  const module = await import('./project-explorer/ExplorerPanelFeature.js');
+  workbenchStartupTimeline.markFeatureReady('explorer');
+  return module;
+};
+const WorkbenchExplorerControllerHost = React.lazy(async () => {
+  const module = await loadExplorerFeature();
+  return { default: module.WorkbenchExplorerControllerHost };
+});
+const WorkbenchExplorerPanelFeature = React.lazy(async () => {
+  const module = await loadExplorerFeature();
+  return { default: module.WorkbenchExplorerPanelFeature };
+});
+const WorkbenchInspectorPanelFeature = React.lazy(async () => {
+  workbenchStartupTimeline.markFeatureRequested('inspector');
+  const module = await import('./shell/InspectorPanelFeature.js');
+  workbenchStartupTimeline.markFeatureReady('inspector');
+  return { default: module.WorkbenchInspectorPanelFeature };
+});
+const WorkbenchFloatingTextEditorWindowFeature = React.lazy(async () => {
+  const module = await import('./canvas/FloatingTextEditorWindowFeature.js');
+  return { default: module.WorkbenchFloatingTextEditorWindowFeature };
 });
 
 export function WorkbenchApp({
   api,
-  initialGlobalSettings
+  onCommitted
 }: {
   api: HttpWorkbenchApiClient;
-  initialGlobalSettings: DebruteGlobalSettingsView;
+  onCommitted?: () => void;
 }): React.ReactElement {
   const initialRoute = useMemo(() => currentDebruteWorkbenchRoute(), []);
   if (initialRoute.kind === 'not-found') {
-    return (
-      <main className="boot-screen" role="alert" data-testid="workbench-not-found">
-        <strong>404 — Workbench page not found</strong>
-        <span>This URL is not a Debrute Workbench page.</span>
-      </main>
-    );
+    return <WorkbenchNotFound onCommitted={onCommitted} />;
   }
   return (
     <WorkbenchRuntimeApp
       api={api}
-      initialGlobalSettings={initialGlobalSettings}
       initialRoute={initialRoute}
+      onCommitted={onCommitted}
     />
+  );
+}
+
+function WorkbenchNotFound({
+  onCommitted
+}: {
+  onCommitted: (() => void) | undefined;
+}): React.ReactElement {
+  useLayoutEffect(() => {
+    onCommitted?.();
+  }, [onCommitted]);
+  return (
+    <main className="boot-screen" role="alert" data-testid="workbench-not-found">
+      <strong>404 — Workbench page not found</strong>
+      <span>This URL is not a Debrute Workbench page.</span>
+    </main>
   );
 }
 
 function WorkbenchRuntimeApp({
   api,
-  initialGlobalSettings,
-  initialRoute
+  initialRoute,
+  onCommitted
 }: {
   api: HttpWorkbenchApiClient;
-  initialGlobalSettings: DebruteGlobalSettingsView;
   initialRoute: Exclude<DebruteWorkbenchRoute, { kind: 'not-found' }>;
+  onCommitted: (() => void) | undefined;
 }): React.ReactElement {
   const projectProjection = useSyncExternalStore(
     api.projectProjection.subscribe,
@@ -168,15 +229,57 @@ function WorkbenchRuntimeApp({
   const notify = useCallback((message: string) => {
     setNotifications((current) => [message, ...current].slice(0, 4));
   }, []);
-  const settingsController = useWorkbenchSettingsController({
-    api,
-    initialGlobalSettings,
-    projectId: runtimeProjectId,
-    notify
+  const presentationController = useWorkbenchPresentationController({
+    globalProjection: api.globalProjection
   });
-  const canvasTextAppearance = settingsController.globalSettings.status === 'ready'
-    ? settingsController.globalSettings.value.canvas.textAppearance
-    : initialGlobalSettings.canvas.textAppearance;
+  useLayoutEffect(() => {
+    workbenchStartupTimeline.mark('react-committed');
+    onCommitted?.();
+  }, [onCommitted]);
+  useEffect(() => {
+    if (!workbenchStartupTimeline.enabled) {
+      return;
+    }
+    let cancelled = false;
+    void waitForWorkbenchShellFonts(document.fonts).then(() => {
+      if (!cancelled) {
+        workbenchStartupTimeline.mark('shell-fonts-ready');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const [settingsFeatureRequested, setSettingsFeatureRequested] = useState(false);
+  const [settingsFeatureController, setSettingsFeatureController] = useState<WorkbenchSettingsController>();
+  const requestSettingsFeature = useCallback(() => {
+    setSettingsFeatureRequested(true);
+  }, []);
+  const settingsActions = useMemo<WorkbenchSettingsActions>(() => {
+    const controller = () => {
+      if (!settingsFeatureController) {
+        throw new Error('Settings feature is not ready.');
+      }
+      return settingsFeatureController.actions;
+    };
+    return {
+      checkProductUpdate: () => controller().checkProductUpdate(),
+      applyProductUpdate: () => controller().applyProductUpdate(),
+      reloadAdobeBridge: () => controller().reloadAdobeBridge(),
+      saveGlobalSettings: (input) => controller().saveGlobalSettings(input),
+      revealModelApiKey: (modelId) => controller().revealModelApiKey(modelId),
+      rescanIntegrations: () => controller().rescanIntegrations(),
+      runIntegrationOperation: (input) => controller().runIntegrationOperation(input),
+      createAdobeBridgePairing: () => controller().createAdobeBridgePairing(),
+      cancelAdobeBridgePairing: (pairingId) => controller().cancelAdobeBridgePairing(pairingId),
+      removeAdobeBridgePairing: (pluginInstanceId) => controller().removeAdobeBridgePairing(pluginInstanceId),
+      linkAdobeBridgePhotoshop: (input) => controller().linkAdobeBridgePhotoshop(input),
+      unlinkAdobeBridgePhotoshop: (pluginInstanceId) => controller().unlinkAdobeBridgePhotoshop(pluginInstanceId)
+    };
+  }, [settingsFeatureController]);
+  const canvasTextAppearance = settingsFeatureController?.globalSettings.status === 'ready'
+    ? settingsFeatureController.globalSettings.value.canvas.textAppearance
+    : presentationController.settings.canvas.textAppearance;
   const canvasTextRenderProfile = useMemo(
     () => canvasTextRenderProfileForAppearance(canvasTextAppearance),
     [
@@ -188,7 +291,10 @@ function WorkbenchRuntimeApp({
       canvasTextAppearance.lineHeightRatio
     ]
   );
-  const i18n = useMemo(() => createI18n(settingsController.locale), [settingsController.locale]);
+  const i18n = useMemo(
+    () => createI18n(presentationController.locale),
+    [presentationController.locale]
+  );
   const announceProjectGeneration = useCallback((input: {
     generation: number;
     projectName: string;
@@ -198,7 +304,7 @@ function WorkbenchRuntimeApp({
       return;
     }
     announcedProjectGenerationsRef.current.add(input.generation);
-    const currentI18n = settingsController.getCurrentI18n();
+    const currentI18n = presentationController.getCurrentI18n();
     if (input.viewStateInvalid) {
       notify(currentI18n.t('shell.notifications.projectViewStateReset', {
         name: input.projectName
@@ -207,7 +313,7 @@ function WorkbenchRuntimeApp({
     notify(currentI18n.t('shell.notifications.projectOpened', {
       name: input.projectName
     }));
-  }, [notify, settingsController.getCurrentI18n]);
+  }, [notify, presentationController.getCurrentI18n]);
 
   useEffect(() => api.onConnectionEnded(setConnectionEnded), []);
 
@@ -221,7 +327,7 @@ function WorkbenchRuntimeApp({
           return;
         }
         setProjectOpenAttemptedPath(result.projectOpen?.attemptedPath);
-        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, settingsController.getCurrentI18n()));
+        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, presentationController.getCurrentI18n()));
         setProjectOpenHereTargetId(
           result.projectOpen?.error?.code === 'project-open-here-required'
             ? result.projectOpen.error.projectId
@@ -229,7 +335,7 @@ function WorkbenchRuntimeApp({
         );
       } catch (error) {
         if (!disposed) {
-          notify(settingsController.getCurrentI18n().t('shell.notifications.projectStartupFailed', {
+          notify(presentationController.getCurrentI18n().t('shell.notifications.projectStartupFailed', {
             message: errorMessage(error)
           }));
         }
@@ -242,7 +348,7 @@ function WorkbenchRuntimeApp({
     return () => {
       disposed = true;
     };
-  }, [initialRoute, notify, settingsController.getCurrentI18n]);
+  }, [initialRoute, notify, presentationController.getCurrentI18n]);
 
   const projectGenerationAppProps = {
     api,
@@ -253,7 +359,10 @@ function WorkbenchRuntimeApp({
     setNotifications,
     notify,
     announceProjectGeneration,
-    settingsController,
+    presentationController,
+    settingsFeatureController,
+    settingsActions,
+    requestSettingsFeature,
     i18n,
     isLoading,
     projectOpenAttemptedPath,
@@ -276,6 +385,17 @@ function WorkbenchRuntimeApp({
   return (
     <>
       {surface}
+      {settingsFeatureRequested ? (
+        <React.Suspense fallback={null}>
+          <WorkbenchSettingsFeatureHost
+            api={api}
+            projectId={runtimeProjectId}
+            notify={notify}
+            getCurrentI18n={presentationController.getCurrentI18n}
+            onController={setSettingsFeatureController}
+          />
+        </React.Suspense>
+      ) : null}
       <NotificationStack notifications={notifications} />
     </>
   );
@@ -290,7 +410,10 @@ function WorkbenchProjectGenerationApp({
   setNotifications,
   notify,
   announceProjectGeneration,
-  settingsController,
+  presentationController,
+  settingsFeatureController,
+  settingsActions,
+  requestSettingsFeature,
   i18n,
   isLoading,
   projectOpenAttemptedPath,
@@ -314,7 +437,10 @@ function WorkbenchProjectGenerationApp({
     projectName: string;
     viewStateInvalid: boolean;
   }): void;
-  settingsController: ReturnType<typeof useWorkbenchSettingsController>;
+  presentationController: WorkbenchPresentationController;
+  settingsFeatureController: WorkbenchSettingsController | undefined;
+  settingsActions: WorkbenchSettingsActions;
+  requestSettingsFeature(): void;
   i18n: WorkbenchI18n;
   isLoading: boolean;
   projectOpenAttemptedPath: string | undefined;
@@ -332,6 +458,14 @@ function WorkbenchProjectGenerationApp({
   const runtimeProjectId = acceptedProject?.projectId;
   const projectDetached = projectProjection.status === 'detached';
   const projectPresentationBlocked = Boolean(connectionEnded || projectDetached);
+  useLayoutEffect(() => {
+    if (isLoading) {
+      return;
+    }
+    workbenchStartupTimeline.mark(
+      acceptedProject ? 'project-surface-committed' : 'project-open-surface-committed'
+    );
+  }, [acceptedProject, isLoading]);
   const projectPathCommandAdmissionRef = useRef(!isProjectOpening);
   const retiredProjectPathCommandAdmissionRef = useRef(false);
   useEffect(() => {
@@ -387,6 +521,11 @@ function WorkbenchProjectGenerationApp({
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(
     initialProjectPresentation.floatingPanels
   );
+  useEffect(() => {
+    if (floatingPanels.panels.settings.open) {
+      requestSettingsFeature();
+    }
+  }, [floatingPanels.panels.settings.open, requestSettingsFeature]);
   const [requestedTerminalCwd, setRequestedTerminalCwd] = useState<string | null>(null);
   const [textFileBuffers, setTextFileBuffers] = useState<Record<string, TextFileBuffer>>(
     initialProjectPresentation.textFileBuffers
@@ -399,6 +538,8 @@ function WorkbenchProjectGenerationApp({
     position: WorkbenchContextMenuPosition;
   }>();
   const [sendToPhotoshopPath, setSendToPhotoshopPath] = useState<string>();
+  const [sendToPhotoshopBridgeError, setSendToPhotoshopBridgeError] = useState<string>();
+  const sendToPhotoshopBridgeLoadRef = useRef(0);
   const [sendingToPhotoshop, setSendingToPhotoshop] = useState(false);
   const [nativeWindowState, setNativeWindowState] = useState<NativeWindowState>();
   const [workbenchViewportRect, setWorkbenchViewportRect] = useState(
@@ -439,24 +580,23 @@ function WorkbenchProjectGenerationApp({
     const state = api.projectProjection.getState();
     return state.status === 'unbound' ? undefined : state.presentedSnapshot;
   }, []);
-  const explorerController = useProjectExplorerController({
-    api,
-    projectId: runtimeProjectId,
-    projectGeneration: projectProjection.generation,
-    getSnapshot: getAcceptedProjectSnapshot,
-    activeCanvasRuntime,
-    locateProjectFileInCanvas,
-    notify,
-    i18n,
-    canStartProjectPathCommand,
-    isCurrentProjectPathCommandScope
-  });
-  const { fileClipboard, inlineEdit: inlineProjectTreeEdit } = explorerController;
+  const [explorerFeatureRequested, setExplorerFeatureRequested] = useState(false);
+  const [explorerController, setExplorerController] = useState<ProjectExplorerController>();
+  const requestExplorerFeature = useCallback(() => {
+    setExplorerFeatureRequested(true);
+  }, []);
+  useEffect(() => {
+    if (floatingPanels.panels.explorer.open) {
+      requestExplorerFeature();
+    }
+  }, [floatingPanels.panels.explorer.open, requestExplorerFeature]);
+  const fileClipboard = explorerController?.fileClipboard;
+  const inlineProjectTreeEdit = explorerController?.inlineEdit;
 
   const notifyCanvasFeedbackUnavailable = useCallback((message: string) => {
-    const currentI18n = settingsController.getCurrentI18n();
+    const currentI18n = presentationController.getCurrentI18n();
     setNotifications((current) => [currentI18n.t('canvas.feedback.unavailable', { message }), ...current].slice(0, 4));
-  }, [settingsController.getCurrentI18n]);
+  }, [presentationController.getCurrentI18n]);
   const feedbackInteraction = useCanvasFeedbackInteraction({
     api,
     projectId: runtimeProjectId,
@@ -582,14 +722,14 @@ function WorkbenchProjectGenerationApp({
       setNativeWindowState(state);
       reconcileCurrentWorkbenchViewportLayout();
     }).catch((error) => {
-      const currentI18n = settingsController.getCurrentI18n();
+      const currentI18n = presentationController.getCurrentI18n();
       notify(currentI18n.t('shell.notifications.windowStateFailed', { message: errorMessage(error) }));
     });
     return shell.onNativeWindowStateChanged((state) => {
       setNativeWindowState(state);
       reconcileCurrentWorkbenchViewportLayout();
     });
-  }, [notify, reconcileCurrentWorkbenchViewportLayout, settingsController.getCurrentI18n]);
+  }, [notify, presentationController.getCurrentI18n, reconcileCurrentWorkbenchViewportLayout]);
 
   useEffect(() => {
     if (!runtimeProjectId) {
@@ -616,8 +756,24 @@ function WorkbenchProjectGenerationApp({
     if (!canStartProjectPathCommand()) {
       return;
     }
+    const load = sendToPhotoshopBridgeLoadRef.current + 1;
+    sendToPhotoshopBridgeLoadRef.current = load;
+    setSendToPhotoshopBridgeError(undefined);
     setSendToPhotoshopPath(projectRelativePath);
-  }, [canStartProjectPathCommand]);
+    void api.ensureAdobeBridgeState().catch((error: unknown) => {
+      if (
+        sendToPhotoshopBridgeLoadRef.current === load
+        && isCurrentProjectPathCommandScope()
+      ) {
+        setSendToPhotoshopBridgeError(errorMessage(error));
+      }
+    });
+  }, [api, canStartProjectPathCommand, isCurrentProjectPathCommandScope]);
+  const closeSendToPhotoshopPicker = useCallback(() => {
+    sendToPhotoshopBridgeLoadRef.current += 1;
+    setSendToPhotoshopPath(undefined);
+    setSendToPhotoshopBridgeError(undefined);
+  }, []);
 
   const {
     ensureTextFileBuffer,
@@ -637,7 +793,6 @@ function WorkbenchProjectGenerationApp({
 
   useEffect(() => {
     return api.onEvent((event) => {
-      settingsController.applyEvent(event);
       feedbackInteraction.applyEvent(event);
 
       if (event.type === 'project.fileChanged') {
@@ -650,8 +805,7 @@ function WorkbenchProjectGenerationApp({
   }, [
     feedbackInteraction.applyEvent,
     feedbackInteraction.load,
-    refreshTextFileBuffer,
-    settingsController.applyEvent
+    refreshTextFileBuffer
   ]);
 
   useEffect(() => {
@@ -759,7 +913,7 @@ function WorkbenchProjectGenerationApp({
         ? undefined
         : accepted.presentedSnapshot.projections.find((item) => item.canvasId === input.canvasId);
       setActiveCanvasId(input.canvasId);
-      explorerController.setSelection(projectTreeSelectionFromPaths([input.projectRelativePath]));
+      explorerController?.setSelection(projectTreeSelectionFromPaths([input.projectRelativePath]));
       centerCanvasProjectionNode(projection, input.projectRelativePath);
     } catch (error) {
       if (!isCurrentProjectPathCommandScope()) {
@@ -770,7 +924,7 @@ function WorkbenchProjectGenerationApp({
   }, [
     canStartProjectPathCommand,
     centerCanvasProjectionNode,
-    explorerController.setSelection,
+    explorerController,
     i18n,
     isCurrentProjectPathCommandScope,
     notify
@@ -907,8 +1061,9 @@ function WorkbenchProjectGenerationApp({
     if (!canStartProjectPathCommand()) {
       return;
     }
+    requestExplorerFeature();
     setContextMenu({ target, position });
-  }, [canStartProjectPathCommand]);
+  }, [canStartProjectPathCommand, requestExplorerFeature]);
 
   const closeWorkbenchContextMenu = useCallback(() => {
     setContextMenu(undefined);
@@ -919,9 +1074,9 @@ function WorkbenchProjectGenerationApp({
       return;
     }
     closeWorkbenchContextMenu();
-    explorerController.cancelEdit();
+    explorerController?.cancelEdit();
     setSendToPhotoshopPath(undefined);
-  }, [closeWorkbenchContextMenu, explorerController.cancelEdit, isProjectOpening, projectPresentationBlocked]);
+  }, [closeWorkbenchContextMenu, explorerController, isProjectOpening, projectPresentationBlocked]);
 
   const openInspectorPanel = useCallback(() => {
     setFloatingPanels((current) => openFloatingPanel(current, 'inspector', workbenchViewportRectRef.current));
@@ -961,31 +1116,33 @@ function WorkbenchProjectGenerationApp({
   const effectiveTitleBarState = useMemo(() => buildWorkbenchTitleBarState({
     platform: productPlatform,
     host: getDebruteShellApi() ? 'desktop' : 'web',
-    locale: settingsController.locale,
+    locale: presentationController.locale,
     projectTitle: snapshot?.metadata.project.name,
-    recentProjectRoots: settingsController.globalSettings.status === 'ready'
-      ? settingsController.globalSettings.value.chrome.recentProjects.map((project) => project.projectRoot)
-      : []
-  }), [settingsController.globalSettings, settingsController.locale, snapshot?.metadata.project.name]);
+    recentProjectRoots: presentationController.settings.chrome.recentProjects.map((project) => project.projectRoot)
+  }), [presentationController.locale, presentationController.settings.chrome.recentProjects, snapshot?.metadata.project.name]);
   const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
     runtimeProjectId ? [] : ['terminal']
   ), [runtimeProjectId]);
 
+  const globalProjection = api.globalProjection.getState();
+  if (globalProjection.status === 'uninitialized') {
+    throw new Error('Workbench project generation requires the initial Global snapshot.');
+  }
   const state: WorkbenchState = {
     snapshot,
     projectId: runtimeProjectId,
     titleBarState: effectiveTitleBarState,
-    globalSettings: settingsController.globalSettings,
-    integrations: settingsController.integrations,
-    product: settingsController.product,
-    resolvedTheme: settingsController.resolvedTheme,
+    globalSettings: { status: 'ready', value: globalProjection.settings },
+    integrations: globalProjection.integrations,
+    product: globalProjection.product,
+    resolvedTheme: presentationController.resolvedTheme,
     projectOpen: {
       ...(projectOpenAttemptedPath ? { attemptedPath: projectOpenAttemptedPath } : {}),
       ...(projectOpenError ? { error: projectOpenError } : {}),
       opening: isProjectOpening
     },
-    explorerSelection: explorerController.selection,
-    adobeBridge: settingsController.adobeBridge,
+    explorerSelection: explorerController?.selection ?? projectTreeSelectionFromPaths([]),
+    adobeBridge: globalProjection.adobeBridge,
     canvasFeedback: feedbackInteraction.feedback,
     textFileBuffers,
     textEditorWindows,
@@ -999,7 +1156,7 @@ function WorkbenchProjectGenerationApp({
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
-    ...settingsController.actions,
+    ...settingsActions,
     sendProjectFileToPhotoshop,
     openSendToPhotoshopPicker,
     lookupGeneratedAssetMetadata: api.lookupGeneratedAssetMetadata,
@@ -1029,7 +1186,7 @@ function WorkbenchProjectGenerationApp({
     openProject,
     openTerminalPanel
   }), [
-    settingsController.actions,
+    settingsActions,
     sendProjectFileToPhotoshop,
     openSendToPhotoshopPicker,
     ensureTextFileBuffer,
@@ -1173,10 +1330,9 @@ function WorkbenchProjectGenerationApp({
     });
   }, [actions, activeCanvasId, i18n, notify]);
   const canRevealInCanvas = Boolean(activeCanvasRuntime && activeCanvasRuntimeSnapshot?.surfaceSize);
-  const persistedAdobeBridgeEnabled = settingsController.globalSettings.status === 'ready'
-    && settingsController.globalSettings.value.adobeBridge.enabled;
-  const readyAdobeBridge = settingsController.adobeBridge.status === 'ready'
-    ? settingsController.adobeBridge.value
+  const persistedAdobeBridgeEnabled = globalProjection.settings.adobeBridge.enabled;
+  const readyAdobeBridge = globalProjection.adobeBridge.status === 'ready'
+    ? globalProjection.adobeBridge.value
     : undefined;
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
@@ -1211,7 +1367,8 @@ function WorkbenchProjectGenerationApp({
     copyPathFailed: i18n.t('shell.notifications.copyPathFailed'),
     resetAutoLayoutFailed: i18n.t('shell.notifications.resetAutoLayoutFailed')
   }), [i18n]);
-  const projectPathCommandCoordinator = useMemo(() => createProjectPathCommandCoordinator({
+  const projectPathCommandCoordinator = useMemo(() => explorerController
+    ? createProjectPathCommandCoordinator({
     canStartCommand: canStartProjectPathCommand,
     isCurrentScope: isCurrentProjectPathCommandScope,
     menuContext: {
@@ -1236,7 +1393,8 @@ function WorkbenchProjectGenerationApp({
       confirmMoveOverwrite,
       errorLabels: contextMenuCommandErrorLabels
     }
-  }), [
+    })
+    : undefined, [
     actions,
     activeCanvasRuntime,
     activeProjection,
@@ -1256,22 +1414,22 @@ function WorkbenchProjectGenerationApp({
     persistedAdobeBridgeEnabled
   ]);
   const contextMenuItems = useMemo(() => contextMenu
-    ? projectPathCommandCoordinator.contextMenuItems(contextMenu.target)
+    ? projectPathCommandCoordinator?.contextMenuItems(contextMenu.target) ?? []
     : [], [contextMenu, projectPathCommandCoordinator]);
   const handleProjectPathContextMenuCommand = useCallback((command: ProjectPathCommand) => {
-    projectPathCommandCoordinator.run(command, contextMenu);
+    projectPathCommandCoordinator?.run(command, contextMenu);
   }, [contextMenu, projectPathCommandCoordinator]);
   const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
-    projectPathCommandCoordinator.run(command, {
+    projectPathCommandCoordinator?.run(command, {
       target,
       position: { x: 0, y: 0 }
     });
   }, [projectPathCommandCoordinator]);
   if (connectionEnded && !acceptedProject) {
     return (
-      <I18nProvider locale={settingsController.locale}>
+      <I18nProvider locale={presentationController.locale}>
         <WorkbenchIconProvider>
-          <div className="workbench-shell" data-theme={settingsController.resolvedTheme} data-testid="workbench-shell">
+          <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
             <WorkbenchTitleBar
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
@@ -1291,9 +1449,9 @@ function WorkbenchProjectGenerationApp({
 
   if (isLoading) {
     return (
-      <I18nProvider locale={settingsController.locale}>
+      <I18nProvider locale={presentationController.locale}>
         <WorkbenchIconProvider>
-          <div className="workbench-shell" data-theme={settingsController.resolvedTheme} data-testid="workbench-shell">
+          <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
             <WorkbenchTitleBar
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
@@ -1311,9 +1469,27 @@ function WorkbenchProjectGenerationApp({
   }
 
   return (
-    <I18nProvider locale={settingsController.locale}>
+    <>
+      {explorerFeatureRequested ? (
+        <React.Suspense fallback={null}>
+          <WorkbenchExplorerControllerHost
+            api={api}
+            projectId={runtimeProjectId}
+            projectGeneration={projectProjection.generation}
+            getSnapshot={getAcceptedProjectSnapshot}
+            activeCanvasRuntime={activeCanvasRuntime}
+            locateProjectFileInCanvas={locateProjectFileInCanvas}
+            notify={notify}
+            i18n={i18n}
+            canStartProjectPathCommand={canStartProjectPathCommand}
+            isCurrentProjectPathCommandScope={isCurrentProjectPathCommandScope}
+            onController={setExplorerController}
+          />
+        </React.Suspense>
+      ) : null}
+      <I18nProvider locale={presentationController.locale}>
       <WorkbenchIconProvider>
-        <div className="workbench-shell" data-theme={settingsController.resolvedTheme} data-testid="workbench-shell">
+        <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
           <WorkbenchTitleBar
             state={effectiveTitleBarState}
             nativeWindowState={nativeWindowState}
@@ -1376,6 +1552,7 @@ function WorkbenchProjectGenerationApp({
             ) : activeCanvas && activeCanvasHasText ? (
               <CanvasTextRenderProfileGate
                 profile={canvasTextRenderProfile}
+                onReady={() => workbenchStartupTimeline.mark('canvas-text-ready')}
                 pending={(
                   <div className="empty-editor" role="status" aria-busy="true">
                     <Loader2 className="spin" size={22} />
@@ -1435,6 +1612,12 @@ function WorkbenchProjectGenerationApp({
                   return;
                 }
                 const isOpen = floatingPanels.panels[panelId].open;
+                if (panelId === 'settings' && !isOpen) {
+                  requestSettingsFeature();
+                }
+                if (panelId === 'explorer' && !isOpen) {
+                  requestExplorerFeature();
+                }
                 setFloatingPanels((current) => toggleFloatingPanel(current, panelId, workbenchViewportRect));
                 setWindowOrder((current) => (
                   isOpen
@@ -1477,22 +1660,27 @@ function WorkbenchProjectGenerationApp({
             {Object.values(textEditorWindows).some((windowState) => windowState.open) ? (
               <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
                 {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
-                  <FloatingTextEditorWindow
+                  <React.Suspense
                     key={windowState.projectRelativePath}
-                    windowState={windowState}
-                    orderState={renderWindowOrder}
-                    buffer={textFileBuffers[windowState.projectRelativePath]}
-                    actions={actions}
-                    onBringToFront={() => setWindowOrder((current) => (
-                      focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
-                    ))}
-                    onClose={() => {
-                      setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
-                      setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
-                    }}
-                    onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
-                    onResize={(rect) => setTextEditorWindows((windows) => resizeTextEditorWindowState(windows, windowState.projectRelativePath, rect, workbenchViewportRect))}
-                  />
+                    fallback={null}
+                  >
+                    <WorkbenchFloatingTextEditorWindowFeature
+                      locale={presentationController.locale}
+                      windowState={windowState}
+                      orderState={renderWindowOrder}
+                      buffer={textFileBuffers[windowState.projectRelativePath]}
+                      actions={actions}
+                      onBringToFront={() => setWindowOrder((current) => (
+                        focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
+                      ))}
+                      onClose={() => {
+                        setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
+                        setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
+                      }}
+                      onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
+                      onResize={(rect) => setTextEditorWindows((windows) => resizeTextEditorWindowState(windows, windowState.projectRelativePath, rect, workbenchViewportRect))}
+                    />
+                  </React.Suspense>
                 ))}
               </CanvasTextRenderProfileGate>
             ) : null}
@@ -1515,30 +1703,56 @@ function WorkbenchProjectGenerationApp({
                 >
                   <FloatingPanelContent
                     panelId={panelId}
-                    state={state}
-                    activeCanvasId={activeCanvasId}
-                    activeCanvasRuntime={activeCanvasRuntime}
-                    actions={actions}
-                    onOpenContextMenu={openWorkbenchContextMenu}
-                    fileClipboard={fileClipboard}
-                    inlineProjectTreeEdit={inlineProjectTreeEdit}
-                    onEditValueChange={explorerController.updateEditValue}
-                    onEditSubmit={() => void explorerController.submitEdit()}
-                    onEditCancel={explorerController.cancelEdit}
-                    onClearCut={explorerController.clearCut}
-                    onExpandProjectDirectory={explorerController.loadDirectory}
-                    onExplorerSelectionChange={explorerController.setSelection}
-                    onLocateFileInCanvas={locateProjectFileInCanvas}
-                    onProjectTreeInternalDrop={explorerController.handleInternalDrop}
-                    onProjectTreeExternalDrop={explorerController.handleExternalDrop}
-                    onCreateRootFile={() => explorerController.beginCreateFile('')}
-                    productPlatform={productPlatform}
-                    onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
+                    explorerPanel={explorerController ? (
+                      <React.Suspense fallback={<div className="project-tree" aria-busy="true" />}>
+                        <WorkbenchExplorerPanelFeature
+                          locale={presentationController.locale}
+                          state={state}
+                          fileClipboard={fileClipboard}
+                          inlineProjectTreeEdit={inlineProjectTreeEdit}
+                          onEditValueChange={explorerController.updateEditValue}
+                          onEditSubmit={() => void explorerController.submitEdit()}
+                          onEditCancel={explorerController.cancelEdit}
+                          onClearCut={explorerController.clearCut}
+                          onExpandProjectDirectory={explorerController.loadDirectory}
+                          onExplorerSelectionChange={explorerController.setSelection}
+                          onLocateFileInCanvas={locateProjectFileInCanvas}
+                          onProjectTreeInternalDrop={explorerController.handleInternalDrop}
+                          onProjectTreeExternalDrop={explorerController.handleExternalDrop}
+                          onOpenContextMenu={openWorkbenchContextMenu}
+                          onCreateRootFile={() => explorerController.beginCreateFile('')}
+                          productPlatform={productPlatform}
+                          onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
+                        />
+                      </React.Suspense>
+                    ) : <div className="project-tree" aria-busy="true" />}
+                    inspectorPanel={(
+                      <React.Suspense fallback={<div className="inspector" aria-busy="true" />}>
+                        <WorkbenchInspectorPanelFeature
+                          locale={presentationController.locale}
+                          state={state}
+                          activeCanvasId={activeCanvasId}
+                          activeCanvasRuntime={activeCanvasRuntime}
+                          actions={actions}
+                        />
+                      </React.Suspense>
+                    )}
+                    settingsPanel={settingsFeatureController ? (
+                      <React.Suspense fallback={<div className="settings-panel" aria-busy="true" />}>
+                        <WorkbenchSettingsPanelFeature
+                          controller={settingsFeatureController}
+                          projectId={runtimeProjectId}
+                          locale={presentationController.locale}
+                          resolvedTheme={presentationController.resolvedTheme}
+                          actions={actions}
+                        />
+                      </React.Suspense>
+                    ) : <div className="settings-panel" aria-busy="true" />}
                     terminalPanel={(
                       <React.Suspense fallback={<div className="terminal-panel" aria-busy="true" />}>
                         <TerminalPanel
                           api={api}
-                          resolvedTheme={settingsController.resolvedTheme}
+                          resolvedTheme={presentationController.resolvedTheme}
                           requestedCwdProjectRelativePath={requestedTerminalCwd}
                           onRequestedCwdConsumed={() => setRequestedTerminalCwd(null)}
                         />
@@ -1549,7 +1763,7 @@ function WorkbenchProjectGenerationApp({
               ) : null
             ))}
           </div>
-          {!projectPresentationBlocked && contextMenu ? (
+          {!projectPresentationBlocked && contextMenu && projectPathCommandCoordinator ? (
             <WorkbenchContextMenu
               items={contextMenuItems}
               position={contextMenu.position}
@@ -1558,14 +1772,19 @@ function WorkbenchProjectGenerationApp({
               onClose={closeWorkbenchContextMenu}
             />
           ) : null}
+          {!projectPresentationBlocked && contextMenu && !projectPathCommandCoordinator ? (
+            <PendingWorkbenchContextMenuDismissal onClose={closeWorkbenchContextMenu} />
+          ) : null}
           {!projectPresentationBlocked && sendToPhotoshopPath && runtimeProjectId ? (
             <SendToPhotoshopDialog
               projectId={runtimeProjectId}
               projectRelativePath={sendToPhotoshopPath}
               enabled={persistedAdobeBridgeEnabled}
               bridge={readyAdobeBridge}
+              loading={globalProjection.adobeBridge.status === 'loading' && !sendToPhotoshopBridgeError}
+              loadError={sendToPhotoshopBridgeError}
               sending={sendingToPhotoshop}
-              onClose={() => setSendToPhotoshopPath(undefined)}
+              onClose={closeSendToPhotoshopPicker}
               onSend={(pluginInstanceId) => {
                 if (!canStartProjectPathCommand()) {
                   return;
@@ -1576,7 +1795,7 @@ function WorkbenchProjectGenerationApp({
                   pluginInstanceId
                 }).then(() => {
                   if (isCurrentProjectPathCommandScope()) {
-                    setSendToPhotoshopPath(undefined);
+                    closeSendToPhotoshopPicker();
                   }
                 }).catch((error) => {
                   if (isCurrentProjectPathCommandScope()) {
@@ -1592,7 +1811,8 @@ function WorkbenchProjectGenerationApp({
           ) : null}
         </div>
       </WorkbenchIconProvider>
-    </I18nProvider>
+      </I18nProvider>
+    </>
   );
 }
 

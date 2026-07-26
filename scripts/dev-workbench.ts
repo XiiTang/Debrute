@@ -59,11 +59,13 @@ vite = spawn(command.command, command.args, {
   env: {
     ...process.env,
     DEBRUTE_RUNTIME_ORIGIN: registration.runtime_origin,
-    VITE_DEBRUTE_CANVAS_PERF: developmentOptions.canvasPerfEnabled ? '1' : '0'
+    VITE_DEBRUTE_CANVAS_PERF: developmentOptions.canvasPerfEnabled ? '1' : '0',
+    VITE_DEBRUTE_STARTUP_PERF: developmentOptions.startupPerfEnabled ? '1' : '0'
   }
 });
 process.stdout.write(`Debrute Workbench launch URL: ${launchUrl}\n`);
 process.stdout.write(`Canvas performance probe: ${developmentOptions.canvasPerfEnabled ? 'enabled' : 'disabled'}\n`);
+process.stdout.write(`Startup performance timeline: ${developmentOptions.startupPerfEnabled ? 'enabled' : 'disabled'}\n`);
 
 try {
   const exitCode = await new Promise<number | null>((resolveExit, reject) => {

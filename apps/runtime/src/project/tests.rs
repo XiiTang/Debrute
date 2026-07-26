@@ -194,6 +194,44 @@ impl ProjectNodeAdapter for BlockingLayoutAdapter {
     }
 }
 
+struct BlockingImageInspectionAdapter {
+    calls: AtomicUsize,
+    gate: Arc<BlockingAdapterGate>,
+}
+
+impl ProjectNodeAdapter for BlockingImageInspectionAdapter {
+    fn layout_size(
+        &self,
+        _project_root: &Path,
+        _node: &CanvasDesiredNode,
+    ) -> Result<CanvasLayoutSize, ProjectError> {
+        Ok(CanvasLayoutSize {
+            width: 1000.0,
+            height: 500.0,
+        })
+    }
+
+    fn image_preview_info(
+        &self,
+        _project_root: &Path,
+        _project_relative_path: &str,
+    ) -> Result<Option<(bool, Option<u64>)>, ProjectError> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            *self.gate.entered.lock().expect("gate should lock") = true;
+            self.gate.entered_ready.notify_all();
+            let mut released = self.gate.released.lock().expect("gate should lock");
+            while !*released {
+                released = self
+                    .gate
+                    .release_ready
+                    .wait(released)
+                    .expect("gate wait should succeed");
+            }
+        }
+        Ok(Some((true, Some(1))))
+    }
+}
+
 #[test]
 fn visible_project_walk_excludes_internal_and_temporary_files() {
     let project = TemporaryDirectory::new("visible-walk");
@@ -201,6 +239,37 @@ fn visible_project_walk_excludes_internal_and_temporary_files() {
     fs::create_dir_all(project.as_ref().join(".debrute/cache"))
         .expect("cache directory should be created");
     fs::create_dir_all(project.as_ref().join("assets")).expect("assets should be created");
+    fs::create_dir_all(project.as_ref().join("reference-repo/vendor-cache"))
+        .expect("ignored repository cache should be created");
+    fs::create_dir_all(project.as_ref().join("reference-repo/node_modules/package"))
+        .expect("dependency directory should be created");
+    fs::create_dir_all(project.as_ref().join("reference-repo/src"))
+        .expect("repository source should be created");
+    add_nested_internal_fixture(&project);
+    fs::write(
+        project.as_ref().join("reference-repo/.gitignore"),
+        "vendor-cache/\n",
+    )
+    .expect("nested ignore policy should be written");
+    fs::write(
+        project
+            .as_ref()
+            .join("reference-repo/vendor-cache/large.bin"),
+        "ignored",
+    )
+    .expect("ignored repository cache should be written");
+    fs::write(
+        project
+            .as_ref()
+            .join("reference-repo/node_modules/package/index.js"),
+        "ignored",
+    )
+    .expect("dependency fixture should be written");
+    fs::write(
+        project.as_ref().join("reference-repo/src/main.rs"),
+        "visible",
+    )
+    .expect("repository source should be written");
     fs::write(project.as_ref().join("assets/visible.txt"), "visible")
         .expect("visible file should be written");
     fs::write(
@@ -220,11 +289,148 @@ fn visible_project_walk_excludes_internal_and_temporary_files() {
     assert!(paths.contains(&"assets/visible.txt".to_owned()));
     assert!(!paths.iter().any(|path| path.starts_with(".git")));
     assert!(!paths.iter().any(|path| path.starts_with(".debrute/cache")));
+    assert!(paths.contains(&"reference-repo/src/main.rs".to_owned()));
+    assert!(!paths.iter().any(|path| path.contains("vendor-cache")));
+    assert!(!paths.iter().any(|path| path.contains("node_modules")));
+    assert!(
+        !paths
+            .iter()
+            .any(|path| path.split('/').any(|segment| segment == ".git"))
+    );
+    assert!(!paths.iter().any(|path| path.contains("/.debrute/cache")));
+    assert!(!paths.iter().any(|path| {
+        Path::new(path)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("lock"))
+    }));
     assert!(
         !paths
             .iter()
             .any(|path| Path::new(path).extension().is_some_and(|ext| ext == "tmp"))
     );
+
+    let requested = list_project_directory(project.as_ref(), "reference-repo")
+        .expect("an explicitly requested Explorer directory should remain available");
+    assert!(requested.iter().any(|entry| {
+        entry.project_relative_path == "reference-repo/node_modules"
+            && entry.kind == ProjectPathKind::Directory
+    }));
+    assert!(
+        !requested
+            .iter()
+            .any(|entry| { entry.project_relative_path == "reference-repo/.git" })
+    );
+}
+
+fn add_nested_internal_fixture(project: &TemporaryDirectory) {
+    fs::create_dir_all(project.as_ref().join("reference-repo/.git/objects"))
+        .expect("nested Git metadata should be created");
+    fs::create_dir_all(
+        project
+            .as_ref()
+            .join("reference-repo/.debrute/cache/previews"),
+    )
+    .expect("nested Debrute cache should be created");
+    fs::create_dir_all(project.as_ref().join("reference-repo/.debrute/canvases"))
+        .expect("nested Debrute documents should be created");
+    fs::write(
+        project.as_ref().join("reference-repo/.git/objects/pack"),
+        "hidden",
+    )
+    .expect("nested Git metadata should be written");
+    fs::write(
+        project
+            .as_ref()
+            .join("reference-repo/.debrute/cache/previews/frame.png"),
+        "hidden",
+    )
+    .expect("nested Debrute cache should be written");
+    fs::write(
+        project
+            .as_ref()
+            .join("reference-repo/.debrute/canvases/index.json.lock"),
+        "hidden",
+    )
+    .expect("nested Debrute lock should be written");
+}
+
+#[test]
+fn explicit_canvas_and_explorer_paths_bypass_only_background_exclusions() {
+    let project = TemporaryDirectory::new("explicit-background-exclusion");
+    let home = TemporaryDirectory::new("explicit-background-exclusion-home");
+    fs::create_dir_all(project.as_ref().join("dist/nested"))
+        .expect("generated directory should be created");
+    fs::create_dir_all(project.as_ref().join("node_modules/expanded/deeper"))
+        .expect("explicit Explorer directory should be created");
+    fs::write(project.as_ref().join(".gitignore"), "dist/\n")
+        .expect("ignore policy should be written");
+    fs::write(project.as_ref().join("dist/nested/render.png"), "render")
+        .expect("explicit generated asset should be written");
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+
+    service
+        .add_project_path_to_canvas_map("canvas-1", "dist/nested")
+        .expect("explicit Canvas directory should be accepted");
+    let completed = service
+        .complete_file_index()
+        .expect("filtered background index should complete");
+    assert!(
+        completed.projections[0]
+            .nodes
+            .iter()
+            .any(|node| { node.node.project_relative_path == "dist/nested/render.png" })
+    );
+    assert!(service.is_explicit_watch_path("dist/nested/render.png"));
+    assert!(!service.is_explicit_watch_path("node_modules/unrelated.js"));
+
+    fs::write(project.as_ref().join("dist/nested/missed.png"), "missed")
+        .expect("backend-rescan fixture should be written");
+    let rescanned = service
+        .complete_file_index()
+        .expect("a full rescan must rebuild explicit Canvas dependencies");
+    assert!(
+        rescanned.projections[0]
+            .nodes
+            .iter()
+            .any(|node| { node.node.project_relative_path == "dist/nested/missed.png" })
+    );
+
+    let created = create_project_path(
+        service.root(),
+        "dist/nested",
+        "command.png",
+        ProjectPathKind::File,
+    )
+    .expect("Runtime command fixture should be created");
+    let command_snapshot = service
+        .finish_committed_change(&created.project_relative_path)
+        .expect("the command result must refresh an explicit Canvas dependency synchronously");
+    assert!(
+        command_snapshot.projections[0]
+            .nodes
+            .iter()
+            .any(|node| { node.node.project_relative_path == "dist/nested/command.png" })
+    );
+
+    fs::remove_dir_all(project.as_ref().join("dist"))
+        .expect("explicit dependency parent should be removed");
+    let removed = service
+        .refresh_watched_paths(&["dist".to_owned()])
+        .expect("an ancestor event must invalidate every nested explicit rule");
+    assert!(
+        !removed.projections[0]
+            .nodes
+            .iter()
+            .any(|node| { node.node.project_relative_path.starts_with("dist/") })
+    );
+
+    service
+        .load_project_directory("node_modules/expanded")
+        .expect("explicit Explorer directory should load");
+    assert!(service.is_explicit_watch_path("node_modules/expanded/new.png"));
+    assert!(!service.is_explicit_watch_path("node_modules/expanded/deeper/new.png"));
 }
 
 #[test]
@@ -270,6 +476,37 @@ fn project_open_loads_only_root_entries_until_a_directory_is_requested() {
     assert!(loaded_paths.contains(&"assets/cover.png"));
     assert!(loaded_paths.contains(&"assets/deep"));
     assert!(!loaded_paths.contains(&"assets/deep/notes.md"));
+}
+
+#[test]
+fn two_phase_project_open_never_publishes_a_replaced_project_identity() {
+    let project = TemporaryDirectory::new("project-identity-barrier");
+    let home = TemporaryDirectory::new("project-identity-barrier-home");
+    let mut service = ProjectService::prepare_unloaded(
+        project.as_ref(),
+        home.as_ref(),
+        Arc::new(FixedNodeAdapter),
+    )
+    .expect("Project authority should prepare");
+    let original_id = service.snapshot().metadata.project.id.clone();
+    let metadata_path = project.as_ref().join(".debrute/project.json");
+    let mut metadata: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&metadata_path).expect("Project metadata should exist"),
+    )
+    .expect("Project metadata should parse");
+    metadata["project"]["id"] = json!(Uuid::new_v4().to_string());
+    fs::write(
+        &metadata_path,
+        serde_json::to_string_pretty(&metadata).expect("Project metadata should serialize"),
+    )
+    .expect("replacement Project identity should write");
+
+    let error = service
+        .refresh_loaded_snapshot()
+        .expect_err("publication must reject a different Project identity");
+
+    assert_eq!(error.code(), "project_identity_changed");
+    assert_eq!(service.snapshot().metadata.project.id, original_id);
 }
 
 #[test]
@@ -2013,7 +2250,7 @@ fn watcher_coalescing_is_path_local_under_unrelated_event_pressure() {
 }
 
 #[test]
-fn watcher_establishment_precedes_final_publication_refresh() {
+fn watcher_changes_during_background_index_are_not_lost() {
     let project = TemporaryDirectory::new("publication-barrier");
     let home = TemporaryDirectory::new("publication-barrier-home");
     fs::write(project.as_ref().join("seed.txt"), "seed").expect("seed should be written");
@@ -2033,13 +2270,10 @@ fn watcher_establishment_precedes_final_publication_refresh() {
             gate: Arc::clone(&gate),
         }),
     );
-    let opening_registry = registry.clone();
-    let project_root = project.as_ref().to_path_buf();
-    let open_worker = thread::spawn(move || {
-        opening_registry
-            .open_project(project_root, ProjectUseKind::Workbench)
-            .expect("Project should open")
-    });
+    let opened = registry
+        .open_project(project.as_ref(), ProjectUseKind::Workbench)
+        .expect("Project should open");
+    opened.session.start_background_file_index();
     let mut entered = gate.entered.lock().expect("gate should lock");
     while !*entered {
         entered = gate
@@ -2053,7 +2287,6 @@ fn watcher_establishment_precedes_final_publication_refresh() {
     *gate.released.lock().expect("gate should lock") = true;
     gate.release_ready.notify_all();
 
-    let opened = open_worker.join().expect("opener should finish");
     let mut subscription = opened
         .session
         .subscribe()
@@ -2095,6 +2328,209 @@ fn watcher_establishment_precedes_final_publication_refresh() {
 }
 
 #[test]
+fn registry_initial_publication_uses_one_snapshot_pass() {
+    let project = TemporaryDirectory::new("single-initial-snapshot");
+    let home = TemporaryDirectory::new("single-initial-snapshot-home");
+    fs::write(project.as_ref().join("preview.png"), "fixture")
+        .expect("preview fixture should be written");
+    let mut setup =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+    setup
+        .add_project_path_to_canvas_map("canvas-1", "preview.png")
+        .expect("Canvas Map should be seeded");
+    drop(setup);
+
+    let gate = Arc::new(BlockingAdapterGate::default());
+    let adapter = Arc::new(BlockingImageInspectionAdapter {
+        calls: AtomicUsize::new(0),
+        gate: Arc::clone(&gate),
+    });
+    let registry = project_registry(home.as_ref(), adapter.clone());
+    let opener_registry = registry.clone();
+    let project_root = project.as_ref().to_path_buf();
+    let opener = thread::spawn(move || {
+        opener_registry.open_project_deferred(project_root, ProjectUseKind::Workbench)
+    });
+
+    let mut entered = gate.entered.lock().expect("gate should lock");
+    while !*entered {
+        entered = gate
+            .entered_ready
+            .wait(entered)
+            .expect("gate wait should succeed");
+    }
+    drop(entered);
+    *gate.released.lock().expect("gate should lock") = true;
+    gate.release_ready.notify_all();
+
+    let opened_session = opener
+        .join()
+        .expect("Project opener should finish")
+        .expect("Project should open");
+    assert_eq!(
+        adapter.calls.load(Ordering::SeqCst),
+        1,
+        "initial publication must inspect each image through one snapshot pass"
+    );
+    drop(opened_session.project_use);
+    registry.close().expect("registry should close");
+}
+
+#[test]
+fn watcher_changes_during_initial_snapshot_are_not_lost() {
+    let project = TemporaryDirectory::new("initial-publication-barrier");
+    let home = TemporaryDirectory::new("initial-publication-barrier-home");
+    fs::write(project.as_ref().join("preview.png"), "fixture")
+        .expect("preview fixture should be written");
+    let mut setup =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+    setup
+        .add_project_path_to_canvas_map("canvas-1", "preview.png")
+        .expect("Canvas Map should be seeded");
+    drop(setup);
+
+    let gate = Arc::new(BlockingAdapterGate::default());
+    let adapter = Arc::new(BlockingImageInspectionAdapter {
+        calls: AtomicUsize::new(0),
+        gate: Arc::clone(&gate),
+    });
+    let registry = project_registry(home.as_ref(), adapter.clone());
+    let opener_registry = registry.clone();
+    let project_root = project.as_ref().to_path_buf();
+    let opener = thread::spawn(move || {
+        opener_registry.open_project_deferred(project_root, ProjectUseKind::Workbench)
+    });
+
+    let mut entered = gate.entered.lock().expect("gate should lock");
+    while !*entered {
+        entered = gate
+            .entered_ready
+            .wait(entered)
+            .expect("gate wait should succeed");
+    }
+    drop(entered);
+    assert_eq!(
+        adapter.calls.load(Ordering::SeqCst),
+        1,
+        "the initial snapshot should be the only inspection before publication"
+    );
+    fs::write(project.as_ref().join("during-open.txt"), "visible")
+        .expect("external write during initial snapshot should succeed");
+    *gate.released.lock().expect("gate should lock") = true;
+    gate.release_ready.notify_all();
+
+    let opened_session = opener
+        .join()
+        .expect("Project opener should finish")
+        .expect("Project should open");
+    let mut subscription = opened_session
+        .session
+        .subscribe()
+        .expect("subscription should open");
+    let ProjectStreamItem::Snapshot(sync) = subscription.recv().expect("snapshot should arrive")
+    else {
+        panic!("Project stream must begin with a snapshot");
+    };
+    if !sync
+        .snapshot
+        .files
+        .iter()
+        .any(|entry| entry.project_relative_path == "during-open.txt")
+    {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let timeout = deadline.saturating_duration_since(Instant::now());
+            let Some(ProjectStreamItem::Event(event)) = subscription
+                .recv_timeout(timeout)
+                .expect("Project stream should remain open")
+            else {
+                panic!("write captured during initial publication must not be lost");
+            };
+            let ProjectChange::ProjectFileChanged { snapshot, .. } = event.change else {
+                continue;
+            };
+            if snapshot
+                .files
+                .iter()
+                .any(|entry| entry.project_relative_path == "during-open.txt")
+            {
+                break;
+            }
+        }
+    }
+    drop(subscription);
+    drop(opened_session.project_use);
+    registry.close().expect("registry should close");
+}
+
+#[test]
+fn project_open_defers_complete_index_until_the_initial_snapshot_is_captured() {
+    let project = TemporaryDirectory::new("deferred-background-index");
+    let home = TemporaryDirectory::new("deferred-background-index-home");
+    fs::write(project.as_ref().join("seed.txt"), "seed").expect("seed should be written");
+    let mut setup =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+    setup
+        .add_project_path_to_canvas_map("canvas-1", "seed.txt")
+        .expect("Canvas Map should be seeded");
+    drop(setup);
+    let gate = Arc::new(BlockingAdapterGate::default());
+    let registry = project_registry(
+        home.as_ref(),
+        Arc::new(BlockingLayoutAdapter {
+            calls: AtomicUsize::new(0),
+            gate: Arc::clone(&gate),
+        }),
+    );
+    let opened = registry
+        .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+        .expect("shallow Project should open");
+
+    let entered_before_snapshot = {
+        let entered = gate.entered.lock().expect("gate should lock");
+        let (entered, _) = gate
+            .entered_ready
+            .wait_timeout_while(entered, Duration::from_millis(200), |entered| !*entered)
+            .expect("gate wait should succeed");
+        *entered
+    };
+    if entered_before_snapshot {
+        *gate.released.lock().expect("gate should lock") = true;
+        gate.release_ready.notify_all();
+        drop(opened.project_use);
+        registry.close().expect("registry should close");
+        panic!("complete indexing must not start before the caller captures the initial snapshot");
+    }
+
+    let mut subscription = opened
+        .session
+        .subscribe()
+        .expect("subscription should open");
+    assert!(matches!(
+        subscription.recv().expect("snapshot should arrive"),
+        ProjectStreamItem::Snapshot(_)
+    ));
+    opened.session.start_background_file_index();
+    let mut entered = gate.entered.lock().expect("gate should lock");
+    while !*entered {
+        entered = gate
+            .entered_ready
+            .wait(entered)
+            .expect("gate wait should succeed");
+    }
+    drop(entered);
+    *gate.released.lock().expect("gate should lock") = true;
+    gate.release_ready.notify_all();
+
+    drop(subscription);
+    drop(opened.project_use);
+    registry.close().expect("registry should close");
+}
+
+#[test]
 fn registry_close_cleans_up_a_session_with_inflight_background_indexing() {
     let project = TemporaryDirectory::new("close-open-race");
     let home = TemporaryDirectory::new("close-open-race-home");
@@ -2114,10 +2550,10 @@ fn registry_close_cleans_up_a_session_with_inflight_background_indexing() {
             gate: Arc::clone(&gate),
         }),
     );
-    let opening_registry = registry.clone();
-    let project_root = project.as_ref().to_path_buf();
-    let open_worker =
-        thread::spawn(move || opening_registry.open_project(project_root, ProjectUseKind::Request));
+    let opened = registry
+        .open_project(project.as_ref(), ProjectUseKind::Request)
+        .expect("Project should open");
+    opened.session.start_background_file_index();
     let mut entered = gate.entered.lock().expect("gate should lock");
     while !*entered {
         entered = gate
@@ -2131,15 +2567,39 @@ fn registry_close_cleans_up_a_session_with_inflight_background_indexing() {
     *gate.released.lock().expect("gate should lock") = true;
     gate.release_ready.notify_all();
 
-    let opened = open_worker
-        .join()
-        .expect("open worker should finish")
-        .expect("shallow opening should finish before background indexing");
     drop(opened.project_use);
     close_worker
         .join()
         .expect("close worker should finish")
         .expect("successful inflight cleanup must not fail registry close");
+}
+
+#[test]
+fn closed_project_session_rejects_a_deferred_background_index_start() {
+    let project = TemporaryDirectory::new("closed-deferred-index");
+    let home = TemporaryDirectory::new("closed-deferred-index-home");
+    let gate = Arc::new(BlockingAdapterGate::default());
+    let registry = project_registry(
+        home.as_ref(),
+        Arc::new(BlockingLayoutAdapter {
+            calls: AtomicUsize::new(0),
+            gate: Arc::clone(&gate),
+        }),
+    );
+    let opened = registry
+        .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+        .expect("deferred Project should open");
+    let session = Arc::clone(&opened.session);
+    drop(opened.project_use);
+    registry.close().expect("registry should close");
+
+    session.start_background_file_index();
+    let entered = gate.entered.lock().expect("gate should lock");
+    let (entered, _) = gate
+        .entered_ready
+        .wait_timeout_while(entered, Duration::from_millis(200), |entered| !*entered)
+        .expect("gate wait should succeed");
+    assert!(!*entered, "closed session must not start deferred indexing");
 }
 
 #[test]

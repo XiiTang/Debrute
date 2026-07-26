@@ -54,7 +54,11 @@ Expansion uses the Project visible-path policy. Debrute does not hide all of
 `.debrute/`: source and pushed Project Documents can be selected like other
 visible files. Cache trees, rendered feedback artifacts, lock paths, Git
 metadata, and Debrute-managed temporary files are excluded before Canvas Map
-expansion.
+expansion. Glob rules filter the background Project index. Exact-file and
+recursive-directory literals are explicit dependencies, so they may select a
+visible path inside a `.gitignore`, dependency, cache, or generated directory;
+Runtime then admits changes only for that named file or subtree. Unrelated
+Project files never enter Canvas ordering or reconciliation work.
 
 Hierarchy is derived from normalized project-relative paths. A structure edge
 exists only from a present directory node to a present direct child; neither

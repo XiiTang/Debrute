@@ -6,6 +6,8 @@ import {
   setDocumentTheme
 } from './workbench/services/workbenchTheme.js';
 import './styles.css';
+import { workbenchStartupTimeline } from './startup/workbenchStartupTimeline.js';
+import { holdWorkbenchThemeUntilCommit } from './startup/workbenchBootstrapTheme.js';
 
 declare global {
   interface Window {
@@ -13,22 +15,35 @@ declare global {
   }
 }
 
+workbenchStartupTimeline.mark('main-evaluated');
 setDocumentTheme(resolveWorkbenchThemePreference('system'));
 
 const api = createHttpWorkbenchApiClient();
+let completeThemeHandoff: (() => void) | undefined;
 
 void api.bootstrapGlobalSettings().then(async ({ settings }) => {
+  workbenchStartupTimeline.mark('global-snapshot-ready');
   setDocumentTheme(resolveWorkbenchThemePreference(settings.workbench.themePreference));
-  document.documentElement.removeAttribute('data-settings-bootstrap');
+  workbenchStartupTimeline.mark('theme-ready');
+  completeThemeHandoff = holdWorkbenchThemeUntilCommit({
+    projection: api.globalProjection,
+    apply: setDocumentTheme,
+    reveal: () => document.documentElement.removeAttribute('data-settings-bootstrap')
+  });
   const { WorkbenchApp } = await import('./workbench/WorkbenchApp.js');
+  workbenchStartupTimeline.mark('workbench-chunk-ready');
   window.__debruteReactRoot ??= createRoot(document.getElementById('root')!);
   window.__debruteReactRoot.render(
     <React.StrictMode>
-      <WorkbenchApp api={api} initialGlobalSettings={settings} />
+      <WorkbenchApp api={api} onCommitted={completeThemeHandoff} />
     </React.StrictMode>
   );
 }).catch((error: unknown) => {
-  document.documentElement.removeAttribute('data-settings-bootstrap');
+  if (completeThemeHandoff) {
+    completeThemeHandoff();
+  } else {
+    document.documentElement.removeAttribute('data-settings-bootstrap');
+  }
   const root = document.getElementById('root');
   if (root) {
     const main = document.createElement('main');

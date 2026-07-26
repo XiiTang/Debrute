@@ -13,12 +13,12 @@ export const DEFAULT_GLOBAL_WORKBENCH_SETTINGS: DebruteGlobalSettingsView['workb
 
 export function resolveWorkbenchThemePreference(
   preference: WorkbenchThemePreference,
-  systemPrefersDark = systemPrefersDarkColorScheme()
+  systemPrefersDark?: boolean
 ): WorkbenchResolvedTheme {
   if (preference === 'dark' || preference === 'light') {
     return preference;
   }
-  return systemPrefersDark ? 'dark' : 'light';
+  return (systemPrefersDark ?? systemPrefersDarkColorScheme()) ? 'dark' : 'light';
 }
 
 export function systemPrefersDarkColorScheme(win: Window = window): boolean {

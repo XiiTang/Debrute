@@ -86,12 +86,14 @@ vite = spawn(viteCommand.command, viteCommand.args, {
   env: {
     ...process.env,
     DEBRUTE_RUNTIME_ORIGIN: registration.runtime_origin,
-    VITE_DEBRUTE_CANVAS_PERF: developmentOptions.canvasPerfEnabled ? '1' : '0'
+    VITE_DEBRUTE_CANVAS_PERF: developmentOptions.canvasPerfEnabled ? '1' : '0',
+    VITE_DEBRUTE_STARTUP_PERF: developmentOptions.startupPerfEnabled ? '1' : '0'
   }
 });
 try {
   await waitForVite(viteOrigin);
   process.stdout.write(`Canvas performance probe: ${developmentOptions.canvasPerfEnabled ? 'enabled' : 'disabled'}\n`);
+  process.stdout.write(`Startup performance timeline: ${developmentOptions.startupPerfEnabled ? 'enabled' : 'disabled'}\n`);
 
   electron = spawn(electronEntrypoint, electronArguments, {
     cwd: desktopRoot,

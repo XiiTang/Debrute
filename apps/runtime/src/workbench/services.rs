@@ -138,6 +138,7 @@ pub enum WorkbenchProjectBindingOutcome {
 }
 
 struct PreparedWorkbenchProjectBinding {
+    session: Arc<ProjectSession>,
     project_use: ProjectUse,
     response: Value,
     bound_event: Value,
@@ -540,6 +541,7 @@ impl WorkbenchRuntimeServices {
             return Ok(outcome);
         }
         let prepared = self.prepare_project_binding(connection_credential, opened)?;
+        let project_session = Arc::clone(&prepared.session);
         let outcome = self
             .connections
             .replace_project(
@@ -555,6 +557,7 @@ impl WorkbenchRuntimeServices {
             )
             .map_err(project_replacement_error)?;
         if outcome == ProjectBindOutcome::AlreadyBound {
+            project_session.start_background_file_index();
             if let Some(binding) = context.desktop.as_ref() {
                 self.runtime_state.retarget_desktop_window(
                     binding,
@@ -599,6 +602,7 @@ impl WorkbenchRuntimeServices {
             self.close_workbench_connection(connection_credential);
             return Err(error);
         }
+        project_session.start_background_file_index();
         Ok(WorkbenchProjectBindingOutcome::Bound(
             BoundWorkbenchProject {
                 project_id: target_project_id,
@@ -671,6 +675,7 @@ impl WorkbenchRuntimeServices {
             return Ok(outcome);
         }
         let prepared = self.prepare_project_binding(connection_credential, opened)?;
+        let project_session = Arc::clone(&prepared.session);
         let outcome = self
             .connections
             .bind_project(
@@ -714,6 +719,7 @@ impl WorkbenchRuntimeServices {
                 }
             }
         }
+        project_session.start_background_file_index();
         Ok(WorkbenchProjectBindingOutcome::Bound(
             BoundWorkbenchProject {
                 project_id,
@@ -774,7 +780,7 @@ impl WorkbenchRuntimeServices {
         kind: ProjectUseKind,
     ) -> Result<OpenProjectSession, RuntimeHttpServiceError> {
         self.projects
-            .open_project(project_root, kind)
+            .open_project_deferred(project_root, kind)
             .map_err(RuntimeHttpServiceError::from_project)
     }
 
@@ -829,6 +835,7 @@ impl WorkbenchRuntimeServices {
             "workingCopies": working_copies
         });
         Ok(PreparedWorkbenchProjectBinding {
+            session: opened.session,
             project_use: opened.project_use,
             response,
             bound_event,
@@ -940,7 +947,7 @@ impl WorkbenchRuntimeServices {
     pub fn discover_project(&self, project_root: &str) -> Result<String, RuntimeHttpServiceError> {
         let opened = self
             .projects
-            .open_project(project_root, ProjectUseKind::Request)
+            .open_project_deferred(project_root, ProjectUseKind::Request)
             .map_err(RuntimeHttpServiceError::from_project)?;
         let project_id = opened.session.project_id().to_owned();
         self.remember_recent_project(&opened.session)?;

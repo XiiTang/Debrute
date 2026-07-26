@@ -1165,27 +1165,21 @@ pub fn project_text_file_type_for_path(
 ) -> Option<(&'static str, &'static str)> {
     let lower = path.to_ascii_lowercase();
     let filename = lower.rsplit('/').next().unwrap_or(&lower);
-    PROJECT_TEXT_FILE_TYPES
+    if let Some(kind) = PROJECT_TEXT_FILE_TYPES
         .iter()
         .find(|kind| kind.filenames.contains(&filename))
-        .or_else(|| {
-            PROJECT_TEXT_FILE_TYPES.iter().find(|kind| {
-                kind.patterns.iter().any(|pattern| {
-                    let candidate = if pattern.contains('/') {
-                        &lower
-                    } else {
-                        filename
-                    };
-                    text_filename_pattern_matches(pattern, candidate)
-                })
-            })
-        })
-        .or_else(|| {
-            PROJECT_TEXT_FILE_TYPES.iter().find(|kind| {
-                kind.extensions
-                    .iter()
-                    .any(|extension| lower.ends_with(extension))
-            })
+    {
+        return Some((kind.language, kind.mime_type));
+    }
+    if let Some(kind) = project_text_filename_pattern_type(&lower, filename) {
+        return Some(kind);
+    }
+    PROJECT_TEXT_FILE_TYPES
+        .iter()
+        .find(|kind| {
+            kind.extensions
+                .iter()
+                .any(|extension| lower.ends_with(extension))
         })
         .map(|kind| (kind.language, kind.mime_type))
         .or_else(|| first_line.and_then(project_text_first_line_type))
@@ -1621,7 +1615,40 @@ fn project_text_first_line_type(first_line: &str) -> Option<(&'static str, &'sta
         .map(|(_, language, mime_type)| (*language, *mime_type))
 }
 
-fn text_filename_pattern_matches(pattern: &str, value: &str) -> bool {
+fn project_text_filename_pattern_type(
+    lower_path: &str,
+    filename: &str,
+) -> Option<(&'static str, &'static str)> {
+    static PATTERNS: OnceLock<Vec<(Regex, bool, &'static str, &'static str)>> = OnceLock::new();
+    PATTERNS
+        .get_or_init(|| {
+            PROJECT_TEXT_FILE_TYPES
+                .iter()
+                .flat_map(|kind| {
+                    kind.patterns.iter().map(|pattern| {
+                        let uses_full_path = pattern.contains('/');
+                        (
+                            compile_text_filename_pattern(pattern),
+                            uses_full_path,
+                            kind.language,
+                            kind.mime_type,
+                        )
+                    })
+                })
+                .collect()
+        })
+        .iter()
+        .find(|(pattern, uses_full_path, _, _)| {
+            pattern.is_match(if *uses_full_path {
+                lower_path
+            } else {
+                filename
+            })
+        })
+        .map(|(_, _, language, mime_type)| (*language, *mime_type))
+}
+
+fn compile_text_filename_pattern(pattern: &str) -> Regex {
     let chars = pattern.chars().collect::<Vec<_>>();
     let mut source = String::from("(?i)^");
     let mut index = 0;
@@ -1646,5 +1673,5 @@ fn text_filename_pattern_matches(pattern: &str, value: &str) -> bool {
         }
     }
     source.push('$');
-    Regex::new(&source).is_ok_and(|regex| regex.is_match(value))
+    Regex::new(&source).expect("Project text filename pattern is static")
 }

@@ -11,6 +11,7 @@ const productPlatform = requireProductPlatform(process.platform);
 export default defineConfig(({ command }) => {
   const runtimeOrigin = process.env.DEBRUTE_RUNTIME_ORIGIN;
   const canvasPerfEnabled = command === 'serve' && process.env.VITE_DEBRUTE_CANVAS_PERF === '1';
+  const startupPerfEnabled = command === 'serve' && process.env.VITE_DEBRUTE_STARTUP_PERF === '1';
   if (command === 'serve' && !runtimeOrigin) {
     throw new Error('DEBRUTE_RUNTIME_ORIGIN is required; start Web through pnpm dev or pnpm dev:electron.');
   }
@@ -26,7 +27,8 @@ export default defineConfig(({ command }) => {
     },
     define: {
       __DEBRUTE_PLATFORM__: JSON.stringify(productPlatform),
-      __DEBRUTE_CANVAS_PERF__: JSON.stringify(canvasPerfEnabled)
+      __DEBRUTE_CANVAS_PERF__: JSON.stringify(canvasPerfEnabled),
+      __DEBRUTE_STARTUP_PERF__: JSON.stringify(startupPerfEnabled)
     },
     resolve: {
       alias: {

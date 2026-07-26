@@ -948,12 +948,11 @@ export type WorkbenchEvent =
   | { type: 'project.fileChanged'; projectId: string; projectRevision: number; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
   | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
   | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
-  | { type: 'recentProjects.changed'; recentProjects: RecentProjectView[] }
-  | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView }
-  | { type: 'integrations.changed'; integrations: IntegrationSettingsView }
-  | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView }
-  | { type: 'adobeBridge.state.failed'; error: { code: string; message: string } }
-  | { type: 'product.changed'; product: DebruteProductState | null };
+  | { type: 'recentProjects.changed'; revision: number; recentProjects: RecentProjectView[] }
+  | { type: 'globalSettings.changed'; revision: number; settings: DebruteGlobalSettingsView }
+  | { type: 'integrations.changed'; revision: number; integrations: IntegrationSettingsView }
+  | { type: 'adobeBridge.state.changed'; revision: number; state: AdobeBridgeStateView }
+  | { type: 'product.changed'; revision: number; product: DebruteProductState | null };
 
 type WorkbenchProjectConnectionFrame =
   | {
@@ -1017,14 +1016,16 @@ const workbenchEventValidators = {
     && value.canvas.id === value.projection.canvasId,
   'canvas.feedback.changed': (value) => isRevisionedProjectEvent(value)
     && isCanvasFeedbackDocument(value.feedback),
-  'recentProjects.changed': (value) => Array.isArray(value.recentProjects),
-  'globalSettings.changed': (value) => isProtocolObject(value.settings),
-  'integrations.changed': (value) => isProtocolObject(value.integrations),
-  'adobeBridge.state.changed': (value) => isProtocolObject(value.state),
-  'adobeBridge.state.failed': (value) => isProtocolObject(value.error)
-    && typeof value.error.code === 'string'
-    && typeof value.error.message === 'string',
-  'product.changed': (value) => value.product === null || isProtocolObject(value.product)
+  'recentProjects.changed': (value) => isNonNegativeInteger(value.revision)
+    && Array.isArray(value.recentProjects),
+  'globalSettings.changed': (value) => isNonNegativeInteger(value.revision)
+    && isProtocolObject(value.settings),
+  'integrations.changed': (value) => isNonNegativeInteger(value.revision)
+    && isProtocolObject(value.integrations),
+  'adobeBridge.state.changed': (value) => isNonNegativeInteger(value.revision)
+    && isProtocolObject(value.state),
+  'product.changed': (value) => isNonNegativeInteger(value.revision)
+    && (value.product === null || isProtocolObject(value.product))
 } satisfies Record<WorkbenchEvent['type'], (value: Record<string, unknown>) => boolean>;
 
 export function isRecognizedWorkbenchEventFrame(
@@ -1432,12 +1433,12 @@ function isNonNegativeInteger(value: unknown): value is number {
 }
 
 export interface WorkbenchApiClient {
-  adobeBridgeGetState(): Promise<AdobeBridgeStateView>;
+  adobeBridgeRefreshState(): Promise<{ ok: true }>;
   adobeBridgeCreatePairing(): Promise<{ pairingId: string; code: string; expiresAt: string }>;
   adobeBridgeCancelPairing(pairingId: string): Promise<void>;
-  adobeBridgeRemovePairing(pluginInstanceId: string): Promise<AdobeBridgeStateView>;
-  adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<AdobeBridgeStateView>;
-  adobeBridgeUnlinkPhotoshop(pluginInstanceId: string): Promise<AdobeBridgeStateView>;
+  adobeBridgeRemovePairing(pluginInstanceId: string): Promise<{ ok: true }>;
+  adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<{ ok: true }>;
+  adobeBridgeUnlinkPhotoshop(pluginInstanceId: string): Promise<{ ok: true }>;
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
   openProject(
     input: { projectRoot: string; forceOpenHere?: boolean } | { projectId: string; forceOpenHere?: boolean }

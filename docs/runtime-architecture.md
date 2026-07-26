@@ -212,11 +212,12 @@ connection end is a terminal page state; refreshing creates a new connection.
 Global Settings, Integration discovery, Adobe live state, and packaged Product
 state are independent resources carried by the initial stream and subsequent
 ordered Global events. The settings snapshot never synchronously probes
-integrations. Initial integration discovery runs in blocking-worker work and
-publishes its own resource frame. Initial Adobe state failure publishes a typed
-resource-failure frame, leaving settings and the shell usable while the Adobe
-page offers its explicit retry. A connected Workbench does not issue a second
-read to initialize any of these resources. Mutating and action commands return
+integrations or Adobe. When Settings is first activated, it explicitly starts
+Integration discovery and requests Adobe live state. Both operations run off
+the connection response path and publish accepted state through ordered Global
+events; the Adobe refresh response is only an acknowledgement and is not installed
+as a second frontend truth. Adobe request failure remains local, retryable
+Settings UI state, leaving settings and the shell usable. Mutating and action commands return
 only their closed command outcome and any action-specific diagnostic; they do not return
 another complete state for the initiating Workbench to apply. Command progress
 is local interaction state and ends with the command response, while displayed
@@ -337,7 +338,9 @@ publishing a change; an empty or unknown-only patch fails without writing.
 
 The public stable Project identity is `.debrute/project.json.project.id`.
 Runtime rejects invalid or duplicate stable ids instead of deriving aliases
-from roots or generating compatibility identities. A loaded Project session
+from roots or generating compatibility identities. Session preparation reads
+that identity once; the watcher-first publication pass and every later refresh
+must observe the same id or fail before publishing. A loaded Project session
 owns one canonical root, snapshot, monotonic `projectRevision`, serialized
 mutation authority, watcher, terminals, and typed Project Uses. The use kinds
 are Workbench, request, running terminal, transfer, and Photoshop link.
@@ -347,16 +350,44 @@ visible children of the root plus targeted Debrute metadata and Canvas
 documents. Directory expansion is a revisioned session command which adds that
 directory's direct children by merging that one directory read into the public
 snapshot; it does not rebuild metadata, Canvas, Feedback, registry, or Canvas
-Map state. A complete file index is built by a session-owned cancellable
-background task outside the serialized mutation lane and installed with one
-short revisioned commit when it changes a public Canvas projection. Project
-close cancels and joins that task. Scan failure preserves the shallow snapshot,
-publishes a Project diagnostic, and leaves explicit refresh as the retry.
-Filesystem watcher
-bursts are sorted and delivered as one batch; a complete index is updated only
+Map state. Registry callers choose either ordinary opening, which starts the
+complete index in the background, or deferred opening. The Workbench binding
+path uses deferred opening: it first captures the shallow snapshot, queues
+`project.bound`, and starts its Project event stream; only then does it start
+the session-owned, idempotent, cancellable background index task. Discovery
+also uses deferred opening because it needs only stable identity and recent
+Project metadata. The task traverses outside the serialized mutation lane,
+honors every nested `.gitignore`, and skips dependency, cache, and generated
+directories such as `node_modules`, `target`, `dist`, and `build`. Those
+directories remain available through an explicit Explorer expansion; they do
+not belong to automatic indexing. The task installs its result
+with one short revisioned commit when it changes a public Canvas projection.
+Project close cancels and joins that task. Scan failure
+preserves the shallow snapshot, publishes a Project diagnostic, and leaves
+explicit refresh as the retry. The CLI `project.validate` command builds a
+separate complete read-only validation snapshot before reporting health, so
+nested Canvas Map drift and target diagnostics are included deterministically
+without pushing drift or changing the live session.
+For a new session, Runtime initializes Project authority, establishes the
+platform watcher, and then performs exactly one initial shallow snapshot pass.
+The supported macOS FSEvents and Windows backends each use one native recursive
+root subscription. Events are filtered through the same nested `.gitignore`
+and generated-directory policy as the index, except paths currently named by
+an explicit Canvas literal rule or directly exposed by an expanded Explorer
+directory remain admitted as session dependencies. Literal Canvas expansions
+are cached per map; a matching event refreshes only its affected file or
+subtree, while unrelated events reuse the cache. A backend rescan, explicit
+full refresh, or changed literal rule rebuilds that targeted cache. Watcher events observed during that pass queue behind the
+publication barrier and are applied after the session is published. Runtime
+does not repeat Canvas projection and media inspection merely to close the
+watcher-establishment race, and it cannot publish a snapshot whose metadata id
+differs from the session id captured before watcher installation.
+Filesystem watcher bursts are sorted and delivered as one batch; a complete index is updated only
 for affected files or directory subtrees. Mutations accepted while the initial
-scan is running are replayed onto its candidate before installation. Full traversal is reserved for initial
-background indexing, an explicit refresh, or a watcher-backend rescan signal.
+scan is running are replayed onto its candidate before installation. Changing
+an included `.gitignore` rebuilds the filtered index.
+Full traversal of included content is reserved for initial background indexing,
+an explicit refresh, an ignore-policy change, or a watcher-backend rescan signal.
 
 Project metadata, Canvas JSON, the Canvas registry, Feedback, Generated Asset
 metadata, and Canvas Map source each deserialize as their one closed current

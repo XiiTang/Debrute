@@ -31,6 +31,32 @@ const CONTEXT_MENU_WIDTH = 190;
 const CONTEXT_MENU_ROW_HEIGHT = 32;
 const CONTEXT_MENU_VERTICAL_PADDING = 10;
 
+export function PendingWorkbenchContextMenuDismissal({
+  onClose
+}: {
+  onClose(): void;
+}): null {
+  useEffect(() => {
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    const close = () => onClose();
+    window.addEventListener('pointerdown', close, { capture: true });
+    window.addEventListener('keydown', closeOnKeyDown);
+    window.addEventListener('wheel', close, { capture: true });
+    window.addEventListener('scroll', close, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', close, { capture: true });
+      window.removeEventListener('keydown', closeOnKeyDown);
+      window.removeEventListener('wheel', close, { capture: true });
+      window.removeEventListener('scroll', close, { capture: true });
+    };
+  }, [onClose]);
+  return null;
+}
+
 export function WorkbenchContextMenu({
   items,
   position,
@@ -62,7 +88,7 @@ export function WorkbenchContextMenu({
 
   useEffect(() => {
     menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-  }, []);
+  }, [items]);
 
   useEffect(() => {
     const closeOnPointerDown = (event: PointerEvent) => {

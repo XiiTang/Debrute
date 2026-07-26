@@ -421,8 +421,22 @@ impl RuntimeCliService {
             ensure_project_initialized(root)?;
         }
         let opened = self.open_project(root)?;
-        let sync = opened.session.sync_snapshot().map_err(project_failure)?;
-        let snapshot = sync.snapshot;
+        let snapshot = if request.command == "project.validate" {
+            let refreshed = opened
+                .session
+                .execute(ProjectCommand::Validate)
+                .map_err(project_failure)?;
+            let ProjectCommandResult::Snapshot(snapshot) = refreshed.value else {
+                unreachable!("Project validation must return its complete snapshot")
+            };
+            snapshot
+        } else {
+            opened
+                .session
+                .sync_snapshot()
+                .map_err(project_failure)?
+                .snapshot
+        };
         if request.command == "project.validate" && snapshot.health.diagnostic_counts.errors > 0 {
             return Ok(error_records(
                 &request.command,
@@ -576,7 +590,7 @@ impl RuntimeCliService {
 
     fn open_project(&self, root: &Path) -> Result<crate::project::OpenProjectSession, CliFailure> {
         self.projects
-            .open_project(root, ProjectUseKind::Request)
+            .open_project_deferred(root, ProjectUseKind::Request)
             .map_err(project_failure)
     }
 }

@@ -21,6 +21,7 @@ getrandom = "0.4.3"
 hyper = "1.10.1"
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 image = { version = "0.25.10", default-features = false, features = ["avif", "jpeg", "png", "tiff", "webp"] }
+ignore = "0.4.31"
 junction = { version = "2.0.0", default-features = false }
 libc = "0.2.186"
 notify = "8.2.0"

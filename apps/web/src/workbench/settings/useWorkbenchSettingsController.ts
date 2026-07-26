@@ -1,21 +1,23 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from 'react';
 import type {
   AdobeBridgeStateView,
   CanvasTextAppearance,
   DebruteGlobalSettingsView,
-  WorkbenchApiClient,
-  WorkbenchEvent,
-  WorkbenchLocale,
-  WorkbenchThemePreference
+  WorkbenchApiClient
 } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { createI18n, type WorkbenchI18n } from '../i18n';
-import {
-  resolveWorkbenchThemePreference,
-  setDocumentTheme,
-  subscribeSystemThemeChanges,
-  type WorkbenchResolvedTheme
-} from '../services/workbenchTheme';
+import type { WorkbenchI18n } from '../i18n';
+import type {
+  WorkbenchGlobalProjection,
+  WorkbenchGlobalProjectionState
+} from '../services/WorkbenchGlobalProjection.js';
 
 export type WorkbenchSettingsActions = Pick<WorkbenchActions,
   | 'checkProductUpdate'
@@ -37,11 +39,7 @@ export interface WorkbenchSettingsController {
   integrations: WorkbenchState['integrations'];
   product: WorkbenchState['product'];
   adobeBridge: WorkbenchState['adobeBridge'];
-  locale: WorkbenchLocale;
-  resolvedTheme: WorkbenchResolvedTheme;
   actions: WorkbenchSettingsActions;
-  getCurrentI18n(): WorkbenchI18n;
-  applyEvent(event: WorkbenchEvent): void;
 }
 
 interface PendingAdobeClientCommand {
@@ -70,37 +68,55 @@ interface CanvasTextAppearanceSaveQueue {
   awaitingEvent?: CanvasTextAppearance;
 }
 
-export function useWorkbenchSettingsController(input: {
+export interface WorkbenchSettingsControllerInput {
   api: WorkbenchApiClient;
-  initialGlobalSettings: DebruteGlobalSettingsView;
+  globalProjection: WorkbenchGlobalProjection;
   projectId: string | undefined;
+  ensureAdobeBridgeState(): Promise<void>;
   notify(message: string): void;
-}): WorkbenchSettingsController {
+  getCurrentI18n(): WorkbenchI18n;
+}
+
+export function useWorkbenchSettingsController(
+  input: WorkbenchSettingsControllerInput
+): WorkbenchSettingsController {
+  const projectionState = useSyncExternalStore(
+    input.globalProjection.subscribe,
+    input.globalProjection.getState,
+    input.globalProjection.getState
+  );
+  const initialProjection = initializedGlobalProjection(projectionState);
+  const initialSettings = initialProjection.settings;
   const [globalSettings, setGlobalSettings] = useState<WorkbenchState['globalSettings']>({
     status: 'ready',
-    value: input.initialGlobalSettings
+    value: initialSettings
   });
-  const [integrations, setIntegrations] = useState<WorkbenchState['integrations']>({ status: 'loading' });
-  const [product, setProduct] = useState<WorkbenchState['product']>({ status: 'loading' });
-  const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>({ status: 'loading' });
-  const [locale, setLocale] = useState<WorkbenchLocale>(input.initialGlobalSettings.workbench.locale);
-  const [themePreference, setThemePreference] = useState<WorkbenchThemePreference>(
-    input.initialGlobalSettings.workbench.themePreference
+  const [integrations, setIntegrations] = useState<WorkbenchState['integrations']>(
+    initialProjection.integrations
   );
-  const [resolvedTheme, setResolvedTheme] = useState<WorkbenchResolvedTheme>(() => (
-    resolveWorkbenchThemePreference(input.initialGlobalSettings.workbench.themePreference)
+  const [product, setProduct] = useState<WorkbenchState['product']>(initialProjection.product);
+  const [adobeBridge, setAdobeBridge] = useState<WorkbenchState['adobeBridge']>(() => (
+    settingsAdobeBridgeResource(initialProjection.adobeBridge)
   ));
   const adobeBridgeLoadVersionRef = useRef(0);
-  const adobeBridgeValueRef = useRef<AdobeBridgeStateView | undefined>(undefined);
+  const adobeBridgeValueRef = useRef<AdobeBridgeStateView | undefined>(
+    initialProjection.adobeBridge.status === 'ready'
+      ? initialProjection.adobeBridge.value
+      : undefined
+  );
   const adobeClientCommandTokenRef = useRef(0);
   const pendingAdobeClientCommandsRef = useRef(new Map<string, PendingAdobeClientCommand>());
-  const localeRef = useRef<WorkbenchLocale>(input.initialGlobalSettings.workbench.locale);
   const confirmedGlobalSettingsRef = useRef<DebruteGlobalSettingsView | undefined>(
-    input.initialGlobalSettings
+    initialSettings
   );
   const canvasTextAppearanceSaveQueueRef = useRef<CanvasTextAppearanceSaveQueue>({
     running: false
   });
+  const observedSettingsRef = useRef(initialProjection.settings);
+  const observedIntegrationsRef = useRef(initialProjection.integrations);
+  const observedProductRef = useRef(initialProjection.product);
+  const observedAdobeBridgeRef = useRef(initialProjection.adobeBridge);
+  const optionalResourcesRequestedRef = useRef(false);
 
   const confirmAdobeClientCommands = useCallback((bridge: AdobeBridgeStateView) => {
     for (const pending of pendingAdobeClientCommandsRef.current.values()) {
@@ -155,13 +171,6 @@ export function useWorkbenchSettingsController(input: {
     pendingAdobeClientCommandsRef.current.clear();
   }, [input.projectId]);
 
-  const applyGlobalSettingsEffects = useCallback((settings: DebruteGlobalSettingsView): DebruteGlobalSettingsView => {
-    localeRef.current = settings.workbench.locale;
-    setLocale(settings.workbench.locale);
-    setThemePreference(settings.workbench.themePreference);
-    return settings;
-  }, []);
-
   const applyLoadedGlobalSettings = useCallback((settings: DebruteGlobalSettingsView) => {
     confirmedGlobalSettingsRef.current = settings;
     const queue = canvasTextAppearanceSaveQueueRef.current;
@@ -176,8 +185,35 @@ export function useWorkbenchSettingsController(input: {
     const effectiveSettings = localAppearance
       ? globalSettingsWithCanvasTextAppearance(settings, localAppearance)
       : settings;
-    setGlobalSettings({ status: 'ready', value: applyGlobalSettingsEffects(effectiveSettings) });
-  }, [applyGlobalSettingsEffects]);
+    setGlobalSettings({ status: 'ready', value: effectiveSettings });
+  }, []);
+
+  useEffect(() => {
+    const projection = initializedGlobalProjection(projectionState);
+    if (projection.settings !== observedSettingsRef.current) {
+      observedSettingsRef.current = projection.settings;
+      applyLoadedGlobalSettings(projection.settings);
+    }
+    if (projection.integrations !== observedIntegrationsRef.current) {
+      observedIntegrationsRef.current = projection.integrations;
+      setIntegrations(projection.integrations);
+    }
+    if (projection.product !== observedProductRef.current) {
+      observedProductRef.current = projection.product;
+      setProduct(projection.product);
+    }
+    if (projection.adobeBridge === observedAdobeBridgeRef.current) {
+      return;
+    }
+    observedAdobeBridgeRef.current = projection.adobeBridge;
+    adobeBridgeLoadVersionRef.current += 1;
+    if (projection.adobeBridge.status === 'ready') {
+      applyAdobeBridgeState(projection.adobeBridge.value);
+      return;
+    }
+    adobeBridgeValueRef.current = undefined;
+    setAdobeBridge(settingsAdobeBridgeResource(projection.adobeBridge));
+  }, [applyAdobeBridgeState, applyLoadedGlobalSettings, projectionState]);
 
   const saveCanvasTextAppearance = useCallback((appearance: CanvasTextAppearance): Promise<void> => {
     const queue = canvasTextAppearanceSaveQueueRef.current;
@@ -243,41 +279,49 @@ export function useWorkbenchSettingsController(input: {
     return pending;
   }, [applyLoadedGlobalSettings, input.api]);
 
-  useEffect(() => {
-    setResolvedTheme(resolveWorkbenchThemePreference(themePreference));
-    if (themePreference !== 'system') return;
-    return subscribeSystemThemeChanges(setResolvedTheme);
-  }, [themePreference]);
-
-  useLayoutEffect(() => {
-    setDocumentTheme(resolvedTheme);
-  }, [resolvedTheme]);
-
-  const reloadAdobeBridge = useCallback(async () => {
+  const loadAdobeBridge = useCallback(async (load: () => Promise<unknown>) => {
     const loadVersion = adobeBridgeLoadVersionRef.current + 1;
     adobeBridgeLoadVersionRef.current = loadVersion;
     pendingAdobeClientCommandsRef.current.clear();
     adobeBridgeValueRef.current = undefined;
     setAdobeBridge({ status: 'loading' });
     try {
-      const bridge = await input.api.adobeBridgeGetState();
-      if (adobeBridgeLoadVersionRef.current === loadVersion) {
-        applyAdobeBridgeState(bridge);
-      }
+      await load();
     } catch (error) {
       if (adobeBridgeLoadVersionRef.current === loadVersion) {
         setAdobeBridge({ status: 'error', message: errorMessage(error) });
       }
     }
-  }, [applyAdobeBridgeState, input.api]);
+  }, []);
+  const reloadAdobeBridge = useCallback(
+    () => loadAdobeBridge(input.api.adobeBridgeRefreshState),
+    [input.api.adobeBridgeRefreshState, loadAdobeBridge]
+  );
+
+  useEffect(() => {
+    if (optionalResourcesRequestedRef.current) {
+      return;
+    }
+    optionalResourcesRequestedRef.current = true;
+    if (initialProjection.integrations.status === 'loading') {
+      void input.api.integrationsRescan().catch(() => undefined);
+    }
+    if (initialProjection.adobeBridge.status === 'loading') {
+      void loadAdobeBridge(input.ensureAdobeBridgeState);
+    }
+  }, [
+    initialProjection.adobeBridge.status,
+    initialProjection.integrations.status,
+    input.api,
+    input.ensureAdobeBridgeState,
+    loadAdobeBridge
+  ]);
 
   useEffect(() => () => {
     adobeBridgeLoadVersionRef.current += 1;
     pendingAdobeClientCommandsRef.current.clear();
     adobeBridgeValueRef.current = undefined;
   }, []);
-
-  const getCurrentI18n = useCallback(() => createI18n(localeRef.current), []);
 
   const actions = useMemo<WorkbenchSettingsActions>(() => ({
     checkProductUpdate: async () => { await input.api.checkProductUpdate(); },
@@ -300,7 +344,7 @@ export function useWorkbenchSettingsController(input: {
     runIntegrationOperation: async (operationInput) => {
       const result = await input.api.integrationsRunOperation(operationInput);
       if (!result.ok) {
-        const currentI18n = getCurrentI18n();
+        const currentI18n = input.getCurrentI18n();
         const diagnostic = result.diagnostic?.stderrTail
           ?? result.diagnostic?.stdoutTail
           ?? result.diagnostic?.errorKind
@@ -316,18 +360,12 @@ export function useWorkbenchSettingsController(input: {
     createAdobeBridgePairing: () => input.api.adobeBridgeCreatePairing(),
     cancelAdobeBridgePairing: (pairingId) => input.api.adobeBridgeCancelPairing(pairingId),
     removeAdobeBridgePairing: async (pluginInstanceId) => {
-      const bridge = await input.api.adobeBridgeRemovePairing(pluginInstanceId);
-      applyAdobeBridgeState(bridge);
+      await input.api.adobeBridgeRemovePairing(pluginInstanceId);
     },
     linkAdobeBridgePhotoshop: async (linkInput) => {
       const command = beginAdobeClientCommand(linkInput.pluginInstanceId, 'link');
-      const linkVersion = adobeBridgeLoadVersionRef.current + 1;
-      adobeBridgeLoadVersionRef.current = linkVersion;
       try {
-        const bridge = await input.api.adobeBridgeLinkPhotoshop(linkInput);
-        if (adobeBridgeLoadVersionRef.current === linkVersion) {
-          applyAdobeBridgeState(bridge);
-        }
+        await input.api.adobeBridgeLinkPhotoshop(linkInput);
         completeAdobeClientCommand(command);
       } catch (error) {
         if (!shouldSuppressAdobeClientCommandError(command)) {
@@ -337,13 +375,8 @@ export function useWorkbenchSettingsController(input: {
     },
     unlinkAdobeBridgePhotoshop: async (pluginInstanceId) => {
       const command = beginAdobeClientCommand(pluginInstanceId, 'unlink');
-      const unlinkVersion = adobeBridgeLoadVersionRef.current + 1;
-      adobeBridgeLoadVersionRef.current = unlinkVersion;
       try {
-        const bridge = await input.api.adobeBridgeUnlinkPhotoshop(pluginInstanceId);
-        if (adobeBridgeLoadVersionRef.current === unlinkVersion) {
-          applyAdobeBridgeState(bridge);
-        }
+        await input.api.adobeBridgeUnlinkPhotoshop(pluginInstanceId);
         completeAdobeClientCommand(command);
       } catch (error) {
         if (!shouldSuppressAdobeClientCommandError(command)) {
@@ -355,62 +388,41 @@ export function useWorkbenchSettingsController(input: {
     applyAdobeBridgeState,
     beginAdobeClientCommand,
     completeAdobeClientCommand,
-    getCurrentI18n,
     input.api,
+    input.getCurrentI18n,
     input.notify,
     reloadAdobeBridge,
     saveCanvasTextAppearance,
     shouldSuppressAdobeClientCommandError
   ]);
 
-  const applyEvent = useCallback((event: WorkbenchEvent) => {
-    if (event.type === 'globalSettings.changed') {
-      applyLoadedGlobalSettings(event.settings);
-      return;
-    }
-    if (event.type === 'integrations.changed') {
-      setIntegrations({ status: 'ready', value: event.integrations });
-      return;
-    }
-    if (event.type === 'recentProjects.changed') {
-      setGlobalSettings((current) => current.status === 'ready'
-        ? {
-            status: 'ready',
-            value: {
-              ...current.value,
-              chrome: { ...current.value.chrome, recentProjects: event.recentProjects }
-            }
-          }
-        : current);
-      return;
-    }
-    if (event.type === 'product.changed') {
-      setProduct({ status: 'ready', value: event.product });
-      return;
-    }
-    if (event.type === 'adobeBridge.state.changed') {
-      adobeBridgeLoadVersionRef.current += 1;
-      applyAdobeBridgeState(event.state);
-      return;
-    }
-    if (event.type === 'adobeBridge.state.failed') {
-      adobeBridgeLoadVersionRef.current += 1;
-      adobeBridgeValueRef.current = undefined;
-      setAdobeBridge({ status: 'error', message: event.error.message });
-    }
-  }, [applyAdobeBridgeState, applyLoadedGlobalSettings]);
-
   return useMemo(() => ({
     globalSettings,
     integrations,
     product,
     adobeBridge,
-    locale,
-    resolvedTheme,
-    actions,
-    getCurrentI18n,
-    applyEvent
-  }), [actions, adobeBridge, applyEvent, getCurrentI18n, globalSettings, integrations, locale, product, resolvedTheme]);
+    actions
+  }), [actions, adobeBridge, globalSettings, integrations, product]);
+}
+
+type InitializedWorkbenchGlobalProjection = Exclude<
+  WorkbenchGlobalProjectionState,
+  { status: 'uninitialized' }
+>;
+
+function initializedGlobalProjection(
+  state: WorkbenchGlobalProjectionState
+): InitializedWorkbenchGlobalProjection {
+  if (state.status === 'uninitialized') {
+    throw new Error('Settings feature requires the initial Global snapshot.');
+  }
+  return state;
+}
+
+function settingsAdobeBridgeResource(
+  resource: InitializedWorkbenchGlobalProjection['adobeBridge']
+): WorkbenchState['adobeBridge'] {
+  return resource;
 }
 
 function globalSettingsWithCanvasTextAppearance(
