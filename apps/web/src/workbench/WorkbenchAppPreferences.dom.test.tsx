@@ -24,6 +24,7 @@ vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
   const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/DefaultCanvasTextRenderProfile.js');
   return {
     CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    CanvasTextRenderProfileProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE
   };
 });
@@ -74,9 +75,6 @@ const canvasRuntimeState = vi.hoisted(() => ({
 }));
 let WorkbenchApp: WorkbenchAppComponent;
 let WorkbenchAppWithMockedCanvas: WorkbenchAppComponent;
-vi.mock('../api/httpWorkbenchApiClient', () => ({
-  createHttpWorkbenchApiClient: () => apiState.client
-}));
 
 describe('WorkbenchApp preferences and project behavior', () => {
   const canvasGetContextDescriptor = Object.getOwnPropertyDescriptor(
@@ -207,6 +205,37 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
+  it('requests a shallow Project directory when Explorer expands it', async () => {
+    const snapshot = snapshotFixture();
+    snapshot.files = [{ projectRelativePath: 'assets', kind: 'directory' }];
+    const loadProjectDirectory = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 2,
+      snapshot
+    }));
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+      openProject: vi.fn(async () => ({
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot,
+        workingCopies: emptyWorkingCopies()
+      })),
+      loadProjectDirectory
+    });
+
+    await act(async () => {
+      requireButton(container, 'Explorer').click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      requireButton(container, 'assets').click();
+      await Promise.resolve();
+    });
+
+    expect(loadProjectDirectory).toHaveBeenCalledWith('assets');
+    await unmount(root, container);
+  });
+
   it('reports native window state failures without inventing Windows controls on macOS', async () => {
     window.debruteShell = shellApiFixture({
       getNativeWindowState: vi.fn().mockRejectedValue(new Error('native state unavailable'))
@@ -247,7 +276,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
   });
 
-  it('loads Adobe live state once when the initial route opens a project', async () => {
+  it('uses streamed Adobe live state without a duplicate REST load', async () => {
     const adobeBridgeGetState = vi.fn(async () => adobeBridgeStateFixture());
     const { container, root } = await renderWorkbenchApp('/projects/project-1', { adobeBridgeGetState });
 
@@ -257,7 +286,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
-    expect(adobeBridgeGetState).toHaveBeenCalledTimes(1);
+    expect(adobeBridgeGetState).not.toHaveBeenCalled();
 
     await unmount(root, container);
   });
@@ -621,9 +650,9 @@ describe('WorkbenchApp preferences and project behavior', () => {
       snapshot: snapshotFixture(),
       workingCopies: emptyWorkingCopies()
     }));
-    const StrictWorkbenchApp = () => (
+    const StrictWorkbenchApp: WorkbenchAppComponent = (props) => (
       <React.StrictMode>
-        <WorkbenchApp />
+        <WorkbenchApp {...props} />
       </React.StrictMode>
     );
 
@@ -692,10 +721,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   describe('Adobe Bridge settings state', { tags: ['settings'] }, () => {
-    it('reloads Adobe live state only through explicit retry after load failure', async () => {
-      const adobeBridgeGetState = vi.fn()
-        .mockRejectedValueOnce(new Error('bridge unavailable'))
-        .mockResolvedValueOnce(adobeBridgeStateFixture());
+    it('opens the streamed Adobe state without issuing a duplicate REST request', async () => {
+      const adobeBridgeGetState = vi.fn(async () => adobeBridgeStateFixture());
       const { container, root } = await renderWorkbenchApp('/', { adobeBridgeGetState });
 
       await act(async () => {
@@ -706,15 +733,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
         requireButton(container, 'Adobe Bridge').click();
         await Promise.resolve();
       });
-      expect(adobeBridgeGetState).toHaveBeenCalledTimes(1);
-
-      await act(async () => {
-        requireButton(container, 'Retry').click();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      expect(adobeBridgeGetState).toHaveBeenCalledTimes(2);
+      expect(container.querySelector('.adobe-bridge-settings-page')).not.toBeNull();
+      expect(adobeBridgeGetState).not.toHaveBeenCalled();
 
       await unmount(root, container);
     });
@@ -848,13 +868,14 @@ async function startPendingAdobeLink(): Promise<{
 }> {
   const link = deferred<AdobeBridgeStateView>();
   const { container, root } = await renderWorkbenchApp('/projects/project-1', {
-    adobeBridgeGetState: vi.fn(async () => adobeBridgeStateWithPhotoshopClient()),
     adobeBridgeLinkPhotoshop: vi.fn(() => link.promise)
   });
 
   await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
+    emitWorkbenchEvent({
+      type: 'adobeBridge.state.changed',
+      state: adobeBridgeStateWithPhotoshopClient()
+    });
   });
   await act(async () => {
     requireButton(container, 'Settings').click();
@@ -886,7 +907,12 @@ async function renderWorkbenchApp(
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(<App />);
+    root.render(
+      <App
+        api={apiState.client as Parameters<WorkbenchAppComponent>[0]['api']}
+        initialGlobalSettings={globalSettingsFixture()}
+      />
+    );
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -960,8 +986,9 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       apiState.listeners.add(listener);
       const settings = globalSettingsFixture();
       listener({ type: 'globalSettings.changed', settings });
-      listener({ type: 'integrations.changed', integrations: settings.integrations });
+      listener({ type: 'integrations.changed', integrations: { integrations: [], backends: [] } });
       listener({ type: 'product.changed', product: productStateFixture() });
+      listener({ type: 'adobeBridge.state.changed', state: adobeBridgeStateFixture() });
       return () => apiState.listeners.delete(listener);
     }),
     onConnectionEnded: vi.fn((listener: (error: Error) => void) => {
@@ -1032,7 +1059,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       video: [],
       audio: []
     },
-    integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true },
     ...overrides
   };

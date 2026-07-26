@@ -198,19 +198,26 @@ persistence or timer-based lifetime and is removed atomically when consumed.
 
 Each loaded Workbench opens one POST SSE connection at
 `/api/workbench/connection`. Its first frames establish an in-memory connection
-credential, the complete Global snapshot, and either a Project binding or an
-explicit open failure. A browser session may contain multiple document
-connections; commands send one connection's credential in a same-origin header
-and Runtime validates the cookie and credential together. There are no split
-Global/Project event streams, reconnect window, heartbeat, unload release, or
-automatic request replay. Unexpected connection end is a terminal page state;
-refreshing creates a new connection.
+credential and the complete Global Settings snapshot before any requested
+Project binding work. The settings frame is sufficient to apply locale, theme,
+and Canvas Text Appearance before React mounts. Project preparation follows in
+blocking-worker work and therefore cannot delay that frame; it later yields
+either a Project binding or an explicit open failure. A browser session may
+contain multiple document connections; commands send one connection's
+credential in a same-origin header and Runtime validates the cookie and
+credential together. There are no split Global/Project connections, reconnect
+window, heartbeat, unload release, or automatic request replay. Unexpected
+connection end is a terminal page state; refreshing creates a new connection.
 
-That initial snapshot and the subsequent ordered Global change events are the
-Workbench's sole projections of Global settings, Integration settings, and
-packaged Product state. A connected Workbench does not issue a second read to
-initialize the same state. Mutating and action commands return only their
-closed command outcome and any action-specific diagnostic; they do not return
+Global Settings, Integration discovery, Adobe live state, and packaged Product
+state are independent resources carried by the initial stream and subsequent
+ordered Global events. The settings snapshot never synchronously probes
+integrations. Initial integration discovery runs in blocking-worker work and
+publishes its own resource frame. Initial Adobe state failure publishes a typed
+resource-failure frame, leaving settings and the shell usable while the Adobe
+page offers its explicit retry. A connected Workbench does not issue a second
+read to initialize any of these resources. Mutating and action commands return
+only their closed command outcome and any action-specific diagnostic; they do not return
 another complete state for the initiating Workbench to apply. Command progress
 is local interaction state and ends with the command response, while displayed
 authoritative state changes only when its Global event is applied. Runtime does
@@ -334,6 +341,22 @@ from roots or generating compatibility identities. A loaded Project session
 owns one canonical root, snapshot, monotonic `projectRevision`, serialized
 mutation authority, watcher, terminals, and typed Project Uses. The use kinds
 are Workbench, request, running terminal, transfer, and Photoshop link.
+
+Project opening publishes a shallow Explorer snapshot containing only direct
+visible children of the root plus targeted Debrute metadata and Canvas
+documents. Directory expansion is a revisioned session command which adds that
+directory's direct children by merging that one directory read into the public
+snapshot; it does not rebuild metadata, Canvas, Feedback, registry, or Canvas
+Map state. A complete file index is built by a session-owned cancellable
+background task outside the serialized mutation lane and installed with one
+short revisioned commit when it changes a public Canvas projection. Project
+close cancels and joins that task. Scan failure preserves the shallow snapshot,
+publishes a Project diagnostic, and leaves explicit refresh as the retry.
+Filesystem watcher
+bursts are sorted and delivered as one batch; a complete index is updated only
+for affected files or directory subtrees. Mutations accepted while the initial
+scan is running are replayed onto its candidate before installation. Full traversal is reserved for initial
+background indexing, an explicit refresh, or a watcher-backend rescan signal.
 
 Project metadata, Canvas JSON, the Canvas registry, Feedback, Generated Asset
 metadata, and Canvas Map source each deserialize as their one closed current

@@ -138,7 +138,6 @@ export interface DebruteGlobalSettingsView {
     video: VideoModelSettingRecord[];
     audio: AudioModelSettingRecord[];
   };
-  integrations: IntegrationSettingsView;
   adobeBridge: DebruteGlobalAdobeBridgeSettings;
 }
 
@@ -953,6 +952,7 @@ export type WorkbenchEvent =
   | { type: 'globalSettings.changed'; settings: DebruteGlobalSettingsView }
   | { type: 'integrations.changed'; integrations: IntegrationSettingsView }
   | { type: 'adobeBridge.state.changed'; state: AdobeBridgeStateView }
+  | { type: 'adobeBridge.state.failed'; error: { code: string; message: string } }
   | { type: 'product.changed'; product: DebruteProductState | null };
 
 type WorkbenchProjectConnectionFrame =
@@ -1021,6 +1021,9 @@ const workbenchEventValidators = {
   'globalSettings.changed': (value) => isProtocolObject(value.settings),
   'integrations.changed': (value) => isProtocolObject(value.integrations),
   'adobeBridge.state.changed': (value) => isProtocolObject(value.state),
+  'adobeBridge.state.failed': (value) => isProtocolObject(value.error)
+    && typeof value.error.code === 'string'
+    && typeof value.error.message === 'string',
   'product.changed': (value) => value.product === null || isProtocolObject(value.product)
 } satisfies Record<WorkbenchEvent['type'], (value: Record<string, unknown>) => boolean>;
 
@@ -1456,6 +1459,7 @@ export interface WorkbenchApiClient {
     onError: (error: Error) => void
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
+  loadProjectDirectory(projectRelativeDirectory: string): Promise<RevisionedProjectResult>;
   writeProjectTextFile(input: WriteProjectTextFileInput): Promise<WorkbenchProjectTextFileWriteResult>;
   putTextWorkingCopy(projectId: string, input: WorkbenchTextWorkingCopy): Promise<WorkbenchTextWorkingCopy>;
   clearTextWorkingCopy(projectId: string, projectRelativePath: string): Promise<void>;

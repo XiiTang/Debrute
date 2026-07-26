@@ -68,6 +68,11 @@ body {
   letter-spacing: 0;
 }
 
+:root[data-settings-bootstrap] body {
+  background: transparent;
+  color: transparent;
+}
+
 button,
 input,
 textarea,

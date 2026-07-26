@@ -4,7 +4,6 @@ import type {
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceResponse,
   DebruteGlobalSettingsView,
-  DebruteProductState,
   DebruteHttpErrorBody,
   RuntimeProjectUploadImportPlan,
   GeneratedAssetMetadataLookup,
@@ -63,6 +62,12 @@ interface RevisionedProjectCommandResult {
 
 export interface HttpWorkbenchApiClient extends WorkbenchApiClient {
   readonly projectProjection: WorkbenchProjectProjection;
+  bootstrapGlobalSettings(): Promise<WorkbenchGlobalSettingsBootstrap>;
+}
+
+export interface WorkbenchGlobalSettingsBootstrap {
+  globalRevision: number;
+  settings: DebruteGlobalSettingsView;
 }
 
 class DebruteHttpRequestError extends Error {
@@ -83,8 +88,6 @@ interface GlobalSnapshotFrame {
   globalRevision: number;
   snapshot: {
     settings: DebruteGlobalSettingsView;
-    photoshop: AdobeBridgeStateView;
-    product: DebruteProductState | null;
   };
 }
 
@@ -101,6 +104,39 @@ export function createHttpWorkbenchApiClient(): HttpWorkbenchApiClient {
   const terminalHub = createTerminalHubClient();
   const projectProjection = createWorkbenchProjectProjection();
   let connectionCredential: string | undefined;
+  let globalSettingsBootstrap: WorkbenchGlobalSettingsBootstrap | undefined;
+  let globalSettingsBootstrapError: Error | undefined;
+  const globalSettingsBootstrapWaiters: Array<{
+    resolve(value: WorkbenchGlobalSettingsBootstrap): void;
+    reject(error: Error): void;
+  }> = [];
+
+  const settleGlobalSettingsBootstrap = (value: WorkbenchGlobalSettingsBootstrap): void => {
+    globalSettingsBootstrap = value;
+    for (const waiter of globalSettingsBootstrapWaiters.splice(0)) {
+      waiter.resolve(value);
+    }
+  };
+
+  const rejectGlobalSettingsBootstrap = (error: Error): void => {
+    globalSettingsBootstrapError = error;
+    for (const waiter of globalSettingsBootstrapWaiters.splice(0)) {
+      waiter.reject(error);
+    }
+  };
+
+  const bootstrapGlobalSettings = (): Promise<WorkbenchGlobalSettingsBootstrap> => {
+    if (globalSettingsBootstrap) {
+      return Promise.resolve(globalSettingsBootstrap);
+    }
+    if (globalSettingsBootstrapError) {
+      return Promise.reject(globalSettingsBootstrapError);
+    }
+    void ensureConnection().catch(() => undefined);
+    return new Promise((resolve, reject) => {
+      globalSettingsBootstrapWaiters.push({ resolve, reject });
+    });
+  };
 
   const fetchResponse = async (method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> => {
     await ensureConnection();
@@ -363,9 +399,11 @@ export function createHttpWorkbenchApiClient(): HttpWorkbenchApiClient {
           }
           if (isGlobalSnapshotFrame(value)) {
             globalSynchronized = true;
+            settleGlobalSettingsBootstrap({
+              globalRevision: value.globalRevision,
+              settings: value.snapshot.settings
+            });
             dispatchWorkbenchEvent({ type: 'globalSettings.changed', settings: value.snapshot.settings });
-            dispatchWorkbenchEvent({ type: 'adobeBridge.state.changed', state: value.snapshot.photoshop });
-            dispatchWorkbenchEvent({ type: 'product.changed', product: value.snapshot.product });
             settleReady();
             return;
           }
@@ -424,6 +462,7 @@ export function createHttpWorkbenchApiClient(): HttpWorkbenchApiClient {
           return;
         }
         connectionEndedError = error instanceof Error ? error : new Error(String(error));
+        rejectGlobalSettingsBootstrap(connectionEndedError);
         projectProjection.endConnection(connectionEndedError);
         connectionCredential = undefined;
         terminalHub.unbindProject();
@@ -451,6 +490,7 @@ export function createHttpWorkbenchApiClient(): HttpWorkbenchApiClient {
 
   return {
     projectProjection,
+    bootstrapGlobalSettings,
     adobeBridgeGetState: () => request<AdobeBridgeStateView>('GET', '/api/adobe-bridge'),
     adobeBridgeCreatePairing: () => request<{ pairingId: string; code: string; expiresAt: string }>(
       'POST',
@@ -562,6 +602,11 @@ export function createHttpWorkbenchApiClient(): HttpWorkbenchApiClient {
       terminalHub.subscribe(terminalId, listener, onError)
     ),
     readProjectTextFile: (projectRelativePath) => requestForCurrentProject<WorkbenchProjectTextFile>('GET', `/files/text/${encodeProjectPath(projectRelativePath)}`),
+    loadProjectDirectory: (projectRelativeDirectory) => requestProjectMutation(
+      'POST',
+      projectPath('/files/load-directory'),
+      { projectRelativeDirectory }
+    ),
     writeProjectTextFile: (input: WriteProjectTextFileInput) => requestProjectMutation<WorkbenchProjectTextFileWriteResult>(
       'PUT',
       projectPath(`/files/text/${encodeProjectPath(input.projectRelativePath)}`),

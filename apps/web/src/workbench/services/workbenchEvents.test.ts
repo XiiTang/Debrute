@@ -17,7 +17,10 @@ describe('workbenchEvents', () => {
       'canvas.feedback.changed',
       'recentProjects.changed',
       'globalSettings.changed',
-      'adobeBridge.state.changed'
+      'integrations.changed',
+      'adobeBridge.state.changed',
+      'adobeBridge.state.failed',
+      'product.changed'
     ];
 
     for (const type of snapshotEventTypes) {

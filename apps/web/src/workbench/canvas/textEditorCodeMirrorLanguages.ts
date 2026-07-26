@@ -1,35 +1,6 @@
 import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage } from '@codemirror/language';
-import { markdown } from '@codemirror/lang-markdown';
-import { json } from '@codemirror/lang-json';
-import { yaml } from '@codemirror/lang-yaml';
-import { html } from '@codemirror/lang-html';
-import { css } from '@codemirror/lang-css';
-import { sass } from '@codemirror/lang-sass';
-import { less } from '@codemirror/lang-less';
-import { javascript } from '@codemirror/lang-javascript';
-import { python } from '@codemirror/lang-python';
-import { php } from '@codemirror/lang-php';
-import { sql } from '@codemirror/lang-sql';
-import { go } from '@codemirror/lang-go';
-import { rust } from '@codemirror/lang-rust';
-import { java } from '@codemirror/lang-java';
-import { cpp } from '@codemirror/lang-cpp';
-import { xml } from '@codemirror/lang-xml';
-import { shell } from '@codemirror/legacy-modes/mode/shell';
-import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
-import { diff } from '@codemirror/legacy-modes/mode/diff';
-import { ruby } from '@codemirror/legacy-modes/mode/ruby';
-import { lua } from '@codemirror/legacy-modes/mode/lua';
-import { perl } from '@codemirror/legacy-modes/mode/perl';
-import { r } from '@codemirror/legacy-modes/mode/r';
-import { powerShell } from '@codemirror/legacy-modes/mode/powershell';
-import { properties } from '@codemirror/legacy-modes/mode/properties';
-import { toml } from '@codemirror/legacy-modes/mode/toml';
-import { stex } from '@codemirror/legacy-modes/mode/stex';
-import { textile } from '@codemirror/legacy-modes/mode/textile';
-import { protobuf } from '@codemirror/legacy-modes/mode/protobuf';
 
 export type CodeMirrorLanguageKind =
   | 'plain'
@@ -123,74 +94,42 @@ export function codeMirrorLanguageKindForProjectTextLanguage(
   return codeMirrorLanguageKinds[language];
 }
 
-export function codeMirrorLanguageExtensionForProjectTextLanguage(
+export async function loadCodeMirrorLanguageExtensionForProjectTextLanguage(
   language: ProjectTextLanguageId
-): Extension {
+): Promise<Extension> {
   switch (codeMirrorLanguageKindForProjectTextLanguage(language)) {
-    case 'markdown':
-      return markdown();
-    case 'json':
-      return json();
-    case 'yaml':
-      return yaml();
-    case 'html':
-      return html();
-    case 'css':
-      return css();
-    case 'scss':
-      return sass();
-    case 'less':
-      return less();
-    case 'xml':
-      return xml();
-    case 'javascript':
-      return javascript();
-    case 'javascriptreact':
-      return javascript({ jsx: true });
-    case 'typescript':
-      return javascript({ typescript: true });
-    case 'typescriptreact':
-      return javascript({ jsx: true, typescript: true });
-    case 'python':
-      return python();
-    case 'php':
-      return php();
-    case 'sql':
-      return sql();
-    case 'go':
-      return go();
-    case 'rust':
-      return rust();
-    case 'java':
-      return java();
-    case 'cpp':
-      return cpp();
-    case 'shell':
-      return StreamLanguage.define(shell);
-    case 'dockerfile':
-      return StreamLanguage.define(dockerFile);
-    case 'diff':
-      return StreamLanguage.define(diff);
-    case 'ruby':
-      return StreamLanguage.define(ruby);
-    case 'lua':
-      return StreamLanguage.define(lua);
-    case 'perl':
-      return StreamLanguage.define(perl);
-    case 'r':
-      return StreamLanguage.define(r);
-    case 'powershell':
-      return StreamLanguage.define(powerShell);
-    case 'properties':
-      return StreamLanguage.define(properties);
-    case 'toml':
-      return StreamLanguage.define(toml);
-    case 'tex':
-      return StreamLanguage.define(stex);
-    case 'textile':
-      return StreamLanguage.define(textile);
-    case 'protobuf':
-      return StreamLanguage.define(protobuf);
+    case 'markdown': return (await import('@codemirror/lang-markdown')).markdown();
+    case 'json': return (await import('@codemirror/lang-json')).json();
+    case 'yaml': return (await import('@codemirror/lang-yaml')).yaml();
+    case 'html': return (await import('@codemirror/lang-html')).html();
+    case 'css': return (await import('@codemirror/lang-css')).css();
+    case 'scss': return (await import('@codemirror/lang-sass')).sass();
+    case 'less': return (await import('@codemirror/lang-less')).less();
+    case 'xml': return (await import('@codemirror/lang-xml')).xml();
+    case 'javascript': return (await import('@codemirror/lang-javascript')).javascript();
+    case 'javascriptreact': return (await import('@codemirror/lang-javascript')).javascript({ jsx: true });
+    case 'typescript': return (await import('@codemirror/lang-javascript')).javascript({ typescript: true });
+    case 'typescriptreact': return (await import('@codemirror/lang-javascript')).javascript({ jsx: true, typescript: true });
+    case 'python': return (await import('@codemirror/lang-python')).python();
+    case 'php': return (await import('@codemirror/lang-php')).php();
+    case 'sql': return (await import('@codemirror/lang-sql')).sql();
+    case 'go': return (await import('@codemirror/lang-go')).go();
+    case 'rust': return (await import('@codemirror/lang-rust')).rust();
+    case 'java': return (await import('@codemirror/lang-java')).java();
+    case 'cpp': return (await import('@codemirror/lang-cpp')).cpp();
+    case 'shell': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/shell')).shell);
+    case 'dockerfile': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/dockerfile')).dockerFile);
+    case 'diff': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/diff')).diff);
+    case 'ruby': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/ruby')).ruby);
+    case 'lua': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/lua')).lua);
+    case 'perl': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/perl')).perl);
+    case 'r': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/r')).r);
+    case 'powershell': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/powershell')).powerShell);
+    case 'properties': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/properties')).properties);
+    case 'toml': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/toml')).toml);
+    case 'tex': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/stex')).stex);
+    case 'textile': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/textile')).textile);
+    case 'protobuf': return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/protobuf')).protobuf);
     case 'plain':
       return [];
   }

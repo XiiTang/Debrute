@@ -3,7 +3,12 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard, Weak, mpsc},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, Weak,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread,
     time::Duration,
 };
 
@@ -18,7 +23,8 @@ use super::{
     ProjectPathKind, ProjectPathOperationStatus, ProjectService, ProjectSnapshot,
     ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackEntryInput,
     copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
-    import_upload_project_entries, move_project_paths, rename_project_path,
+    import_upload_project_entries, list_project_files_until, move_project_paths,
+    rename_project_path,
     watcher::{ProjectFileWatcher, ProjectWatchSignal},
     write_project_text_file,
 };
@@ -86,6 +92,9 @@ impl<T> ProjectMutation<T> {
 /// the filesystem without the session deriving the matching revision and event.
 pub enum ProjectCommand {
     Refresh,
+    LoadDirectory {
+        project_relative_directory: String,
+    },
     CreateCanvas,
     RenameCanvas {
         canvas_id: String,
@@ -460,6 +469,7 @@ impl ProjectSessionRegistry {
                 let project_use = add_use(&self.inner, &mut state, &project_id, use_kind)?;
                 session.publish();
                 self.inner.feedback_artifacts.attach(&session);
+                session.start_background_file_index();
                 drop(state);
                 transition.finish(None, None);
                 (self.inner.on_change)();
@@ -656,8 +666,14 @@ pub struct ProjectSession {
     delivery: Mutex<()>,
     state: Mutex<ProjectSessionState>,
     watcher: Mutex<Option<ProjectFileWatcher>>,
+    background_file_index: Mutex<Option<BackgroundFileIndex>>,
     published: Mutex<bool>,
     publication_ready: Condvar,
+}
+
+struct BackgroundFileIndex {
+    cancelled: Arc<AtomicBool>,
+    worker: thread::JoinHandle<()>,
 }
 
 struct ProjectSessionState {
@@ -679,6 +695,7 @@ impl ProjectSession {
             feedback_artifacts,
             delivery: Mutex::new(()),
             watcher: Mutex::new(None),
+            background_file_index: Mutex::new(None),
             published: Mutex::new(false),
             publication_ready: Condvar::new(),
             state: Mutex::new(ProjectSessionState {
@@ -850,6 +867,75 @@ impl ProjectSession {
         Ok(result)
     }
 
+    fn start_background_file_index(self: &Arc<Self>) {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let session = Arc::clone(self);
+        let worker = thread::Builder::new()
+            .name("debrute-project-index".to_owned())
+            .spawn(move || {
+                let files = match list_project_files_until(&session.root, || {
+                    worker_cancelled.load(Ordering::Acquire)
+                }) {
+                    Ok(Some(files)) => files,
+                    Ok(None) => return,
+                    Err(error) => {
+                        if !worker_cancelled.load(Ordering::Acquire) {
+                            session.publish_background_file_index_failure(&error.to_string());
+                        }
+                        return;
+                    }
+                };
+                if worker_cancelled.load(Ordering::Acquire) {
+                    return;
+                }
+                let install_result = session.commit_mutation_with(
+                    move |service| {
+                        if service.file_index_is_complete() {
+                            return Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
+                                service.snapshot().clone(),
+                            )));
+                        }
+                        let previous = service.snapshot().clone();
+                        let snapshot = service.install_complete_file_index(files)?;
+                        if snapshots_equivalent(&previous, &snapshot) {
+                            service.preserve_public_snapshot(previous.clone());
+                            Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
+                                previous,
+                            )))
+                        } else {
+                            Ok(project_snapshot_mutation(snapshot))
+                        }
+                    },
+                    |_| {},
+                );
+                if let Err(error) = install_result
+                    && !worker_cancelled.load(Ordering::Acquire)
+                {
+                    session.publish_background_file_index_failure(&error.to_string());
+                }
+            });
+        match worker {
+            Ok(worker) => {
+                *lock(&self.background_file_index) =
+                    Some(BackgroundFileIndex { cancelled, worker });
+            }
+            Err(error) => {
+                self.publish_background_file_index_failure(&error.to_string());
+            }
+        }
+    }
+
+    fn publish_background_file_index_failure(&self, message: &str) {
+        let _ = self.commit_mutation_with(
+            |service| {
+                let snapshot = service.background_file_index_failed(message);
+                Ok(project_snapshot_mutation(snapshot))
+            },
+            |_| {},
+        );
+    }
+
     /// Moves a fully validated Project batch to native trash inside the same
     /// revision admission lane as every filesystem mutation.
     ///
@@ -873,7 +959,11 @@ impl ProjectSession {
                         status: ProjectPathOperationStatus::Ok,
                     })
                     .collect::<Vec<_>>();
-                let snapshot = service.refresh()?;
+                let changed_paths = entries
+                    .iter()
+                    .map(|entry| entry.project_relative_path.clone())
+                    .collect::<Vec<_>>();
+                let snapshot = service.finish_committed_changes(&changed_paths)?;
                 Ok(ProjectMutation::changed(
                     ProjectCommandResult::PathsChanged {
                         results,
@@ -945,7 +1035,9 @@ impl ProjectSession {
                 if let Some(session) = weak.upgrade() {
                     session.wait_until_published();
                     let _ = match signal {
-                        ProjectWatchSignal::Path(path) => session.apply_watched_file_change(path),
+                        ProjectWatchSignal::Paths(paths) => {
+                            session.apply_watched_file_changes(paths)
+                        }
                         ProjectWatchSignal::RescanRequired(message) => {
                             session.apply_watcher_backend_error(message)
                         }
@@ -957,7 +1049,7 @@ impl ProjectSession {
         let refresh_result = (|| {
             let _delivery = lock(&self.delivery);
             let mut state = self.open_state()?;
-            state.service.refresh()?;
+            state.service.refresh_loaded_snapshot()?;
             state.project_revision = 1;
             Ok(())
         })();
@@ -985,8 +1077,13 @@ impl ProjectSession {
         }
     }
 
+    #[cfg(test)]
     fn apply_watched_file_change(&self, path: String) -> Result<(), ProjectError> {
-        self.apply_watched_refresh(ProjectWatchSignal::Path(path))
+        self.apply_watched_file_changes(vec![path])
+    }
+
+    fn apply_watched_file_changes(&self, paths: Vec<String>) -> Result<(), ProjectError> {
+        self.apply_watched_refresh(ProjectWatchSignal::Paths(paths))
     }
 
     fn apply_watcher_backend_error(&self, message: String) -> Result<(), ProjectError> {
@@ -996,10 +1093,12 @@ impl ProjectSession {
     #[allow(clippy::too_many_lines)] // One delivery guard owns the complete refresh transaction.
     fn apply_watched_refresh(&self, signal: ProjectWatchSignal) -> Result<(), ProjectError> {
         let feedback_source = match &signal {
-            ProjectWatchSignal::Path(path) if path != super::CANVAS_FEEDBACK_PROJECT_PATH => {
-                Some(path.clone())
+            ProjectWatchSignal::Paths(paths)
+                if paths.len() == 1 && paths[0] != super::CANVAS_FEEDBACK_PROJECT_PATH =>
+            {
+                Some(paths[0].clone())
             }
-            ProjectWatchSignal::Path(_) | ProjectWatchSignal::RescanRequired(_) => None,
+            ProjectWatchSignal::Paths(_) | ProjectWatchSignal::RescanRequired(_) => None,
         };
         let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
@@ -1009,14 +1108,18 @@ impl ProjectSession {
             .ok_or(ProjectError::RevisionExhausted)?;
         let previous = state.service.snapshot().clone();
         let diagnostic_path = match &signal {
-            ProjectWatchSignal::Path(path) => path.as_str(),
+            ProjectWatchSignal::Paths(paths) => paths.first().map_or("", String::as_str),
             ProjectWatchSignal::RescanRequired(_) => "",
         };
-        let snapshot = match state.service.refresh() {
+        let snapshot_result = match &signal {
+            ProjectWatchSignal::Paths(paths) => state.service.refresh_watched_paths(paths),
+            ProjectWatchSignal::RescanRequired(_) => state.service.complete_file_index(),
+        };
+        let snapshot = match snapshot_result {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 let message = match &signal {
-                    ProjectWatchSignal::Path(_) => error.to_string(),
+                    ProjectWatchSignal::Paths(_) => error.to_string(),
                     ProjectWatchSignal::RescanRequired(watch_error) => {
                         format!("{watch_error}; full refresh failed: {error}")
                     }
@@ -1070,11 +1173,15 @@ impl ProjectSession {
         }
         state.project_revision = next_revision;
         let change = match signal {
-            ProjectWatchSignal::Path(path) => ProjectChange::ProjectFileChanged {
-                project_relative_path: path,
-                snapshot,
-            },
-            ProjectWatchSignal::RescanRequired(_) => ProjectChange::ProjectChanged(snapshot),
+            ProjectWatchSignal::Paths(paths) if paths.len() == 1 => {
+                ProjectChange::ProjectFileChanged {
+                    project_relative_path: paths[0].clone(),
+                    snapshot,
+                }
+            }
+            ProjectWatchSignal::Paths(_) | ProjectWatchSignal::RescanRequired(_) => {
+                ProjectChange::ProjectChanged(snapshot)
+            }
         };
         let event = ProjectEvent {
             project_id: self.project_id.clone(),
@@ -1134,17 +1241,31 @@ impl ProjectSession {
 
     fn finalize_close(&self) -> Result<(), ProjectError> {
         self.close_watcher();
+        let background_index_result = self.close_background_file_index();
         let detach_result = self.feedback_artifacts.detach(&self.root);
         if detach_result.is_ok() {
             lock(&self.state).service.release_capability_binding();
         }
-        detach_result
+        background_index_result.and(detach_result)
     }
 
     fn close_watcher(&self) {
         if let Some(mut watcher) = lock(&self.watcher).take() {
             watcher.close();
         }
+    }
+
+    fn close_background_file_index(&self) -> Result<(), ProjectError> {
+        let Some(index) = lock(&self.background_file_index).take() else {
+            return Ok(());
+        };
+        index.cancelled.store(true, Ordering::Release);
+        index.worker.join().map_err(|_| {
+            ProjectError::service(
+                "project_index_join_failed",
+                "Project background index worker panicked during close.",
+            )
+        })
     }
 }
 
@@ -1217,6 +1338,19 @@ fn execute_project_command(
         ProjectCommand::Refresh => {
             let snapshot = service.refresh()?;
             Ok(project_snapshot_mutation(snapshot))
+        }
+        ProjectCommand::LoadDirectory {
+            project_relative_directory,
+        } => {
+            let previous = service.snapshot().clone();
+            let snapshot = service.load_project_directory(&project_relative_directory)?;
+            if snapshots_equivalent(&previous, &snapshot) {
+                Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
+                    snapshot,
+                )))
+            } else {
+                Ok(project_snapshot_mutation(snapshot))
+            }
         }
         command @ (ProjectCommand::CreateCanvas
         | ProjectCommand::RenameCanvas { .. }
@@ -1407,7 +1541,7 @@ fn execute_single_file_command(
         } => {
             let result = rename_project_path(service.root(), &project_relative_path, &name)?;
             let target = result.project_relative_path.clone();
-            let snapshot = service.finish_committed_change(&target)?;
+            let snapshot = service.finish_committed_changes(&[project_relative_path, target])?;
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::PathChanged {
                     result,
@@ -1529,8 +1663,7 @@ fn project_paths_mutation(
     paths: impl IntoIterator<Item = String>,
 ) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
     let paths = paths.into_iter().collect::<Vec<_>>();
-    let diagnostic_path = paths.first().map_or("", String::as_str);
-    let snapshot = service.finish_committed_change(diagnostic_path)?;
+    let snapshot = service.finish_committed_changes(&paths)?;
     Ok(ProjectMutation::changed(
         ProjectCommandResult::PathsChanged {
             results,

@@ -690,7 +690,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
             canvas: { textAppearance: globalSettingsFixture().canvas.textAppearance },
             chrome: { recentProjects: [] },
             models: { image: [], video: [], audio: [] },
-            integrations: { integrations: [], backends: [] },
             adobeBridge: { enabled: true }
           }}
           onSettingsChange={async (settings) => {
@@ -1075,6 +1074,7 @@ function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchSt
     snapshot: undefined,
     titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjectRoots: [] }),
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
+    integrations: { status: 'ready', value: { integrations: [], backends: [] } },
     product: { status: 'ready', value: productState() },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
@@ -1157,7 +1157,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
         apiKeySet: false
       }]
     },
-    integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true },
     ...overrides
   };

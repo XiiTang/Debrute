@@ -169,6 +169,29 @@ pub(super) async fn create_path(
     )
 }
 
+pub(super) async fn load_directory(
+    State(state): State<WorkbenchRouterState>,
+    Extension(scope): Extension<ProjectAuthorization>,
+    request: Request,
+) -> Response {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Input {
+        project_relative_directory: String,
+    }
+    let input: Input = match json_body(request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    command_for_scope(
+        &state,
+        &scope,
+        ProjectCommand::LoadDirectory {
+            project_relative_directory: input.project_relative_directory,
+        },
+    )
+}
+
 pub(super) async fn import_local(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,

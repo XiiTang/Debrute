@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { Loader2 } from './ui/index.js';
 import type {
   DebruteProductPlatform,
+  DebruteGlobalSettingsView,
   DebruteWorkbenchRoute,
   ProjectPathEntry,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { createHttpWorkbenchApiClient } from '../api/httpWorkbenchApiClient';
+import type { HttpWorkbenchApiClient } from '../api/httpWorkbenchApiClient';
 import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
@@ -87,7 +88,6 @@ import { FloatingDock } from './shell/FloatingDock';
 import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/FloatingPanel';
 import { FloatingTextEditorWindow } from './canvas/FloatingTextEditorWindow';
 import { NotificationStack } from './shell/NotificationStack';
-import { TerminalPanel } from './terminal/TerminalPanel';
 import { Button, WorkbenchIconProvider } from './ui/index.js';
 import { FIXED_TOP_FLOATING_BAR_RECTS, TITLE_BAR_RESERVED_RECT } from './shell/workbenchLayers';
 import {
@@ -104,20 +104,25 @@ import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
 import { I18nProvider, createI18n, type WorkbenchI18n } from './i18n';
 import { useWorkbenchSettingsController } from './settings/useWorkbenchSettingsController';
+import { canvasTextRenderProfileForAppearance } from './canvas/CanvasFontCatalog.js';
 import {
-  DEFAULT_CANVAS_TEXT_APPEARANCE,
-  canvasTextRenderProfileForAppearance
-} from './canvas/CanvasFontCatalog.js';
-import { CanvasTextRenderProfileGate } from './canvas/CanvasTextRenderProfileContext.js';
+  CanvasTextRenderProfileGate,
+  CanvasTextRenderProfileProvider
+} from './canvas/CanvasTextRenderProfileContext.js';
 
-const api = createHttpWorkbenchApiClient();
 const productPlatform: DebruteProductPlatform = __DEBRUTE_PLATFORM__;
+const TerminalPanel = React.lazy(async () => {
+  const module = await import('./terminal/TerminalPanel');
+  return { default: module.TerminalPanel };
+});
 
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => api.dispose());
-}
-
-export function WorkbenchApp(): React.ReactElement {
+export function WorkbenchApp({
+  api,
+  initialGlobalSettings
+}: {
+  api: HttpWorkbenchApiClient;
+  initialGlobalSettings: DebruteGlobalSettingsView;
+}): React.ReactElement {
   const initialRoute = useMemo(() => currentDebruteWorkbenchRoute(), []);
   if (initialRoute.kind === 'not-found') {
     return (
@@ -127,10 +132,24 @@ export function WorkbenchApp(): React.ReactElement {
       </main>
     );
   }
-  return <WorkbenchRuntimeApp initialRoute={initialRoute} />;
+  return (
+    <WorkbenchRuntimeApp
+      api={api}
+      initialGlobalSettings={initialGlobalSettings}
+      initialRoute={initialRoute}
+    />
+  );
 }
 
-function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWorkbenchRoute, { kind: 'not-found' }> }): React.ReactElement {
+function WorkbenchRuntimeApp({
+  api,
+  initialGlobalSettings,
+  initialRoute
+}: {
+  api: HttpWorkbenchApiClient;
+  initialGlobalSettings: DebruteGlobalSettingsView;
+  initialRoute: Exclude<DebruteWorkbenchRoute, { kind: 'not-found' }>;
+}): React.ReactElement {
   const projectProjection = useSyncExternalStore(
     api.projectProjection.subscribe,
     api.projectProjection.getState
@@ -149,10 +168,15 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   const notify = useCallback((message: string) => {
     setNotifications((current) => [message, ...current].slice(0, 4));
   }, []);
-  const settingsController = useWorkbenchSettingsController({ api, projectId: runtimeProjectId, notify });
+  const settingsController = useWorkbenchSettingsController({
+    api,
+    initialGlobalSettings,
+    projectId: runtimeProjectId,
+    notify
+  });
   const canvasTextAppearance = settingsController.globalSettings.status === 'ready'
     ? settingsController.globalSettings.value.canvas.textAppearance
-    : DEFAULT_CANVAS_TEXT_APPEARANCE;
+    : initialGlobalSettings.canvas.textAppearance;
   const canvasTextRenderProfile = useMemo(
     () => canvasTextRenderProfileForAppearance(canvasTextAppearance),
     [
@@ -221,6 +245,8 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
   }, [initialRoute, notify, settingsController.getCurrentI18n]);
 
   const projectGenerationAppProps = {
+    api,
+    canvasTextRenderProfile,
     projectProjection,
     connectionEnded,
     notifications,
@@ -248,14 +274,16 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     />
   );
   return (
-    <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
+    <>
       {surface}
       <NotificationStack notifications={notifications} />
-    </CanvasTextRenderProfileGate>
+    </>
   );
 }
 
 function WorkbenchProjectGenerationApp({
+  api,
+  canvasTextRenderProfile,
   projectProjection,
   connectionEnded,
   notifications,
@@ -274,6 +302,8 @@ function WorkbenchProjectGenerationApp({
   isProjectOpening,
   setIsProjectOpening
 }: {
+  api: HttpWorkbenchApiClient;
+  canvasTextRenderProfile: ReturnType<typeof canvasTextRenderProfileForAppearance>;
   projectProjection: WorkbenchProjectProjectionState;
   connectionEnded: Error | undefined;
   notifications: string[];
@@ -382,6 +412,7 @@ function WorkbenchProjectGenerationApp({
   const activeProjection = activeCanvas
     ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
     : undefined;
+  const activeCanvasHasText = activeCanvas?.nodeElements.some((node) => node.mediaKind === 'text') ?? false;
   const centerCanvasProjectionNode = useCallback((
     projection: WorkbenchProjectSessionSnapshot['projections'][number] | undefined,
     projectRelativePath: string
@@ -945,6 +976,7 @@ function WorkbenchProjectGenerationApp({
     projectId: runtimeProjectId,
     titleBarState: effectiveTitleBarState,
     globalSettings: settingsController.globalSettings,
+    integrations: settingsController.integrations,
     product: settingsController.product,
     resolvedTheme: settingsController.resolvedTheme,
     projectOpen: {
@@ -1341,6 +1373,44 @@ function WorkbenchProjectGenerationApp({
                   {i18n.t('canvas.registry.autoRepair')}
                 </Button>
               </div>
+            ) : activeCanvas && activeCanvasHasText ? (
+              <CanvasTextRenderProfileGate
+                profile={canvasTextRenderProfile}
+                pending={(
+                  <div className="empty-editor" role="status" aria-busy="true">
+                    <Loader2 className="spin" size={22} />
+                    <span>Preparing Canvas text rendering…</span>
+                  </div>
+                )}
+              >
+                <CanvasEditor
+                  canvasId={activeCanvasId}
+                  state={state}
+                  actions={actions}
+                  runtimeScopeKey={canvasRuntimeScopeKey}
+                  minimapOpen={canvasMinimapOpen}
+                  onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
+                  feedbackInteraction={feedbackInteraction.canvas}
+                  onRuntimeChange={setActiveCanvasRuntime}
+                  onOpenContextMenu={openWorkbenchContextMenu}
+                  interactionBlocked={projectPresentationBlocked}
+                />
+              </CanvasTextRenderProfileGate>
+            ) : activeCanvas ? (
+              <CanvasTextRenderProfileProvider profile={canvasTextRenderProfile}>
+                <CanvasEditor
+                  canvasId={activeCanvasId}
+                  state={state}
+                  actions={actions}
+                  runtimeScopeKey={canvasRuntimeScopeKey}
+                  minimapOpen={canvasMinimapOpen}
+                  onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
+                  feedbackInteraction={feedbackInteraction.canvas}
+                  onRuntimeChange={setActiveCanvasRuntime}
+                  onOpenContextMenu={openWorkbenchContextMenu}
+                  interactionBlocked={projectPresentationBlocked}
+                />
+              </CanvasTextRenderProfileProvider>
             ) : (
               <CanvasEditor
                 canvasId={activeCanvasId}
@@ -1404,24 +1474,28 @@ function WorkbenchProjectGenerationApp({
                 onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.reorderCanvasesFailed', { message: errorMessage(error) })))}
               />
             ) : null}
-            {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
-              <FloatingTextEditorWindow
-                key={windowState.projectRelativePath}
-                windowState={windowState}
-                orderState={renderWindowOrder}
-                buffer={textFileBuffers[windowState.projectRelativePath]}
-                actions={actions}
-                onBringToFront={() => setWindowOrder((current) => (
-                  focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
+            {Object.values(textEditorWindows).some((windowState) => windowState.open) ? (
+              <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
+                {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
+                  <FloatingTextEditorWindow
+                    key={windowState.projectRelativePath}
+                    windowState={windowState}
+                    orderState={renderWindowOrder}
+                    buffer={textFileBuffers[windowState.projectRelativePath]}
+                    actions={actions}
+                    onBringToFront={() => setWindowOrder((current) => (
+                      focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
+                    ))}
+                    onClose={() => {
+                      setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
+                      setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
+                    }}
+                    onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
+                    onResize={(rect) => setTextEditorWindows((windows) => resizeTextEditorWindowState(windows, windowState.projectRelativePath, rect, workbenchViewportRect))}
+                  />
                 ))}
-                onClose={() => {
-                  setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
-                  setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
-                }}
-                onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
-                onResize={(rect) => setTextEditorWindows((windows) => resizeTextEditorWindowState(windows, windowState.projectRelativePath, rect, workbenchViewportRect))}
-              />
-            ))}
+              </CanvasTextRenderProfileGate>
+            ) : null}
           </div>
           <div className="panel-layer" data-testid="panel-layer" inert={projectPresentationBlocked}>
             {FLOATING_PANEL_IDS.map((panelId) => (
@@ -1452,6 +1526,7 @@ function WorkbenchProjectGenerationApp({
                     onEditSubmit={() => void explorerController.submitEdit()}
                     onEditCancel={explorerController.cancelEdit}
                     onClearCut={explorerController.clearCut}
+                    onExpandProjectDirectory={explorerController.loadDirectory}
                     onExplorerSelectionChange={explorerController.setSelection}
                     onLocateFileInCanvas={locateProjectFileInCanvas}
                     onProjectTreeInternalDrop={explorerController.handleInternalDrop}
@@ -1460,12 +1535,14 @@ function WorkbenchProjectGenerationApp({
                     productPlatform={productPlatform}
                     onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
                     terminalPanel={(
-                      <TerminalPanel
-                        api={api}
-                        resolvedTheme={settingsController.resolvedTheme}
-                        requestedCwdProjectRelativePath={requestedTerminalCwd}
-                        onRequestedCwdConsumed={() => setRequestedTerminalCwd(null)}
-                      />
+                      <React.Suspense fallback={<div className="terminal-panel" aria-busy="true" />}>
+                        <TerminalPanel
+                          api={api}
+                          resolvedTheme={settingsController.resolvedTheme}
+                          requestedCwdProjectRelativePath={requestedTerminalCwd}
+                          onRequestedCwdConsumed={() => setRequestedTerminalCwd(null)}
+                        />
+                      </React.Suspense>
                     )}
                   />
                 </WorkbenchFloatingPanelShell>

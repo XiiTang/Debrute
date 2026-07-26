@@ -173,31 +173,12 @@ pub(super) async fn workbench_connection(
             return service_error_response(RuntimeHttpServiceError::from_global(error));
         }
     };
-    let photoshop = match services.photoshop().state() {
-        Ok(state) => match serde_json::to_value(state) {
-            Ok(value) => value,
-            Err(error) => {
-                services.close_workbench_connection(&context.credential);
-                return service_error_response(RuntimeHttpServiceError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "photoshop_state_invalid",
-                    error.to_string(),
-                ));
-            }
-        },
-        Err(error) => {
-            services.close_workbench_connection(&context.credential);
-            return service_error_response(RuntimeHttpServiceError::from_photoshop(error));
-        }
-    };
     if sender
         .try_send(json!({
             "type": "global.snapshot",
             "globalRevision": global_revision,
             "snapshot": {
-                "settings": settings,
-                "photoshop": photoshop,
-                "product": product
+                "settings": settings
             }
         }))
         .is_err()
@@ -209,25 +190,49 @@ pub(super) async fn workbench_connection(
             "Workbench connection closed during bootstrap.",
         );
     }
-    if let Some(project_id) = requested_project_id
-        && let Err(error) = services.bind_connection_project_id(
-            &browser_session,
-            &context.credential,
-            &project_id,
-            false,
-        )
-    {
-        let _ = sender
-            .send(json!({
-                "type": "project.open_failed",
-                "projectId": project_id,
+    let _ = sender.try_send(json!({
+        "type": "product.changed",
+        "revision": global_revision,
+        "product": product
+    }));
+    let adobe_bridge_event = match services.photoshop().state() {
+        Ok(photoshop) => match serde_json::to_value(photoshop) {
+            Ok(photoshop) => json!({
+                "type": "adobeBridge.state.changed",
+                "revision": global_revision,
+                "state": photoshop
+            }),
+            Err(error) => json!({
+                "type": "adobeBridge.state.failed",
+                "revision": global_revision,
+                "error": {
+                    "code": "adobe_bridge_state_invalid",
+                    "message": error.to_string()
+                }
+            }),
+        },
+        Err(error) => {
+            let error = RuntimeHttpServiceError::from_photoshop(error);
+            json!({
+                "type": "adobeBridge.state.failed",
+                "revision": global_revision,
                 "error": {
                     "code": error.code,
-                    "message": error.message,
-                    "details": error.details
+                    "message": error.message
                 }
-            }))
-            .await;
+            })
+        }
+    };
+    let _ = sender.try_send(adobe_bridge_event);
+    if let Some(integrations) = services.global().integration_snapshot() {
+        let _ = sender.try_send(json!({
+            "type": "integrations.changed",
+            "revision": global_revision,
+            "integrations": integrations
+        }));
+    } else if services.global().begin_initial_integration_load() {
+        let global = Arc::clone(services.global());
+        tokio::task::spawn_blocking(move || global.integrations_rescan());
     }
     let global_sender = sender.clone();
     let global_connections = Arc::clone(services.connections());
@@ -252,6 +257,30 @@ pub(super) async fn workbench_connection(
             }
         }
     });
+    if let Some(project_id) = requested_project_id {
+        let project_services = Arc::clone(&services);
+        let project_sender = sender.clone();
+        let project_browser_session = browser_session.clone();
+        let project_credential = context.credential.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = project_services.bind_connection_project_id(
+                &project_browser_session,
+                &project_credential,
+                &project_id,
+                false,
+            ) {
+                let _ = project_sender.try_send(json!({
+                    "type": "project.open_failed",
+                    "projectId": project_id,
+                    "error": {
+                        "code": error.code,
+                        "message": error.message,
+                        "details": error.details
+                    }
+                }));
+            }
+        });
+    }
     let guard = WorkbenchConnectionGuard {
         services,
         credential: context.credential,
@@ -339,6 +368,10 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
         .route(
             "/projects/{project_id}/files",
             post(super::project_routes::create_path),
+        )
+        .route(
+            "/projects/{project_id}/files/load-directory",
+            post(super::project_routes::load_directory),
         )
         .route(
             "/projects/{project_id}/files/import/local",

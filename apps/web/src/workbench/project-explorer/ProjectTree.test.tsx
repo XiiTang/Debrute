@@ -8,6 +8,7 @@ import {
   handleProjectTreeRootContextMenuEvent,
   isRootBlankAreaEventTarget,
   projectTreeRowClickAction,
+  newlyExpandedProjectTreePaths,
   ProjectTree
 } from './ProjectTree';
 import { flattenProjectTree, type ProjectTreeSelectionState } from './projectTreeInteraction';
@@ -24,6 +25,12 @@ function renderStaticWithI18n(element: ReactElement): string {
 }
 
 describe('ProjectTree', () => {
+  it('requests only directories that transition to expanded', () => {
+    expect(newlyExpandedProjectTreePaths(
+      new Set(['assets']),
+      new Set(['assets', 'briefs', 'src'])
+    )).toEqual(['briefs', 'src']);
+  });
   it('renders selected project files', () => {
     const html = renderStaticWithI18n(
       <ProjectTree

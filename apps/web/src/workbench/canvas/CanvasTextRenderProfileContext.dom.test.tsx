@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 import {
   CanvasTextRenderProfileGate,
+  CanvasTextRenderProfileProvider,
   useCanvasTextRenderProfile
 } from './CanvasTextRenderProfileContext.js';
 import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
@@ -162,9 +163,21 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
     }
   });
 
-  it('requires the preparation gate', () => {
+  it('provides a profile without preparing its font resources', () => {
+    const prepare = vi.fn(DEFAULT_CANVAS_TEXT_RENDER_PROFILE.prepare);
+    const profile = { ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE, prepare };
+
+    expect(renderToStaticMarkup(
+      <CanvasTextRenderProfileProvider profile={profile}>
+        <ProfileProbe />
+      </CanvasTextRenderProfileProvider>
+    )).toContain(profile.resolvedTypography.fontSize);
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('requires a render profile provider', () => {
     expect(() => renderToStaticMarkup(<ProfileProbe />)).toThrow(
-      'CanvasTextRenderProfileGate is required.'
+      'CanvasTextRenderProfileProvider is required.'
     );
   });
 });

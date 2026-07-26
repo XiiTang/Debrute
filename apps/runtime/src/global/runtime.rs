@@ -25,7 +25,6 @@ pub struct DebruteGlobalSettingsView {
     pub canvas: super::store::CanvasSettings,
     pub chrome: ChromeSettings,
     pub models: ModelSettingsView,
-    pub integrations: IntegrationSettingsView,
     pub adobe_bridge: AdobeBridgeSettings,
 }
 
@@ -65,6 +64,7 @@ struct GlobalEventState {
 struct IntegrationProjectionState {
     generation: u64,
     view: Option<IntegrationSettingsView>,
+    initial_load_started: bool,
 }
 
 impl GlobalRuntimeService {
@@ -146,18 +146,16 @@ impl GlobalRuntimeService {
         self.publish(change);
     }
 
-    /// Returns the complete settings view with a cached or freshly scanned
-    /// integration projection.
+    /// Returns the complete persisted Global Settings view without probing
+    /// optional integrations.
     ///
     /// # Errors
     ///
     /// Returns [`GlobalSettingsError`] when persisted settings cannot be read.
     pub fn settings_get(&self) -> Result<DebruteGlobalSettingsView, GlobalSettingsError> {
-        let candidate = self.integration_candidate(false);
         let _commit = self.lock_commit();
-        let integrations = self.adopt_integration_candidate(candidate);
         let projection = self.store.read_view(&self.catalog)?;
-        Ok(complete_view(projection, integrations))
+        Ok(complete_view(projection))
     }
 
     /// Returns one exact configured Model API key without changing or
@@ -181,13 +179,11 @@ impl GlobalRuntimeService {
         &self,
         input: &Value,
     ) -> Result<DebruteGlobalSettingsView, GlobalSettingsError> {
-        let candidate = self.integration_candidate(false);
         let _delivery = self.lock_delivery();
         let (view, change) = {
             let _commit = self.lock_commit();
-            let integrations = self.adopt_integration_candidate(candidate);
             let result = self.store.patch(input, &self.catalog)?;
-            let view = complete_view(result.view, integrations);
+            let view = complete_view(result.view);
             let change = result
                 .changed
                 .then(|| GlobalRuntimeChange::GlobalSettingsChanged(view.clone()));
@@ -266,6 +262,38 @@ impl GlobalRuntimeService {
         self.publish(GlobalRuntimeChange::IntegrationsChanged(view));
     }
 
+    /// Returns the cached integration projection without probing the host.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the integration projection lock is poisoned.
+    #[must_use]
+    pub fn integration_snapshot(&self) -> Option<IntegrationSettingsView> {
+        self.integration_projection
+            .lock()
+            .expect("integration projection lock poisoned")
+            .view
+            .clone()
+    }
+
+    /// Claims the single initial background integration load.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the integration projection lock is poisoned.
+    #[must_use]
+    pub fn begin_initial_integration_load(&self) -> bool {
+        let mut projection = self
+            .integration_projection
+            .lock()
+            .expect("integration projection lock poisoned");
+        if projection.view.is_some() || projection.initial_load_started {
+            return false;
+        }
+        projection.initial_load_started = true;
+        true
+    }
+
     /// Runs one closed integration operation with start and settled revisions.
     ///
     #[must_use]
@@ -311,6 +339,7 @@ impl GlobalRuntimeService {
                 .checked_add(1)
                 .expect("Global integration projection generation exhausted");
             projection.view = Some(view.clone());
+            projection.initial_load_started = false;
             return view;
         }
         projection
@@ -332,6 +361,7 @@ impl GlobalRuntimeService {
                 .checked_add(1)
                 .expect("Global integration projection generation exhausted");
             projection.view = Some(view.clone());
+            projection.initial_load_started = false;
             drop(projection);
             GlobalRuntimeChange::IntegrationsChanged(view)
         };
@@ -376,16 +406,12 @@ impl GlobalRuntimeService {
     }
 }
 
-fn complete_view(
-    projection: GlobalSettingsView,
-    integrations: IntegrationSettingsView,
-) -> DebruteGlobalSettingsView {
+fn complete_view(projection: GlobalSettingsView) -> DebruteGlobalSettingsView {
     DebruteGlobalSettingsView {
         workbench: projection.workbench,
         canvas: projection.canvas,
         chrome: projection.chrome,
         models: projection.models,
-        integrations,
         adobe_bridge: projection.adobe_bridge,
     }
 }

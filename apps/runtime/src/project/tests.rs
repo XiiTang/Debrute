@@ -164,18 +164,18 @@ struct BlockingAdapterGate {
     release_ready: Condvar,
 }
 
-struct BlockingSecondLayoutAdapter {
+struct BlockingLayoutAdapter {
     calls: AtomicUsize,
     gate: Arc<BlockingAdapterGate>,
 }
 
-impl ProjectNodeAdapter for BlockingSecondLayoutAdapter {
+impl ProjectNodeAdapter for BlockingLayoutAdapter {
     fn layout_size(
         &self,
         _project_root: &Path,
         _node: &CanvasDesiredNode,
     ) -> Result<CanvasLayoutSize, ProjectError> {
-        if self.calls.fetch_add(1, Ordering::SeqCst) == 1 {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
             *self.gate.entered.lock().expect("gate should lock") = true;
             self.gate.entered_ready.notify_all();
             let mut released = self.gate.released.lock().expect("gate should lock");
@@ -225,6 +225,137 @@ fn visible_project_walk_excludes_internal_and_temporary_files() {
             .iter()
             .any(|path| Path::new(path).extension().is_some_and(|ext| ext == "tmp"))
     );
+}
+
+#[test]
+fn project_open_loads_only_root_entries_until_a_directory_is_requested() {
+    let project = TemporaryDirectory::new("shallow-project-open");
+    let home = TemporaryDirectory::new("shallow-project-open-home");
+    fs::create_dir_all(project.as_ref().join("assets/deep"))
+        .expect("nested directory should be created");
+    fs::write(project.as_ref().join("README.md"), "root").expect("root file should be written");
+    fs::write(project.as_ref().join("assets/cover.png"), "cover")
+        .expect("nested file should be written");
+    fs::write(project.as_ref().join("assets/deep/notes.md"), "notes")
+        .expect("deep file should be written");
+
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("project should open");
+    let opened_paths = service
+        .snapshot()
+        .files
+        .iter()
+        .map(|entry| entry.project_relative_path.as_str())
+        .collect::<Vec<_>>();
+    assert!(opened_paths.contains(&"README.md"));
+    assert!(opened_paths.contains(&"assets"));
+    assert!(!opened_paths.contains(&"assets/cover.png"));
+    assert!(!opened_paths.contains(&"assets/deep/notes.md"));
+    let opened_metadata = service.snapshot().metadata.clone();
+    let opened_canvases = service.snapshot().canvases.clone();
+    fs::write(project.as_ref().join(".debrute/project.json"), "not json")
+        .expect("metadata should be made unreadable to unrelated snapshot reloads");
+
+    let loaded = service
+        .load_project_directory("assets")
+        .expect("directory should load");
+    assert_eq!(loaded.metadata, opened_metadata);
+    assert_eq!(loaded.canvases, opened_canvases);
+    let loaded_paths = loaded
+        .files
+        .iter()
+        .map(|entry| entry.project_relative_path.as_str())
+        .collect::<Vec<_>>();
+    assert!(loaded_paths.contains(&"assets/cover.png"));
+    assert!(loaded_paths.contains(&"assets/deep"));
+    assert!(!loaded_paths.contains(&"assets/deep/notes.md"));
+}
+
+#[test]
+fn shallow_project_open_does_not_rewrite_deep_canvas_map_nodes() {
+    let project = TemporaryDirectory::new("shallow-project-canvas-map");
+    let home = TemporaryDirectory::new("shallow-project-canvas-map-home");
+    fs::create_dir_all(project.as_ref().join("assets/deep"))
+        .expect("nested directory should be created");
+    fs::write(project.as_ref().join("assets/deep/notes.md"), "notes")
+        .expect("deep file should be written");
+    let mut setup =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("project should initialize");
+    setup
+        .add_project_path_to_canvas_map("canvas-1", "assets/deep/notes.md")
+        .expect("deep Canvas Map path should be added");
+    drop(setup);
+    let canvas_path = debrute_project_paths(project.as_ref(), home.as_ref())
+        .canvases_dir
+        .join("canvas-1.json");
+    let before = fs::read_to_string(&canvas_path).expect("Canvas should be readable");
+
+    let reopened =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("project should reopen from a shallow snapshot");
+
+    assert_eq!(
+        fs::read_to_string(&canvas_path).expect("Canvas should remain readable"),
+        before
+    );
+    assert!(
+        reopened.snapshot().canvases[0]
+            .node_elements
+            .iter()
+            .any(|node| { node.project_relative_path == "assets/deep/notes.md" })
+    );
+}
+
+#[test]
+fn background_index_replays_paths_changed_while_its_candidate_was_scanning() {
+    let project = TemporaryDirectory::new("background-index-race");
+    let home = TemporaryDirectory::new("background-index-race-home");
+    fs::create_dir_all(project.as_ref().join("assets"))
+        .expect("assets directory should be created");
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("project should initialize");
+    let stale_candidate = list_project_files(project.as_ref()).expect("candidate should scan");
+    fs::write(project.as_ref().join("assets/new.txt"), "new").expect("new file should be written");
+    service
+        .add_project_path_to_canvas_map("canvas-1", "assets/new.txt")
+        .expect("new path should be added to the Canvas Map");
+    service
+        .refresh_watched_paths(&["assets/new.txt".to_owned()])
+        .expect("watcher path should be recorded");
+
+    let installed = service
+        .install_complete_file_index(stale_candidate)
+        .expect("background candidate should install with pending paths replayed");
+
+    assert!(
+        installed.projections[0]
+            .nodes
+            .iter()
+            .any(|node| { node.node.project_relative_path == "assets/new.txt" })
+    );
+}
+
+#[test]
+fn background_index_failure_preserves_shallow_snapshot_and_is_visible() {
+    let project = TemporaryDirectory::new("background-index-failure");
+    let home = TemporaryDirectory::new("background-index-failure-home");
+    fs::write(project.as_ref().join("README.md"), "root").expect("root file should exist");
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("project should initialize");
+    let files = service.snapshot().files.clone();
+
+    let snapshot = service.background_file_index_failed("nested directory is unreadable");
+
+    assert_eq!(snapshot.files, files);
+    assert!(snapshot.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "project.index.failed"
+            && diagnostic.message == "nested directory is unreadable"
+    }));
+    assert_eq!(snapshot.health.diagnostic_counts.errors, 1);
 }
 
 #[test]
@@ -612,6 +743,10 @@ fn post_commit_refresh_rollback_failure_does_not_install_a_rejection_layer() {
     let opened = registry
         .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
+    opened
+        .session
+        .execute(ProjectCommand::Refresh)
+        .expect("initial file index should complete");
     fs::write(
         project.as_ref().join(".debrute/canvas-maps/canvas-1.yaml"),
         "paths:\n  - scene.txt\n",
@@ -645,6 +780,10 @@ fn watcher_refresh_rollback_failure_does_not_poison_later_refreshes() {
     let opened = registry
         .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
+    opened
+        .session
+        .execute(ProjectCommand::Refresh)
+        .expect("initial file index should complete");
     fs::write(
         project.as_ref().join(".debrute/canvas-maps/canvas-1.yaml"),
         "paths:\n  - scene.txt\n",
@@ -1365,6 +1504,9 @@ fn canvas_map_layout_failures_remain_canvas_local_diagnostics() {
         Arc::new(FailingLayoutAdapter),
     )
     .expect("adapter failure must not reject the Project");
+    service
+        .complete_file_index()
+        .expect("background indexing should keep Canvas failures local");
     let diagnostic = service
         .snapshot()
         .diagnostics
@@ -1769,7 +1911,7 @@ fn upload_manifest_rejects_file_ancestor_before_overwrite_effects() {
 }
 
 #[test]
-fn project_watcher_publishes_external_file_changes_once() {
+fn project_watcher_publishes_external_file_changes_in_one_batched_revision() {
     let project = TemporaryDirectory::new("watcher");
     let home = TemporaryDirectory::new("watcher-home");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
@@ -1795,14 +1937,17 @@ fn project_watcher_publishes_external_file_changes_once() {
         panic!("watcher should publish an external change");
     };
     assert_eq!(event.project_revision, 2);
-    let ProjectChange::ProjectFileChanged {
-        project_relative_path,
-        snapshot,
-    } = event.change
-    else {
-        panic!("watcher should publish a Project file change");
+    let snapshot = match event.change {
+        ProjectChange::ProjectFileChanged {
+            project_relative_path,
+            snapshot,
+        } => {
+            assert_eq!(project_relative_path, "external.txt");
+            snapshot
+        }
+        ProjectChange::ProjectChanged(snapshot) => snapshot,
+        _ => panic!("watcher should publish a Project file change batch"),
     };
-    assert_eq!(project_relative_path, "external.txt");
     assert!(snapshot.files.iter().any(|entry| {
         entry.project_relative_path == "external.txt" && entry.kind == ProjectPathKind::File
     }));
@@ -1883,7 +2028,7 @@ fn watcher_establishment_precedes_final_publication_refresh() {
     let gate = Arc::new(BlockingAdapterGate::default());
     let registry = project_registry(
         home.as_ref(),
-        Arc::new(BlockingSecondLayoutAdapter {
+        Arc::new(BlockingLayoutAdapter {
             calls: AtomicUsize::new(0),
             gate: Arc::clone(&gate),
         }),
@@ -1950,7 +2095,7 @@ fn watcher_establishment_precedes_final_publication_refresh() {
 }
 
 #[test]
-fn registry_close_treats_an_inflight_open_cancellation_as_successful_cleanup() {
+fn registry_close_cleans_up_a_session_with_inflight_background_indexing() {
     let project = TemporaryDirectory::new("close-open-race");
     let home = TemporaryDirectory::new("close-open-race-home");
     fs::write(project.as_ref().join("seed.txt"), "seed").expect("seed should be written");
@@ -1964,7 +2109,7 @@ fn registry_close_treats_an_inflight_open_cancellation_as_successful_cleanup() {
     let gate = Arc::new(BlockingAdapterGate::default());
     let registry = project_registry(
         home.as_ref(),
-        Arc::new(BlockingSecondLayoutAdapter {
+        Arc::new(BlockingLayoutAdapter {
             calls: AtomicUsize::new(0),
             gate: Arc::clone(&gate),
         }),
@@ -1986,10 +2131,11 @@ fn registry_close_treats_an_inflight_open_cancellation_as_successful_cleanup() {
     *gate.released.lock().expect("gate should lock") = true;
     gate.release_ready.notify_all();
 
-    let Err(open_error) = open_worker.join().expect("open worker should finish") else {
-        panic!("inflight open should be cancelled by registry close");
-    };
-    assert_eq!(open_error.code(), "project_registry_closed");
+    let opened = open_worker
+        .join()
+        .expect("open worker should finish")
+        .expect("shallow opening should finish before background indexing");
+    drop(opened.project_use);
     close_worker
         .join()
         .expect("close worker should finish")
@@ -2053,6 +2199,12 @@ fn directory_commands_do_not_suppress_later_parent_directory_events() {
             kind: ProjectPathKind::Directory,
         })
         .expect("directory should be created");
+    opened
+        .session
+        .execute(ProjectCommand::LoadDirectory {
+            project_relative_directory: "folder".to_owned(),
+        })
+        .expect("directory should become part of the shallow Explorer snapshot");
     fs::write(project.as_ref().join("folder/external.txt"), "external")
         .expect("external child should be written");
     opened

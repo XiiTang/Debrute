@@ -54,6 +54,11 @@ Workbench URL. Runtime records only the live window key and route. Desktop does
 not persist a settings copy. Missing or invalid launch presentation fails the
 window launch instead of selecting a default background. Runtime does not
 persist window bounds, focus, recovery topology, or renderer acknowledgements.
+The renderer document remains transparent while its Workbench connection waits
+for the authoritative Global Settings snapshot, leaving this native background
+visible. It begins normal painting only after applying the snapshot's resolved
+theme, so a slow Project or Integration resource cannot produce an intermediate
+default-theme frame.
 
 Opening an already-open Project from Electron focuses its existing window.
 Opening another Project replaces the current window's binding after target

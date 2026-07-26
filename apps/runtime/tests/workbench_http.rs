@@ -199,6 +199,18 @@ fn runtime_shutdown_closes_a_live_workbench_stream_before_http_join() {
     let mut events = SseEvents::new(response);
     assert_eq!(events.next()["type"], "connection.opened");
     assert_eq!(events.next()["type"], "global.snapshot");
+    assert_eq!(
+        events.next_of_type("product.changed")["type"],
+        "product.changed"
+    );
+    assert_eq!(
+        events.next_of_type("adobeBridge.state.changed")["type"],
+        "adobeBridge.state.changed"
+    );
+    assert_eq!(
+        events.next_of_type("integrations.changed")["type"],
+        "integrations.changed"
+    );
 
     runtime.server.stop_accepting();
     runtime.services.close_all_workbench_connections();
@@ -251,7 +263,7 @@ fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
     let open = client
         .post(format!("{}/api/projects/open", runtime.origin()))
         .header(ORIGIN, runtime.origin())
-        .header(COOKIE, cookie_pair)
+        .header(COOKIE, &cookie_pair)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({ "projectRoot": project.root }))
         .send()
@@ -260,10 +272,80 @@ fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
     let body: Value = open.json().expect("Project open response should be JSON");
     assert_eq!(body["projectId"], project.id);
     assert!(body.get("snapshot").is_none());
-    let bound = events.next();
+    let bound = events.next_of_type("project.bound");
     assert_eq!(bound["type"], "project.bound");
     assert_eq!(bound["project"]["projectId"], project.id);
     assert_eq!(bound["workingCopies"], json!({"text": {}, "feedback": {}}));
+}
+
+#[test]
+fn project_directory_load_publishes_only_the_requested_depth() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("shallow-directory-load");
+    fs::create_dir_all(Path::new(&project.root).join("assets/deep"))
+        .expect("nested Project directory should be created");
+    fs::write(Path::new(&project.root).join("assets/cover.png"), "cover")
+        .expect("nested Project file should be written");
+    fs::write(
+        Path::new(&project.root).join("assets/deep/notes.md"),
+        "notes",
+    )
+    .expect("deep Project file should be written");
+    let client = Client::new();
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+
+    let bound = events.next_of_type("project.bound");
+    let opened_files = bound["project"]["snapshot"]["files"]
+        .as_array()
+        .expect("bound Project files should be an array");
+    assert!(
+        opened_files
+            .iter()
+            .any(|entry| entry["projectRelativePath"] == "assets")
+    );
+    assert!(
+        !opened_files
+            .iter()
+            .any(|entry| entry["projectRelativePath"] == "assets/cover.png")
+    );
+
+    let load = client
+        .post(format!(
+            "{}/api/projects/{}/files/load-directory",
+            runtime.origin(),
+            project.id
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "projectRelativeDirectory": "assets" }))
+        .send()
+        .expect("Project directory load should complete");
+    assert_eq!(load.status().as_u16(), 200);
+    let body: Value = load
+        .json()
+        .expect("Project directory load should return JSON");
+    assert_eq!(body["projectId"], project.id);
+    let changed = events.next_of_type("project.changed");
+    let loaded_files = changed["snapshot"]["files"]
+        .as_array()
+        .expect("changed Project files should be an array");
+    assert!(
+        loaded_files
+            .iter()
+            .any(|entry| entry["projectRelativePath"] == "assets/cover.png")
+    );
+    assert!(
+        loaded_files
+            .iter()
+            .any(|entry| entry["projectRelativePath"] == "assets/deep")
+    );
+    assert!(
+        !loaded_files
+            .iter()
+            .any(|entry| entry["projectRelativePath"] == "assets/deep/notes.md")
+    );
 }
 
 #[test]
@@ -708,7 +790,10 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
 
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
-    assert_eq!(events.next()["type"], "project.bound");
+    assert_eq!(
+        events.next_of_type("project.bound")["type"],
+        "project.bound"
+    );
     let put = client
         .put(format!(
             "{}/api/projects/{}/working-copies/text/draft.md",
@@ -730,7 +815,7 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
 
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
-    let restored = events.next();
+    let restored = events.next_of_type("project.bound");
     assert_eq!(
         restored["workingCopies"]["text"]["draft.md"],
         json!({
@@ -757,7 +842,7 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
     assert_eq!(
-        events.next()["workingCopies"],
+        events.next_of_type("project.bound")["workingCopies"],
         json!({"text": {}, "feedback": {}})
     );
 }
@@ -769,7 +854,10 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
     let client = Client::new();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
-    assert_eq!(events.next()["type"], "project.bound");
+    assert_eq!(
+        events.next_of_type("project.bound")["type"],
+        "project.bound"
+    );
 
     for (item_id, project_relative_path, comment) in [
         ("feedback-a", "images/a.png", "First local value"),
@@ -800,7 +888,7 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
 
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
-    let restored = events.next();
+    let restored = events.next_of_type("project.bound");
     assert_eq!(
         restored["workingCopies"]["feedback"],
         json!({
@@ -840,7 +928,7 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
     assert_eq!(
-        events.next()["workingCopies"]["feedback"],
+        events.next_of_type("project.bound")["workingCopies"]["feedback"],
         json!({
             "feedback-b": {
                 "itemId": "feedback-b",

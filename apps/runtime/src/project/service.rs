@@ -24,11 +24,12 @@ use super::{
     UpdateCanvasFeedbackEntryInput, bring_canvas_node_to_front, canvas_map_path,
     canvas_media_kind_from_path, clear_canvas_manual_layouts, commit_project_document_transaction,
     create_canvas_document, debrute_project_paths, expand_canvas_map, expand_canvas_map_path_rules,
-    is_valid_stable_project_id, list_project_files, normalize_canvas_name, parse_canvas_map,
-    project_canvas, project_canvas_with_known_projection, project_content_hash,
-    project_document_directory_hash, project_document_file_hash, project_file_revision,
-    project_text_file_type_for_path, read_canvas_feedback_state, reconcile_canvas_nodes,
-    replace_file, resolve_existing_project_path, resolve_no_symlink_project_path_for_write,
+    is_project_visible_path, is_valid_stable_project_id, list_project_directory,
+    list_project_files, normalize_canvas_name, parse_canvas_map, project_canvas,
+    project_canvas_with_known_projection, project_content_hash, project_document_directory_hash,
+    project_document_file_hash, project_file_revision, project_text_file_type_for_path,
+    read_canvas_feedback_state, reconcile_canvas_nodes, replace_file,
+    resolve_existing_project_path, resolve_no_symlink_project_path_for_write, resolve_project_path,
     serialize_canvas_map_with_rule, update_canvas_feedback_document, update_canvas_node_layouts,
     update_canvas_text_viewports, update_canvas_video_playback, validate_canvas_document,
     validate_canvas_feedback_document, validate_canvas_id, validate_feedback_media_targets,
@@ -137,6 +138,10 @@ pub struct ProjectService {
     feedback_hash: Option<String>,
     feedback_valid: bool,
     feedback_render_diagnostics: HashMap<String, ProjectDiagnostic>,
+    loaded_project_directories: BTreeSet<String>,
+    indexed_files: Vec<ProjectPathEntry>,
+    file_index_complete: bool,
+    pending_file_index_paths: BTreeSet<String>,
 }
 
 impl ProjectService {
@@ -190,6 +195,10 @@ impl ProjectService {
             feedback_hash: None,
             feedback_valid: true,
             feedback_render_diagnostics: HashMap::new(),
+            loaded_project_directories: BTreeSet::from([String::new()]),
+            indexed_files: Vec::new(),
+            file_index_complete: false,
+            pending_file_index_paths: BTreeSet::new(),
         };
         service.snapshot = service.load_snapshot_transactional(true)?;
         Ok(service)
@@ -291,8 +300,86 @@ impl ProjectService {
     /// # Errors
     /// Returns an error when Project state cannot be read, validated, or synchronized.
     pub fn refresh(&mut self) -> Result<ProjectSnapshot, ProjectError> {
+        self.complete_file_index()
+    }
+
+    pub(crate) fn refresh_loaded_snapshot(&mut self) -> Result<ProjectSnapshot, ProjectError> {
         self.snapshot = self.load_snapshot_transactional(true)?;
         Ok(self.snapshot.clone())
+    }
+
+    pub(crate) fn refresh_watched_paths(
+        &mut self,
+        project_relative_paths: &[String],
+    ) -> Result<ProjectSnapshot, ProjectError> {
+        if self.file_index_complete {
+            self.refresh_file_index_paths(project_relative_paths)?;
+        } else {
+            self.record_pending_file_index_paths(project_relative_paths)?;
+        }
+        self.refresh_loaded_snapshot()
+    }
+
+    /// Adds one Explorer directory to the public shallow tree and reloads the snapshot.
+    ///
+    /// # Errors
+    /// Returns an error when the directory is invalid, unreadable, or snapshot loading fails.
+    pub(crate) fn load_project_directory(
+        &mut self,
+        project_relative_directory: &str,
+    ) -> Result<ProjectSnapshot, ProjectError> {
+        let directory = super::normalize_project_directory_path(project_relative_directory)?;
+        if self.loaded_project_directories.contains(&directory) {
+            return Ok(self.snapshot.clone());
+        }
+        let entries = list_project_directory(&self.root, &directory)?;
+        self.loaded_project_directories.insert(directory);
+        self.snapshot.files.extend(entries);
+        self.snapshot
+            .files
+            .sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
+        self.snapshot
+            .files
+            .dedup_by(|left, right| left.project_relative_path == right.project_relative_path);
+        Ok(self.snapshot.clone())
+    }
+
+    pub(crate) fn complete_file_index(&mut self) -> Result<ProjectSnapshot, ProjectError> {
+        let files = list_project_files(&self.root)?;
+        self.install_complete_file_index(files)
+    }
+
+    pub(crate) fn file_index_is_complete(&self) -> bool {
+        self.file_index_complete
+    }
+
+    pub(crate) fn install_complete_file_index(
+        &mut self,
+        files: Vec<ProjectPathEntry>,
+    ) -> Result<ProjectSnapshot, ProjectError> {
+        let previous_files = std::mem::replace(&mut self.indexed_files, files);
+        let previous_complete = std::mem::replace(&mut self.file_index_complete, true);
+        let pending_paths = std::mem::take(&mut self.pending_file_index_paths);
+        if let Err(error) =
+            self.refresh_file_index_paths(&pending_paths.iter().cloned().collect::<Vec<_>>())
+        {
+            self.indexed_files = previous_files;
+            self.file_index_complete = previous_complete;
+            self.pending_file_index_paths = pending_paths;
+            return Err(error);
+        }
+        match self.load_snapshot_transactional(true) {
+            Ok(snapshot) => {
+                self.snapshot = snapshot;
+                Ok(self.snapshot.clone())
+            }
+            Err(error) => {
+                self.indexed_files = previous_files;
+                self.file_index_complete = previous_complete;
+                self.pending_file_index_paths = pending_paths;
+                Err(error)
+            }
+        }
     }
 
     /// Applies one closed Canvas feedback mutation as a structured-document transaction.
@@ -351,15 +438,60 @@ impl ProjectService {
         snapshot
     }
 
+    /// Publishes a visible diagnostic when private background indexing fails.
+    /// The shallow Explorer snapshot remains usable and an explicit refresh can
+    /// retry the complete index.
+    pub(crate) fn background_file_index_failed(&mut self, error_message: &str) -> ProjectSnapshot {
+        const ID: &str = "project.index.failed";
+        let mut snapshot = self.snapshot.clone();
+        snapshot
+            .diagnostics
+            .retain(|diagnostic| diagnostic.id != ID);
+        snapshot.diagnostics.insert(
+            0,
+            ProjectDiagnostic {
+                id: ID.to_owned(),
+                severity: ProjectDiagnosticSeverity::Error,
+                code: ID.to_owned(),
+                message: error_message.to_owned(),
+                file_path: Some(self.root.to_string_lossy().into_owned()),
+                line: None,
+                column: None,
+                entity_id: None,
+            },
+        );
+        snapshot.health = project_health(
+            &snapshot.metadata,
+            snapshot.canvases.len(),
+            &snapshot.diagnostics,
+            &self.debrute_home,
+        );
+        self.snapshot = snapshot.clone();
+        snapshot
+    }
+
     pub(crate) fn finish_committed_change(
         &mut self,
         project_relative_path: &str,
     ) -> Result<ProjectSnapshot, ProjectError> {
+        self.finish_committed_changes(&[project_relative_path.to_owned()])
+    }
+
+    pub(crate) fn finish_committed_changes(
+        &mut self,
+        project_relative_paths: &[String],
+    ) -> Result<ProjectSnapshot, ProjectError> {
+        let diagnostic_path = project_relative_paths.first().map_or("", String::as_str);
+        if self.file_index_complete {
+            self.refresh_file_index_paths(project_relative_paths)?;
+        } else {
+            self.record_pending_file_index_paths(project_relative_paths)?;
+        }
         match self.load_snapshot_transactional(true) {
             Ok(snapshot) => self.snapshot = snapshot,
             Err(error) if error.leaves_mutation_outcome_uncertain() => return Err(error),
             Err(error) => {
-                self.watch_refresh_failed(project_relative_path, &error.to_string());
+                self.watch_refresh_failed(diagnostic_path, &error.to_string());
             }
         }
         Ok(self.snapshot.clone())
@@ -884,7 +1016,12 @@ impl ProjectService {
         write_canvas_changes: bool,
     ) -> Result<ProjectSnapshot, ProjectError> {
         let metadata = read_project_metadata(&self.root, &self.debrute_home)?;
-        let files = list_project_files(&self.root)?;
+        let files = self.load_explorer_files()?;
+        let projection_files = if self.file_index_complete {
+            self.indexed_files.clone()
+        } else {
+            files.clone()
+        };
         let (canvases, document_diagnostics) = self.load_canvas_documents()?;
         let mut feedback_diagnostics = Vec::new();
         match read_canvas_feedback_state(&self.root, crate::now_rfc3339()).and_then(|state| {
@@ -929,12 +1066,16 @@ impl ProjectService {
                 .iter()
                 .filter_map(|id| by_id.get(id).cloned())
                 .collect();
-            ordered = self.synchronize_canvas_maps(
-                ordered,
-                &files,
-                write_canvas_changes,
-                &mut canvas_map_diagnostics,
-            )?;
+            ordered = if self.file_index_complete {
+                self.synchronize_canvas_maps(
+                    ordered,
+                    &projection_files,
+                    write_canvas_changes,
+                    &mut canvas_map_diagnostics,
+                )?
+            } else {
+                self.load_canvas_map_sources(ordered, &mut canvas_map_diagnostics)
+            };
         }
         let mut projections = Vec::new();
         if matches!(registry, CanvasRegistryState::Ready { .. }) {
@@ -1000,7 +1141,7 @@ impl ProjectService {
     fn load_canvas_documents(
         &mut self,
     ) -> Result<(Vec<CanvasDocument>, Vec<ProjectDiagnostic>), ProjectError> {
-        let mut files: Vec<_> = list_project_files(&self.root)?
+        let mut files: Vec<_> = list_project_directory(&self.root, ".debrute/canvases")?
             .into_iter()
             .filter_map(|entry| {
                 if entry.project_relative_path == CANVAS_INDEX_FILE {
@@ -1054,6 +1195,166 @@ impl ProjectService {
             }
         }
         Ok((canvases, diagnostics))
+    }
+
+    fn load_explorer_files(&self) -> Result<Vec<ProjectPathEntry>, ProjectError> {
+        let mut files = self
+            .loaded_project_directories
+            .iter()
+            .map(|directory| list_project_directory(&self.root, directory))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        files.sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
+        files.dedup_by(|left, right| left.project_relative_path == right.project_relative_path);
+        Ok(files)
+    }
+
+    fn refresh_file_index_paths(
+        &mut self,
+        project_relative_paths: &[String],
+    ) -> Result<(), ProjectError> {
+        let mut paths = project_relative_paths
+            .iter()
+            .map(|path| super::normalize_project_relative_path(path))
+            .collect::<Result<Vec<_>, _>>()?;
+        paths.sort_by(|left, right| {
+            left.matches('/')
+                .count()
+                .cmp(&right.matches('/').count())
+                .then_with(|| left.cmp(right))
+        });
+        let mut compact = Vec::<String>::new();
+        for relative in paths {
+            if compact
+                .iter()
+                .any(|parent| relative.starts_with(&format!("{parent}/")))
+            {
+                continue;
+            }
+            compact.push(relative);
+        }
+        for relative in compact {
+            let absolute = resolve_project_path(&self.root, &relative)?;
+            let metadata = match fs::symlink_metadata(&absolute) {
+                Ok(metadata) if !metadata.file_type().is_symlink() => Some(metadata),
+                Ok(_) => None,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            self.indexed_files.retain(|entry| {
+                entry.project_relative_path != relative
+                    && !entry
+                        .project_relative_path
+                        .starts_with(&format!("{relative}/"))
+            });
+            let Some(metadata) = metadata else {
+                continue;
+            };
+            if !is_project_visible_path(&relative) {
+                continue;
+            }
+            if metadata.is_file() {
+                self.indexed_files.push(ProjectPathEntry {
+                    project_relative_path: relative,
+                    kind: super::ProjectPathKind::File,
+                });
+                continue;
+            }
+            if !metadata.is_dir() {
+                continue;
+            }
+            self.indexed_files.push(ProjectPathEntry {
+                project_relative_path: relative.clone(),
+                kind: super::ProjectPathKind::Directory,
+            });
+            self.indexed_files
+                .extend(
+                    list_project_files(&absolute)?
+                        .into_iter()
+                        .map(|entry| ProjectPathEntry {
+                            project_relative_path: format!(
+                                "{relative}/{}",
+                                entry.project_relative_path
+                            ),
+                            kind: entry.kind,
+                        }),
+                );
+        }
+        self.indexed_files
+            .sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
+        self.indexed_files
+            .dedup_by(|left, right| left.project_relative_path == right.project_relative_path);
+        Ok(())
+    }
+
+    fn record_pending_file_index_paths(
+        &mut self,
+        project_relative_paths: &[String],
+    ) -> Result<(), ProjectError> {
+        for path in project_relative_paths {
+            self.pending_file_index_paths
+                .insert(super::normalize_project_relative_path(path)?);
+        }
+        Ok(())
+    }
+
+    fn load_canvas_map_sources(
+        &mut self,
+        canvases: Vec<CanvasDocument>,
+        diagnostics: &mut Vec<ProjectDiagnostic>,
+    ) -> Vec<CanvasDocument> {
+        let mut next_map_hashes = HashMap::new();
+        for canvas in &canvases {
+            let source_relative = match canvas_map_path(&canvas.id) {
+                Ok(path) => path,
+                Err(error) => {
+                    diagnostics.push(document_diagnostic(
+                        format!("document.invalid-source:{}", canvas.id),
+                        "document_invalid_source",
+                        error.to_string(),
+                        &self.root,
+                        Some(canvas.id.clone()),
+                        ProjectDiagnosticSeverity::Error,
+                    ));
+                    continue;
+                }
+            };
+            let source_path = self.root.join(&source_relative);
+            let Ok(content) = fs::read_to_string(&source_path) else {
+                diagnostics.push(document_diagnostic(
+                    format!("document.invalid-source:{}", canvas.id),
+                    "document_invalid_source",
+                    "Canvas Map source could not be read.".to_owned(),
+                    &source_path,
+                    Some(canvas.id.clone()),
+                    ProjectDiagnosticSeverity::Error,
+                ));
+                continue;
+            };
+            match parse_canvas_map(&canvas.id, &source_relative, &content) {
+                Ok(_) => {
+                    next_map_hashes.insert(canvas.id.clone(), project_content_hash(&content));
+                }
+                Err(error) => {
+                    let mut diagnostic = document_diagnostic(
+                        format!("document.invalid-source:{}", canvas.id),
+                        "document_invalid_source",
+                        error.to_string(),
+                        &source_path,
+                        Some(canvas.id.clone()),
+                        ProjectDiagnosticSeverity::Error,
+                    );
+                    diagnostic.line = error.field("line").and_then(|line| line.parse().ok());
+                    diagnostic.column =
+                        error.field("column").and_then(|column| column.parse().ok());
+                    diagnostics.push(diagnostic);
+                }
+            }
+        }
+        self.canvas_map_hashes = next_map_hashes;
+        canvases
     }
 
     fn read_registry(&mut self) -> Result<CanvasRegistryState, ProjectError> {

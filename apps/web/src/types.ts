@@ -8,6 +8,7 @@ import type {
   CanvasVideoPreviewSourceRequest,
   CanvasVideoPreviewSourceResponse,
   GeneratedAssetMetadataLookup,
+  IntegrationSettingsView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   SaveCanvasTextPreviewSourceInput,
@@ -42,6 +43,7 @@ export interface WorkbenchState {
   projectId?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
   globalSettings: EventProjection<DebruteGlobalSettingsView>;
+  integrations: EventProjection<IntegrationSettingsView>;
   product: EventProjection<DebruteProductState | null>;
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;

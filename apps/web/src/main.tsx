@@ -1,8 +1,10 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { WorkbenchApp } from './workbench/WorkbenchApp';
-import { CanvasTextRenderProfileGate } from './workbench/canvas/CanvasTextRenderProfileContext.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './workbench/canvas/DefaultCanvasTextRenderProfile.js';
+import { createHttpWorkbenchApiClient } from './api/httpWorkbenchApiClient.js';
+import {
+  resolveWorkbenchThemePreference,
+  setDocumentTheme
+} from './workbench/services/workbenchTheme.js';
 import './styles.css';
 
 declare global {
@@ -11,18 +13,36 @@ declare global {
   }
 }
 
-window.__debruteReactRoot ??= createRoot(document.getElementById('root')!);
-window.__debruteReactRoot.render(
-  <CanvasTextRenderProfileGate
-    profile={DEFAULT_CANVAS_TEXT_RENDER_PROFILE}
-    pending={(
-      <main className="boot-screen" role="status" data-testid="canvas-text-render-profile-loading">
-        <span>Preparing Canvas text rendering…</span>
-      </main>
-    )}
-  >
+setDocumentTheme(resolveWorkbenchThemePreference('system'));
+
+const api = createHttpWorkbenchApiClient();
+
+void api.bootstrapGlobalSettings().then(async ({ settings }) => {
+  setDocumentTheme(resolveWorkbenchThemePreference(settings.workbench.themePreference));
+  document.documentElement.removeAttribute('data-settings-bootstrap');
+  const { WorkbenchApp } = await import('./workbench/WorkbenchApp.js');
+  window.__debruteReactRoot ??= createRoot(document.getElementById('root')!);
+  window.__debruteReactRoot.render(
     <React.StrictMode>
-      <WorkbenchApp />
+      <WorkbenchApp api={api} initialGlobalSettings={settings} />
     </React.StrictMode>
-  </CanvasTextRenderProfileGate>
-);
+  );
+}).catch((error: unknown) => {
+  document.documentElement.removeAttribute('data-settings-bootstrap');
+  const root = document.getElementById('root');
+  if (root) {
+    const main = document.createElement('main');
+    main.className = 'boot-screen';
+    main.setAttribute('role', 'alert');
+    const title = document.createElement('strong');
+    title.textContent = 'Debrute Workbench could not start.';
+    const message = document.createElement('span');
+    message.textContent = error instanceof Error ? error.message : String(error);
+    main.append(title, message);
+    root.replaceChildren(main);
+  }
+});
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => api.dispose());
+}

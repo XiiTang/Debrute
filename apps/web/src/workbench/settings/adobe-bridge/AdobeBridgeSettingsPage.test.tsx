@@ -141,6 +141,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
     projectId: 'project-1',
     titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjectRoots: [] }),
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
+    integrations: { status: 'ready', value: { integrations: [], backends: [] } },
     product: { status: 'ready', value: null },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
@@ -209,7 +210,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
     },
     chrome: { recentProjects: [] },
     models: { image: [], video: [], audio: [] },
-    integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true },
     ...overrides
   };

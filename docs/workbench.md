@@ -38,6 +38,17 @@ background. When an ordinary Desktop open targets a Project owned by Web, the
 root surface requires an explicit **Open Here** action before requesting
 preemption.
 
+The document does not mount React from guessed defaults. Bootstrap first waits
+for the Runtime-owned Global Settings snapshot, applies its resolved theme,
+and passes its locale and Canvas Text Appearance as authoritative initial
+values when it imports and mounts the Workbench composition root. During that
+wait the renderer is transparent, so
+Electron's authoritative native launch background remains visible. Product,
+Integration discovery, and Adobe live state are separate Global resources;
+their slower work cannot delay settings or the first Workbench shell. A
+requested Project binding is also prepared after the Global Settings frame and
+cannot delay it.
+
 A successful `project.bound` event is one complete Project-open result:
 Project id, ordered revision, snapshot, and current Working Copies travel
 together from the HTTP client through startup to the composition root. An
@@ -76,8 +87,9 @@ publish their accepted results through the same ordered Project event stream.
 
 Focused units own cohesive state:
 
-- `useWorkbenchSettingsController` owns global settings, Adobe Bridge live
-  state, locale, resolved theme, and settings commands.
+- `useWorkbenchSettingsController` owns the already-bootstrapped global
+  settings, separate Integration and Adobe Bridge live resources, locale,
+  resolved theme, and settings commands.
 - `useProjectExplorerController` owns Explorer selection, clipboard, inline
   edits, file commands, and invalidation when the project changes.
 - Canvas controllers own Canvas feedback, overlays, and runtime interaction.
@@ -89,6 +101,15 @@ The owner of an asynchronous operation applies request-version or
 project-generation checks where overlapping results can occur. Failed loads are
 not converted into successful empty data, and failed saves leave the relevant
 draft available with an owning error state.
+
+The initial JavaScript graph contains only the bootstrap and critical
+Workbench shell. Terminal, Canvas video controls, and each CodeMirror language
+parser load from separate chunks when their owning surface first needs them.
+Canvas managed fonts gate only active Canvas text surfaces and floating text
+windows; they never block the shell, Explorer, Settings, or a Project-open
+result. The production build manifest enforces gzip ceilings of 80 KiB for the
+bootstrap graph and 320 KiB for the critical Workbench graph, and rejects an
+eager Terminal, video-control, or language-parser dependency.
 
 Workbench has exactly three page-path shapes: `/`, `/open`, and
 `/projects/<project-id>`. Those paths select the application entry document;
@@ -232,12 +253,15 @@ Settings has one directory and one content surface. Its current pages are
 General; Appearance; Image, Video, TTS, Music, and SFX Models; Integrations; and
 Adobe Bridge. Appearance composes the Workbench Theme mode with the separate
 global Canvas Text Appearance controls; General retains language, default
-frontend, product information, and updates. Runtime-owned Global Settings and
-Product projections have only loading and ready states because connection
-failure ends the Workbench. The Adobe Bridge live resource additionally owns
-its retryable error state. Persisted Adobe Bridge enablement comes from global
-settings while discovery, clients, links, and transfers remain a separate live
-resource.
+frontend, product information, and updates. Runtime-owned Global Settings is
+ready before React mounts. Product and Integration projections retain their own
+loading and ready states because they arrive independently; connection failure
+still ends the Workbench. The Adobe Bridge live resource additionally owns its
+retryable error state, including a typed failure of its initial streamed load.
+Persisted Adobe Bridge enablement comes from global
+settings while discovery, clients, links, and transfers remain separate live
+resources. The initial stream is the only source of those resources; Workbench
+does not follow it with duplicate initial GETs.
 
 Workbench sends closed partial settings mutations. Editable model text fields
 are trimmed before submission; Runtime accepts only already-canonical values
@@ -261,7 +285,9 @@ with its native system theme and applies the matching pre-render window
 background before loading the document. It does not persist another settings
 copy or fall back to a default background when that snapshot is absent or
 invalid. After bootstrap, the ordinary Runtime global snapshot and event path
-continue to own live theme changes.
+continue to own live theme changes. The renderer remains transparent until the
+authoritative Global Settings snapshot has applied the same resolved theme,
+then removes its bootstrap marker and paints normal content.
 
 Workbench product copy supports `en` and `zh-CN`. Translation keys are semantic
 identifiers shared by complete typed dictionaries. Missing keys and missing
@@ -278,6 +304,15 @@ described in [`runtime-architecture.md`](./runtime-architecture.md).
 
 Explorer derives its tree from the current Project snapshot, excludes `.git`
 metadata, sorts directories before files, and naturally sorts names.
+Opening a Project loads only the root's direct visible children. Expanding a
+collapsed directory issues one revisioned Runtime directory-load command and
+adds only that directory's direct children to the current snapshot without
+reloading unrelated Project documents; repeated expansion is a no-op. Creating
+inside a collapsed directory first loads that parent. Runtime may build its
+complete Canvas/file index in a session-owned background task, but that private
+index is not serialized into Explorer and does not inflate the initial tree.
+Closing the Project cancels and joins the task; scan failure keeps the shallow
+tree usable and appears as a retryable Project diagnostic.
 Its selection model owns selected paths, focus, and range anchor. Pointer and
 keyboard behavior supports single, toggle, range, and context-menu selection,
 as well as platform-appropriate copy, cut, paste, delete, and permanent-delete

@@ -486,8 +486,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     })));
     assert!(!service.install_observer(Arc::new(|_| {})));
 
-    let initial = service.settings_get().expect("global settings should load");
-    assert_eq!(initial.integrations.integrations.len(), 5);
+    service.settings_get().expect("global settings should load");
     assert_eq!(service.revision(), 0);
     service
         .settings_save(&json!({ "workbench": { "locale": "zh-CN" } }))
@@ -615,6 +614,51 @@ fn desktop_presentation_startup_snapshot_does_not_probe_integrations() {
     assert!(recent.is_empty());
     assert_eq!(theme, "system");
     assert!(!adapter.started());
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
+fn workbench_global_settings_snapshot_does_not_probe_integrations() {
+    let home = temporary_home("workbench-global-snapshot");
+    let adapter = Arc::new(BlockingScanAdapter::default());
+    let service = Arc::new(GlobalRuntimeService::new(
+        GlobalConfigStore::new(&home),
+        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
+    ));
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let snapshot_service = Arc::clone(&service);
+    let snapshot = thread::spawn(move || {
+        let result = snapshot_service.sync_snapshot();
+        finished_tx
+            .send(())
+            .expect("snapshot completion should be observed");
+        result
+    });
+
+    let completed_without_probe = finished_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+    let integration_probe_started = adapter.started();
+    adapter.release();
+    let (_, settings, _) = snapshot
+        .join()
+        .expect("snapshot thread should join")
+        .expect("global settings snapshot should load");
+
+    assert!(
+        completed_without_probe,
+        "Global settings must not wait for Integration discovery"
+    );
+    assert!(
+        !integration_probe_started,
+        "Global settings must not start Integration discovery"
+    );
+    assert!(
+        serde_json::to_value(settings)
+            .expect("Global settings should serialize")
+            .get("integrations")
+            .is_none(),
+        "Integration discovery is an independent Runtime projection"
+    );
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
 
@@ -778,6 +822,7 @@ fn rejected_integration_operations_do_not_publish_transition_events() {
         ModelCatalog::bundled().expect("bundled model catalog should parse"),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     );
+    service.integrations_rescan();
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
     assert!(service.install_observer(Arc::new(move |event| {
@@ -786,10 +831,6 @@ fn rejected_integration_operations_do_not_publish_transition_events() {
             .expect("event recorder should lock")
             .push(event);
     })));
-    service
-        .settings_get()
-        .expect("integration cache should load");
-
     let unknown = service.integrations_run_operation("missing", IntegrationOperation::Install);
     assert_eq!(
         unknown
@@ -826,11 +867,7 @@ fn an_external_integration_scan_does_not_block_recent_project_commits() {
         IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
     ));
     let scan_service = Arc::clone(&service);
-    let scan = thread::spawn(move || {
-        scan_service
-            .settings_get()
-            .expect("settings scan should complete after release")
-    });
+    let scan = thread::spawn(move || scan_service.integrations_rescan());
     adapter.wait_until_started();
 
     let alpha = project_root(&home, "alpha");
@@ -852,7 +889,10 @@ fn an_external_integration_scan_does_not_block_recent_project_commits() {
 
     adapter.release();
     recent.join().expect("recent thread should join");
-    let view = scan.join().expect("scan thread should join");
+    scan.join().expect("scan thread should join");
+    let view = service
+        .settings_get()
+        .expect("settings should remain readable after Integration discovery");
     assert_eq!(
         view.chrome.recent_projects,
         [debrute_runtime::global::RecentProjectEntry {

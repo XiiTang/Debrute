@@ -2,7 +2,7 @@ import React from 'react';
 import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import { Compartment } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { codeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';
+import { loadCodeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';
 import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
 import {
   canvasTextEditorApplyFocusRequest,
@@ -67,6 +67,7 @@ export function CanvasTextEditor({
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
   const [pointerFocus, setPointerFocus] = React.useState(false);
+  const [readyLanguage, setReadyLanguage] = React.useState<ProjectTextLanguageId>();
   const consumedFocusRequestRef = React.useRef<{
     requestId: number;
     view: EditorView;
@@ -121,7 +122,7 @@ export function CanvasTextEditor({
       doc: value,
       extensions: [
         ...canvasTextEditorBaseExtensions(callbackRef),
-        compartments.language.of(codeMirrorLanguageExtensionForProjectTextLanguage(language)),
+        compartments.language.of([]),
         compartments.readOnly.of(canvasTextEditorReadOnlyExtension(readOnly)),
         compartments.renderProfile.of(canvasTextEditorCursorScrollMarginExtension(renderProfile)),
         compartments.wordWrap.of(canvasTextEditorWordWrapExtension(wordWrap))
@@ -200,7 +201,7 @@ export function CanvasTextEditor({
 
   React.useEffect(() => {
     const view = viewRef.current;
-    if (!view || visible === false) {
+    if (!view || visible === false || readyLanguage !== language) {
       return;
     }
     let cancelled = false;
@@ -237,7 +238,7 @@ export function CanvasTextEditor({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [initialScrollLeft, initialScrollTop, visible]);
+  }, [initialScrollLeft, initialScrollTop, language, readyLanguage, visible]);
 
   React.useEffect(() => {
     const view = viewRef.current;
@@ -283,16 +284,34 @@ export function CanvasTextEditor({
     if (!view || !compartments) {
       return;
     }
+    let cancelled = false;
+    setReadyLanguage(undefined);
+    void loadCodeMirrorLanguageExtensionForProjectTextLanguage(language).then((extension) => {
+      if (cancelled || viewRef.current !== view) {
+        return;
+      }
+      view.dispatch({ effects: compartments.language.reconfigure(extension) });
+      setReadyLanguage(language);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language]);
 
+  React.useEffect(() => {
+    const view = viewRef.current;
+    const compartments = compartmentsRef.current;
+    if (!view || !compartments) {
+      return;
+    }
     view.dispatch({
       effects: [
-        compartments.language.reconfigure(codeMirrorLanguageExtensionForProjectTextLanguage(language)),
         compartments.readOnly.reconfigure(canvasTextEditorReadOnlyExtension(readOnly)),
         compartments.renderProfile.reconfigure(canvasTextEditorCursorScrollMarginExtension(renderProfile)),
         compartments.wordWrap.reconfigure(canvasTextEditorWordWrapExtension(wordWrap))
       ]
     });
-  }, [language, readOnly, renderProfile, wordWrap]);
+  }, [readOnly, renderProfile, wordWrap]);
 
   React.useLayoutEffect(() => {
     const wasReadOnly = previousReadOnlyRef.current;

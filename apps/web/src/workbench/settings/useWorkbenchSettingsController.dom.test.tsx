@@ -15,18 +15,42 @@ import {
 } from './useWorkbenchSettingsController';
 
 describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
-  it('loads Global settings from the connection event and Adobe Bridge from its API', async () => {
+  it('starts from the bootstrapped Global settings without probing Adobe Bridge', async () => {
     const api = apiFixture();
-    const probe = await renderController(api);
+    const initialSettings = settingsFixture({
+      locale: 'zh-CN',
+      themePreference: 'light',
+      defaultFrontend: 'browser'
+    });
+    const probe = await renderController(api, 'project-1', initialSettings);
 
-    expect(probe.current.globalSettings.status).toBe('loading');
+    expect(probe.current.globalSettings).toEqual({ status: 'ready', value: initialSettings });
+    expect(probe.current.locale).toBe('zh-CN');
+    expect(probe.current.resolvedTheme).toBe('light');
+    expect(probe.current.adobeBridge.status).toBe('loading');
+    expect(api.adobeBridgeGetState).not.toHaveBeenCalled();
     await act(async () => {
-      probe.current.applyEvent({ type: 'globalSettings.changed', settings: settingsFixture() });
+      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: adobeBridgeFixture() });
     });
 
-    expect(probe.current.globalSettings.status).toBe('ready');
     expect(probe.current.adobeBridge.status).toBe('ready');
-    expect(api.adobeBridgeGetState).toHaveBeenCalledTimes(1);
+    await probe.unmount();
+  });
+
+  it('turns an initial Adobe Bridge resource failure into retryable error state', async () => {
+    const probe = await renderController(apiFixture());
+
+    await act(async () => {
+      probe.current.applyEvent({
+        type: 'adobeBridge.state.failed',
+        error: { code: 'adobe_bridge_state_invalid', message: 'bridge state unavailable' }
+      });
+    });
+
+    expect(probe.current.adobeBridge).toEqual({
+      status: 'error',
+      message: 'bridge state unavailable'
+    });
     await probe.unmount();
   });
 
@@ -339,10 +363,12 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   it('suppresses an unlink rejection after an event removes the original active link', async () => {
     const unlink = deferred<AdobeBridgeStateView>();
     const api = apiFixture({
-      adobeBridgeGetState: vi.fn(async () => linkedAdobeBridgeFixture()),
       adobeBridgeUnlinkPhotoshop: vi.fn(() => unlink.promise)
     });
     const probe = await renderController(api);
+    await act(async () => {
+      probe.current.applyEvent({ type: 'adobeBridge.state.changed', state: linkedAdobeBridgeFixture() });
+    });
 
     let pending!: Promise<void>;
     await act(async () => {
@@ -362,8 +388,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     const probe = await renderController(api);
     await act(async () => {
       probe.current.applyEvent({
-        type: 'globalSettings.changed',
-        settings: settingsWithIntegrationSummary('Initial settings')
+        type: 'integrations.changed',
+        integrations: integrationSettingsFixture('Initial settings')
       });
     });
 
@@ -378,7 +404,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       await pending;
     });
 
-    expect(readyGlobalSettings(probe).integrations.integrations[0]?.summary).toBe('Event settings');
+    expect(readyIntegrations(probe).integrations[0]?.summary).toBe('Event settings');
     await probe.unmount();
   });
 
@@ -390,8 +416,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     const probe = await renderController(api);
     await act(async () => {
       probe.current.applyEvent({
-        type: 'globalSettings.changed',
-        settings: settingsWithIntegrationSummary('Initial settings')
+        type: 'integrations.changed',
+        integrations: integrationSettingsFixture('Initial settings')
       });
     });
 
@@ -413,26 +439,37 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       await pendingOperation;
     });
 
-    expect(readyGlobalSettings(probe).integrations.integrations[0]?.summary).toBe('Settled event');
+    expect(readyIntegrations(probe).integrations[0]?.summary).toBe('Settled event');
     await probe.unmount();
   });
 });
 
 function ControllerProbe({
   api,
+  initialGlobalSettings,
   projectId,
   onValue
 }: {
   api: WorkbenchApiClient;
+  initialGlobalSettings: DebruteGlobalSettingsView;
   projectId: string | undefined;
   onValue(value: WorkbenchSettingsController): void;
 }): null {
-  const controller = useWorkbenchSettingsController({ api, projectId, notify: vi.fn() });
+  const controller = useWorkbenchSettingsController({
+    api,
+    initialGlobalSettings,
+    projectId,
+    notify: vi.fn()
+  });
   useEffect(() => onValue(controller), [controller, onValue]);
   return null;
 }
 
-async function renderController(api: WorkbenchApiClient, initialProjectId = 'project-1'): Promise<{
+async function renderController(
+  api: WorkbenchApiClient,
+  initialProjectId = 'project-1',
+  initialGlobalSettings = settingsFixture()
+): Promise<{
   readonly current: WorkbenchSettingsController;
   rerender(projectId: string | undefined): Promise<void>;
   unmount(): Promise<void>;
@@ -444,7 +481,14 @@ async function renderController(api: WorkbenchApiClient, initialProjectId = 'pro
   const onValue = (value: WorkbenchSettingsController) => { current = value; };
   const render = async (projectId: string | undefined) => {
     await act(async () => {
-      root.render(<ControllerProbe api={api} projectId={projectId} onValue={onValue} />);
+      root.render(
+        <ControllerProbe
+          api={api}
+          initialGlobalSettings={initialGlobalSettings}
+          projectId={projectId}
+          onValue={onValue}
+        />
+      );
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -494,7 +538,6 @@ function settingsFixture(workbench: {
     },
     chrome: { recentProjects: [] },
     models: { image: [], video: [], audio: [] },
-    integrations: { integrations: [], backends: [] },
     adobeBridge: { enabled: true }
   };
 }
@@ -528,13 +571,6 @@ function linkedAdobeBridgeFixture(): AdobeBridgeStateView {
   };
 }
 
-function settingsWithIntegrationSummary(summary: string): DebruteGlobalSettingsView {
-  return {
-    ...settingsFixture(),
-    integrations: integrationSettingsFixture(summary)
-  };
-}
-
 function integrationSettingsFixture(summary: string): IntegrationSettingsView {
   return {
     backends: [],
@@ -555,6 +591,13 @@ function readyGlobalSettings(probe: { readonly current: WorkbenchSettingsControl
     throw new Error(`Expected ready global settings, got ${probe.current.globalSettings.status}.`);
   }
   return probe.current.globalSettings.value;
+}
+
+function readyIntegrations(probe: { readonly current: WorkbenchSettingsController }): IntegrationSettingsView {
+  if (probe.current.integrations.status !== 'ready') {
+    throw new Error(`Expected ready integrations, got ${probe.current.integrations.status}.`);
+  }
+  return probe.current.integrations.value;
 }
 
 function deferred<T>(): {

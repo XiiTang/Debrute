@@ -805,7 +805,7 @@ describe('CanvasSurface', () => {
         );
       });
 
-      for (let frame = 0; frame < 5; frame += 1) {
+      for (let frame = 0; frame < 20; frame += 1) {
         await act(async () => {
           await vi.advanceTimersByTimeAsync(20);
           await Promise.resolve();
@@ -2097,10 +2097,10 @@ function workbenchStateFixture(
           video: [],
           audio: []
         },
-        integrations: { integrations: [], backends: [] },
         adobeBridge: { enabled: true }
       }
     },
+    integrations: { status: 'ready', value: { integrations: [], backends: [] } },
     product: { status: 'ready', value: productState() },
     adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
     resolvedTheme: 'dark',

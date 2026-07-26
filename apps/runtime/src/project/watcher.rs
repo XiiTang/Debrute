@@ -1,4 +1,4 @@
-//! Recursive Project filesystem observation with path-local event coalescing.
+//! Recursive Project filesystem observation with burst event batching.
 
 use std::{
     collections::HashMap,
@@ -22,7 +22,7 @@ enum WatchMessage {
 }
 
 pub(super) enum ProjectWatchSignal {
-    Path(String),
+    Paths(Vec<String>),
     RescanRequired(String),
 }
 
@@ -124,9 +124,11 @@ fn flush_ready(
         .filter_map(|(path, deadline)| (*deadline <= now).then_some(path.clone()))
         .collect::<Vec<_>>();
     ready.sort();
-    for path in ready {
-        pending.remove(&path);
-        on_change(ProjectWatchSignal::Path(path));
+    for path in &ready {
+        pending.remove(path);
+    }
+    if !ready.is_empty() {
+        on_change(ProjectWatchSignal::Paths(ready));
     }
 }
 

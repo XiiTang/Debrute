@@ -115,6 +115,19 @@ describe('Workbench event decoding', () => {
     expect(decodeWorkbenchEvent(event)).toEqual(event);
   });
 
+  it('accepts only a complete typed Adobe Bridge resource failure', () => {
+    const event = {
+      type: 'adobeBridge.state.failed',
+      error: { code: 'adobe_bridge_state_invalid', message: 'state unavailable' }
+    };
+
+    expect(decodeWorkbenchEvent(event)).toEqual(event);
+    expect(decodeWorkbenchEvent({
+      type: 'adobeBridge.state.failed',
+      error: { message: 'state unavailable' }
+    })).toBeUndefined();
+  });
+
   it('recognizes but rejects incomplete authoritative Project payloads', () => {
     const incompleteSnapshot = {
       type: 'project.changed',

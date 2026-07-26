@@ -21,7 +21,8 @@ export default defineConfig(({ command }) => {
       react()
     ],
     build: {
-      license: true
+      license: true,
+      manifest: true
     },
     define: {
       __DEBRUTE_PLATFORM__: JSON.stringify(productPlatform),

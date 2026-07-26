@@ -144,7 +144,7 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
         ) : activePage === 'integrations' ? (
           <SettingsResourcePanel
             title={i18n.t('settings.integrations.title')}
-            resource={derivedSettingsResource(state.globalSettings, (settings) => settings.integrations)}
+            resource={state.integrations}
           >
             {(settings) => <IntegrationsSettingsPage settings={settings} actions={actions} />}
           </SettingsResourcePanel>

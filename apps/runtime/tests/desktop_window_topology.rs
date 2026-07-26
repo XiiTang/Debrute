@@ -484,7 +484,10 @@ fn bind_desktop_project(
         &cookie,
         &credential,
     );
-    assert_eq!(events.next()["type"], "project.bound");
+    assert_eq!(
+        events.next_of_type("project.bound")["type"],
+        "project.bound"
+    );
     assert!(matches!(
         state.open_desktop_window(&WorkbenchRoute::Project {
             project_id: project_id.to_owned(),
@@ -557,7 +560,10 @@ fn preempt_desktop_project(
         &web_cookie,
         &web_credential,
     );
-    assert_eq!(web_events.next()["type"], "project.bound");
+    assert_eq!(
+        web_events.next_of_type("project.bound")["type"],
+        "project.bound"
+    );
     loop {
         if binding.events.next()["type"] == "project.preempted" {
             break;
@@ -618,7 +624,7 @@ fn desktop_open_here_preempts_web(
             "requestedProjectId": project_id
         }),
     );
-    let conflict = desktop_events.next();
+    let conflict = desktop_events.next_of_type("project.open_failed");
     assert_eq!(conflict["type"], "project.open_failed");
     assert_eq!(conflict["error"]["code"], "project_owned_by_web");
 
@@ -631,7 +637,10 @@ fn desktop_open_here_preempts_web(
         .send()
         .expect("Open Here should complete");
     assert_eq!(open_here.status().as_u16(), 200);
-    assert_eq!(desktop_events.next()["type"], "project.bound");
+    assert_eq!(
+        desktop_events.next_of_type("project.bound")["type"],
+        "project.bound"
+    );
     loop {
         if web_events.next()["type"] == "project.preempted" {
             break;
@@ -653,6 +662,15 @@ impl HttpSseEvents {
                 .expect("SSE line should read");
             if let Some(data) = line.strip_prefix("data:") {
                 return serde_json::from_str(data.trim()).expect("SSE data should be JSON");
+            }
+        }
+    }
+
+    fn next_of_type(&mut self, expected_type: &str) -> Value {
+        loop {
+            let event = self.next();
+            if event["type"] == expected_type {
+                return event;
             }
         }
     }

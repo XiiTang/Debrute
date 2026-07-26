@@ -55,6 +55,7 @@ export function ProjectTree({
   onEditSubmit,
   onEditCancel,
   onClearCut,
+  onExpandDirectory,
   productPlatform,
   onKeyboardFileCommand
 }: {
@@ -79,6 +80,7 @@ export function ProjectTree({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
+  onExpandDirectory?: ((projectRelativeDirectory: string) => void) | undefined;
   productPlatform: DebruteProductPlatform;
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
@@ -195,7 +197,12 @@ export function ProjectTree({
           onEditCancel,
           onClearCut,
           onSelectionChange,
-          onExpandedChange: setExpanded,
+          onExpandedChange: (next) => {
+            for (const path of newlyExpandedProjectTreePaths(expanded, next)) {
+              onExpandDirectory?.(path);
+            }
+            setExpanded(next);
+          },
           onKeyboardFileCommand
         })}
       >
@@ -227,6 +234,7 @@ export function ProjectTree({
                 next.delete(path);
               } else {
                 next.add(path);
+                onExpandDirectory?.(path);
               }
               return next;
             })}
@@ -244,6 +252,13 @@ export function ProjectTree({
       </div>
     </div>
   );
+}
+
+export function newlyExpandedProjectTreePaths(
+  current: ReadonlySet<string>,
+  next: ReadonlySet<string>
+): string[] {
+  return [...next].filter((path) => !current.has(path)).sort();
 }
 
 export function handleProjectTreeKeyboardEvent(input: {

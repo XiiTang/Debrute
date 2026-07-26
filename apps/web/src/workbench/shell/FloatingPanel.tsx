@@ -156,6 +156,7 @@ export function FloatingPanelContent({
   onEditSubmit,
   onEditCancel,
   onClearCut,
+  onExpandProjectDirectory,
   onExplorerSelectionChange,
   onLocateFileInCanvas,
   onProjectTreeInternalDrop,
@@ -177,6 +178,7 @@ export function FloatingPanelContent({
   onEditSubmit?: (() => void) | undefined;
   onEditCancel?: (() => void) | undefined;
   onClearCut?: (() => void) | undefined;
+  onExpandProjectDirectory?: ((projectRelativeDirectory: string) => void) | undefined;
   onExplorerSelectionChange: (selection: WorkbenchState['explorerSelection']) => void;
   onLocateFileInCanvas?: ((projectRelativePath: string) => void) | undefined;
   onProjectTreeInternalDrop?: ((input: {
@@ -210,6 +212,7 @@ export function FloatingPanelContent({
         onEditSubmit={onEditSubmit}
         onEditCancel={onEditCancel}
         onClearCut={onClearCut}
+        onExpandDirectory={onExpandProjectDirectory}
         productPlatform={productPlatform}
         onKeyboardFileCommand={onKeyboardFileCommand}
       />

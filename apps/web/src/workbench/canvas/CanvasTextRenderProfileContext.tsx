@@ -3,6 +3,20 @@ import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 
 const CanvasTextRenderProfileContext = React.createContext<CanvasTextRenderProfile | undefined>(undefined);
 
+export function CanvasTextRenderProfileProvider({
+  profile,
+  children
+}: {
+  profile: CanvasTextRenderProfile;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <CanvasTextRenderProfileContext.Provider value={profile}>
+      {children}
+    </CanvasTextRenderProfileContext.Provider>
+  );
+}
+
 export function CanvasTextRenderProfileGate({
   profile,
   pending,
@@ -73,16 +87,16 @@ export function CanvasTextRenderProfileGate({
     return <>{pending}</>;
   }
   return (
-    <CanvasTextRenderProfileContext.Provider value={currentState.active}>
+    <CanvasTextRenderProfileProvider profile={currentState.active}>
       {children}
-    </CanvasTextRenderProfileContext.Provider>
+    </CanvasTextRenderProfileProvider>
   );
 }
 
 export function useCanvasTextRenderProfile(): CanvasTextRenderProfile {
   const profile = React.useContext(CanvasTextRenderProfileContext);
   if (!profile) {
-    throw new Error('CanvasTextRenderProfileGate is required.');
+    throw new Error('CanvasTextRenderProfileProvider is required.');
   }
   return profile;
 }

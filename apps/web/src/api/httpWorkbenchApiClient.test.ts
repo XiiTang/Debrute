@@ -6,6 +6,18 @@ describe('Runtime Workbench connection', () => {
     vi.unstubAllGlobals();
   });
 
+  it('resolves Global Settings bootstrap without waiting for a Project binding', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+
+    await expect(client.bootstrapGlobalSettings()).resolves.toEqual({
+      globalRevision: 1,
+      settings: {}
+    });
+    expect(harness.calls.map((call) => call.path)).toEqual(['/api/workbench/connection']);
+    client.dispose();
+  });
+
   it('uses one connection credential for commands and never puts it in a URL', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
@@ -25,6 +37,22 @@ describe('Runtime Workbench connection', () => {
     ]);
     expect(header(harness.calls[1]?.init, 'x-debrute-workbench-connection')).toBe('connection-1');
     expect(harness.calls.every((call) => !call.path.includes('connection-1'))).toBe(true);
+    client.dispose();
+  });
+
+  it('loads an Explorer directory through a revisioned POST command', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+    await client.loadProjectDirectory('assets/source files');
+
+    const call = harness.calls.at(-1);
+    expect(call?.path).toBe('/api/projects/project-1/files/load-directory');
+    expect(call?.init?.method).toBe('POST');
+    expect(JSON.parse(String(call?.init?.body))).toEqual({
+      projectRelativeDirectory: 'assets/source files'
+    });
     client.dispose();
   });
 
@@ -299,11 +327,21 @@ function createHarness() {
             type: 'global.snapshot',
             globalRevision: 1,
             snapshot: {
-              settings: {},
-              photoshop: {},
-              product: null
+              settings: {}
             }
           }));
+          controller.enqueue(sse(encoder, {
+            type: 'adobeBridge.state.changed',
+            state: {
+              settings: { enabled: true, discoveryStatus: 'available' },
+              pairedPlugins: [],
+              clients: [],
+              projects: [],
+              links: [],
+              transfers: []
+            }
+          }));
+          controller.enqueue(sse(encoder, { type: 'product.changed', product: null }));
         }
       });
       return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
@@ -342,6 +380,18 @@ function createHarness() {
       return Response.json({ ok: true });
     }
     if (path === '/api/projects/project-1/canvases') {
+      return Response.json({
+        projectId: 'project-1',
+        projectRevision: 2
+      });
+    }
+    if (path === '/api/projects/project-1/files/load-directory') {
+      streamController?.enqueue(sse(encoder, {
+        type: 'project.changed',
+        projectId: 'project-1',
+        projectRevision: 2,
+        snapshot: snapshotFixture('project-1')
+      }));
       return Response.json({
         projectId: 'project-1',
         projectRevision: 2

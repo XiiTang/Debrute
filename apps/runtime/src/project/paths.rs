@@ -938,24 +938,104 @@ fn is_windows_absolute(path: &str) -> bool {
 /// # Errors
 /// Returns an error when the root cannot be traversed safely.
 pub fn list_project_files(root: &Path) -> Result<Vec<ProjectPathEntry>, ProjectError> {
+    Ok(list_project_files_until(root, || false)?.unwrap_or_default())
+}
+
+/// Lists the deterministic visible Project tree until cancellation is requested.
+///
+/// A cancelled traversal returns `None` without treating normal Project close as
+/// a filesystem failure.
+///
+/// # Errors
+/// Returns an error when the root cannot be traversed safely before cancellation.
+pub(crate) fn list_project_files_until(
+    root: &Path,
+    is_cancelled: impl Fn() -> bool,
+) -> Result<Option<Vec<ProjectPathEntry>>, ProjectError> {
+    if is_cancelled() {
+        return Ok(None);
+    }
     let mut result = Vec::new();
     let project = ProjectCapabilityFs::open(root)?;
-    walk_visible(&project.root, "", &mut result)?;
+    if !walk_visible_until(&project.root, "", &mut result, &is_cancelled)? {
+        return Ok(None);
+    }
+    if is_cancelled() {
+        return Ok(None);
+    }
+    result.sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
+    if is_cancelled() {
+        return Ok(None);
+    }
+    Ok(Some(result))
+}
+
+/// Lists only the direct visible children of one Project directory.
+///
+/// # Errors
+/// Returns an error when the directory path is invalid or cannot be read safely.
+pub fn list_project_directory(
+    root: &Path,
+    project_relative_directory: &str,
+) -> Result<Vec<ProjectPathEntry>, ProjectError> {
+    let directory = normalize_project_directory_path(project_relative_directory)?;
+    if !directory.is_empty() && !is_project_visible_path(&directory) {
+        return Err(ProjectError::Validation(format!(
+            "Project directory is not visible: {directory}"
+        )));
+    }
+    let project = ProjectCapabilityFs::open(root)?;
+    let current = match project.open_directory(&directory) {
+        Ok(current) => current,
+        Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(error) => return Err(error),
+    };
+    let mut result = Vec::new();
+    for entry in current.entries()? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let relative = if directory.is_empty() {
+            name
+        } else {
+            format!("{directory}/{name}")
+        };
+        if file_type.is_dir() && !file_type.is_symlink() && is_project_visible_path(&relative) {
+            result.push(ProjectPathEntry {
+                project_relative_path: relative,
+                kind: ProjectPathKind::Directory,
+            });
+        } else if file_type.is_file() && is_project_visible_path(&relative) {
+            result.push(ProjectPathEntry {
+                project_relative_path: relative,
+                kind: ProjectPathKind::File,
+            });
+        }
+    }
     result.sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
     Ok(result)
 }
 
-fn walk_visible(
+fn walk_visible_until(
     current: &Dir,
     prefix: &str,
     result: &mut Vec<ProjectPathEntry>,
-) -> Result<(), ProjectError> {
+    is_cancelled: &impl Fn() -> bool,
+) -> Result<bool, ProjectError> {
+    if is_cancelled() {
+        return Ok(false);
+    }
     let entries = match current.entries() {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
         Err(error) => return Err(error.into()),
     };
     for entry in entries {
+        if is_cancelled() {
+            return Ok(false);
+        }
         let entry = entry?;
         let file_type = entry.file_type()?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -972,7 +1052,9 @@ fn walk_visible(
                 project_relative_path: relative.clone(),
                 kind: ProjectPathKind::Directory,
             });
-            walk_visible(&entry.open_dir()?, &relative, result)?;
+            if !walk_visible_until(&entry.open_dir()?, &relative, result, is_cancelled)? {
+                return Ok(false);
+            }
         } else if file_type.is_file() && is_project_visible_path(&relative) {
             result.push(ProjectPathEntry {
                 project_relative_path: relative,
@@ -980,7 +1062,7 @@ fn walk_visible(
             });
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 #[must_use]
@@ -995,7 +1077,30 @@ pub fn project_file_revision(size: u64, mtime_ms: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    #[test]
+    fn visible_project_walk_stops_when_its_owner_is_cancelled() {
+        let root = std::env::temp_dir().join(format!("debrute-cancel-walk-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("one/two/three")).unwrap();
+        fs::write(root.join("one/a.txt"), "a").unwrap();
+        fs::write(root.join("one/two/b.txt"), "b").unwrap();
+        fs::write(root.join("one/two/three/c.txt"), "c").unwrap();
+        let checks = Cell::new(0usize);
+
+        let result = list_project_files_until(&root, || {
+            let next = checks.get() + 1;
+            checks.set(next);
+            next >= 4
+        })
+        .unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(checks.get(), 4);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn protected_visibility_is_case_insensitive_across_every_segment() {

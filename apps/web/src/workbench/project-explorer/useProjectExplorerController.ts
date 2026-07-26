@@ -34,6 +34,16 @@ interface ProjectCommandScope {
   generation: number;
 }
 
+type DirectoryLoadOutcome =
+  | { ok: true }
+  | { ok: false; error: unknown };
+
+interface PendingCreateParentLoad {
+  token: number;
+  parentProjectRelativePath: string;
+  outcome: Promise<DirectoryLoadOutcome>;
+}
+
 export interface ProjectExplorerController {
   selection: ProjectTreeSelectionState;
   fileClipboard: WorkbenchFileClipboard | undefined;
@@ -57,6 +67,7 @@ export interface ProjectExplorerController {
   submitEdit(): Promise<void>;
   cancelEdit(): void;
   clearCut(): void;
+  loadDirectory(projectRelativeDirectory: string): void;
   handleInternalDrop(input: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
@@ -88,6 +99,8 @@ export function useProjectExplorerController(input: {
     projectId: input.projectId,
     generation: input.projectGeneration
   });
+  const editIntentTokenRef = useRef(0);
+  const pendingCreateParentLoadRef = useRef<PendingCreateParentLoad | undefined>(undefined);
 
   const captureProjectScope = useCallback((): ProjectCommandScope => ({ ...projectScopeRef.current }), []);
   const isCurrentProjectScope = useCallback((scope: ProjectCommandScope, resultProjectId?: string): boolean => {
@@ -100,6 +113,8 @@ export function useProjectExplorerController(input: {
 
   useEffect(() => {
     return () => {
+      editIntentTokenRef.current += 1;
+      pendingCreateParentLoadRef.current = undefined;
       projectScopeRef.current = {
         projectId: undefined,
         generation: projectScopeRef.current.generation + 1
@@ -111,24 +126,64 @@ export function useProjectExplorerController(input: {
     setSelectionState(nextSelection);
   }, []);
 
-  const beginCreateFile = useCallback((parentProjectRelativePath: string) => {
+  const requestDirectory = useCallback(async (projectRelativeDirectory: string): Promise<void> => {
+    if (!canStartProjectPathCommand()) {
+      throw new Error('Project path commands are unavailable.');
+    }
+    const scope = captureProjectScope();
+    try {
+      const result = await input.api.loadProjectDirectory(projectRelativeDirectory);
+      if (!isCurrentProjectScope(scope, result.projectId)) {
+        throw new Error('Project changed while its directory was loading.');
+      }
+    } catch (error) {
+      if (isCurrentProjectScope(scope)) {
+        input.notify(notificationMessageForFileCommandError(
+          input.i18n.t('shell.notifications.loadProjectDirectoryFailed'),
+          error
+        ));
+      }
+      throw error;
+    }
+  }, [canStartProjectPathCommand, captureProjectScope, input.api, input.i18n, input.notify, isCurrentProjectScope]);
+
+  const loadDirectory = useCallback((projectRelativeDirectory: string) => {
+    void requestDirectory(projectRelativeDirectory).catch(() => undefined);
+  }, [requestDirectory]);
+
+  const beginCreate = useCallback((
+    kind: 'creating-file' | 'creating-directory',
+    parentProjectRelativePath: string
+  ) => {
     if (!canStartProjectPathCommand()) {
       return;
     }
-    setInlineEdit(createInlineEditState('creating-file', parentProjectRelativePath));
-  }, [canStartProjectPathCommand]);
+    const token = editIntentTokenRef.current + 1;
+    editIntentTokenRef.current = token;
+    pendingCreateParentLoadRef.current = parentProjectRelativePath
+      ? {
+          token,
+          parentProjectRelativePath,
+          outcome: directoryLoadOutcome(requestDirectory(parentProjectRelativePath))
+        }
+      : undefined;
+    setInlineEdit(createInlineEditState(kind, parentProjectRelativePath));
+  }, [canStartProjectPathCommand, requestDirectory]);
+
+  const beginCreateFile = useCallback((parentProjectRelativePath: string) => {
+    beginCreate('creating-file', parentProjectRelativePath);
+  }, [beginCreate]);
 
   const beginCreateDirectory = useCallback((parentProjectRelativePath: string) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
-    setInlineEdit(createInlineEditState('creating-directory', parentProjectRelativePath));
-  }, [canStartProjectPathCommand]);
+    beginCreate('creating-directory', parentProjectRelativePath);
+  }, [beginCreate]);
 
   const beginRename = useCallback((entry: ProjectPathEntry) => {
     if (!canStartProjectPathCommand()) {
       return;
     }
+    editIntentTokenRef.current += 1;
+    pendingCreateParentLoadRef.current = undefined;
     setInlineEdit(createInlineEditState('renaming', entry.projectRelativePath));
   }, [canStartProjectPathCommand]);
 
@@ -168,8 +223,39 @@ export function useProjectExplorerController(input: {
     }
     const { error: _error, ...submittingEdit } = current;
     const scope = captureProjectScope();
+    const intentToken = editIntentTokenRef.current;
     setInlineEdit({ ...submittingEdit, submitting: true });
     try {
+      if (current.kind === 'creating-file' || current.kind === 'creating-directory') {
+        const parent = current.parentProjectRelativePath;
+        if (parent) {
+          let pending = pendingCreateParentLoadRef.current;
+          if (
+            !pending
+            || pending.token !== intentToken
+            || pending.parentProjectRelativePath !== parent
+          ) {
+            pending = {
+              token: intentToken,
+              parentProjectRelativePath: parent,
+              outcome: directoryLoadOutcome(requestDirectory(parent))
+            };
+            pendingCreateParentLoadRef.current = pending;
+          }
+          const outcome = await pending.outcome;
+          if (
+            editIntentTokenRef.current !== intentToken
+            || !isCurrentProjectScope(scope)
+          ) {
+            return;
+          }
+          if (!outcome.ok) {
+            pendingCreateParentLoadRef.current = undefined;
+            setInlineEdit({ ...current, submitting: false, error: errorMessage(outcome.error) });
+            return;
+          }
+        }
+      }
       const result = current.kind === 'renaming'
         ? await input.api.renameProjectPath({
             projectRelativePath: current.projectRelativePath,
@@ -188,15 +274,18 @@ export function useProjectExplorerController(input: {
         return;
       }
       setSelectionState(projectTreeSelectionFromPaths([result.projectRelativePath]));
+      pendingCreateParentLoadRef.current = undefined;
       setInlineEdit(undefined);
     } catch (error) {
       if (isCurrentProjectScope(scope)) {
         setInlineEdit({ ...current, submitting: false, error: errorMessage(error) });
       }
     }
-  }, [canStartProjectPathCommand, captureProjectScope, inlineEdit, input.api, input.i18n, isCurrentProjectScope]);
+  }, [canStartProjectPathCommand, captureProjectScope, inlineEdit, input.api, input.i18n, isCurrentProjectScope, requestDirectory]);
 
   const cancelEdit = useCallback(() => {
+    editIntentTokenRef.current += 1;
+    pendingCreateParentLoadRef.current = undefined;
     setInlineEdit(undefined);
   }, []);
 
@@ -470,6 +559,7 @@ export function useProjectExplorerController(input: {
     submitEdit,
     cancelEdit,
     clearCut,
+    loadDirectory,
     handleInternalDrop,
     handleExternalDrop
   }), [
@@ -486,6 +576,7 @@ export function useProjectExplorerController(input: {
     handleExternalDrop,
     handleInternalDrop,
     inlineEdit,
+    loadDirectory,
     pasteEntries,
     revealEntry,
     selection,
@@ -498,6 +589,13 @@ export function useProjectExplorerController(input: {
 
 function isPathInside(path: string, parentPath: string): boolean {
   return path === parentPath || path.startsWith(`${parentPath}/`);
+}
+
+function directoryLoadOutcome(request: Promise<void>): Promise<DirectoryLoadOutcome> {
+  return request.then(
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ ok: false as const, error })
+  );
 }
 
 function errorMessage(error: unknown): string {

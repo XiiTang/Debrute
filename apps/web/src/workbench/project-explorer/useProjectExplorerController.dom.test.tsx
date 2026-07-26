@@ -46,6 +46,100 @@ describe('useProjectExplorerController', () => {
     await probe.unmount();
   });
 
+  it('loads a collapsed parent before creating a child inside it', async () => {
+    const loadProjectDirectory = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 2
+    }));
+    const probe = await renderController({ loadProjectDirectory });
+
+    await act(async () => {
+      probe.current.beginCreateFile('assets');
+      await Promise.resolve();
+    });
+
+    expect(loadProjectDirectory).toHaveBeenCalledOnce();
+    expect(loadProjectDirectory).toHaveBeenCalledWith('assets');
+    expect(probe.current.inlineEdit).toMatchObject({
+      kind: 'creating-file',
+      parentProjectRelativePath: 'assets'
+    });
+    await probe.unmount();
+  });
+
+  it('does not submit a child create until its collapsed parent has loaded', async () => {
+    const directory = deferred<{ projectId: string; projectRevision: number }>();
+    const createProjectFile = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 3,
+      projectRelativePath: 'assets/new.txt',
+      kind: 'file' as const
+    }));
+    const probe = await renderController({
+      loadProjectDirectory: vi.fn(() => directory.promise),
+      createProjectFile
+    });
+    await act(async () => {
+      probe.current.beginCreateFile('assets');
+    });
+    await act(async () => {
+      probe.current.updateEditValue('new.txt');
+    });
+
+    let submission!: Promise<void>;
+    await act(async () => {
+      submission = probe.current.submitEdit();
+      await Promise.resolve();
+    });
+    expect(createProjectFile).not.toHaveBeenCalled();
+
+    await act(async () => {
+      directory.resolve({ projectId: 'project-1', projectRevision: 2 });
+      await submission;
+    });
+    expect(createProjectFile).toHaveBeenCalledOnce();
+    await probe.unmount();
+  });
+
+  it('keeps a child create retryable when its parent directory load fails', async () => {
+    const failedDirectory = deferred<{ projectId: string; projectRevision: number }>();
+    const loadProjectDirectory = vi.fn()
+      .mockImplementationOnce(() => failedDirectory.promise)
+      .mockResolvedValueOnce({ projectId: 'project-1', projectRevision: 2 });
+    const createProjectFile = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 3,
+      projectRelativePath: 'assets/new.txt',
+      kind: 'file' as const
+    }));
+    const probe = await renderController({ loadProjectDirectory, createProjectFile });
+    await act(async () => {
+      probe.current.beginCreateFile('assets');
+    });
+    await act(async () => {
+      probe.current.updateEditValue('new.txt');
+    });
+    await act(async () => {
+      const submission = probe.current.submitEdit();
+      failedDirectory.reject(new Error('directory unavailable'));
+      await submission;
+    });
+
+    expect(createProjectFile).not.toHaveBeenCalled();
+    expect(probe.current.inlineEdit).toMatchObject({
+      value: 'new.txt',
+      submitting: false,
+      error: 'directory unavailable'
+    });
+
+    await act(async () => {
+      await probe.current.submitEdit();
+    });
+    expect(loadProjectDirectory).toHaveBeenCalledTimes(2);
+    expect(createProjectFile).toHaveBeenCalledOnce();
+    await probe.unmount();
+  });
+
   it('uses the accepted stream snapshot after a delete command outcome', async () => {
     const getSnapshot = vi.fn(() => snapshotWithFiles(['folder']));
     const probe = await renderController({

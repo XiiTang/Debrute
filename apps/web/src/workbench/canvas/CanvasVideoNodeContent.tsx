@@ -2,16 +2,17 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { AlertTriangle, Video } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { useI18n } from '../i18n';
-import {
-  CanvasVideoPlayerAdapter,
-  type CanvasVideoPlayRequest,
-  type CanvasVideoPlayerHandle
-} from './CanvasVideoPlayerAdapter';
+import type { CanvasVideoPlayRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
+
+const CanvasVideoPlayerAdapter = React.lazy(async () => {
+  const module = await import('./CanvasVideoPlayerAdapter');
+  return { default: module.CanvasVideoPlayerAdapter };
+});
 
 type CanvasVideoVisibleLayer = 'preview' | 'player';
 
@@ -342,24 +343,26 @@ export function CanvasVideoNodeContent({
               : 'canvas-video-layer canvas-video-layer--hidden'}
             data-canvas-video-layer="player"
           >
-            <CanvasVideoPlayerAdapter
-              key={`${node.availability.fileUrl}:${retryKey}`}
-              ref={register}
-              node={node}
-              initialTimeSeconds={initialTimeSeconds}
-              playRequest={playRequest}
-              onPointerInside={mountPlayer}
-              onFocusInside={mountPlayer}
-              formatPlayError={formatVideoPlayError}
-              formatSeekError={formatVideoSeekError}
-              onError={setError}
-              onPlayingChange={handlePlayingChange}
-              onPlaybackBoundary={handlePlaybackBoundary}
-              onReadyForDisplay={handlePlayerReadyForDisplay}
-              onPlayRequestConsumed={(requestId) => {
-                setPlayRequest((current) => current?.requestId === requestId ? undefined : current);
-              }}
-            />
+            <React.Suspense fallback={<div className="db-canvas-node-placeholder" aria-busy="true" />}>
+              <CanvasVideoPlayerAdapter
+                key={`${node.availability.fileUrl}:${retryKey}`}
+                ref={register}
+                node={node}
+                initialTimeSeconds={initialTimeSeconds}
+                playRequest={playRequest}
+                onPointerInside={mountPlayer}
+                onFocusInside={mountPlayer}
+                formatPlayError={formatVideoPlayError}
+                formatSeekError={formatVideoSeekError}
+                onError={setError}
+                onPlayingChange={handlePlayingChange}
+                onPlaybackBoundary={handlePlaybackBoundary}
+                onReadyForDisplay={handlePlayerReadyForDisplay}
+                onPlayRequestConsumed={(requestId) => {
+                  setPlayRequest((current) => current?.requestId === requestId ? undefined : current);
+                }}
+              />
+            </React.Suspense>
           </div>
         ) : null}
         {visibleLayer === 'preview' && !previewLayerSource && !videoPreviewError && !playerMounted ? (
