@@ -7,12 +7,10 @@ import type {
   ManagedCliDiagnostic,
   ProductUpdateState,
   SaveDebruteGlobalSettingsInput,
-  WorkbenchLocale,
-  WorkbenchThemePreference
+  WorkbenchLocale
 } from '@debrute/app-protocol';
 import type { EventProjection, WorkbenchActions } from '../../../types';
 import { useI18n, type WorkbenchI18n } from '../../i18n';
-import type { WorkbenchResolvedTheme } from '../../services/workbenchTheme';
 import { Button, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index.js';
 
 type OperationState =
@@ -28,27 +26,19 @@ export function GeneralSettingsPage({
   actions,
   product,
   settings,
-  resolvedTheme,
   onSettingsChange
 }: {
   actions: ProductActions;
   product: EventProjection<DebruteProductState | null>;
   settings: DebruteGlobalSettingsView;
-  resolvedTheme: WorkbenchResolvedTheme;
   onSettingsChange: (settings: SaveDebruteGlobalSettingsInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
-  const [themeDraft, setThemeDraft] = useState(settings.workbench.themePreference);
   const [localeDraft, setLocaleDraft] = useState(settings.workbench.locale);
   const [defaultFrontendDraft, setDefaultFrontendDraft] = useState(settings.workbench.defaultFrontend);
-  const [themeOperation, setThemeOperation] = useState<OperationState>({ status: 'idle' });
   const [localeOperation, setLocaleOperation] = useState<OperationState>({ status: 'idle' });
   const [defaultFrontendOperation, setDefaultFrontendOperation] = useState<OperationState>({ status: 'idle' });
-
-  useEffect(() => {
-    setThemeDraft(settings.workbench.themePreference);
-  }, [settings.workbench.themePreference]);
 
   useEffect(() => {
     setLocaleDraft(settings.workbench.locale);
@@ -65,16 +55,6 @@ export function GeneralSettingsPage({
       setOperation({ status: 'idle' });
     } catch (error) {
       setOperation({ status: 'error', message: errorMessage(error) });
-    }
-  };
-
-  const saveTheme = async (themePreference: WorkbenchThemePreference) => {
-    setThemeOperation({ status: 'loading' });
-    try {
-      await onSettingsChange({ workbench: { themePreference } });
-      setThemeOperation({ status: 'idle' });
-    } catch (error) {
-      setThemeOperation({ status: 'error', message: errorMessage(error) });
     }
   };
 
@@ -100,33 +80,6 @@ export function GeneralSettingsPage({
 
   return (
     <div className="general-settings-page">
-      <section className="settings-group">
-        <h3>{i18n.t('settings.general.appearance')}</h3>
-        <Field
-          label={i18n.t('settings.general.theme.label')}
-          description={themeHelpText(themeDraft, resolvedTheme, i18n)}
-        >
-          <Select
-            value={themeDraft}
-            invalid={themeOperation.status === 'error'}
-            disabled={themeOperation.status === 'loading'}
-            onChange={(event) => {
-              const themePreference = event.currentTarget.value as WorkbenchThemePreference;
-              setThemeDraft(themePreference);
-              void saveTheme(themePreference);
-            }}
-          >
-            <option value="system">{i18n.t('settings.general.theme.system')}</option>
-            <option value="dark">{i18n.t('settings.general.theme.dark')}</option>
-            <option value="light">{i18n.t('settings.general.theme.light')}</option>
-          </Select>
-        </Field>
-        {themeOperation.status === 'error' ? (
-          <small className="db-form-error">
-            {i18n.t('settings.general.theme.saveFailed', { message: themeOperation.message })}
-          </small>
-        ) : null}
-      </section>
       <section className="settings-group">
         <h3>{i18n.t('settings.general.language.label')}</h3>
         <Field label={i18n.t('settings.general.language.label')}>
@@ -206,21 +159,6 @@ export function GeneralSettingsPage({
       ) : null}
     </div>
   );
-}
-
-function themeHelpText(
-  preference: WorkbenchThemePreference,
-  resolvedTheme: WorkbenchResolvedTheme,
-  i18n: WorkbenchI18n
-): string {
-  if (preference === 'system') {
-    return i18n.t('settings.general.theme.usingSystem', {
-      theme: resolvedTheme === 'dark'
-        ? i18n.t('settings.general.theme.resolvedDark')
-        : i18n.t('settings.general.theme.resolvedLight')
-    });
-  }
-  return i18n.t('settings.general.theme.appliedGlobal');
 }
 
 function ProductUpdateSection({

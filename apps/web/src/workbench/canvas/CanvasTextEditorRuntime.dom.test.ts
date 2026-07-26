@@ -16,18 +16,15 @@ import {
   canvasTextEditorUpdateListener,
   type CanvasTextEditorCallbackRef
 } from './CanvasTextEditorRuntime';
-import { CANVAS_TEXT_SURFACE_METRICS } from './CanvasTextSurface';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
 
 describe('CanvasTextEditorRuntime', { tags: ['canvas-text'] }, () => {
-  it('configures the cursor scroll margin from text surface metrics', () => {
+  it('configures the cursor scroll margin from the resolved render profile', () => {
     const state = EditorState.create({
-      extensions: [canvasTextEditorCursorScrollMarginExtension()]
+      extensions: [canvasTextEditorCursorScrollMarginExtension(DEFAULT_CANVAS_TEXT_RENDER_PROFILE)]
     });
 
-    expect(state.facet(EditorView.cursorScrollMargin)).toEqual({
-      x: CANVAS_TEXT_SURFACE_METRICS.linePaddingInlinePx,
-      y: Math.ceil(CANVAS_TEXT_SURFACE_METRICS.lineHeightPx * 2)
-    });
+    expect(state.facet(EditorView.cursorScrollMargin)).toEqual({ x: 8, y: 34 });
   });
 
   it('binds Mod-s to save', () => {

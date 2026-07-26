@@ -40,6 +40,47 @@ impl Default for WorkbenchSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CanvasFontId {
+    #[default]
+    NotoSansMonoCjkSc,
+    Lilex,
+    JetbrainsMono,
+    IbmPlexMono,
+    NotoSansSc,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanvasTextAppearance {
+    pub font_id: CanvasFontId,
+    pub font_size_px: f64,
+    pub line_height_ratio: f64,
+    pub font_weight: u16,
+    pub letter_spacing_px: f64,
+    pub ligatures: bool,
+}
+
+impl Default for CanvasTextAppearance {
+    fn default() -> Self {
+        Self {
+            font_id: CanvasFontId::default(),
+            font_size_px: 12.0,
+            line_height_ratio: 1.4,
+            font_weight: 400,
+            letter_spacing_px: 0.0,
+            ligatures: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanvasSettings {
+    pub text_appearance: CanvasTextAppearance,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChromeSettings {
@@ -75,10 +116,11 @@ impl Default for AdobeBridgeSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GlobalSettingsConfig {
     pub workbench: WorkbenchSettings,
+    pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
     pub models: Vec<ModelConfig>,
     pub adobe_bridge: AdobeBridgeSettings,
@@ -90,22 +132,23 @@ pub struct SecretsConfig {
     pub model_api_keys: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GlobalConfigSnapshot {
     pub settings: GlobalSettingsConfig,
     pub secrets: SecretsConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GlobalSettingsView {
     pub workbench: WorkbenchSettings,
+    pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
     pub models: ModelSettingsView,
     pub adobe_bridge: AdobeBridgeSettings,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GlobalMutationResult {
     pub view: GlobalSettingsView,
     pub changed: bool,
@@ -352,6 +395,7 @@ impl GlobalConfigStore {
 fn project_view(snapshot: &GlobalConfigSnapshot, catalog: &ModelCatalog) -> GlobalSettingsView {
     GlobalSettingsView {
         workbench: snapshot.settings.workbench.clone(),
+        canvas: snapshot.settings.canvas.clone(),
         chrome: snapshot.settings.chrome.clone(),
         models: settings_view(snapshot, catalog),
         adobe_bridge: snapshot.settings.adobe_bridge.clone(),
@@ -366,7 +410,7 @@ fn apply_patch(
     let patch = closed_patch_record(
         input,
         "Global settings patch",
-        &["workbench", "modelSetting", "adobeBridge"],
+        &["workbench", "canvas", "modelSetting", "adobeBridge"],
     )?;
     if let Some(value) = patch.get("workbench") {
         let workbench = closed_patch_record(
@@ -385,6 +429,22 @@ fn apply_patch(
             snapshot.settings.workbench.default_frontend = parse_default_frontend(frontend)?;
         }
         validate_workbench(&snapshot.settings.workbench)?;
+    }
+    if let Some(value) = patch.get("canvas") {
+        let canvas = closed_patch_record(value, "Global settings canvas", &["textAppearance"])?;
+        let appearance = canvas.get("textAppearance").ok_or_else(|| {
+            GlobalSettingsError::Validation(
+                "Global settings canvas must contain textAppearance.".to_owned(),
+            )
+        })?;
+        let appearance: CanvasTextAppearance =
+            serde_json::from_value(appearance.clone()).map_err(|error| {
+                GlobalSettingsError::Validation(format!(
+                    "Canvas text appearance must be one complete value: {error}"
+                ))
+            })?;
+        validate_canvas_text_appearance(&appearance)?;
+        snapshot.settings.canvas.text_appearance = appearance;
     }
     if let Some(value) = patch.get("modelSetting") {
         apply_model_patch(
@@ -466,10 +526,50 @@ fn validate_snapshot(
     catalog: &ModelCatalog,
 ) -> Result<(), GlobalSettingsError> {
     validate_workbench(&snapshot.settings.workbench)?;
+    validate_canvas_text_appearance(&snapshot.settings.canvas.text_appearance)?;
     validate_recent_projects(&snapshot.settings.chrome.recent_projects)?;
     validate_model_configs(&snapshot.settings.models, catalog)?;
     validate_secret_map(&snapshot.secrets.model_api_keys, catalog)?;
     Ok(())
+}
+
+fn validate_canvas_text_appearance(
+    appearance: &CanvasTextAppearance,
+) -> Result<(), GlobalSettingsError> {
+    if !is_finite_inclusive(appearance.font_size_px, 6.0, 100.0)
+        || !has_decimal_precision(appearance.font_size_px, 2.0)
+    {
+        return validation(
+            "Canvas text fontSizePx must be a finite 6–100 value in 0.5px increments.",
+        );
+    }
+    if !is_finite_inclusive(appearance.line_height_ratio, 1.0, 2.0)
+        || !has_decimal_precision(appearance.line_height_ratio, 100.0)
+    {
+        return validation(
+            "Canvas text lineHeightRatio must be a finite 1.0–2.0 value with at most two decimal places.",
+        );
+    }
+    if !(100..=900).contains(&appearance.font_weight) {
+        return validation("Canvas text fontWeight must be an integer from 100 to 900.");
+    }
+    if !is_finite_inclusive(appearance.letter_spacing_px, -5.0, 20.0)
+        || !has_decimal_precision(appearance.letter_spacing_px, 10.0)
+    {
+        return validation(
+            "Canvas text letterSpacingPx must be a finite -5–20 value in 0.1px increments.",
+        );
+    }
+    Ok(())
+}
+
+fn is_finite_inclusive(value: f64, minimum: f64, maximum: f64) -> bool {
+    value.is_finite() && value >= minimum && value <= maximum
+}
+
+fn has_decimal_precision(value: f64, scale: f64) -> bool {
+    let scaled = value * scale;
+    (scaled - scaled.round()).abs() <= f64::EPSILON * scale * 8.0
 }
 
 fn validate_recent_projects(

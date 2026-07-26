@@ -308,13 +308,16 @@ decisions are indexed under the
 ## Global And Project State
 
 Runtime's global store is the sole persistence boundary for Workbench
-preferences, recent Project roots, model overrides and API keys, and Photoshop
-bridge settings. Recent Projects persist only the mapping from stable Project
-id to canonical root. Non-secret settings and secrets use separate atomic
-files; public projections expose only whether a key is set and a non-secret
-preview. The typed default frontend is exactly `desktop`, `browser`, or
-`runtime-only`; invalid values do not enter Runtime state. Global events carry
-an ordered `globalRevision` independent of Project state.
+preferences, Canvas Text Appearance, recent Project roots, model overrides and
+API keys, and Photoshop bridge settings. Canvas Text Appearance persists as one
+complete `canvas.textAppearance` value rather than field patches: managed font
+ID, font size, line-height ratio, requested integer weight, letter spacing, and
+ligatures. Recent Projects persist only the mapping from stable Project id to
+canonical root. Non-secret settings and secrets use separate atomic files;
+public projections expose only whether a key is set and a non-secret preview.
+The typed default frontend is exactly `desktop`, `browser`, or `runtime-only`;
+invalid values do not enter Runtime state. Global events carry an ordered
+`globalRevision` independent of Project state.
 
 An absent global settings or secrets file uses the current first-launch
 defaults. An existing file must match the one closed current shape: unknown

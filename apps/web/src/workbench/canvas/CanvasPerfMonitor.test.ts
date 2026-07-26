@@ -170,7 +170,7 @@ describe('CanvasPerfMonitor', () => {
     monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-check-requested' });
     monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-availability-resolved' });
     monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasTextPreviewRuntime', name: 'text-preview-capture-ready' });
-    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasTextPreviewRuntime', name: 'text-preview-snapshot-built' });
+    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasTextPreviewRuntime', name: 'text-preview-scene-built' });
     monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasTextPreviewRuntime', name: 'text-preview-raster-completed' });
     monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-upload-completed' });
     monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasTextPreviewRuntime', name: 'text-preview-pending-ready' });
@@ -183,7 +183,7 @@ describe('CanvasPerfMonitor', () => {
       'text-preview-source-check-requested': 1,
       'text-preview-source-availability-resolved': 1,
       'text-preview-capture-ready': 1,
-      'text-preview-snapshot-built': 1,
+      'text-preview-scene-built': 1,
       'text-preview-raster-completed': 1,
       'text-preview-source-upload-completed': 1,
       'text-preview-pending-ready': 1,

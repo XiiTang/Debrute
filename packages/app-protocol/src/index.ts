@@ -90,6 +90,21 @@ export interface DebruteHttpErrorBody {
 export type WorkbenchLocale = 'en' | 'zh-CN';
 export type WorkbenchThemePreference = 'system' | 'dark' | 'light';
 export type DebruteDefaultFrontend = 'desktop' | 'browser' | 'runtime-only';
+export type CanvasFontId =
+  | 'noto-sans-mono-cjk-sc'
+  | 'lilex'
+  | 'jetbrains-mono'
+  | 'ibm-plex-mono'
+  | 'noto-sans-sc';
+
+export interface CanvasTextAppearance {
+  fontId: CanvasFontId;
+  fontSizePx: number;
+  lineHeightRatio: number;
+  fontWeight: number;
+  letterSpacingPx: number;
+  ligatures: boolean;
+}
 
 interface RecentProjectView {
   projectId: string;
@@ -102,6 +117,10 @@ interface DebruteGlobalWorkbenchSettings {
   defaultFrontend: DebruteDefaultFrontend;
 }
 
+export interface DebruteGlobalCanvasSettings {
+  textAppearance: CanvasTextAppearance;
+}
+
 interface DebruteGlobalChromeSettings {
   recentProjects: RecentProjectView[];
 }
@@ -112,6 +131,7 @@ export interface DebruteGlobalAdobeBridgeSettings {
 
 export interface DebruteGlobalSettingsView {
   workbench: DebruteGlobalWorkbenchSettings;
+  canvas: DebruteGlobalCanvasSettings;
   chrome: DebruteGlobalChromeSettings;
   models: {
     image: ImageModelSettingRecord[];
@@ -124,6 +144,7 @@ export interface DebruteGlobalSettingsView {
 
 export interface SaveDebruteGlobalSettingsInput {
   workbench?: Partial<DebruteGlobalWorkbenchSettings>;
+  canvas?: { textAppearance: CanvasTextAppearance };
   modelSetting?: { modelId: string; setting: SaveModelSettingInput };
   adobeBridge?: SaveAdobeBridgeSettingsInput;
 }

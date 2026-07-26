@@ -37,6 +37,7 @@ import {
 } from './CanvasPerfMonitor';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import { canvasRawFileProjectId } from './canvasRawFileUrls';
+import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
 
 export interface CanvasTextPreviewSource {
   projectRelativePath: string;
@@ -95,6 +96,17 @@ interface CanvasTextPreviewErrorState {
   targetKey: string;
   sourceKey?: string | undefined;
   error: Error;
+}
+
+interface CanvasTextPreviewTargetResolution {
+  candidate: CanvasTextPreviewCandidate;
+  target?: CanvasTextPreviewTarget | undefined;
+  pendingFingerprint?: Promise<string> | undefined;
+}
+
+interface CanvasTextPreviewAvailabilityRequest {
+  epoch: number;
+  targetKeys: ReadonlySet<string>;
 }
 
 export interface CanvasTextPreviewRuntimeValue {
@@ -158,6 +170,7 @@ export function CanvasTextPreviewProvider({
   previewResourceScheduler: CanvasPreviewResourceScheduler;
   children: React.ReactNode;
 }): React.ReactElement {
+  const renderProfile = useCanvasTextRenderProfile();
   const [sourceAvailability, setSourceAvailability] = useState<Record<string, CanvasTextPreviewSourceAvailability>>({});
   const [measuredBodies, setMeasuredBodies] = useState<Map<string, CanvasTextPreviewMeasuredBody>>(() => new Map());
   const [captureTarget, setCaptureTarget] = useState<CanvasTextPreviewTarget>();
@@ -165,20 +178,35 @@ export function CanvasTextPreviewProvider({
   const [previewErrors, setPreviewErrors] = useState<Record<string, CanvasTextPreviewErrorState>>({});
   const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasTextPreviewTarget>>({});
   const [previewPresentations, setPreviewPresentations] = useState<Record<string, CanvasTextPreviewPresentationState>>({});
-  const [availabilityCheckedTargetKeys, setAvailabilityCheckedTargetKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [styleKeyState, setStyleKeyState] = useState<{
     key?: string | undefined;
     error?: Error | undefined;
   }>({});
   const currentTargetKeysRef = useRef(new Map<string, string>());
   const currentTargetsRef = useRef<Record<string, CanvasTextPreviewTarget>>({});
+  const targetResolutionsRef = useRef(new Map<string, CanvasTextPreviewTargetResolution>());
   const previewPresentationsRef = useRef<Record<string, CanvasTextPreviewPresentationState>>({});
   const currentResourceKeysRef = useRef(new Map<string, string>());
   const currentCanvasIdRef = useRef(canvasId);
   const interactionActive = cameraState !== 'idle' || dragState !== undefined;
+  const interactionActiveRef = useRef(interactionActive);
   const runtimeEpochRef = useRef(0);
   const mountedRef = useRef(true);
   const bodyRegistrationsRef = useRef(new Map<string, () => void>());
+  const registeredTextBodyElementsRef = useRef(new Map<string, HTMLElement>());
+  const measurementEligiblePathsRef = useRef(new Set<string>());
+  const pendingBodyMeasurementElementsRef = useRef(new Map<string, HTMLElement>());
+  const measurementFlushFrameRef = useRef<number | undefined>(undefined);
+  const measurementPauseRecordedRef = useRef(false);
+  const availabilityCheckedTargetKeysRef = useRef(new Set<string>());
+  const availabilityPendingTargetsRef = useRef(new Map<string, CanvasTextPreviewTarget>());
+  const availabilityInFlightRef = useRef<CanvasTextPreviewAvailabilityRequest | undefined>(undefined);
+  const availabilityFlushFrameRef = useRef<number | undefined>(undefined);
+  const availabilityPauseRecordedRef = useRef(false);
+  const availabilityFlushRef = useRef<() => void>(() => undefined);
+  const activeInlineTextPathRef = useRef(activeInlineTextPath);
+  const previousActiveInlineTextPathRef = useRef(activeInlineTextPath);
+  const capturePriorityPathRef = useRef<string | undefined>(undefined);
   const uploadingTargetKeysRef = useRef(new Set<string>());
   const presentationQueuesRef = useRef<CanvasTextPreviewPresentationQueues>({
     mount: new Map(),
@@ -191,6 +219,8 @@ export function CanvasTextPreviewProvider({
   currentTargetsRef.current = currentTargets;
   previewPresentationsRef.current = previewPresentations;
   currentCulledNodePathsRef.current = culledNodePaths;
+  activeInlineTextPathRef.current = activeInlineTextPath;
+  interactionActiveRef.current = interactionActive;
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
 
   const recordTextPreviewCounter = useCallback((
@@ -205,6 +235,38 @@ export function CanvasTextPreviewProvider({
       detail
     });
   }, [perfMonitor]);
+
+  const recordPendingBodyMeasurementsPaused = useCallback(() => {
+    const count = pendingBodyMeasurementElementsRef.current.size;
+    if (count === 0 || measurementPauseRecordedRef.current) {
+      return;
+    }
+    measurementPauseRecordedRef.current = true;
+    recordTextPreviewCounter('text-preview-body-measurement-paused', { count });
+  }, [recordTextPreviewCounter]);
+
+  const recordPendingAvailabilityPaused = useCallback(() => {
+    const count = availabilityPendingTargetsRef.current.size;
+    if (count === 0 || availabilityPauseRecordedRef.current) {
+      return;
+    }
+    availabilityPauseRecordedRef.current = true;
+    recordTextPreviewCounter('text-preview-source-check-paused', { count });
+  }, [recordTextPreviewCounter]);
+
+  const scheduleAvailabilityFlush = useCallback(() => {
+    if (interactionActiveRef.current) {
+      recordPendingAvailabilityPaused();
+      return;
+    }
+    if (availabilityFlushFrameRef.current !== undefined) {
+      return;
+    }
+    availabilityFlushFrameRef.current = window.requestAnimationFrame(() => {
+      availabilityFlushFrameRef.current = undefined;
+      availabilityFlushRef.current();
+    });
+  }, [recordPendingAvailabilityPaused]);
 
   const isCurrentTarget = useCallback((epoch: number, target: CanvasTextPreviewTarget): boolean => (
     mountedRef.current
@@ -413,6 +475,22 @@ export function CanvasTextPreviewProvider({
       }
       publishingSourceKeysRef.current.clear();
       uploadingTargetKeysRef.current.clear();
+      targetResolutionsRef.current.clear();
+      registeredTextBodyElementsRef.current.clear();
+      measurementEligiblePathsRef.current.clear();
+      pendingBodyMeasurementElementsRef.current.clear();
+      availabilityCheckedTargetKeysRef.current.clear();
+      availabilityPendingTargetsRef.current.clear();
+      availabilityInFlightRef.current = undefined;
+      capturePriorityPathRef.current = undefined;
+      if (measurementFlushFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(measurementFlushFrameRef.current);
+        measurementFlushFrameRef.current = undefined;
+      }
+      if (availabilityFlushFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(availabilityFlushFrameRef.current);
+        availabilityFlushFrameRef.current = undefined;
+      }
       for (const cleanup of bodyRegistrationsRef.current.values()) {
         cleanup();
       }
@@ -426,7 +504,7 @@ export function CanvasTextPreviewProvider({
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.resolve().then(() => canvasTextPreviewStyleSnapshotForDocument())
+    void Promise.resolve().then(() => canvasTextPreviewStyleSnapshotForDocument(renderProfile))
       .then((snapshot) => canvasTextPreviewStyleKey(snapshot))
       .then((key) => {
         if (!cancelled) {
@@ -440,7 +518,7 @@ export function CanvasTextPreviewProvider({
     return () => {
       cancelled = true;
     };
-  }, [styleDependencyKey]);
+  }, [renderProfile, styleDependencyKey]);
 
   if (styleKeyState.error) {
     throw styleKeyState.error;
@@ -489,42 +567,144 @@ export function CanvasTextPreviewProvider({
     setPreviewErrors((current) => withoutRecordPath(current, path));
   }, [activeInlineTextPath, previewResourceScheduler]);
 
-  const commitTextBodyMeasurement = useCallback((projectRelativePath: string, element: HTMLElement) => {
-    const measurement = canvasTextPreviewBodyMeasurement(element);
-    if (measurement.width <= 0 || measurement.height <= 0) {
+  useEffect(() => {
+    const previousPath = previousActiveInlineTextPathRef.current;
+    if (previousPath && previousPath !== activeInlineTextPath) {
+      capturePriorityPathRef.current = previousPath;
+    }
+    previousActiveInlineTextPathRef.current = activeInlineTextPath;
+  }, [activeInlineTextPath]);
+
+  const flushPendingBodyMeasurements = useCallback(() => {
+    measurementFlushFrameRef.current = undefined;
+    if (interactionActiveRef.current || pendingBodyMeasurementElementsRef.current.size === 0) {
+      return;
+    }
+    const startedAt = performance.now();
+    const pendingElements = pendingBodyMeasurementElementsRef.current;
+    pendingBodyMeasurementElementsRef.current = new Map();
+    const pendingMeasurements = new Map<string, CanvasTextPreviewMeasuredBody>();
+    for (const [path, element] of pendingElements) {
+      if (registeredTextBodyElementsRef.current.get(path) !== element
+        || activeInlineTextPathRef.current === path
+        || currentCulledNodePathsRef.current.has(path)) {
+        continue;
+      }
+      const measurement = canvasTextPreviewBodyMeasurement(element);
+      if (measurement.width > 0 && measurement.height > 0) {
+        pendingMeasurements.set(path, measurement);
+      }
+    }
+    recordTextPreviewCounter('text-preview-body-measurement-flushed', {
+      requestedCount: pendingElements.size,
+      measuredCount: pendingMeasurements.size,
+      durationMs: performance.now() - startedAt
+    });
+    if (pendingMeasurements.size === 0) {
       return;
     }
     setMeasuredBodies((current) => {
-      const existing = current.get(projectRelativePath);
-      if (existing && existing.width === measurement.width && existing.height === measurement.height) {
-        return current;
+      let next = current;
+      for (const [path, measurement] of pendingMeasurements) {
+        const existing = current.get(path);
+        if (existing?.width === measurement.width && existing.height === measurement.height) {
+          continue;
+        }
+        if (next === current) {
+          next = new Map(current);
+        }
+        next.set(path, measurement);
       }
-      const next = new Map(current);
-      next.set(projectRelativePath, measurement);
       return next;
     });
-  }, []);
+  }, [recordTextPreviewCounter]);
+
+  const scheduleTextBodyMeasurement = useCallback((projectRelativePath: string, element: HTMLElement) => {
+    if (registeredTextBodyElementsRef.current.get(projectRelativePath) !== element) {
+      return;
+    }
+    if (activeInlineTextPathRef.current === projectRelativePath
+      || currentCulledNodePathsRef.current.has(projectRelativePath)) {
+      if (pendingBodyMeasurementElementsRef.current.get(projectRelativePath) === element) {
+        pendingBodyMeasurementElementsRef.current.delete(projectRelativePath);
+      }
+      return;
+    }
+    pendingBodyMeasurementElementsRef.current.set(projectRelativePath, element);
+    if (interactionActiveRef.current) {
+      recordPendingBodyMeasurementsPaused();
+    } else if (measurementFlushFrameRef.current === undefined) {
+      measurementFlushFrameRef.current = window.requestAnimationFrame(flushPendingBodyMeasurements);
+    }
+  }, [flushPendingBodyMeasurements, recordPendingBodyMeasurementsPaused]);
+
+  useEffect(() => {
+    const previousEligiblePaths = measurementEligiblePathsRef.current;
+    const nextEligiblePaths = new Set<string>();
+    for (const [path, element] of registeredTextBodyElementsRef.current) {
+      if (path === activeInlineTextPath || culledNodePaths.has(path)) {
+        pendingBodyMeasurementElementsRef.current.delete(path);
+        continue;
+      }
+      nextEligiblePaths.add(path);
+      if (!previousEligiblePaths.has(path)) {
+        scheduleTextBodyMeasurement(path, element);
+      }
+    }
+    measurementEligiblePathsRef.current = nextEligiblePaths;
+  }, [activeInlineTextPath, culledNodePaths, scheduleTextBodyMeasurement]);
+
+  useEffect(() => {
+    if (interactionActive) {
+      if (measurementFlushFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(measurementFlushFrameRef.current);
+        measurementFlushFrameRef.current = undefined;
+      }
+      recordPendingBodyMeasurementsPaused();
+      return;
+    }
+    measurementPauseRecordedRef.current = false;
+    if (pendingBodyMeasurementElementsRef.current.size > 0
+      && measurementFlushFrameRef.current === undefined) {
+      measurementFlushFrameRef.current = window.requestAnimationFrame(flushPendingBodyMeasurements);
+    }
+  }, [flushPendingBodyMeasurements, interactionActive, recordPendingBodyMeasurementsPaused]);
+
+  useEffect(() => {
+    if (interactionActive) {
+      if (availabilityFlushFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(availabilityFlushFrameRef.current);
+        availabilityFlushFrameRef.current = undefined;
+      }
+      recordPendingAvailabilityPaused();
+      return;
+    }
+    availabilityPauseRecordedRef.current = false;
+    if (availabilityPendingTargetsRef.current.size > 0 && !availabilityInFlightRef.current) {
+      scheduleAvailabilityFlush();
+    }
+  }, [interactionActive, recordPendingAvailabilityPaused, scheduleAvailabilityFlush]);
 
   const registerTextBody = useCallback((projectRelativePath: string, element: HTMLElement | null) => {
     bodyRegistrationsRef.current.get(projectRelativePath)?.();
     bodyRegistrationsRef.current.delete(projectRelativePath);
+    registeredTextBodyElementsRef.current.delete(projectRelativePath);
+    measurementEligiblePathsRef.current.delete(projectRelativePath);
+    pendingBodyMeasurementElementsRef.current.delete(projectRelativePath);
     if (!element) {
       return;
     }
-    const commit = () => commitTextBodyMeasurement(projectRelativePath, element);
-    const cleanup: Array<() => void> = [];
-    const observer = new ResizeObserver(commit);
+    registeredTextBodyElementsRef.current.set(projectRelativePath, element);
+    if (activeInlineTextPathRef.current !== projectRelativePath
+      && !currentCulledNodePathsRef.current.has(projectRelativePath)) {
+      measurementEligiblePathsRef.current.add(projectRelativePath);
+    }
+    const schedule = () => scheduleTextBodyMeasurement(projectRelativePath, element);
+    const observer = new ResizeObserver(schedule);
     observer.observe(element);
-    cleanup.push(() => observer.disconnect());
-    const frame = window.requestAnimationFrame(commit);
-    cleanup.push(() => window.cancelAnimationFrame(frame));
-    commit();
-    bodyRegistrationsRef.current.set(projectRelativePath, () => {
-      for (const item of cleanup) {
-        item();
-      }
-    });
-  }, [commitTextBodyMeasurement]);
+    schedule();
+    bodyRegistrationsRef.current.set(projectRelativePath, () => observer.disconnect());
+  }, [scheduleTextBodyMeasurement]);
 
   useEffect(() => {
     if (!styleKeyState.key) {
@@ -538,34 +718,77 @@ export function CanvasTextPreviewProvider({
       measuredBodies,
       styleKey: styleKeyState.key
     }).filter((candidate) => candidate.projectRelativePath !== activeInlineTextPath);
-    void Promise.all(candidates.map(async (candidate): Promise<CanvasTextPreviewTarget> => ({
-      ...candidate,
-      fingerprint: await canvasTextPreviewFingerprint(candidate)
-    }))).then((resolvedTargets) => {
+    const previousResolutions = targetResolutionsRef.current;
+    const nextResolutions = new Map<string, CanvasTextPreviewTargetResolution>();
+    for (const candidate of candidates) {
+      const existing = previousResolutions.get(candidate.projectRelativePath);
+      if (existing && canvasTextPreviewCandidatesEqual(existing.candidate, candidate)) {
+        nextResolutions.set(candidate.projectRelativePath, existing);
+        continue;
+      }
+      const pendingFingerprint = canvasTextPreviewFingerprint(candidate).then((fingerprint) => {
+        recordTextPreviewCounter('text-preview-target-fingerprint-computed', {
+          projectRelativePath: candidate.projectRelativePath,
+          fingerprint
+        });
+        return fingerprint;
+      });
+      nextResolutions.set(candidate.projectRelativePath, { candidate, pendingFingerprint });
+    }
+    if (activeInlineTextPath) {
+      const retainedResolution = previousResolutions.get(activeInlineTextPath);
+      const retainedTarget = currentTargetsRef.current[activeInlineTextPath];
+      if (retainedResolution) {
+        nextResolutions.set(activeInlineTextPath, retainedResolution);
+      } else if (retainedTarget) {
+        nextResolutions.set(activeInlineTextPath, {
+          candidate: retainedTarget,
+          target: retainedTarget
+        });
+      }
+    }
+    targetResolutionsRef.current = nextResolutions;
+    const unresolved = [...nextResolutions.values()].filter((resolution) => !resolution.target);
+    void Promise.all(unresolved.map(async (resolution) => ({
+      resolution,
+      fingerprint: await resolution.pendingFingerprint!
+    }))).then((resolved) => {
       if (cancelled) {
         return;
       }
-      const retainedActiveTarget = activeInlineTextPath
-        ? currentTargetsRef.current[activeInlineTextPath]
-        : undefined;
-      const targets = retainedActiveTarget
-        ? [...resolvedTargets, retainedActiveTarget]
-        : resolvedTargets;
+      for (const { resolution, fingerprint } of resolved) {
+        if (targetResolutionsRef.current.get(resolution.candidate.projectRelativePath) === resolution) {
+          resolution.target = { ...resolution.candidate, fingerprint };
+          resolution.pendingFingerprint = undefined;
+        }
+      }
+      const targets = [...nextResolutions.values()].flatMap((resolution) => (
+        resolution.target ? [resolution.target] : []
+      ));
       const targetKeys = new Map(targets.map((target) => [
         target.projectRelativePath,
         canvasTextPreviewTargetKey(target)
       ]));
-      currentTargetKeysRef.current = targetKeys;
       const targetsByPath = canvasTextPreviewTargetsByPath(targets);
+      if (canvasTextPreviewTargetRecordsEqual(currentTargetsRef.current, targetsByPath)) {
+        return;
+      }
+      currentTargetKeysRef.current = targetKeys;
       currentTargetsRef.current = targetsByPath;
       setCurrentTargets(targetsByPath);
       setCaptureTarget((current) => current
         && targetKeys.get(current.projectRelativePath) === canvasTextPreviewTargetKey(current)
         ? current
         : undefined);
-      setAvailabilityCheckedTargetKeys((current) => new Set([...current].filter((key) => (
-        [...targetKeys.values()].includes(key)
-      ))));
+      const retainedTargetKeys = new Set(targetKeys.values());
+      availabilityCheckedTargetKeysRef.current = new Set(
+        [...availabilityCheckedTargetKeysRef.current].filter((key) => retainedTargetKeys.has(key))
+      );
+      for (const [path, target] of availabilityPendingTargetsRef.current) {
+        if (targetKeys.get(path) !== canvasTextPreviewTargetKey(target)) {
+          availabilityPendingTargetsRef.current.delete(path);
+        }
+      }
       setSourceAvailability((current) => canvasTextPreviewCurrentSourceAvailability({
         targets,
         sourceAvailability: current
@@ -588,31 +811,52 @@ export function CanvasTextPreviewProvider({
     activeInlineTextPath,
     measuredBodies,
     nodes,
+    recordTextPreviewCounter,
     styleKeyState.key,
     textFileBuffers
   ]);
 
-  useEffect(() => {
-    const targets = Object.values(currentTargets).filter((target) => (
-      target.projectRelativePath !== activeInlineTextPath
-      && !culledNodePaths.has(target.projectRelativePath)
-      && !availabilityCheckedTargetKeys.has(canvasTextPreviewTargetKey(target))
-    ));
-    if (targets.length === 0) {
-      return undefined;
+  availabilityFlushRef.current = () => {
+    if (!mountedRef.current || interactionActiveRef.current || availabilityInFlightRef.current) {
+      return;
     }
-    let cancelled = false;
+    const targets: CanvasTextPreviewTarget[] = [];
+    for (const [path, target] of availabilityPendingTargetsRef.current) {
+      availabilityPendingTargetsRef.current.delete(path);
+      const targetKey = canvasTextPreviewTargetKey(target);
+      if (currentTargetKeysRef.current.get(path) !== targetKey
+        || activeInlineTextPathRef.current === path
+        || currentCulledNodePathsRef.current.has(path)
+        || availabilityCheckedTargetKeysRef.current.has(targetKey)) {
+        continue;
+      }
+      targets.push(target);
+    }
+    if (targets.length === 0) {
+      return;
+    }
+    const request: CanvasTextPreviewAvailabilityRequest = {
+      epoch: runtimeEpochRef.current,
+      targetKeys: new Set(targets.map(canvasTextPreviewTargetKey))
+    };
+    availabilityInFlightRef.current = request;
     recordTextPreviewCounter('text-preview-source-check-requested', { count: targets.length });
     void actions.readCanvasTextPreviewSources({
       canvasId,
       sources: targets.map(canvasTextPreviewSourceTargetForApi)
     }).then((result) => {
-      if (cancelled) {
+      if (availabilityInFlightRef.current !== request
+        || request.epoch !== runtimeEpochRef.current
+        || !mountedRef.current) {
         return;
       }
+      availabilityInFlightRef.current = undefined;
       const currentResults = targets.filter((target) => (
         currentTargetKeysRef.current.get(target.projectRelativePath) === canvasTextPreviewTargetKey(target)
       ));
+      for (const target of currentResults) {
+        availabilityCheckedTargetKeysRef.current.add(canvasTextPreviewTargetKey(target));
+      }
       const successfulResults: CanvasTextPreviewTarget[] = [];
       for (const target of currentResults) {
         const source = result.sources[target.projectRelativePath]!;
@@ -631,21 +875,24 @@ export function CanvasTextPreviewProvider({
           available: source.status === 'available'
         });
       }
-      setSourceAvailability((current) => canvasTextPreviewSourcesWithAvailability({
-        current,
-        targets: successfulResults,
-        sources: result.sources
-      }));
-      setAvailabilityCheckedTargetKeys((current) => new Set([
-        ...current,
-        ...currentResults.map(canvasTextPreviewTargetKey)
-      ]));
+      startTransition(() => {
+        setSourceAvailability((current) => canvasTextPreviewSourcesWithAvailability({
+          current,
+          targets: successfulResults,
+          sources: result.sources
+        }));
+      });
+      scheduleAvailabilityFlush();
     }, (error: unknown) => {
-      if (cancelled) {
+      if (availabilityInFlightRef.current !== request
+        || request.epoch !== runtimeEpochRef.current
+        || !mountedRef.current) {
         return;
       }
+      availabilityInFlightRef.current = undefined;
       for (const target of targets) {
         if (currentTargetKeysRef.current.get(target.projectRelativePath) === canvasTextPreviewTargetKey(target)) {
+          availabilityCheckedTargetKeysRef.current.add(canvasTextPreviewTargetKey(target));
           setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
             'source_availability_failed',
             failureFieldsForTarget(target),
@@ -653,23 +900,37 @@ export function CanvasTextPreviewProvider({
           ));
         }
       }
-      setAvailabilityCheckedTargetKeys((current) => new Set([
-        ...current,
-        ...targets.map(canvasTextPreviewTargetKey)
-      ]));
+      scheduleAvailabilityFlush();
     });
-    return () => {
-      cancelled = true;
-    };
+  };
+
+  useEffect(() => {
+    const inFlightTargetKeys = availabilityInFlightRef.current?.targetKeys ?? new Set<string>();
+    for (const [path, target] of availabilityPendingTargetsRef.current) {
+      if (currentTargetKeysRef.current.get(path) !== canvasTextPreviewTargetKey(target)
+        || path === activeInlineTextPath
+        || culledNodePaths.has(path)) {
+        availabilityPendingTargetsRef.current.delete(path);
+      }
+    }
+    for (const target of Object.values(currentTargets)) {
+      const targetKey = canvasTextPreviewTargetKey(target);
+      if (target.projectRelativePath === activeInlineTextPath
+        || culledNodePaths.has(target.projectRelativePath)
+        || availabilityCheckedTargetKeysRef.current.has(targetKey)
+        || inFlightTargetKeys.has(targetKey)) {
+        continue;
+      }
+      availabilityPendingTargetsRef.current.set(target.projectRelativePath, target);
+    }
+    if (availabilityPendingTargetsRef.current.size > 0) {
+      scheduleAvailabilityFlush();
+    }
   }, [
-    actions,
-    availabilityCheckedTargetKeys,
     activeInlineTextPath,
-    canvasId,
     culledNodePaths,
     currentTargets,
-    recordTextPreviewCounter,
-    setCurrentPreviewFailure
+    scheduleAvailabilityFlush
   ]);
 
   useEffect(() => {
@@ -803,6 +1064,7 @@ export function CanvasTextPreviewProvider({
       return;
     }
     const failedTargetKeys = new Set(Object.values(previewErrors).map((error) => error.targetKey));
+    const priorityPath = capturePriorityPathRef.current;
     const next = canvasTextPreviewNextCaptureTarget({
       targets: Object.values(currentTargets).filter((target) => (
         target.projectRelativePath !== activeInlineTextPath
@@ -810,10 +1072,26 @@ export function CanvasTextPreviewProvider({
       )),
       sourceAvailability,
       uploadingTargetKeys: uploadingTargetKeysRef.current,
-      failedTargetKeys
+      failedTargetKeys,
+      priorityPath
     });
     if (next) {
+      if (next.projectRelativePath === priorityPath) {
+        capturePriorityPathRef.current = undefined;
+      }
       setCaptureTarget(next);
+      return;
+    }
+    if (priorityPath) {
+      const priorityTarget = currentTargets[priorityPath];
+      const priorityAvailability = sourceAvailability[priorityPath];
+      if (!nodesByPath.has(priorityPath)
+        || (priorityTarget
+          && priorityAvailability?.fingerprint === priorityTarget.fingerprint
+          && priorityAvailability.available)
+        || (priorityTarget && failedTargetKeys.has(canvasTextPreviewTargetKey(priorityTarget)))) {
+        capturePriorityPathRef.current = undefined;
+      }
     }
   }, [
     captureTarget,
@@ -821,7 +1099,9 @@ export function CanvasTextPreviewProvider({
     currentTargets,
     culledNodePaths,
     interactionActive,
+    nodesByPath,
     previewErrors,
+    previewPresentations,
     presentationWorkCanPublish,
     sourceAvailability
   ]);
@@ -849,10 +1129,12 @@ export function CanvasTextPreviewProvider({
         uploadingTargetKeysRef.current.delete(targetKey);
         return;
       }
-      setSourceAvailability((current) => ({
-        ...current,
-        [target.projectRelativePath]: { fingerprint: target.fingerprint, available: true }
-      }));
+      startTransition(() => {
+        setSourceAvailability((current) => ({
+          ...current,
+          [target.projectRelativePath]: { fingerprint: target.fingerprint, available: true }
+        }));
+      });
       clearCurrentPreviewFailure(target);
       recordTextPreviewCounter('text-preview-source-upload-completed', {
         projectRelativePath: target.projectRelativePath,
@@ -892,16 +1174,15 @@ export function CanvasTextPreviewProvider({
   const recordCaptureStage = useCallback((event: CanvasTextPreviewCaptureStageEvent) => {
     const counter: CanvasPerfCounterName = event.stage === 'capture-ready'
       ? 'text-preview-capture-ready'
-      : event.stage === 'snapshot-built'
-        ? 'text-preview-snapshot-built'
+      : event.stage === 'scene-built'
+        ? 'text-preview-scene-built'
         : 'text-preview-raster-completed';
     recordTextPreviewCounter(counter, {
       projectRelativePath: event.target.projectRelativePath,
       fingerprint: event.target.fingerprint,
       durationMs: event.durationMs,
-      ...(event.snapshotWidth === undefined ? {} : { snapshotWidth: event.snapshotWidth }),
-      ...(event.snapshotHeight === undefined ? {} : { snapshotHeight: event.snapshotHeight }),
-      ...(event.snapshotBytes === undefined ? {} : { snapshotBytes: event.snapshotBytes })
+      ...(event.sceneWidth === undefined ? {} : { sceneWidth: event.sceneWidth }),
+      ...(event.sceneHeight === undefined ? {} : { sceneHeight: event.sceneHeight })
     });
   }, [recordTextPreviewCounter]);
 
@@ -1121,18 +1402,33 @@ export function canvasTextPreviewNextCaptureTarget(input: {
   sourceAvailability: Record<string, CanvasTextPreviewSourceAvailability>;
   uploadingTargetKeys: ReadonlySet<string>;
   failedTargetKeys: ReadonlySet<string>;
+  priorityPath?: string | undefined;
 }): CanvasTextPreviewTarget | undefined {
+  const priorityTarget = input.priorityPath
+    ? input.targets.find((target) => target.projectRelativePath === input.priorityPath)
+    : undefined;
+  if (priorityTarget && canvasTextPreviewTargetNeedsCapture(input, priorityTarget)) {
+    return priorityTarget;
+  }
   for (const target of input.targets) {
-    const availability = input.sourceAvailability[target.projectRelativePath];
-    const key = canvasTextPreviewTargetKey(target);
-    if (availability?.fingerprint === target.fingerprint
-      && !availability.available
-      && !input.uploadingTargetKeys.has(key)
-      && !input.failedTargetKeys.has(key)) {
+    if (canvasTextPreviewTargetNeedsCapture(input, target)) {
       return target;
     }
   }
   return undefined;
+}
+
+function canvasTextPreviewTargetNeedsCapture(input: {
+  sourceAvailability: Record<string, CanvasTextPreviewSourceAvailability>;
+  uploadingTargetKeys: ReadonlySet<string>;
+  failedTargetKeys: ReadonlySet<string>;
+}, target: CanvasTextPreviewTarget): boolean {
+  const availability = input.sourceAvailability[target.projectRelativePath];
+  const key = canvasTextPreviewTargetKey(target);
+  return availability?.fingerprint === target.fingerprint
+    && !availability.available
+    && !input.uploadingTargetKeys.has(key)
+    && !input.failedTargetKeys.has(key);
 }
 
 export function canvasTextPreviewCurrentSourceAvailability(input: {
@@ -1294,6 +1590,32 @@ function clearStaleCanvasTextPreviewErrors(
 
 function canvasTextPreviewTargetsByPath(targets: CanvasTextPreviewTarget[]): Record<string, CanvasTextPreviewTarget> {
   return Object.fromEntries(targets.map((target) => [target.projectRelativePath, target]));
+}
+
+function canvasTextPreviewCandidatesEqual(
+  left: CanvasTextPreviewCandidate,
+  right: CanvasTextPreviewCandidate
+): boolean {
+  return left.canvasId === right.canvasId
+    && left.projectRelativePath === right.projectRelativePath
+    && left.content === right.content
+    && left.language === right.language
+    && left.wordWrap === right.wordWrap
+    && left.contentCssWidth === right.contentCssWidth
+    && left.contentCssHeight === right.contentCssHeight
+    && left.scrollTop === right.scrollTop
+    && left.scrollLeft === right.scrollLeft
+    && left.styleKey === right.styleKey;
+}
+
+function canvasTextPreviewTargetRecordsEqual(
+  left: Record<string, CanvasTextPreviewTarget>,
+  right: Record<string, CanvasTextPreviewTarget>
+): boolean {
+  const leftPaths = Object.keys(left);
+  const rightPaths = Object.keys(right);
+  return leftPaths.length === rightPaths.length
+    && rightPaths.every((path) => left[path] === right[path]);
 }
 
 function canvasTextPreviewSourceTargetForApi(target: CanvasTextPreviewTarget) {

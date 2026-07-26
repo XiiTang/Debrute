@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   AdobeBridgeStateView,
+  CanvasTextAppearance,
   DebruteGlobalSettingsView,
   WorkbenchApiClient,
   WorkbenchEvent,
@@ -52,6 +53,23 @@ interface PendingAdobeClientCommand {
   confirmed: boolean;
 }
 
+interface CanvasTextAppearanceSaveWaiter {
+  resolve(): void;
+  reject(error: unknown): void;
+}
+
+interface CanvasTextAppearanceSaveTask {
+  appearance: CanvasTextAppearance;
+  waiters: CanvasTextAppearanceSaveWaiter[];
+}
+
+interface CanvasTextAppearanceSaveQueue {
+  running: boolean;
+  inFlight?: CanvasTextAppearanceSaveTask & { confirmed: boolean };
+  queued?: CanvasTextAppearanceSaveTask;
+  awaitingEvent?: CanvasTextAppearance;
+}
+
 export function useWorkbenchSettingsController(input: {
   api: WorkbenchApiClient;
   projectId: string | undefined;
@@ -70,6 +88,10 @@ export function useWorkbenchSettingsController(input: {
   const adobeClientCommandTokenRef = useRef(0);
   const pendingAdobeClientCommandsRef = useRef(new Map<string, PendingAdobeClientCommand>());
   const localeRef = useRef<WorkbenchLocale>(locale);
+  const confirmedGlobalSettingsRef = useRef<DebruteGlobalSettingsView | undefined>(undefined);
+  const canvasTextAppearanceSaveQueueRef = useRef<CanvasTextAppearanceSaveQueue>({
+    running: false
+  });
 
   const confirmAdobeClientCommands = useCallback((bridge: AdobeBridgeStateView) => {
     for (const pending of pendingAdobeClientCommandsRef.current.values()) {
@@ -132,8 +154,85 @@ export function useWorkbenchSettingsController(input: {
   }, []);
 
   const applyLoadedGlobalSettings = useCallback((settings: DebruteGlobalSettingsView) => {
-    setGlobalSettings({ status: 'ready', value: applyGlobalSettingsEffects(settings) });
+    confirmedGlobalSettingsRef.current = settings;
+    const queue = canvasTextAppearanceSaveQueueRef.current;
+    delete queue.awaitingEvent;
+    if (queue.inFlight && sameCanvasTextAppearance(
+      queue.inFlight.appearance,
+      settings.canvas.textAppearance
+    )) {
+      queue.inFlight.confirmed = true;
+    }
+    const localAppearance = localCanvasTextAppearance(queue, settings.canvas.textAppearance);
+    const effectiveSettings = localAppearance
+      ? globalSettingsWithCanvasTextAppearance(settings, localAppearance)
+      : settings;
+    setGlobalSettings({ status: 'ready', value: applyGlobalSettingsEffects(effectiveSettings) });
   }, [applyGlobalSettingsEffects]);
+
+  const saveCanvasTextAppearance = useCallback((appearance: CanvasTextAppearance): Promise<void> => {
+    const queue = canvasTextAppearanceSaveQueueRef.current;
+    setGlobalSettings((current) => current.status === 'ready'
+      ? {
+          status: 'ready',
+          value: globalSettingsWithCanvasTextAppearance(current.value, appearance)
+        }
+      : current);
+    const pending = new Promise<void>((resolve, reject) => {
+      const waiter = { resolve, reject };
+      if (queue.queued) {
+        queue.queued.appearance = appearance;
+        queue.queued.waiters.push(waiter);
+      } else {
+        queue.queued = { appearance, waiters: [waiter] };
+      }
+    });
+    if (queue.running) {
+      return pending;
+    }
+    queue.running = true;
+    void (async () => {
+      while (queue.queued) {
+        const task = queue.queued;
+        delete queue.queued;
+        const inFlight = { ...task, confirmed: false };
+        queue.inFlight = inFlight;
+        try {
+          await input.api.globalSettingsSave({
+            canvas: { textAppearance: task.appearance }
+          });
+        } catch (error) {
+          delete queue.inFlight;
+          const queued = canvasTextAppearanceSaveQueueRef.current.queued as
+            | CanvasTextAppearanceSaveTask
+            | undefined;
+          delete queue.queued;
+          delete queue.awaitingEvent;
+          queue.running = false;
+          task.waiters.forEach((waiter) => waiter.reject(error));
+          queued?.waiters.forEach((waiter) => waiter.reject(error));
+          const confirmed = confirmedGlobalSettingsRef.current;
+          if (confirmed) {
+            applyLoadedGlobalSettings(confirmed);
+          }
+          return;
+        }
+        task.waiters.forEach((waiter) => waiter.resolve());
+        delete queue.inFlight;
+        if (!queue.queued && !inFlight.confirmed) {
+          queue.awaitingEvent = task.appearance;
+        }
+      }
+      queue.running = false;
+      if (!queue.awaitingEvent) {
+        const confirmed = confirmedGlobalSettingsRef.current;
+        if (confirmed) {
+          applyLoadedGlobalSettings(confirmed);
+        }
+      }
+    })();
+    return pending;
+  }, [applyLoadedGlobalSettings, input.api]);
 
   useEffect(() => {
     setResolvedTheme(resolveWorkbenchThemePreference(themePreference));
@@ -179,6 +278,10 @@ export function useWorkbenchSettingsController(input: {
     applyProductUpdate: async () => { await input.api.applyProductUpdate(); },
     reloadAdobeBridge,
     saveGlobalSettings: async (saveInput) => {
+      if (saveInput.canvas && Object.keys(saveInput).length === 1) {
+        await saveCanvasTextAppearance(saveInput.canvas.textAppearance);
+        return;
+      }
       await input.api.globalSettingsSave(saveInput);
     },
     revealModelApiKey: async (modelId) => {
@@ -250,6 +353,7 @@ export function useWorkbenchSettingsController(input: {
     input.api,
     input.notify,
     reloadAdobeBridge,
+    saveCanvasTextAppearance,
     shouldSuppressAdobeClientCommandError
   ]);
 
@@ -296,6 +400,44 @@ export function useWorkbenchSettingsController(input: {
     getCurrentI18n,
     applyEvent
   }), [actions, adobeBridge, applyEvent, getCurrentI18n, globalSettings, locale, product, resolvedTheme]);
+}
+
+function globalSettingsWithCanvasTextAppearance(
+  settings: DebruteGlobalSettingsView,
+  appearance: CanvasTextAppearance
+): DebruteGlobalSettingsView {
+  return {
+    ...settings,
+    canvas: { textAppearance: appearance }
+  };
+}
+
+function localCanvasTextAppearance(
+  queue: CanvasTextAppearanceSaveQueue,
+  confirmed: CanvasTextAppearance
+): CanvasTextAppearance | undefined {
+  if (queue.queued) {
+    return queue.queued.appearance;
+  }
+  if (queue.inFlight) {
+    return queue.inFlight.confirmed
+      && !sameCanvasTextAppearance(queue.inFlight.appearance, confirmed)
+      ? undefined
+      : queue.inFlight.appearance;
+  }
+  return queue.awaitingEvent;
+}
+
+function sameCanvasTextAppearance(
+  left: CanvasTextAppearance,
+  right: CanvasTextAppearance
+): boolean {
+  return left.fontId === right.fontId
+    && left.fontSizePx === right.fontSizePx
+    && left.lineHeightRatio === right.lineHeightRatio
+    && left.fontWeight === right.fontWeight
+    && left.letterSpacingPx === right.letterSpacingPx
+    && left.ligatures === right.ligatures;
 }
 
 function errorMessage(error: unknown): string {

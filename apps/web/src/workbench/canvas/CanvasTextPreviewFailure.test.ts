@@ -27,7 +27,7 @@ describe('CanvasTextPreviewFailure', { tags: ['canvas-text'] }, () => {
   it('turns a browser Event into a stable owned-stage message', () => {
     const failure = canvasTextPreviewFailureFromUnknown(
       'raster_failed',
-      { ...fields, snapshotWidth: 420, snapshotHeight: 280, snapshotBytes: 4096 },
+      { ...fields, sceneWidth: 420, sceneHeight: 280 },
       new Event('error')
     );
 

@@ -11,4 +11,8 @@ revealed without another resource request; if only the requested width changed,
 the retained image remains visible while the next width loads. This trades a
 capture and cache pipeline for stable large-Canvas rendering and a handoff that
 neither loses scroll position nor flashes blank or stale content, instead of
-keeping every CodeMirror editor live.
+keeping every CodeMirror editor live. The main thread incrementally extracts
+the DOM-dependent bounded CodeMirror geometry directly into a drawing-command scene, while one
+dedicated Worker loads the exact managed font bytes and performs the non-
+preemptible `OffscreenCanvas` draw and PNG encoding.
+Image, text, and video sources then share one Runtime width-variant service.

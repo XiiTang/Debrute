@@ -104,6 +104,11 @@ import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
 import { I18nProvider, createI18n, type WorkbenchI18n } from './i18n';
 import { useWorkbenchSettingsController } from './settings/useWorkbenchSettingsController';
+import {
+  DEFAULT_CANVAS_TEXT_APPEARANCE,
+  canvasTextRenderProfileForAppearance
+} from './canvas/CanvasFontCatalog.js';
+import { CanvasTextRenderProfileGate } from './canvas/CanvasTextRenderProfileContext.js';
 
 const api = createHttpWorkbenchApiClient();
 const productPlatform: DebruteProductPlatform = __DEBRUTE_PLATFORM__;
@@ -145,6 +150,20 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     setNotifications((current) => [message, ...current].slice(0, 4));
   }, []);
   const settingsController = useWorkbenchSettingsController({ api, projectId: runtimeProjectId, notify });
+  const canvasTextAppearance = settingsController.globalSettings.status === 'ready'
+    ? settingsController.globalSettings.value.canvas.textAppearance
+    : DEFAULT_CANVAS_TEXT_APPEARANCE;
+  const canvasTextRenderProfile = useMemo(
+    () => canvasTextRenderProfileForAppearance(canvasTextAppearance),
+    [
+      canvasTextAppearance.fontId,
+      canvasTextAppearance.fontSizePx,
+      canvasTextAppearance.fontWeight,
+      canvasTextAppearance.letterSpacingPx,
+      canvasTextAppearance.ligatures,
+      canvasTextAppearance.lineHeightRatio
+    ]
+  );
   const i18n = useMemo(() => createI18n(settingsController.locale), [settingsController.locale]);
   const announceProjectGeneration = useCallback((input: {
     generation: number;
@@ -229,10 +248,10 @@ function WorkbenchRuntimeApp({ initialRoute }: { initialRoute: Exclude<DebruteWo
     />
   );
   return (
-    <>
+    <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
       {surface}
       <NotificationStack notifications={notifications} />
-    </>
+    </CanvasTextRenderProfileGate>
   );
 }
 

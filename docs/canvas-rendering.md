@@ -243,8 +243,13 @@ SVG and SVGZ remain on the separate `resvg` path. Their parsing, external and
 embedded resource, font, cache-identity, and detailed resource-limit contracts
 belong to a dedicated design outside the Raster Preview Engine contract.
 
-Image, text, and video variant rendering share one global Raster Preview Pool
-with capacity three. Feedback Artifact rendering may retain its own latest-only
+Image, text, and video width variants are resolved by one Runtime raster-variant
+service and share one global Raster Preview Pool with capacity three. The
+service owns width validation, per-cache-key exclusion, evaluation of the
+caller-selected output policy, equal-width direct-source return, Raster Preview
+Engine path identity, atomic publication, and response-file creation. Media-
+specific callers own source production, source-current validation, and their
+output policy. Feedback Artifact rendering may retain its own latest-only
 or serialized scheduling, but it consumes the same global slot while performing
 raster work. There are no per-media raster pools, dynamic weights, machine
 memory probing, or user-configurable concurrency. Metadata reads and external
@@ -313,14 +318,14 @@ publication protects completed cache paths, and the next structural cache
 reconciliation removes abandoned temporary outputs after a later explicit
 Runtime start.
 
-Every cached width variant produced by the shared engine uses one code-owned
+Every cached width variant produced by the shared variant service uses one code-owned
 `Raster Preview Engine Version`. Image, text, and video variants use the same
 value. A change that can alter the engine's output pixels, encoding, or format
 increments this version in the same change; a Debrute product version does not
 increment it automatically. `Version` identifies a code contract, while
 `revision` remains reserved for Project, file, and Operation state.
 
-The shared engine does not create an equal-width variant. When a requested
+The shared variant service does not create an equal-width variant. When a requested
 width reaches a browser-displayable source's intrinsic width, its caller serves
 that exact revision-bound source: a Project file for an image, the canonical
 browser-captured PNG for text, or the selected poster/extracted frame for video.
@@ -355,13 +360,13 @@ Preview caches use structural reconciliation rather than a byte quota, LRU,
 TTL, or background cleanup timer. Image caches retain requested quantized-width
 variants only for the current visible source and file revision under the exact
 current engine path.
-Text caches retain the current source identity for each Canvas and Project path;
-video caches retain the current video revision and the source identity implied
-by its persisted Playback Position or initial poster. Source-identity changes
-remove superseded text fingerprints and video frame identities. Current-
-identity width variants remain reusable across zoom changes, displays, and
-sessions. This policy does not add a user-facing cache setting or cleanup
-command.
+Text caches resolve only the exact requested source identity for each Canvas and
+Project path; superseded fingerprint directories do not participate in current
+lookup. Video caches retain the current video revision and the source identity
+implied by its persisted Playback Position or initial poster. Video source-
+identity changes remove superseded frame identities. Current-identity width
+variants remain reusable across zoom changes, displays, and sessions. This
+policy does not add a user-facing cache setting or cleanup command.
 
 ## Performance Diagnostics
 

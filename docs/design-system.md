@@ -77,6 +77,42 @@ Operating-system, browser, and Photoshop host chrome remain host-owned. UXP
 responds to Photoshop appearance and maps Debrute panel content to the
 corresponding light or dark product theme.
 
+## Theme Ownership
+
+**Workbench Theme** is the unified front-end visual system applied across every
+Project and Workbench window. Changing Projects does not select, persist, or
+override it; `Project Theme` is not a product term. It owns semantic colors,
+surface treatment, shared-control presentation, the Canvas editor palette, and
+syntax styling. Canvas Text Appearance remains a separate Canvas-owned input for
+the typography of Project text, and the rendered editor and its derived preview
+compose both inputs without either owning the other.
+
+Canvas Text Appearance supplies the base font weight. Workbench Theme syntax
+rules may override font weight or font style for individual tokens, but they do
+not override Canvas Font, font size, line height, letter spacing, or ligatures.
+Token-specific weight requests follow the same managed-face matching contract
+as the base weight. Canvas text rendering disables font synthesis: when a Theme
+requests a weight or style for which the selected Canvas Font has no real
+managed face, it uses the closest real face and never fabricates bold or
+oblique outlines. The initial normal-face-only catalog may therefore render an
+italic token upright.
+
+The current product provides one Workbench Theme with light and dark modes. The
+`system`, `dark`, and `light` preference selects the resolved mode rather than a
+theme identity. Theme presets, a theme schema, theme import, and theme-selection
+UI are outside the current product contract.
+
+Settings presents these composed inputs on a dedicated **Appearance** page in
+the general navigation group. Its **Workbench Theme** section owns the existing
+mode preference, while its **Canvas Text Appearance** section owns the global
+font, font size, line height, font weight, letter spacing, and ligature controls.
+Font selection is a closed catalog control and never accepts an arbitrary
+family name, path, or user-entered identifier. It lists the five catalog display
+names without a specimen, per-option font rendering, editable search, or
+temporary preview. Language, default-frontend, product-information, and update
+controls remain on the separate General page. Valid control changes update the
+real Canvas text surfaces immediately.
+
 ## Theme Language
 
 Light mode uses cream and pale peach as its broad paper field, with charcoal
@@ -211,6 +247,16 @@ cannot load packaged `@font-face` resources: UXP uses the Photoshop host font
 and carries the brand through palette, geometry, and iconography instead of
 pretending to provide cross-host metric parity.
 
+Canvas text editors and their derived previews resolve Canvas Text Appearance
+and Workbench Theme into an exact Canvas text render profile rather than
+depending on the global technical-font family name. Canvas Font selection
+chooses the managed faces; the profile digest-verifies and registers their exact
+assets, applies the complete Canvas typography and editor geometry, and supplies
+the same faces to preview raster capture. Changing a resolved typography or
+syntax-style input creates a new preview identity. Existing derived previews
+therefore become invalid and ordinary Canvas maintenance generates replacements
+as needed, without an appearance-specific rebuild sweep.
+
 Display type does not enter dense controls or technical content. At 15px it is
 accepted only after bilingual 100% and 125% scale review proves that Chinese and
 Latin labels remain clear without changing control height or wrapping. If a
@@ -325,7 +371,10 @@ may use a local control background.
 close placement, continuous background, and body overflow. The shell renders
 each panel name once.
 
-Settings uses grouped General, Models, and Integrations navigation, one title per selected page, explicit loading/error/ready content, ordinary sections for General settings, and cards only for independent repeated records.
+Settings uses General, Appearance, Models, and Integrations navigation, one
+title per selected page, explicit loading/error/ready content, ordinary
+sections for General and Appearance settings, and cards only for independent
+repeated records.
 
 Explorer owns tree geometry and editing. Inspector owns selection properties,
 metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and

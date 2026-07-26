@@ -3,12 +3,13 @@
 mod cache;
 mod libvips_adapter;
 pub(crate) mod raster;
+mod raster_variants;
 mod video;
 
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read as _, Seek as _},
+    io::Read as _,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -33,11 +34,14 @@ use super::{
     project_file_revision_from_metadata, resolve_no_symlink_existing_project_path,
 };
 use cache::{
-    KeyedLocks, Semaphore, atomic_write, project_relative_path_cache_key,
-    project_revision_cache_key, safe_cache_segment,
+    Semaphore, atomic_write, project_relative_path_cache_key, project_revision_cache_key,
+    safe_cache_segment,
 };
 use raster::RasterPreviewEngine;
 pub use raster::initialize_raster_preview_engine;
+use raster_variants::{
+    RasterPreviewVariantOutputPolicy, RasterPreviewVariantRequest, RasterPreviewVariantService,
+};
 
 pub(crate) const RASTER_PREVIEW_ENGINE_VERSION: u32 = 1;
 const MAX_TEXT_PREVIEW_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
@@ -100,10 +104,8 @@ pub struct CanvasTextPreviewSourceView {
 }
 
 pub struct ProjectPreviewService {
-    raster: RasterPreviewEngine,
+    raster_variants: Arc<RasterPreviewVariantService>,
     raster_pool: Arc<Semaphore>,
-    image_locks: KeyedLocks,
-    text_locks: KeyedLocks,
     video: CanvasVideoPreviewService,
 }
 
@@ -129,7 +131,7 @@ impl ProjectNodeAdapter for NativeProjectNodeAdapter {
                 let relative = previewable_image_path(&node.project_relative_path)?;
                 let source = resolve_no_symlink_existing_project_path(project_root, &relative)?;
                 let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
-                let metadata = self.previews.raster.metadata_file(
+                let metadata = self.previews.raster_variants.metadata_file(
                     &source,
                     &mut file,
                     &PreviewCancellation::default(),
@@ -189,12 +191,15 @@ impl ProjectPreviewService {
     #[must_use]
     pub fn new(workers: &RuntimeWorkerServices, media_tools: MediaToolPaths) -> Self {
         let raster_pool = Arc::new(Semaphore::new(3));
+        let raster_variants = Arc::new(RasterPreviewVariantService::new(Arc::clone(&raster_pool)));
         Self {
-            raster: RasterPreviewEngine::new(Arc::clone(&raster_pool), 4),
+            raster_variants: Arc::clone(&raster_variants),
             raster_pool: Arc::clone(&raster_pool),
-            image_locks: KeyedLocks::default(),
-            text_locks: KeyedLocks::default(),
-            video: CanvasVideoPreviewService::new(workers.supervisor(), media_tools, raster_pool),
+            video: CanvasVideoPreviewService::new(
+                workers.supervisor(),
+                media_tools,
+                raster_variants,
+            ),
         }
     }
 
@@ -224,9 +229,11 @@ impl ProjectPreviewService {
         };
         let source = resolve_no_symlink_existing_project_path(project_root, &relative)?;
         let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
-        let metadata =
-            self.raster
-                .metadata_file(&source, &mut file, &PreviewCancellation::default())?;
+        let metadata = self.raster_variants.metadata_file(
+            &source,
+            &mut file,
+            &PreviewCancellation::default(),
+        )?;
         Ok(CanvasImagePreviewSourceInfo {
             previewable: true,
             source_width: Some(metadata.width),
@@ -257,7 +264,7 @@ impl ProjectPreviewService {
             };
             let path = resolve_no_symlink_existing_project_path(project_root, &relative)?;
             if self
-                .raster
+                .raster_variants
                 .metadata_file(&path, &mut file, &PreviewCancellation::default())
                 .is_err()
             {
@@ -348,73 +355,32 @@ impl ProjectPreviewService {
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
-        validate_preview_width(width)?;
         let relative = previewable_image_path(project_relative_path)?;
-        let key = format!(
-            "{}\0{relative}\0{revision}\0{width}",
-            project_root.display()
-        );
-        let _lock = self.image_locks.acquire(&key, cancellation)?;
-        cancellation.check()?;
-        let mut source = open_revisioned_source(project_root, &relative, revision)?;
-        let base = format!(
-            ".debrute/cache/canvas-image-previews/{}/{}/raster-engine-v{RASTER_PREVIEW_ENGINE_VERSION}/preview-w{width}",
+        let source = open_revisioned_source(project_root, &relative, revision)?;
+        let cache_directory = format!(
+            ".debrute/cache/canvas-image-previews/{}/{}",
             project_relative_path_cache_key(&relative)?,
             project_revision_cache_key(revision)?
         );
-        let metadata = self
-            .raster
-            .metadata_file(&source.path, &mut source.file, cancellation)?;
-        if width > metadata.width {
-            return Err(ProjectError::service(
-                "canvas_preview_invalid_width",
-                format!("Canvas preview width exceeds source width: {relative}"),
-            ));
-        }
-        if width == metadata.width
-            && let Some(content_type) = direct_image_content_type(&relative)
-        {
-            verify_source_revision(&source, revision)?;
-            source.file.rewind()?;
-            return Ok(CanvasPreviewFile {
-                absolute_path: source.path,
-                file: source.file,
-                content_type,
-            });
-        }
-        if let Some(cached) = existing_preview(project_root, &base, &["jpg", "png"])? {
-            verify_source_revision(&source, revision)?;
-            return Ok(cached);
-        }
-        let (extension, format, content_type) = if metadata.has_alpha {
-            ("png", RasterOutputFormat::Png, "image/png")
-        } else {
-            ("jpg", RasterOutputFormat::Jpeg, "image/jpeg")
-        };
-        let project_path = format!("{base}.{extension}");
         let source_root = source.project_root.clone();
         let source_relative = source.relative.clone();
         let source_identity = source.identity;
-        ProjectCapabilityFs::open(project_root)?.atomic_write_stream_checked(
-            &project_path,
-            |output| {
-                self.raster.render_variant_to_file(
-                    &source.path,
-                    &mut source.file,
-                    width,
-                    format,
-                    output,
-                    cancellation,
-                )
+        self.raster_variants.resolve(
+            project_root,
+            RasterPreviewVariantRequest {
+                source_path: source.path,
+                source_file: source.file,
+                source_content_type: direct_image_content_type(&relative),
+                cache_directory,
+                width,
+                output_policy: RasterPreviewVariantOutputPolicy::MatchSourceAlpha,
+                invalid_width_message: format!(
+                    "Canvas preview width exceeds source width: {relative}"
+                ),
             },
+            cancellation,
             || verify_source_snapshot(&source_root, &source_relative, &source_identity, revision),
-        )?;
-        let file = open_no_symlink_existing_project_file(project_root, &project_path)?;
-        Ok(CanvasPreviewFile {
-            absolute_path: resolve_no_symlink_existing_project_path(project_root, &project_path)?,
-            file,
-            content_type,
-        })
+        )
     }
 
     /// Saves one bounded browser-captured text preview source.
@@ -484,7 +450,6 @@ impl ProjectPreviewService {
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
-        validate_preview_width(width)?;
         let source_path = text_source_project_path(canvas_id, target)?;
         let source = existing_file(project_root, &source_path)?.ok_or_else(|| {
             ProjectError::service_with_fields(
@@ -503,59 +468,25 @@ impl ProjectPreviewService {
                 ],
             )
         })?;
-        let mut file = open_no_symlink_existing_project_file(project_root, &source_path)?;
+        let file = open_no_symlink_existing_project_file(project_root, &source_path)?;
         let source_identity = debrute_native_fs::file_identity(&file)?;
-        let metadata = self
-            .raster
-            .metadata_file(&source, &mut file, cancellation)?;
-        if width > metadata.width {
-            return Err(ProjectError::service(
-                "canvas_preview_invalid_width",
-                format!(
+        self.raster_variants.resolve(
+            project_root,
+            RasterPreviewVariantRequest {
+                source_path: source,
+                source_file: file,
+                source_content_type: Some("image/png"),
+                cache_directory: text_preview_base_project_path(canvas_id, target)?,
+                width,
+                output_policy: RasterPreviewVariantOutputPolicy::Png,
+                invalid_width_message: format!(
                     "Canvas text preview width exceeds source width: {}",
                     target.project_relative_path
                 ),
-            ));
-        }
-        if width == metadata.width {
-            verify_text_preview_source(project_root, &source_path, &source_identity)?;
-            return Ok(CanvasPreviewFile {
-                absolute_path: source,
-                file,
-                content_type: "image/png",
-            });
-        }
-        let variant_path = text_variant_project_path(canvas_id, target, width)?;
-        let key = format!("{}\0{variant_path}", project_root.display());
-        let _lock = self.text_locks.acquire(&key, cancellation)?;
-        if let Some((path, file)) = existing_open_file(project_root, &variant_path)? {
-            verify_text_preview_source(project_root, &source_path, &source_identity)?;
-            return Ok(CanvasPreviewFile {
-                absolute_path: path,
-                file,
-                content_type: "image/png",
-            });
-        }
-        ProjectCapabilityFs::open(project_root)?.atomic_write_stream_checked(
-            &variant_path,
-            |output| {
-                self.raster.render_variant_to_file(
-                    &source,
-                    &mut file,
-                    width,
-                    RasterOutputFormat::Png,
-                    output,
-                    cancellation,
-                )
             },
+            cancellation,
             || verify_text_preview_source(project_root, &source_path, &source_identity),
-        )?;
-        let file = open_no_symlink_existing_project_file(project_root, &variant_path)?;
-        Ok(CanvasPreviewFile {
-            absolute_path: resolve_no_symlink_existing_project_path(project_root, &variant_path)?,
-            file,
-            content_type: "image/png",
-        })
+        )
     }
 
     #[must_use]
@@ -625,27 +556,6 @@ fn open_revisioned_source(
         file,
         identity,
     })
-}
-
-fn verify_source_revision(
-    source: &RevisionedSource,
-    expected_revision: &str,
-) -> Result<(), ProjectError> {
-    let handle_revision = project_file_revision_from_metadata(&source.file.metadata()?)?;
-    let current = open_no_symlink_existing_project_file(&source.project_root, &source.relative)?;
-    let current_revision = project_file_revision_from_metadata(&current.metadata()?)?;
-    let current_identity = debrute_native_fs::file_identity(&current)?;
-    if handle_revision == expected_revision
-        && current_revision == expected_revision
-        && current_identity == source.identity
-    {
-        Ok(())
-    } else {
-        Err(ProjectError::service(
-            "canvas_preview_revision_mismatch",
-            "Canvas preview source changed during rendering.",
-        ))
-    }
 }
 
 fn verify_source_snapshot(
@@ -718,35 +628,12 @@ fn direct_image_content_type(path: &str) -> Option<&'static str> {
     }
 }
 
-fn validate_preview_width(width: u32) -> Result<(), ProjectError> {
-    if width == 0 {
-        Err(ProjectError::service(
-            "canvas_preview_invalid_width",
-            "Canvas preview width must be positive.",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 fn text_source_project_path(
     canvas_id: &str,
     target: &CanvasTextPreviewSourceTarget,
 ) -> Result<String, ProjectError> {
     Ok(format!(
         "{}/source.png",
-        text_preview_base_project_path(canvas_id, target)?
-    ))
-}
-
-fn text_variant_project_path(
-    canvas_id: &str,
-    target: &CanvasTextPreviewSourceTarget,
-    width: u32,
-) -> Result<String, ProjectError> {
-    validate_preview_width(width)?;
-    Ok(format!(
-        "{}/raster-engine-v{RASTER_PREVIEW_ENGINE_VERSION}/preview-w{width}.png",
         text_preview_base_project_path(canvas_id, target)?
     ))
 }
@@ -774,28 +661,6 @@ fn is_canvas_id(value: &str) -> bool {
         && value.bytes().enumerate().all(|(index, byte)| {
             byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'_' | b'.' | b'-'))
         })
-}
-
-fn existing_preview(
-    project_root: &Path,
-    base: &str,
-    extensions: &[&str],
-) -> Result<Option<CanvasPreviewFile>, ProjectError> {
-    for extension in extensions {
-        let project_path = format!("{base}.{extension}");
-        if let Some((path, file)) = existing_open_file(project_root, &project_path)? {
-            return Ok(Some(CanvasPreviewFile {
-                absolute_path: path,
-                file,
-                content_type: if *extension == "png" {
-                    "image/png"
-                } else {
-                    "image/jpeg"
-                },
-            }));
-        }
-    }
-    Ok(None)
 }
 
 fn existing_open_file(

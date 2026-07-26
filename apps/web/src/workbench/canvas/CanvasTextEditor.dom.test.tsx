@@ -1,97 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { CanvasTextEditor } from './CanvasTextEditor';
 import { canvasTextEditorApplyFocusRequest } from './CanvasTextEditorRuntime';
+import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
+
+const TEST_CANVAS_TEXT_RENDER_PROFILE = {
+  ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
+  prepare: async () => ({ identity: 'test-font', faces: [] })
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
-  it('renders the final CodeMirror editor root marker', () => {
-    const html = renderToStaticMarkup(
-      <CanvasTextEditor
-        value="# Notes"
-        language="markdown"
-        wordWrap={false}
-        onChange={() => undefined}
-        onSave={() => undefined}
-        onToggleWordWrap={() => undefined}
-      />
-    );
-
-    expect(html).toContain('data-canvas-text-editor="true"');
-    expect(html).toContain('data-editor-engine="codemirror"');
-    expect(html).toContain('canvas-text-editor');
-  });
-
-  it('marks the live editor as edit mode', () => {
-    const html = renderToStaticMarkup(
-      <CanvasTextEditor
-        value="# Notes"
-        language="markdown"
-        wordWrap={false}
-        onChange={() => undefined}
-        onSave={() => undefined}
-        onToggleWordWrap={() => undefined}
-      />
-    );
-
-    expect(html).toContain('data-editor-mode="edit"');
-  });
-
-  it('accepts visible state without changing the editor mode marker', () => {
-    const html = renderToStaticMarkup(
-      <CanvasTextEditor
-        value="# Notes"
-        language="markdown"
-        wordWrap={false}
-        visible={false}
-        onChange={() => undefined}
-        onSave={() => undefined}
-        onToggleWordWrap={() => undefined}
-      />
-    );
-
-    expect(html).toContain('data-editor-mode="edit"');
-    expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
-  });
-
-  it('uses shared text surface CSS variables', () => {
-    const html = renderToStaticMarkup(
-      <CanvasTextEditor
-        value="# Notes"
-        language="markdown"
-        wordWrap={false}
-        onChange={() => undefined}
-        onSave={() => undefined}
-        onToggleWordWrap={() => undefined}
-      />
-    );
-
-    expect(html).toContain('--canvas-text-editor-line-height:16.8px');
-    expect(html).toContain('--canvas-text-editor-line-padding-inline:8px');
-  });
-
-  it('exposes the word wrap state for styling and diagnostics', () => {
-    const html = renderToStaticMarkup(
-      <CanvasTextEditor
-        value="# Notes"
-        language="markdown"
-        wordWrap
-        onChange={() => undefined}
-        onSave={() => undefined}
-        onToggleWordWrap={() => undefined}
-      />
-    );
-
-    expect(html).toContain('data-word-wrap="on"');
-  });
-
   it('applies a focus request after the first-click focus sequence', async () => {
     const frameCallbacks: Array<FrameRequestCallback | undefined> = [];
     const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
@@ -109,7 +35,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
 
     try {
       await act(async () => {
-        root.render(
+        root.render(withRenderProfile(
           <CanvasTextEditor
             value="# Notes"
             language="markdown"
@@ -120,7 +46,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
             onSave={() => undefined}
             onToggleWordWrap={() => undefined}
           />
-        );
+        ));
       });
 
       const content = container.querySelector('.cm-content');
@@ -173,7 +99,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
 
     try {
       await act(async () => {
-        root.render(
+        root.render(withRenderProfile(
           <CanvasTextEditor
             value="# Notes"
             language="markdown"
@@ -182,7 +108,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
             onSave={() => undefined}
             onToggleWordWrap={() => undefined}
           />
-        );
+        ));
       });
 
       const editorHost = container.querySelector<HTMLElement>('.canvas-text-editor');
@@ -197,7 +123,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
       expect(document.activeElement).toBe(content);
 
       await act(async () => {
-        root.render(
+        root.render(withRenderProfile(
           <CanvasTextEditor
             value="# Notes"
             language="markdown"
@@ -207,7 +133,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
             onSave={() => undefined}
             onToggleWordWrap={() => undefined}
           />
-        );
+        ));
       });
 
       expect(editorHost?.dataset.editorMode).toBe('handoff');
@@ -236,7 +162,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
 
     try {
       await act(async () => {
-        root.render(
+        root.render(withRenderProfile(
           <CanvasTextEditor
             value="# Notes"
             language="markdown"
@@ -249,7 +175,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
             onSave={() => undefined}
             onToggleWordWrap={() => undefined}
           />
-        );
+        ));
       });
 
       const scroller = container.querySelector<HTMLElement>('.cm-scroller');
@@ -294,7 +220,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
 
     try {
       await act(async () => {
-        root.render(
+        root.render(withRenderProfile(
           <React.StrictMode>
             <CanvasTextEditor
               value="# Notes"
@@ -307,7 +233,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
               onToggleWordWrap={() => undefined}
             />
           </React.StrictMode>
-        );
+        ));
       });
 
       expect(focus).not.toHaveBeenCalled();
@@ -335,7 +261,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
 
     try {
       await act(async () => {
-        root.render(
+        root.render(withRenderProfile(
           <CanvasTextEditor
             value="# Notes"
             language="markdown"
@@ -347,7 +273,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
             onToggleWordWrap={() => undefined}
             onScrollPositionCommit={onScrollPositionCommit}
           />
-        );
+        ));
       });
 
       const scroller = container.querySelector<HTMLElement>('.cm-scroller');
@@ -395,7 +321,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
 
     try {
       await act(async () => {
-        root.render(
+        root.render(withRenderProfile(
           <CanvasTextEditor
             value="# Notes"
             language="markdown"
@@ -405,7 +331,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
             onToggleWordWrap={() => undefined}
             onScrollPositionCommit={onScrollPositionCommit}
           />
-        );
+        ));
       });
 
       const scroller = container.querySelector<HTMLElement>('.cm-scroller');
@@ -470,7 +396,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
 
     try {
       await act(async () => {
-        root.render(<Harness active />);
+        root.render(withRenderProfile(<Harness active />));
       });
 
       const scroller = container.querySelector<HTMLElement>('.cm-scroller');
@@ -485,7 +411,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
       });
 
       await act(async () => {
-        root.render(<Harness active={false} />);
+        root.render(withRenderProfile(<Harness active={false} />));
       });
 
       expect(events).toEqual([
@@ -501,6 +427,13 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
   });
 });
 
+function withRenderProfile(children: React.ReactNode): React.ReactElement {
+  return (
+    <CanvasTextRenderProfileGate profile={TEST_CANVAS_TEXT_RENDER_PROFILE} pending={null}>
+      {children}
+    </CanvasTextRenderProfileGate>
+  );
+}
 
 function installAnimationFrameQueue(frameCallbacks: Array<FrameRequestCallback | undefined>): () => void {
   const originalRequestAnimationFrame = window.requestAnimationFrame;

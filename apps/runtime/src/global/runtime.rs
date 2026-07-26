@@ -18,23 +18,24 @@ use super::{
 
 pub type GlobalRuntimeObserver = Arc<dyn Fn(GlobalRuntimeEvent) + Send + Sync>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebruteGlobalSettingsView {
     pub workbench: WorkbenchSettings,
+    pub canvas: super::store::CanvasSettings,
     pub chrome: ChromeSettings,
     pub models: ModelSettingsView,
     pub integrations: IntegrationSettingsView,
     pub adobe_bridge: AdobeBridgeSettings,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GlobalRuntimeEvent {
     pub revision: u64,
     pub change: GlobalRuntimeChange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GlobalRuntimeChange {
     GlobalSettingsChanged(DebruteGlobalSettingsView),
     RecentProjectsChanged(Vec<RecentProjectEntry>),
@@ -381,6 +382,7 @@ fn complete_view(
 ) -> DebruteGlobalSettingsView {
     DebruteGlobalSettingsView {
         workbench: projection.workbench,
+        canvas: projection.canvas,
         chrome: projection.chrome,
         models: projection.models,
         integrations,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CANVAS_TEXT_SURFACE_METRICS } from './CanvasTextSurface';
+import { createCanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import {
+  DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
+  DEFAULT_CANVAS_TEXT_RENDER_PROFILE_DEFINITION
+} from './DefaultCanvasTextRenderProfile.js';
 import {
   CANVAS_TEXT_PREVIEW_STYLE_CSS_VARIABLES,
   canvasTextPreviewStyleKey,
@@ -10,6 +14,7 @@ import {
 describe('CanvasTextPreviewStyleKey', { tags: ['canvas-text'] }, () => {
   it('hashes the same effective style snapshot to the same key', async () => {
     const snapshot = canvasTextPreviewStyleSnapshot({
+      renderProfile: DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
       cssVariables: textPreviewCssVariables({
         '--db-text': '#ffffff',
         '--db-text-muted': 'rgb(255 255 255 / 72%)'
@@ -21,12 +26,14 @@ describe('CanvasTextPreviewStyleKey', { tags: ['canvas-text'] }, () => {
 
   it('changes when an effective text preview style value changes', async () => {
     const first = await canvasTextPreviewStyleKey(canvasTextPreviewStyleSnapshot({
+      renderProfile: DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
       cssVariables: textPreviewCssVariables({
         '--db-text': '#ffffff',
         '--db-text-muted': 'rgb(255 255 255 / 72%)'
       })
     }));
     const second = await canvasTextPreviewStyleKey(canvasTextPreviewStyleSnapshot({
+      renderProfile: DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
       cssVariables: textPreviewCssVariables({
         '--db-text': '#111827',
         '--db-text-muted': 'rgb(17 24 39 / 70%)'
@@ -40,6 +47,7 @@ describe('CanvasTextPreviewStyleKey', { tags: ['canvas-text'] }, () => {
 
   it('does not include broader theme or project style labels', () => {
     const snapshot = canvasTextPreviewStyleSnapshot({
+      renderProfile: DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
       cssVariables: textPreviewCssVariables({
         '--db-text': '#ffffff',
         '--db-text-muted': 'rgb(255 255 255 / 72%)'
@@ -48,7 +56,32 @@ describe('CanvasTextPreviewStyleKey', { tags: ['canvas-text'] }, () => {
 
     expect(JSON.stringify(snapshot)).not.toContain('theme');
     expect(JSON.stringify(snapshot)).not.toContain('projectStyle');
-    expect(snapshot.textSurfaceMetrics).toEqual(CANVAS_TEXT_SURFACE_METRICS);
+    expect(snapshot.renderProfileIdentity).toBe(DEFAULT_CANVAS_TEXT_RENDER_PROFILE.identity);
+  });
+
+  it('changes when any resolved text render profile setting changes', async () => {
+    const alternate = createCanvasTextRenderProfile({
+      ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE_DEFINITION,
+      typography: {
+        ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE_DEFINITION.typography,
+        letterSpacingPx: 2
+      }
+    });
+    const cssVariables = textPreviewCssVariables({
+      '--db-text': '#ffffff',
+      '--db-text-muted': 'rgb(255 255 255 / 72%)'
+    });
+
+    const first = await canvasTextPreviewStyleKey(canvasTextPreviewStyleSnapshot({
+      renderProfile: DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
+      cssVariables
+    }));
+    const second = await canvasTextPreviewStyleKey(canvasTextPreviewStyleSnapshot({
+      renderProfile: alternate,
+      cssVariables
+    }));
+
+    expect(first).not.toBe(second);
   });
 
   it('reads required CSS variables from the document element', () => {
@@ -58,7 +91,9 @@ describe('CanvasTextPreviewStyleKey', { tags: ['canvas-text'] }, () => {
     });
 
     try {
-      expect(canvasTextPreviewStyleSnapshotForDocument().cssVariables).toEqual(textPreviewCssVariables({
+      expect(canvasTextPreviewStyleSnapshotForDocument(
+        DEFAULT_CANVAS_TEXT_RENDER_PROFILE
+      ).cssVariables).toEqual(textPreviewCssVariables({
         '--db-text': '#ffffff',
         '--db-text-muted': 'rgb(255 255 255 / 72%)'
       }));
@@ -74,7 +109,9 @@ describe('CanvasTextPreviewStyleKey', { tags: ['canvas-text'] }, () => {
     });
 
     try {
-      expect(() => canvasTextPreviewStyleSnapshotForDocument()).toThrow(
+      expect(() => canvasTextPreviewStyleSnapshotForDocument(
+        DEFAULT_CANVAS_TEXT_RENDER_PROFILE
+      )).toThrow(
         'Canvas text preview style variable is required: --db-text-muted'
       );
     } finally {

@@ -29,6 +29,19 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     assert_eq!(initial.workbench.locale, "en");
     assert_eq!(initial.workbench.theme_preference, "system");
     assert_eq!(initial.workbench.default_frontend, DefaultFrontend::Desktop);
+    assert_eq!(
+        serde_json::to_value(&initial.canvas).expect("Canvas settings should serialize"),
+        json!({
+            "textAppearance": {
+                "fontId": "noto-sans-mono-cjk-sc",
+                "fontSizePx": 12.0,
+                "lineHeightRatio": 1.4,
+                "fontWeight": 400,
+                "letterSpacingPx": 0.0,
+                "ligatures": true
+            }
+        })
+    );
     assert!(initial.chrome.recent_projects.is_empty());
     assert!(initial.adobe_bridge.enabled);
     assert_eq!(initial.models.image.len(), 13);
@@ -62,6 +75,80 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     );
 
     fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
+fn canvas_text_appearance_is_one_complete_validated_global_setting() {
+    let home = temporary_home("canvas-text-appearance");
+    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let store = GlobalConfigStore::new(&home);
+
+    let result = store
+        .patch(
+            &json!({
+                "canvas": {
+                    "textAppearance": {
+                        "fontId": "jetbrains-mono",
+                        "fontSizePx": 15.5,
+                        "lineHeightRatio": 1.35,
+                        "fontWeight": 600,
+                        "letterSpacingPx": -0.2,
+                        "ligatures": false
+                    }
+                }
+            }),
+            &catalog,
+        )
+        .expect("complete Canvas text appearance should persist");
+
+    assert_eq!(
+        serde_json::to_value(&result.view.canvas).expect("Canvas settings should serialize"),
+        json!({
+            "textAppearance": {
+                "fontId": "jetbrains-mono",
+                "fontSizePx": 15.5,
+                "lineHeightRatio": 1.35,
+                "fontWeight": 600,
+                "letterSpacingPx": -0.2,
+                "ligatures": false
+            }
+        })
+    );
+
+    for invalid in [
+        json!({ "canvas": { "textAppearance": { "fontId": "lilex" } } }),
+        canvas_text_appearance_patch_with("fontId", json!("system-font")),
+        canvas_text_appearance_patch_with("fontSizePx", json!(5.5)),
+        canvas_text_appearance_patch_with("fontSizePx", json!(12.25)),
+        canvas_text_appearance_patch_with("lineHeightRatio", json!(1.234)),
+        canvas_text_appearance_patch_with("fontWeight", json!(901)),
+        canvas_text_appearance_patch_with("letterSpacingPx", json!(0.15)),
+        canvas_text_appearance_patch_with("unexpectedField", json!(true)),
+    ] {
+        assert!(matches!(
+            store.patch(&invalid, &catalog),
+            Err(GlobalSettingsError::Validation(_))
+        ));
+    }
+
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+fn canvas_text_appearance_patch_with(field: &str, value: serde_json::Value) -> serde_json::Value {
+    let mut patch = json!({
+        "canvas": {
+            "textAppearance": {
+                "fontId": "lilex",
+                "fontSizePx": 12.0,
+                "lineHeightRatio": 1.4,
+                "fontWeight": 400,
+                "letterSpacingPx": 0.0,
+                "ligatures": true
+            }
+        }
+    });
+    patch["canvas"]["textAppearance"][field] = value;
+    patch
 }
 
 #[test]
@@ -277,6 +364,23 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
         serde_json::to_string_pretty(&settings).expect("settings should serialize"),
     )
     .expect("invalid settings fixture should write");
+    assert!(matches!(
+        store.read_view(&catalog),
+        Err(GlobalSettingsError::Json(_))
+    ));
+
+    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
+    settings
+        .as_object_mut()
+        .expect("settings should be an object")
+        .remove("canvas");
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
+    )
+    .expect("obsolete settings fixture should write");
     assert!(matches!(
         store.read_view(&catalog),
         Err(GlobalSettingsError::Json(_))

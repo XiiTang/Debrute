@@ -11,10 +11,12 @@ import {
   type CanvasTextPreviewFailureFields
 } from './CanvasTextPreviewFailure';
 import {
-  createCanvasTextPreviewSnapshotBuild,
-  type CanvasTextPreviewSnapshot,
-  type CanvasTextPreviewSnapshotBuild
-} from './CanvasTextPreviewSnapshot';
+  createCanvasTextPreviewSceneBuild,
+  type CanvasTextPreviewBuiltScene,
+  type CanvasTextPreviewSceneBuild,
+} from './CanvasTextPreviewScene';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
 
 const CANVAS_TEXT_PREVIEW_CAPTURE_SLICE_MS = 16;
 const CANVAS_TEXT_PREVIEW_LAYOUT_FRAME_LIMIT = 30;
@@ -22,16 +24,15 @@ const CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
 
 export type CanvasTextPreviewCaptureStage =
   | 'capture-ready'
-  | 'snapshot-built'
+  | 'scene-built'
   | 'raster-completed';
 
 export interface CanvasTextPreviewCaptureStageEvent {
   stage: CanvasTextPreviewCaptureStage;
   target: CanvasTextPreviewTarget;
   durationMs: number;
-  snapshotWidth?: number | undefined;
-  snapshotHeight?: number | undefined;
-  snapshotBytes?: number | undefined;
+  sceneWidth?: number | undefined;
+  sceneHeight?: number | undefined;
 }
 
 export interface CanvasTextPreviewCaptureLaneProps {
@@ -42,23 +43,24 @@ export interface CanvasTextPreviewCaptureLaneProps {
   onFailure(target: CanvasTextPreviewTarget, failure: CanvasTextPreviewFailure): void;
 }
 
-type LanePhase = 'waiting-layout' | 'readiness' | 'snapshot' | 'raster' | 'rasterizing' | 'complete';
+type LanePhase = 'waiting-layout' | 'readiness' | 'scene' | 'raster' | 'rasterizing' | 'complete';
 
 interface LaneJob {
   key: string;
   target: CanvasTextPreviewTarget;
+  renderProfile: CanvasTextRenderProfile;
   phase: LanePhase;
-  snapshotBuild?: CanvasTextPreviewSnapshotBuild | undefined;
-  snapshot?: CanvasTextPreviewSnapshot | undefined;
+  sceneBuild?: CanvasTextPreviewSceneBuild | undefined;
+  builtScene?: CanvasTextPreviewBuiltScene | undefined;
   frame?: number | undefined;
-  snapshotMaxSliceMs: number;
+  sceneMaxSliceMs: number;
   readinessAttempts: number;
   disposed: boolean;
 }
 
-function releaseSnapshotBuild(job: LaneJob): void {
-  const build = job.snapshotBuild;
-  job.snapshotBuild = undefined;
+function releaseSceneBuild(job: LaneJob): void {
+  const build = job.sceneBuild;
+  job.sceneBuild = undefined;
   build?.dispose();
 }
 
@@ -69,6 +71,7 @@ export function CanvasTextPreviewCaptureLane({
   onRasterized,
   onFailure
 }: CanvasTextPreviewCaptureLaneProps): React.ReactElement | null {
+  const renderProfile = useCanvasTextRenderProfile();
   const elementRef = useRef<HTMLDivElement | null>(null);
   const jobRef = useRef<LaneJob | undefined>(undefined);
   const rasterInFlightRef = useRef(false);
@@ -95,19 +98,19 @@ export function CanvasTextPreviewCaptureLane({
       return;
     }
     job.disposed = true;
-    releaseSnapshotBuild(job);
+    releaseSceneBuild(job);
   }, []);
 
   const failJob = useCallback((job: LaneJob, error: unknown) => {
     if (job.disposed) {
       return;
     }
-    const stage = job.phase === 'raster' ? 'raster_failed' : 'snapshot_not_ready';
+    const stage = job.phase === 'raster' ? 'raster_failed' : 'scene_not_ready';
     const failure = error instanceof CanvasTextPreviewFailure
       ? error
       : canvasTextPreviewFailureFromUnknown(stage, failureFieldsForTarget(job.target), error);
     job.phase = 'complete';
-    releaseSnapshotBuild(job);
+    releaseSceneBuild(job);
     onFailureRef.current(job.target, failure);
   }, []);
 
@@ -152,7 +155,7 @@ export function CanvasTextPreviewCaptureLane({
         scheduleJob();
         return;
       }
-      job.phase = 'snapshot';
+      job.phase = 'scene';
       onStageRef.current({
         stage: 'capture-ready',
         target: job.target,
@@ -161,30 +164,29 @@ export function CanvasTextPreviewCaptureLane({
       scheduleJob();
       return;
     }
-    if (job.phase === 'snapshot') {
+    if (job.phase === 'scene') {
       try {
         const sliceStartedAt = performance.now();
-        if (!job.snapshotBuild) {
-          job.snapshotBuild = createCanvasTextPreviewSnapshotBuild({
+        if (!job.sceneBuild) {
+          job.sceneBuild = createCanvasTextPreviewSceneBuild({
             captureRoot: element,
             fields: failureFieldsForTarget(job.target)
           });
         }
-        const result = job.snapshotBuild.runSlice(timestamp + CANVAS_TEXT_PREVIEW_CAPTURE_SLICE_MS);
-        job.snapshotMaxSliceMs = Math.max(job.snapshotMaxSliceMs, performance.now() - sliceStartedAt);
+        const result = job.sceneBuild.runSlice(timestamp + CANVAS_TEXT_PREVIEW_CAPTURE_SLICE_MS);
+        job.sceneMaxSliceMs = Math.max(job.sceneMaxSliceMs, performance.now() - sliceStartedAt);
         if (!result.done) {
           scheduleJob();
           return;
         }
-        job.snapshot = result.snapshot;
+        job.builtScene = result.builtScene;
         job.phase = 'raster';
         onStageRef.current({
-          stage: 'snapshot-built',
+          stage: 'scene-built',
           target: job.target,
-          durationMs: job.snapshotMaxSliceMs,
-          snapshotWidth: result.snapshot.width,
-          snapshotHeight: result.snapshot.height,
-          snapshotBytes: result.snapshot.serializedBytes
+          durationMs: job.sceneMaxSliceMs,
+          sceneWidth: result.builtScene.width,
+          sceneHeight: result.builtScene.height
         });
         scheduleJob();
       } catch (error) {
@@ -192,12 +194,14 @@ export function CanvasTextPreviewCaptureLane({
       }
       return;
     }
-    if (job.phase === 'raster' && job.snapshot) {
-      const snapshot = job.snapshot;
+    if (job.phase === 'raster' && job.builtScene) {
+      const builtScene = job.builtScene;
       job.phase = 'rasterizing';
       rasterInFlightRef.current = true;
       void captureCanvasTextPreviewSource({
-        snapshot,
+        builtScene,
+        document: element.ownerDocument,
+        renderProfile: job.renderProfile,
         fields: failureFieldsForTarget(job.target)
       }).then((result) => {
         if (job.disposed) {
@@ -207,9 +211,8 @@ export function CanvasTextPreviewCaptureLane({
           stage: 'raster-completed',
           target: job.target,
           durationMs: result.rasterDurationMs,
-          snapshotWidth: result.snapshotWidth,
-          snapshotHeight: result.snapshotHeight,
-          snapshotBytes: result.snapshotBytes
+          sceneWidth: result.sceneWidth,
+          sceneHeight: result.sceneHeight
         });
         onRasterizedRef.current(job.target, result);
       }, (error: unknown) => {
@@ -219,7 +222,7 @@ export function CanvasTextPreviewCaptureLane({
         job.phase = 'raster';
         failJob(job, error);
       }).finally(() => {
-        releaseSnapshotBuild(job);
+        releaseSceneBuild(job);
         job.disposed = true;
         rasterInFlightRef.current = false;
         scheduleJob();
@@ -239,9 +242,10 @@ export function CanvasTextPreviewCaptureLane({
     const job: LaneJob = {
       key: targetKey,
       target,
+      renderProfile,
       phase: layoutReadyTargetKeysRef.current.has(targetKey) ? 'readiness' : 'waiting-layout',
       readinessAttempts: 0,
-      snapshotMaxSliceMs: 0,
+      sceneMaxSliceMs: 0,
       disposed: false
     };
     jobRef.current = job;
@@ -253,7 +257,7 @@ export function CanvasTextPreviewCaptureLane({
       }
       disposeJob(job);
     };
-  }, [disposeJob, scheduleJob, target, targetKey]);
+  }, [disposeJob, renderProfile, scheduleJob, target, targetKey]);
 
   useEffect(() => {
     const job = jobRef.current;
@@ -278,14 +282,9 @@ export function CanvasTextPreviewCaptureLane({
     if (!job || job.disposed || job.phase !== 'waiting-layout') {
       return;
     }
-    void document.fonts.ready.then(() => {
-      if (jobRef.current !== job || job.disposed || job.phase !== 'waiting-layout') {
-        return;
-      }
-      job.phase = 'readiness';
-      scheduleJob();
-    }, (error: unknown) => failJob(job, error));
-  }, [failJob, scheduleJob]);
+    job.phase = 'readiness';
+    scheduleJob();
+  }, [scheduleJob, targetKey]);
 
   if (!target) {
     return null;

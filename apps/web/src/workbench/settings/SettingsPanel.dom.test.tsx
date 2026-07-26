@@ -9,6 +9,7 @@ import { createEmptyProjectTreeSelection } from '../project-explorer/projectTree
 import { SettingsPanel } from './SettingsPanel';
 import { AudioModelSettings, ImageModelSettings } from './MediaModelSettingsPage';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
+import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
 import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState';
 
 describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
@@ -479,13 +480,112 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           actions={actions()}
           product={{ status: 'ready', value: productState() }}
           settings={readyResourceValue(stateWithSettings().globalSettings)}
+          onSettingsChange={async () => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect((html.match(/class="settings-group"/g) ?? []).length).toBe(3);
+  });
+
+  it('renders Workbench Theme and the closed five-font catalog on Appearance', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <AppearanceSettingsPage
+          settings={globalSettingsFixture()}
           resolvedTheme="dark"
           onSettingsChange={async () => undefined}
         />
       </I18nProvider>
     );
 
-    expect((html.match(/class="settings-group"/g) ?? []).length).toBe(4);
+    expect(html).toContain('Workbench Theme');
+    expect(html).toContain('Canvas Text Appearance');
+    for (const name of [
+      'Noto Sans Mono CJK SC',
+      'Lilex',
+      'JetBrains Mono',
+      'IBM Plex Mono',
+      'Noto Sans SC'
+    ]) {
+      expect(html).toContain(name);
+    }
+    expect(html).not.toContain('Apply');
+    expect(html).not.toContain('Restore default');
+  });
+
+  it('saves every valid Appearance change as one complete value without accepting invalid drafts', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onSettingsChange = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <AppearanceSettingsPage
+              settings={globalSettingsFixture()}
+              resolvedTheme="dark"
+              onSettingsChange={onSettingsChange}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await changeSelect(requireSelectWithOption(container, 'JetBrains Mono'), 'lilex');
+      expect(onSettingsChange).toHaveBeenLastCalledWith({
+        canvas: {
+          textAppearance: {
+            ...globalSettingsFixture().canvas.textAppearance,
+            fontId: 'lilex'
+          }
+        }
+      });
+
+      const weight = requireInputForLabel(container, 'Font weight');
+      await act(async () => {
+        setInputValue(weight, '600');
+        weight.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(onSettingsChange).toHaveBeenLastCalledWith({
+        canvas: {
+          textAppearance: {
+            ...globalSettingsFixture().canvas.textAppearance,
+            fontId: 'lilex',
+            fontWeight: 600
+          }
+        }
+      });
+
+      await act(async () => {
+        weight.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'ArrowUp',
+          altKey: true,
+          bubbles: true
+        }));
+      });
+      expect(onSettingsChange).toHaveBeenLastCalledWith({
+        canvas: {
+          textAppearance: {
+            ...globalSettingsFixture().canvas.textAppearance,
+            fontId: 'lilex',
+            fontWeight: 610
+          }
+        }
+      });
+
+      const callCount = onSettingsChange.mock.calls.length;
+      const fontSize = requireInputForLabel(container, 'Font size');
+      await act(async () => {
+        setInputValue(fontSize, '12.25');
+        fontSize.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(onSettingsChange).toHaveBeenCalledTimes(callCount);
+      expect(fontSize.getAttribute('aria-invalid')).toBe('true');
+    } finally {
+      await unmount(root, container);
+    }
   });
 
   it('uses neutral tones for quiet ready states', () => {
@@ -495,7 +595,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           actions={actions()}
           product={{ status: 'ready', value: productState() }}
           settings={readyResourceValue(stateWithSettings().globalSettings)}
-          resolvedTheme="dark"
           onSettingsChange={async () => undefined}
         />
       </I18nProvider>
@@ -521,7 +620,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               }}
               product={{ status: 'ready', value: availableProductState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
-              resolvedTheme="dark"
               onSettingsChange={async () => undefined}
             />
           </I18nProvider>
@@ -558,7 +656,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               }}
               product={{ status: 'ready', value: availableProductState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
-              resolvedTheme="dark"
               onSettingsChange={async () => undefined}
             />
           </I18nProvider>
@@ -581,7 +678,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     }
   });
 
-  it('renders Workbench language and appearance preferences in General settings', () => {
+  it('renders Workbench language and application preferences in General settings', () => {
     const saved: unknown[] = [];
     const html = renderToStaticMarkup(
       <I18nProvider locale="zh-CN">
@@ -590,12 +687,12 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           product={{ status: 'ready', value: productState() }}
           settings={{
             workbench: { locale: 'zh-CN', themePreference: 'system', defaultFrontend: 'browser' },
+            canvas: { textAppearance: globalSettingsFixture().canvas.textAppearance },
             chrome: { recentProjects: [] },
             models: { image: [], video: [], audio: [] },
             integrations: { integrations: [], backends: [] },
             adobeBridge: { enabled: true }
           }}
-          resolvedTheme="dark"
           onSettingsChange={async (settings) => {
             saved.push(settings);
           }}
@@ -604,11 +701,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     );
 
     expect(html).not.toContain('<h2');
-    expect(html).toContain('外观');
-    expect(html).toContain('主题');
-    expect(html).toContain('跟随系统');
-    expect(html).toContain('深色');
-    expect(html).toContain('浅色');
     expect(html).toContain('语言');
     expect(html).toContain('简体中文');
     expect(html).toContain('默认前端');
@@ -631,7 +723,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               actions={actions()}
               product={{ status: 'ready', value: productState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
-              resolvedTheme="dark"
               onSettingsChange={onSettingsChange}
             />
           </I18nProvider>
@@ -661,7 +752,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     document.body.append(container);
     const root = createRoot(container);
     const onSettingsChange = vi.fn(async (input: Parameters<WorkbenchActions['saveGlobalSettings']>[0]) => {
-      if (input.workbench?.themePreference) throw new Error('theme unavailable');
       if (input.workbench?.locale) throw new Error('language unavailable');
       throw new Error('frontend unavailable');
     });
@@ -674,33 +764,24 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               actions={actions()}
               product={{ status: 'ready', value: productState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
-              resolvedTheme="dark"
               onSettingsChange={onSettingsChange}
             />
           </I18nProvider>
         );
       });
 
-      const theme = requireSelectWithOption(container, 'Light');
       const language = requireSelectWithOption(container, 'Simplified Chinese');
       const defaultFrontend = requireSelectWithOption(container, 'Runtime only');
-      await changeSelect(theme, 'dark');
       await changeSelect(language, 'zh-CN');
       await changeSelect(defaultFrontend, 'runtime-only');
 
-      expect(theme.value).toBe('dark');
       expect(language.value).toBe('zh-CN');
       expect(defaultFrontend.value).toBe('runtime-only');
 
-      const appearanceSection = requireSettingsSection(container, 'Appearance');
       const languageSection = requireSettingsSection(container, 'Language');
       const applicationSection = requireSettingsSection(container, 'Application');
-      expect(appearanceSection.textContent).toContain('Failed to save appearance preference: theme unavailable');
-      expect(appearanceSection.textContent).not.toContain('language unavailable');
       expect(languageSection.textContent).toContain('Failed to save language preference: language unavailable');
-      expect(languageSection.textContent).not.toContain('theme unavailable');
       expect(applicationSection.textContent).toContain('Failed to save default frontend: frontend unavailable');
-      expect(applicationSection.textContent).not.toContain('theme unavailable');
     } finally {
       await unmount(root, container);
     }
@@ -720,24 +801,21 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               actions={actions()}
               product={{ status: 'ready', value: productState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
-              resolvedTheme="dark"
               onSettingsChange={() => save.promise}
             />
           </I18nProvider>
         );
       });
 
-      const theme = requireSelectWithOption(container, 'Light');
       const language = requireSelectWithOption(container, 'Simplified Chinese');
       const defaultFrontend = requireSelectWithOption(container, 'Runtime only');
       await act(async () => {
-        setSelectValue(theme, 'dark');
-        theme.dispatchEvent(new Event('change', { bubbles: true }));
+        setSelectValue(language, 'zh-CN');
+        language.dispatchEvent(new Event('change', { bubbles: true }));
         await Promise.resolve();
       });
 
-      expect(theme.disabled).toBe(true);
-      expect(language.disabled).toBe(false);
+      expect(language.disabled).toBe(true);
       expect(defaultFrontend.disabled).toBe(false);
 
       await act(async () => {
@@ -763,7 +841,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
                 actions={actions()}
                 product={{ status: 'ready', value: productState() }}
                 settings={settings}
-                resolvedTheme="light"
                 onSettingsChange={async () => undefined}
               />
             </I18nProvider>
@@ -775,7 +852,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'browser' }
       }));
 
-      expect(requireSelectWithOption(container, 'Light').value).toBe('light');
       expect(requireSelectWithOption(container, 'Simplified Chinese').value).toBe('zh-CN');
       expect(requireSelectWithOption(container, 'Runtime only').value).toBe('browser');
     } finally {
@@ -1015,6 +1091,16 @@ function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchSt
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
+    canvas: {
+      textAppearance: {
+        fontId: 'noto-sans-mono-cjk-sc',
+        fontSizePx: 12,
+        lineHeightRatio: 1.4,
+        fontWeight: 400,
+        letterSpacingPx: 0,
+        ligatures: true
+      }
+    },
     chrome: { recentProjects: [] },
     models: {
       image: [{
@@ -1154,6 +1240,17 @@ function requireSelectWithOption(container: HTMLElement, option: string): HTMLSe
     throw new Error(`Expected select containing option ${option}.`);
   }
   return select;
+}
+
+function requireInputForLabel(container: HTMLElement, label: string): HTMLInputElement {
+  const field = Array.from(container.querySelectorAll<HTMLElement>('.db-field')).find((candidate) => (
+    candidate.querySelector('.db-field__label')?.textContent === label
+  ));
+  const input = field?.querySelector('input');
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error(`Expected input for ${label}.`);
+  }
+  return input;
 }
 
 function requireSettingsSection(container: HTMLElement, title: string): HTMLElement {

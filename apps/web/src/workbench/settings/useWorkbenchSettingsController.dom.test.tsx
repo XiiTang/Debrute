@@ -55,6 +55,85 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     await probe.unmount();
   });
 
+  it('applies Canvas text appearance immediately and coalesces unsent complete values', async () => {
+    const firstSave = deferred<{ ok: true }>();
+    const latestSave = deferred<{ ok: true }>();
+    const globalSettingsSave = vi.fn()
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockImplementationOnce(() => latestSave.promise);
+    const probe = await renderController(apiFixture({ globalSettingsSave }));
+    await act(async () => {
+      probe.current.applyEvent({ type: 'globalSettings.changed', settings: settingsFixture() });
+    });
+
+    const first = {
+      ...settingsFixture().canvas.textAppearance,
+      fontSizePx: 13
+    };
+    const superseded = { ...first, fontSizePx: 14 };
+    const latest = { ...first, fontSizePx: 15 };
+    let firstPending!: Promise<void>;
+    let supersededPending!: Promise<void>;
+    let latestPending!: Promise<void>;
+    await act(async () => {
+      firstPending = probe.current.actions.saveGlobalSettings({ canvas: { textAppearance: first } });
+      supersededPending = probe.current.actions.saveGlobalSettings({ canvas: { textAppearance: superseded } });
+      latestPending = probe.current.actions.saveGlobalSettings({ canvas: { textAppearance: latest } });
+    });
+
+    expect(readyGlobalSettings(probe).canvas.textAppearance).toEqual(latest);
+    expect(globalSettingsSave).toHaveBeenCalledTimes(1);
+    expect(globalSettingsSave).toHaveBeenNthCalledWith(1, { canvas: { textAppearance: first } });
+
+    await act(async () => {
+      probe.current.applyEvent({
+        type: 'globalSettings.changed',
+        settings: { ...settingsFixture(), canvas: { textAppearance: first } }
+      });
+      firstSave.resolve({ ok: true });
+      await firstPending;
+    });
+    expect(globalSettingsSave).toHaveBeenCalledTimes(2);
+    expect(globalSettingsSave).toHaveBeenNthCalledWith(2, { canvas: { textAppearance: latest } });
+
+    await act(async () => {
+      probe.current.applyEvent({
+        type: 'globalSettings.changed',
+        settings: { ...settingsFixture(), canvas: { textAppearance: latest } }
+      });
+      latestSave.resolve({ ok: true });
+      await Promise.all([supersededPending, latestPending]);
+    });
+    expect(readyGlobalSettings(probe).canvas.textAppearance).toEqual(latest);
+    await probe.unmount();
+  });
+
+  it('returns Canvas text appearance to the latest Runtime-confirmed value after save failure', async () => {
+    const save = deferred<{ ok: true }>();
+    const probe = await renderController(apiFixture({
+      globalSettingsSave: vi.fn(() => save.promise)
+    }));
+    const confirmed = settingsFixture();
+    await act(async () => {
+      probe.current.applyEvent({ type: 'globalSettings.changed', settings: confirmed });
+    });
+    const changed = { ...confirmed.canvas.textAppearance, fontWeight: 600 };
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = probe.current.actions.saveGlobalSettings({ canvas: { textAppearance: changed } });
+    });
+    expect(readyGlobalSettings(probe).canvas.textAppearance).toEqual(changed);
+
+    await act(async () => {
+      save.reject(new Error('settings unavailable'));
+      await expect(pending).rejects.toThrow('settings unavailable');
+    });
+    expect(readyGlobalSettings(probe).canvas.textAppearance).toEqual(
+      confirmed.canvas.textAppearance
+    );
+    await probe.unmount();
+  });
+
   it('returns the exact API key from the explicit reveal command', async () => {
     const revealModelApiKey = vi.fn(async () => ({ apiKey: '  密钥🔑  ' }));
     const probe = await renderController(apiFixture({ revealModelApiKey }));
@@ -403,6 +482,16 @@ function settingsFixture(workbench: {
 }): DebruteGlobalSettingsView {
   return {
     workbench,
+    canvas: {
+      textAppearance: {
+        fontId: 'noto-sans-mono-cjk-sc',
+        fontSizePx: 12,
+        lineHeightRatio: 1.4,
+        fontWeight: 400,
+        letterSpacingPx: 0,
+        ligatures: true
+      }
+    },
     chrome: { recentProjects: [] },
     models: { image: [], video: [], audio: [] },
     integrations: { integrations: [], backends: [] },

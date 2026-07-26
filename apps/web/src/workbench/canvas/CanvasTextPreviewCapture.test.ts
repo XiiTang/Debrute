@@ -1,59 +1,62 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { toBlob } from 'html-to-image';
 import {
   CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
   captureCanvasTextPreviewSource,
   canvasTextPreviewFingerprint
 } from './CanvasTextPreviewCapture';
-import type { CanvasTextPreviewSnapshot } from './CanvasTextPreviewSnapshot';
+import { rasterizeCanvasTextPreviewInWorker } from './CanvasTextPreviewRasterWorkerClient';
+import type { CanvasTextPreviewBuiltScene } from './CanvasTextPreviewScene';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
 
-vi.mock('html-to-image', () => ({
-  toBlob: vi.fn(async () => new Blob(['png'], { type: 'image/png' }))
+vi.mock('./CanvasTextPreviewRasterWorkerClient', () => ({
+  rasterizeCanvasTextPreviewInWorker: vi.fn(async () => new Blob(['png'], { type: 'image/png' }))
 }));
+
+const TEST_DOCUMENT = {} as Document;
 
 describe('CanvasTextPreviewCapture', { tags: ['canvas-text'] }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('rasterizes only a bounded snapshot at the fixed source scale', async () => {
-    const snapshot = snapshotFixture(320, 160);
+  it('sends only a bounded drawing scene to the raster worker at the fixed source scale', async () => {
+    const builtScene = builtSceneFixture(320, 160);
+    const renderProfile = renderProfileFixture();
 
     const result = await captureCanvasTextPreviewSource({
-      snapshot,
+      builtScene,
+      document: TEST_DOCUMENT,
+      renderProfile,
       fields: failureFields()
     });
 
     expect(result.sourcePng.type).toBe('image/png');
     expect(result).toMatchObject({
-      snapshotWidth: 320,
-      snapshotHeight: 160,
-      snapshotBytes: snapshot.serializedBytes
+      sceneWidth: 320,
+      sceneHeight: 160
     });
-    expect(toBlob).toHaveBeenCalledWith(snapshot.root, expect.objectContaining({
-      pixelRatio: 4,
+    expect(rasterizeCanvasTextPreviewInWorker).toHaveBeenCalledWith({
+      scene: expect.objectContaining({
+        background: expect.any(String),
+        commands: expect.any(Array)
+      }),
+      fontFaces: expect.arrayContaining([
+        expect.objectContaining({ family: 'canvas-text-test' })
+      ]),
+      fontResourceKey: 'canvas-text-test-font',
       width: 320,
       height: 160,
-      backgroundColor: 'transparent',
-      skipFonts: true,
-      includeStyleProperties: []
-    }));
-    expect(toBlob).toHaveBeenCalledWith(snapshot.root, expect.not.objectContaining({
-      canvasWidth: expect.any(Number)
-    }));
-    expect(toBlob).toHaveBeenCalledWith(snapshot.root, expect.not.objectContaining({
-      canvasHeight: expect.any(Number)
-    }));
-    expect(toBlob).toHaveBeenCalledWith(snapshot.root, expect.not.objectContaining({
-      filter: expect.any(Function)
-    }));
+      scale: 4
+    });
   });
 
   it('reports raster_failed instead of exposing a raw Event', async () => {
-    vi.mocked(toBlob).mockRejectedValueOnce(new Event('error'));
+    vi.mocked(rasterizeCanvasTextPreviewInWorker).mockRejectedValueOnce(new Event('error'));
 
     await expect(captureCanvasTextPreviewSource({
-      snapshot: snapshotFixture(320, 160),
+      builtScene: builtSceneFixture(320, 160),
+      document: TEST_DOCUMENT,
+      renderProfile: renderProfileFixture(),
       fields: failureFields()
     })).rejects.toMatchObject({
       stage: 'raster_failed',
@@ -65,10 +68,12 @@ describe('CanvasTextPreviewCapture', { tags: ['canvas-text'] }, () => {
     const raster = deferred<Blob>();
     let now = 10;
     vi.spyOn(performance, 'now').mockImplementation(() => now);
-    vi.mocked(toBlob).mockReturnValueOnce(raster.promise);
+    vi.mocked(rasterizeCanvasTextPreviewInWorker).mockReturnValueOnce(raster.promise);
 
     const capture = captureCanvasTextPreviewSource({
-      snapshot: snapshotFixture(320, 160),
+      builtScene: builtSceneFixture(320, 160),
+      document: TEST_DOCUMENT,
+      renderProfile: renderProfileFixture(),
       fields: failureFields()
     });
     now = 37;
@@ -141,7 +146,7 @@ describe('CanvasTextPreviewCapture', { tags: ['canvas-text'] }, () => {
     });
 
     await expect(sha256({
-      visualVersion: 'canvas-text-preview-v13',
+      visualVersion: 'canvas-text-preview-v15',
       content: 'hello',
       language: 'markdown',
       wordWrap: true,
@@ -155,20 +160,26 @@ describe('CanvasTextPreviewCapture', { tags: ['canvas-text'] }, () => {
   });
 });
 
-function snapshotFixture(width: number, height: number): CanvasTextPreviewSnapshot {
-  const outerHTML = `<div data-canvas-text-preview-snapshot="true" style="width:${width}px;height:${height}px;overflow:hidden"></div>`;
-  const root = {
-    dataset: { canvasTextPreviewSnapshot: 'true' },
-    style: { width: `${width}px`, height: `${height}px`, overflow: 'hidden' },
-    outerHTML,
-    querySelector: () => null,
-    querySelectorAll: () => []
-  } as unknown as HTMLDivElement;
+function builtSceneFixture(width: number, height: number): CanvasTextPreviewBuiltScene {
+  const scene = { background: 'transparent', commands: [] };
   return {
-    root,
+    scene,
     width,
-    height,
-    serializedBytes: new TextEncoder().encode(root.outerHTML).byteLength
+    height
+  };
+}
+
+function renderProfileFixture() {
+  return {
+    ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
+    prepare: async () => ({
+      identity: 'canvas-text-test-font',
+      faces: [{
+        family: 'canvas-text-test',
+        bytes: new Uint8Array([1]).buffer,
+        descriptors: { weight: '400', style: 'normal', stretch: '100%' }
+      }]
+    })
   };
 }
 

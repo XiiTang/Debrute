@@ -3,12 +3,13 @@ import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import { Compartment } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { codeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';
-import { canvasTextSurfaceCssVariables } from './CanvasTextSurface';
+import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
 import {
   canvasTextEditorApplyFocusRequest,
   canvasTextEditorApplyInitialScroll,
   canvasTextEditorBaseExtensions,
   canvasTextEditorEnsureVisibleSyntaxReady,
+  canvasTextEditorCursorScrollMarginExtension,
   canvasTextEditorReadOnlyExtension,
   canvasTextEditorSyncExternalValue,
   canvasTextEditorWordWrapExtension,
@@ -20,6 +21,7 @@ import {
 interface CanvasTextEditorCompartments {
   language: Compartment;
   readOnly: Compartment;
+  renderProfile: Compartment;
   wordWrap: Compartment;
 }
 
@@ -61,6 +63,7 @@ export function CanvasTextEditor({
   onReadOnlyTransition?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onLayoutReady?: (() => void) | undefined;
 }): React.ReactElement {
+  const renderProfile = useCanvasTextRenderProfile();
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
   const [pointerFocus, setPointerFocus] = React.useState(false);
@@ -85,6 +88,7 @@ export function CanvasTextEditor({
     compartmentsRef.current = {
       language: new Compartment(),
       readOnly: new Compartment(),
+      renderProfile: new Compartment(),
       wordWrap: new Compartment()
     };
   }
@@ -119,6 +123,7 @@ export function CanvasTextEditor({
         ...canvasTextEditorBaseExtensions(callbackRef),
         compartments.language.of(codeMirrorLanguageExtensionForProjectTextLanguage(language)),
         compartments.readOnly.of(canvasTextEditorReadOnlyExtension(readOnly)),
+        compartments.renderProfile.of(canvasTextEditorCursorScrollMarginExtension(renderProfile)),
         compartments.wordWrap.of(canvasTextEditorWordWrapExtension(wordWrap))
       ],
       parent: host
@@ -283,10 +288,11 @@ export function CanvasTextEditor({
       effects: [
         compartments.language.reconfigure(codeMirrorLanguageExtensionForProjectTextLanguage(language)),
         compartments.readOnly.reconfigure(canvasTextEditorReadOnlyExtension(readOnly)),
+        compartments.renderProfile.reconfigure(canvasTextEditorCursorScrollMarginExtension(renderProfile)),
         compartments.wordWrap.reconfigure(canvasTextEditorWordWrapExtension(wordWrap))
       ]
     });
-  }, [language, readOnly, wordWrap]);
+  }, [language, readOnly, renderProfile, wordWrap]);
 
   React.useLayoutEffect(() => {
     const wasReadOnly = previousReadOnlyRef.current;
@@ -311,7 +317,7 @@ export function CanvasTextEditor({
       data-word-wrap={wordWrap ? 'on' : 'off'}
       data-pointer-focus={!readOnly && pointerFocus ? 'true' : 'false'}
       className={`canvas-text-editor canvas-text-editor--${readOnly ? 'handoff' : 'edit'}`}
-      style={canvasTextSurfaceCssVariables() as React.CSSProperties}
+      style={renderProfile.editorStyle as React.CSSProperties}
       onPointerDownCapture={() => {
         if (!readOnly) {
           setPointerFocus(true);

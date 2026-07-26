@@ -2,44 +2,30 @@ import {
   canvasTextPreviewFailureFromUnknown,
   type CanvasTextPreviewFailureFields
 } from './CanvasTextPreviewFailure';
-
-const FORBIDDEN_SNAPSHOT_SELECTOR = [
-  '.cm-editor',
-  '.cm-scroller',
-  '.cm-content',
-  '.cm-line',
-  '.cm-gutters',
-  '.cm-gutter',
-  '.cm-selectionLayer',
-  '.cm-cursorLayer',
-  '.cm-gap',
-  'button',
-  'input',
-  'textarea',
-  'select',
-  '[contenteditable="true"]'
-].join(', ');
+import type {
+  CanvasTextPreviewRasterRect,
+  CanvasTextPreviewRasterScene,
+  CanvasTextPreviewRasterText
+} from './CanvasTextPreviewRasterWorkerProtocol.js';
 
 const ROW_TOLERANCE_PX = 0.5;
-const SNAPSHOT_FRAGMENT_KINDS = new Set(['background', 'line-number', 'text']);
 
-export interface CanvasTextPreviewSnapshot {
-  root: HTMLDivElement;
+export interface CanvasTextPreviewBuiltScene {
+  scene: CanvasTextPreviewRasterScene;
   width: number;
   height: number;
-  serializedBytes: number;
 }
 
-export type CanvasTextPreviewSnapshotSliceResult =
+export type CanvasTextPreviewSceneSliceResult =
   | { done: false }
-  | { done: true; snapshot: CanvasTextPreviewSnapshot };
+  | { done: true; builtScene: CanvasTextPreviewBuiltScene };
 
-export interface CanvasTextPreviewSnapshotBuild {
-  runSlice(deadline: number): CanvasTextPreviewSnapshotSliceResult;
+export interface CanvasTextPreviewSceneBuild {
+  runSlice(deadline: number): CanvasTextPreviewSceneSliceResult;
   dispose(): void;
 }
 
-type SnapshotWorkItem =
+type SceneWorkItem =
   | { kind: 'line-number'; element: HTMLElement }
   | { kind: 'line-walker'; walker: TreeWalker }
   | { kind: 'text-node'; node: Text }
@@ -51,18 +37,18 @@ type SnapshotWorkItem =
       endOffset: number;
     };
 
-interface SnapshotGeometry {
+interface SceneGeometry {
   viewport: DOMRect;
   rootRect: DOMRect;
   rootWidth: number;
   rootHeight: number;
 }
 
-export function createCanvasTextPreviewSnapshotBuild(input: {
+export function createCanvasTextPreviewSceneBuild(input: {
   captureRoot: HTMLElement;
   fields: CanvasTextPreviewFailureFields;
   now?: (() => number) | undefined;
-}): CanvasTextPreviewSnapshotBuild {
+}): CanvasTextPreviewSceneBuild {
   const now = input.now ?? performance.now.bind(performance);
   const scroller = input.captureRoot.querySelector<HTMLElement>('.cm-scroller');
   const content = input.captureRoot.querySelector<HTMLElement>('.cm-content');
@@ -75,7 +61,7 @@ export function createCanvasTextPreviewSnapshotBuild(input: {
     || scroller.clientWidth <= 0
     || scroller.clientHeight <= 0) {
     throw canvasTextPreviewFailureFromUnknown(
-      'snapshot_not_ready',
+      'scene_not_ready',
       input.fields,
       'Canvas text preview capture target does not have a ready CodeMirror viewport.'
     );
@@ -85,46 +71,33 @@ export function createCanvasTextPreviewSnapshotBuild(input: {
   const rootRect = input.captureRoot.getBoundingClientRect();
   if (!isFinitePositiveRect(viewport) || !isFinitePositiveRect(rootRect)) {
     throw canvasTextPreviewFailureFromUnknown(
-      'snapshot_not_ready',
+      'scene_not_ready',
       input.fields,
       'Canvas text preview capture geometry is not ready.'
     );
   }
 
   const geometry = { viewport, rootRect, rootWidth, rootHeight };
-  const work = collectVisibleSnapshotWork(scroller, content, viewport);
-  const root = document.createElement('div');
-  root.dataset.canvasTextPreviewSnapshot = 'true';
+  const work = collectVisibleSceneWork(scroller, content, viewport);
   const scrollerStyle = getComputedStyle(scroller);
-  Object.assign(root.style, {
-    position: 'absolute',
-    left: '0px',
-    top: '0px',
-    width: `${rootWidth}px`,
-    height: `${rootHeight}px`,
-    overflow: 'hidden',
-    pointerEvents: 'none',
-    contain: 'strict',
-    background: scrollerStyle.background
-  });
-  input.captureRoot.append(root);
-  appendBackgroundPlanes(root, scroller, content, geometry);
+  const commands: Array<CanvasTextPreviewRasterRect | CanvasTextPreviewRasterText> = [];
+  appendBackgroundPlanes(commands, scroller, content, geometry);
 
   let cursor = 0;
   let disposed = false;
-  let completed: CanvasTextPreviewSnapshot | undefined;
+  let completed: CanvasTextPreviewBuiltScene | undefined;
 
   return {
     runSlice(deadline) {
       if (disposed) {
         throw canvasTextPreviewFailureFromUnknown(
-          'snapshot_invariant_violation',
+          'scene_invariant_violation',
           input.fields,
-          'Canvas text preview snapshot build was disposed.'
+          'Canvas text preview scene build was disposed.'
         );
       }
       if (completed) {
-        return { done: true, snapshot: completed };
+        return { done: true, builtScene: completed };
       }
       while (cursor < work.length && now() < deadline) {
         const item = work[cursor++];
@@ -132,7 +105,7 @@ export function createCanvasTextPreviewSnapshotBuild(input: {
           break;
         }
         if (item.kind === 'line-number') {
-          appendLineNumber(root, item.element, geometry);
+          appendLineNumber(commands, item.element, geometry);
         } else if (item.kind === 'line-walker') {
           const node = item.walker.nextNode();
           if (node) {
@@ -144,85 +117,72 @@ export function createCanvasTextPreviewSnapshotBuild(input: {
         } else if (item.kind === 'text-node') {
           work.push(...visibleTextRowWork(item.node, geometry));
         } else {
-          appendVisibleTextRow(root, item, geometry);
+          appendVisibleTextRow(commands, item, geometry);
         }
       }
       if (cursor < work.length) {
         return { done: false };
       }
+      const scene = {
+        background: scrollerStyle.backgroundColor || 'transparent',
+        commands
+      } satisfies CanvasTextPreviewRasterScene;
       completed = {
-        root,
+        scene,
         width: rootWidth,
-        height: rootHeight,
-        serializedBytes: new TextEncoder().encode(root.outerHTML).byteLength
+        height: rootHeight
       };
-      assertCanvasTextPreviewSnapshot(completed, input.fields);
-      return { done: true, snapshot: completed };
+      assertCanvasTextPreviewScene(completed, input.fields);
+      work.length = 0;
+      return { done: true, builtScene: completed };
     },
     dispose() {
       disposed = true;
-      root.remove();
+      work.length = 0;
     }
   };
 }
 
-export function assertCanvasTextPreviewSnapshot(
-  snapshot: CanvasTextPreviewSnapshot,
+function assertCanvasTextPreviewScene(
+  builtScene: CanvasTextPreviewBuiltScene,
   fields: CanvasTextPreviewFailureFields
 ): void {
   const fail = (message: string): never => {
-    throw canvasTextPreviewFailureFromUnknown('snapshot_invariant_violation', {
+    throw canvasTextPreviewFailureFromUnknown('scene_invariant_violation', {
       ...fields,
-      snapshotWidth: snapshot.width,
-      snapshotHeight: snapshot.height,
-      snapshotBytes: snapshot.serializedBytes
+      sceneWidth: builtScene.width,
+      sceneHeight: builtScene.height
     }, message);
   };
 
-  if (snapshot.root.dataset.canvasTextPreviewSnapshot !== 'true') {
-    fail('Canvas text preview raster input is not a snapshot root.');
+  if (!Number.isFinite(builtScene.width)
+    || builtScene.width <= 0
+    || !Number.isFinite(builtScene.height)
+    || builtScene.height <= 0) {
+    fail('Canvas text preview scene dimensions are invalid.');
   }
-  if (!Number.isFinite(snapshot.width)
-    || snapshot.width <= 0
-    || !Number.isFinite(snapshot.height)
-    || snapshot.height <= 0
-    || Number.parseFloat(snapshot.root.style.width) !== snapshot.width
-    || Number.parseFloat(snapshot.root.style.height) !== snapshot.height
-    || snapshot.root.style.overflow !== 'hidden') {
-    fail('Canvas text preview snapshot root dimensions are invalid.');
-  }
-  if (!Number.isFinite(snapshot.serializedBytes) || snapshot.serializedBytes <= 0) {
-    fail('Canvas text preview snapshot serialization is empty.');
-  }
-  if (snapshot.root.querySelector(FORBIDDEN_SNAPSHOT_SELECTOR)) {
-    fail('Canvas text preview snapshot contains a forbidden editor or interactive subtree.');
-  }
-  for (const child of snapshot.root.querySelectorAll<HTMLElement>('*')) {
-    if (!SNAPSHOT_FRAGMENT_KINDS.has(child.dataset.canvasTextPreviewFragment ?? '')) {
-      fail('Canvas text preview snapshot contains an unmarked descendant.');
+  for (const command of builtScene.scene.commands) {
+    if (![command.x, command.y, command.width, command.height].every(Number.isFinite)
+      || command.x < 0
+      || command.y < 0
+      || command.width <= 0
+      || command.height <= 0
+      || command.x + command.width > builtScene.width + ROW_TOLERANCE_PX
+      || command.y + command.height > builtScene.height + ROW_TOLERANCE_PX) {
+      fail('Canvas text preview scene contains a command outside its bounds.');
     }
-    const left = Number.parseFloat(child.style.left);
-    const top = Number.parseFloat(child.style.top);
-    const width = Number.parseFloat(child.style.width);
-    const height = Number.parseFloat(child.style.height);
-    if (![left, top, width, height].every(Number.isFinite)
-      || left < 0
-      || top < 0
-      || width < 0
-      || height < 0
-      || left + width > snapshot.width + ROW_TOLERANCE_PX
-      || top + height > snapshot.height + ROW_TOLERANCE_PX) {
-      fail('Canvas text preview snapshot contains a fragment outside the root bounds.');
+    if (command.kind === 'text' && command.text.includes('\t')) {
+      fail('Canvas text preview scene contains an unresolved tab.');
     }
   }
 }
 
-function collectVisibleSnapshotWork(
+function collectVisibleSceneWork(
   scroller: HTMLElement,
   content: HTMLElement,
   viewport: DOMRect
-): SnapshotWorkItem[] {
-  const work: SnapshotWorkItem[] = [];
+): SceneWorkItem[] {
+  const work: SceneWorkItem[] = [];
   for (const element of scroller.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')) {
     if (rectsIntersect(element.getBoundingClientRect(), viewport)) {
       work.push({ kind: 'line-number', element });
@@ -241,62 +201,61 @@ function collectVisibleSnapshotWork(
 }
 
 function appendBackgroundPlanes(
-  root: HTMLElement,
+  commands: CanvasTextPreviewRasterScene['commands'],
   scroller: HTMLElement,
   content: HTMLElement,
-  geometry: SnapshotGeometry
+  geometry: SceneGeometry
 ): void {
   const gutters = scroller.querySelector<HTMLElement>('.cm-gutters');
   for (const element of [gutters, content]) {
     if (!element) {
       continue;
     }
-    const clipped = clipToSnapshot(element.getBoundingClientRect(), geometry);
+    const clipped = clipToScene(element.getBoundingClientRect(), geometry);
     if (!clipped) {
       continue;
     }
     const style = getComputedStyle(element);
-    const plane = document.createElement('div');
-    plane.dataset.canvasTextPreviewFragment = 'background';
-    setFragmentBox(plane, clipped);
-    plane.style.backgroundColor = style.backgroundColor;
-    plane.style.borderColor = style.borderColor;
-    plane.style.borderStyle = style.borderStyle;
-    plane.style.borderWidth = style.borderWidth;
-    root.append(plane);
+    const borderWidth = Number.parseFloat(style.borderWidth) || 0;
+    commands.push({
+      kind: 'rect',
+      x: clipped.left,
+      y: clipped.top,
+      width: clipped.width,
+      height: clipped.height,
+      fill: style.backgroundColor || 'transparent',
+      stroke: borderWidth > 0 && style.borderStyle !== '' && style.borderStyle !== 'none'
+        ? style.borderColor || 'transparent'
+        : 'none',
+      strokeWidth: borderWidth
+    });
   }
 }
 
 function appendLineNumber(
-  root: HTMLElement,
+  commands: CanvasTextPreviewRasterScene['commands'],
   source: HTMLElement,
-  geometry: SnapshotGeometry
+  geometry: SceneGeometry
 ): void {
   const sourceRect = source.getBoundingClientRect();
-  const clipped = clipToSnapshot(sourceRect, geometry);
+  const clipped = clipToScene(sourceRect, geometry);
   if (!clipped) {
     return;
   }
-  const fragment = document.createElement('span');
-  fragment.dataset.canvasTextPreviewFragment = 'line-number';
-  fragment.textContent = source.textContent;
-  setFragmentBox(fragment, clipped);
-  copyPixelTextStyle(source, fragment);
-  const sourceStyle = getComputedStyle(source);
-  fragment.style.display = 'block';
-  fragment.style.overflow = 'hidden';
-  fragment.style.textAlign = sourceStyle.textAlign;
-  fragment.style.paddingLeft = sourceStyle.paddingLeft;
-  fragment.style.paddingRight = sourceStyle.paddingRight;
-  fragment.style.fontVariantNumeric = sourceStyle.fontVariantNumeric;
-  fragment.style.textIndent = `${sourceRect.left - geometry.rootRect.left - clipped.left}px`;
-  root.append(fragment);
+  commands.push(textCommand({
+    source,
+    kind: 'line-number',
+    text: source.textContent ?? '',
+    sourceRect,
+    clipped,
+    geometry
+  }));
 }
 
 function visibleTextRowWork(
   node: Text,
-  geometry: SnapshotGeometry
-): SnapshotWorkItem[] {
+  geometry: SceneGeometry
+): SceneWorkItem[] {
   if (!node.parentElement || node.data.length === 0) {
     return [];
   }
@@ -343,9 +302,9 @@ function textNodeWraps(node: Text): boolean {
 }
 
 function appendVisibleTextRow(
-  root: HTMLElement,
-  item: Extract<SnapshotWorkItem, { kind: 'text-row' }>,
-  geometry: SnapshotGeometry
+  commands: CanvasTextPreviewRasterScene['commands'],
+  item: Extract<SceneWorkItem, { kind: 'text-row' }>,
+  geometry: SceneGeometry
 ): void {
   const { node, row, startOffset, endOffset } = item;
   const source = node.parentElement;
@@ -365,24 +324,45 @@ function appendVisibleTextRow(
     range.detach();
     return;
   }
+  let segmentStart = start;
+  for (let offset = start; offset < end; offset += 1) {
+    if (node.data[offset] !== '\t') {
+      continue;
+    }
+    appendVisibleTextSegment(commands, range, node, source, segmentStart, offset, geometry);
+    segmentStart = offset + 1;
+  }
+  appendVisibleTextSegment(commands, range, node, source, segmentStart, end, geometry);
+  range.detach();
+}
+
+function appendVisibleTextSegment(
+  commands: CanvasTextPreviewRasterScene['commands'],
+  range: Range,
+  node: Text,
+  source: HTMLElement,
+  start: number,
+  end: number,
+  geometry: SceneGeometry
+): void {
+  if (end <= start) {
+    return;
+  }
   range.setStart(node, start);
   range.setEnd(node, end);
   const sourceRect = range.getBoundingClientRect();
-  const clipped = clipToSnapshot(sourceRect, geometry);
+  const clipped = clipToScene(sourceRect, geometry);
   if (!clipped) {
-    range.detach();
     return;
   }
-  const fragment = document.createElement('span');
-  fragment.dataset.canvasTextPreviewFragment = 'text';
-  fragment.textContent = node.data.slice(start, end);
-  setFragmentBox(fragment, clipped);
-  copyPixelTextStyle(source, fragment);
-  fragment.style.display = 'block';
-  fragment.style.overflow = 'hidden';
-  fragment.style.textIndent = `${sourceRect.left - geometry.rootRect.left - clipped.left}px`;
-  root.append(fragment);
-  range.detach();
+  commands.push(textCommand({
+    source,
+    kind: 'text',
+    text: node.data.slice(start, end),
+    sourceRect,
+    clipped,
+    geometry
+  }));
 }
 
 function lowerBoundCharacterOffset(
@@ -408,25 +388,66 @@ function lowerBoundCharacterOffset(
   return low;
 }
 
-function copyPixelTextStyle(source: Element, target: HTMLElement): void {
-  const style = getComputedStyle(source);
-  target.style.fontFamily = style.fontFamily;
-  target.style.fontSize = style.fontSize;
-  target.style.fontWeight = style.fontWeight;
-  target.style.fontStyle = style.fontStyle;
-  target.style.fontVariant = style.fontVariant;
-  target.style.lineHeight = style.lineHeight;
-  target.style.color = style.color;
-  target.style.backgroundColor = style.backgroundColor;
-  target.style.textDecorationLine = style.textDecorationLine;
-  target.style.textDecorationColor = style.textDecorationColor;
-  target.style.textDecorationStyle = style.textDecorationStyle;
-  target.style.letterSpacing = style.letterSpacing;
-  target.style.whiteSpace = 'pre';
-  target.style.tabSize = style.tabSize;
+function textCommand(input: {
+  source: HTMLElement;
+  kind: 'line-number' | 'text';
+  text: string;
+  sourceRect: DOMRect;
+  clipped: { left: number; top: number; width: number; height: number };
+  geometry: SceneGeometry;
+}): CanvasTextPreviewRasterText {
+  const style = getComputedStyle(input.source);
+  const indent = input.sourceRect.left
+    - input.geometry.rootRect.left
+    - input.clipped.left;
+  const textAlign = input.kind === 'line-number'
+    && (style.textAlign === 'right' || style.textAlign === 'center')
+    ? style.textAlign
+    : 'left';
+  const paddingLeft = input.kind === 'line-number'
+    ? Number.parseFloat(style.paddingLeft) || 0
+    : 0;
+  const paddingRight = input.kind === 'line-number'
+    ? Number.parseFloat(style.paddingRight) || 0
+    : 0;
+  const textX = textAlign === 'right'
+    ? input.clipped.width - paddingRight + indent
+    : textAlign === 'center'
+      ? input.clipped.width / 2 + indent
+      : paddingLeft + indent;
+  return {
+    kind: 'text',
+    x: input.clipped.left,
+    y: input.clipped.top,
+    width: input.clipped.width,
+    height: input.clipped.height,
+    text: input.text,
+    textX,
+    textAlign,
+    color: style.color || 'transparent',
+    background: style.backgroundColor || 'transparent',
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize,
+    fontWeight: style.fontWeight,
+    fontStyle: style.fontStyle,
+    fontStretch: style.fontStretch,
+    fontKerning: style.fontKerning,
+    fontVariantCaps: style.fontVariantCaps || 'normal',
+    fontVariantLigatures: style.fontVariantLigatures,
+    fontVariantNumeric: input.kind === 'line-number' ? style.fontVariantNumeric : '',
+    fontFeatureSettings: style.fontFeatureSettings,
+    fontVariationSettings: style.fontVariationSettings,
+    fontOpticalSizing: style.fontOpticalSizing,
+    fontSynthesis: style.fontSynthesis,
+    letterSpacing: style.letterSpacing,
+    wordSpacing: style.wordSpacing,
+    textDecorationLine: style.textDecorationLine,
+    textDecorationColor: style.textDecorationColor,
+    textDecorationStyle: style.textDecorationStyle
+  };
 }
 
-function clipToSnapshot(rect: DOMRect, geometry: SnapshotGeometry): {
+function clipToScene(rect: DOMRect, geometry: SceneGeometry): {
   left: number;
   top: number;
   width: number;
@@ -445,20 +466,6 @@ function clipToSnapshot(rect: DOMRect, geometry: SnapshotGeometry): {
     width: right - left,
     height: bottom - top
   };
-}
-
-function setFragmentBox(
-  element: HTMLElement,
-  box: { left: number; top: number; width: number; height: number }
-): void {
-  Object.assign(element.style, {
-    position: 'absolute',
-    boxSizing: 'border-box',
-    left: `${box.left}px`,
-    top: `${box.top}px`,
-    width: `${box.width}px`,
-    height: `${box.height}px`
-  });
 }
 
 function sameRow(first: DOMRect, second: DOMRect): boolean {

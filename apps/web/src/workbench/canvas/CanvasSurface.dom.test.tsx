@@ -37,6 +37,11 @@ import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { I18nProvider } from '../i18n';
 
+vi.mock('./CanvasTextRenderProfileContext.js', async () => {
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./DefaultCanvasTextRenderProfile.js');
+  return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
+});
+
 const {
   videoTogglePlaybackSpy,
   videoPauseAtSpy,
@@ -2076,6 +2081,16 @@ function workbenchStateFixture(
       status: 'ready',
       value: {
         workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
+        canvas: {
+          textAppearance: {
+            fontId: 'noto-sans-mono-cjk-sc',
+            fontSizePx: 12,
+            lineHeightRatio: 1.4,
+            fontWeight: 400,
+            letterSpacingPx: 0,
+            ligatures: true
+          }
+        },
         chrome: { recentProjects: [] },
         models: {
           image: [],

@@ -20,6 +20,14 @@ import {
   type WorkbenchProjectProjection
 } from './services/WorkbenchProjectProjection.js';
 
+vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/DefaultCanvasTextRenderProfile.js');
+  return {
+    CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE
+  };
+});
+
 type WorkbenchAppComponent = (typeof import('./WorkbenchApp'))['WorkbenchApp'];
 
 const apiState = vi.hoisted(() => {
@@ -1008,6 +1016,16 @@ function productStateFixture(): DebruteProductState {
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'dark', defaultFrontend: 'desktop' },
+    canvas: {
+      textAppearance: {
+        fontId: 'noto-sans-mono-cjk-sc',
+        fontSizePx: 12,
+        lineHeightRatio: 1.4,
+        fontWeight: 400,
+        letterSpacingPx: 0,
+        ligatures: true
+      }
+    },
     chrome: { recentProjects: [] },
     models: {
       image: imageSettingsFixture(),

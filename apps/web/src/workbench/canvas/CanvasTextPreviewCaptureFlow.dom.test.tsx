@@ -11,17 +11,22 @@ import type {
   CanvasTextPreviewTarget
 } from './CanvasTextPreviewCapture';
 import type {
-  CanvasTextPreviewSnapshot,
-  CanvasTextPreviewSnapshotBuild
-} from './CanvasTextPreviewSnapshot';
+  CanvasTextPreviewSceneBuild,
+  CanvasTextPreviewBuiltScene
+} from './CanvasTextPreviewScene';
 
 const mocks = vi.hoisted(() => ({
-  createSnapshotBuild: vi.fn(),
+  createSceneBuild: vi.fn(),
   captureSource: vi.fn()
 }));
 
-vi.mock('./CanvasTextPreviewSnapshot', () => ({
-  createCanvasTextPreviewSnapshotBuild: mocks.createSnapshotBuild
+vi.mock('./CanvasTextRenderProfileContext.js', async () => {
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./DefaultCanvasTextRenderProfile.js');
+  return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
+});
+
+vi.mock('./CanvasTextPreviewScene', () => ({
+  createCanvasTextPreviewSceneBuild: mocks.createSceneBuild
 }));
 
 vi.mock('./CanvasTextPreviewCapture', () => ({
@@ -80,12 +85,11 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     frames = installAnimationFrameQueue();
     layoutAligned = true;
     restoreGeometry = installCaptureGeometry(() => layoutAligned);
-    mocks.createSnapshotBuild.mockReturnValue(completedSnapshotBuild());
+    mocks.createSceneBuild.mockReturnValue(completedSceneBuild());
     mocks.captureSource.mockResolvedValue({
       sourcePng: new Blob(['png'], { type: 'image/png' }),
-      snapshotWidth: 320,
-      snapshotHeight: 160,
-      snapshotBytes: 256,
+      sceneWidth: 320,
+      sceneHeight: 160,
       rasterDurationMs: 2
     });
   });
@@ -97,7 +101,7 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     restoreGeometry();
   });
 
-  it('starts readiness, snapshot, and raster on separate eligible frames', async () => {
+  it('starts readiness, scene building, and raster on separate eligible frames', async () => {
     const stages: string[] = [];
     const onRasterized = vi.fn();
 
@@ -113,10 +117,10 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     await frames.runNext();
     expect(stages).toEqual(['capture-ready']);
     await frames.runNext();
-    expect(stages).toEqual(['capture-ready', 'snapshot-built']);
+    expect(stages).toEqual(['capture-ready', 'scene-built']);
     expect(mocks.captureSource).not.toHaveBeenCalled();
     await frames.runNext();
-    expect(stages).toEqual(['capture-ready', 'snapshot-built', 'raster-completed']);
+    expect(stages).toEqual(['capture-ready', 'scene-built', 'raster-completed']);
     expect(onRasterized).toHaveBeenCalledTimes(1);
   });
 
@@ -142,9 +146,8 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     await act(async () => {
       raster.resolve({
         sourcePng: new Blob(['png'], { type: 'image/png' }),
-        snapshotWidth: 320,
-        snapshotHeight: 160,
-        snapshotBytes: 256,
+        sceneWidth: 320,
+        sceneHeight: 160,
         rasterDurationMs: 2
       });
       await raster.promise;
@@ -155,12 +158,12 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     expect(onRasterized).toHaveBeenCalledTimes(1);
   });
 
-  it('pauses an incremental snapshot at its cursor during interaction', async () => {
-    const snapshot = snapshotFixture();
+  it('pauses incremental scene building at its cursor during interaction', async () => {
+    const builtScene = builtSceneFixture();
     const runSlice = vi.fn()
       .mockReturnValueOnce({ done: false })
-      .mockReturnValueOnce({ done: true, snapshot });
-    mocks.createSnapshotBuild.mockReturnValue({ runSlice, dispose: vi.fn() });
+      .mockReturnValueOnce({ done: true, builtScene });
+    mocks.createSceneBuild.mockReturnValue({ runSlice, dispose: vi.fn() });
     const props = {
       root,
       target: targetFixture(),
@@ -176,17 +179,17 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
 
     await renderLane({ ...props, interactionActive: true });
     expect(frames.pending()).toBe(0);
-    expect(mocks.createSnapshotBuild).toHaveBeenCalledTimes(1);
+    expect(mocks.createSceneBuild).toHaveBeenCalledTimes(1);
 
     await renderLane({ ...props, interactionActive: false });
     await frames.runNext();
     expect(runSlice).toHaveBeenCalledTimes(2);
-    expect(mocks.createSnapshotBuild).toHaveBeenCalledTimes(1);
+    expect(mocks.createSceneBuild).toHaveBeenCalledTimes(1);
   });
 
-  it('reports a typed target failure and disposes its snapshot', async () => {
-    const build = completedSnapshotBuild();
-    mocks.createSnapshotBuild.mockReturnValue(build);
+  it('reports a typed target failure and disposes its scene build', async () => {
+    const build = completedSceneBuild();
+    mocks.createSceneBuild.mockReturnValue(build);
     mocks.captureSource.mockRejectedValue(new CanvasTextPreviewFailure(
       'raster_failed',
       failureFields(),
@@ -256,7 +259,7 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
 
     expect(onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ projectRelativePath: 'notes/a.md' }),
-      expect.objectContaining({ stage: 'snapshot_not_ready' })
+      expect.objectContaining({ stage: 'scene_not_ready' })
     );
   });
 });
@@ -306,20 +309,19 @@ function failureFields() {
   };
 }
 
-function snapshotFixture(): CanvasTextPreviewSnapshot {
-  const root = document.createElement('div');
-  root.dataset.canvasTextPreviewSnapshot = 'true';
-  root.style.width = '320px';
-  root.style.height = '160px';
-  root.style.overflow = 'hidden';
-  return { root, width: 320, height: 160, serializedBytes: 256 };
+function builtSceneFixture(): CanvasTextPreviewBuiltScene {
+  return {
+    scene: { background: 'transparent', commands: [] },
+    width: 320,
+    height: 160
+  };
 }
 
-function completedSnapshotBuild(): CanvasTextPreviewSnapshotBuild & { dispose: ReturnType<typeof vi.fn> } {
-  const snapshot = snapshotFixture();
+function completedSceneBuild(): CanvasTextPreviewSceneBuild & { dispose: ReturnType<typeof vi.fn> } {
+  const builtScene = builtSceneFixture();
   return {
-    runSlice: vi.fn(() => ({ done: true as const, snapshot })),
-    dispose: vi.fn(() => snapshot.root.remove())
+    runSlice: vi.fn(() => ({ done: true as const, builtScene })),
+    dispose: vi.fn(() => undefined)
   };
 }
 

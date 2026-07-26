@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AudioLines, Cable, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
+import { AudioLines, Cable, Eye, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
 import type {
   AdobeBridgeStateView,
   DebruteGlobalAdobeBridgeSettings,
@@ -7,6 +7,7 @@ import type {
 } from '@debrute/app-protocol';
 import type { EventProjection, SettingsResource, WorkbenchActions, WorkbenchState } from '../../types';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
+import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage';
 import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage';
@@ -17,7 +18,8 @@ const SETTINGS_NAV_GROUPS = [
   {
     id: 'general',
     items: [
-      { id: 'general', labelKey: 'settings.nav.general', icon: Settings }
+      { id: 'general', labelKey: 'settings.nav.general', icon: Settings },
+      { id: 'appearance', labelKey: 'settings.nav.appearance', icon: Eye }
     ]
   },
   {
@@ -86,8 +88,20 @@ export function SettingsPanel({ state, actions }: { state: WorkbenchState; actio
               <GeneralSettingsPage
                 actions={actions}
                 product={state.product}
-                resolvedTheme={state.resolvedTheme}
                 settings={settings}
+                onSettingsChange={actions.saveGlobalSettings}
+              />
+            )}
+          </SettingsResourcePanel>
+        ) : activePage === 'appearance' ? (
+          <SettingsResourcePanel
+            title={i18n.t('settings.appearance.title')}
+            resource={state.globalSettings}
+          >
+            {(settings) => (
+              <AppearanceSettingsPage
+                settings={settings}
+                resolvedTheme={state.resolvedTheme}
                 onSettingsChange={actions.saveGlobalSettings}
               />
             )}

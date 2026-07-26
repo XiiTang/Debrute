@@ -1,6 +1,6 @@
 export type CanvasTextPreviewFailureStage =
-  | 'snapshot_not_ready'
-  | 'snapshot_invariant_violation'
+  | 'scene_not_ready'
+  | 'scene_invariant_violation'
   | 'source_availability_failed'
   | 'raster_failed'
   | 'source_upload_failed'
@@ -11,15 +11,14 @@ export interface CanvasTextPreviewFailureFields {
   canvasId: string;
   projectRelativePath: string;
   fingerprint: string;
-  snapshotWidth?: number | undefined;
-  snapshotHeight?: number | undefined;
-  snapshotBytes?: number | undefined;
+  sceneWidth?: number | undefined;
+  sceneHeight?: number | undefined;
   durationMs?: number | undefined;
 }
 
 const DEFAULT_MESSAGES: Record<CanvasTextPreviewFailureStage, string> = {
-  snapshot_not_ready: 'Canvas text preview snapshot is not ready.',
-  snapshot_invariant_violation: 'Canvas text preview snapshot is invalid.',
+  scene_not_ready: 'Canvas text preview scene is not ready.',
+  scene_invariant_violation: 'Canvas text preview scene is invalid.',
   source_availability_failed: 'Canvas text preview source availability check failed.',
   raster_failed: 'Canvas text preview raster failed.',
   source_upload_failed: 'Canvas text preview source upload failed.',

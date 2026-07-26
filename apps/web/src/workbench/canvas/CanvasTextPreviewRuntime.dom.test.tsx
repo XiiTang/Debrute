@@ -23,6 +23,14 @@ import {
   type CanvasTextPreviewMeasuredBody,
   type CanvasTextPreviewRuntimeValue
 } from './CanvasTextPreviewRuntime';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
+
+const TEST_CANVAS_TEXT_RENDER_PROFILE = {
+  ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
+  prepare: async () => ({ identity: 'test-font', faces: [] })
+};
 
 const laneMock = vi.hoisted(() => ({
   renderedTargets: [] as Array<string | undefined>,
@@ -33,7 +41,6 @@ const laneMock = vi.hoisted(() => ({
     onFailure(target: CanvasTextPreviewTarget, failure: Error): void;
   } | undefined
 }));
-
 vi.mock('./CanvasTextPreviewCaptureLane', async () => {
   const ReactModule = await import('react');
   return {
@@ -55,8 +62,13 @@ function TextRuntimeConsumer(): React.ReactElement {
 }
 
 vi.mock('./CanvasTextPreviewStyleKey', () => ({
-  canvasTextPreviewStyleSnapshotForDocument: () => ({ color: '#fff' }),
-  canvasTextPreviewStyleKey: async () => 'sha256:style'
+  canvasTextPreviewStyleSnapshotForDocument: (renderProfile: CanvasTextRenderProfile) => ({
+    color: '#fff',
+    renderProfileIdentity: renderProfile.identity
+  }),
+  canvasTextPreviewStyleKey: async (snapshot: { renderProfileIdentity: string }) => (
+    `sha256:${snapshot.renderProfileIdentity}`
+  )
 }));
 
 let previewResourceScheduler: CanvasPreviewResourceScheduler;
@@ -113,7 +125,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       actions,
       cameraState: 'idle'
     });
-    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'a.md');
+    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'a.md');
     const first = laneMock.props!.target!;
 
     expect(laneMock.props?.target?.projectRelativePath).toBe('a.md');
@@ -129,6 +141,369 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(save).toHaveBeenCalledTimes(2);
     expect(firstUpload.settled()).toBe(false);
     expect(secondUpload.settled()).toBe(false);
+  });
+
+  it('resumes serialized capture after pending preview publication drains', async () => {
+    const firstUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
+    const secondUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
+    const thirdUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
+    const save = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>((input) => (
+      input.projectRelativePath === 'a.md'
+        ? firstUpload.promise
+        : input.projectRelativePath === 'b.md'
+          ? secondUpload.promise
+          : thirdUpload.promise
+    ));
+    const nodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100), nodeFixture('c.md', 200)];
+    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
+
+    await renderProvider({
+      root,
+      nodes,
+      actions: actionsFixture({ available: false, save }),
+      cameraState: 'idle',
+      probe: (runtime) => {
+        runtimeValue = runtime;
+      }
+    });
+    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'a.md');
+    const first = laneMock.props!.target!;
+    await act(async () => laneMock.props?.onRasterized(first, rasterResult()));
+    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
+
+    await act(async () => firstUpload.resolve(saveResult(save.mock.calls[0]![0])));
+    await runFramesUntil(frames, () => runtimeValue?.presentationForNode({ node: nodes[0]! }).pending !== undefined);
+    const firstPending = runtimeValue!.presentationForNode({ node: nodes[0]! }).pending!;
+    await act(async () => runtimeValue?.reportPendingReady(nodes[0]!, firstPending));
+
+    const second = laneMock.props!.target!;
+    await act(async () => laneMock.props?.onRasterized(second, rasterResult()));
+    await runFramesUntil(frames, () => runtimeValue?.presentationForNode({ node: nodes[0]! }).visible !== undefined);
+    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'c.md');
+
+    expect(laneMock.props?.target?.projectRelativePath).toBe('c.md');
+    expect(secondUpload.settled()).toBe(false);
+  });
+
+  it('keeps one source availability request in flight and coalesces a latest follow-up batch', async () => {
+    const firstRequest = deferred<Awaited<ReturnType<WorkbenchActions['readCanvasTextPreviewSources']>>>();
+    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>()
+      .mockImplementationOnce(() => firstRequest.promise)
+      .mockImplementation(async (request) => missingSourcesResult(request));
+    const firstNode = nodeFixture('a.md', 0);
+
+    await renderProvider({
+      root,
+      nodes: [firstNode],
+      actions: actionsFixture({ available: false, read }),
+      cameraState: 'idle'
+    });
+    await runFramesUntil(frames, () => read.mock.calls.length === 1);
+    const firstInput = read.mock.calls[0]![0];
+
+    await renderProvider({
+      root,
+      nodes: [firstNode, nodeFixture('b.md', 100)],
+      actions: actionsFixture({ available: false, read }),
+      cameraState: 'idle'
+    });
+    await flushWork();
+
+    expect(read).toHaveBeenCalledTimes(1);
+
+    await act(async () => firstRequest.resolve(missingSourcesResult(firstInput)));
+    await runFramesUntil(frames, () => read.mock.calls.length === 2);
+
+    expect(read.mock.calls[1]![0].sources.map((source) => source.projectRelativePath)).toEqual(['b.md']);
+  });
+
+  it('keeps queued source availability off moving frames and resumes the latest batch once idle', async () => {
+    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
+      missingSourcesResult(request)
+    ));
+    const nodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100)];
+    const actions = actionsFixture({ available: false, read });
+
+    await renderProvider({ root, nodes, actions, cameraState: 'idle' });
+    await frames.runNext();
+    await waitFor(() => frames.pending() === 1);
+    expect(read).not.toHaveBeenCalled();
+
+    await renderProvider({ root, nodes, actions, cameraState: 'moving' });
+
+    expect(frames.pending()).toBe(0);
+    expect(read).not.toHaveBeenCalled();
+
+    await renderProvider({ root, nodes, actions, cameraState: 'idle' });
+    await runFramesUntil(frames, () => read.mock.calls.length === 1);
+
+    expect(read.mock.calls[0]![0].sources.map((source) => source.projectRelativePath)).toEqual(['a.md', 'b.md']);
+  });
+
+  it('records body measurement that first becomes pending after interaction is already active', async () => {
+    const recordCounter = vi.fn();
+    const actions = actionsFixture({ available: false });
+
+    await renderProvider({
+      root,
+      nodes: [],
+      actions,
+      cameraState: 'moving',
+      perfMonitor: { recordCounter }
+    });
+    await renderProvider({
+      root,
+      nodes: [nodeFixture('a.md', 0)],
+      actions,
+      cameraState: 'moving',
+      perfMonitor: { recordCounter }
+    });
+    await flushWork();
+
+    const pauseCounters = recordCounter.mock.calls
+      .map(([event]) => event.name)
+      .filter((name) => name.endsWith('-paused'));
+    expect(pauseCounters).toEqual(['text-preview-body-measurement-paused']);
+  });
+
+  it('records source availability that first becomes pending after interaction is already active', async () => {
+    const recordCounter = vi.fn();
+    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
+      missingSourcesResult(request)
+    ));
+    const node = nodeFixture('a.md', 0);
+    const actions = actionsFixture({ available: false, read });
+
+    await renderProvider({
+      root,
+      nodes: [node],
+      actions,
+      cameraState: 'idle',
+      content: 'first',
+      perfMonitor: { recordCounter }
+    });
+    await runFramesUntil(frames, () => read.mock.calls.length === 1);
+    recordCounter.mockClear();
+
+    await renderProvider({
+      root,
+      nodes: [node],
+      actions,
+      cameraState: 'moving',
+      content: 'second',
+      perfMonitor: { recordCounter }
+    });
+    await waitFor(() => recordCounter.mock.calls.some(([event]) => (
+      event.name === 'text-preview-source-check-paused'
+    )));
+
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(recordCounter.mock.calls.filter(([event]) => (
+      event.name === 'text-preview-source-check-paused'
+    ))).toHaveLength(1);
+  });
+
+  it('reuses unchanged target fingerprints when another node joins the Canvas', async () => {
+    const recordCounter = vi.fn();
+    const actions = actionsFixture({ available: true });
+    const firstNodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100)];
+    const fingerprintPaths = () => recordCounter.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.name === 'text-preview-target-fingerprint-computed')
+      .map((event) => event.detail?.projectRelativePath);
+
+    await renderProvider({
+      root,
+      nodes: firstNodes,
+      actions,
+      cameraState: 'idle',
+      perfMonitor: { recordCounter }
+    });
+    await runFramesUntil(frames, () => fingerprintPaths().length === 2);
+
+    await renderProvider({
+      root,
+      nodes: [...firstNodes, nodeFixture('c.md', 200)],
+      actions,
+      cameraState: 'idle',
+      perfMonitor: { recordCounter }
+    });
+    await runFramesUntil(frames, () => fingerprintPaths().length === 3);
+
+    expect(fingerprintPaths().sort()).toEqual(['a.md', 'b.md', 'c.md']);
+  });
+
+  it('reads each text body geometry only in the scheduled measurement frame', async () => {
+    const bodyWidthRead = vi.fn();
+    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
+      missingSourcesResult(request)
+    ));
+
+    await renderProvider({
+      root,
+      nodes: [nodeFixture('a.md', 0)],
+      actions: actionsFixture({ available: false, read }),
+      cameraState: 'idle',
+      onBodyWidthRead: bodyWidthRead,
+      strictMode: true
+    });
+
+    expect(bodyWidthRead).not.toHaveBeenCalled();
+    await runFramesUntil(frames, () => read.mock.calls.length === 1);
+    expect(bodyWidthRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps queued text body measurements off moving frames and resumes the latest batch once idle', async () => {
+    const bodyWidthRead = vi.fn();
+    const nodes = Array.from({ length: 100 }, (_, index) => nodeFixture(`node-${index}.md`, index * 100));
+    const actions = actionsFixture({ available: false });
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'idle',
+      onBodyWidthRead: bodyWidthRead
+    });
+    expect(frames.pending()).toBe(1);
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'moving',
+      onBodyWidthRead: bodyWidthRead
+    });
+
+    expect(frames.pending()).toBe(0);
+    expect(bodyWidthRead).not.toHaveBeenCalled();
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'idle',
+      onBodyWidthRead: bodyWidthRead
+    });
+    expect(frames.pending()).toBe(1);
+    await frames.runNext();
+
+    expect(bodyWidthRead).toHaveBeenCalledTimes(100);
+  });
+
+  it('measures only eligible text bodies and schedules newly eligible paths once', async () => {
+    const measuredPaths: string[] = [];
+    const onBodyWidthRead = (path: string) => measuredPaths.push(path);
+    const nodes = [
+      nodeFixture('visible.md', 0),
+      nodeFixture('culled.md', 100),
+      nodeFixture('active.md', 200)
+    ];
+    const actions = actionsFixture({ available: false });
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'idle',
+      activeInlineTextPath: 'active.md',
+      culledNodePaths: new Set(['culled.md']),
+      onBodyWidthRead
+    });
+    await frames.runNext();
+
+    expect(measuredPaths).toEqual(['visible.md']);
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'idle',
+      onBodyWidthRead
+    });
+    await runFramesUntil(frames, () => measuredPaths.length === 3);
+
+    expect(measuredPaths).toEqual(['visible.md', 'culled.md', 'active.md']);
+  });
+
+  it('ignores a disconnected body observer callback after the path registers a replacement', async () => {
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      observer: ResizeObserver;
+    }> = [];
+    vi.stubGlobal('ResizeObserver', class implements ResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        observers.push({ callback, observer: this });
+      }
+      disconnect(): void {}
+      observe(): void {}
+      unobserve(): void {}
+    });
+    const measuredWidths: number[] = [];
+    const node = nodeFixture('a.md', 0);
+    const actions = actionsFixture({ available: false });
+
+    await renderProvider({
+      root,
+      nodes: [node],
+      actions,
+      cameraState: 'idle',
+      bodyMeasurements: { 'a.md': { width: 320, height: 160 } },
+      onBodyWidthRead: (_path, width) => measuredWidths.push(width)
+    });
+    await runFramesUntil(frames, () => measuredWidths.length === 1);
+
+    const staleObserver = observers[0]!;
+    await renderProvider({
+      root,
+      nodes: [node],
+      actions,
+      cameraState: 'idle',
+      bodyMeasurements: { 'a.md': { width: 640, height: 160 } },
+      onBodyWidthRead: (_path, width) => measuredWidths.push(width)
+    });
+    staleObserver.callback([], staleObserver.observer);
+    await runFramesUntil(frames, () => measuredWidths.length === 2);
+
+    expect(measuredWidths).toEqual([320, 640]);
+  });
+
+  it('captures the node that just left inline editing before ordinary visible maintenance', async () => {
+    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
+      missingSourcesResult(request)
+    ));
+    const actions = actionsFixture({ available: false, read });
+    const nodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100)];
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'moving',
+      activeInlineTextPath: 'b.md'
+    });
+    await flushWork();
+    expect(read).not.toHaveBeenCalled();
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'moving'
+    });
+    await flushWork();
+    expect(read).not.toHaveBeenCalled();
+
+    await renderProvider({
+      root,
+      nodes,
+      actions,
+      cameraState: 'idle'
+    });
+    await runFramesUntil(frames, () => laneMock.props?.target !== undefined);
+
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(laneMock.props?.target?.projectRelativePath).toBe('b.md');
   });
 
   it('keeps a culled text node in the current target identity set', async () => {
@@ -202,7 +577,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       cameraState: 'idle',
       perfMonitor: { recordCounter }
     });
-    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'notes/scene.md');
+    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'notes/scene.md');
 
     expect(read).toHaveBeenCalledTimes(1);
     expect(recordCounter).toHaveBeenCalledWith(expect.objectContaining({
@@ -433,16 +808,16 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       actions: actionsFixture({ available: false }),
       cameraState: 'idle'
     });
-    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'a.md');
+    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'a.md');
     const first = laneMock.props!.target!;
     await act(async () => laneMock.props?.onFailure(first, new CanvasTextPreviewFailure(
-      'snapshot_not_ready',
+      'scene_not_ready',
       {
         canvasId: first.canvasId,
         projectRelativePath: first.projectRelativePath,
         fingerprint: first.fingerprint
       },
-      'Canvas text preview snapshot is not ready.'
+      'Canvas text preview scene is not ready.'
     )));
 
     await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
@@ -562,7 +937,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       previewResourceScheduler: controlledScheduler,
       probe: (runtime) => observed.push(runtime.presentationForNode({ node }))
     });
-    await waitFor(() => starts.length > 0);
+    await runFramesUntil(frames, () => starts.length > 0);
 
     expect(latest(observed)?.pending).toBeUndefined();
     expect(starts[0]?.kind).toBe('text');
@@ -651,7 +1026,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
         pendingCount = nodes.filter((node) => runtime.presentationForNode({ node }).pending !== undefined).length;
       }
     });
-    await waitFor(() => starts.length === nodes.length);
+    await runFramesUntil(frames, () => starts.length === nodes.length);
     const commitCountBeforeStarts = commitCount;
     for (let batch = 0; batch < 20 && pendingCount !== nodes.length; batch += 1) {
       await act(async () => {
@@ -802,6 +1177,8 @@ async function renderProvider(input: {
   perfMonitor?: { recordCounter(event: Parameters<NonNullable<React.ComponentProps<typeof CanvasTextPreviewProvider>['perfMonitor']>['recordCounter']>[0]): void } | undefined;
   previewResourceScheduler?: CanvasPreviewResourceScheduler | undefined;
   onCommit?: (() => void) | undefined;
+  onBodyWidthRead?: ((path: string, width: number) => void) | undefined;
+  strictMode?: boolean | undefined;
 }): Promise<void> {
   const buffers = Object.fromEntries(input.nodes.map((node) => [
     node.projectRelativePath,
@@ -834,34 +1211,49 @@ async function renderProvider(input: {
             key={node.projectRelativePath}
             path={node.projectRelativePath}
             measurement={input.bodyMeasurements?.[node.projectRelativePath]}
+            onWidthRead={input.onBodyWidthRead}
           />
         ))}
         {input.probe ? <RuntimeProbe onRuntime={input.probe} /> : null}
       </CanvasTextPreviewProvider>
     );
-    input.root.render(input.onCommit
-      ? <React.Profiler id="canvas-text-preview-runtime" onRender={input.onCommit}>{provider}</React.Profiler>
-      : provider);
+    const withRenderProfile = (
+      <CanvasTextRenderProfileGate profile={TEST_CANVAS_TEXT_RENDER_PROFILE} pending={null}>
+        {provider}
+      </CanvasTextRenderProfileGate>
+    );
+    const profiled = input.onCommit
+      ? <React.Profiler id="canvas-text-preview-runtime" onRender={input.onCommit}>{withRenderProfile}</React.Profiler>
+      : withRenderProfile;
+    input.root.render(input.strictMode ? <React.StrictMode>{profiled}</React.StrictMode> : profiled);
   });
 }
 
 function RegisteredBody({
   path,
-  measurement = { width: 320, height: 160 }
+  measurement = { width: 320, height: 160 },
+  onWidthRead
 }: {
   path: string;
   measurement?: CanvasTextPreviewMeasuredBody | undefined;
+  onWidthRead?: ((path: string, width: number) => void) | undefined;
 }): React.ReactElement {
   const { registerTextBody } = useCanvasTextPreviewRuntime();
   React.useEffect(() => {
     const body = document.createElement('div');
     Object.defineProperties(body, {
-      clientWidth: { configurable: true, value: measurement.width },
+      clientWidth: {
+        configurable: true,
+        get: () => {
+          onWidthRead?.(path, measurement.width);
+          return measurement.width;
+        }
+      },
       clientHeight: { configurable: true, value: measurement.height }
     });
     registerTextBody(path, body);
     return () => registerTextBody(path, null);
-  }, [measurement.height, measurement.width, path, registerTextBody]);
+  }, [measurement.height, measurement.width, onWidthRead, path, registerTextBody]);
   return <div />;
 }
 
@@ -929,9 +1321,8 @@ function targetKey(target: CanvasTextPreviewTarget): string {
 function rasterResult(): CanvasTextPreviewRasterResult {
   return {
     sourcePng: new Blob(['png'], { type: 'image/png' }),
-    snapshotWidth: 320,
-    snapshotHeight: 160,
-    snapshotBytes: 256,
+    sceneWidth: 320,
+    sceneHeight: 160,
     rasterDurationMs: 2
   };
 }
@@ -962,6 +1353,17 @@ function saveResult(input: Parameters<WorkbenchActions['saveCanvasTextPreviewSou
       fingerprint: input.fingerprint,
       status: 'available' as const
     }
+  };
+}
+
+function missingSourcesResult(
+  input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]
+): Awaited<ReturnType<WorkbenchActions['readCanvasTextPreviewSources']>> {
+  return {
+    sources: Object.fromEntries(input.sources.map((source) => [
+      source.projectRelativePath,
+      { ...source, status: 'missing' as const }
+    ]))
   };
 }
 
@@ -1038,7 +1440,7 @@ async function runFramesUntil(
   frames: ReturnType<typeof installAnimationFrameQueue>,
   predicate: () => boolean
 ): Promise<void> {
-  for (let attempt = 0; attempt < 20 && !predicate(); attempt += 1) {
+  for (let attempt = 0; attempt < 80 && !predicate(); attempt += 1) {
     await waitFor(() => frames.pending() > 0);
     await frames.runNext();
   }

@@ -197,6 +197,16 @@ function createActions(): WorkbenchActions {
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
+    canvas: {
+      textAppearance: {
+        fontId: 'noto-sans-mono-cjk-sc',
+        fontSizePx: 12,
+        lineHeightRatio: 1.4,
+        fontWeight: 400,
+        letterSpacingPx: 0,
+        ligatures: true
+      }
+    },
     chrome: { recentProjects: [] },
     models: { image: [], video: [], audio: [] },
     integrations: { integrations: [], backends: [] },

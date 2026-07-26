@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  assertCanvasTextPreviewSnapshot,
-  createCanvasTextPreviewSnapshotBuild,
-  type CanvasTextPreviewSnapshot
-} from './CanvasTextPreviewSnapshot';
+  createCanvasTextPreviewSceneBuild,
+  type CanvasTextPreviewBuiltScene
+} from './CanvasTextPreviewScene';
 
 const cleanups: Array<() => void> = [];
 
@@ -13,7 +12,28 @@ afterEach(() => {
   }
 });
 
-describe('CanvasTextPreviewSnapshot', { tags: ['canvas-text'] }, () => {
+describe('CanvasTextPreviewSceneBuilder', { tags: ['canvas-text'] }, () => {
+  it('returns the worker drawing scene without a temporary DOM representation', () => {
+    const fixture = captureFixture({ content: 'const direct = true;', scrollLeft: 0 });
+    const build = createCanvasTextPreviewSceneBuild({
+      captureRoot: fixture.captureRoot,
+      fields: failureFields(),
+      now: () => 0
+    });
+
+    const result = build.runSlice(Number.POSITIVE_INFINITY);
+
+    expect(result.done).toBe(true);
+    if (!result.done) {
+      throw new Error('Scene fixture did not complete.');
+    }
+    expect(result.builtScene).not.toHaveProperty('root');
+    expect(result.builtScene.scene.commands).toContainEqual(expect.objectContaining({
+      kind: 'text',
+      text: 'const direct = true;'
+    }));
+  });
+
   it.each([6_472, 600_000])(
     'copies bounded visible text from an unwrapped %i-byte JSON line',
     (payloadLength) => {
@@ -22,78 +42,135 @@ describe('CanvasTextPreviewSnapshot', { tags: ['canvas-text'] }, () => {
         payload: 'x'.repeat(payloadLength),
         tags: ['art', 'api', 'preview']
       });
-      const fixture = snapshotFixture({ content, scrollLeft: 14_600 });
+      const fixture = captureFixture({ content, scrollLeft: 14_600 });
 
-      const snapshot = finishSnapshot(fixture.captureRoot);
+      const builtScene = finishScene(fixture.captureRoot);
+      const text = sceneText(builtScene);
 
-      expect(snapshot.width).toBe(420);
-      expect(snapshot.height).toBe(280);
-      expect(snapshot.root.textContent).toContain('xxxxxxxx');
-      expect(snapshot.root.textContent?.length).toBeLessThan(512);
-      expect(snapshot.root.textContent).not.toBe(content);
-      expect(snapshot.serializedBytes).toBeLessThan(32_000);
-      expect(snapshot.root.querySelector('.cm-scroller, .cm-editor, .cm-line, .cm-gap')).toBeNull();
-      expect(snapshot.root.querySelector('button, input, textarea, [contenteditable="true"]')).toBeNull();
+      expect(builtScene.width).toBe(420);
+      expect(builtScene.height).toBe(280);
+      expect(text).toContain('xxxxxxxx');
+      expect(text.length).toBeLessThan(512);
+      expect(text).not.toBe(content);
+      expect(JSON.stringify(builtScene.scene).length).toBeLessThan(32_000);
+      expect(builtScene).not.toHaveProperty('root');
       expect(fixture.rangeMetrics.maxRequestedSpan).toBeLessThan(1_024);
     }
   );
 
   it('creates a valid blank preview for an empty text file', () => {
-    const fixture = snapshotFixture({ content: '', scrollLeft: 0 });
+    const fixture = captureFixture({ content: '', scrollLeft: 0 });
 
-    const snapshot = finishSnapshot(fixture.captureRoot);
+    const builtScene = finishScene(fixture.captureRoot);
 
-    expect(snapshot.root.querySelector('[data-canvas-text-preview-fragment="text"]')).toBeNull();
-    expect(snapshot.root.dataset.canvasTextPreviewSnapshot).toBe('true');
+    expect(builtScene.scene.commands
+      .filter((command) => command.kind === 'text')
+      .map((command) => command.text)).toEqual(['1']);
+    expect(builtScene.scene.commands.some((command) => command.kind === 'rect')).toBe(true);
   });
 
   it('preserves visible syntax colors and aligned line numbers without source subtrees', () => {
-    const fixture = snapshotFixture({
+    const fixture = captureFixture({
       content: 'const answer = 42;',
       scrollLeft: 0,
       syntaxColor: 'rgb(255, 0, 0)'
     });
 
-    const snapshot = finishSnapshot(fixture.captureRoot);
-    const lineNumber = snapshot.root.querySelector<HTMLElement>('[data-canvas-text-preview-fragment="line-number"]');
-    const text = snapshot.root.querySelector<HTMLElement>('[data-canvas-text-preview-fragment="text"]');
+    const builtScene = finishScene(fixture.captureRoot);
+    const lineNumber = builtScene.scene.commands.find((command) => (
+      command.kind === 'text' && command.text === '1'
+    ));
+    const text = builtScene.scene.commands.find((command) => (
+      command.kind === 'text' && command.text === 'const answer = 42;'
+    ));
 
-    expect(lineNumber?.textContent).toBe('1');
-    expect(text?.style.color).toBe('rgb(255, 0, 0)');
-    expect(lineNumber?.style.top).toBe(text?.style.top);
-    expect(lineNumber?.style.textAlign).toBe('right');
-    expect(lineNumber?.style.paddingLeft).toBe('5px');
-    expect(lineNumber?.style.paddingRight).toBe('3px');
-    expect(snapshot.root.querySelector('.cm-gutters, .cm-content')).toBeNull();
+    expect(lineNumber).toMatchObject({
+      kind: 'text',
+      text: '1',
+      textAlign: 'right',
+      textX: 37,
+      fontVariantNumeric: 'tabular-nums'
+    });
+    expect(text).toMatchObject({
+      kind: 'text',
+      color: 'rgb(255, 0, 0)',
+      fontSize: '17px',
+      fontWeight: '700',
+      fontStyle: 'italic',
+      fontStretch: '120%',
+      letterSpacing: '2px',
+      wordSpacing: '4px',
+      fontKerning: 'none',
+      fontVariantLigatures: 'no-common-ligatures no-contextual',
+      fontFeatureSettings: '"ss01" 1',
+      fontVariationSettings: '"MONO" 0.75',
+      fontOpticalSizing: 'none',
+      fontSynthesis: 'none'
+    });
+    expect(lineNumber?.y).toBe(text?.y);
+  });
+
+  it('builds a bounded worker-safe drawing scene', () => {
+    const fixture = captureFixture({
+      content: 'const answer = 42;',
+      scrollLeft: 0,
+      syntaxColor: 'rgb(255, 0, 0)'
+    });
+    const builtScene = finishScene(fixture.captureRoot);
+
+    const scene = builtScene.scene;
+
+    expect(scene.commands).toContainEqual(expect.objectContaining({ kind: 'rect' }));
+    expect(scene.commands).toContainEqual(expect.objectContaining({
+      kind: 'text',
+      text: 'const answer = 42;',
+      color: 'rgb(255, 0, 0)',
+      fontVariantLigatures: 'no-common-ligatures no-contextual',
+      fontFeatureSettings: '"ss01" 1',
+      fontVariationSettings: '"MONO" 0.75',
+      fontOpticalSizing: 'none',
+      fontSynthesis: 'none'
+    }));
+    expect(JSON.stringify(scene)).not.toContain('foreignObject');
+    expect(JSON.stringify(scene)).not.toContain('cm-editor');
+  });
+
+  it('uses DOM geometry to split tabs before Worker drawing', () => {
+    const fixture = captureFixture({ content: '\tconst\tanswer', scrollLeft: 0 });
+    const builtScene = finishScene(fixture.captureRoot);
+
+    const scene = builtScene.scene;
+    const textCommands = scene.commands.filter((command) => command.kind === 'text');
+
+    expect(textCommands.every((command) => !command.text.includes('\t'))).toBe(true);
+    expect(textCommands.map((command) => command.text).join('')).toContain('constanswer');
   });
 
   it('copies only vertically visible wrapped rows from one CodeMirror text node', () => {
-    const fixture = wrappedSnapshotFixture('abcdefghijKLMNOPQRSTuvwxyzABCD1234567890');
+    const fixture = wrappedCaptureFixture('abcdefghijKLMNOPQRSTuvwxyzABCD1234567890');
 
-    const snapshot = finishSnapshot(fixture.captureRoot);
-    const fragments = [...snapshot.root.querySelectorAll<HTMLElement>(
-      '[data-canvas-text-preview-fragment="text"]'
-    )];
+    const builtScene = finishScene(fixture.captureRoot);
+    const fragments = builtScene.scene.commands.filter((command) => command.kind === 'text');
 
     expect(fragments.length).toBeGreaterThanOrEqual(2);
-    expect(fragments.map((fragment) => fragment.textContent).join('')).not.toContain('abcdefghij');
-    expect(fragments.map((fragment) => fragment.textContent).join('')).toContain('KLMNOPQRST');
-    expect(fragments.every((fragment) => Number.parseFloat(fragment.style.top) >= 0)).toBe(true);
+    expect(fragments.map((fragment) => fragment.text).join('')).not.toContain('abcdefghij');
+    expect(fragments.map((fragment) => fragment.text).join('')).toContain('KLMNOPQRST');
+    expect(fragments.every((fragment) => fragment.y >= 0)).toBe(true);
   });
 
   it('never requests the complete offset range of a 600 KB wrapped text node', () => {
-    const fixture = wrappedSnapshotFixture('x'.repeat(600_000));
+    const fixture = wrappedCaptureFixture('x'.repeat(600_000));
 
-    const snapshot = finishSnapshot(fixture.captureRoot);
+    const builtScene = finishScene(fixture.captureRoot);
 
-    expect(snapshot.root.textContent?.length).toBeLessThan(512);
+    expect(sceneText(builtScene).length).toBeLessThan(512);
     expect(fixture.rangeMetrics.maxRequestedSpan).toBeLessThan(1_024);
   });
 
   it('yields an incremental build when the frame deadline is consumed', () => {
-    const fixture = snapshotFixture({ content: 'first second third', scrollLeft: 0 });
+    const fixture = captureFixture({ content: 'first second third', scrollLeft: 0 });
     let now = 0;
-    const build = createCanvasTextPreviewSnapshotBuild({
+    const build = createCanvasTextPreviewSceneBuild({
       captureRoot: fixture.captureRoot,
       fields: failureFields(),
       now: () => now++
@@ -105,7 +182,7 @@ describe('CanvasTextPreviewSnapshot', { tags: ['canvas-text'] }, () => {
   });
 
   it('defers CodeMirror text tree traversal until an incremental slice runs', () => {
-    const fixture = snapshotFixture({ content: 'incremental traversal', scrollLeft: 0 });
+    const fixture = captureFixture({ content: 'incremental traversal', scrollLeft: 0 });
     const createTreeWalker = document.createTreeWalker.bind(document);
     let nextNodeCalls = 0;
     const spy = vi.spyOn(document, 'createTreeWalker').mockImplementation((...args) => {
@@ -123,7 +200,7 @@ describe('CanvasTextPreviewSnapshot', { tags: ['canvas-text'] }, () => {
       return walker;
     });
 
-    const build = createCanvasTextPreviewSnapshotBuild({
+    const build = createCanvasTextPreviewSceneBuild({
       captureRoot: fixture.captureRoot,
       fields: failureFields(),
       now: () => 0
@@ -134,53 +211,32 @@ describe('CanvasTextPreviewSnapshot', { tags: ['canvas-text'] }, () => {
     spy.mockRestore();
   });
 
-  it('rejects a snapshot child whose declared box escapes the root', () => {
-    const fixture = snapshotFixture({ content: 'bounded', scrollLeft: 0 });
-    const snapshot = finishSnapshot(fixture.captureRoot);
-    const child = snapshot.root.querySelector<HTMLElement>('[data-canvas-text-preview-fragment]');
-    expect(child).toBeDefined();
-    if (!child) {
-      throw new Error('Expected a snapshot fragment.');
-    }
-    child.style.width = '421px';
+  it('returns only commands bounded by the builtScene dimensions', () => {
+    const fixture = captureFixture({ content: 'bounded', scrollLeft: 0 });
+    const builtScene = finishScene(fixture.captureRoot);
 
-    expect(() => assertCanvasTextPreviewSnapshot(snapshot, failureFields())).toThrowError(
-      expect.objectContaining({ stage: 'snapshot_invariant_violation' })
-    );
+    expect(builtScene.scene.commands.every((command) => (
+      command.x >= 0
+      && command.y >= 0
+      && command.x + command.width <= builtScene.width + 0.5
+      && command.y + command.height <= builtScene.height + 0.5
+    ))).toBe(true);
   });
 
-  it('rejects an unmarked descendant that bypasses fragment invariants', () => {
-    const fixture = snapshotFixture({ content: 'bounded', scrollLeft: 0 });
-    const snapshot = finishSnapshot(fixture.captureRoot);
-    const child = document.createElement('div');
-    Object.assign(child.style, {
-      position: 'absolute',
-      left: '0px',
-      top: '0px',
-      width: '421px',
-      height: '20px'
-    });
-    snapshot.root.append(child);
-
-    expect(() => assertCanvasTextPreviewSnapshot(snapshot, failureFields())).toThrowError(
-      expect.objectContaining({ stage: 'snapshot_invariant_violation' })
-    );
-  });
-
-  it('reports snapshot_not_ready when CodeMirror has no visible scroller', () => {
+  it('reports scene_not_ready when CodeMirror has no visible scroller', () => {
     const captureRoot = document.createElement('div');
     document.body.append(captureRoot);
     cleanups.push(() => captureRoot.remove());
 
-    expect(() => createCanvasTextPreviewSnapshotBuild({
+    expect(() => createCanvasTextPreviewSceneBuild({
       captureRoot,
       fields: failureFields()
-    })).toThrowError(expect.objectContaining({ stage: 'snapshot_not_ready' }));
+    })).toThrowError(expect.objectContaining({ stage: 'scene_not_ready' }));
   });
 });
 
-function finishSnapshot(captureRoot: HTMLElement): CanvasTextPreviewSnapshot {
-  const build = createCanvasTextPreviewSnapshotBuild({
+function finishScene(captureRoot: HTMLElement): CanvasTextPreviewBuiltScene {
+  const build = createCanvasTextPreviewSceneBuild({
     captureRoot,
     fields: failureFields(),
     now: () => 0
@@ -188,9 +244,16 @@ function finishSnapshot(captureRoot: HTMLElement): CanvasTextPreviewSnapshot {
   const result = build.runSlice(Number.POSITIVE_INFINITY);
   expect(result.done).toBe(true);
   if (!result.done) {
-    throw new Error('Snapshot fixture did not complete.');
+    throw new Error('Scene fixture did not complete.');
   }
-  return result.snapshot;
+  return result.builtScene;
+}
+
+function sceneText(builtScene: CanvasTextPreviewBuiltScene): string {
+  return builtScene.scene.commands
+    .filter((command) => command.kind === 'text')
+    .map((command) => command.text)
+    .join('');
 }
 
 function failureFields() {
@@ -201,7 +264,7 @@ function failureFields() {
   };
 }
 
-function snapshotFixture(input: {
+function captureFixture(input: {
   content: string;
   scrollLeft: number;
   syntaxColor?: string | undefined;
@@ -225,6 +288,7 @@ function snapshotFixture(input: {
   lineNumber.style.textAlign = 'right';
   lineNumber.style.paddingLeft = '5px';
   lineNumber.style.paddingRight = '3px';
+  lineNumber.style.fontVariantNumeric = 'tabular-nums';
   const content = document.createElement('div');
   content.className = 'cm-content';
   content.style.whiteSpace = 'pre';
@@ -233,6 +297,18 @@ function snapshotFixture(input: {
   line.style.whiteSpace = 'pre';
   const syntax = document.createElement('span');
   syntax.style.color = input.syntaxColor ?? 'rgb(220, 220, 220)';
+  syntax.style.fontSize = '17px';
+  syntax.style.fontWeight = '700';
+  syntax.style.fontStyle = 'italic';
+  syntax.style.fontStretch = '120%';
+  syntax.style.letterSpacing = '2px';
+  syntax.style.wordSpacing = '4px';
+  syntax.style.fontKerning = 'none';
+  syntax.style.fontVariantLigatures = 'no-common-ligatures no-contextual';
+  syntax.style.fontFeatureSettings = '"ss01" 1';
+  syntax.style.fontVariationSettings = '"MONO" 0.75';
+  syntax.style.fontOpticalSizing = 'none';
+  syntax.style.fontSynthesis = 'none';
   const text = document.createTextNode(input.content);
   syntax.append(text);
   line.append(syntax);
@@ -263,7 +339,7 @@ function snapshotFixture(input: {
   return { captureRoot, rangeMetrics: rangeControl.metrics };
 }
 
-function wrappedSnapshotFixture(textContent: string): {
+function wrappedCaptureFixture(textContent: string): {
   captureRoot: HTMLDivElement;
   rangeMetrics: { maxRequestedSpan: number };
 } {

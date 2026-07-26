@@ -14,8 +14,8 @@ pub use runtime::{
     GlobalRuntimeService,
 };
 pub use store::{
-    AdobeBridgeSettings, ChromeSettings, DefaultFrontend, GlobalConfigSnapshot, GlobalConfigStore,
-    GlobalMutationResult, GlobalSettingsConfig, GlobalSettingsError, GlobalSettingsView,
-    ModelConfig, RecentProjectEntry, RecentProjectsMutationResult, SecretsConfig,
-    WorkbenchSettings,
+    AdobeBridgeSettings, CanvasFontId, CanvasSettings, CanvasTextAppearance, ChromeSettings,
+    DefaultFrontend, GlobalConfigSnapshot, GlobalConfigStore, GlobalMutationResult,
+    GlobalSettingsConfig, GlobalSettingsError, GlobalSettingsView, ModelConfig, RecentProjectEntry,
+    RecentProjectsMutationResult, SecretsConfig, WorkbenchSettings,
 };

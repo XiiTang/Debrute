@@ -1,17 +1,17 @@
-import { toBlob } from 'html-to-image';
 import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import {
   canvasTextPreviewFailureFromUnknown,
   type CanvasTextPreviewFailureFields
 } from './CanvasTextPreviewFailure';
 import {
-  assertCanvasTextPreviewSnapshot,
-  type CanvasTextPreviewSnapshot
-} from './CanvasTextPreviewSnapshot';
+  type CanvasTextPreviewBuiltScene
+} from './CanvasTextPreviewScene';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import { rasterizeCanvasTextPreviewInWorker } from './CanvasTextPreviewRasterWorkerClient.js';
 
 export const CANVAS_TEXT_PREVIEW_SOURCE_SCALE = 4;
 
-const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v13';
+const CANVAS_TEXT_PREVIEW_VISUAL_VERSION = 'canvas-text-preview-v15';
 
 export interface CanvasTextPreviewCandidate {
   canvasId: string;
@@ -32,43 +32,42 @@ export interface CanvasTextPreviewTarget extends CanvasTextPreviewCandidate {
 
 export interface CanvasTextPreviewRasterResult {
   sourcePng: Blob;
-  snapshotWidth: number;
-  snapshotHeight: number;
-  snapshotBytes: number;
+  sceneWidth: number;
+  sceneHeight: number;
   rasterDurationMs: number;
 }
 
 export async function captureCanvasTextPreviewSource(input: {
-  snapshot: CanvasTextPreviewSnapshot;
+  builtScene: CanvasTextPreviewBuiltScene;
+  document: Document;
+  renderProfile: CanvasTextRenderProfile;
   fields: CanvasTextPreviewFailureFields;
 }): Promise<CanvasTextPreviewRasterResult> {
-  assertCanvasTextPreviewSnapshot(input.snapshot, input.fields);
   const startedAt = performance.now();
   try {
-    const sourcePng = await toBlob(input.snapshot.root, {
-      pixelRatio: CANVAS_TEXT_PREVIEW_SOURCE_SCALE,
-      width: input.snapshot.width,
-      height: input.snapshot.height,
-      backgroundColor: 'transparent',
-      skipFonts: true,
-      includeStyleProperties: []
+    const font = await input.renderProfile.prepare(input.document);
+    const sourcePng = await rasterizeCanvasTextPreviewInWorker({
+      scene: input.builtScene.scene,
+      fontResourceKey: font.identity,
+      fontFaces: font.faces,
+      width: input.builtScene.width,
+      height: input.builtScene.height,
+      scale: CANVAS_TEXT_PREVIEW_SOURCE_SCALE
     });
-    if (!sourcePng) {
+    if (sourcePng.type !== 'image/png') {
       throw new Error('Canvas text preview raster did not produce a PNG blob.');
     }
     return {
       sourcePng,
-      snapshotWidth: input.snapshot.width,
-      snapshotHeight: input.snapshot.height,
-      snapshotBytes: input.snapshot.serializedBytes,
+      sceneWidth: input.builtScene.width,
+      sceneHeight: input.builtScene.height,
       rasterDurationMs: performance.now() - startedAt
     };
   } catch (error) {
     throw canvasTextPreviewFailureFromUnknown('raster_failed', {
       ...input.fields,
-      snapshotWidth: input.snapshot.width,
-      snapshotHeight: input.snapshot.height,
-      snapshotBytes: input.snapshot.serializedBytes,
+      sceneWidth: input.builtScene.width,
+      sceneHeight: input.builtScene.height,
       durationMs: performance.now() - startedAt
     }, error);
   }

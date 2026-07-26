@@ -1071,7 +1071,6 @@
 .canvas-text-editor .cm-editor {
   color: var(--db-text);
   background: transparent;
-  font-size: var(--canvas-text-editor-font-size);
 }
 
 .canvas-text-editor .cm-scroller {
@@ -1081,7 +1080,18 @@
   overscroll-behavior: contain;
   font-family: var(--canvas-text-editor-font-family);
   font-size: var(--canvas-text-editor-font-size);
+  font-weight: var(--canvas-text-editor-font-weight);
+  font-style: var(--canvas-text-editor-font-style);
+  font-stretch: var(--canvas-text-editor-font-stretch);
   line-height: var(--canvas-text-editor-line-height);
+  letter-spacing: var(--canvas-text-editor-letter-spacing);
+  word-spacing: var(--canvas-text-editor-word-spacing);
+  font-kerning: var(--canvas-text-editor-font-kerning);
+  font-variant-ligatures: var(--canvas-text-editor-font-variant-ligatures);
+  font-feature-settings: var(--canvas-text-editor-font-feature-settings);
+  font-variation-settings: var(--canvas-text-editor-font-variation-settings);
+  font-optical-sizing: var(--canvas-text-editor-font-optical-sizing);
+  font-synthesis: var(--canvas-text-editor-font-synthesis);
 }
 
 .canvas-text-editor .cm-content {
@@ -1109,7 +1119,6 @@
 .canvas-text-editor .cm-line {
   min-height: var(--canvas-text-editor-line-height);
   padding-inline: var(--canvas-text-editor-line-padding-inline);
-  line-height: var(--canvas-text-editor-line-height);
 }
 
 .canvas-text-editor .cm-gutters {
@@ -1117,16 +1126,12 @@
   color: var(--db-text-muted);
   background: transparent;
   border: 0;
-  font-family: var(--canvas-text-editor-font-family);
-  font-size: var(--canvas-text-editor-font-size);
-  line-height: var(--canvas-text-editor-line-height);
   font-variant-numeric: tabular-nums;
 }
 
 .canvas-text-editor .cm-gutterElement {
   padding-left: var(--canvas-text-editor-gutter-padding-left);
   padding-right: var(--canvas-text-editor-gutter-padding-right);
-  line-height: var(--canvas-text-editor-line-height);
   white-space: nowrap;
 }
 

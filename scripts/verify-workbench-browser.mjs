@@ -14,6 +14,9 @@ import { packageManagerCommand } from './package-manager-command.mjs';
 import { terminateWindowsProcessTree } from './terminate-windows-process-tree.mjs';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const browserScreenshotDirectory = process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR?.trim()
+  ? resolve(process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR)
+  : undefined;
 const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
 const fixtureHome = join(fixtureRoot, '.home');
 const fixtureTemporaryDirectory = join(fixtureRoot, '.tmp');
@@ -747,9 +750,13 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
   await waitForCanvasTextResponse(viewportCommit, page, textNode, label, requestLog, 'text viewport PATCH');
   await waitForCanvasTextResponse(previewSourceSave, page, textNode, label, requestLog, 'text preview source save');
   await textNode.locator('.canvas-text-preview-image').waitFor({ state: 'visible', timeout: 60000 });
+  await assertCanvasTextPreviewRaster(page, textNode, label);
+  await saveBrowserScreenshot(page, `${label}-canvas-text-preview.png`);
 
   await clickVisibleElementPoint(page, textBody, label, 'Canvas text body');
   await scroller.waitFor({ state: 'visible', timeout: 60000 });
+  await assertCanvasTextRenderProfile(page, textNode, label);
+  await saveBrowserScreenshot(page, `${label}-canvas-text-editor.png`);
   const restoredScrollTop = await scroller.evaluate((element) => element.scrollTop);
   const restoreFloor = committedScrollTop - 120;
   if (restoredScrollTop < restoreFloor) {
@@ -762,6 +769,158 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
     throw new Error(`[${label}] Cursor movement reset Canvas text scroll. Expected >= ${arrowFloor}, received ${afterArrowScrollTop}.`);
   }
   console.log(`[${label}] Canvas text scroll restore, preview handoff, and cursor movement passed.`);
+}
+
+async function assertCanvasTextPreviewRaster(page, textNode, label) {
+  const preview = textNode.locator('img[data-canvas-text-preview-layer="visible"]').first();
+  await preview.waitFor({ state: 'visible', timeout: 60000 });
+  const statistics = await preview.evaluate((image) => {
+    if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0) {
+      throw new Error('Canvas text preview image was not decoded.');
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) {
+      throw new Error('Canvas text preview pixel context was unavailable.');
+    }
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const regionStatistics = (leftRatio, rightRatio) => {
+      const left = Math.floor(canvas.width * leftRatio);
+      const right = Math.ceil(canvas.width * rightRatio);
+      const colors = new Map();
+      let nonTransparentPixels = 0;
+      let dominantColorPixels = 0;
+      for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = left; x < right; x += 1) {
+          const offset = (y * canvas.width + x) * 4;
+          const alpha = pixels[offset + 3];
+          if (alpha > 0) {
+            nonTransparentPixels += 1;
+          }
+          const color = `${pixels[offset] >> 4}:${pixels[offset + 1] >> 4}:${pixels[offset + 2] >> 4}:${alpha >> 4}`;
+          const colorPixels = (colors.get(color) ?? 0) + 1;
+          colors.set(color, colorPixels);
+          dominantColorPixels = Math.max(dominantColorPixels, colorPixels);
+        }
+      }
+      const pixelCount = (right - left) * canvas.height;
+      return {
+        nonTransparentRatio: nonTransparentPixels / pixelCount,
+        detailRatio: (pixelCount - dominantColorPixels) / pixelCount,
+        quantizedColorCount: colors.size
+      };
+    };
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      whole: regionStatistics(0, 1),
+      gutter: regionStatistics(0, 0.12),
+      content: regionStatistics(0.12, 0.95)
+    };
+  });
+  if (statistics.whole.nonTransparentRatio < 0.01
+    || statistics.gutter.detailRatio < 0.001
+    || statistics.content.detailRatio < 0.005
+    || statistics.content.quantizedColorCount < 3) {
+    throw new Error(`[${label}] Canvas text preview raster was blank or incomplete: ${JSON.stringify(statistics)}.`);
+  }
+  console.log(`[${label}] Canvas text Worker raster decoded with non-empty text detail: ${JSON.stringify(statistics)}.`);
+}
+
+async function assertCanvasTextRenderProfile(page, textNode, label) {
+  const values = await textNode.locator('.canvas-text-editor').evaluate((host) => {
+    const scroller = host.querySelector('.cm-scroller');
+    const content = host.querySelector('.cm-content');
+    if (!(scroller instanceof HTMLElement) || !(content instanceof HTMLElement)) {
+      throw new Error('Canvas text editor content was not mounted.');
+    }
+    const variables = Object.fromEntries([...host.style]
+      .filter((property) => property.startsWith('--canvas-text-editor-'))
+      .map((property) => [property, host.style.getPropertyValue(property).trim()]));
+    const familyValue = variables['--canvas-text-editor-font-family'] ?? '';
+    const families = [...familyValue.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+    const line = host.querySelector('.cm-line');
+    const gutterElement = host.querySelector('.cm-gutterElement');
+    if (!(line instanceof HTMLElement) || !(gutterElement instanceof HTMLElement)) {
+      throw new Error('Canvas text editor geometry targets were not mounted.');
+    }
+    const propertyTargets = {
+      'tab-size': { element: content, property: 'tab-size' },
+      'line-padding-inline': { element: line, property: 'padding-inline' },
+      'gutter-padding-left': { element: gutterElement, property: 'padding-left' },
+      'gutter-padding-right': { element: gutterElement, property: 'padding-right' }
+    };
+    const probe = document.createElement('span');
+    host.append(probe);
+    const mismatches = Object.keys(variables).flatMap((variable) => {
+      const profileProperty = variable.replace('--canvas-text-editor-', '');
+      const target = propertyTargets[profileProperty] ?? {
+        element: scroller,
+        property: profileProperty
+      };
+      probe.style.cssText = '';
+      probe.style.setProperty(target.property, variables[variable]);
+      if (!probe.style.getPropertyValue(target.property)) {
+        return [{
+          property: profileProperty,
+          expected: variables[variable],
+          actual: 'unsupported Profile binding'
+        }];
+      }
+      const actualValue = getComputedStyle(target.element).getPropertyValue(target.property).trim();
+      const expectedValue = getComputedStyle(probe).getPropertyValue(target.property).trim();
+      return actualValue === expectedValue
+        ? []
+        : [{ property: profileProperty, expected: expectedValue, actual: actualValue }];
+    });
+    probe.remove();
+    const fonts = [...document.fonts]
+      .filter((face) => families.includes(face.family))
+      .map((face) => ({
+        family: face.family,
+        status: face.status,
+        weight: face.weight,
+        style: face.style
+      }));
+    return {
+      variables,
+      mismatches,
+      families,
+      fonts,
+      missingFamilies: families.filter((family) => !fonts.some((font) => font.family === family))
+    };
+  });
+  const emptyVariables = Object.entries(values.variables)
+    .filter(([, value]) => value.length === 0)
+    .map(([property]) => property);
+  if (emptyVariables.length > 0) {
+    throw new Error(`[${label}] Canvas text render Profile published empty variables: ${emptyVariables.join(', ')}.`);
+  }
+  if (values.mismatches.length > 0) {
+    throw new Error(
+      `[${label}] Canvas text editor did not apply its Profile variables: ${JSON.stringify(values.mismatches)}.`
+    );
+  }
+  if (values.families.length === 0
+    || values.missingFamilies.length > 0
+    || values.fonts.some((font) => font.status !== 'loaded')) {
+    throw new Error(`[${label}] Canvas text managed font faces were not all loaded: ${JSON.stringify(values.fonts)}.`);
+  }
+  console.log(`[${label}] Canvas text Profile variables, computed typography, and managed font faces passed.`);
+}
+
+async function saveBrowserScreenshot(page, filename) {
+  if (!browserScreenshotDirectory) {
+    return;
+  }
+  await mkdir(browserScreenshotDirectory, { recursive: true });
+  await page.screenshot({
+    path: join(browserScreenshotDirectory, filename),
+    animations: 'disabled'
+  });
 }
 
 async function clickVisibleElementPoint(page, locator, label, description) {

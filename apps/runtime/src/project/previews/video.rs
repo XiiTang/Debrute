@@ -17,9 +17,11 @@ use super::{
         KeyedLocks, Semaphore, project_relative_path_cache_key, project_revision_cache_key,
         validate_cache_segment,
     },
-    existing_file, existing_open_file,
-    raster::{RasterOutputFormat, RasterPreviewEngine},
-    validate_preview_width,
+    existing_file,
+    raster::RasterPreviewEngine,
+    raster_variants::{
+        RasterPreviewVariantOutputPolicy, RasterPreviewVariantRequest, RasterPreviewVariantService,
+    },
 };
 use crate::project::{
     ProjectCapabilityFs, ProjectError, normalize_project_relative_path,
@@ -95,25 +97,23 @@ pub struct CanvasVideoPreviewSourceView {
 pub struct CanvasVideoPreviewService {
     supervisor: Arc<BoundedProcessSupervisor>,
     tools: MediaToolPaths,
-    raster: RasterPreviewEngine,
+    raster_variants: Arc<RasterPreviewVariantService>,
     stable_copy_admission: Semaphore,
     source_locks: KeyedLocks,
-    variant_locks: KeyedLocks,
 }
 
 impl CanvasVideoPreviewService {
     pub(super) fn new(
         supervisor: Arc<BoundedProcessSupervisor>,
         tools: MediaToolPaths,
-        raster_pool: Arc<super::cache::Semaphore>,
+        raster_variants: Arc<RasterPreviewVariantService>,
     ) -> Self {
         Self {
             supervisor,
             tools,
-            raster: RasterPreviewEngine::new(raster_pool, 8),
+            raster_variants,
             stable_copy_admission: Semaphore::new(1),
             source_locks: KeyedLocks::default(),
-            variant_locks: KeyedLocks::default(),
         }
     }
 
@@ -210,7 +210,6 @@ impl CanvasVideoPreviewService {
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
-        validate_preview_width(width)?;
         let kind = source_kind(target.current_time_seconds)?;
         let directory = video_source_directory(
             canvas_id,
@@ -240,74 +239,27 @@ impl CanvasVideoPreviewService {
                     ],
                 )
             })?;
-        let mut file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
-        let metadata = self
-            .raster
-            .metadata_file(&source, &mut file, cancellation)?;
-        if width > metadata.width {
-            return Err(ProjectError::service(
-                "canvas_preview_invalid_width",
-                format!(
+        let file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
+        self.raster_variants.resolve(
+            project_root,
+            RasterPreviewVariantRequest {
+                source_path: source,
+                source_file: file,
+                source_content_type: direct_source_content_type(&source_project_path),
+                cache_directory: directory,
+                width,
+                output_policy: RasterPreviewVariantOutputPolicy::Jpeg,
+                invalid_width_message: format!(
                     "Canvas video preview width exceeds source width: {}",
                     target.project_relative_path
                 ),
-            ));
-        }
-        if width == metadata.width {
-            assert_source_key_current(project_root, target, kind, source_key)?;
-            let content_type = match Path::new(&source_project_path)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .map(str::to_ascii_lowercase)
-                .as_deref()
-            {
-                Some("png") => "image/png",
-                Some("webp") => "image/webp",
-                Some("avif") => "image/avif",
-                _ => "image/jpeg",
-            };
-            return Ok(CanvasPreviewFile {
-                absolute_path: source,
-                file,
-                content_type,
-            });
-        }
-        let variant = format!(
-            "{directory}/raster-engine-v{}/preview-w{width}.jpg",
-            super::RASTER_PREVIEW_ENGINE_VERSION
-        );
-        let key = format!("{}\0{variant}", project_root.display());
-        let _lock = self.variant_locks.acquire(&key, cancellation)?;
-        assert_video_revision(project_root, target)?;
-        assert_source_key_current(project_root, target, kind, source_key)?;
-        if let Some((path, file)) = existing_open_file(project_root, &variant)? {
-            assert_source_key_current(project_root, target, kind, source_key)?;
-            return Ok(CanvasPreviewFile {
-                absolute_path: path,
-                file,
-                content_type: "image/jpeg",
-            });
-        }
-        ProjectCapabilityFs::open(project_root)?.atomic_write_stream_checked(
-            &variant,
-            |output| {
-                self.raster.render_variant_to_file(
-                    &source,
-                    &mut file,
-                    width,
-                    RasterOutputFormat::Jpeg,
-                    output,
-                    cancellation,
-                )
             },
-            || assert_source_key_current(project_root, target, kind, source_key),
-        )?;
-        let file = open_no_symlink_existing_project_file(project_root, &variant)?;
-        Ok(CanvasPreviewFile {
-            absolute_path: resolve_no_symlink_existing_project_path(project_root, &variant)?,
-            file,
-            content_type: "image/jpeg",
-        })
+            cancellation,
+            || {
+                assert_video_revision(project_root, target)?;
+                assert_source_key_current(project_root, target, kind, source_key)
+            },
+        )
     }
 
     fn resolve_source(
@@ -456,7 +408,7 @@ impl CanvasVideoPreviewService {
         };
         let mut file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
         let metadata = self
-            .raster
+            .raster_variants
             .metadata_file(&source, &mut file, cancellation)?;
         Ok(ResolvedSource {
             source_key,
@@ -516,7 +468,7 @@ impl CanvasVideoPreviewService {
         };
         let mut file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
         let metadata = self
-            .raster
+            .raster_variants
             .metadata_file(&source, &mut file, cancellation)?;
         Ok(ResolvedSource {
             source_key: source_key.to_owned(),
@@ -1116,6 +1068,21 @@ fn source_file(
     }
 }
 
+fn direct_source_content_type(project_path: &str) -> Option<&'static str> {
+    match Path::new(project_path)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "avif" => Some("image/avif"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1242,10 +1209,11 @@ mod tests {
             current_time_seconds: 0.0,
         };
         let workers = crate::workers::RuntimeWorkerServices::new();
+        let raster_pool = Arc::new(Semaphore::new(3));
         let service = CanvasVideoPreviewService::new(
             workers.supervisor(),
             MediaToolPaths::unavailable(),
-            Arc::new(Semaphore::new(3)),
+            Arc::new(RasterPreviewVariantService::new(raster_pool)),
         );
         let source = service
             .resolve_source(&root, "canvas-1", &target, &PreviewCancellation::default())

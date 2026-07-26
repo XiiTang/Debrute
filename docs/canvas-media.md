@@ -111,6 +111,10 @@ positive Playback Position frames, creates no equal-width variant, and consumes
 no Raster Preview Pool slot.
 
 The requested width uses the same raster-preview width model as Canvas images.
+After poster selection or frame extraction produces `source.<ext>`, video uses
+the same Runtime raster-variant service as image and text. Video contributes its
+JPEG output policy and source-current validator; it does not own separate width
+validation, locking, resize, cache-publication, or response-file logic.
 Cache paths are derived state and are excluded from Project-visible content.
 Runtime removes superseded video revisions and source identities that no longer
 match the persisted Playback Position or selected initial poster. Under the

@@ -17,16 +17,9 @@ import {
   syntaxTreeAvailable
 } from '@codemirror/language';
 import { search, searchKeymap } from '@codemirror/search';
-import { CANVAS_TEXT_SURFACE_METRICS } from './CanvasTextSurface';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 
 export const CANVAS_TEXT_EDITOR_SYNTAX_HIGHLIGHT_STYLE_ID = 'codemirror-default-highlight-style-v1';
-
-const CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN_LINES = 2;
-
-export const CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN = {
-  x: CANVAS_TEXT_SURFACE_METRICS.linePaddingInlinePx,
-  y: Math.ceil(CANVAS_TEXT_SURFACE_METRICS.lineHeightPx * CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN_LINES)
-} as const;
 
 export interface CanvasTextEditorCallbacks {
   onChange: (value: string) => void;
@@ -249,47 +242,25 @@ export function canvasTextEditorWordWrapExtension(wordWrap: boolean): Extension 
   return wordWrap ? EditorView.lineWrapping : [];
 }
 
-export function canvasTextEditorCursorScrollMarginExtension(): Extension {
-  return EditorView.cursorScrollMargin.of(CANVAS_TEXT_EDITOR_CURSOR_SCROLL_MARGIN);
+export function canvasTextEditorCursorScrollMarginExtension(
+  renderProfile: CanvasTextRenderProfile
+): Extension {
+  return EditorView.cursorScrollMargin.of({
+    x: renderProfile.editorGeometry.linePaddingInlinePx,
+    y: Math.ceil(Number.parseFloat(renderProfile.resolvedTypography.lineHeight) * 2)
+  });
 }
 
 export function canvasTextEditorTheme(): Extension {
   return EditorView.theme({
-    '&': {
-      height: '100%',
-      color: 'var(--db-text)',
-      backgroundColor: 'transparent',
-      fontSize: 'var(--canvas-text-editor-font-size)'
-    },
     '&.cm-focused': {
       outline: 'none'
     },
-    '.cm-scroller': {
-      fontFamily: 'var(--canvas-text-editor-font-family)',
-      lineHeight: 'var(--canvas-text-editor-line-height)',
-      overscrollBehavior: 'contain'
-    },
     '.cm-content': {
-      minHeight: '100%',
-      caretColor: 'var(--db-text)',
-      tabSize: 'var(--canvas-text-editor-tab-size)'
-    },
-    '.cm-line': {
-      padding: '0 var(--canvas-text-editor-line-padding-inline)',
-      lineHeight: 'var(--canvas-text-editor-line-height)'
-    },
-    '.cm-gutters': {
-      color: 'var(--db-text-muted)',
-      backgroundColor: 'transparent',
-      border: 'none'
+      caretColor: 'var(--db-text)'
     },
     '.cm-activeLineGutter': {
       backgroundColor: 'transparent'
-    },
-    '.cm-gutterElement': {
-      paddingLeft: 'var(--canvas-text-editor-gutter-padding-left)',
-      paddingRight: 'var(--canvas-text-editor-gutter-padding-right)',
-      lineHeight: 'var(--canvas-text-editor-line-height)'
     },
     '.cm-panels': {
       color: 'var(--db-text)',
@@ -317,7 +288,9 @@ export function canvasTextEditorTheme(): Extension {
   }, { dark: true });
 }
 
-export function canvasTextEditorBaseExtensions(callbacks: CanvasTextEditorCallbackRef): Extension[] {
+export function canvasTextEditorBaseExtensions(
+  callbacks: CanvasTextEditorCallbackRef
+): Extension[] {
   return [
     history(),
     lineNumbers(),
@@ -326,7 +299,6 @@ export function canvasTextEditorBaseExtensions(callbacks: CanvasTextEditorCallba
     syntaxHighlighting(defaultHighlightStyle),
     keymap.of(canvasTextEditorKeymap(callbacks)),
     EditorView.updateListener.of(canvasTextEditorUpdateListener(callbacks)),
-    canvasTextEditorCursorScrollMarginExtension(),
     canvasTextEditorTheme()
   ];
 }

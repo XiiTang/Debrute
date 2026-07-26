@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
@@ -6,6 +6,11 @@ import { FloatingTextEditorWindow } from './FloatingTextEditorWindow';
 import { textEditorWindowIdentity } from '../shell/workbenchWindowOrder';
 import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from '../shell/windowBounds';
 import { I18nProvider } from '../i18n';
+
+vi.mock('./CanvasTextRenderProfileContext.js', async () => {
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./DefaultCanvasTextRenderProfile.js');
+  return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
+});
 
 function renderStaticWithI18n(element: React.ReactElement): string {
   return renderToStaticMarkup(

@@ -229,18 +229,28 @@ are documented in [`desktop-shell.md`](./desktop-shell.md).
 ## Settings, Theme, And Language
 
 Settings has one directory and one content surface. Its current pages are
-General; Image, Video, TTS, Music, and SFX Models; Integrations; and Adobe
-Bridge. Runtime-owned Global Settings and Product projections have only loading
-and ready states because connection failure ends the Workbench. The Adobe Bridge
-live resource additionally owns its retryable error state. Persisted Adobe
-Bridge enablement comes from global settings while discovery, clients, links,
-and transfers remain a separate live resource.
+General; Appearance; Image, Video, TTS, Music, and SFX Models; Integrations; and
+Adobe Bridge. Appearance composes the Workbench Theme mode with the separate
+global Canvas Text Appearance controls; General retains language, default
+frontend, product information, and updates. Runtime-owned Global Settings and
+Product projections have only loading and ready states because connection
+failure ends the Workbench. The Adobe Bridge live resource additionally owns
+its retryable error state. Persisted Adobe Bridge enablement comes from global
+settings while discovery, clients, links, and transfers remain a separate live
+resource.
 
 Workbench sends closed partial settings mutations. Editable model text fields
 are trimmed before submission; Runtime accepts only already-canonical values
 and does not repeat that normalization. Empty settings objects and unknown
 fields are errors, while submitting a valid value that is already current is an
 idempotent no-op.
+
+Canvas Text Appearance mutations always carry the complete font ID, font size,
+line-height ratio, requested weight, letter spacing, and ligature value. Valid
+control changes update the local Canvas immediately. Each Workbench window
+serializes its own submissions and replaces only an unsent appearance with the
+newest complete value. Runtime event order remains authoritative across
+windows; a rejected submission restores the latest Runtime-confirmed value.
 
 The runtime persists `system`, `dark`, or `light` as the Workbench theme
 preference. `system` follows `prefers-color-scheme`; the resolved value is
@@ -260,9 +270,9 @@ Each key has a current product-copy consumer; dictionaries do not reserve
 generic vocabulary for possible future UI, and tests do not keep otherwise
 unused keys alive.
 Brand names, paths, model identifiers, protocol values, user content, and raw
-external errors remain untranslated. Locale and theme changes arrive through
-the Runtime-owned Global snapshot and event path described in
-[`runtime-architecture.md`](./runtime-architecture.md).
+external errors remain untranslated. Locale, Theme, and Canvas Text Appearance
+changes arrive through the Runtime-owned Global snapshot and event path
+described in [`runtime-architecture.md`](./runtime-architecture.md).
 
 ## Explorer And Context Menus
 

@@ -44,7 +44,7 @@ format. Project-visible Debrute Project Documents can therefore be edited throug
 the same text API, while generic create, rename, move, copy, and delete remain
 blocked for protected `.debrute` paths. The committed file remains successful
 even if the following Project refresh exposes an invalid structured document or
-cannot build a new snapshot; normal diagnostics report that state.
+cannot build a new Project snapshot; normal diagnostics report that state.
 
 ## Workbench Text Buffers
 
@@ -67,7 +67,58 @@ previous Project identity cannot update the newly active Project.
 the hidden preview-capture surface, and floating text editor windows. It owns one
 CodeMirror `EditorView`, reconfigurable language, read-only, and word-wrap
 compartments, external-value synchronization, search, save and wrap commands,
-and the shared Canvas text metrics.
+and consumes the current resolved Canvas Text Render Profile.
+
+## Canvas Text Render Profile
+
+Workbench owns one immutable Canvas Text Render Profile generation at a time.
+Its Font Resource owns the managed font assets, exact SHA-256 identities,
+ordered families, and face weight/style/stretch and Unicode descriptors. The
+Profile resolves the Runtime-owned global Canvas Text Appearance together with
+the fixed editor geometry. Canvas Text Appearance is one complete value:
+managed font ID, font size, line-height ratio, requested base weight, letter
+spacing, and the common/contextual-ligature switch. The Profile derives pixel
+line height, word spacing, tab size, kerning, OpenType settings, optical sizing,
+font-synthesis policy, line padding, gutter padding, and cursor scroll geometry.
+
+The managed Canvas Font catalog contains Noto Sans Mono CJK SC, Lilex,
+JetBrains Mono, IBM Plex Mono, and proportional Noto Sans SC. Lilex, JetBrains
+Mono, and IBM Plex Mono use the exact managed Noto Sans Mono CJK SC faces as
+their CJK fallback. Catalog IDs are stable settings values; display names,
+operating-system family names, file paths, and asset digests are not settings.
+The default appearance selects Noto Sans Mono CJK SC at 12 px, a 1.4 line-height
+ratio, requested weight 400, zero letter spacing, and enabled common/contextual
+ligatures.
+
+Every supported typography preference has one canonical mapping to the live
+editor CSS binding, the CodeMirror measurement generation, the computed styles
+read into a preview scene, and the Profile identity. A Profile is published
+only after every managed face has been read, digest-verified, registered, and
+loaded. The previously active exact Profile remains published while a requested
+replacement prepares, then the replacement is published atomically.
+Preparation failure is fatal for the requested Profile: it is not retried,
+rewritten to another Canvas Font, or replaced by an implicit system-font
+fallback.
+
+Each managed family receives a digest-derived internal CSS family name, so two
+font files with the same human-readable family name cannot collide. The same
+exact bytes generate the `FontFace` instances used by live editors and are
+supplied to the isolated raster Worker for its own `FontFace` registration.
+System font names without readable, fixed font bytes are not valid managed Profile assets.
+Canvas rendering uses `font-synthesis: none`. The saved requested weight remains
+independent of Canvas Font selection; when no exact normal face exists, the
+renderer selects the closest real managed face without rewriting the request or
+fabricating bold or oblique outlines. Workbench Theme syntax rules may request
+a token-specific weight or style, but they cannot override the Canvas Font,
+size, line height, letter spacing, or ligature value.
+
+Settings exposes Canvas Text Appearance on the global Appearance page. Every
+valid control change updates the real Canvas optimistically and submits the
+complete value immediately. One Workbench window serializes those writes and
+coalesces only values that have not been sent. Runtime events remain the
+authoritative cross-window projection; a rejected write restores the latest
+Runtime-confirmed appearance. There is no apply action, restore-default action,
+custom font input, font import, or temporary preview editor.
 
 For an inline Canvas text node, only a unique single-node selection owns the live
 editor. Multi-selection does not. DOM focus is an input detail rather than the
@@ -124,8 +175,10 @@ pixel-affecting input owned by the pipeline:
 - measured text-body width and height;
 - persisted Text Viewport;
 - the fixed canonical source scale; and
-- a style key derived from shared text metrics, effective theme text colors,
-  syntax-highlight style identity, and a style snapshot version.
+- a style key derived from the complete Canvas Text Render Profile identity,
+  effective theme text colors, syntax-highlight style identity, and a style
+  snapshot version. The Profile identity includes exact font byte digests and
+  every supported typography and editor-geometry value.
 
 The canonical source uses a fixed 4x raster scale. Its version is a source-
 pipeline version rather than a Project revision. Width variants add the shared
@@ -147,12 +200,10 @@ no Raster Preview Pool slot.
 
 The cache tree is not Project-visible. A project-visible `.debrute` text file,
 including a Canvas Map or Canvas JSON document, remains eligible as a source;
-the hidden derived cache cannot recursively become one. Once a new fingerprint
-becomes the current source identity for the same Canvas and Project path,
-Runtime removes superseded fingerprint directories. Within the current
-fingerprint it reads and writes only the exact current Raster Engine path and
-does not enumerate or remove sibling engine-version directories. No byte quota,
-LRU, or TTL applies to the current identity's width variants.
+the hidden derived cache cannot recursively become one. Runtime reads and writes
+only the exact requested fingerprint and Raster Engine path; neither lookup nor
+save enumerates sibling fingerprint or engine-version directories. No byte
+quota, LRU, or TTL applies to width variants.
 
 ## Capture Pipeline
 
@@ -162,21 +213,58 @@ publication, and owns typed per-node failures. Availability is returned per
 item as available, missing, or error, so one invalid source cannot poison sibling
 text nodes.
 
+Text-body measurements are retained latest-by-path and coalesced once per
+animation frame. Camera movement or node dragging cancels the pending
+measurement frame without discarding its eligible paths; the batch resumes
+after interaction becomes idle. Culled and actively edited text bodies do not
+enter the batch, retain their last valid measurement, and receive one new
+measurement when they next become eligible. Target reconciliation retains the
+resolved fingerprint for every path whose content, language, wrap, measured
+geometry, persisted viewport, and style key remain unchanged; changed paths
+replace pending work instead of creating a historical queue.
+
+Source availability uses the existing batch Runtime interface with at most one
+request in flight. Camera movement or node dragging prevents a queued request
+from starting; an already in-flight request may settle, while later targets are
+retained by path with the newest identity winning and form the next batch after
+interaction becomes idle. Availability and completed source-upload state enter
+React as low-priority maintenance updates. There is no automatic retry.
+
 `CanvasTextPreviewCaptureLane` owns one serialized browser capture lane. Work
 does not enter the lane during camera movement or node dragging. Readiness,
-snapshot building, and raster start occur on separate eligible frames. Snapshot
-building is incremental and bounded to visible CodeMirror geometry: it copies
+scene building, and Worker submission occur on separate eligible frames. Scene
+building is incremental and bounded to visible CodeMirror geometry: it records
 only aligned visible line numbers, visible text fragments, and required
-background planes. Long wrapped or unwrapped lines use bounded range searches
-rather than cloning the complete editor DOM. Empty text is a valid blank
-snapshot; missing geometry and escaping or unmarked descendants are explicit
-failures.
+background planes as immutable drawing commands. Long wrapped or unwrapped
+lines use bounded range searches rather than cloning the complete editor DOM.
+Empty text is a valid blank scene; missing geometry and commands outside the
+capture bounds are explicit failures.
 
-The rasterizer converts only the bounded snapshot to the fixed-scale PNG. Once
-rasterization completes, source upload may continue while the lane advances to
-another target. Runtime stores the canonical source atomically, creates
-requested PNG width variants through the shared raster service, reuses existing
-variants, and deduplicates identical in-flight variant work.
+When an inline editor releases a node, that path receives one capture priority
+over ordinary visible maintenance. An already-rasterizing target is allowed to
+finish; the priority changes only the next eligible target. Other visible work
+keeps deterministic Canvas spatial order, and culled nodes do not start source
+availability, capture, or variant work.
+
+The main thread builds the immutable rectangle and text drawing-command scene
+directly from the bounded CodeMirror geometry and prepares the checksum-verified
+managed font bytes. It submits those values to one dedicated browser Worker.
+The Worker loads each font profile once, draws the scene through
+`OffscreenCanvas`, and encodes the fixed-scale PNG. It does not depend on
+Worker-side SVG or HTML decoding. The Capture Lane owns serialized submission;
+the Worker client rejects a concurrent request as an invariant violation. An
+already-submitted job is not paused, terminated, or restarted when Canvas
+interaction begins; stale completion is discarded by the existing runtime epoch
+and target identity checks.
+
+Once rasterization completes, source upload may continue while the lane advances
+to another target. Runtime stores the canonical source atomically. Image, text,
+and video callers then pass their selected source, target width, output policy,
+and source validator to one shared raster-variant service. That service owns
+width validation, equal-width direct-source return, keyed in-flight exclusion,
+Raster Preview Engine identity, resize/encode, atomic cache publication, and
+file response creation. Text selects alpha-preserving PNG output; the source
+producer does not reimplement variant generation.
 
 ## Variant Selection And Mounted Handoff
 
@@ -200,14 +288,14 @@ the last valid body size, invalidate the committed preview, or unload it.
 
 ## Failure And Observability Contract
 
-Preview failures are owned at the stage that can explain them: snapshot not
-ready, snapshot invariant violation, source availability, raster rendering,
+Preview failures are owned at the stage that can explain them: scene not ready,
+scene-command invariant violation, source availability, raster rendering,
 source upload, mounted-image load, or mounted-image decode. A failure affects only its
 current node and source identity, allows later capture-lane work to continue,
 and remains visible instead of becoming an empty success state.
 
 Development/test performance counters record availability, capture readiness,
-snapshot, raster, upload, pending readiness, publication, and failure
+scene building, raster, upload, pending readiness, publication, and failure
 boundaries. See [`canvas-rendering.md`](./canvas-rendering.md) for the shared
 resource scheduler and diagnostic capture surface.
 
@@ -226,9 +314,11 @@ resource scheduler and diagnostic capture surface.
   `apps/runtime/src/workbench/project_routes.rs`.
 - Pending Text Viewport display and Runtime-result reconciliation:
   `apps/web/src/workbench/services/canvasSnapshotUpdates.ts`.
-- Preview identity, capture, runtime, handoff, and typed failures:
+- Preview identity, DOM scene extraction, Worker raster, runtime, handoff, and typed failures:
   `apps/web/src/workbench/canvas/CanvasTextPreview*.ts*`.
 - Source capture and identity: `apps/web/src/workbench/canvas/CanvasTextPreview*.ts*`.
-- Uploaded source and variant storage: `apps/runtime/src/project/previews/mod.rs`.
+- Uploaded source storage: `apps/runtime/src/project/previews/mod.rs`.
+- Shared image, text, and video width-variant derivation:
+  `apps/runtime/src/project/previews/raster_variants.rs`.
 - Integration coverage: `apps/runtime/src/project/tests.rs` and
   `apps/runtime/tests/runtime_lifecycle.rs`.
