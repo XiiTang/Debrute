@@ -70,7 +70,6 @@ struct ConnectionProjectBinding {
 
 pub(crate) struct ProjectBindingCommit {
     pub(crate) project_id: String,
-    pub(crate) allow_preemption: bool,
     pub(crate) project_use: ProjectUse,
     pub(crate) bound_event: Value,
 }
@@ -122,7 +121,6 @@ pub(crate) enum ProjectBindOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectBindError {
     Stale,
-    TargetOwned,
     EventQueueUnavailable,
 }
 
@@ -439,7 +437,6 @@ impl WorkbenchConnectionRegistry {
     ) -> Result<ProjectBindOutcome, ProjectBindError> {
         let ProjectBindingCommit {
             project_id,
-            allow_preemption,
             project_use,
             bound_event,
         } = commit;
@@ -467,14 +464,6 @@ impl WorkbenchConnectionRegistry {
             }
             if record.binding.is_some() {
                 return Err(ProjectBindError::Stale);
-            }
-            if !allow_preemption
-                && inner
-                    .owner_by_project
-                    .get(&project_id)
-                    .is_some_and(|owner| owner != credential)
-            {
-                return Err(ProjectBindError::TargetOwned);
             }
             let bound_permit = reserve_bound_event(record)?;
             (
@@ -548,7 +537,6 @@ impl WorkbenchConnectionRegistry {
     ) -> Result<ProjectBindOutcome, ProjectBindError> {
         let ProjectBindingCommit {
             project_id: target_project_id,
-            allow_preemption,
             project_use,
             bound_event,
         } = commit;
@@ -569,14 +557,6 @@ impl WorkbenchConnectionRegistry {
             }
             if source_project_id == target_project_id {
                 return Ok(ProjectBindOutcome::AlreadyBound);
-            }
-            if !allow_preemption
-                && inner
-                    .owner_by_project
-                    .get(&target_project_id)
-                    .is_some_and(|owner| owner != credential)
-            {
-                return Err(ProjectBindError::TargetOwned);
             }
             let bound_permit = reserve_bound_event(record)?;
             (
@@ -1029,7 +1009,6 @@ mod tests {
     fn binding(project_id: &str) -> ProjectBindingCommit {
         ProjectBindingCommit {
             project_id: project_id.to_owned(),
-            allow_preemption: true,
             project_use: project_use(project_id),
             bound_event: json!({"type": "project.bound"}),
         }
@@ -1238,50 +1217,6 @@ mod tests {
         assert!(source_lifetime.try_recv().is_err());
         assert!(target_lifetime.try_recv().is_err());
         assert!(target_receiver.try_recv().is_err());
-    }
-
-    #[test]
-    fn replacement_without_preemption_permission_preserves_target_owner() {
-        let registry = WorkbenchConnectionRegistry::new();
-        let (target_events, mut target_receiver) = mpsc::channel::<Value>(4);
-        let (target_owner, _target_closed) =
-            registry.open("browser-1".to_owned(), None, target_events);
-        registry
-            .bind_project(&target_owner.credential, 0, binding("project-b"))
-            .expect("target Project should bind");
-        assert!(target_receiver.try_recv().is_ok());
-
-        let (source_events, mut source_receiver) = mpsc::channel::<Value>(4);
-        let (source_owner, _source_closed) =
-            registry.open("browser-2".to_owned(), None, source_events);
-        registry
-            .bind_project(&source_owner.credential, 0, binding("project-a"))
-            .expect("source Project should bind");
-        assert!(source_receiver.try_recv().is_ok());
-        let mut commit = binding("project-b");
-        commit.allow_preemption = false;
-
-        let error = registry
-            .replace_project(&source_owner.credential, "project-a", 1, commit)
-            .expect_err("ordinary Desktop replacement must not preempt another owner");
-
-        assert_eq!(error, ProjectBindError::TargetOwned);
-        assert_eq!(
-            registry
-                .project_owner("project-a")
-                .expect("source owner should remain")
-                .credential,
-            source_owner.credential
-        );
-        assert_eq!(
-            registry
-                .project_owner("project-b")
-                .expect("target owner should remain")
-                .credential,
-            target_owner.credential
-        );
-        assert!(target_receiver.try_recv().is_err());
-        assert!(source_receiver.try_recv().is_err());
     }
 
     #[test]

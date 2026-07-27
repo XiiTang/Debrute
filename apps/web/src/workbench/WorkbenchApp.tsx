@@ -25,12 +25,16 @@ import { createCanvasSelectionStackOrderSync } from './services/canvasStackOrder
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import {
   currentDebruteWorkbenchRoute,
-  openInitialProject,
-  projectOpenHereProjectId,
   replaceWorkbenchProjectRoute,
+  resolveInitialProjectRoute,
   shouldShowInitialProjectLoader,
   type ProjectOpenStartupError
 } from './services/projectSessionState';
+import {
+  createProjectBindingLifecycle,
+  type ProjectBindingLifecycle,
+  type ProjectBindingLifecycleOutcome
+} from './services/projectBindingLifecycle.js';
 import { restoreProjectViewState, saveProjectViewState } from './services/projectViewState';
 import { reconcileWorkbenchViewportLayout } from './services/workbenchViewportLayout';
 import {
@@ -218,6 +222,15 @@ function WorkbenchRuntimeApp({
     api.projectProjection.subscribe,
     api.projectProjection.getState
   );
+  const projectBindingLifecycle = useMemo(() => createProjectBindingLifecycle({
+    openProject: api.openProject,
+    projectProjection: api.projectProjection,
+    commitProjectRoute: replaceWorkbenchProjectRoute
+  }), [api]);
+  const projectBindingLifecycleState = useSyncExternalStore(
+    projectBindingLifecycle.subscribe,
+    projectBindingLifecycle.getState
+  );
   const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
   const runtimeProjectId = acceptedProject?.projectId;
   const [connectionEnded, setConnectionEnded] = useState<Error>();
@@ -225,9 +238,7 @@ function WorkbenchRuntimeApp({
   const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
   const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
   const [projectOpenError, setProjectOpenError] = useState<string>();
-  const [projectOpenHereTargetId, setProjectOpenHereTargetId] = useState<string>();
-  const [isProjectOpening, setIsProjectOpening] = useState(false);
-  const initialProjectOpeningRef = useRef<ReturnType<typeof openInitialProject> | undefined>(undefined);
+  const initialProjectOpeningRef = useRef<ReturnType<ProjectBindingLifecycle['open']> | undefined>(undefined);
   const announcedProjectGenerationsRef = useRef(new Set<number>());
   const notify = useCallback((message: string) => {
     setNotifications((current) => [message, ...current].slice(0, 4));
@@ -324,18 +335,26 @@ function WorkbenchRuntimeApp({
     let disposed = false;
     void (async () => {
       try {
-        initialProjectOpeningRef.current ??= openInitialProject(api, initialRoute);
+        const resolution = resolveInitialProjectRoute(initialRoute);
+        setProjectOpenAttemptedPath(resolution.projectOpen?.attemptedPath);
+        setProjectOpenError(localizedProjectOpenError(
+          resolution.projectOpen?.error,
+          presentationController.getCurrentI18n()
+        ));
+        if (!resolution.target) {
+          return;
+        }
+        initialProjectOpeningRef.current ??= projectBindingLifecycle.open(resolution.target);
         const result = await initialProjectOpeningRef.current;
         if (disposed) {
           return;
         }
-        setProjectOpenAttemptedPath(result.projectOpen?.attemptedPath);
-        setProjectOpenError(localizedProjectOpenError(result.projectOpen?.error, presentationController.getCurrentI18n()));
-        setProjectOpenHereTargetId(
-          result.projectOpen?.error?.code === 'project-open-here-required'
-            ? result.projectOpen.error.projectId
-            : undefined
-        );
+        if (result.outcome === 'failed') {
+          const error: ProjectOpenStartupError = initialRoute.kind === 'project'
+            ? { code: 'project-snapshot-load-failed', message: result.error.message }
+            : { code: 'project-open-failed', message: result.error.message };
+          setProjectOpenError(localizedProjectOpenError(error, presentationController.getCurrentI18n()));
+        }
       } catch (error) {
         if (!disposed) {
           notify(presentationController.getCurrentI18n().t('shell.notifications.projectStartupFailed', {
@@ -351,7 +370,7 @@ function WorkbenchRuntimeApp({
     return () => {
       disposed = true;
     };
-  }, [initialRoute, notify, presentationController.getCurrentI18n]);
+  }, [initialRoute, notify, presentationController.getCurrentI18n, projectBindingLifecycle]);
 
   const projectGenerationAppProps = {
     api,
@@ -372,10 +391,8 @@ function WorkbenchRuntimeApp({
     setProjectOpenAttemptedPath,
     projectOpenError,
     setProjectOpenError,
-    projectOpenHereTargetId,
-    setProjectOpenHereTargetId,
-    isProjectOpening,
-    setIsProjectOpening
+    projectBindingLifecycle,
+    isProjectOpening: projectBindingLifecycleState.opening
   };
   const surface = projectProjection.status === 'unbound' ? (
     <WorkbenchProjectGenerationApp {...projectGenerationAppProps} />
@@ -423,10 +440,8 @@ function WorkbenchProjectGenerationApp({
   setProjectOpenAttemptedPath,
   projectOpenError,
   setProjectOpenError,
-  projectOpenHereTargetId,
-  setProjectOpenHereTargetId,
-  isProjectOpening,
-  setIsProjectOpening
+  projectBindingLifecycle,
+  isProjectOpening
 }: {
   api: HttpWorkbenchApiClient;
   canvasTextRenderProfile: ReturnType<typeof canvasTextRenderProfileForAppearance>;
@@ -450,10 +465,8 @@ function WorkbenchProjectGenerationApp({
   setProjectOpenAttemptedPath: React.Dispatch<React.SetStateAction<string | undefined>>;
   projectOpenError: string | undefined;
   setProjectOpenError: React.Dispatch<React.SetStateAction<string | undefined>>;
-  projectOpenHereTargetId: string | undefined;
-  setProjectOpenHereTargetId: React.Dispatch<React.SetStateAction<string | undefined>>;
+  projectBindingLifecycle: ProjectBindingLifecycle;
   isProjectOpening: boolean;
-  setIsProjectOpening: React.Dispatch<React.SetStateAction<boolean>>;
 }): React.ReactElement {
   const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
   const hasAcceptedProject = acceptedProject !== undefined;
@@ -469,37 +482,10 @@ function WorkbenchProjectGenerationApp({
       acceptedProject ? 'project-surface-committed' : 'project-open-surface-committed'
     );
   }, [acceptedProject, isLoading]);
-  const projectPathCommandAdmissionRef = useRef(!isProjectOpening);
-  const retiredProjectPathCommandAdmissionRef = useRef(false);
-  useEffect(() => {
-    if (isProjectOpening) {
-      projectPathCommandAdmissionRef.current = false;
-      return;
-    }
-    if (!retiredProjectPathCommandAdmissionRef.current) {
-      projectPathCommandAdmissionRef.current = true;
-    }
-  }, [isProjectOpening]);
   const canStartProjectPathCommand = useCallback(
-    () => projectPathCommandAdmissionRef.current && !projectPresentationBlocked,
-    [projectPresentationBlocked]
-  );
-  const beginProjectOpening = useCallback(() => {
-    if (!projectPathCommandAdmissionRef.current) {
-      return false;
-    }
-    projectPathCommandAdmissionRef.current = false;
-    setIsProjectOpening(true);
-    return true;
-  }, [setIsProjectOpening]);
-  const finishProjectOpening = useCallback((restoreCommandAdmission: boolean) => {
-    retiredProjectPathCommandAdmissionRef.current = !restoreCommandAdmission;
-    projectPathCommandAdmissionRef.current = restoreCommandAdmission;
-    setIsProjectOpening(false);
-  }, [setIsProjectOpening]);
-  const didProjectBindingChange = useCallback(
-    () => api.projectProjection.getState().generation !== projectProjection.generation,
-    [projectProjection.generation]
+    () => projectBindingLifecycle.canStartProjectPathCommand(projectProjection.generation)
+      && !projectPresentationBlocked,
+    [projectBindingLifecycle, projectPresentationBlocked, projectProjection.generation]
   );
   const isCurrentProjectPathCommandScope = useCallback(() => {
     const current = api.projectProjection.getState();
@@ -615,10 +601,8 @@ function WorkbenchProjectGenerationApp({
       projectName: acceptedProject.presentedSnapshot.metadata.project.name,
       viewStateInvalid: initialProjectPresentation.viewStateInvalid
     });
-    setProjectOpenHereTargetId(undefined);
     setProjectOpenAttemptedPath(undefined);
     setProjectOpenError(undefined);
-    replaceWorkbenchProjectRoute(acceptedProject.projectId);
     feedbackInteraction.restoreWorkingCopies(acceptedProject.workingCopies.feedback);
     void feedbackInteraction.load();
   }, [acceptedProject?.generation]);
@@ -627,48 +611,12 @@ function WorkbenchProjectGenerationApp({
     if (!runtimeProjectId) {
       return;
     }
-    if (!beginProjectOpening()) {
-      return;
-    }
     setProjectOpenError(undefined);
-    let projectBindingChanged = false;
-    try {
-      const opened = await api.openProject({ projectId: runtimeProjectId, forceOpenHere: true });
-      if (!('outcome' in opened)) {
-        projectBindingChanged = didProjectBindingChange();
-        replaceWorkbenchProjectRoute(opened.projectId);
-      }
-    } catch (error) {
-      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
-    } finally {
-      finishProjectOpening(!projectBindingChanged);
+    const outcome = await projectBindingLifecycle.open({ projectId: runtimeProjectId });
+    if (outcome.outcome === 'failed') {
+      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: outcome.error.message }));
     }
-  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, i18n, runtimeProjectId, setProjectOpenError]);
-
-  const openProjectHere = useCallback(async () => {
-    if (!projectOpenHereTargetId) {
-      return;
-    }
-    if (!beginProjectOpening()) {
-      return;
-    }
-    setProjectOpenError(undefined);
-    let projectBindingChanged = false;
-    try {
-      const opened = await api.openProject({
-        projectId: projectOpenHereTargetId,
-        forceOpenHere: true
-      });
-      if (!('outcome' in opened)) {
-        projectBindingChanged = didProjectBindingChange();
-        replaceWorkbenchProjectRoute(opened.projectId);
-      }
-    } catch (error) {
-      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
-    } finally {
-      finishProjectOpening(!projectBindingChanged);
-    }
-  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, i18n, projectOpenHereTargetId, setProjectOpenError]);
+  }, [i18n, projectBindingLifecycle, runtimeProjectId, setProjectOpenError]);
 
   useEffect(() => {
     workbenchViewportRectRef.current = workbenchViewportRect;
@@ -959,6 +907,21 @@ function WorkbenchProjectGenerationApp({
     return result;
   }, [activeCanvasId]);
 
+  const presentProjectOpenFailure = useCallback((error: Error) => {
+    const message = i18n.t('projectOpen.openFailed', { message: error.message });
+    if (hasAcceptedProject) {
+      notify(message);
+      return;
+    }
+    setProjectOpenError(message);
+  }, [hasAcceptedProject, i18n, notify, setProjectOpenError]);
+
+  const presentProjectOpenOutcome = useCallback((outcome: ProjectBindingLifecycleOutcome) => {
+    if (outcome.outcome === 'failed') {
+      presentProjectOpenFailure(outcome.error);
+    }
+  }, [presentProjectOpenFailure]);
+
   const openProject = useCallback<WorkbenchActions['openProject']>(async () => {
     const shell = getDebruteShellApi();
     if (shell) {
@@ -967,67 +930,29 @@ function WorkbenchProjectGenerationApp({
       try {
         await shell.executeNativeMenuCommand({ commandId: 'project.open-picker' });
       } catch (error) {
-        const message = i18n.t('projectOpen.openFailed', { message: errorMessage(error) });
-        if (hasAcceptedProject) {
-          notify(message);
-        } else {
-          setProjectOpenError(message);
-        }
+        presentProjectOpenFailure(error instanceof Error ? error : new Error(String(error)));
       }
-      return;
-    }
-    if (!beginProjectOpening()) {
       return;
     }
     setProjectOpenError(undefined);
     setProjectOpenAttemptedPath(undefined);
-    let projectBindingChanged = false;
     try {
-      const result = await api.openProjectFromPicker();
-      if (!result.opened) {
+      const projectRoot = await api.chooseProjectRoot();
+      if (!projectRoot) {
         return;
       }
-      if ('outcome' in result) {
-        return;
-      }
-      projectBindingChanged = didProjectBindingChange();
-      replaceWorkbenchProjectRoute(result.projectId);
+      setProjectOpenAttemptedPath(projectRoot);
+      presentProjectOpenOutcome(await projectBindingLifecycle.open({ projectRoot }));
     } catch (error) {
-      const openHereProjectId = projectOpenHereProjectId(error);
-      if (openHereProjectId) {
-        setProjectOpenHereTargetId(openHereProjectId);
-        return;
-      }
-      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: errorMessage(error) }));
-    } finally {
-      finishProjectOpening(!projectBindingChanged);
+      presentProjectOpenFailure(error instanceof Error ? error : new Error(String(error)));
     }
-  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, hasAcceptedProject, i18n, notify, setProjectOpenAttemptedPath, setProjectOpenError, setProjectOpenHereTargetId]);
+  }, [api, presentProjectOpenFailure, presentProjectOpenOutcome, projectBindingLifecycle, setProjectOpenAttemptedPath, setProjectOpenError]);
 
-  const openProjectRoot = useCallback(async (projectRoot: string): Promise<void> => {
-    if (!beginProjectOpening()) {
-      return;
-    }
+  const openProjectRoot = useCallback(async (projectRoot: string): Promise<ProjectBindingLifecycleOutcome> => {
     setProjectOpenError(undefined);
     setProjectOpenAttemptedPath(projectRoot);
-    let projectBindingChanged = false;
-    try {
-      const opened = await api.openProject({ projectRoot });
-      if (!('outcome' in opened)) {
-        projectBindingChanged = didProjectBindingChange();
-        replaceWorkbenchProjectRoute(opened.projectId);
-      }
-    } catch (error) {
-      const openHereProjectId = projectOpenHereProjectId(error);
-      if (openHereProjectId) {
-        setProjectOpenHereTargetId(openHereProjectId);
-        return;
-      }
-      throw error;
-    } finally {
-      finishProjectOpening(!projectBindingChanged);
-    }
-  }, [beginProjectOpening, didProjectBindingChange, finishProjectOpening, setProjectOpenAttemptedPath, setProjectOpenError, setProjectOpenHereTargetId]);
+    return projectBindingLifecycle.open({ projectRoot });
+  }, [projectBindingLifecycle, setProjectOpenAttemptedPath, setProjectOpenError]);
 
   useEffect(() => {
     const shell = getDebruteShellApi();
@@ -1035,16 +960,9 @@ function WorkbenchProjectGenerationApp({
       return;
     }
     return shell.onOpenProjectRequested((projectRoot) => {
-      void openProjectRoot(projectRoot).catch((error) => {
-        const message = i18n.t('projectOpen.openFailed', { message: errorMessage(error) });
-        if (hasAcceptedProject) {
-          notify(message);
-          return;
-        }
-        setProjectOpenError(message);
-      });
+      void openProjectRoot(projectRoot).then(presentProjectOpenOutcome);
     });
-  }, [hasAcceptedProject, i18n, notify, openProjectRoot, setProjectOpenError]);
+  }, [openProjectRoot, presentProjectOpenOutcome]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
     if (!canStartProjectPathCommand()) {
@@ -1240,11 +1158,13 @@ function WorkbenchProjectGenerationApp({
       api,
       shell: getDebruteShellApi(),
       openProjectFromPicker: actions.openProject,
-      openProjectRoot
+      openProjectRoot: async (projectRoot) => {
+        presentProjectOpenOutcome(await openProjectRoot(projectRoot));
+      }
     }).catch((error) => {
       notify(i18n.t('shell.notifications.menuCommandFailed', { message: errorMessage(error) }));
     });
-  }, [actions.openProject, i18n, notify, openProjectRoot]);
+  }, [actions.openProject, i18n, notify, openProjectRoot, presentProjectOpenOutcome]);
   const handleTitleBarWindowCommand = useCallback((command: 'minimize' | 'toggle-maximize' | 'close') => {
     const shell = getDebruteShellApi();
     if (!shell) {
@@ -1508,18 +1428,7 @@ function WorkbenchProjectGenerationApp({
             </WorkbenchCanvasDialog>
           ) : null}
           <div className="canvas-layer" data-testid="canvas-layer" inert={projectPresentationBlocked}>
-            {projectOpenHereTargetId ? (
-              <div className="empty-editor empty-project" role="status" data-testid="workbench-open-here-status">
-                <strong>This Project is active in a Web Workbench.</strong>
-                <span>Choose Open Here to move it to this Desktop window.</span>
-                <Button loading={isProjectOpening} disabled={isProjectOpening} onClick={() => { void openProjectHere(); }}>Open Here</Button>
-                {projectOpenError ? (
-                  <span className="db-form-error" role="alert" data-testid="workbench-open-here-error">
-                    {projectOpenError}
-                  </span>
-                ) : null}
-              </div>
-            ) : registryInvalid ? (
+            {registryInvalid ? (
               <div className="empty-editor empty-project">
                 <strong>{i18n.t('canvas.registry.needsRepair')}</strong>
                 <span>{registryInvalid.message}</span>
@@ -1923,9 +1832,6 @@ function localizedProjectOpenError(error: ProjectOpenStartupError | undefined, i
   }
   if (error.code === 'project-path-must-be-absolute') {
     return i18n.t('projectOpen.pathMustBeAbsolute');
-  }
-  if (error.code === 'project-open-here-required') {
-    return undefined;
   }
   if (error.code === 'project-snapshot-load-failed') {
     return i18n.t('projectOpen.snapshotLoadFailed', { message: error.message });

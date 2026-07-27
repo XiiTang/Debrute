@@ -67,7 +67,7 @@ const apiState = vi.hoisted(() => {
         };
       }
       const value = Reflect.get(state.api, property, state.api);
-      if ((property === 'openProject' || property === 'openProjectFromPicker') && typeof value === 'function') {
+      if (property === 'openProject' && typeof value === 'function') {
         return async (...args: unknown[]) => {
           const result = await Reflect.apply(value, state.api, args) as Record<string, unknown>;
           if (
@@ -246,7 +246,66 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     expect(executeNativeMenuCommand).toHaveBeenCalledWith({ commandId: 'project.open-picker' });
-    expect(apiState.api!.openProjectFromPicker).not.toHaveBeenCalled();
+    expect(apiState.api!.chooseProjectRoot).not.toHaveBeenCalled();
+    await unmount(root, container);
+  });
+
+  it('keeps the current Project admitted while the Web selector is open and cancelled', async () => {
+    const selection = deferred<string | undefined>();
+    const chooseProjectRoot = vi.fn(() => selection.promise);
+    const openProject = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 1,
+      snapshot: stackOrderSnapshotFixture(),
+      workingCopies: emptyWorkingCopies()
+    }));
+    const addProjectPathToCanvasMap = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 2,
+      canvasId: 'canvas-1',
+      projectRelativePath: 'flow/new.png'
+    }));
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+      chooseProjectRoot,
+      openProject,
+      addProjectPathToCanvasMap
+    });
+
+    await act(async () => {
+      requireButton(container, 'File').click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      requireButton(container, 'Open Project').click();
+      await Promise.resolve();
+    });
+
+    expect(chooseProjectRoot).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="workbench-project-opening"]')).toBeNull();
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: {
+        getData: () => JSON.stringify([{
+          kind: 'file',
+          projectRelativePath: 'flow/new.png'
+        }])
+      }
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="canvas-surface"]')?.dispatchEvent(drop);
+      await Promise.resolve();
+    });
+
+    expect(addProjectPathToCanvasMap).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      selection.resolve(undefined);
+      await Promise.resolve();
+    });
+
+    expect(openProject).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('Demo');
     await unmount(root, container);
   });
 
@@ -431,65 +490,48 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('requires an explicit Open Here action when Desktop opens a Project owned by Web', async () => {
-    const conflict = Object.assign(new Error('Project is active in Web.'), {
-      code: 'project_owned_by_web',
-      details: { projectId: 'project-1' }
-    });
-    const openProject = vi.fn(async (input: { projectId: string; forceOpenHere?: boolean }) => {
-      if (!input.forceOpenHere) {
-        throw conflict;
-      }
-      return {
-        projectId: 'project-1',
-        projectRevision: 1,
-        snapshot: snapshotFixture(),
-        workingCopies: emptyWorkingCopies()
-      };
-    });
+  it('opens an explicitly requested Desktop Project without a destination confirmation surface', async () => {
+    const openProject = vi.fn<WorkbenchApiClient['openProject']>(async () => ({
+      projectId: 'project-1',
+      projectRevision: 1,
+      snapshot: snapshotFixture(),
+      workingCopies: emptyWorkingCopies()
+    }));
     const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
 
-    const openHereStatus = container.querySelector('[data-testid="workbench-open-here-status"]');
-    expect(openHereStatus?.textContent).toContain('active in a Web Workbench');
-    expect(openHereStatus?.closest('[data-testid="canvas-layer"]')).not.toBeNull();
-    expect(openHereStatus?.getAttribute('role')).toBe('status');
-    expect(openHereStatus?.querySelector('[role="dialog"]')).toBeNull();
-
-    await act(async () => {
-      requireButton(container, 'Open Here').click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(openProject).toHaveBeenLastCalledWith({ projectId: 'project-1', forceOpenHere: true });
-    expect(container.querySelector('[data-testid="workbench-open-here-status"]')).toBeNull();
+    expect(openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
+    expect(findButton(container, 'Open Here')).toBeUndefined();
     expect(container.textContent).toContain('Demo');
     await unmount(root, container);
   });
 
-  it('keeps an Open Here retry failure directly below the action', async () => {
-    const conflict = Object.assign(new Error('Project is active in Web.'), {
-      code: 'project_owned_by_web',
-      details: { projectId: 'project-1' }
-    });
-    const openProject = vi.fn(async (input: { forceOpenHere?: boolean }) => {
-      if (input.forceOpenHere) {
-        throw new Error('takeover failed');
-      }
-      throw conflict;
-    });
+  it('keeps a detached Open Here failure inside the blocking dialog', async () => {
+    const openProject = vi.fn<WorkbenchApiClient['openProject']>()
+      .mockResolvedValueOnce({
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: snapshotFixture(),
+        workingCopies: emptyWorkingCopies()
+      })
+      .mockRejectedValueOnce(new Error('takeover failed'));
     const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
 
+    await act(async () => {
+      detachCurrentProject();
+      await Promise.resolve();
+    });
     await act(async () => {
       requireButton(container, 'Open Here').click();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    const openHereStatus = container.querySelector('[data-testid="workbench-open-here-status"]');
-    const error = openHereStatus?.querySelector('[data-testid="workbench-open-here-error"]');
+    const dialog = container.querySelector('[data-testid="workbench-detached-dialog-layer"]');
+    const error = dialog?.querySelector('[role="alert"]');
     expect(error?.textContent).toContain('Open project failed: takeover failed');
     expect(error?.previousElementSibling?.textContent).toContain('Open Here');
+    expect(openProject).toHaveBeenLastCalledWith({ projectId: 'project-1' });
+    expect(container.querySelector('[data-testid="canvas-layer"]')?.hasAttribute('inert')).toBe(true);
     await unmount(root, container);
   });
 
@@ -518,6 +560,41 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(error?.textContent).toContain('Open project failed: native open failed');
     expect(error?.previousElementSibling?.textContent).toContain('Open Project');
     expect(openPanel?.textContent).toContain('/projects/missing');
+    await unmount(root, container);
+  });
+
+  it('shows a bound Project replacement failure as a notification and keeps the Project', async () => {
+    let openProjectRequested: ((projectRoot: string) => void) | undefined;
+    window.debruteShell = shellApiFixture({
+      onOpenProjectRequested: (listener) => {
+        openProjectRequested = listener;
+        return () => { openProjectRequested = undefined; };
+      }
+    });
+    const openProject = vi.fn<WorkbenchApiClient['openProject']>(async (target) => {
+      if ('projectRoot' in target) {
+        throw new Error('replacement failed');
+      }
+      return {
+        projectId: 'project-1',
+        projectRevision: 1,
+        snapshot: snapshotFixture(),
+        workingCopies: emptyWorkingCopies()
+      };
+    });
+    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
+
+    await act(async () => {
+      openProjectRequested?.('/projects/missing');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('.db-notification-stack')?.textContent)
+      .toContain('Open project failed: replacement failed');
+    expect(container.querySelector('.project-open-panel__error')).toBeNull();
+    expect(container.textContent).toContain('Demo');
+    expect(container.querySelector('[data-testid="workbench-project-opening"]')).toBeNull();
     await unmount(root, container);
   });
 
@@ -1132,7 +1209,7 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       snapshot: snapshotFixture(),
       workingCopies: emptyWorkingCopies()
     })),
-    openProjectFromPicker: vi.fn(async () => ({ opened: false })),
+    chooseProjectRoot: vi.fn(async () => undefined),
     readCanvasFeedback: vi.fn(async () => ({ entries: {} })),
     putTextWorkingCopy: vi.fn(async (_projectId, value) => value),
     clearTextWorkingCopy: vi.fn(async () => undefined),

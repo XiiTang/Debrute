@@ -21,8 +21,8 @@ Only the default-open intent reads the Runtime-owned frontend preference.
 Explicit intents never fall back to another frontend. Runtime has no pre-ready
 activation queue, intent id, deduplication cache, or cross-instance replay.
 
-Opening a Project applies the Workbench single-owner rule. If another Desktop
-window owns it, an ordinary Desktop activation focuses that window. A browser
-activation creates its requested Workbench and may preempt the current owner.
-Desktop's explicit **Open Here** action also preempts. These are direct outcomes
-of the submitted intent, not retries or timeout fallbacks.
+Opening a Project applies the Workbench explicit-open ownership rule and
+same-Desktop-host focus exception defined by
+[ADR 0033](./0033-workbench-session-lifetime-follows-its-container.md). Focus or
+ownership transfer is a direct outcome of the submitted intent, not a retry,
+second destination confirmation, or timeout fallback.

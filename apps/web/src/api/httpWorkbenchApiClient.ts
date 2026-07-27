@@ -24,6 +24,7 @@ import type {
   WorkbenchCanvasManagementResult,
   WorkbenchCanvasResetLayoutResult,
   WorkbenchProjectOpenResult,
+  WorkbenchProjectTarget,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
   WorkbenchProjectTextFile,
@@ -123,6 +124,7 @@ export function createHttpWorkbenchApiClient(options: {
   let globalSettingsBootstrap: WorkbenchGlobalSettingsBootstrap | undefined;
   let globalSettingsBootstrapError: Error | undefined;
   let adobeBridgeStateLoad: Promise<void> | undefined;
+  let projectRootSelection: Promise<string | undefined> | undefined;
   const globalSettingsBootstrapWaiters: Array<{
     resolve(value: WorkbenchGlobalSettingsBootstrap): void;
     reject(error: Error): void;
@@ -415,6 +417,17 @@ export function createHttpWorkbenchApiClient(options: {
       boundProjectWaiters.set(projectId, waiters);
     });
   };
+  const requestProjectBinding = async (
+    path: '/api/projects/open' | '/api/projects/replace',
+    target: WorkbenchProjectTarget
+  ): ReturnType<WorkbenchApiClient['openProject']> => {
+    startupTimeline.mark('project-open-requested');
+    const opened = await request<ProjectBindingCommandResult>('POST', path, target);
+    if (opened.outcome === 'focused_existing_desktop') {
+      return { outcome: opened.outcome, projectId: opened.projectId };
+    }
+    return waitForBoundProject(opened.projectId);
+  };
   const ensureConnection = (): Promise<void> => {
     if (connectionReady) {
       return connectionReady;
@@ -589,83 +602,39 @@ export function createHttpWorkbenchApiClient(options: {
       '/adobe-bridge/send-to-photoshop',
       input
     ),
-    openProject: async (input) => {
+    openProject: async (target) => {
       await ensureConnection();
       const currentProjectId = currentProjectBinding()?.projectId;
-      if ('projectId' in input) {
-        if (initialProjectError && !input.forceOpenHere) {
+      if ('projectId' in target) {
+        if (initialProjectError) {
           throw initialProjectError;
         }
-        if (currentProjectId === input.projectId) {
-          return waitForBoundProject(input.projectId);
+        if (currentProjectId === target.projectId) {
+          return waitForBoundProject(target.projectId);
         }
         if (!currentProjectId) {
-          startupTimeline.mark('project-open-requested');
-          const opened = await request<ProjectBindingCommandResult>(
-            'POST',
-            '/api/projects/open',
-            {
-              projectId: input.projectId,
-              ...(input.forceOpenHere ? { forceOpenHere: true } : {})
-            }
-          );
-          if (opened.outcome === 'focused_existing_desktop') {
-            return { outcome: opened.outcome, projectId: opened.projectId };
-          }
-          return waitForBoundProject(opened.projectId);
+          return requestProjectBinding('/api/projects/open', target);
         }
         throw new Error(`Workbench is already bound to Project ${currentProjectId}.`);
       }
       if (!currentProjectId) {
-        startupTimeline.mark('project-open-requested');
-        const opened = await request<ProjectBindingCommandResult>(
-          'POST',
-          '/api/projects/open',
-          {
-            projectRoot: input.projectRoot,
-            ...(input.forceOpenHere ? { forceOpenHere: true } : {})
-          }
-        );
-        if (opened.outcome === 'focused_existing_desktop') {
-          return { outcome: opened.outcome, projectId: opened.projectId };
-        }
-        return waitForBoundProject(opened.projectId);
+        return requestProjectBinding('/api/projects/open', target);
       }
-      startupTimeline.mark('project-open-requested');
-      const opened = await request<ProjectBindingCommandResult>(
-        'POST',
-        '/api/projects/replace',
-        {
-          projectRoot: input.projectRoot,
-          ...(input.forceOpenHere ? { forceOpenHere: true } : {})
-        }
-      );
-      if (opened.outcome === 'focused_existing_desktop') {
-        return { outcome: opened.outcome, projectId: opened.projectId };
-      }
-      return waitForBoundProject(opened.projectId);
+      return requestProjectBinding('/api/projects/replace', target);
     },
-    openProjectFromPicker: async () => {
-      await ensureConnection();
-      const result = await request<ProjectPickerCommandResult>('POST', '/api/projects/choose', {});
-      if (!result.selected) {
-        return { opened: false };
+    chooseProjectRoot: () => {
+      if (projectRootSelection) {
+        return projectRootSelection;
       }
-      const currentProjectId = currentProjectBinding()?.projectId;
-      startupTimeline.mark('project-open-requested');
-      const opened = await request<ProjectBindingCommandResult>(
-        'POST',
-        currentProjectId ? '/api/projects/replace' : '/api/projects/open',
-        { projectRoot: result.projectRoot }
-      );
-      if (opened.outcome === 'focused_existing_desktop') {
-        return {
-          opened: true,
-          outcome: 'focused_existing_desktop',
-          projectId: opened.projectId
-        };
-      }
-      return { opened: true, ...await waitForBoundProject(opened.projectId) };
+      const selection = request<ProjectPickerCommandResult>('POST', '/api/projects/choose', {})
+        .then((result) => result.selected ? result.projectRoot : undefined);
+      const sharedSelection = selection.finally(() => {
+        if (projectRootSelection === sharedSelection) {
+          projectRootSelection = undefined;
+        }
+      });
+      projectRootSelection = sharedSelection;
+      return sharedSelection;
     },
     clearRecentProjectRoots: () => request<{ ok: true }>('DELETE', '/api/workbench/recent-projects'),
     checkProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/check'),

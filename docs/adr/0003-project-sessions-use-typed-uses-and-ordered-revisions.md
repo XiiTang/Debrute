@@ -71,9 +71,11 @@ Workbench does not reload the whole renderer, keep the previous Project
 subtree alive in the background, define a generic Project-reset interface, or
 maintain an imperative reset list. A detach does not advance the generation or
 replace the subtree: it removes command authority and preserves that binding's
-last presentation read-only. Project-scoped asynchronous work carries its
-binding generation, so completion from a disposed generation cannot publish
-into the current one.
+last presentation read-only. Project-local presentation work retires with its
+generation-keyed subtree. Work that publishes outside that subtree must prove
+that it still belongs to the current accepted generation. The Project binding
+lifecycle governs admission; it does not own completion of commands that were
+already accepted.
 
 Within one binding generation, the accepted Project stream is contiguous.
 After revision `R`, only revision `R + 1` is valid. A repeated, older, or
@@ -124,19 +126,19 @@ projection, loads Working Copies, and secures delivery of the first
 `project.bound` frame. Any preparation failure leaves both Workbench owners
 unchanged. Selecting the already bound target is a no-op.
 
-When a bound Workbench starts replacement, it synchronously closes Project Path
-Command admission for the presented binding before asking Runtime to open the
-target. Commands already submitted retain their captured Project id and binding
-generation; commands not yet submitted do not cross that boundary. The current
-native confirmation is synchronous, so Project switching cannot begin while it
-is open; if switching begins first, the closed gate prevents opening a new
-confirmation. Any future non-blocking confirmation must belong to and disappear
-with its Project generation. Runtime replacement waits for active Project
-request leases to drain before committing the new binding. A cancelled or failed
-open restores command admission to the unchanged binding. A successful open
-mounts the new generation with fresh command authority. Neither Web transport
-abort nor Project switching claims to cancel or roll back an accepted Runtime
-command.
+Target selection is outside the Project binding attempt. Cancelling a browser or
+native selector submits no open, leaves the current binding unchanged, and does
+not close Project Path Command admission. Once a concrete target enters the
+Workbench Project binding lifecycle, it synchronously closes admission for the
+presented binding before transport or any asynchronous preparation begins.
+Commands already submitted retain their captured Project id and binding
+generation; commands not yet submitted do not cross that boundary. Runtime
+replacement waits for active Project request leases to drain before committing
+the new binding. Failed preparation or a focused-existing Desktop outcome
+restores command admission to the unchanged requesting binding. An accepted
+`project.bound` mounts the new generation with fresh command authority. Neither
+Web transport abort nor Project switching claims to cancel or roll back an
+accepted Runtime command.
 
 The commit changes the connection's Project binding, the unique owner, and the
 owning Workbench Project Use as one Runtime transaction. It advances a
@@ -154,13 +156,13 @@ returns the preparation error while A and B retain their original owners. If
 serialization and first-frame delivery succeed, the later owner change is the
 single commit.
 
-When another Desktop window already owns the target, an ordinary Desktop open
-focuses that window. When Web owns the target, an ordinary Desktop open remains
-unbound on the root surface until the user chooses **Open Here**. A Web
-Workbench, or Desktop's explicit **Open Here** command, preempts the previous
-Workbench. Runtime sends `project.preempted`, clears the old binding and Project
-Use, and retargets a preempted Desktop window to the root route. It does not
-close the native window or transfer frontend state.
+The explicit-open ownership rule, the same-Desktop-host focus exception, and the
+detached **Open Here** behavior are defined by
+[ADR 0033](./0033-workbench-session-lifetime-follows-its-container.md). When that
+routing selects an ownership transfer, Runtime sends `project.preempted`, clears
+the displaced binding and Workbench Project Use, and retargets a displaced
+Desktop window to the root route as part of the committed transition. It does
+not close the native window or transfer frontend state.
 
 Runtime Working Copies protect unsaved text values and the latest Canvas
 Feedback values not yet reflected in accepted Runtime state independently of a

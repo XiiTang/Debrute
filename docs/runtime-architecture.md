@@ -411,14 +411,18 @@ cap.
 Opening from an unbound Workbench and replacing from a bound Workbench are the
 only binding operations. Target validation finishes before an atomic replace;
 opening the current target is a no-op. Each Project has at most one Workbench.
-Opening an already-open Project from another Desktop window focuses the
-existing window. When Web owns the Project, an ordinary Desktop open stays on
-the root surface and requires **Open Here**; it does not silently take
-ownership. A Web Workbench, or an explicit Desktop **Open Here** action,
-preempts the current Workbench. A preempted Desktop window stays open on the
-unbound topology route, while its renderer preserves the last Project
-presentation as a read-only detached surface with **Open Here**. It is not
-closed, silently rebound, or allowed to retain Project command authority.
+An explicit open from a requesting Workbench acquires the concrete target at the
+atomic binding commit and displaces any different Workbench owner without a
+second destination confirmation. Preparation does not modify either owner; a
+failure leaves both bindings unchanged. The only duplicate-open exception is
+inside one Desktop host: if another Desktop window owns the target, Runtime
+focuses that existing window and leaves the requesting window's binding
+unchanged. Runtime sends `project.preempted` only when an ownership transfer
+commits. A displaced Desktop window stays open on the unbound topology route,
+while its renderer preserves the last Project presentation as a read-only
+detached surface with **Open Here**. It is not closed, silently rebound, or
+allowed to retain Project command authority. **Open Here** is another explicit
+request to acquire that same Project under this rule.
 
 Project mutations are serialized and semantically validated. Commands return
 their outcome; ordered stream events carry authoritative state. A stale or

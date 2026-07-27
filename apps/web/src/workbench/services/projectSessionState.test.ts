@@ -1,274 +1,78 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot, WorkbenchWorkingCopies } from '@debrute/app-protocol';
-import { openInitialProject, replaceWorkbenchProjectRoute, shouldShowInitialProjectLoader } from './projectSessionState';
+import {
+  replaceWorkbenchProjectRoute,
+  resolveInitialProjectRoute,
+  shouldShowInitialProjectLoader
+} from './projectSessionState.js';
 
-function emptyWorkingCopies(): WorkbenchWorkingCopies {
-  return { text: {}, feedback: {} };
-}
-
-describe('project session startup', () => {
+describe('initial Project route', () => {
   const originalWindow = (globalThis as { window?: unknown }).window;
 
   afterEach(() => {
     (globalThis as { window?: unknown }).window = originalWindow;
   });
 
-  it('opens the project addressed by the project Workbench route', async () => {
-    (globalThis as { window?: unknown }).window = {
-      location: { pathname: '/projects/123e4567-e89b-42d3-a456-426614174000', search: '', hash: '' },
-      history: { state: null, replaceState: vi.fn() }
-    };
-    const calls: unknown[] = [];
-    const snapshot = { canvases: [{ id: 'canvas-1', name: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
-    const api = {
-      openProject: async (input: unknown) => {
-        calls.push(input);
-        return {
-          projectId: '123e4567-e89b-42d3-a456-426614174000',
-          projectRevision: 1,
-          snapshot,
-          workingCopies: emptyWorkingCopies()
-        };
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api, {
+  it('resolves a Project route to one concrete Project id', () => {
+    expect(resolveInitialProjectRoute({
       kind: 'project',
       projectId: '123e4567-e89b-42d3-a456-426614174000'
-    })).resolves.toEqual({
-      project: {
-        projectId: '123e4567-e89b-42d3-a456-426614174000',
-        projectRevision: 1,
-        snapshot,
-        workingCopies: emptyWorkingCopies()
-      },
+    })).toEqual({
       route: {
         kind: 'project',
         projectId: '123e4567-e89b-42d3-a456-426614174000'
-      }
-    });
-
-    expect(calls).toEqual([{ projectId: '123e4567-e89b-42d3-a456-426614174000' }]);
-  });
-
-  it('surfaces project route load failures as structured project-opening errors', async () => {
-    const calls: unknown[] = [];
-    const api = {
-      openProject: async (input: unknown) => {
-        calls.push(input);
-        throw new Error('Project session is not open.');
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api, {
-      kind: 'project',
-      projectId: 'missing-project'
-    })).resolves.toEqual({
-      project: undefined,
-      route: {
-        kind: 'project',
-        projectId: 'missing-project'
       },
-      projectOpen: {
-        error: {
-          code: 'project-snapshot-load-failed',
-          message: 'Project session is not open.'
-        }
-      }
-    });
-    expect(calls).toEqual([{ projectId: 'missing-project' }]);
-  });
-
-  it('turns a Desktop-versus-Web ownership conflict into an explicit Open Here choice', async () => {
-    const error = Object.assign(new Error('Project is active in Web.'), {
-      code: 'project_owned_by_web',
-      details: { projectId: 'project-in-web' }
-    });
-    const api = {
-      openProject: async () => { throw error; }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api, {
-      kind: 'project',
-      projectId: 'project-in-web'
-    })).resolves.toMatchObject({
-      project: undefined,
-      projectOpen: {
-        error: {
-          code: 'project-open-here-required',
-          projectId: 'project-in-web'
-        }
-      }
+      target: { projectId: '123e4567-e89b-42d3-a456-426614174000' }
     });
   });
 
-  it('keeps the Workbench root empty until a project is explicitly opened', async () => {
-    const calls: unknown[] = [];
-    const api = {
-      openProject: async (input: unknown) => {
-        calls.push(input);
-        throw new Error('openProject should not be called for the Workbench root');
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api, { kind: 'workbench' })).resolves.toEqual({
-      project: undefined,
+  it('keeps the Workbench root target-free', () => {
+    expect(resolveInitialProjectRoute({ kind: 'workbench' })).toEqual({
       route: { kind: 'workbench' }
     });
-
-    expect(calls).toEqual([]);
   });
 
-  it('skips the project-opening loader for the Workbench root', () => {
-    expect(shouldShowInitialProjectLoader({ kind: 'workbench' })).toBe(false);
-  });
-
-  it('keeps the project-opening loader for explicit project routes', () => {
-    expect(shouldShowInitialProjectLoader({
-      kind: 'project',
-      projectId: '123e4567-e89b-42d3-a456-426614174000'
-    })).toBe(true);
-    expect(shouldShowInitialProjectLoader({
-      kind: 'project-open',
-      projectRoot: '/Users/me/Project A'
-    })).toBe(true);
-  });
-
-  it('opens an absolute path from the project-open route and removes the path from browser history', async () => {
-    const replaceState = vi.fn();
-    const snapshot = { canvases: [{ id: 'canvas-1', name: 'canvas-1' }] } as WorkbenchProjectSessionSnapshot;
-    (globalThis as { window?: unknown }).window = {
-      location: { pathname: '/open', search: '?path=%2FUsers%2Fme%2FProject%20A', hash: '' },
-      history: { state: { preserved: true }, replaceState }
-    };
-    const calls: unknown[] = [];
-    const api = {
-      openProject: async (input: unknown) => {
-        calls.push(input);
-        return {
-          projectId: 'project-live-id',
-          projectRevision: 1,
-          snapshot,
-          workingCopies: emptyWorkingCopies()
-        };
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api)).resolves.toEqual({
-      project: {
-        projectId: 'project-live-id',
-        projectRevision: 1,
-        snapshot,
-        workingCopies: emptyWorkingCopies()
-      },
-      route: { kind: 'project-open', projectRoot: '/Users/me/Project A' },
-      projectOpen: { attemptedPath: '/Users/me/Project A' }
-    });
-    expect(calls).toEqual([{ projectRoot: '/Users/me/Project A' }]);
-    expect(replaceState).toHaveBeenCalledWith(
-      { preserved: true },
-      '',
-      '/projects/project-live-id'
-    );
-  });
-
-  it('passes an absolute project path with a trailing space through unchanged', async () => {
-    const calls: unknown[] = [];
-    const snapshot = { canvases: [] } as unknown as WorkbenchProjectSessionSnapshot;
-    const api = {
-      openProject: async (input: unknown) => {
-        calls.push(input);
-        return {
-          projectId: 'project-spaced-path',
-          projectRevision: 1,
-          snapshot,
-          workingCopies: emptyWorkingCopies()
-        };
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await openInitialProject(api, {
+  it('passes an absolute Project path through unchanged', () => {
+    expect(resolveInitialProjectRoute({
       kind: 'project-open',
       projectRoot: '/Users/me/Project '
+    })).toEqual({
+      route: { kind: 'project-open', projectRoot: '/Users/me/Project ' },
+      target: { projectRoot: '/Users/me/Project ' },
+      projectOpen: { attemptedPath: '/Users/me/Project ' }
     });
-
-    expect(calls).toEqual([{ projectRoot: '/Users/me/Project ' }]);
   });
 
-  it('rejects a relative project-open path without calling Runtime', async () => {
-    const calls: unknown[] = [];
-    const api = {
-      openProject: async (input: unknown) => {
-        calls.push(input);
-        throw new Error('openProject should not be called for relative paths');
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api, { kind: 'project-open', projectRoot: 'relative/project' })).resolves.toMatchObject({
-      project: undefined,
+  it('rejects missing and relative Project paths before binding begins', () => {
+    expect(resolveInitialProjectRoute({ kind: 'project-open' })).toEqual({
+      route: { kind: 'project-open' },
+      projectOpen: { error: { code: 'project-path-required' } }
+    });
+    expect(resolveInitialProjectRoute({
+      kind: 'project-open',
+      projectRoot: 'relative/project'
+    })).toEqual({
+      route: { kind: 'project-open', projectRoot: 'relative/project' },
       projectOpen: {
         attemptedPath: 'relative/project',
         error: { code: 'project-path-must-be-absolute' }
       }
     });
-    expect(calls).toEqual([]);
   });
 
-  it('surfaces a missing project-open path without attempted path context', async () => {
-    const calls: unknown[] = [];
-    const api = {
-      openProject: async (input: unknown) => {
-        calls.push(input);
-        throw new Error('openProject should not be called without a path');
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api, { kind: 'project-open' })).resolves.toMatchObject({
-      project: undefined,
-      projectOpen: {
-        error: { code: 'project-path-required' }
-      }
-    });
-    expect(calls).toEqual([]);
+  it('shows the initial loader only for explicit Project routes', () => {
+    expect(shouldShowInitialProjectLoader({ kind: 'workbench' })).toBe(false);
+    expect(shouldShowInitialProjectLoader({
+      kind: 'project',
+      projectId: 'project-1'
+    })).toBe(true);
+    expect(shouldShowInitialProjectLoader({
+      kind: 'project-open',
+      projectRoot: '/Users/me/Project A'
+    })).toBe(true);
+    expect(shouldShowInitialProjectLoader({ kind: 'not-found' })).toBe(false);
   });
 
-  it('keeps failed project-open attempts as structured read-only error context', async () => {
-    const api = {
-      openProject: async () => {
-        throw new Error('projectRoot must resolve to a directory.');
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await expect(openInitialProject(api, { kind: 'project-open', projectRoot: '/missing/project' })).resolves.toMatchObject({
-      project: undefined,
-      projectOpen: {
-        attemptedPath: '/missing/project',
-        error: {
-          code: 'project-open-failed',
-          message: 'projectRoot must resolve to a directory.'
-        }
-      }
-    });
-  });
-
-  it('does not rewrite the Workbench root route without an explicit project id', async () => {
-    const replaceState = vi.fn();
-    (globalThis as { window?: unknown }).window = {
-      location: { pathname: '/', search: '', hash: '' },
-      history: { replaceState }
-    };
-    const api = {
-      openProject: async () => {
-        throw new Error('openProject should not be called for the Workbench root');
-      }
-    } as unknown as WorkbenchApiClient;
-
-    await openInitialProject(api, { kind: 'workbench' });
-
-    expect(replaceState).not.toHaveBeenCalled();
-  });
-
-  it('preserves browser history state while removing stale search and hash state', () => {
+  it('commits an accepted Project id without preserving stale search or hash state', () => {
     const replaceState = vi.fn();
     const state = { preserved: true };
     (globalThis as { window?: unknown }).window = {
@@ -283,9 +87,5 @@ describe('project session startup', () => {
       '',
       '/projects/123e4567-e89b-42d3-a456-426614174000'
     );
-  });
-
-  it('does not show a Project loader for Not Found routes', () => {
-    expect(shouldShowInitialProjectLoader({ kind: 'not-found' })).toBe(false);
   });
 });

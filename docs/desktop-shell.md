@@ -60,16 +60,21 @@ visible. It begins normal painting only after applying the snapshot's resolved
 theme, so a slow Project or Integration resource cannot produce an intermediate
 default-theme frame.
 
-Opening an already-open Project from Electron focuses its existing window.
-Opening another Project replaces the current window's binding after target
-validation. If Web already owns the target, an ordinary Electron open remains
-on the root Project chooser and presents **Open Here** instead of taking the
-Project silently. A browser may preempt the Project; the old Electron window
-remains open with its last Project presentation, becomes read-only, and offers
-**Open Here**. The Runtime topology treats that detached window as unbound; the
-preserved presentation is frontend-local context, not Project command
-authority. **Open Here** explicitly preempts another Workbench instead of
-focusing it.
+Electron Main owns the native Project selector and window topology, not Project
+binding. Cancelling the selector emits no renderer open intent. After selection,
+Main sends the concrete Project root to the requesting renderer, which enters
+the same Workbench binding lifecycle as a browser-selected target.
+
+If another window in the same Desktop host already owns the selected Project,
+Desktop focuses that existing window and leaves the requesting window's current
+binding unchanged. Otherwise the requesting renderer acquires the Project at
+Runtime's atomic binding commit, including when a browser Workbench previously
+owned it; the destination does not present a second **Open Here** confirmation.
+A displaced Electron window remains open with its last Project presentation,
+becomes read-only, and alone offers **Open Here**. Runtime treats that detached
+window as unbound in Desktop topology; the preserved presentation is
+frontend-local context, not Project command authority. Its **Open Here** action
+enters the same binding lifecycle to request the Project back.
 
 The red close button closes one window. A non-final close reports that window
 key to Runtime. The final close instead closes the Desktop Control connection

@@ -24,19 +24,25 @@ general-purpose controls or panel shells.
 ## Composition And Asynchronous State
 
 `WorkbenchApp.tsx` is the composition root. It connects the API client, the
-shell, focused controllers, project-session state, Canvas runtime, editors, and
-feature views. The HTTP client owns one long-lived POST SSE Workbench
-connection, its in-memory command credential, the current Project binding, and
-ordered Global and Project revisions. Concurrent ordinary-browser tabs share
-their storage partition's HttpOnly browser session but retain independent
-connections, credentials, and Project bindings. The client never reconnects or
-automatically replays a command; unexpected connection end becomes a terminal
-connection state and a manual page refresh creates a fresh connection. An
-accepted Project retains its last Canvas beneath a blocking connection dialog;
-an unbound Workbench presents the connection error directly over its Canvas
-background. When an ordinary Desktop open targets a Project owned by Web, the
-root surface requires an explicit **Open Here** action before requesting
-preemption.
+shell, focused controllers, Project binding lifecycle, Project projection,
+Canvas runtime, editors, and feature views. The HTTP client owns one long-lived
+POST SSE Workbench connection, its in-memory command credential, wire delivery,
+and command/revision waiting. It does not own the accepted Project projection or
+frontend binding lifecycle. Concurrent ordinary-browser tabs share their storage
+partition's HttpOnly browser session but retain independent connections,
+credentials, and Project bindings. The client never reconnects or automatically
+replays a command; unexpected connection end becomes a terminal connection state
+and a manual page refresh creates a fresh connection. An accepted Project retains
+its last Canvas beneath a blocking connection dialog; an unbound Workbench
+presents the connection error directly over its Canvas background.
+
+`WorkbenchProjectProjection` is the accepted frontend authority for Project
+identity, binding generation, ordered Project revision, complete snapshot,
+detach, and projection failure. One Project binding lifecycle owns a concrete
+target's single in-flight open, synchronous Project Path Command admission,
+binding-outcome interpretation, and Project-URL commit eligibility. It delegates
+transport to the HTTP client and accepted-state publication to the projection;
+it does not own React presentation or command completion.
 
 The document does not mount React from guessed defaults. Bootstrap first waits
 for the Runtime-owned Global Settings snapshot, applies its resolved theme,
@@ -81,6 +87,19 @@ exact connection and releases B's Workbench Project Use. It does not roll back
 to A because the client may already have observed B. Selecting the already-bound
 Project remains a no-op.
 
+An explicit open from one Workbench directly acquires its concrete target at
+that commit, displacing any different browser-tab or Desktop-window owner. The
+requesting destination does not show an ownership confirmation; the displaced
+Workbench becomes detached and offers **Open Here**. Within one Desktop host,
+opening a Project owned by another Desktop window instead focuses that existing
+window and leaves the requesting window's binding unchanged.
+
+Only after `WorkbenchProjectProjection` accepts the complete `project.bound`
+baseline may the binding lifecycle commit the canonical Project URL. A failed
+preparation or focused-existing Desktop outcome preserves the requesting
+Workbench's accepted Project and URL. An accepted replacement retires the source
+binding and is never rolled back by a later frontend completion.
+
 Every Project-scoped mutation is authorized against the connection's current
 binding generation as well as its Project id. Work begun for A cannot commit to
 A after the same connection has switched to B; this applies in particular to
@@ -98,6 +117,12 @@ Focused units own cohesive state:
 - `WorkbenchGlobalProjection` accepts the initial Runtime Global snapshot and
   every ordered Global event, fails closed on a revision gap, and preserves the
   last accepted value when the connection ends.
+- `WorkbenchProjectProjection` accepts each complete `project.bound` baseline
+  and contiguous Project event, and owns the current identity, binding
+  generation, snapshot, detach, and projection failure.
+- The Project binding lifecycle owns concrete-target attempts, command
+  admission, structured outcomes, and URL eligibility without owning transport,
+  accepted Project state, React presentation, or Project-command completion.
 - Bootstrap writes the pre-mount document theme and follows ordered Global
   changes until React commits. It then unsubscribes and
   `useWorkbenchPresentationController` becomes the only document theme writer,
@@ -197,20 +222,27 @@ background. Its reserved top hit area still owns window dragging and title-bar
 controls, so Canvas interaction cannot begin there. Local text/icon contrast and
 control interaction fills preserve chrome legibility without forming a strip.
 
-An unbound Workbench, Project-opening progress, Project-open errors, an absent
-Canvas, and Canvas repair place their focused content directly over this
-background, centered below the title-bar hit area. Open failures remain visible
-below the corresponding Project action until another attempt begins. The shared
-appearance does not create a Canvas domain object or admit Canvas interaction
-before a real Canvas projection exists. The Not Found page is not a Workbench
-shell and keeps its independent error presentation.
+An unbound Workbench, its Project-opening progress and initial Project-open
+failure, an absent Canvas, and Canvas repair place their focused content directly
+over this background, centered below the title-bar hit area. The initial failure
+remains visible below the corresponding Project action until another attempt
+begins. During a bound A-to-B open, A's last accepted presentation remains visible
+with an opening state and no new Project Path Command admission; failed
+preparation restores A and reports a non-blocking notification. Selector cancel,
+a repeated open ignored while another attempt is active, a focused-existing
+Desktop outcome, and a superseded attempt report no error.
+The shared appearance does not create a Canvas domain object or admit Canvas
+interaction before a real Canvas projection exists. The Not Found page is not a
+Workbench shell and keeps its independent error presentation.
 
 When a bound Project is preempted or its Runtime connection ends, the last
 accepted Canvas remains visible. A solid, non-dismissible dialog sits on a
 transparent blocking layer below the title bar. The Canvas, floating bars, and
 panels are inert, Canvas-owned global input is disabled, and transient Canvas
 menus are closed while the dialog is present; the title bar remains available
-for opening another Project or closing the window.
+for opening another Project or closing the window. If detached **Open Here**
+fails, the Workbench remains detached and presents the failure beside that
+dialog action.
 
 The floating dock controls exactly four panel kinds: Explorer, Inspector,
 Settings, and Terminal. `WorkbenchFloatingPanelShell` is their single frame. It
@@ -387,8 +419,9 @@ One Project Path Command model describes operations on the Project root and on
 single or multiple Project Path targets. Explorer pointer interaction, Project
 Tree keyboard shortcuts, and Canvas context menus only supply command intent;
 they do not define different command meanings. One Project-scoped coordinator
-owns availability, target interpretation, confirmation, stale-result rejection,
-and accepted follow-up selection, clipboard, and Canvas state.
+owns availability, target interpretation, confirmation, and accepted follow-up
+selection, clipboard, and Canvas state. It applies the narrow current-generation
+check needed before a completion writes to shared UI state.
 
 The coordinator delegates effects rather than absorbing their implementations:
 filesystem mutation and native path access cross Runtime's validated native-file
@@ -396,22 +429,30 @@ boundary, Canvas navigation remains Canvas-owned, Terminal opening remains
 Terminal-owned, and Photoshop transfer remains integration-owned. Project Paths
 remain the browser's normal file identity across all invocation surfaces.
 
-The coordinator admits a Project Path Command only while its Project binding is
-current and no replacement Project is opening. Starting Project replacement
-closes that admission gate synchronously across Explorer, Canvas, keyboard,
-inline editing, and drag-and-drop entry points. Workbench closes unsubmitted
-context menus, inline edits, and Photoshop pickers, then shows that the target
-Project is opening. If target selection or preparation is cancelled or fails,
-the existing binding's command gate opens again.
+Target selection belongs to the browser or Desktop shell rather than the Project
+binding lifecycle. While the selector is open, the current binding remains
+admitted; cancel submits no binding attempt and changes nothing. Once a concrete
+target enters the lifecycle, it closes Project Path Command admission
+synchronously, before transport or any asynchronous preparation, across
+Explorer, Canvas, keyboard, inline editing, and drag-and-drop entry points.
+Workbench closes unsubmitted context menus, inline edits, and Photoshop pickers,
+then shows that the target Project is opening. Failed preparation or a
+focused-existing Desktop outcome reopens the unchanged binding's gate. An
+accepted `project.bound` retires the old gate and mounts fresh admission with the
+new generation. A second open in the same Workbench does not start another
+concurrent transport attempt.
 
 A command submitted before that boundary remains owned by its captured Project
 id and binding generation. Runtime's Project binding lease lets the accepted
 request finish before the replacement binding commits; switching does not
 retarget, retry, roll back, or imply cancellation of that command. Accepting the
 new binding may abort a remaining Web-side wait, but transport abort is not
-Runtime cancellation. After replacement, an old generation cannot update the
-new Project's selection, internal clipboard, Canvas presentation, dialogs, or
-notifications.
+Runtime cancellation. Project-local Explorer, selection, inline-edit, and Canvas
+presentation state lives beneath the generation-keyed subtree and retires with
+the old generation. Only a completion that can escape into shared clipboard,
+Canvas navigation, or global-notification state performs a narrow current-scope
+check. The Project binding lifecycle issues no per-command token and does not own
+command completion.
 
 Product Quit has a narrower completion boundary. Runtime first stops accepting
 new work and signals every Workbench connection and Project request lifetime.
@@ -451,5 +492,9 @@ documented in [`integrations.md`](./integrations.md) and
 - Title-bar and Web menu presentation:
   `apps/web/src/workbench/shell/`; shared semantic command protocol:
   `packages/app-protocol/src/workbenchChrome.ts`.
-- Composition and project state: `apps/web/src/workbench/WorkbenchApp.tsx` and
+- Composition: `apps/web/src/workbench/WorkbenchApp.tsx`.
+- Project binding lifecycle and accepted Project projection:
+  `apps/web/src/workbench/services/projectBindingLifecycle.ts` and
+  `apps/web/src/workbench/services/WorkbenchProjectProjection.ts`.
+- Workbench transport and revision waiting:
   `apps/web/src/api/httpWorkbenchApiClient.ts`.

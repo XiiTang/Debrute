@@ -475,7 +475,6 @@ impl WorkbenchRuntimeServices {
         browser_session: &str,
         connection_credential: &str,
         project_root: &str,
-        force_open_here: bool,
     ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
         let context = self
             .connections
@@ -494,7 +493,7 @@ impl WorkbenchRuntimeServices {
                 "OpenProject requires an unbound Workbench connection.",
             ));
         }
-        self.bind_opened_project(connection_credential, project_root, force_open_here)
+        self.bind_opened_project(connection_credential, project_root)
     }
 
     pub fn bind_connection_project_id(
@@ -502,15 +501,9 @@ impl WorkbenchRuntimeServices {
         browser_session: &str,
         connection_credential: &str,
         project_id: &str,
-        force_open_here: bool,
     ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
         let project_root = self.project_root_for_stable_id(project_id)?;
-        self.bind_connection_project_root(
-            browser_session,
-            connection_credential,
-            &project_root,
-            force_open_here,
-        )
+        self.bind_connection_project_root(browser_session, connection_credential, &project_root)
     }
 
     pub fn replace_connection_project_root(
@@ -518,7 +511,6 @@ impl WorkbenchRuntimeServices {
         browser_session: &str,
         connection_credential: &str,
         project_root: &str,
-        force_open_here: bool,
     ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
         let context = self
             .connections
@@ -540,10 +532,7 @@ impl WorkbenchRuntimeServices {
         let opened = self.open_project_use(project_root, ProjectUseKind::Workbench)?;
         let target_project_id = opened.session.project_id().to_owned();
         self.remember_recent_project(&opened.session)?;
-        if !force_open_here
-            && let Some(outcome) =
-                self.desktop_existing_owner_outcome(&context, &target_project_id)?
-        {
+        if let Some(outcome) = self.desktop_existing_owner_outcome(&context, &target_project_id)? {
             return Ok(outcome);
         }
         let prepared = self.prepare_project_binding(connection_credential, opened)?;
@@ -556,7 +545,6 @@ impl WorkbenchRuntimeServices {
                 context.binding_generation,
                 ProjectBindingCommit {
                     project_id: target_project_id.clone(),
-                    allow_preemption: context.desktop.is_none() || force_open_here,
                     project_use: prepared.project_use,
                     bound_event: prepared.bound_event,
                 },
@@ -678,7 +666,6 @@ impl WorkbenchRuntimeServices {
         &self,
         connection_credential: &str,
         project_root: &str,
-        force_open_here: bool,
     ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
         let context = self
             .connections
@@ -693,9 +680,7 @@ impl WorkbenchRuntimeServices {
         let opened = self.open_project_use(project_root, ProjectUseKind::Workbench)?;
         let project_id = opened.session.project_id().to_owned();
         self.remember_recent_project(&opened.session)?;
-        if !force_open_here
-            && let Some(outcome) = self.desktop_existing_owner_outcome(&context, &project_id)?
-        {
+        if let Some(outcome) = self.desktop_existing_owner_outcome(&context, &project_id)? {
             return Ok(outcome);
         }
         let prepared = self.prepare_project_binding(connection_credential, opened)?;
@@ -707,7 +692,6 @@ impl WorkbenchRuntimeServices {
                 context.binding_generation,
                 ProjectBindingCommit {
                     project_id: project_id.clone(),
-                    allow_preemption: context.desktop.is_none() || force_open_here,
                     project_use: prepared.project_use,
                     bound_event: prepared.bound_event,
                 },
@@ -766,36 +750,31 @@ impl WorkbenchRuntimeServices {
         if owner.credential == requester.credential {
             return Ok(None);
         }
-        if let Some(binding) = owner.desktop {
-            let focused = self
-                .runtime_state
-                .focus_desktop_window(&binding)
-                .map_err(|error| {
-                    RuntimeHttpServiceError::new(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "desktop_window_focus_failed",
-                        error.to_string(),
-                    )
-                })?;
-            if !focused {
-                return Err(RuntimeHttpServiceError::new(
+        let Some(binding) = owner.desktop else {
+            return Ok(None);
+        };
+        let focused = self
+            .runtime_state
+            .focus_desktop_window(&binding)
+            .map_err(|error| {
+                RuntimeHttpServiceError::new(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "desktop_window_focus_failed",
-                    "Runtime no longer owns the target Desktop window.",
-                ));
-            }
-            return Ok(Some(
-                WorkbenchProjectBindingOutcome::FocusedExistingDesktop {
-                    project_id: project_id.to_owned(),
-                },
+                    error.to_string(),
+                )
+            })?;
+        if !focused {
+            return Err(RuntimeHttpServiceError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "desktop_window_focus_failed",
+                "Runtime no longer owns the target Desktop window.",
             ));
         }
-        Err(RuntimeHttpServiceError::new(
-            StatusCode::CONFLICT,
-            "project_owned_by_web",
-            "This Project is active in a Web Workbench. Choose Open Here to move it to Desktop.",
-        )
-        .with_details(json!({ "projectId": project_id })))
+        Ok(Some(
+            WorkbenchProjectBindingOutcome::FocusedExistingDesktop {
+                project_id: project_id.to_owned(),
+            },
+        ))
     }
 
     fn open_project_use(
@@ -1036,11 +1015,6 @@ fn project_binding_error(
         ProjectBindError::Stale => {
             RuntimeHttpServiceError::new(StatusCode::CONFLICT, stale_code, stale_message)
         }
-        ProjectBindError::TargetOwned => RuntimeHttpServiceError::new(
-            StatusCode::CONFLICT,
-            "project_binding_stale",
-            "Target Project gained another Workbench owner before binding.",
-        ),
         ProjectBindError::EventQueueUnavailable => RuntimeHttpServiceError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "workbench_connection_backpressure",

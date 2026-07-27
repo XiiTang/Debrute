@@ -217,6 +217,10 @@ export interface WorkbenchProjectOpenResult extends RevisionedProjectResult {
   workingCopies: WorkbenchWorkingCopies;
 }
 
+export type WorkbenchProjectTarget =
+  | { projectRoot: string }
+  | { projectId: string };
+
 type WorkbenchProjectOpenOutcome =
   | WorkbenchProjectOpenResult
   | { outcome: 'focused_existing_desktop'; projectId: string };
@@ -268,10 +272,6 @@ export interface WorkbenchWorkingCopies {
   text: Record<string, WorkbenchTextWorkingCopy>;
   feedback: Record<string, WorkbenchFeedbackWorkingCopy>;
 }
-
-type WorkbenchProjectPickerOpenResult =
-  | { opened: false }
-  | ({ opened: true } & WorkbenchProjectOpenOutcome);
 
 export interface WorkbenchProjectTextFileWriteResult extends RevisionedProjectResult {
   file: WorkbenchProjectTextFile;
@@ -1440,10 +1440,8 @@ export interface WorkbenchApiClient {
   adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<{ ok: true }>;
   adobeBridgeUnlinkPhotoshop(pluginInstanceId: string): Promise<{ ok: true }>;
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
-  openProject(
-    input: { projectRoot: string; forceOpenHere?: boolean } | { projectId: string; forceOpenHere?: boolean }
-  ): Promise<WorkbenchProjectOpenOutcome>;
-  openProjectFromPicker(): Promise<WorkbenchProjectPickerOpenResult>;
+  openProject(target: WorkbenchProjectTarget): Promise<WorkbenchProjectOpenOutcome>;
+  chooseProjectRoot(): Promise<string | undefined>;
   clearRecentProjectRoots(): Promise<{ ok: true }>;
   checkProductUpdate(): Promise<{ ok: true }>;
   applyProductUpdate(): Promise<{ ok: true }>;

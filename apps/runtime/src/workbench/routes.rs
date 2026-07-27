@@ -236,7 +236,6 @@ pub(super) async fn workbench_connection(
                 &project_browser_session,
                 &project_credential,
                 &project_id,
-                false,
             ) {
                 let _ = project_sender.try_send(json!({
                     "type": "project.open_failed",
@@ -703,26 +702,18 @@ async fn project_open(
     struct Input {
         project_root: Option<String>,
         project_id: Option<String>,
-        #[serde(default)]
-        force_open_here: bool,
     }
     let input: Input = match json_body(request).await {
         Ok(body) => body,
         Err(response) => return response,
     };
     let result = match (input.project_root, input.project_id) {
-        (Some(project_root), None) => services.bind_connection_project_root(
-            &browser.0,
-            &connection.credential,
-            &project_root,
-            input.force_open_here,
-        ),
-        (None, Some(project_id)) => services.bind_connection_project_id(
-            &browser.0,
-            &connection.credential,
-            &project_id,
-            input.force_open_here,
-        ),
+        (Some(project_root), None) => {
+            services.bind_connection_project_root(&browser.0, &connection.credential, &project_root)
+        }
+        (None, Some(project_id)) => {
+            services.bind_connection_project_id(&browser.0, &connection.credential, &project_id)
+        }
         _ => {
             return service_error_response(RuntimeHttpServiceError::new(
                 StatusCode::BAD_REQUEST,
@@ -780,8 +771,6 @@ async fn project_replace(
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
         project_root: String,
-        #[serde(default)]
-        force_open_here: bool,
     }
     let input: Input = match json_body(request).await {
         Ok(input) => input,
@@ -792,7 +781,6 @@ async fn project_replace(
         &browser.0,
         &connection.credential,
         &input.project_root,
-        input.force_open_here,
     ) {
         Ok(result) => project_binding_response(result),
         Err(error) => service_error_response(error),

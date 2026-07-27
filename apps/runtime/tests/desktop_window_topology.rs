@@ -5,7 +5,7 @@ use std::{
     io::Write,
     io::{BufRead, BufReader},
     os::unix::net::UnixStream,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Barrier, Weak},
     time::Duration,
 };
@@ -350,25 +350,10 @@ fn desktop_route_tracks_in_window_replacement_and_web_preemption() {
     let assets = root.join("assets");
     fs::create_dir_all(&assets).expect("assets should be created");
     fs::write(assets.join("index.html"), "<main>Debrute</main>").expect("index should be written");
-    let project_root = root.join("project");
-    let project_id = Uuid::new_v4().to_string();
-    fs::create_dir_all(project_root.join(".debrute/canvases"))
-        .expect("Project metadata directory should be created");
-    write_json(
-        &project_root.join(".debrute/project.json"),
-        &json!({
-            "project": {
-                "id": project_id,
-                "name": "Desktop route",
-                "createdAt": "2026-07-18T00:00:00.000Z",
-                "updatedAt": "2026-07-18T00:00:00.000Z"
-            }
-        }),
-    );
-    write_json(
-        &project_root.join(".debrute/canvases/index.json"),
-        &json!({"canvasOrder": []}),
-    );
+    let projects = ProjectReplacementFixtures {
+        target: project_fixture(root.join("project-b"), "Target B"),
+        source: project_fixture(root.join("project-a"), "Source A"),
+    };
 
     let state = Arc::new(RuntimeControlState::new("runtime-instance"));
     assert!(
@@ -409,23 +394,48 @@ fn desktop_route_tracks_in_window_replacement_and_web_preemption() {
         &mut desktop,
         http.origin(),
         &state,
-        &project_root,
-        &project_id,
+        &projects.target.root,
+        &projects.target.id,
     );
-    preempt_desktop_project(
-        &mut desktop,
-        http.origin(),
-        &state,
-        &project_root,
-        &project_id,
-        &mut binding,
-    );
+    preempt_desktop_project(&mut desktop, http.origin(), &state, &projects, &mut binding);
 
     drop(binding.events);
     drop(desktop);
     server.join().expect("server should finish");
     drop(http);
     let _ = fs::remove_dir_all(root);
+}
+
+struct ProjectFixture {
+    root: PathBuf,
+    id: String,
+}
+
+struct ProjectReplacementFixtures {
+    target: ProjectFixture,
+    source: ProjectFixture,
+}
+
+fn project_fixture(root: PathBuf, name: &str) -> ProjectFixture {
+    let id = Uuid::new_v4().to_string();
+    fs::create_dir_all(root.join(".debrute/canvases"))
+        .expect("Project metadata directory should be created");
+    write_json(
+        &root.join(".debrute/project.json"),
+        &json!({
+            "project": {
+                "id": id,
+                "name": name,
+                "createdAt": "2026-07-18T00:00:00.000Z",
+                "updatedAt": "2026-07-18T00:00:00.000Z"
+            }
+        }),
+    );
+    write_json(
+        &root.join(".debrute/canvases/index.json"),
+        &json!({"canvasOrder": []}),
+    );
+    ProjectFixture { root, id }
 }
 
 struct DesktopProjectBinding {
@@ -507,10 +517,36 @@ fn preempt_desktop_project(
     desktop: &mut UnixStream,
     origin: &str,
     state: &RuntimeControlState,
-    project_root: &Path,
-    project_id: &str,
+    projects: &ProjectReplacementFixtures,
     binding: &mut DesktopProjectBinding,
 ) {
+    let mut second = open_second_desktop_workbench(desktop, origin, state, projects, binding);
+    let mut web_events = move_target_to_web(origin, &projects.target, binding);
+    replace_web_target_from_bound_desktop(
+        desktop,
+        origin,
+        state,
+        projects,
+        binding,
+        &mut second,
+        &mut web_events,
+    );
+}
+
+struct DesktopWorkbenchConnection {
+    window_key: String,
+    cookie: String,
+    credential: String,
+    events: HttpSseEvents,
+}
+
+fn open_second_desktop_workbench(
+    desktop: &mut UnixStream,
+    origin: &str,
+    state: &RuntimeControlState,
+    projects: &ProjectReplacementFixtures,
+    binding: &DesktopProjectBinding,
+) -> DesktopWorkbenchConnection {
     assert!(matches!(
         state.open_desktop_window(&WorkbenchRoute::Root),
         Ok(DesktopOpenResult::Opened)
@@ -520,7 +556,7 @@ fn preempt_desktop_project(
         desktop,
         "second-ticket",
         ControlRequest::CreateDesktopLaunchTicket {
-            window_key: second_window,
+            window_key: second_window.clone(),
         },
     );
     let ServerMessage::Response {
@@ -530,7 +566,7 @@ fn preempt_desktop_project(
     else {
         panic!("expected second Desktop launch ticket");
     };
-    let (second_cookie, second_credential, second_events) = open_http_connection(
+    let (cookie, credential, events) = open_http_connection(
         &binding.client,
         origin,
         &json!({"desktopLaunchTicket": ticket}),
@@ -539,24 +575,36 @@ fn preempt_desktop_project(
         open_http_project_response(
             &binding.client,
             origin,
-            project_root,
-            &second_cookie,
-            &second_credential,
+            &projects.target.root,
+            &cookie,
+            &credential,
         ),
         json!({
             "outcome": "focused_existing_desktop",
-            "projectId": project_id
+            "projectId": projects.target.id
         })
     );
     expect_control_focus(desktop, &binding.window_key);
+    DesktopWorkbenchConnection {
+        window_key: second_window,
+        cookie,
+        credential,
+        events,
+    }
+}
 
+fn move_target_to_web(
+    origin: &str,
+    target: &ProjectFixture,
+    binding: &mut DesktopProjectBinding,
+) -> HttpSseEvents {
     let (web_cookie, web_credential, mut web_events) =
         open_http_connection(&binding.client, origin, &json!({}));
     open_http_project(
         &binding.client,
         origin,
-        project_root,
-        project_id,
+        &target.root,
+        &target.id,
         &web_cookie,
         &web_credential,
     );
@@ -569,83 +617,80 @@ fn preempt_desktop_project(
             break;
         }
     }
-    assert!(matches!(
-        state.open_desktop_window(&WorkbenchRoute::Project {
-            project_id: project_id.to_owned(),
-        }),
-        Ok(DesktopOpenResult::Opened)
-    ));
-    let opened_window = expect_control_open(
-        desktop,
-        &WorkbenchRoute::Project {
-            project_id: project_id.to_owned(),
-        },
-    );
-    assert_ne!(opened_window, binding.window_key);
-
-    desktop_open_here_preempts_web(
-        desktop,
-        origin,
-        project_id,
-        opened_window,
-        &binding.client,
-        &mut web_events,
-    );
-
-    drop(web_events);
-    drop(second_events);
+    web_events
 }
 
-fn desktop_open_here_preempts_web(
+fn replace_web_target_from_bound_desktop(
     desktop: &mut UnixStream,
     origin: &str,
-    project_id: &str,
-    window_key: String,
-    client: &Client,
+    state: &RuntimeControlState,
+    projects: &ProjectReplacementFixtures,
+    binding: &DesktopProjectBinding,
+    second: &mut DesktopWorkbenchConnection,
     web_events: &mut HttpSseEvents,
 ) {
-    send_request(
-        desktop,
-        "web-owner-ticket",
-        ControlRequest::CreateDesktopLaunchTicket { window_key },
-    );
-    let ServerMessage::Response {
-        response: ControlResponse::DesktopLaunchTicket { ticket, .. },
-        ..
-    } = read_server_frame(desktop).expect("Desktop ticket should arrive")
-    else {
-        panic!("expected Desktop launch ticket");
-    };
-    let (desktop_cookie, desktop_credential, mut desktop_events) = open_http_connection(
-        client,
+    open_http_project(
+        &binding.client,
         origin,
-        &json!({
-            "desktopLaunchTicket": ticket,
-            "requestedProjectId": project_id
-        }),
+        &projects.source.root,
+        &projects.source.id,
+        &second.cookie,
+        &second.credential,
     );
-    let conflict = desktop_events.next_of_type("project.open_failed");
-    assert_eq!(conflict["type"], "project.open_failed");
-    assert_eq!(conflict["error"]["code"], "project_owned_by_web");
-
-    let open_here = client
-        .post(format!("{origin}/api/projects/open"))
-        .header(ORIGIN, origin)
-        .header(COOKIE, desktop_cookie)
-        .header(WORKBENCH_CONNECTION_HEADER, desktop_credential)
-        .json(&json!({ "projectId": project_id, "forceOpenHere": true }))
-        .send()
-        .expect("Open Here should complete");
-    assert_eq!(open_here.status().as_u16(), 200);
     assert_eq!(
-        desktop_events.next_of_type("project.bound")["type"],
-        "project.bound"
+        second.events.next_of_type("project.bound")["project"]["projectId"],
+        projects.source.id
+    );
+    let replacement = binding
+        .client
+        .post(format!("{origin}/api/projects/replace"))
+        .header(ORIGIN, origin)
+        .header(COOKIE, &second.cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &second.credential)
+        .json(&json!({ "projectRoot": projects.target.root.to_string_lossy() }))
+        .send()
+        .expect("Desktop replacement should complete");
+    let replacement_status = replacement.status().as_u16();
+    let replacement_body = replacement.text().expect("replacement body should read");
+    assert_eq!(
+        replacement_status, 200,
+        "Desktop replacement failed: {replacement_body}"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&replacement_body).expect("replacement should be JSON"),
+        json!({ "outcome": "bound", "projectId": projects.target.id })
+    );
+    assert_eq!(
+        second.events.next_of_type("project.bound")["project"]["projectId"],
+        projects.target.id
     );
     loop {
         if web_events.next()["type"] == "project.preempted" {
             break;
         }
     }
+    assert!(matches!(
+        state.open_desktop_window(&WorkbenchRoute::Project {
+            project_id: projects.target.id.clone(),
+        }),
+        Ok(DesktopOpenResult::FocusedExisting)
+    ));
+    expect_control_focus(desktop, &second.window_key);
+
+    let (released_cookie, released_credential, mut released_events) =
+        open_http_connection(&binding.client, origin, &json!({}));
+    open_http_project(
+        &binding.client,
+        origin,
+        &projects.source.root,
+        &projects.source.id,
+        &released_cookie,
+        &released_credential,
+    );
+    assert_eq!(
+        released_events.next_of_type("project.bound")["project"]["projectId"],
+        projects.source.id
+    );
 }
 
 struct HttpSseEvents {

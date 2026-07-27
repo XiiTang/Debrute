@@ -48,6 +48,9 @@ describe('Runtime Workbench connection', () => {
       '/api/projects/open'
     ]);
     expect(header(harness.calls[1]?.init, 'x-debrute-workbench-connection')).toBe('connection-1');
+    expect(JSON.parse(String(harness.calls[1]?.init?.body))).toEqual({
+      projectRoot: '/tmp/project'
+    });
     expect(harness.calls.every((call) => !call.path.includes('connection-1'))).toBe(true);
     client.dispose();
   });
@@ -79,27 +82,31 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
-  it('excludes cancelled picker time from the first Project binding mark', async () => {
+  it('chooses a Project root without starting a Project binding', async () => {
     const harness = createHarness();
     const mark = vi.fn();
     const client = createHttpWorkbenchApiClient({ startupTimeline: { mark } });
 
-    await expect(client.openProjectFromPicker()).resolves.toEqual({ opened: false });
+    const resolveSelection = harness.deferNextProjectRootSelection();
+    const firstSelection = client.chooseProjectRoot();
+    const repeatedSelection = client.chooseProjectRoot();
+    expect(repeatedSelection).toBe(firstSelection);
+    await vi.waitFor(() => expect(harness.calls.filter(
+      (call) => call.path === '/api/projects/choose'
+    )).toHaveLength(1));
+    resolveSelection(undefined);
+    await expect(firstSelection).resolves.toBeUndefined();
+    await expect(repeatedSelection).resolves.toBeUndefined();
     expect(mark).not.toHaveBeenCalledWith('project-open-requested');
 
     harness.selectNextProjectRoot('/tmp/picked-project');
-    await expect(client.openProjectFromPicker()).resolves.toMatchObject({
-      opened: true,
-      projectId: 'project-1'
-    });
+    await expect(client.chooseProjectRoot()).resolves.toBe('/tmp/picked-project');
 
-    expect(mark).toHaveBeenCalledTimes(1);
-    expect(mark).toHaveBeenCalledWith('project-open-requested');
+    expect(mark).not.toHaveBeenCalledWith('project-open-requested');
     expect(harness.calls.map((call) => call.path)).toEqual([
       '/api/workbench/connection',
       '/api/projects/choose',
-      '/api/projects/choose',
-      '/api/projects/open'
+      '/api/projects/choose'
     ]);
     client.dispose();
   });
@@ -166,37 +173,6 @@ describe('Runtime Workbench connection', () => {
 
     await expect(client.openProject({ projectId: 'project-1' })).resolves.toMatchObject({
       projectId: 'project-1'
-    });
-    client.dispose();
-  });
-
-  it('allows explicit Open Here after the initial Desktop-versus-Web conflict', async () => {
-    const harness = createHarness();
-    const client = createHttpWorkbenchApiClient();
-    await client.checkProductUpdate();
-    harness.emit({
-      type: 'project.open_failed',
-      projectId: 'project-1',
-      error: {
-        code: 'project_owned_by_web',
-        message: 'Project is active in Web.'
-      }
-    });
-
-    await vi.waitFor(async () => {
-      await expect(client.openProject({ projectId: 'project-1' })).rejects.toMatchObject({
-        code: 'project_owned_by_web'
-      });
-    });
-    await expect(client.openProject({
-      projectId: 'project-1',
-      forceOpenHere: true
-    })).resolves.toMatchObject({ projectId: 'project-1' });
-
-    const openRequest = harness.calls.find((call) => call.path === '/api/projects/open');
-    expect(JSON.parse(String(openRequest?.init?.body))).toEqual({
-      projectId: 'project-1',
-      forceOpenHere: true
     });
     client.dispose();
   });
@@ -387,6 +363,8 @@ function createHarness(globalRevision = 1) {
   let projectNumber = 0;
   let focusNext = false;
   let pickerSelection: string | undefined;
+  let pendingPickerSelection: Promise<string | undefined> | undefined;
+  let resolvePendingPickerSelection: ((projectRoot: string | undefined) => void) | undefined;
   const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const path = String(input);
     calls.push({ path, init });
@@ -453,7 +431,12 @@ function createHarness(globalRevision = 1) {
       return Response.json({ outcome: 'bound', projectId });
     }
     if (path === '/api/projects/choose') {
-      const selected = pickerSelection;
+      const selection = pendingPickerSelection;
+      const selected = selection ? await selection : pickerSelection;
+      if (pendingPickerSelection === selection) {
+        pendingPickerSelection = undefined;
+        resolvePendingPickerSelection = undefined;
+      }
       pickerSelection = undefined;
       return Response.json(selected
         ? { selected: true, projectRoot: selected }
@@ -515,6 +498,14 @@ function createHarness(globalRevision = 1) {
     },
     focusNextProject() {
       focusNext = true;
+    },
+    deferNextProjectRootSelection() {
+      pendingPickerSelection = new Promise((resolve) => {
+        resolvePendingPickerSelection = resolve;
+      });
+      return (projectRoot: string | undefined) => {
+        resolvePendingPickerSelection?.(projectRoot);
+      };
     },
     selectNextProjectRoot(projectRoot: string) {
       pickerSelection = projectRoot;
