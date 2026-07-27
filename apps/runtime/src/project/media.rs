@@ -1,6 +1,12 @@
 //! Revision-bound Project media files and transport-neutral byte-range plans.
 
-use std::{fs, path::Path, time::UNIX_EPOCH};
+use std::{
+    fs,
+    io::{Read as _, Seek as _, SeekFrom},
+    path::Path,
+};
+
+use sha2::{Digest as _, Sha256};
 
 use super::{
     CanvasMediaKind, ProjectError, assert_project_tree_visible_path,
@@ -64,7 +70,7 @@ pub fn open_revisioned_project_file(
         ));
     }
     let relative = assert_project_tree_visible_path(project_relative_path)?;
-    let file = open_no_symlink_existing_project_file(project_root, &relative)?;
+    let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(ProjectError::service(
@@ -72,7 +78,7 @@ pub fn open_revisioned_project_file(
             format!("Project path is not a file: {relative}"),
         ));
     }
-    let revision = project_file_revision_from_metadata(&metadata)?;
+    let revision = project_media_revision(&mut file)?;
     if revision != expected_revision {
         return Err(ProjectError::service_with_fields(
             "stale_revision",
@@ -158,20 +164,31 @@ pub fn parse_byte_range(range_header: Option<&str>, file_size: u64) -> ParsedRan
     })
 }
 
-/// Computes the current Project media revision from one already-open file.
+/// Computes the exact Project media revision by streaming one already-open file.
 ///
 /// # Errors
-/// Returns an error when the modification time predates the Unix epoch or is unavailable.
-pub fn project_file_revision_from_metadata(
-    metadata: &fs::Metadata,
-) -> Result<String, ProjectError> {
-    let modified_ms = metadata
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| ProjectError::Validation(error.to_string()))?
-        .as_secs_f64()
-        * 1000.0;
-    Ok(super::project_file_revision(metadata.len(), modified_ms))
+/// Returns an error when the file cannot be read or its original position cannot be restored.
+pub(crate) fn project_media_revision(file: &mut fs::File) -> Result<String, ProjectError> {
+    let original_position = file.stream_position()?;
+    file.seek(SeekFrom::Start(0))?;
+    let revision = (|| {
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0_u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        Ok::<_, ProjectError>(format!("sha256:{:x}", hasher.finalize()))
+    })();
+    let restore = file.seek(SeekFrom::Start(original_position));
+    match (revision, restore) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error.into()),
+        (Ok(revision), Ok(_)) => Ok(revision),
+    }
 }
 
 #[must_use]
@@ -228,6 +245,10 @@ pub fn project_media_kind_from_content_type(content_type: &str) -> CanvasMediaKi
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, io::Seek as _};
+
+    use uuid::Uuid;
+
     use super::*;
 
     #[test]
@@ -276,5 +297,26 @@ mod tests {
             project_content_type("unknown.bin"),
             "application/octet-stream"
         );
+    }
+
+    #[test]
+    fn media_revision_hashes_content_and_restores_the_open_file_position() {
+        let root = std::env::temp_dir().join(format!("debrute-media-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let first_path = root.join("first.bin");
+        let second_path = root.join("second.bin");
+        fs::write(&first_path, b"aaaa").unwrap();
+        fs::write(&second_path, b"bbbb").unwrap();
+        let mut first = fs::File::open(first_path).unwrap();
+        let mut second = fs::File::open(second_path).unwrap();
+        first.seek(SeekFrom::Start(2)).unwrap();
+
+        let first_revision = project_media_revision(&mut first).unwrap();
+        let second_revision = project_media_revision(&mut second).unwrap();
+
+        assert_ne!(first_revision, second_revision);
+        assert!(first_revision.starts_with("sha256:"));
+        assert_eq!(first.stream_position().unwrap(), 2);
+        fs::remove_dir_all(root).unwrap();
     }
 }

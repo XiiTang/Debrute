@@ -25,7 +25,7 @@ use super::{
 };
 use crate::project::{
     ProjectCapabilityFs, ProjectError, normalize_project_relative_path,
-    open_no_symlink_existing_project_file, project_file_revision_from_metadata,
+    open_no_symlink_existing_project_file, project_media_revision,
     resolve_no_symlink_existing_project_path,
 };
 
@@ -380,7 +380,7 @@ impl CanvasVideoPreviewService {
                     ),
                 ));
             }
-            let actual_revision = project_file_revision_from_metadata(&poster.file.metadata()?)?;
+            let actual_revision = project_media_revision(&mut poster.file)?;
             if actual_revision != poster.revision {
                 return Err(ProjectError::service(
                     "canvas_video_poster_changed",
@@ -736,7 +736,7 @@ impl StableVideoInput {
         let mut source = open_no_symlink_existing_project_file(project_root, &relative)?;
         let source_identity = debrute_native_fs::file_identity(&source)?;
         let source_metadata = source.metadata()?;
-        let source_revision = project_file_revision_from_metadata(&source_metadata)?;
+        let source_revision = project_media_revision(&mut source)?;
         let source_length = source_metadata.len();
         let directory =
             std::env::temp_dir().join(format!(".debrute-runtime-video-{}", Uuid::new_v4()));
@@ -777,7 +777,7 @@ impl StableVideoInput {
             }
             cancellation.check()?;
             let current_identity = debrute_native_fs::file_identity(&source)?;
-            let current_revision = project_file_revision_from_metadata(&source.metadata()?)?;
+            let current_revision = project_media_revision(&mut source)?;
             if source_identity != current_identity || source_revision != current_revision {
                 return Err(ProjectError::service(
                     "project_path_changed",
@@ -919,7 +919,7 @@ fn explicit_poster(
         } else {
             format!("{directory}/{base}{suffix}")
         };
-        let file = match open_no_symlink_existing_project_file(project_root, &candidate) {
+        let mut file = match open_no_symlink_existing_project_file(project_root, &candidate) {
             Ok(file) => file,
             Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 continue;
@@ -943,7 +943,7 @@ fn explicit_poster(
         return Ok(Some(ExplicitPoster {
             relative: candidate,
             absolute,
-            revision: project_file_revision_from_metadata(&metadata)?,
+            revision: project_media_revision(&mut file)?,
             file,
         }));
     }
@@ -955,8 +955,8 @@ fn assert_video_revision(
     target: &CanvasVideoPreviewTarget,
 ) -> Result<(), ProjectError> {
     let relative = normalize_project_relative_path(&target.project_relative_path)?;
-    let file = open_no_symlink_existing_project_file(project_root, &relative)?;
-    let actual = project_file_revision_from_metadata(&file.metadata()?)?;
+    let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
+    let actual = project_media_revision(&mut file)?;
     if actual == target.video_revision {
         Ok(())
     } else {
@@ -1166,11 +1166,10 @@ mod tests {
         image::RgbaImage::new(2, 2)
             .save(root.join("media/clip.poster.png"))
             .unwrap();
-        let video = File::open(root.join("media/clip.mp4")).unwrap();
+        let mut video = File::open(root.join("media/clip.mp4")).unwrap();
         let target = CanvasVideoPreviewTarget {
             project_relative_path: "media/clip.mp4".to_owned(),
-            video_revision: project_file_revision_from_metadata(&video.metadata().unwrap())
-                .unwrap(),
+            video_revision: project_media_revision(&mut video).unwrap(),
             current_time_seconds: 0.0,
         };
         let poster = explicit_poster(&root, &target.project_relative_path)
@@ -1201,11 +1200,10 @@ mod tests {
         image::RgbaImage::new(2, 2)
             .save(root.join("media/clip.poster.png"))
             .unwrap();
-        let video = File::open(root.join("media/clip.mp4")).unwrap();
+        let mut video = File::open(root.join("media/clip.mp4")).unwrap();
         let target = CanvasVideoPreviewTarget {
             project_relative_path: "media/clip.mp4".to_owned(),
-            video_revision: project_file_revision_from_metadata(&video.metadata().unwrap())
-                .unwrap(),
+            video_revision: project_media_revision(&mut video).unwrap(),
             current_time_seconds: 0.0,
         };
         let workers = crate::workers::RuntimeWorkerServices::new();

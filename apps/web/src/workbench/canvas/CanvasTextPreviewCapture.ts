@@ -5,7 +5,7 @@ import {
 } from './CanvasTextPreviewFailure';
 import {
   type CanvasTextPreviewBuiltScene
-} from './CanvasTextPreviewScene';
+} from './CanvasTextPreviewScene.js';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 import { rasterizeCanvasTextPreviewInWorker } from './CanvasTextPreviewRasterWorkerClient.js';
 

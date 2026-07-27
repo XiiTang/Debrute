@@ -50,8 +50,8 @@ describe('native recent projects', () => {
     ]);
   });
 
-  it('fails when Windows rejects the Jump List', () => {
-    expect(() => syncNativeRecentProjects(
+  it('returns a Windows Jump List rejection for the caller to diagnose', () => {
+    expect(syncNativeRecentProjects(
       {
         setJumpList: vi.fn(() => 'fileTypeRegistrationError' as const),
         addRecentDocument: vi.fn(),
@@ -60,7 +60,7 @@ describe('native recent projects', () => {
       'win32',
       'C:\\Program Files\\Debrute\\Debrute.exe',
       []
-    )).toThrow('Windows rejected the Debrute Jump List: fileTypeRegistrationError');
+    )).toBe('fileTypeRegistrationError');
   });
 
   it('parses desktop open intents from native launch arguments', () => {

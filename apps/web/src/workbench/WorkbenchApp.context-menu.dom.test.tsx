@@ -1,10 +1,10 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from './i18n';
-import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
-import type { ProjectPathCommandCoordinator } from './services/projectPathCommandCoordinator';
-import { ProjectPathContextMenuHost } from './WorkbenchApp';
+import { I18nProvider } from './i18n/index.js';
+import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime.js';
+import type { ProjectPathCommandCoordinator } from './services/projectPathCommandCoordinator.js';
+import { ProjectPathContextMenuHost } from './WorkbenchApp.js';
 
 describe('ProjectPathContextMenuHost', () => {
   it('isolates Canvas surface readiness updates inside the open menu host', async () => {

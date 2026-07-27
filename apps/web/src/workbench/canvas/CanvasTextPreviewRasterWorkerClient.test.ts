@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CanvasTextPreviewRasterWorkerClient } from './CanvasTextPreviewRasterWorkerClient';
+import { CanvasTextPreviewRasterWorkerClient } from './CanvasTextPreviewRasterWorkerClient.js';
 import type {
   CanvasTextPreviewRasterWorkerRequest,
   CanvasTextPreviewRasterWorkerResponse
-} from './CanvasTextPreviewRasterWorkerProtocol';
+} from './CanvasTextPreviewRasterWorkerProtocol.js';
 
 describe('CanvasTextPreviewRasterWorkerClient', { tags: ['canvas-text'] }, () => {
   it('rejects concurrent raster submission and registers each font only once', async () => {
@@ -93,16 +93,8 @@ function requestFixture(text: string) {
         fontFamily: 'monospace',
         fontSize: '16px',
         fontWeight: '400',
-        fontStyle: 'normal',
-        fontStretch: '100%',
-        fontKerning: 'auto',
-        fontVariantCaps: 'normal',
         fontVariantLigatures: 'normal',
         fontVariantNumeric: 'normal',
-        fontFeatureSettings: 'normal',
-        fontVariationSettings: 'normal',
-        fontOpticalSizing: 'auto',
-        fontSynthesis: 'none',
         letterSpacing: '0px',
         wordSpacing: '0px',
         textDecorationLine: 'none',

@@ -6,10 +6,10 @@ import type {
   AdobeBridgeTransferView,
   DebruteGlobalAdobeBridgeSettings
 } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../../types';
-import { adobeBridgeErrorLabel } from '../../adobe-bridge/adobeBridgeLabels';
+import type { WorkbenchActions } from '../../../types.js';
+import { adobeBridgeErrorLabel } from '../../adobe-bridge/adobeBridgeLabels.js';
 import { Button, StatusPill, Switch, Toolbar } from '../../ui/index.js';
-import { useI18n, type WorkbenchI18n } from '../../i18n';
+import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
 
 type ClientOperation =
   | { status: 'loading' }

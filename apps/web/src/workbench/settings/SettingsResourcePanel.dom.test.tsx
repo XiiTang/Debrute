@@ -3,8 +3,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from '../i18n';
-import { SettingsResourcePanel } from './SettingsResourcePanel';
+import { I18nProvider } from '../i18n/index.js';
+import { SettingsResourcePanel } from './SettingsResourcePanel.js';
 
 describe('SettingsResourcePanel', { tags: ['settings'] }, () => {
   it('renders loading state without rendering ready children', () => {

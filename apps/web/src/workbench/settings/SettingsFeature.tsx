@@ -1,7 +1,7 @@
 import { useLayoutEffect } from 'react';
 import '../styles/settings.css';
 import '../styles/integrations.css';
-import type { WorkbenchActions, WorkbenchState } from '../../types.js';
+import type { WorkbenchActions } from '../../types.js';
 import type { HttpWorkbenchApiClient } from '../../api/httpWorkbenchApiClient.js';
 import type { WorkbenchResolvedTheme } from '../services/workbenchTheme.js';
 import type { WorkbenchLocale } from '@debrute/app-protocol';
@@ -60,10 +60,7 @@ export function WorkbenchSettingsPanelFeature({
     adobeBridge: controller.adobeBridge,
     projectId,
     resolvedTheme
-  } satisfies Pick<
-    WorkbenchState,
-    'globalSettings' | 'integrations' | 'product' | 'adobeBridge' | 'projectId' | 'resolvedTheme'
-  >;
+  };
   return (
     <I18nProvider locale={locale}>
       <SettingsPanel state={state} actions={actions} />

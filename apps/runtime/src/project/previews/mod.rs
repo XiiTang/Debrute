@@ -30,8 +30,8 @@ use super::{
     CanvasVideoPresentationKind, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
     DefaultProjectNodeAdapter, ProjectCapabilityFs, ProjectError, ProjectNodeAdapter,
     ProjectPathEntry, ProjectPathKind, assert_project_tree_visible_path,
-    normalize_project_relative_path, open_no_symlink_existing_project_file,
-    project_file_revision_from_metadata, resolve_no_symlink_existing_project_path,
+    normalize_project_relative_path, open_no_symlink_existing_project_file, project_media_revision,
+    resolve_no_symlink_existing_project_path,
 };
 use cache::{
     Semaphore, atomic_write, project_relative_path_cache_key, project_revision_cache_key,
@@ -270,7 +270,7 @@ impl ProjectPreviewService {
             {
                 continue;
             }
-            let revision = project_file_revision_from_metadata(&file.metadata()?)?;
+            let revision = project_media_revision(&mut file)?;
             expected.insert(
                 project_relative_path_cache_key(&relative)?,
                 project_revision_cache_key(&revision)?,
@@ -535,8 +535,8 @@ fn open_revisioned_source(
         ));
     }
     let path = resolve_no_symlink_existing_project_path(project_root, relative)?;
-    let file = open_no_symlink_existing_project_file(project_root, relative)?;
-    let actual = project_file_revision_from_metadata(&file.metadata()?)?;
+    let mut file = open_no_symlink_existing_project_file(project_root, relative)?;
+    let actual = project_media_revision(&mut file)?;
     if actual != expected_revision {
         return Err(ProjectError::service_with_fields(
             "canvas_preview_revision_mismatch",
@@ -564,8 +564,8 @@ fn verify_source_snapshot(
     identity: &debrute_native_fs::PathIdentity,
     expected_revision: &str,
 ) -> Result<(), ProjectError> {
-    let current = open_no_symlink_existing_project_file(project_root, relative)?;
-    let current_revision = project_file_revision_from_metadata(&current.metadata()?)?;
+    let mut current = open_no_symlink_existing_project_file(project_root, relative)?;
+    let current_revision = project_media_revision(&mut current)?;
     let current_identity = debrute_native_fs::file_identity(&current)?;
     if current_revision == expected_revision && &current_identity == identity {
         Ok(())
@@ -712,8 +712,8 @@ fn video_text_tracks(
             parse_video_track(&video, &relative).map(|track| (relative, track))
         })
         .map(|(relative, parsed)| {
-            let file = open_no_symlink_existing_project_file(project_root, &relative)?;
-            let revision = project_file_revision_from_metadata(&file.metadata()?)?;
+            let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
+            let revision = project_media_revision(&mut file)?;
             Ok(VideoTrack {
                 project_relative_path: relative,
                 revision,
@@ -935,8 +935,8 @@ mod tests {
     #[test]
     fn image_preview_is_revision_bound_and_deterministic() {
         let root = fixture();
-        let source = File::open(root.join("assets/source.png")).unwrap();
-        let revision = project_file_revision_from_metadata(&source.metadata().unwrap()).unwrap();
+        let mut source = File::open(root.join("assets/source.png")).unwrap();
+        let revision = project_media_revision(&mut source).unwrap();
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
@@ -977,8 +977,8 @@ mod tests {
     fn intrinsic_image_width_returns_the_revision_bound_source_without_an_equal_width_cache() {
         let root = fixture();
         let source_path = root.join("assets/source.png");
-        let source = File::open(&source_path).unwrap();
-        let revision = project_file_revision_from_metadata(&source.metadata().unwrap()).unwrap();
+        let mut source = File::open(&source_path).unwrap();
+        let revision = project_media_revision(&mut source).unwrap();
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
@@ -1010,8 +1010,8 @@ mod tests {
         ImageBuffer::from_pixel(8, 4, Rgb([24_u8, 48, 96]))
             .save_with_format(&source_path, image::ImageFormat::Tiff)
             .unwrap();
-        let source = File::open(&source_path).unwrap();
-        let revision = project_file_revision_from_metadata(&source.metadata().unwrap()).unwrap();
+        let mut source = File::open(&source_path).unwrap();
+        let revision = project_media_revision(&mut source).unwrap();
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
@@ -1048,8 +1048,8 @@ mod tests {
         ImageBuffer::from_pixel(9_000, 1, Rgba([1_u8, 2, 3, 255]))
             .save(&source_path)
             .unwrap();
-        let source = File::open(&source_path).unwrap();
-        let revision = project_file_revision_from_metadata(&source.metadata().unwrap()).unwrap();
+        let mut source = File::open(&source_path).unwrap();
+        let revision = project_media_revision(&mut source).unwrap();
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
@@ -1074,8 +1074,8 @@ mod tests {
         let root = fixture();
         let source_path = root.join("assets/large.jpg");
         write_solid_jpeg(&source_path, 5_000, 4_000);
-        let source = File::open(&source_path).unwrap();
-        let revision = project_file_revision_from_metadata(&source.metadata().unwrap()).unwrap();
+        let mut source = File::open(&source_path).unwrap();
+        let revision = project_media_revision(&mut source).unwrap();
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
@@ -1219,9 +1219,8 @@ mod tests {
         let source_path = root.join("assets/source.png");
         let workers = RuntimeWorkerServices::new();
         let service = ProjectPreviewService::new(&workers, MediaToolPaths::unavailable());
-        let source = File::open(&source_path).unwrap();
-        let first_revision =
-            project_file_revision_from_metadata(&source.metadata().unwrap()).unwrap();
+        let mut source = File::open(&source_path).unwrap();
+        let first_revision = project_media_revision(&mut source).unwrap();
         let preview = service
             .resolve_image_preview(
                 &root,
@@ -1262,9 +1261,9 @@ mod tests {
         let source_path = root.join("assets/source.png");
         let workers = RuntimeWorkerServices::new();
         let service = ProjectPreviewService::new(&workers, MediaToolPaths::unavailable());
-        let source = File::open(&source_path).unwrap();
+        let mut source = File::open(&source_path).unwrap();
         let metadata = source.metadata().unwrap();
-        let revision = project_file_revision_from_metadata(&metadata).unwrap();
+        let revision = project_media_revision(&mut source).unwrap();
         drop(
             service
                 .resolve_image_preview(

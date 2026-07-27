@@ -26,7 +26,7 @@ import {
 import type { WorkbenchActions } from '../types.js';
 
 vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/DefaultCanvasTextRenderProfile.js');
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/CanvasTextRenderProfile.test-support.js');
   return {
     CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     CanvasTextRenderProfileProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,

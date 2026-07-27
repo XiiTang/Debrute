@@ -38,7 +38,7 @@ import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { I18nProvider } from '../i18n';
 
 vi.mock('./CanvasTextRenderProfileContext.js', async () => {
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./DefaultCanvasTextRenderProfile.js');
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
   return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
 });
 

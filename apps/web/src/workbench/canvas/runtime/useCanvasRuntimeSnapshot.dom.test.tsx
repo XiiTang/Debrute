@@ -1,8 +1,8 @@
 import { act, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './CanvasEditorRuntime';
-import { useCanvasSurfaceReady } from './useCanvasRuntimeSnapshot';
+import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './CanvasEditorRuntime.js';
+import { useCanvasSurfaceReady } from './useCanvasRuntimeSnapshot.js';
 
 describe('useCanvasSurfaceReady', () => {
   it('rerenders only when surface readiness changes and unsubscribes on unmount', async () => {

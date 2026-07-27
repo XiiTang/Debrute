@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
-import { WorkbenchFloatingTextEditorWindowFeature } from './FloatingTextEditorWindowFeature';
+import { WorkbenchFloatingTextEditorWindowFeature } from './FloatingTextEditorWindowFeature.js';
 import { textEditorWindowIdentity } from '../shell/workbenchWindowOrder';
 import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from '../shell/windowBounds';
 

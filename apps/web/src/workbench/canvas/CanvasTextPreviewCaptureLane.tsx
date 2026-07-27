@@ -13,7 +13,7 @@ import {
   createCanvasTextPreviewSceneBuild,
   type CanvasTextPreviewBuiltScene,
   type CanvasTextPreviewSceneBuild,
-} from './CanvasTextPreviewScene';
+} from './CanvasTextPreviewScene.js';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
 import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';

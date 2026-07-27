@@ -49,6 +49,7 @@ struct ConnectionRegistryInner {
     records: HashMap<String, ConnectionRecord>,
     credentials_by_browser_session: HashMap<String, HashSet<String>>,
     owner_by_project: HashMap<String, String>,
+    admission_closed: bool,
 }
 
 struct ConnectionRecord {
@@ -223,7 +224,7 @@ impl WorkbenchConnectionRegistry {
         browser_session: String,
         desktop: Option<DesktopLaunchBinding>,
         events: mpsc::Sender<Value>,
-    ) -> (WorkbenchConnectionContext, oneshot::Receiver<()>) {
+    ) -> Option<(WorkbenchConnectionContext, oneshot::Receiver<()>)> {
         let credential = Uuid::new_v4().to_string();
         let (cancellation, cancelled) = oneshot::channel();
         let (project_cancellation, _) = broadcast::channel(1);
@@ -239,13 +240,16 @@ impl WorkbenchConnectionRegistry {
             closing: false,
         };
         let mut inner = self.lock_inner();
+        if inner.admission_closed {
+            return None;
+        }
         inner
             .credentials_by_browser_session
             .entry(browser_session.clone())
             .or_default()
             .insert(credential.clone());
         inner.records.insert(credential.clone(), record);
-        (
+        Some((
             WorkbenchConnectionContext {
                 credential,
                 browser_session,
@@ -254,7 +258,16 @@ impl WorkbenchConnectionRegistry {
                 desktop,
             },
             cancelled,
-        )
+        ))
+    }
+
+    pub(crate) fn close_admission(&self) {
+        self.lock_inner().admission_closed = true;
+    }
+
+    #[must_use]
+    pub(crate) fn is_accepting(&self) -> bool {
+        !self.lock_inner().admission_closed
     }
 
     #[must_use]
@@ -1018,7 +1031,9 @@ mod tests {
     fn project_lifetime_ends_on_replacement_and_connection_close() {
         let registry = WorkbenchConnectionRegistry::new();
         let (events, _receiver) = mpsc::channel::<Value>(4);
-        let (connection, _closed) = registry.open("browser-1".to_owned(), None, events);
+        let (connection, _closed) = registry
+            .open("browser-1".to_owned(), None, events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&connection.credential, 0, binding("project-1"))
             .expect("initial Project should bind");
@@ -1042,7 +1057,9 @@ mod tests {
     fn close_all_ends_every_connection_and_project_lifetime() {
         let registry = WorkbenchConnectionRegistry::new();
         let (first_events, _first_receiver) = mpsc::channel::<Value>(4);
-        let (first, mut first_closed) = registry.open("browser-1".to_owned(), None, first_events);
+        let (first, mut first_closed) = registry
+            .open("browser-1".to_owned(), None, first_events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&first.credential, 0, binding("project-1"))
             .expect("first project should bind");
@@ -1051,8 +1068,9 @@ mod tests {
             .expect("first project lifetime should exist");
 
         let (second_events, _second_receiver) = mpsc::channel::<Value>(4);
-        let (second, mut second_closed) =
-            registry.open("browser-2".to_owned(), None, second_events);
+        let (second, mut second_closed) = registry
+            .open("browser-2".to_owned(), None, second_events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&second.credential, 0, binding("project-2"))
             .expect("second project should bind");
@@ -1073,12 +1091,34 @@ mod tests {
     }
 
     #[test]
+    fn closed_admission_rejects_every_late_connection() {
+        let registry = WorkbenchConnectionRegistry::new();
+        registry.close_admission();
+
+        let (events, _receiver) = mpsc::channel::<Value>(4);
+        assert!(
+            registry
+                .open("browser-1".to_owned(), None, events)
+                .is_none()
+        );
+        assert!(!registry.is_accepting());
+        assert_eq!(
+            registry.counts(),
+            super::WorkbenchConnectionCounts {
+                connections: 0,
+                bound_projects: 0,
+            }
+        );
+    }
+
+    #[test]
     fn connection_closer_deadline_does_not_abort_an_accepted_project_request() {
         let registry = Arc::new(WorkbenchConnectionRegistry::new());
         let closer = WorkbenchConnectionCloser::start(Arc::clone(&registry));
         let (events, _receiver) = mpsc::channel::<Value>(4);
-        let (connection, mut connection_closed) =
-            registry.open("browser-1".to_owned(), None, events);
+        let (connection, mut connection_closed) = registry
+            .open("browser-1".to_owned(), None, events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&connection.credential, 0, binding("project-1"))
             .expect("Project should bind");
@@ -1117,7 +1157,9 @@ mod tests {
         let registry = Arc::new(WorkbenchConnectionRegistry::new());
         let closer = WorkbenchConnectionCloser::start(Arc::clone(&registry));
         let (first_events, _first_receiver) = mpsc::channel::<Value>(4);
-        let (first, mut first_closed) = registry.open("browser-1".to_owned(), None, first_events);
+        let (first, mut first_closed) = registry
+            .open("browser-1".to_owned(), None, first_events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&first.credential, 0, binding("project-1"))
             .expect("first Project should bind");
@@ -1127,8 +1169,9 @@ mod tests {
             .expect("accepted Project request should own a lease");
 
         let (second_events, _second_receiver) = mpsc::channel::<Value>(4);
-        let (second, mut second_closed) =
-            registry.open("browser-2".to_owned(), None, second_events);
+        let (second, mut second_closed) = registry
+            .open("browser-2".to_owned(), None, second_events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&second.credential, 0, binding("project-2"))
             .expect("second Project should bind");
@@ -1170,8 +1213,9 @@ mod tests {
     fn replacement_preparation_failure_preserves_both_project_owners() {
         let registry = WorkbenchConnectionRegistry::new();
         let (target_events, mut target_receiver) = mpsc::channel::<Value>(4);
-        let (target_owner, _target_closed) =
-            registry.open("browser-1".to_owned(), None, target_events);
+        let (target_owner, _target_closed) = registry
+            .open("browser-1".to_owned(), None, target_events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&target_owner.credential, 0, binding("project-b"))
             .expect("target Project should bind");
@@ -1181,8 +1225,9 @@ mod tests {
             .expect("target Project lifetime should exist");
 
         let (source_events, _source_receiver) = mpsc::channel::<Value>(1);
-        let (source_owner, _source_closed) =
-            registry.open("browser-2".to_owned(), None, source_events);
+        let (source_owner, _source_closed) = registry
+            .open("browser-2".to_owned(), None, source_events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&source_owner.credential, 0, binding("project-a"))
             .expect("source Project should bind");
@@ -1223,7 +1268,9 @@ mod tests {
     fn replacement_waits_for_old_generation_requests_before_committing() {
         let registry = Arc::new(WorkbenchConnectionRegistry::new());
         let (events, mut receiver) = mpsc::channel::<Value>(4);
-        let (connection, _closed) = registry.open("browser-1".to_owned(), None, events);
+        let (connection, _closed) = registry
+            .open("browser-1".to_owned(), None, events)
+            .expect("connection admission should be open");
         registry
             .bind_project(&connection.credential, 0, binding("project-a"))
             .expect("source Project should bind");
@@ -1304,9 +1351,13 @@ mod tests {
     fn browser_session_keeps_each_document_connection_live_until_the_last_closes() {
         let registry = WorkbenchConnectionRegistry::new();
         let (first_events, _first_receiver) = mpsc::channel::<Value>(4);
-        let (first, _first_closed) = registry.open("browser-1".to_owned(), None, first_events);
+        let (first, _first_closed) = registry
+            .open("browser-1".to_owned(), None, first_events)
+            .expect("connection admission should be open");
         let (second_events, _second_receiver) = mpsc::channel::<Value>(4);
-        let (second, _second_closed) = registry.open("browser-1".to_owned(), None, second_events);
+        let (second, _second_closed) = registry
+            .open("browser-1".to_owned(), None, second_events)
+            .expect("connection admission should be open");
 
         assert!(registry.authorize("browser-1", &first.credential).is_some());
         assert!(

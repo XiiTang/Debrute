@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { AlertTriangle, Video } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { useI18n } from '../i18n';
-import type { CanvasVideoPlayRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
+import type { CanvasVideoPlayRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter.js';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import { preloadCanvasImageForHandoff } from './CanvasMediaHandoff';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
@@ -10,7 +10,7 @@ import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
 
 const CanvasVideoPlayerAdapter = React.lazy(async () => {
-  const module = await import('./CanvasVideoPlayerAdapter');
+  const module = await import('./CanvasVideoPlayerAdapter.js');
   return { default: module.CanvasVideoPlayerAdapter };
 });
 

@@ -77,14 +77,18 @@ and consumes the current resolved Canvas Text Render Profile.
 ## Canvas Text Render Profile
 
 Workbench owns one immutable Canvas Text Render Profile generation at a time.
-Its Font Resource owns the managed font assets, exact SHA-256 identities,
-ordered families, and face weight/style/stretch and Unicode descriptors. The
-Profile resolves the Runtime-owned global Canvas Text Appearance together with
-the fixed editor geometry. Canvas Text Appearance is one complete value:
-managed font ID, font size, line-height ratio, requested base weight, letter
-spacing, and the common/contextual-ligature switch. The Profile derives pixel
-line height, word spacing, tab size, kerning, OpenType settings, optical sizing,
-font-synthesis policy, line padding, gutter padding, and cursor scroll geometry.
+Each Font Resource owns one managed family with exact SHA-256 face identities
+and fixed numeric weights. Every face is normal style at 100% stretch; the
+resource does not expose variable axes, Unicode ranges, alternate styles, or
+synthetic faces. A catalog entry that needs CJK coverage composes an ordered
+primary Resource and Noto Sans Mono CJK SC fallback Resource. The Profile
+resolves the Runtime-owned global Canvas Text Appearance together with the fixed
+editor geometry. Canvas Text Appearance is one complete value: managed font ID,
+font size, line-height ratio, requested base weight, letter spacing, and the
+common/contextual-ligature switch. The Profile derives pixel line height, fixed
+word spacing and tab size, normal kerning, fixed OpenType and optical-sizing
+settings, no-synthesis policy, line padding, gutter padding, and cursor scroll
+geometry.
 
 The managed Canvas Font catalog contains Noto Sans Mono CJK SC, Lilex,
 JetBrains Mono, IBM Plex Mono, and proportional Noto Sans SC. Lilex, JetBrains
@@ -105,11 +109,14 @@ Preparation failure is fatal for the requested Profile: it is not retried,
 rewritten to another Canvas Font, or replaced by an implicit system-font
 fallback.
 
-Each managed family receives a digest-derived internal CSS family name, so two
-font files with the same human-readable family name cannot collide. The same
+Each managed Resource receives a digest-derived internal CSS family name, so
+two font files with the same human-readable family name cannot collide. Its
+weight faces share that internal family; a composed CJK fallback keeps its own
+internal family and follows the primary family in the CSS family list. The same
 exact bytes generate the `FontFace` instances used by live editors and are
 supplied to the isolated raster Worker for its own `FontFace` registration.
-System font names without readable, fixed font bytes are not valid managed Profile assets.
+System font names without readable, fixed font bytes are not valid managed
+Profile assets.
 Canvas rendering uses `font-synthesis: none`. The saved requested weight remains
 independent of Canvas Font selection; when no exact normal face exists, the
 renderer selects the closest real managed face without rewriting the request or

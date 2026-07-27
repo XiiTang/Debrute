@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createCanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import { canvasTextRenderProfileForAppearance } from './CanvasFontCatalog.js';
 import {
   DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
-  DEFAULT_CANVAS_TEXT_RENDER_PROFILE_DEFINITION
-} from './DefaultCanvasTextRenderProfile.js';
+  TEST_CANVAS_TEXT_APPEARANCE
+} from './CanvasTextRenderProfile.test-support.js';
 import {
   CANVAS_TEXT_PREVIEW_STYLE_CSS_VARIABLES,
   canvasTextPreviewStyleKey,
@@ -60,12 +60,9 @@ describe('CanvasTextPreviewStyleKey', { tags: ['canvas-text'] }, () => {
   });
 
   it('changes when any resolved text render profile setting changes', async () => {
-    const alternate = createCanvasTextRenderProfile({
-      ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE_DEFINITION,
-      typography: {
-        ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE_DEFINITION.typography,
-        letterSpacingPx: 2
-      }
+    const alternate = canvasTextRenderProfileForAppearance({
+      ...TEST_CANVAS_TEXT_APPEARANCE,
+      letterSpacingPx: 2
     });
     const cssVariables = textPreviewCssVariables({
       '--db-text': '#ffffff',

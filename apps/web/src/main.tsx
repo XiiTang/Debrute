@@ -39,6 +39,7 @@ void api.bootstrapGlobalSettings().then(async ({ settings }) => {
     </React.StrictMode>
   );
 }).catch((error: unknown) => {
+  api.dispose();
   if (completeThemeHandoff) {
     completeThemeHandoff();
   } else {

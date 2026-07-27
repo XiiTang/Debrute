@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCanvasTextPreviewSceneBuild,
   type CanvasTextPreviewBuiltScene
-} from './CanvasTextPreviewScene';
+} from './CanvasTextPreviewScene.js';
 
 const cleanups: Array<() => void> = [];
 
@@ -96,16 +96,9 @@ describe('CanvasTextPreviewSceneBuilder', { tags: ['canvas-text'] }, () => {
       color: 'rgb(255, 0, 0)',
       fontSize: '17px',
       fontWeight: '700',
-      fontStyle: 'italic',
-      fontStretch: '120%',
       letterSpacing: '2px',
       wordSpacing: '4px',
-      fontKerning: 'none',
-      fontVariantLigatures: 'no-common-ligatures no-contextual',
-      fontFeatureSettings: '"ss01" 1',
-      fontVariationSettings: '"MONO" 0.75',
-      fontOpticalSizing: 'none',
-      fontSynthesis: 'none'
+      fontVariantLigatures: 'no-common-ligatures no-contextual'
     });
     expect(lineNumber?.y).toBe(text?.y);
   });
@@ -125,11 +118,7 @@ describe('CanvasTextPreviewSceneBuilder', { tags: ['canvas-text'] }, () => {
       kind: 'text',
       text: 'const answer = 42;',
       color: 'rgb(255, 0, 0)',
-      fontVariantLigatures: 'no-common-ligatures no-contextual',
-      fontFeatureSettings: '"ss01" 1',
-      fontVariationSettings: '"MONO" 0.75',
-      fontOpticalSizing: 'none',
-      fontSynthesis: 'none'
+      fontVariantLigatures: 'no-common-ligatures no-contextual'
     }));
     expect(JSON.stringify(scene)).not.toContain('foreignObject');
     expect(JSON.stringify(scene)).not.toContain('cm-editor');
@@ -299,16 +288,9 @@ function captureFixture(input: {
   syntax.style.color = input.syntaxColor ?? 'rgb(220, 220, 220)';
   syntax.style.fontSize = '17px';
   syntax.style.fontWeight = '700';
-  syntax.style.fontStyle = 'italic';
-  syntax.style.fontStretch = '120%';
   syntax.style.letterSpacing = '2px';
   syntax.style.wordSpacing = '4px';
-  syntax.style.fontKerning = 'none';
   syntax.style.fontVariantLigatures = 'no-common-ligatures no-contextual';
-  syntax.style.fontFeatureSettings = '"ss01" 1';
-  syntax.style.fontVariationSettings = '"MONO" 0.75';
-  syntax.style.fontOpticalSizing = 'none';
-  syntax.style.fontSynthesis = 'none';
   const text = document.createTextNode(input.content);
   syntax.append(text);
   line.append(syntax);

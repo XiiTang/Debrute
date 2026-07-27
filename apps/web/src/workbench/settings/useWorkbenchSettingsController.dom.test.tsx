@@ -12,7 +12,7 @@ import type {
 import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
-} from './useWorkbenchSettingsController';
+} from './useWorkbenchSettingsController.js';
 import {
   createWorkbenchGlobalProjection,
   type WorkbenchGlobalEvent,
@@ -54,6 +54,34 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       message: 'bridge state unavailable'
     }));
 
+    await probe.unmount();
+  });
+
+  it('turns the initial integration rescan failure into retryable local state', async () => {
+    const integrationsRescan = vi.fn()
+      .mockRejectedValueOnce(new Error('integration scan unavailable'))
+      .mockResolvedValueOnce({ ok: true as const });
+    const probe = await renderController(apiFixture({ integrationsRescan }));
+
+    await vi.waitFor(() => expect(probe.current.integrations).toEqual({
+      status: 'error',
+      message: 'integration scan unavailable'
+    }));
+
+    await act(async () => {
+      await probe.current.actions.rescanIntegrations();
+    });
+    expect(probe.current.integrations).toEqual({ status: 'loading' });
+
+    await act(async () => {
+      probe.acceptEvent({
+        type: 'integrations.changed',
+        revision: 1,
+        integrations: integrationSettingsFixture('Recovered settings')
+      });
+    });
+    expect(readyIntegrations(probe).integrations[0]?.summary).toBe('Recovered settings');
+    expect(integrationsRescan).toHaveBeenCalledTimes(2);
     await probe.unmount();
   });
 

@@ -8,7 +8,7 @@ import {
   type CanvasEdgeSegment,
   type VirtualizedCanvasRenderState
 } from './canvasVirtualization';
-import type { CanvasLayoutOverride } from './canvasManualLayoutDraft';
+import type { CanvasLayoutOverride } from './canvasManualLayoutDraft.js';
 import type { CanvasCamera, CanvasCameraState } from './runtime/canvasCamera';
 import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { rectsIntersect } from './runtime/canvasGeometry';

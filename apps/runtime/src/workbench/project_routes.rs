@@ -2100,6 +2100,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preview_request_cancellation_reaches_a_blocking_worker_within_the_drain_budget() {
+        let started = Arc::new(tokio::sync::Notify::new());
+        let cancellation_observed = Arc::new(tokio::sync::Notify::new());
+        let worker_started = Arc::clone(&started);
+        let worker_observed = Arc::clone(&cancellation_observed);
+        let request = tokio::spawn(blocking_preview_response(
+            false,
+            PreviewCachePolicy::Revalidate,
+            move |cancellation| {
+                worker_started.notify_one();
+                while cancellation.check().is_ok() {
+                    thread::yield_now();
+                }
+                worker_observed.notify_one();
+                Err(cancellation
+                    .check()
+                    .expect_err("dropped request must cancel the preview worker"))
+            },
+        ));
+        tokio::time::timeout(Duration::from_millis(500), started.notified())
+            .await
+            .expect("blocking preview worker must start within the HTTP drain budget");
+
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_millis(500), cancellation_observed.notified())
+            .await
+            .expect(
+                "blocking preview worker must observe cancellation within the HTTP drain budget",
+            );
+    }
+
+    #[tokio::test]
     async fn preview_file_response_streams_the_complete_file_from_its_start() {
         let path = std::env::temp_dir().join(format!(
             "debrute-preview-response-{}.png",

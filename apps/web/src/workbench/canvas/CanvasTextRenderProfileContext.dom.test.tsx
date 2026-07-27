@@ -8,7 +8,7 @@ import {
   CanvasTextRenderProfileProvider,
   useCanvasTextRenderProfile
 } from './CanvasTextRenderProfileContext.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './DefaultCanvasTextRenderProfile.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
 describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
   it('publishes a profile only after its font resource is ready', async () => {

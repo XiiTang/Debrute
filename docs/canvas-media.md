@@ -13,6 +13,13 @@ unknown from their current Project path. Available nodes carry a revisioned raw
 file URL and MIME type. Images and videos require intrinsic dimensions for
 automatic layout; audio uses a fixed Canvas size.
 
+Every available file node derives its media revision by streaming the exact
+current file bytes through SHA-256. Size and modification time remain projection
+metadata, not media identity. Raw-file and preview services rehash the opened
+source and reject a request when its expected content revision is stale;
+directory nodes retain their separate metadata revision because they have no
+file bytes.
+
 Image nodes use the derived raster-preview lifecycle in
 [`canvas-rendering.md`](./canvas-rendering.md). Audio nodes use a native audio
 element with controls, no preloading, a fixed presentation size, a file caption,

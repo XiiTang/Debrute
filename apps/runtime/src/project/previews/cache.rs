@@ -307,8 +307,8 @@ mod tests {
             "images%2Fcover.png--58c1e05606778e3e"
         );
         assert_eq!(
-            project_revision_cache_key("1780000000000:204800").unwrap(),
-            "1780000000000%3A204800"
+            project_revision_cache_key("sha256:abcd").unwrap(),
+            "sha256%3Aabcd"
         );
         assert_eq!(
             project_relative_path_cache_key("拼接图/韩语 page 1.png").unwrap(),

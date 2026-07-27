@@ -31,6 +31,10 @@ const projectIconPath = join(__dirname, 'icon.png');
 const dockIconPath = join(__dirname, 'dock_icon.png');
 const desktopPlatform = requireDesktopPlatform(process.platform);
 
+if (desktopPlatform === 'win32') {
+  app.setAppUserModelId('io.github.xiitang.debrute');
+}
+
 let control: RuntimeControlClient | undefined;
 let windowHost: DesktopWindowHost<Electron.BrowserWindow, ElectronDesktopWindow> | undefined;
 let appQuitAllowed = false;
@@ -180,15 +184,14 @@ function handleControlEvent(event: ControlEvent): void {
     return;
   }
   recentProjects = event.recent_projects;
-  try {
-    syncNativeRecentProjects(
-      app,
-      desktopPlatform,
-      process.execPath,
-      recentProjects.map((project) => project.projectRoot)
-    );
-  } catch (error) {
-    reportDesktopError(error);
+  const jumpListResult = syncNativeRecentProjects(
+    app,
+    desktopPlatform,
+    process.execPath,
+    recentProjects.map((project) => project.projectRoot)
+  );
+  if (jumpListResult && jumpListResult !== 'ok') {
+    console.warn(`Windows rejected the Debrute Jump List: ${jumpListResult}`);
   }
   installApplicationMenu();
 }
