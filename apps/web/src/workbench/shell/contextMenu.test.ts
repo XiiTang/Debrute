@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { PhotoshopStateView } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import {
   buildWorkbenchContextMenuItems,
@@ -9,12 +10,12 @@ import {
 describe('workbench context menu', () => {
   it('builds the aligned Canvas file node menu without Explorer edit-only actions', () => {
     const items = buildWorkbenchContextMenuItems({
-      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
+      target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png', sizeBytes: 1024 },
       projection: projectionWithNodes(['flow/cover.png']),
       canSelectCanvasNode: true,
       canRevealInCanvas: true,
       fileClipboard: undefined,
-      adobeBridgeEnabled: true
+      photoshop: photoshopState()
     });
 
     expect(menuShape(items)).toEqual([
@@ -28,7 +29,7 @@ describe('workbench context menu', () => {
       'open-terminal:enabled',
       'copy-path:enabled',
       'copy-relative-path:enabled',
-      'send-to-photoshop:enabled',
+      'send-to-photoshop:submenu:2',
       'reveal-in-system-file-manager:enabled',
       '---',
       'delete:enabled'
@@ -233,24 +234,148 @@ describe('workbench context menu', () => {
     expect(items.find((item) => item.kind === 'action' && item.command === 'paste')).toMatchObject({ disabled: true });
   });
 
-  it('shows Send to Photoshop for supported Project Tree image files when bridge is enabled', () => {
+  it('shows every live Photoshop document for an eligible Project file', () => {
     const items = buildWorkbenchContextMenuItems({
       target: {
         source: 'explorer',
         targetKind: 'item',
-        paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
+        paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file', sizeBytes: 1024 }],
         primaryPath: 'assets/cover.png',
         targetDirectoryPath: 'assets'
       },
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
-      adobeBridgeEnabled: true
+      photoshop: photoshopState()
     });
 
     expect(actionCommands(items)).toContain('send-to-photoshop');
+    expect(items.find((item) => item.kind === 'photoshop-submenu')).toMatchObject({
+      targets: [
+        { pluginSessionId: 'session-1', documentId: 7, title: 'Poster.psd' },
+        { pluginSessionId: 'session-2', documentId: 9, title: 'Poster.psd' }
+      ]
+    });
   });
 
-  it('does not show Send to Photoshop for unsupported files', () => {
+  it('keeps every live Document visible and disables only AVIF-incompatible sessions', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'assets/cover.avif', kind: 'file', sizeBytes: 1024 }],
+        primaryPath: 'assets/cover.avif',
+        targetDirectoryPath: 'assets'
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      photoshop: {
+        sessions: [
+          {
+            pluginSessionId: 'session-1',
+            hostVersion: '26.7.0',
+            placementMimeTypes: [
+              'image/png',
+              'image/jpeg',
+              'image/webp',
+              'image/vnd.adobe.photoshop'
+            ],
+            documents: [{ documentId: 7, title: 'Legacy.psd' }]
+          },
+          {
+            pluginSessionId: 'session-2',
+            hostVersion: '26.8.0',
+            placementMimeTypes: [
+              'image/png',
+              'image/jpeg',
+              'image/webp',
+              'image/vnd.adobe.photoshop',
+              'image/avif'
+            ],
+            documents: [{ documentId: 9, title: 'Current.psd' }]
+          }
+        ]
+      }
+    });
+
+    expect(items.find((item) => item.kind === 'photoshop-submenu')).toMatchObject({
+      targets: [
+        {
+          pluginSessionId: 'session-1',
+          documentId: 7,
+          title: 'Legacy.psd',
+          disabled: true,
+          requirement: 'photoshop_26_8_for_avif'
+        },
+        { pluginSessionId: 'session-2', documentId: 9, title: 'Current.psd' }
+      ]
+    });
+  });
+
+  it('keeps the AVIF submenu and every Document visible when all sessions are incompatible', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'assets/cover.avif', kind: 'file', sizeBytes: 1024 }],
+        primaryPath: 'assets/cover.avif',
+        targetDirectoryPath: 'assets'
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      photoshop: {
+        sessions: [{
+          pluginSessionId: 'session-1',
+          hostVersion: '24.4.0',
+          placementMimeTypes: [
+            'image/png',
+            'image/jpeg',
+            'image/webp',
+            'image/vnd.adobe.photoshop'
+          ],
+          documents: [
+            { documentId: 7, title: 'Poster.psd' },
+            { documentId: 9, title: 'Reference.psd' }
+          ]
+        }]
+      }
+    });
+
+    expect(items.find((item) => item.kind === 'photoshop-submenu')).toMatchObject({
+      targets: [
+        {
+          documentId: 7,
+          title: 'Poster.psd',
+          disabled: true,
+          requirement: 'photoshop_26_8_for_avif'
+        },
+        {
+          documentId: 9,
+          title: 'Reference.psd',
+          disabled: true,
+          requirement: 'photoshop_26_8_for_avif'
+        }
+      ]
+    });
+  });
+
+  it('keeps an eligible submenu visible with no document targets', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'assets/cover.webp', kind: 'file', sizeBytes: 0 }],
+        primaryPath: 'assets/cover.webp',
+        targetDirectoryPath: 'assets'
+      },
+      projection: projectionWithNodes([]),
+      canRevealInCanvas: false,
+      photoshop: { sessions: [] }
+    });
+
+    expect(items.find((item) => item.kind === 'photoshop-submenu')).toMatchObject({ targets: [] });
+  });
+
+  it('does not show Send to Photoshop for unsupported, oversized, or unsized files', () => {
     const items = buildWorkbenchContextMenuItems({
       target: {
         source: 'explorer',
@@ -261,10 +386,49 @@ describe('workbench context menu', () => {
       },
       projection: projectionWithNodes([]),
       canRevealInCanvas: false,
-      adobeBridgeEnabled: true
+      photoshop: photoshopState()
     });
 
     expect(actionCommands(items)).not.toContain('send-to-photoshop');
+
+    for (const entry of [
+      { projectRelativePath: 'too-large.psd', kind: 'file' as const, sizeBytes: 256 * 1024 * 1024 + 1 },
+      { projectRelativePath: 'unknown.png', kind: 'file' as const }
+    ]) {
+      expect(actionCommands(buildWorkbenchContextMenuItems({
+        target: {
+          source: 'explorer',
+          targetKind: 'item',
+          paths: [entry],
+          primaryPath: entry.projectRelativePath,
+          targetDirectoryPath: ''
+        },
+        projection: projectionWithNodes([]),
+        canRevealInCanvas: false,
+        photoshop: photoshopState()
+      }))).not.toContain('send-to-photoshop');
+    }
+  });
+
+  it('applies the Photoshop format and size boundary to Canvas-owned file facts', () => {
+    const build = (projectRelativePath: string, sizeBytes?: number) => actionCommands(
+      buildWorkbenchContextMenuItems({
+        target: {
+          source: 'canvas',
+          kind: 'file',
+          projectRelativePath,
+          ...(sizeBytes === undefined ? {} : { sizeBytes })
+        },
+        projection: projectionWithNodes([]),
+        canRevealInCanvas: false,
+        photoshop: photoshopState()
+      })
+    );
+
+    expect(build('data/deep/cover.png', 256 * 1024 * 1024)).toContain('send-to-photoshop');
+    expect(build('data/deep/missing.png')).not.toContain('send-to-photoshop');
+    expect(build('data/deep/too-large.png', 256 * 1024 * 1024 + 1)).not.toContain('send-to-photoshop');
+    expect(build('data/deep/notes.txt', 1024)).not.toContain('send-to-photoshop');
   });
 
   it('shows only root-level creation and paste actions for blank Project Tree targets', () => {
@@ -347,15 +511,36 @@ describe('workbench context menu', () => {
 });
 
 function actionCommands(items: ReturnType<typeof buildWorkbenchContextMenuItems>): string[] {
-  return items.filter((item) => item.kind === 'action').map((item) => item.command);
+  return items.filter((item) => item.kind !== 'separator').map((item) => item.command);
 }
 
 function menuShape(items: ReturnType<typeof buildWorkbenchContextMenuItems>): string[] {
   return items.map((item) => (
     item.kind === 'separator'
       ? '---'
-      : `${item.command}:${item.disabled === true ? 'disabled' : 'enabled'}`
+      : item.kind === 'photoshop-submenu'
+        ? `${item.command}:submenu:${item.targets.length}`
+        : `${item.command}:${item.disabled === true ? 'disabled' : 'enabled'}`
   ));
+}
+
+function photoshopState(): PhotoshopStateView {
+  return {
+    sessions: [
+      {
+        pluginSessionId: 'session-1',
+        hostVersion: '27.0',
+        placementMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/vnd.adobe.photoshop', 'image/avif'],
+        documents: [{ documentId: 7, title: 'Poster.psd' }]
+      },
+      {
+        pluginSessionId: 'session-2',
+        hostVersion: '27.0',
+        placementMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/vnd.adobe.photoshop', 'image/avif'],
+        documents: [{ documentId: 9, title: 'Poster.psd' }]
+      }
+    ]
+  };
 }
 
 function projectionWithNodes(

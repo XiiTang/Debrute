@@ -38,6 +38,8 @@ pub enum ProjectPathKind {
 pub struct ProjectPathEntry {
     pub project_relative_path: String,
     pub kind: ProjectPathKind,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

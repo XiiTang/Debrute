@@ -4,7 +4,8 @@ use std::{
     fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
 };
 
 use debrute_runtime::{
@@ -24,10 +25,13 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
+static WORKBENCH_HTTP_TEST_ADMISSION: Mutex<()> = Mutex::new(());
+const WORKBENCH_HTTP_TEST_TIMEOUT: Duration = Duration::from_mins(2);
+
 #[test]
 fn stable_assets_have_no_launch_credential_in_the_url() {
     let runtime = TestRuntime::start();
-    let response = Client::new()
+    let response = test_client()
         .get(format!("{}/projects/project-1", runtime.origin()))
         .send()
         .expect("stable Workbench route should respond");
@@ -46,7 +50,7 @@ fn stable_assets_have_no_launch_credential_in_the_url() {
 #[test]
 fn packaged_workbench_serves_only_the_closed_page_routes() {
     let runtime = TestRuntime::start();
-    let client = Client::new();
+    let client = test_client();
     for path in [
         "/",
         "/open",
@@ -83,7 +87,7 @@ fn packaged_workbench_serves_only_the_closed_page_routes() {
 #[test]
 fn workbench_connection_requires_exact_origin_and_rejects_bearer_auth() {
     let runtime = TestRuntime::start();
-    let client = Client::new();
+    let client = test_client();
     let missing_origin = client
         .post(format!("{}/api/workbench/connection", runtime.origin()))
         .header(ACCEPT, "text/event-stream")
@@ -106,7 +110,7 @@ fn workbench_connection_requires_exact_origin_and_rejects_bearer_auth() {
 #[test]
 fn source_runtime_has_no_product_http_routes() {
     let runtime = TestRuntime::start();
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     let response = client
         .get(format!("{}/api/runtime/product", runtime.origin()))
@@ -121,7 +125,7 @@ fn source_runtime_has_no_product_http_routes() {
 #[test]
 fn model_api_key_reveal_is_authenticated_non_cacheable_and_not_published() {
     let runtime = TestRuntime::start();
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     let exact_api_key = "  密钥🔑 \n";
     let save = client
@@ -146,7 +150,7 @@ fn model_api_key_reveal_is_authenticated_non_cacheable_and_not_published() {
     let event_json = settings_event.to_string();
     assert!(!event_json.contains(exact_api_key));
     assert!(!event_json.contains("apiKeyPreview"));
-    let revision = runtime.services.global().revision();
+    let revision = runtime.services().global().revision();
 
     let unauthorized = client
         .post(format!(
@@ -183,13 +187,13 @@ fn model_api_key_reveal_is_authenticated_non_cacheable_and_not_published() {
         reveal.json::<Value>().expect("reveal should return JSON"),
         json!({ "apiKey": exact_api_key })
     );
-    assert_eq!(runtime.services.global().revision(), revision);
+    assert_eq!(runtime.services().global().revision(), revision);
 }
 
 #[test]
 fn runtime_shutdown_closes_a_live_workbench_stream_before_http_join() {
     let mut runtime = TestRuntime::start();
-    let response = Client::new()
+    let response = test_client()
         .post(format!("{}/api/workbench/connection", runtime.origin()))
         .header(ORIGIN, runtime.origin())
         .header(ACCEPT, "text/event-stream")
@@ -203,10 +207,14 @@ fn runtime_shutdown_closes_a_live_workbench_stream_before_http_join() {
         events.next_of_type("product.changed")["type"],
         "product.changed"
     );
+    assert_eq!(
+        events.next_of_type("photoshop.state.changed")["type"],
+        "photoshop.state.changed"
+    );
 
-    runtime.services.close_workbench_connection_admission();
+    runtime.services().close_workbench_connection_admission();
     runtime.server.stop_accepting();
-    runtime.services.close_all_workbench_connections();
+    runtime.services().close_all_workbench_connections();
     runtime.server.join();
     drop(runtime);
 
@@ -220,9 +228,9 @@ fn runtime_shutdown_closes_a_live_workbench_stream_before_http_join() {
 #[test]
 fn closed_workbench_admission_rejects_late_connections_while_listener_drains() {
     let runtime = TestRuntime::start();
-    runtime.services.close_workbench_connection_admission();
+    runtime.services().close_workbench_connection_admission();
 
-    let response = Client::new()
+    let response = test_client()
         .post(format!("{}/api/workbench/connection", runtime.origin()))
         .header(ORIGIN, runtime.origin())
         .header(ACCEPT, "text/event-stream")
@@ -243,7 +251,7 @@ fn closed_workbench_admission_rejects_late_connections_while_listener_drains() {
 fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("single-connection");
-    let client = Client::new();
+    let client = test_client();
     let response = client
         .post(format!("{}/api/workbench/connection", runtime.origin()))
         .header(ORIGIN, runtime.origin())
@@ -307,7 +315,7 @@ fn project_directory_load_publishes_only_the_requested_depth() {
         "notes",
     )
     .expect("deep Project file should be written");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -369,7 +377,7 @@ fn replacement_publishes_the_prepared_project_and_releases_the_source_use() {
     let runtime = TestRuntime::start();
     let source = runtime.create_project("replacement-source");
     let target = runtime.create_project("replacement-target");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &source, &cookie, &credential);
     assert_eq!(
@@ -407,8 +415,8 @@ fn replacement_publishes_the_prepared_project_and_releases_the_source_use() {
         .send()
         .expect("stale source request should complete");
     assert_eq!(stale_source_request.status().as_u16(), 403);
-    assert!(runtime.services.projects().get(&source.id).is_err());
-    assert!(runtime.services.projects().get(&target.id).is_ok());
+    assert!(runtime.services().projects().get(&source.id).is_err());
+    assert!(runtime.services().projects().get(&target.id).is_ok());
 }
 
 #[test]
@@ -422,7 +430,7 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
     fs::write(&second_file, b"second tab").expect("second file should be written");
     let first_revision = media_revision(&first_file);
     let second_revision = media_revision(&second_file);
-    let client = Client::new();
+    let client = test_client();
 
     let (cookie, first_credential, mut first_events) = open_unbound_connection(&client, &runtime);
     let (second_cookie, second_credential, mut second_events) =
@@ -505,7 +513,7 @@ fn passive_media_routes_reject_missing_or_empty_identity_values() {
     let project = runtime.create_project("media-query-contract");
     fs::write(Path::new(&project.root).join("image.png"), b"fixture")
         .expect("fixture should be written");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -544,7 +552,7 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
         .save(&image_path)
         .expect("image fixture should be written");
     let revision = media_revision(&image_path);
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -590,7 +598,7 @@ fn project_path_entries_reject_unknown_fields_at_the_http_boundary() {
     let project = runtime.create_project("project-path-entry-contract");
     let fixture = Path::new(&project.root).join("note.txt");
     fs::write(&fixture, "note").expect("text fixture should be written");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -625,7 +633,7 @@ fn canvas_mutation_routes_require_exact_non_empty_collections() {
     let project = runtime.create_project("canvas-mutation-contract");
     fs::write(Path::new(&project.root).join("note.txt"), "note")
         .expect("text fixture should be written");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -693,7 +701,7 @@ fn canvas_mutation_routes_require_exact_non_empty_collections() {
 fn canvas_media_state_routes_require_exact_non_empty_collections() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("canvas-media-state-contract");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -753,7 +761,7 @@ fn canvas_layout_and_selective_reset_accept_exact_current_inputs() {
     let project = runtime.create_project("canvas-layout-contract");
     fs::write(Path::new(&project.root).join("note.txt"), "note")
         .expect("text fixture should be written");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -845,7 +853,7 @@ fn assert_canvas_mutation_error(
 fn working_copy_survives_connection_close_and_clears_without_retention() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("working-copy");
-    let client = Client::new();
+    let client = test_client();
 
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
@@ -910,7 +918,7 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
 fn feedback_working_copies_are_independent_by_stable_item_id() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("feedback-working-copies");
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
     assert_eq!(
@@ -1013,7 +1021,7 @@ fn video_preview_sources_are_keyed_by_project_path() {
         .save(project_root.join("media/clip.poster.png"))
         .expect("poster fixture should be written");
     let video_revision = media_revision(&video);
-    let client = Client::new();
+    let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
 
@@ -1052,6 +1060,13 @@ fn video_preview_sources_are_keyed_by_project_path() {
 
 fn open_unbound_connection(client: &Client, runtime: &TestRuntime) -> (String, String, SseEvents) {
     open_unbound_connection_with_cookie(client, runtime, None)
+}
+
+fn test_client() -> Client {
+    Client::builder()
+        .timeout(WORKBENCH_HTTP_TEST_TIMEOUT)
+        .build()
+        .expect("Workbench HTTP test client should build")
 }
 
 fn open_unbound_connection_with_cookie(
@@ -1184,11 +1199,15 @@ impl SseEvents {
 struct TestRuntime {
     root: PathBuf,
     server: WorkbenchHttpServer,
-    services: Arc<WorkbenchRuntimeServices>,
+    services: Option<Arc<WorkbenchRuntimeServices>>,
+    _admission: MutexGuard<'static, ()>,
 }
 
 impl TestRuntime {
     fn start() -> Self {
+        let admission = WORKBENCH_HTTP_TEST_ADMISSION
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let root = std::env::temp_dir().join(format!("dbrt-http-{}", Uuid::new_v4()));
         let assets = root.join("assets");
         fs::create_dir_all(&assets).expect("assets should be created");
@@ -1221,12 +1240,19 @@ impl TestRuntime {
         Self {
             root,
             server,
-            services,
+            services: Some(services),
+            _admission: admission,
         }
     }
 
     fn origin(&self) -> &str {
         self.server.origin()
+    }
+
+    fn services(&self) -> &WorkbenchRuntimeServices {
+        self.services
+            .as_deref()
+            .expect("test Runtime services should remain live")
     }
 
     fn create_project(&self, name: &str) -> TestProject {
@@ -1258,6 +1284,16 @@ impl TestRuntime {
 
 impl Drop for TestRuntime {
     fn drop(&mut self) {
+        let Some(services) = self.services.take() else {
+            return;
+        };
+        services.close_workbench_connection_admission();
+        self.server.stop_accepting();
+        services.close_all_workbench_connections();
+        self.server.join();
+        services.finish_workbench_connection_closer();
+        services.shutdown_owned_work();
+        drop(services);
         let _ = fs::remove_dir_all(&self.root);
     }
 }

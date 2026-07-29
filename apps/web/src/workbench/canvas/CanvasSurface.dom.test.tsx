@@ -196,6 +196,116 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('Delete');
   });
 
+  it('opens Canvas Project Path Commands with only current available-node size facts', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'context-menu-file-facts' });
+    const node = nodeFixture('data/deep/cover.png', 0, 0);
+    if (node.availability.state !== 'available') {
+      throw new Error('fixture must be available');
+    }
+    node.availability = { ...node.availability, size: 12_345 };
+    const missingNode = {
+      ...nodeFixture('data/deep/missing.png', 260, 0),
+      availability: { state: 'missing' as const, message: 'File is missing.' }
+    };
+    const unreadableNode = {
+      ...nodeFixture('data/deep/unreadable.png', 520, 0),
+      availability: { state: 'unreadable' as const, message: 'File is unreadable.' }
+    };
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [node, missingNode, unreadableNode],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+    const onOpenContextMenu = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              onOpenContextMenu={onOpenContextMenu}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      const element = await waitForCanvasSurfaceElement(
+        container,
+        '[data-canvas-node-path="data/deep/cover.png"]'
+      );
+      await act(async () => {
+        element.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 40,
+          clientY: 60
+        }));
+      });
+
+      expect(onOpenContextMenu).toHaveBeenCalledWith({
+        source: 'canvas',
+        kind: 'file',
+        projectRelativePath: 'data/deep/cover.png',
+        sizeBytes: 12_345
+      }, { x: 40, y: 60 });
+
+      const missingElement = await waitForCanvasSurfaceElement(
+        container,
+        '[data-canvas-node-path="data/deep/missing.png"]'
+      );
+      await act(async () => {
+        missingElement.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 80,
+          clientY: 100
+        }));
+      });
+      expect(onOpenContextMenu).toHaveBeenLastCalledWith({
+        source: 'canvas',
+        kind: 'file',
+        projectRelativePath: 'data/deep/missing.png',
+        sizeBytes: undefined
+      }, { x: 80, y: 100 });
+
+      const unreadableElement = await waitForCanvasSurfaceElement(
+        container,
+        '[data-canvas-node-path="data/deep/unreadable.png"]'
+      );
+      await act(async () => {
+        unreadableElement.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 120,
+          clientY: 140
+        }));
+      });
+      expect(onOpenContextMenu).toHaveBeenLastCalledWith({
+        source: 'canvas',
+        kind: 'file',
+        projectRelativePath: 'data/deep/unreadable.png',
+        sizeBytes: undefined
+      }, { x: 120, y: 140 });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('uses the fixed Canvas presentation for unavailable image text without scaling available image pixels', () => {
     const canvas = createCanvasDocument({ id: 'image-availability-presentation' });
     const projection: CanvasProjection = {
@@ -2122,13 +2232,12 @@ function workbenchStateFixture(
           image: [],
           video: [],
           audio: []
-        },
-        adobeBridge: { enabled: true }
+        }
       }
     },
     integrations: { status: 'ready', value: { integrations: [], backends: [] } },
     product: { status: 'ready', value: productState() },
-    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
+    photoshop: { status: 'ready', value: { sessions: [] } },
     resolvedTheme: 'dark',
     canvasFeedback: undefined,
     textFileBuffers: {},
@@ -2140,7 +2249,6 @@ function workbenchStateFixture(
 const actions: WorkbenchActions = {
   checkProductUpdate: async () => undefined,
   applyProductUpdate: async () => undefined,
-  reloadAdobeBridge: async () => undefined,
   saveGlobalSettings: async () => undefined,
   revealModelApiKey: async () => {
     throw new Error('not used');
@@ -2151,15 +2259,9 @@ const actions: WorkbenchActions = {
     integrationId: input.integrationId,
     operation: input.operation
   }),
-  createAdobeBridgePairing: async () => ({ pairingId: 'pairing-1', code: '123456', expiresAt: '2026-07-17T00:00:00Z' }),
-  cancelAdobeBridgePairing: async () => undefined,
-  removeAdobeBridgePairing: async () => undefined,
-  linkAdobeBridgePhotoshop: async () => undefined,
-  unlinkAdobeBridgePhotoshop: async () => undefined,
   sendProjectFileToPhotoshop: async () => {
     throw new Error('not used');
   },
-  openSendToPhotoshopPicker: () => undefined,
   lookupGeneratedAssetMetadata: async () => {
     throw new Error('not used');
   },

@@ -18,8 +18,6 @@ describe('release version contract', () => {
       'Desktop package',
       'Photoshop UXP package',
       'Photoshop UXP manifest',
-      'Photoshop CEP package',
-      'Photoshop CEP manifest',
       'debrute-audio-director Skill',
       'debrute-core Skill',
       'debrute-image-director Skill',
@@ -34,14 +32,11 @@ describe('release version contract', () => {
       await mkdir(join(root, 'apps/desktop'), { recursive: true });
       await mkdir(join(root, 'apps/photoshop-uxp-plugin'), { recursive: true });
       await mkdir(join(root, 'apps/photoshop-uxp-plugin/public'), { recursive: true });
-      await mkdir(join(root, 'apps/photoshop-cep-plugin/public/CSXS'), { recursive: true });
       await mkdir(join(root, 'skills/debrute-core'), { recursive: true });
       await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/desktop/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/photoshop-uxp-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/photoshop-uxp-plugin/public/manifest.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/public/CSXS/manifest.xml'), '<ExtensionManifest ExtensionBundleVersion="1.2.3"></ExtensionManifest>', 'utf8');
       await writeFile(join(root, 'skills/debrute-core/SKILL.md'), [
         '---',
         'name: debrute-core',
@@ -63,15 +58,12 @@ describe('release version contract', () => {
       await mkdir(join(root, 'apps/desktop'), { recursive: true });
       await mkdir(join(root, 'apps/web'), { recursive: true });
       await mkdir(join(root, 'apps/photoshop-uxp-plugin/public'), { recursive: true });
-      await mkdir(join(root, 'apps/photoshop-cep-plugin/public/CSXS'), { recursive: true });
       await mkdir(join(root, 'skills/debrute-core'), { recursive: true });
       await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/desktop/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/web/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/photoshop-uxp-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/photoshop-uxp-plugin/public/manifest.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/public/CSXS/manifest.xml'), '<ExtensionManifest ExtensionBundleVersion="1.2.3"></ExtensionManifest>', 'utf8');
       await writeFile(join(root, 'skills/debrute-core/SKILL.md'), [
         '---',
         'name: debrute-core',
@@ -92,14 +84,11 @@ describe('release version contract', () => {
     try {
       await mkdir(join(root, 'apps/desktop'), { recursive: true });
       await mkdir(join(root, 'apps/photoshop-uxp-plugin/public'), { recursive: true });
-      await mkdir(join(root, 'apps/photoshop-cep-plugin/public/CSXS'), { recursive: true });
       await mkdir(join(root, 'skills/debrute-core'), { recursive: true });
       await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/desktop/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/photoshop-uxp-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
       await writeFile(join(root, 'apps/photoshop-uxp-plugin/public/manifest.json'), JSON.stringify({ version: '1.2.4' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/public/CSXS/manifest.xml'), '<ExtensionManifest ExtensionBundleVersion="1.2.3"></ExtensionManifest>', 'utf8');
       await writeFile(join(root, 'skills/debrute-core/SKILL.md'), [
         '---',
         'name: debrute-core',
@@ -115,31 +104,4 @@ describe('release version contract', () => {
     }
   });
 
-  it('rejects mismatched Photoshop CEP manifest versions instead of packaging mixed metadata', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'debrute-release-cep-manifest-contract-'));
-    try {
-      await mkdir(join(root, 'apps/desktop'), { recursive: true });
-      await mkdir(join(root, 'apps/photoshop-uxp-plugin/public'), { recursive: true });
-      await mkdir(join(root, 'apps/photoshop-cep-plugin/public/CSXS'), { recursive: true });
-      await mkdir(join(root, 'skills/debrute-core'), { recursive: true });
-      await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/desktop/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-uxp-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-uxp-plugin/public/manifest.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/package.json'), JSON.stringify({ version: '1.2.3' }), 'utf8');
-      await writeFile(join(root, 'apps/photoshop-cep-plugin/public/CSXS/manifest.xml'), '<ExtensionManifest ExtensionBundleVersion="1.2.4"></ExtensionManifest>', 'utf8');
-      await writeFile(join(root, 'skills/debrute-core/SKILL.md'), [
-        '---',
-        'name: debrute-core',
-        'metadata:',
-        '  debrute.version: "1.2.3"',
-        '---',
-        ''
-      ].join('\n'), 'utf8');
-
-      await expect(validateReleaseVersionContract(root)).rejects.toThrow(/photoshop cep manifest/i);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
 });

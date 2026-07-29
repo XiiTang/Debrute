@@ -24,7 +24,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     expect(html).toContain('class="settings-directory-group__label">Models</span>');
     expect(html).toContain('class="settings-directory-group__label">Integrations</span>');
     expect(html.indexOf('Image Models')).toBeLessThan(html.indexOf('Integrations</strong>'));
-    expect(html.indexOf('Integrations</strong>')).toBeLessThan(html.indexOf('Adobe Bridge'));
+    expect(html).not.toContain('Adobe Bridge');
   });
 
   it('renders exactly one selected Settings page title', () => {
@@ -689,8 +689,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
             workbench: { locale: 'zh-CN', themePreference: 'system', defaultFrontend: 'browser' },
             canvas: { textAppearance: globalSettingsFixture().canvas.textAppearance },
             chrome: { recentProjects: [] },
-            models: { image: [], video: [], audio: [] },
-            adobeBridge: { enabled: true }
+            models: { image: [], video: [], audio: [] }
           }}
           onSettingsChange={async (settings) => {
             saved.push(settings);
@@ -938,135 +937,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     }
   });
 
-  it('saves persisted Adobe enabled state without reloading live state', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const saveGlobalSettings = vi.fn(async () => undefined);
-    const reloadAdobeBridge = vi.fn(async () => undefined);
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <SettingsPanel
-              state={stateWithSettings()}
-              actions={{ ...actions(), saveGlobalSettings, reloadAdobeBridge } as WorkbenchActions}
-            />
-          </I18nProvider>
-        );
-      });
-      await act(async () => {
-        requireButton(container, 'Adobe Bridge').click();
-      });
-      const enabledSwitch = container.querySelector('input[type="checkbox"]');
-      if (!(enabledSwitch instanceof HTMLInputElement)) {
-        throw new Error('Expected Adobe Bridge enabled switch.');
-      }
-
-      await act(async () => {
-        enabledSwitch.click();
-        await Promise.resolve();
-      });
-
-      expect(saveGlobalSettings).toHaveBeenCalledWith({ adobeBridge: { enabled: false } });
-      expect(reloadAdobeBridge).not.toHaveBeenCalled();
-    } finally {
-      await unmount(root, container);
-    }
-  });
-
-  it('shows per-client Adobe link progress and preserves failures for retry', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const link = deferred<void>();
-    const linkAdobeBridgePhotoshop = vi.fn()
-      .mockImplementationOnce(() => link.promise)
-      .mockResolvedValueOnce(undefined);
-    const state = stateWithSettings({
-      projectId: 'project-1',
-      adobeBridge: {
-        status: 'ready',
-        value: {
-          settings: { enabled: true, discoveryStatus: 'available' },
-          pairedPlugins: [],
-          clients: [{
-            pluginInstanceId: 'photoshop-1',
-            hostApp: 'photoshop',
-            hostVersion: '2026',
-            clientRuntime: 'uxp',
-            displayName: 'Photoshop 2026',
-            documentCount: 0,
-            activeDocumentTitle: null,
-            connectedAt: '2026-07-10T00:00:00.000Z',
-            lastSeenAt: '2026-07-10T00:00:00.000Z'
-          }, {
-            pluginInstanceId: 'photoshop-2',
-            hostApp: 'photoshop',
-            hostVersion: '2026',
-            clientRuntime: 'uxp',
-            displayName: 'Photoshop 2026 · Second client',
-            documentCount: 0,
-            activeDocumentTitle: null,
-            connectedAt: '2026-07-10T00:00:00.000Z',
-            lastSeenAt: '2026-07-10T00:00:00.000Z'
-          }],
-          projects: [],
-          links: [],
-          transfers: []
-        }
-      }
-    });
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <SettingsPanel
-              state={state}
-              actions={{ ...actions(), linkAdobeBridgePhotoshop } as WorkbenchActions}
-            />
-          </I18nProvider>
-        );
-      });
-      await act(async () => {
-        requireButton(container, 'Adobe Bridge').click();
-      });
-
-      const connect = requireButton(container, 'Connect');
-      await act(async () => {
-        connect.click();
-        await Promise.resolve();
-      });
-      expect(connect.disabled).toBe(true);
-      expect(connect.getAttribute('aria-busy')).toBe('true');
-      const otherConnect = Array.from(container.querySelectorAll('button')).find((candidate) => (
-        candidate !== connect && candidate.textContent === 'Connect'
-      ));
-      expect(otherConnect).toBeInstanceOf(HTMLButtonElement);
-      expect((otherConnect as HTMLButtonElement).disabled).toBe(false);
-
-      await act(async () => {
-        link.reject(new Error('Photoshop link denied'));
-        await link.promise.catch(() => undefined);
-        await Promise.resolve();
-      });
-      expect(connect.disabled).toBe(false);
-      expect(connect.getAttribute('aria-busy')).toBeNull();
-      expect(connect.closest('.db-record-row')?.textContent).toContain('Photoshop link denied');
-
-      await act(async () => {
-        connect.click();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(linkAdobeBridgePhotoshop).toHaveBeenCalledTimes(2);
-      expect(connect.closest('.db-record-row')?.textContent).not.toContain('Photoshop link denied');
-    } finally {
-      await unmount(root, container);
-    }
-  });
 });
 
 function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
@@ -1079,7 +949,7 @@ function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchSt
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
     explorerSelection: createEmptyProjectTreeSelection(),
-    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
+    photoshop: { status: 'ready', value: { sessions: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -1157,7 +1027,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
         apiKeySet: false
       }]
     },
-    adobeBridge: { enabled: true },
     ...overrides
   };
 }
@@ -1166,7 +1035,6 @@ function actions(): WorkbenchActions {
   return {
     checkProductUpdate: vi.fn(async () => undefined),
     applyProductUpdate: vi.fn(async () => undefined),
-    reloadAdobeBridge: vi.fn(async () => undefined),
     saveGlobalSettings: vi.fn(async () => undefined),
     runIntegrationOperation: vi.fn(async (input) => ({
       ok: true,

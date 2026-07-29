@@ -14,7 +14,6 @@ interface TsConfigFile {
 const emitTsconfigPaths = [
   'packages/app-protocol/tsconfig.json',
   'packages/canvas-core/tsconfig.json',
-  'packages/photoshop-bridge-plugin-core/tsconfig.json',
   'packages/runtime-control-client/tsconfig.json'
 ];
 

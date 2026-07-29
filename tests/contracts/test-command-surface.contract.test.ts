@@ -73,7 +73,6 @@ describe('local test command surface', () => {
     ]));
     expect(coverage?.exclude).not.toEqual(expect.arrayContaining([
       'apps/desktop/src/electron/main.ts',
-      'apps/photoshop-cep-plugin/src/main.ts',
       'apps/photoshop-uxp-plugin/src/main.ts'
     ]));
   });

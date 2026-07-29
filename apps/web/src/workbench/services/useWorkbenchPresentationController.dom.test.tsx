@@ -97,7 +97,6 @@ function settingsFixture(
       }
     },
     chrome: { recentProjects: [] },
-    models: { image: [], video: [], audio: [] },
-    adobeBridge: { enabled: true }
+    models: { image: [], video: [], audio: [] }
   };
 }

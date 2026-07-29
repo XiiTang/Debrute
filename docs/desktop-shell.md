@@ -4,7 +4,7 @@ Debrute Desktop is a trayless Electron window host for the same Web Workbench
 and shared local Runtime used by browser clients. Runtime alone owns the
 persistent macOS or Windows tray. Desktop owns native windows, menus, folder
 picking, and Product packaging. Project sessions, global settings, integrations,
-Adobe Bridge, file mutation, terminals, and process lifecycle remain
+Photoshop file transfer, file mutation, terminals, and process lifecycle remain
 Runtime-owned.
 
 Each Desktop artifact is built on its matching native release target together

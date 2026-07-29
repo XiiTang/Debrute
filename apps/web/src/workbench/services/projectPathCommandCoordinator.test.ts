@@ -31,7 +31,7 @@ describe('Project Path Command coordinator', () => {
         },
         canSelectCanvasNode: true,
         fileClipboard: undefined,
-        adobeBridgeEnabled: false
+        photoshop: undefined
       },
       commandContext: commandContextFixture()
     });
@@ -52,7 +52,7 @@ describe('Project Path Command coordinator', () => {
         projection: undefined,
         canSelectCanvasNode: false,
         fileClipboard: undefined,
-        adobeBridgeEnabled: false
+        photoshop: undefined
       },
       commandContext: {
         activeProjection: undefined,
@@ -73,6 +73,8 @@ describe('Project Path Command coordinator', () => {
         },
         copyText: vi.fn(),
         notify: vi.fn(),
+        startNotification: () => vi.fn(),
+        photoshopLabels: photoshopLabelsFixture(),
         closeContextMenu,
         openInspectorPanel: vi.fn(),
         confirmPermanentDelete,
@@ -93,7 +95,8 @@ describe('Project Path Command coordinator', () => {
     };
 
     expect(coordinator.contextMenuItems(target, false).every((item) => (
-      item.kind === 'separator' || item.disabled === true
+      item.kind === 'separator'
+        || (item.kind === 'action' ? item.disabled === true : item.targets.length === 0)
     ))).toBe(true);
     coordinator.run('delete-permanently', {
       target,
@@ -119,7 +122,7 @@ describe('Project Path Command coordinator', () => {
         projection: undefined,
         canSelectCanvasNode: false,
         fileClipboard: undefined,
-        adobeBridgeEnabled: false
+        photoshop: undefined
       },
       commandContext: {
         activeProjection: undefined,
@@ -142,6 +145,8 @@ describe('Project Path Command coordinator', () => {
         },
         copyText,
         notify,
+        startNotification: () => vi.fn(),
+        photoshopLabels: photoshopLabelsFixture(),
         closeContextMenu: vi.fn(),
         openInspectorPanel: vi.fn(),
         confirmPermanentDelete: vi.fn(() => true),
@@ -211,6 +216,8 @@ function commandContextFixture() {
     },
     copyText: vi.fn(),
     notify: vi.fn(),
+    startNotification: () => vi.fn(),
+    photoshopLabels: photoshopLabelsFixture(),
     closeContextMenu: vi.fn(),
     openInspectorPanel: vi.fn(),
     confirmPermanentDelete: vi.fn(() => true),
@@ -220,6 +227,14 @@ function commandContextFixture() {
       copyPathFailed: 'Copy Path failed',
       resetAutoLayoutFailed: 'Reset auto layout failed'
     }
+  };
+}
+
+function photoshopLabelsFixture() {
+  return {
+    sending: (path: string, title: string) => `Sending ${path} to ${title}`,
+    sent: (path: string, title: string) => `Sent ${path} to ${title}`,
+    failed: (message: string) => `Failed: ${message}`
   };
 }
 

@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs,
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::OnceLock,
     time::UNIX_EPOCH,
@@ -23,6 +23,24 @@ use super::{
 };
 
 const DEFAULT_MAX_TEXT_BYTES: u64 = 1024 * 1024;
+
+fn project_io_error(operation: &str, path: &Path, error: &io::Error) -> ProjectError {
+    ProjectError::Io(io::Error::new(
+        error.kind(),
+        format!("{operation} at {}: {error}", path.display()),
+    ))
+}
+
+fn project_rename_error(source: &Path, target: &Path, error: &io::Error) -> ProjectError {
+    ProjectError::Io(io::Error::new(
+        error.kind(),
+        format!(
+            "rename Project staging path {} to {}: {error}",
+            source.display(),
+            target.display()
+        ),
+    ))
+}
 
 #[cfg(test)]
 thread_local! {
@@ -190,6 +208,7 @@ pub(crate) fn create_project_path(
     Ok(ProjectPathEntry {
         project_relative_path: relative,
         kind,
+        size_bytes: (kind == ProjectPathKind::File).then_some(0),
     })
 }
 
@@ -218,9 +237,13 @@ pub(crate) fn rename_project_path(
         )));
     }
     rename_no_replace(&source_absolute, &target_absolute)?;
+    let size_bytes = (kind == ProjectPathKind::File)
+        .then(|| fs::metadata(&target_absolute).map(|metadata| metadata.len()))
+        .transpose()?;
     Ok(ProjectPathEntry {
         project_relative_path: target,
         kind,
+        size_bytes,
     })
 }
 
@@ -621,10 +644,33 @@ fn materialize_upload_stages(
             }
             ProjectUploadEntry::TemporaryFile { temporary_path, .. } => {
                 if let Some(parent) = stage.parent() {
-                    fs::create_dir_all(parent)?;
+                    fs::create_dir_all(parent).map_err(|error| {
+                        project_io_error("create Project upload staging directory", parent, &error)
+                    })?;
                 }
-                fs::copy(temporary_path, &stage)?;
-                fs::OpenOptions::new().read(true).open(&stage)?.sync_all()?;
+                let mut source = fs::File::open(temporary_path).map_err(|error| {
+                    project_io_error("open temporary upload source", temporary_path, &error)
+                })?;
+                let mut target = fs::OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(&stage)
+                    .map_err(|error| {
+                        project_io_error("create Project upload staging file", &stage, &error)
+                    })?;
+                io::copy(&mut source, &mut target).map_err(|error| {
+                    ProjectError::Io(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "copy temporary upload {} to Project staging path {}: {error}",
+                            temporary_path.display(),
+                            stage.display()
+                        ),
+                    ))
+                })?;
+                target.sync_all().map_err(|error| {
+                    project_io_error("sync Project upload staging file", &stage, &error)
+                })?;
             }
             ProjectUploadEntry::Directory { .. } => {}
         }
@@ -700,7 +746,10 @@ fn commit_staged_paths(staged: &[(PathBuf, PathBuf)], overwrite: bool) -> Result
             let mut rollback_errors = remove_committed_paths_for_rollback(&committed);
             rollback_errors.extend(restore_path_backups(&backups));
             cleanup_paths(staged.iter().map(|(path, _)| path));
-            return Err(rollback_or_original(error.into(), &rollback_errors));
+            return Err(rollback_or_original(
+                project_rename_error(temporary, target, &error),
+                &rollback_errors,
+            ));
         }
         committed.push((target.clone(), identity));
     }
@@ -920,7 +969,8 @@ pub(super) fn commit_staged_paths_for_test(
 }
 
 fn project_path_identity(path: &Path) -> Result<debrute_native_fs::PathIdentity, ProjectError> {
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| project_io_error("read Project path identity metadata", path, &error))?;
     if metadata.file_type().is_symlink() {
         return Err(ProjectError::Validation(format!(
             "Project operation path must not contain a symbolic link: {}",
@@ -933,7 +983,8 @@ fn project_path_identity(path: &Path) -> Result<debrute_native_fs::PathIdentity,
             path.display()
         )));
     }
-    debrute_native_fs::path_identity(path).map_err(ProjectError::from)
+    debrute_native_fs::path_identity(path)
+        .map_err(|error| project_io_error("read native Project path identity", path, &error))
 }
 
 fn rollback_or_original(original: ProjectError, rollback_errors: &[String]) -> ProjectError {
@@ -995,6 +1046,7 @@ fn normalized_top_level_entries(
         normalized.push(ProjectPathEntry {
             project_relative_path: path,
             kind,
+            size_bytes: None,
         });
     }
     let mut top_level = Vec::<ProjectPathEntry>::new();

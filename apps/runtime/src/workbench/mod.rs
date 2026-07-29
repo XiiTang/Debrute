@@ -8,7 +8,7 @@ mod project_routes;
 mod routes;
 mod routing;
 mod services;
-mod websocket;
+pub(crate) mod websocket;
 mod working_copy;
 
 pub(crate) use authority::{DesktopLaunchBinding, SourceWorkbenchRegistrationError};

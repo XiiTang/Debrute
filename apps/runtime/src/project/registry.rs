@@ -38,7 +38,6 @@ pub enum ProjectUseKind {
     Request,
     RunningTerminal,
     Transfer,
-    PhotoshopLink,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -453,6 +452,7 @@ impl ProjectSessionRegistry {
                 project_id,
                 service,
                 Arc::clone(&self.inner.feedback_artifacts),
+                Arc::clone(&self.inner.on_change),
             ));
             session.prepare_for_publication()?;
             Ok(session)
@@ -683,6 +683,7 @@ pub struct ProjectSession {
     project_id: String,
     root: PathBuf,
     feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+    on_change: Arc<dyn Fn() + Send + Sync>,
     delivery: Mutex<()>,
     state: Mutex<ProjectSessionState>,
     watcher: Mutex<Option<ProjectFileWatcher>>,
@@ -715,11 +716,13 @@ impl ProjectSession {
         project_id: String,
         service: ProjectService,
         feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+        on_change: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
         Self {
             project_id,
             root: service.root().to_path_buf(),
             feedback_artifacts,
+            on_change,
             delivery: Mutex::new(()),
             watcher: Mutex::new(None),
             background_file_index: Mutex::new(BackgroundFileIndexLifecycle::NotStarted),
@@ -791,7 +794,7 @@ impl ProjectSession {
         &self,
         update: &CanvasFeedbackDiagnosticUpdate,
     ) -> Result<(), ProjectError> {
-        let _delivery = lock(&self.delivery);
+        let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
         let next_revision = state
             .project_revision
@@ -807,6 +810,9 @@ impl ProjectSession {
             change: ProjectChange::ProjectChanged(snapshot),
         };
         publish_event(&mut state, &event);
+        drop(state);
+        drop(delivery);
+        (self.on_change)();
         Ok(())
     }
 
@@ -819,7 +825,7 @@ impl ProjectSession {
         mutation: impl FnOnce(&mut ProjectService) -> Result<ProjectMutation<T>, ProjectError>,
         post_commit: impl FnOnce(&ProjectRevisionResult<T>),
     ) -> Result<ProjectRevisionResult<T>, ProjectError> {
-        let _delivery = lock(&self.delivery);
+        let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
         let next_revision = state
             .project_revision
@@ -836,6 +842,7 @@ impl ProjectSession {
         } else {
             None
         };
+        let changed = event.is_some();
         let revision = state.project_revision;
         if let Some(event) = &event {
             publish_event(&mut state, event);
@@ -846,6 +853,11 @@ impl ProjectSession {
             project_revision: revision,
         };
         post_commit(&result);
+        drop(state);
+        drop(delivery);
+        if changed {
+            (self.on_change)();
+        }
         Ok(result)
     }
 
@@ -890,6 +902,55 @@ impl ProjectSession {
         )?;
         if let Some(error) = dispatch_error.into_inner() {
             self.feedback_artifacts.report_dispatch_error(&error);
+        }
+        Ok(result)
+    }
+
+    /// Executes one Project command only at the caller's exact revision barrier.
+    ///
+    /// # Errors
+    /// Returns `project_revision_changed` before the command has any effect when
+    /// another Project mutation has already advanced the session.
+    pub fn execute_at_revision(
+        &self,
+        expected_revision: u64,
+        command: ProjectCommand,
+    ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
+        let delivery = lock(&self.delivery);
+        let mut state = self.open_state()?;
+        if state.project_revision != expected_revision {
+            return Err(ProjectError::service(
+                "project_revision_changed",
+                format!(
+                    "Project revision changed from {expected_revision} to {}.",
+                    state.project_revision
+                ),
+            ));
+        }
+        let next_revision = state
+            .project_revision
+            .checked_add(1)
+            .ok_or(ProjectError::RevisionExhausted)?;
+        let result = execute_project_command(&mut state.service, command)?;
+        let changed = result.change.is_some();
+        if let Some(change) = result.change {
+            state.project_revision = next_revision;
+            let event = ProjectEvent {
+                project_id: self.project_id.clone(),
+                project_revision: state.project_revision,
+                change,
+            };
+            publish_event(&mut state, &event);
+        }
+        let result = ProjectRevisionResult {
+            value: result.value,
+            project_id: self.project_id.clone(),
+            project_revision: state.project_revision,
+        };
+        drop(state);
+        drop(delivery);
+        if changed {
+            (self.on_change)();
         }
         Ok(result)
     }
@@ -1195,6 +1256,9 @@ impl ProjectSession {
                         change: ProjectChange::ProjectChanged(snapshot),
                     };
                     publish_event(&mut state, &event);
+                    drop(state);
+                    drop(delivery);
+                    (self.on_change)();
                     return Err(error);
                 }
                 state
@@ -1264,6 +1328,7 @@ impl ProjectSession {
         });
         drop(state);
         drop(delivery);
+        (self.on_change)();
         if let Some(error) = dispatch_error {
             self.feedback_artifacts.report_dispatch_error(&error);
         }

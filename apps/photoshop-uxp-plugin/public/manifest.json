@@ -1,17 +1,21 @@
 {
   "manifestVersion": 5,
-  "id": "com.debrute.photoshop.bridge",
-  "name": "Debrute Bridge",
+  "id": "com.debrute.photoshop",
+  "name": "Debrute Photoshop",
   "version": "0.0.4",
   "main": "index.html",
   "host": {
     "app": "PS",
-    "minVersion": "23.3.0"
+    "minVersion": "24.4.0",
+    "data": {
+      "apiVersion": 2,
+      "loadEvent": "startup"
+    }
   },
   "entrypoints": [
     {
       "type": "panel",
-      "id": "debruteBridgePanel",
+      "id": "debrutePhotoshopPanel",
       "label": {
         "default": "Debrute"
       },
@@ -35,10 +39,7 @@
   ],
   "requiredPermissions": {
     "network": {
-      "domains": [
-        "http://127.0.0.1:*",
-        "ws://127.0.0.1:*"
-      ]
+      "domains": "all"
     },
     "localFileSystem": "plugin"
   }

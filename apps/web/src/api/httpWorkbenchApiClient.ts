@@ -73,7 +73,6 @@ export interface HttpWorkbenchApiClient extends WorkbenchApiClient {
   readonly globalProjection: WorkbenchGlobalProjection;
   readonly projectProjection: WorkbenchProjectProjection;
   bootstrapGlobalSettings(): Promise<WorkbenchGlobalSettingsBootstrap>;
-  ensureAdobeBridgeState(): Promise<void>;
 }
 
 export interface WorkbenchGlobalSettingsBootstrap {
@@ -123,7 +122,6 @@ export function createHttpWorkbenchApiClient(options: {
   let connectionCredential: string | undefined;
   let globalSettingsBootstrap: WorkbenchGlobalSettingsBootstrap | undefined;
   let globalSettingsBootstrapError: Error | undefined;
-  let adobeBridgeStateLoad: Promise<void> | undefined;
   let projectRootSelection: Promise<string | undefined> | undefined;
   const globalSettingsBootstrapWaiters: Array<{
     resolve(value: WorkbenchGlobalSettingsBootstrap): void;
@@ -187,24 +185,6 @@ export function createHttpWorkbenchApiClient(options: {
       return undefined as T;
     }
     return response.json() as Promise<T>;
-  };
-  const ensureAdobeBridgeState = (): Promise<void> => {
-    const state = globalProjection.getState();
-    if (state.status !== 'uninitialized' && state.adobeBridge.status === 'ready') {
-      return Promise.resolve();
-    }
-    if (!adobeBridgeStateLoad) {
-      const load = request<{ ok: true }>('POST', '/api/adobe-bridge/state/refresh')
-        .then(() => undefined)
-        .catch((error: unknown) => {
-          if (adobeBridgeStateLoad === load) {
-            adobeBridgeStateLoad = undefined;
-          }
-          throw error;
-        });
-      adobeBridgeStateLoad = load;
-    }
-    return adobeBridgeStateLoad;
   };
   const requestFormData = async <T>(
     method: string,
@@ -360,9 +340,6 @@ export function createHttpWorkbenchApiClient(options: {
       projectProjection.acceptProjectEvent(event);
     } else {
       globalProjection.acceptEvent(event as WorkbenchGlobalEvent);
-    }
-    if (event.type === 'adobeBridge.state.changed') {
-      adobeBridgeStateLoad = undefined;
     }
     if (eventListeners.size === 0 && !eventListenerWasRegistered) {
       pendingInitialEvents.push(event);
@@ -578,28 +555,9 @@ export function createHttpWorkbenchApiClient(options: {
     globalProjection,
     projectProjection,
     bootstrapGlobalSettings,
-    ensureAdobeBridgeState,
-    adobeBridgeRefreshState: () => request<{ ok: true }>('POST', '/api/adobe-bridge/state/refresh'),
-    adobeBridgeCreatePairing: () => request<{ pairingId: string; code: string; expiresAt: string }>(
-      'POST',
-      '/api/adobe-bridge/pairings'
-    ),
-    adobeBridgeCancelPairing: (pairingId) => request<void>(
-      'DELETE',
-      `/api/adobe-bridge/pairings/${encodeURIComponent(pairingId)}`
-    ),
-    adobeBridgeRemovePairing: (pluginInstanceId) => request<{ ok: true }>(
-      'DELETE',
-      `/api/adobe-bridge/plugin-instances/${encodeURIComponent(pluginInstanceId)}/pairing`
-    ),
-    adobeBridgeLinkPhotoshop: (input) => requestForCurrentProject<{ ok: true }>('POST', '/adobe-bridge/links', input),
-    adobeBridgeUnlinkPhotoshop: (pluginInstanceId) => requestForCurrentProject<{ ok: true }>(
-      'DELETE',
-      `/adobe-bridge/links/${encodeURIComponent(pluginInstanceId)}`
-    ),
     sendProjectFileToPhotoshop: (input) => requestForCurrentProject<SendProjectFileToPhotoshopResult>(
       'POST',
-      '/adobe-bridge/send-to-photoshop',
+      '/photoshop/send',
       input
     ),
     openProject: async (target) => {

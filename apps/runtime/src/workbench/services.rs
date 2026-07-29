@@ -5,11 +5,10 @@
 )]
 
 use std::{
-    collections::HashMap,
     env,
     path::Path,
     pin::Pin,
-    sync::{Arc, Mutex, MutexGuard, Weak},
+    sync::{Arc, Mutex, Weak},
     task::{Context, Poll},
     thread,
     time::Duration,
@@ -30,11 +29,7 @@ use crate::{
     },
     integrations::{IntegrationOperation, Platform},
     model_operation::ModelOperationService,
-    photoshop::{
-        PhotoshopBridgeError, PhotoshopBridgeErrorCode, PhotoshopBridgeService,
-        PhotoshopBridgeStateView, PhotoshopDiscoveryStatus, PhotoshopPairingAuthority,
-        RuntimePhotoshopMessage,
-    },
+    photoshop::PhotoshopIntegration,
     project::{
         CanvasFeedbackArtifacts, GeneratedAssetMetadataService, MediaToolPaths,
         NativeProjectNodeAdapter, OpenProjectSession, ProjectNativeShellService, ProjectSession,
@@ -53,8 +48,6 @@ use super::{
 
 const GLOBAL_EVENT_CAPACITY: usize = 256;
 pub(crate) const WORKBENCH_HTTP_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
-
-type PhotoshopSocketRegistry = HashMap<String, tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>>;
 
 pub trait RuntimeProductHttpService: Send + Sync {
     fn state(&self) -> Result<Value, RuntimeHttpServiceError>;
@@ -158,8 +151,7 @@ pub struct WorkbenchRuntimeServices {
     terminals: TerminalService,
     generated_assets: Arc<GeneratedAssetMetadataService>,
     model_operations: Arc<ModelOperationService<GenerationService>>,
-    photoshop: Arc<PhotoshopBridgeService>,
-    photoshop_sockets: Arc<Mutex<PhotoshopSocketRegistry>>,
+    photoshop: Arc<PhotoshopIntegration>,
     connections: Arc<WorkbenchConnectionRegistry>,
     connection_closer: WorkbenchConnectionCloser,
     global_events: broadcast::Sender<GlobalRuntimeEvent>,
@@ -173,7 +165,7 @@ impl WorkbenchRuntimeServices {
     ///
     /// # Errors
     ///
-    /// Returns a typed startup error when a catalog, pairing registry, feedback
+    /// Returns a typed startup error when a catalog, Photoshop integration, feedback
     /// scheduler, or initial global projection cannot start.
     ///
     /// # Panics
@@ -200,10 +192,21 @@ impl WorkbenchRuntimeServices {
             CanvasFeedbackArtifacts::new(Arc::clone(&previews))
                 .map_err(RuntimeHttpServiceError::from_project)?,
         );
-        let projects = ProjectSessionRegistry::new(
+        let photoshop_holder = Arc::new(Mutex::new(Weak::<PhotoshopIntegration>::new()));
+        let project_photoshop_holder = Arc::clone(&photoshop_holder);
+        let projects = ProjectSessionRegistry::with_change_callback(
             &debrute_home,
             Arc::new(NativeProjectNodeAdapter::new(Arc::clone(&previews))),
             feedback,
+            Arc::new(move || {
+                if let Some(photoshop) = project_photoshop_holder
+                    .lock()
+                    .expect("Photoshop integration holder lock poisoned")
+                    .upgrade()
+                {
+                    photoshop.broadcast_projects();
+                }
+            }),
         );
         let terminals = TerminalService::new(projects.clone());
         let native_shell = Arc::new(ProjectNativeShellService::new(&workers));
@@ -228,68 +231,17 @@ impl WorkbenchRuntimeServices {
             Arc::clone(&generated_assets),
         ));
         let model_operations = Arc::new(ModelOperationService::new(Arc::clone(&generation)));
-        let pairings = Arc::new(
-            PhotoshopPairingAuthority::open(&debrute_home)
-                .map_err(RuntimeHttpServiceError::from_photoshop)?,
-        );
-        let photoshop_holder = Arc::new(Mutex::new(Weak::<PhotoshopBridgeService>::new()));
-        let callback_holder = Arc::clone(&photoshop_holder);
-        let photoshop_sockets = Arc::new(Mutex::new(PhotoshopSocketRegistry::new()));
-        let callback_sockets = Arc::clone(&photoshop_sockets);
         let callback_global = Arc::clone(&global);
-        let photoshop = Arc::new(PhotoshopBridgeService::with_change_callback(
-            pairings,
-            projects.clone(),
-            env!("CARGO_PKG_VERSION"),
+        let photoshop = Arc::new(PhotoshopIntegration::new(
             runtime_state.instance_id(),
-            true,
-            PhotoshopDiscoveryStatus::Unavailable,
-            Arc::new(move || {
-                let service = callback_holder
-                    .lock()
-                    .expect("Photoshop service holder lock poisoned")
-                    .upgrade();
-                if let Some(service) = service {
-                    let state = service.state().unwrap_or_else(|error| {
-                        panic!(
-                            "Photoshop global projection failed after a committed change ({}): {error}",
-                            error.code().as_str()
-                        )
-                    });
-                    callback_global
-                        .publish_external(GlobalRuntimeChange::PhotoshopBridgeChanged(state));
-                    let sockets = lock_photoshop_socket_registry(&callback_sockets)
-                        .iter()
-                        .map(|(session_id, sender)| (session_id.clone(), sender.clone()))
-                        .collect::<Vec<_>>();
-                    let mut stale_session_ids = Vec::new();
-                    for (session_id, sender) in sockets {
-                        if match photoshop_socket_projection(service.state_for_session(&session_id))
-                        {
-                            PhotoshopSocketProjection::Message(message) => {
-                                sender.try_send(message).is_err()
-                            }
-                            PhotoshopSocketProjection::Stale => true,
-                        } {
-                            stale_session_ids.push(session_id);
-                        }
-                    }
-                    if !stale_session_ids.is_empty() {
-                        let mut sockets = lock_photoshop_socket_registry(&callback_sockets);
-                        for session_id in &stale_session_ids {
-                            sockets.remove(session_id);
-                        }
-                        drop(sockets);
-                        for session_id in stale_session_ids {
-                            service.disconnect_session(&session_id);
-                        }
-                    }
-                }
+            projects.clone(),
+            Arc::new(move |state| {
+                callback_global.publish_external(GlobalRuntimeChange::PhotoshopChanged(state));
             }),
         ));
         *photoshop_holder
             .lock()
-            .expect("Photoshop service holder lock poisoned") = Arc::downgrade(&photoshop);
+            .expect("Photoshop integration holder lock poisoned") = Arc::downgrade(&photoshop);
 
         let (global_events, _) = broadcast::channel(GLOBAL_EVENT_CAPACITY);
         let event_sender = global_events.clone();
@@ -312,7 +264,7 @@ impl WorkbenchRuntimeServices {
                     presentation_state.set_theme_preference(&settings.workbench.theme_preference);
                 }
                 GlobalRuntimeChange::IntegrationsChanged(_)
-                | GlobalRuntimeChange::PhotoshopBridgeChanged(_)
+                | GlobalRuntimeChange::PhotoshopChanged(_)
                 | GlobalRuntimeChange::ProductChanged(_) => {}
             }
             let _ = event_sender.send(event);
@@ -337,7 +289,6 @@ impl WorkbenchRuntimeServices {
             generated_assets,
             model_operations,
             photoshop,
-            photoshop_sockets,
             connections,
             connection_closer,
             global_events,
@@ -404,54 +355,8 @@ impl WorkbenchRuntimeServices {
     }
 
     #[must_use]
-    pub fn photoshop(&self) -> &Arc<PhotoshopBridgeService> {
+    pub fn photoshop(&self) -> &Arc<PhotoshopIntegration> {
         &self.photoshop
-    }
-
-    pub fn register_photoshop_socket(
-        &self,
-        session_id: String,
-        replaced_session_id: Option<&str>,
-        sender: tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>,
-    ) {
-        let mut sockets = lock_photoshop_socket_registry(&self.photoshop_sockets);
-        if let Some(replaced) = replaced_session_id
-            && let Some(replaced_sender) = sockets.remove(replaced)
-        {
-            let _ = replaced_sender.try_send(RuntimePhotoshopMessage::BridgeError {
-                code: crate::photoshop::PhotoshopBridgeErrorCode::PluginSessionReplaced,
-                message: "Photoshop plugin session was replaced.".to_owned(),
-            });
-        }
-        insert_photoshop_socket(&mut sockets, session_id, sender);
-    }
-
-    pub fn unregister_photoshop_socket(&self, session_id: &str) {
-        lock_photoshop_socket_registry(&self.photoshop_sockets).remove(session_id);
-    }
-
-    pub fn send_photoshop_message(
-        &self,
-        session_id: &str,
-        message: RuntimePhotoshopMessage,
-    ) -> Result<(), RuntimeHttpServiceError> {
-        let sender = lock_photoshop_socket_registry(&self.photoshop_sockets)
-            .get(session_id)
-            .cloned()
-            .ok_or_else(|| {
-                RuntimeHttpServiceError::new(
-                    StatusCode::CONFLICT,
-                    "adobe_client_offline",
-                    "Photoshop plugin is not connected.",
-                )
-            })?;
-        sender.try_send(message).map_err(|_| {
-            RuntimeHttpServiceError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "photoshop_socket_backpressure",
-                "Photoshop plugin outbound queue is unavailable.",
-            )
-        })
     }
 
     #[must_use]
@@ -1055,46 +960,24 @@ impl RuntimeHttpServiceError {
         )
     }
 
-    pub(crate) fn from_photoshop(error: crate::photoshop::PhotoshopBridgeError) -> Self {
-        use crate::photoshop::PhotoshopBridgeErrorCode as Code;
-
+    pub(crate) fn from_photoshop(error: crate::photoshop::PhotoshopError) -> Self {
         let status = match error.code() {
-            Code::AdobeBridgeDisabled | Code::AdobeDiscoveryUnavailable => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
-            Code::AdobeClientOffline
-            | Code::ProjectOffline
-            | Code::PairingNotFound
-            | Code::PairingExpired
-            | Code::TargetDirectoryMissing
-            | Code::TransferUrlExpired => StatusCode::NOT_FOUND,
-            Code::ProjectNotLinked => StatusCode::FORBIDDEN,
-            Code::PluginSessionInvalid => StatusCode::UNAUTHORIZED,
-            Code::PluginSessionReplaced | Code::PairingAttemptsExceeded => StatusCode::CONFLICT,
-            Code::UploadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            Code::PairingCapacityReached | Code::TransferCapacityReached => {
-                StatusCode::TOO_MANY_REQUESTS
-            }
-            Code::TransferTimeout => StatusCode::GATEWAY_TIMEOUT,
-            Code::PairingRegistryInvalid | Code::PersistenceFailed => {
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-            Code::PairingCodeInvalid
-            | Code::PairingKeyInvalid
-            | Code::PairingSignatureInvalid
-            | Code::TargetDirectoryNotVisible
-            | Code::UnsupportedFileType
-            | Code::NoActiveDocument
-            | Code::PhotoshopPlaceFailed
-            | Code::InvalidTransferPayload => StatusCode::BAD_REQUEST,
+            crate::photoshop::PhotoshopErrorCode::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            crate::photoshop::PhotoshopErrorCode::SessionInvalid => StatusCode::UNAUTHORIZED,
+            crate::photoshop::PhotoshopErrorCode::Busy
+            | crate::photoshop::PhotoshopErrorCode::ProjectRevisionChanged => StatusCode::CONFLICT,
+            crate::photoshop::PhotoshopErrorCode::DocumentClosed
+            | crate::photoshop::PhotoshopErrorCode::ProjectOffline
+            | crate::photoshop::PhotoshopErrorCode::TargetDirectoryMissing => StatusCode::NOT_FOUND,
+            crate::photoshop::PhotoshopErrorCode::FileTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            crate::photoshop::PhotoshopErrorCode::TargetDirectoryNotVisible
+            | crate::photoshop::PhotoshopErrorCode::UnsupportedFileType
+            | crate::photoshop::PhotoshopErrorCode::InvalidTransferPayload
+            | crate::photoshop::PhotoshopErrorCode::PlaceFailed
+            | crate::photoshop::PhotoshopErrorCode::ExportFailed
+            | crate::photoshop::PhotoshopErrorCode::ProtocolInvalid => StatusCode::BAD_REQUEST,
         };
-        let fields = error.fields().clone();
-        let mapped = Self::new(status, error.code().as_str(), error.to_string());
-        if fields.is_empty() {
-            mapped
-        } else {
-            mapped.with_details(Value::Object(fields))
-        }
+        Self::new(status, error.code().as_str(), error.to_string())
     }
 
     pub(crate) fn serialization(error: &serde_json::Error) -> Self {
@@ -1234,113 +1117,5 @@ fn current_platform() -> Platform {
     #[cfg(target_os = "windows")]
     {
         Platform::Windows
-    }
-}
-
-fn lock_photoshop_socket_registry(
-    registry: &Mutex<PhotoshopSocketRegistry>,
-) -> MutexGuard<'_, PhotoshopSocketRegistry> {
-    registry
-        .lock()
-        .expect("Photoshop socket registry lock poisoned")
-}
-
-fn insert_photoshop_socket(
-    registry: &mut PhotoshopSocketRegistry,
-    session_id: String,
-    sender: tokio::sync::mpsc::Sender<RuntimePhotoshopMessage>,
-) {
-    assert!(
-        registry.insert(session_id, sender).is_none(),
-        "Photoshop socket session must register exactly once"
-    );
-}
-
-enum PhotoshopSocketProjection {
-    Message(RuntimePhotoshopMessage),
-    Stale,
-}
-
-fn photoshop_socket_projection(
-    state: Result<PhotoshopBridgeStateView, PhotoshopBridgeError>,
-) -> PhotoshopSocketProjection {
-    match state {
-        Ok(state) => {
-            PhotoshopSocketProjection::Message(RuntimePhotoshopMessage::BridgeState { state })
-        }
-        Err(error) if error.code() == PhotoshopBridgeErrorCode::PluginSessionInvalid => {
-            PhotoshopSocketProjection::Stale
-        }
-        Err(error) => PhotoshopSocketProjection::Message(RuntimePhotoshopMessage::BridgeError {
-            code: error.code(),
-            message: error.to_string(),
-        }),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn poisoned_photoshop_socket_registry_panics() {
-        let registry = Arc::new(Mutex::new(PhotoshopSocketRegistry::new()));
-        let poison = Arc::clone(&registry);
-        assert!(
-            thread::spawn(move || {
-                let _registry = poison.lock().unwrap();
-                panic!("poison Photoshop socket registry");
-            })
-            .join()
-            .is_err()
-        );
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            drop(lock_photoshop_socket_registry(&registry));
-        }));
-        assert!(
-            result.is_err(),
-            "Workbench must not recover a poisoned Photoshop socket registry"
-        );
-    }
-
-    #[test]
-    fn duplicate_photoshop_socket_registration_panics() {
-        let mut registry = PhotoshopSocketRegistry::new();
-        let (first, _) = tokio::sync::mpsc::channel(1);
-        insert_photoshop_socket(&mut registry, "session-1".to_owned(), first);
-        let (replacement, _) = tokio::sync::mpsc::channel(1);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            insert_photoshop_socket(&mut registry, "session-1".to_owned(), replacement);
-        }));
-        assert!(
-            result.is_err(),
-            "Workbench must not replace an already registered Photoshop socket"
-        );
-    }
-
-    #[test]
-    fn only_an_invalid_plugin_session_makes_a_photoshop_socket_stale() {
-        let invalid = PhotoshopBridgeError::new(
-            PhotoshopBridgeErrorCode::PluginSessionInvalid,
-            "invalid session",
-        );
-        assert!(matches!(
-            photoshop_socket_projection(Err(invalid)),
-            PhotoshopSocketProjection::Stale
-        ));
-
-        let project_race = PhotoshopBridgeError::new(
-            PhotoshopBridgeErrorCode::ProjectOffline,
-            "Project closed while projecting state",
-        );
-        assert!(matches!(
-            photoshop_socket_projection(Err(project_race)),
-            PhotoshopSocketProjection::Message(RuntimePhotoshopMessage::BridgeError {
-                code: PhotoshopBridgeErrorCode::ProjectOffline,
-                ..
-            })
-        ));
     }
 }

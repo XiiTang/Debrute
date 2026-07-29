@@ -13,6 +13,7 @@ export interface ProjectTreeSelectionState {
 export interface ProjectTreeVisibleItem {
   path: string;
   kind: 'file' | 'directory';
+  sizeBytes?: number;
   parentPath: string;
   depth: number;
 }
@@ -121,7 +122,8 @@ export function projectTreePathEntriesFromSelection(input: {
     .filter((item) => selected.has(item.path))
     .map((item) => ({
       projectRelativePath: item.path,
-      kind: item.kind
+      kind: item.kind,
+      ...(item.sizeBytes === undefined ? {} : { sizeBytes: item.sizeBytes })
     }));
 }
 
@@ -147,7 +149,11 @@ export function projectTreeDragEntries(input: {
     });
   }
   const item = input.visibleItems.find((visibleItem) => visibleItem.path === path);
-  return item ? [{ projectRelativePath: item.path, kind: item.kind }] : [];
+  return item ? [{
+    projectRelativePath: item.path,
+    kind: item.kind,
+    ...(item.sizeBytes === undefined ? {} : { sizeBytes: item.sizeBytes })
+  }] : [];
 }
 
 export function projectTreeDropTargetDirectory(input: {
@@ -228,6 +234,7 @@ function appendVisibleProjectTreeNode(
   result.push({
     path: node.path,
     kind: node.kind,
+    ...(node.kind === 'file' && node.sizeBytes !== undefined ? { sizeBytes: node.sizeBytes } : {}),
     parentPath: projectTreeParentPath(node.path),
     depth
   });

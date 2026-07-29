@@ -2,7 +2,7 @@
 
 Debrute runs one shared Rust Runtime per operating-system user. Runtime is the
 authority for Project files, global settings and secrets, model generation,
-integrations, product updates, Workbench connections, Photoshop links, and
+integrations, product updates, Workbench connections, Photoshop transfers, and
 terminal processes. Web Workbench, Desktop, plugins, and the `debrute` CLI are
 clients; none owns a parallel backend or a copy of authoritative state.
 
@@ -73,6 +73,14 @@ opens the menu. A tray creation failure exits Runtime before services start or
 `Ready` is published, and the launcher reports the startup failure. There is
 no trayless fallback, retry loop, or degraded Runtime status.
 
+Browser activation resolves the exact current Runtime-owned Workbench URL and
+hands it to the operating system. macOS requires `/usr/bin/open` to exit
+successfully. Windows commits the handoff when `explorer.exe` starts
+successfully because Explorer may exit with code 1 after passing the URL to the
+registered browser; failure to spawn still rejects the activation. Runtime does
+not try another browser command or reinterpret a successful Windows handoff as
+an activation failure.
+
 The Start at Login check item reflects the exact operating-system login
 registration last confirmed by Runtime. A user change performs one registration
 write using the selected check state. A successful write confirms that state;
@@ -138,7 +146,31 @@ Runtime startup, or establish a second connection.
 Source development runs the same Rust Runtime plus Vite. Vite proxies relative
 Workbench HTTP and WebSocket traffic to the exact Runtime origin; it does not
 host privileged services or persist a discovery credential. Packaged Runtime
-serves the version-selected Web assets itself.
+serves the version-selected Web assets itself. Source development never runs a
+Windows Runtime directly from Cargo's `target/debug`: the launcher assembles the
+executable and its closed native-raster payload into a disposable fixed
+`.scratch/rust-runtime-dev/windows-runtime` directory. This keeps the running
+Windows image and DLL locks away from Cargo output while retaining exact binary
+and payload identity comparison. Its strict assembly identity binds the
+compiled executable hash, native-raster manifest hash, and complete flat
+payload inventory hash. Reuse also rehashes the actual executable and closed
+payload directory, so a changed build, payload revision, missing file, extra
+file, or damaged file stops the old Runtime and reassembles the directory; only
+an exact current assembly reuses the existing process. The launcher does not
+equate Control loss with Windows releasing the executable image and DLLs. Old
+directory removal and validated-staging activation share one five-second
+deadline and retry only the closed Windows contention set `EBUSY`, `EMFILE`,
+`ENFILE`, `ENOTEMPTY`, and `EPERM`; every other error fails immediately. The
+assembly identity is published only after staging activation succeeds. This
+directory and its assembly-identity file are launcher-created repository-local
+state, not developer configuration or a checked-in Product input; a fresh
+checkout creates them on demand. The Vite proxy target remains fixed for that
+source development session. If its Control connection loses Runtime, the
+launcher stops its Vite process and any Electron development host, reports the
+terminal loss, and exits; it never leaves a proxy
+aimed at a retired Runtime origin or discovers a replacement backend. A new
+`pnpm dev` or `pnpm dev:electron` run registers the new exact Runtime origin and
+creates a fresh Workbench connection.
 
 Runtime finishes its in-process service composition before the Workbench HTTP
 listener starts. The immutable router state owns one required CLI adapter and,
@@ -209,15 +241,13 @@ credential together. There are no split Global/Project connections, reconnect
 window, heartbeat, unload release, or automatic request replay. Unexpected
 connection end is a terminal page state; refreshing creates a new connection.
 
-Global Settings, Integration discovery, Adobe live state, and packaged Product
+Global Settings, Integration discovery, live Photoshop state, and packaged Product
 state are independent resources carried by the initial stream and subsequent
 ordered Global events. The settings snapshot never synchronously probes
-integrations or Adobe. When Settings is first activated, it explicitly starts
-Integration discovery and requests Adobe live state. Both operations run off
-the connection response path and publish accepted state through ordered Global
-events; the Adobe refresh response is only an acknowledgement and is not installed
-as a second frontend truth. Adobe request failure remains local, retryable
-Settings UI state, leaving settings and the shell usable. Mutating and action commands return
+integrations or Photoshop. Settings activation explicitly starts Integration
+discovery. Photoshop sessions publish complete live state through the initial
+stream and ordered Global events, with no settings-owned refresh or second
+frontend truth. Mutating and action commands return
 only their closed command outcome and any action-specific diagnostic; they do not return
 another complete state for the initiating Workbench to apply. Command progress
 is local interaction state and ends with the command response, while displayed
@@ -228,8 +258,8 @@ page.
 
 Passive Project media GETs remain authorized when the live browser session has
 a live connection bound to the requested Project.
-CLI authorization and Photoshop pairing use separate, route-limited sessions
-and cannot be substituted for a Workbench connection.
+CLI authorization and the Photoshop gateway use separate, route-limited
+sessions and cannot be substituted for a Workbench connection.
 
 Project file plans remain transport-neutral: they express an optional byte
 range, not a numeric HTTP status. The Workbench HTTP adapter maps a complete
@@ -317,7 +347,8 @@ decisions are indexed under the
 
 Runtime's global store is the sole persistence boundary for Workbench
 preferences, Canvas Text Appearance, recent Project roots, model overrides and
-API keys, and Photoshop bridge settings. Canvas Text Appearance persists as one
+API keys. Photoshop state is live-only and is not a Global Settings field.
+Canvas Text Appearance persists as one
 complete `canvas.textAppearance` value rather than field patches: managed font
 ID, font size, line-height ratio, requested integer weight, letter spacing, and
 ligatures. Recent Projects persist only the mapping from stable Project id to
@@ -343,7 +374,7 @@ that identity once; the watcher-first publication pass and every later refresh
 must observe the same id or fail before publishing. A loaded Project session
 owns one canonical root, snapshot, monotonic `projectRevision`, serialized
 mutation authority, watcher, terminals, and typed Project Uses. The use kinds
-are Workbench, request, running terminal, transfer, and Photoshop link.
+are Workbench, request, running terminal, and transfer.
 
 Project opening publishes a shallow Explorer snapshot containing only direct
 visible children of the root plus targeted Debrute metadata and Canvas

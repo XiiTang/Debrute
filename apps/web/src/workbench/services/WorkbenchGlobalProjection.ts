@@ -1,20 +1,20 @@
 import type {
-  AdobeBridgeStateView,
   DebruteGlobalSettingsView,
   DebruteProductState,
   IntegrationSettingsView,
+  PhotoshopStateView,
   WorkbenchEvent
 } from '@debrute/app-protocol';
 
 type LoadingResource = { status: 'loading' };
 type ReadyResource<T> = { status: 'ready'; value: T };
-type AdobeBridgeResource = LoadingResource | ReadyResource<AdobeBridgeStateView>;
+type PhotoshopResource = LoadingResource | ReadyResource<PhotoshopStateView>;
 
 interface WorkbenchGlobalProjectionData {
   revision: number;
   settings: DebruteGlobalSettingsView;
   integrations: LoadingResource | ReadyResource<IntegrationSettingsView>;
-  adobeBridge: AdobeBridgeResource;
+  photoshop: PhotoshopResource;
   product: LoadingResource | ReadyResource<DebruteProductState | null>;
 }
 
@@ -75,7 +75,7 @@ export function createWorkbenchGlobalProjection(): WorkbenchGlobalProjectionWrit
         revision: input.revision,
         settings: input.settings,
         integrations: { status: 'loading' },
-        adobeBridge: { status: 'loading' },
+        photoshop: { status: 'loading' },
         product: { status: 'loading' }
       });
     },
@@ -114,11 +114,11 @@ export function createWorkbenchGlobalProjection(): WorkbenchGlobalProjectionWrit
             integrations: { status: 'ready', value: event.integrations }
           });
           return;
-        case 'adobeBridge.state.changed':
+        case 'photoshop.state.changed':
           transition({
             ...current,
             revision,
-            adobeBridge: { status: 'ready', value: event.state }
+            photoshop: { status: 'ready', value: event.state }
           });
           return;
         case 'product.changed':
@@ -150,8 +150,8 @@ function canHydrateInitialResource(
   if (event.type === 'product.changed') {
     return state.product.status === 'loading';
   }
-  if (event.type === 'adobeBridge.state.changed') {
-    return state.adobeBridge.status === 'loading';
+  if (event.type === 'photoshop.state.changed') {
+    return state.photoshop.status === 'loading';
   }
   return false;
 }

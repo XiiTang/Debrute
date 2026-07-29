@@ -83,30 +83,14 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  apps/photoshop-cep-plugin:
-    dependencies:
-      '@debrute/photoshop-bridge-plugin-core':
-        specifier: workspace:*
-        version: link:../../packages/photoshop-bridge-plugin-core
-    devDependencies:
-      '@vitejs/plugin-react':
-        specifier: ^6.0.3
-        version: 6.0.3(vite@8.1.3(@types/node@24.13.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vite:
-        specifier: ^8.1.3
-        version: 8.1.3(@types/node@24.13.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.13.1)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
-
   apps/photoshop-uxp-plugin:
     dependencies:
-      '@debrute/photoshop-bridge-plugin-core':
+      '@debrute/app-protocol':
         specifier: workspace:*
-        version: link:../../packages/photoshop-bridge-plugin-core
+        version: link:../../packages/app-protocol
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
     devDependencies:
       '@vitejs/plugin-react':
         specifier: ^6.0.3
@@ -236,12 +220,6 @@ importers:
   packages/architecture-rules: {}
 
   packages/canvas-core: {}
-
-  packages/photoshop-bridge-plugin-core:
-    dependencies:
-      '@debrute/app-protocol':
-        specifier: workspace:*
-        version: link:../app-protocol
 
   packages/runtime-control-client:
     dependencies:
@@ -1477,6 +1455,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.8.2:
+    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
 
   filelist@1.0.6:
     resolution: {integrity: sha512-5giy2PkLYY1cP39p17Ech+2xlpTRL9HLspOfEgm0L6CwBXBTgsK5ou0JtzYuepxkaQ/tvhCFIJ5uXo0OrM2DxA==}
@@ -3790,6 +3771,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.5):
     optionalDependencies:
       picomatch: 4.0.5
+
+  fflate@0.8.2: {}
 
   filelist@1.0.6:
     dependencies:

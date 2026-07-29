@@ -15,13 +15,11 @@ import {
 
 export function WorkbenchSettingsFeatureHost({
   api,
-  projectId,
   notify,
   getCurrentI18n,
   onController
 }: {
   api: HttpWorkbenchApiClient;
-  projectId: string | undefined;
   notify(message: string): void;
   getCurrentI18n: WorkbenchSettingsControllerInput['getCurrentI18n'];
   onController(controller: WorkbenchSettingsController): void;
@@ -29,8 +27,6 @@ export function WorkbenchSettingsFeatureHost({
   const controller = useWorkbenchSettingsController({
     api,
     globalProjection: api.globalProjection,
-    projectId,
-    ensureAdobeBridgeState: api.ensureAdobeBridgeState,
     notify,
     getCurrentI18n
   });
@@ -42,13 +38,11 @@ export function WorkbenchSettingsFeatureHost({
 
 export function WorkbenchSettingsPanelFeature({
   controller,
-  projectId,
   locale,
   resolvedTheme,
   actions
 }: {
   controller: WorkbenchSettingsController;
-  projectId: string | undefined;
   locale: WorkbenchLocale;
   resolvedTheme: WorkbenchResolvedTheme;
   actions: WorkbenchActions;
@@ -57,8 +51,6 @@ export function WorkbenchSettingsPanelFeature({
     globalSettings: controller.globalSettings,
     integrations: controller.integrations,
     product: controller.product,
-    adobeBridge: controller.adobeBridge,
-    projectId,
     resolvedTheme
   };
   return (

@@ -1,5 +1,12 @@
 # Photoshop Bridge Uses A Link-Scoped Protocol
 
+Superseded for the current Photoshop integration by ADRs
+[0063](./0063-photoshop-transfers-use-explicit-live-targets.md),
+[0064](./0064-photoshop-connections-use-ephemeral-runtime-sessions.md), and
+[0065](./0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md). Its
+narrow-authority and Project-relative-path rationale remains applicable; CEP,
+pairing, persistent links, and the discovery redirect do not.
+
 Photoshop plugins connect to the shared Runtime through a dedicated client-scoped
 protocol and must explicitly link to a live Project before transferring files.
 Plugins receive neither Workbench/CLI authority nor absolute Project paths; they use

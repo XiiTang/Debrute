@@ -90,13 +90,13 @@ describe('brand visual language', () => {
     const panels = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/panels.css'), 'utf8');
     const overlays = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/overlays.css'), 'utf8');
     const canvas = readFileSync(join(root, 'apps/web/src/workbench/styles/canvas.css'), 'utf8');
-    const cep = readFileSync(join(root, 'apps/photoshop-cep-plugin/src/styles.css'), 'utf8');
+    const uxp = readFileSync(join(root, 'apps/photoshop-uxp-plugin/src/styles.css'), 'utf8');
     expect(panels.match(/\.db-panel__title\s*\{[\s\S]*?\}/)?.[0]).not.toContain('--db-font-display');
     expect(overlays.match(/\.db-empty-state strong\s*\{[\s\S]*?\}/)?.[0])
       .toContain('font-size: var(--db-font-lg)');
     expect(canvas.match(/\.canvas-empty-state strong\s*\{[\s\S]*?\}/)?.[0])
       .toContain('font-size: var(--db-font-lg)');
-    expect(cep.match(/\.bridge-section__title\s*\{[\s\S]*?\}/)?.[0]).not.toContain('Smiley Sans');
+    expect(uxp).not.toContain('Smiley Sans');
   });
 
   it('uses solid blocks and hard underlayers instead of decorative line borders', () => {
@@ -211,7 +211,6 @@ describe('brand visual language', () => {
   it('keeps owned surfaces flat while reserving gradients for functional guides', () => {
     const stylePaths = [
       ...globSync('apps/web/src/**/*.css', { cwd: root }).map(portablePath),
-      'apps/photoshop-cep-plugin/src/styles.css',
       'apps/photoshop-uxp-plugin/src/styles.css'
     ];
     const allowedGradientFiles = new Set([
@@ -241,15 +240,9 @@ describe('brand visual language', () => {
     ]);
   });
 
-  it('uses bundled fonts in CEP and the Photoshop host font in UXP', () => {
-    const cep = readFileSync(join(root, 'apps/photoshop-cep-plugin/src/styles.css'), 'utf8');
+  it('uses the Photoshop host font in UXP', () => {
     const uxp = readFileSync(join(root, 'apps/photoshop-uxp-plugin/src/styles.css'), 'utf8');
     const uxpBuild = readFileSync(join(root, 'apps/photoshop-uxp-plugin/vite.config.ts'), 'utf8');
-    expect(cep).toContain('@font-face');
-    expect(cep).toContain('"Noto Sans SC"');
-    expect(cep).toContain('"Noto Sans Mono CJK SC"');
-    expect(cep).toContain('NotoSansSC-Semibold.woff2');
-    expect(cep).toContain('NotoSansMonoCJKsc-Bold.woff2');
     expect(uxp).not.toContain('@font-face');
     expect(uxp).toContain('font-family: inherit');
     expect(uxpBuild).toContain("external: ['uxp']");

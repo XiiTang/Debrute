@@ -4,8 +4,8 @@ Runtime binds one required dynamic loopback listener on `127.0.0.1:0`. It is
 the sole Workbench browser origin and serves packaged assets, relative HTTP
 APIs, the POST SSE Workbench connection, Terminal WebSockets, and transfer
 content. Its port and credentials are never persisted or discovered by
-scanning. The fixed Photoshop discovery listener remains a separate, narrow
-integration bootstrap.
+scanning. The bounded-pool Photoshop gateway remains a separate, narrow
+integration transport governed by ADR 0065.
 
 Every request must arrive from loopback and use Runtime's exact numeric Host.
 State-changing requests and WebSocket upgrades additionally require the exact

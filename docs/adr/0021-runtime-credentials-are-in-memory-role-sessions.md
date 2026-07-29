@@ -11,9 +11,9 @@ HttpOnly session that may cover multiple loaded documents. Each document's POST
 SSE connection issues a narrower JavaScript-held command credential, and a
 command is authorized only by the matching browser-session and connection pair.
 A CLI obtains its HTTP authorization only through its live `cli` Control
-connection and keeps that connection open for the command. Photoshop pairing
-remains scoped to the plugin protocol. No credential can substitute for another
-role.
+connection and keeps that connection open for the command. Each Photoshop
+socket receives its own ephemeral bearer scoped to the Photoshop gateway. No
+credential can substitute for another role.
 
 Credentials are never written to discovery files, URLs, logs, environment
 variables, or command output. Closing the owning connection revokes the

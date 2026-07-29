@@ -4,7 +4,7 @@ import { buildProjectFileTree, expandedProjectTreePaths } from './projectFileTre
 describe('project file tree', () => {
   it('builds nested directory and file nodes from project-relative paths', () => {
     const tree = buildProjectFileTree([
-      { kind: 'file', projectRelativePath: 'assets/cover.png' },
+      { kind: 'file', projectRelativePath: 'assets/cover.png', sizeBytes: 57_000 },
       { kind: 'file', projectRelativePath: 'assets/pages/page-2.png' },
       { kind: 'directory', projectRelativePath: 'assets/pages' },
       { kind: 'file', projectRelativePath: 'rules/main.md' }
@@ -24,7 +24,7 @@ describe('project file tree', () => {
               { kind: 'file', name: 'page-2.png', path: 'assets/pages/page-2.png' }
             ]
           },
-          { kind: 'file', name: 'cover.png', path: 'assets/cover.png' }
+          { kind: 'file', name: 'cover.png', path: 'assets/cover.png', sizeBytes: 57_000 }
         ]
       },
       {

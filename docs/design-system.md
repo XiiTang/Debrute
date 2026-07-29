@@ -68,8 +68,8 @@ token source, and reduced-motion behavior remains available.
 ## Surface Coverage
 
 The visual system applies to the shared Web/Electron Workbench, Desktop's native
-first frame, and Debrute-owned content and controls in the Photoshop CEP and UXP
-panels. Product artwork and platform icon containers are governed by
+first frame, and Debrute-owned content and controls in the Photoshop UXP panel.
+Product artwork and platform icon containers are governed by
 [`brand.md`](./brand.md); generation and publishing are governed by
 [`releases.md`](./releases.md).
 
@@ -238,7 +238,7 @@ Mono CJK SC 2.004 in static WOFF2 Regular and Bold builds. One family handles
 its Chinese and Latin coverage; Debrute does not draw custom glyphs or define a
 separate wordmark.
 
-Web, Electron, and CEP load these files from the packaged product rather than a
+Web and Electron load these files from the packaged product rather than a
 network or operating-system font lookup. Static builds are required; the CFF2
 variable builds are not part of the product contract. Font files, source
 versions, OFL license text, and modification or subsetting notices live together
@@ -414,13 +414,11 @@ README, Web favicon, Electron application icon, Dock icon, ICNS, ICO, and
 Runtime tray output follow [`brand.md`](./brand.md). Desktop's native first
 frame uses `#F7E3D0` for resolved light and `#171714` for resolved night.
 
-CEP uses the night palette, bundled functional and technical fonts, shared
-cutout icon semantics for panel icons, and the same square/cut control language.
 UXP maps the panel to light or night from Photoshop's host appearance, keeps
 host-owned chrome untouched, and uses the host font because
 [UXP does not support packaged `@font-face` files](https://developer.adobe.com/photoshop/uxp/guides/uxp_guide/unsupported/).
-Both plugins preserve their structure, commands, density, and Photoshop
-integration behavior.
+The UXP panel preserves the shared control density and Photoshop integration
+behavior without introducing a second host-specific visual system.
 
 ## Source Ownership
 
@@ -465,7 +463,7 @@ provider; Debrute-owned surfaces contain no decorative gradients, backdrop blur,
 large soft shadows, generic capsules, or runtime-random roughness; and Canvas
 and Terminal exceptions remain intact. Static render review covers light and
 night at 100% and 125%, narrow and wide supported desktop windows, Desktop first
-frame, CEP, and UXP host appearances.
+frame and UXP host appearances.
 
 Visual acceptance checks bilingual truncation and baseline alignment, focus
 visibility, semantic color independence, stable content geometry, defined

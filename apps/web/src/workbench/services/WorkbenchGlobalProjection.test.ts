@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type {
-  AdobeBridgeStateView,
   DebruteGlobalSettingsView,
-  IntegrationSettingsView
+  IntegrationSettingsView,
+  PhotoshopStateView
 } from '@debrute/app-protocol';
 import { createWorkbenchGlobalProjection } from './WorkbenchGlobalProjection.js';
 
@@ -18,9 +18,9 @@ describe('WorkbenchGlobalProjection', () => {
       product: null
     });
     projection.acceptEvent({
-      type: 'adobeBridge.state.changed',
+      type: 'photoshop.state.changed',
       revision: 4,
-      state: adobeBridgeFixture()
+      state: photoshopFixture()
     });
     projection.acceptEvent({
       type: 'integrations.changed',
@@ -33,7 +33,7 @@ describe('WorkbenchGlobalProjection', () => {
       revision: 4,
       settings,
       integrations: { status: 'ready', value: integrationsFixture() },
-      adobeBridge: { status: 'ready', value: adobeBridgeFixture() },
+      photoshop: { status: 'ready', value: photoshopFixture() },
       product: { status: 'ready', value: null }
     });
   });
@@ -85,18 +85,18 @@ describe('WorkbenchGlobalProjection', () => {
     });
   });
 
-  it('hydrates Adobe state only through its ordered event', () => {
+  it('hydrates Photoshop state only through its ordered event', () => {
     const projection = createWorkbenchGlobalProjection();
     projection.acceptSnapshot({ revision: 10, settings: settingsFixture() });
     projection.acceptEvent({
-      type: 'adobeBridge.state.changed',
+      type: 'photoshop.state.changed',
       revision: 10,
-      state: adobeBridgeFixture()
+      state: photoshopFixture()
     });
     expect(projection.getState()).toMatchObject({
       status: 'active',
       revision: 10,
-      adobeBridge: { status: 'ready' }
+      photoshop: { status: 'ready' }
     });
   });
 });
@@ -115,19 +115,13 @@ function settingsFixture(locale: 'en' | 'zh-CN' = 'en'): DebruteGlobalSettingsVi
       }
     },
     chrome: { recentProjects: [] },
-    models: { image: [], video: [], audio: [] },
-    adobeBridge: { enabled: true }
+    models: { image: [], video: [], audio: [] }
   };
 }
 
-function adobeBridgeFixture(): AdobeBridgeStateView {
+function photoshopFixture(): PhotoshopStateView {
   return {
-    settings: { enabled: true, discoveryStatus: 'available' },
-    pairedPlugins: [],
-    clients: [],
-    projects: [],
-    links: [],
-    transfers: []
+    sessions: []
   };
 }
 

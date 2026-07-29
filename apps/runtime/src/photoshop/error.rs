@@ -1,162 +1,134 @@
 use std::{error::Error, fmt, io};
 
-use serde::{Deserialize, Serialize};
-
 use crate::project::ProjectError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PhotoshopBridgeErrorCode {
-    AdobeBridgeDisabled,
-    AdobeDiscoveryUnavailable,
-    AdobeClientOffline,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhotoshopErrorCode {
+    Unavailable,
+    SessionInvalid,
+    Busy,
+    DocumentClosed,
     ProjectOffline,
-    ProjectNotLinked,
-    PairingNotFound,
-    PairingExpired,
-    PairingCodeInvalid,
-    PairingAttemptsExceeded,
-    PairingKeyInvalid,
-    PairingSignatureInvalid,
-    PairingRegistryInvalid,
-    PairingCapacityReached,
-    PluginSessionInvalid,
-    PluginSessionReplaced,
+    ProjectRevisionChanged,
     TargetDirectoryMissing,
     TargetDirectoryNotVisible,
     UnsupportedFileType,
-    NoActiveDocument,
-    PhotoshopPlaceFailed,
-    UploadTooLarge,
+    FileTooLarge,
     InvalidTransferPayload,
-    TransferCapacityReached,
-    TransferUrlExpired,
-    TransferTimeout,
-    PersistenceFailed,
+    PlaceFailed,
+    ExportFailed,
+    ProtocolInvalid,
 }
 
-impl PhotoshopBridgeErrorCode {
+impl PhotoshopErrorCode {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::AdobeBridgeDisabled => "adobe_bridge_disabled",
-            Self::AdobeDiscoveryUnavailable => "adobe_discovery_unavailable",
-            Self::AdobeClientOffline => "adobe_client_offline",
+            Self::Unavailable => "photoshop_unavailable",
+            Self::SessionInvalid => "photoshop_session_invalid",
+            Self::Busy => "photoshop_busy",
+            Self::DocumentClosed => "photoshop_document_closed",
             Self::ProjectOffline => "project_offline",
-            Self::ProjectNotLinked => "project_not_linked",
-            Self::PairingNotFound => "pairing_not_found",
-            Self::PairingExpired => "pairing_expired",
-            Self::PairingCodeInvalid => "pairing_code_invalid",
-            Self::PairingAttemptsExceeded => "pairing_attempts_exceeded",
-            Self::PairingKeyInvalid => "pairing_key_invalid",
-            Self::PairingSignatureInvalid => "pairing_signature_invalid",
-            Self::PairingRegistryInvalid => "pairing_registry_invalid",
-            Self::PairingCapacityReached => "pairing_capacity_reached",
-            Self::PluginSessionInvalid => "plugin_session_invalid",
-            Self::PluginSessionReplaced => "plugin_session_replaced",
+            Self::ProjectRevisionChanged => "project_revision_changed",
             Self::TargetDirectoryMissing => "target_directory_missing",
             Self::TargetDirectoryNotVisible => "target_directory_not_visible",
             Self::UnsupportedFileType => "unsupported_file_type",
-            Self::NoActiveDocument => "no_active_document",
-            Self::PhotoshopPlaceFailed => "photoshop_place_failed",
-            Self::UploadTooLarge => "upload_too_large",
+            Self::FileTooLarge => "file_too_large",
             Self::InvalidTransferPayload => "invalid_transfer_payload",
-            Self::TransferCapacityReached => "transfer_capacity_reached",
-            Self::TransferUrlExpired => "transfer_url_expired",
-            Self::TransferTimeout => "transfer_timeout",
-            Self::PersistenceFailed => "persistence_failed",
+            Self::PlaceFailed => "photoshop_place_failed",
+            Self::ExportFailed => "photoshop_export_failed",
+            Self::ProtocolInvalid => "photoshop_protocol_invalid",
         }
     }
 }
 
 #[derive(Debug)]
-pub struct PhotoshopBridgeError {
-    code: PhotoshopBridgeErrorCode,
-    message: String,
-    fields: serde_json::Map<String, serde_json::Value>,
-    source: Option<Box<dyn Error + Send + Sync>>,
+pub struct PhotoshopError {
+    code: PhotoshopErrorCode,
+    message: &'static str,
 }
 
-impl PhotoshopBridgeError {
+impl PhotoshopError {
     #[must_use]
-    pub fn new(code: PhotoshopBridgeErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            fields: serde_json::Map::new(),
-            source: None,
-        }
+    pub const fn new(code: PhotoshopErrorCode, message: &'static str) -> Self {
+        Self { code, message }
     }
 
     #[must_use]
-    pub fn with_field(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<serde_json::Value>,
-    ) -> Self {
-        self.fields.insert(key.into(), value.into());
-        self
-    }
-
-    #[must_use]
-    pub fn code(&self) -> PhotoshopBridgeErrorCode {
+    pub const fn code(&self) -> PhotoshopErrorCode {
         self.code
     }
-
-    #[must_use]
-    pub fn fields(&self) -> &serde_json::Map<String, serde_json::Value> {
-        &self.fields
-    }
 }
 
-impl fmt::Display for PhotoshopBridgeError {
+impl fmt::Display for PhotoshopError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
+        formatter.write_str(self.message)
     }
 }
 
-impl Error for PhotoshopBridgeError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.source.as_deref().map(|source| source as _)
-    }
-}
+impl Error for PhotoshopError {}
 
-impl From<ProjectError> for PhotoshopBridgeError {
+impl From<ProjectError> for PhotoshopError {
     fn from(error: ProjectError) -> Self {
-        let code = match error.code() {
-            "project_not_open" | "project_not_found" => PhotoshopBridgeErrorCode::ProjectOffline,
-            _ => PhotoshopBridgeErrorCode::PersistenceFailed,
+        let (code, message) = match error.code() {
+            "project_not_open" | "project_not_found" => (
+                PhotoshopErrorCode::ProjectOffline,
+                "The selected Debrute Project is no longer open.",
+            ),
+            "project_revision_changed" => (
+                PhotoshopErrorCode::ProjectRevisionChanged,
+                "Debrute Project revision changed.",
+            ),
+            _ => (
+                PhotoshopErrorCode::InvalidTransferPayload,
+                "Debrute could not complete the Photoshop Project operation.",
+            ),
         };
-        Self {
-            code,
-            message: error.to_string(),
-            fields: serde_json::Map::from_iter([(
-                "projectCode".to_owned(),
-                serde_json::Value::String(error.code().to_owned()),
-            )]),
-            source: Some(Box::new(error)),
-        }
+        eprintln!("Debrute Photoshop Project operation failed: {error}");
+        Self::new(code, message)
     }
 }
 
-impl From<io::Error> for PhotoshopBridgeError {
+impl From<io::Error> for PhotoshopError {
     fn from(error: io::Error) -> Self {
-        Self {
-            code: PhotoshopBridgeErrorCode::PersistenceFailed,
-            message: error.to_string(),
-            fields: serde_json::Map::new(),
-            source: Some(Box::new(error)),
-        }
+        eprintln!("Debrute Photoshop file operation failed: {error}");
+        Self::new(
+            PhotoshopErrorCode::InvalidTransferPayload,
+            "Photoshop transfer file operation failed.",
+        )
     }
 }
 
-impl From<serde_json::Error> for PhotoshopBridgeError {
-    fn from(error: serde_json::Error) -> Self {
-        Self {
-            code: PhotoshopBridgeErrorCode::PairingRegistryInvalid,
-            message: error.to_string(),
-            fields: serde_json::Map::new(),
-            source: Some(Box::new(error)),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_errors_keep_absolute_paths_out_of_the_photoshop_message() {
+        let private_path = r"C:\Users\developer\AppData\Local\Temp\debrute-export.png";
+        let error = PhotoshopError::from(ProjectError::ProjectNotFound(private_path.to_owned()));
+
+        assert_eq!(error.code(), PhotoshopErrorCode::ProjectOffline);
+        assert_eq!(
+            error.to_string(),
+            "The selected Debrute Project is no longer open."
+        );
+        assert!(!error.to_string().contains(private_path));
+    }
+
+    #[test]
+    fn io_errors_keep_absolute_paths_out_of_the_photoshop_message() {
+        let private_path = r"C:\Users\developer\AppData\Local\Temp\debrute-export.png";
+        let error = PhotoshopError::from(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("could not write {private_path}"),
+        ));
+
+        assert_eq!(error.code(), PhotoshopErrorCode::InvalidTransferPayload);
+        assert_eq!(
+            error.to_string(),
+            "Photoshop transfer file operation failed."
+        );
+        assert!(!error.to_string().contains(private_path));
     }
 }

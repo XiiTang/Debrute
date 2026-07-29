@@ -466,6 +466,7 @@ async fn reveal_path(
         &ProjectPathEntry {
             project_relative_path: path.to_owned(),
             kind: input.kind,
+            size_bytes: None,
         },
     ) {
         Ok(()) => Json(json!({"ok": true})).into_response(),

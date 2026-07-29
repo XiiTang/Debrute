@@ -634,10 +634,14 @@ function CanvasSurfaceRuntime({
     event.preventDefault();
     event.stopPropagation();
     runtime.setSelection({ kind: 'node', projectRelativePath: node.projectRelativePath });
+    const sizeBytes = node.nodeKind === 'file' && node.availability.state === 'available'
+      ? node.availability.size
+      : undefined;
     onOpenContextMenu?.({
       source: 'canvas',
       kind: node.nodeKind,
-      projectRelativePath: node.projectRelativePath
+      projectRelativePath: node.projectRelativePath,
+      ...(sizeBytes === undefined ? {} : { sizeBytes })
     }, {
       x: event.clientX,
       y: event.clientY

@@ -72,11 +72,11 @@ installed product.
 Rust integration tests own isolated Control endpoints, homes, Project roots,
 loopback listeners, workers, and child processes. Runtime shutdown closes
 Workbench connections and their Project Uses, Global/Project streams,
-WebSockets, Photoshop discovery, PTYs, and HTTP sockets, then joins its owned
+WebSockets, the Photoshop gateway, PTYs, and HTTP sockets, then joins its owned
 workers. Cleanup errors remain visible instead of being converted into
 successful teardown. Project-use lifetime tests end ownership through the same
 drop or owner-removal path used by Workbench, requests, Terminals, Transfers,
-and Photoshop links. An injected final-session cleanup failure must close root
+and Photoshop transfers. An injected final-session cleanup failure must close root
 admission, make the next open return the exact failure, and remain visible to
 Registry shutdown; tests do not call a special fallible Project Use release API
 that production owners bypass. Tests that exercise process-global native

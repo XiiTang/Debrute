@@ -115,15 +115,57 @@ describe('Workbench event decoding', () => {
     expect(decodeWorkbenchEvent(event)).toEqual(event);
   });
 
-  it('rejects the removed Adobe Bridge bootstrap-failure event', () => {
+  it('accepts the live Photoshop session and Document projection', () => {
     const event = {
-      type: 'adobeBridge.state.failed',
-      revision: 4,
-      error: { code: 'adobe_bridge_state_invalid', message: 'state unavailable' }
+      type: 'photoshop.state.changed',
+      revision: 7,
+      state: {
+        sessions: [{
+          pluginSessionId: 'photoshop-session-1',
+          hostVersion: '27.9.0',
+          placementMimeTypes: [
+            'image/png',
+            'image/jpeg',
+            'image/webp',
+            'image/vnd.adobe.photoshop',
+            'image/avif'
+          ],
+          documents: [
+            { documentId: 41, title: 'Poster.psd' },
+            { documentId: 52, title: 'Poster.psd' }
+          ]
+        }]
+      }
     };
 
-    expect(isRecognizedWorkbenchEventFrame(event)).toBe(false);
-    expect(decodeWorkbenchEvent(event)).toBeUndefined();
+    expect(decodeWorkbenchEvent(event)).toEqual(event);
+    expect(decodeWorkbenchEvent({
+      ...event,
+      state: { sessions: [{ ...event.state.sessions[0], documents: [{ documentId: -1, title: 'Poster.psd' }] }] }
+    })).toBeUndefined();
+    const { placementMimeTypes: _, ...missingCapabilities } = event.state.sessions[0];
+    expect(decodeWorkbenchEvent({
+      ...event,
+      state: { sessions: [missingCapabilities] }
+    })).toBeUndefined();
+    for (const placementMimeTypes of [
+      [],
+      ['image/png', 'image/png'],
+      ['image/png', 'image/gif']
+    ]) {
+      expect(decodeWorkbenchEvent({
+        ...event,
+        state: {
+          sessions: [{ ...event.state.sessions[0], placementMimeTypes }]
+        }
+      })).toBeUndefined();
+    }
+    expect(decodeWorkbenchEvent({
+      ...event,
+      state: {
+        sessions: [{ ...event.state.sessions[0], extra: true }]
+      }
+    })).toBeUndefined();
   });
 
   it('recognizes but rejects incomplete authoritative Project payloads', () => {

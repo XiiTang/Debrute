@@ -27,6 +27,8 @@ const electronArguments = ['.'];
 let vite: ChildProcess | undefined;
 let electron: ChildProcess | undefined;
 let shutdown: Promise<void> | undefined;
+let stopping = false;
+let removeRuntimeLost = () => undefined;
 const VITE_STARTUP_TIMEOUT_MS = 60_000;
 
 ensureDevelopmentElectronIsSigned();
@@ -71,6 +73,17 @@ if (registration.result !== 'dev_workbench_origin_registered') {
   control.close();
   throw new Error(`Runtime rejected source Workbench registration: ${registration.result}`);
 }
+removeRuntimeLost = control.onRuntimeLost((error) => {
+  if (stopping) return;
+  process.stderr.write(
+    `Debrute Runtime stopped during Electron source development (${error.code}): ${error.message}. Restart pnpm dev:electron.\n`
+  );
+  process.exitCode = 1;
+  void requestShutdown().catch((cleanupError) => {
+    console.error(cleanupError);
+    process.exitCode = 1;
+  });
+});
 
 const viteCommand = packageManagerCommand(workspaceRoot, [
   '--filter',
@@ -119,7 +132,9 @@ try {
 }
 
 function requestShutdown(): Promise<void> {
+  stopping = true;
   shutdown ??= (async () => {
+    removeRuntimeLost();
     const results = await Promise.allSettled([
       stopDevelopmentChild(electron, { label: 'Electron development host' }),
       stopDevelopmentChild(vite, { label: 'Vite development server' }),

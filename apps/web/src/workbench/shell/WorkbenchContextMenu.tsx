@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import {
   Clipboard,
+  ChevronRight,
   Copy,
   Edit3,
   FilePlus2,
@@ -17,6 +18,7 @@ import {
 import {
   clampWorkbenchContextMenuPosition,
   type ProjectPathCommand,
+  type PhotoshopDocumentTarget,
   type WorkbenchContextMenuItem,
   type WorkbenchContextMenuPosition
 } from './contextMenu';
@@ -66,13 +68,13 @@ export function WorkbenchContextMenu({
 }: {
   items: WorkbenchContextMenuItem[];
   position: WorkbenchContextMenuPosition;
-  onCommand: (command: ProjectPathCommand) => void;
+  onCommand: (command: ProjectPathCommand, target?: PhotoshopDocumentTarget) => void;
   onClose: () => void;
   productPlatform: DebruteProductPlatform;
 }): React.ReactElement | null {
   const i18n = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const actionCount = items.filter((item) => item.kind === 'action').length;
+  const actionCount = items.filter((item) => item.kind !== 'separator').length;
   const separatorCount = items.filter((item) => item.kind === 'separator').length;
   const clampedPosition = useMemo(() => clampWorkbenchContextMenuPosition({
     position,
@@ -135,6 +137,13 @@ export function WorkbenchContextMenu({
       {items.map((item) => (
         item.kind === 'separator' ? (
           <Menu.Separator key={item.id} />
+        ) : item.kind === 'photoshop-submenu' ? (
+          <PhotoshopSubmenu
+            key={item.command}
+            targets={item.targets}
+            opensLeft={clampedPosition.x + CONTEXT_MENU_WIDTH * 2 > window.innerWidth}
+            onCommand={(target) => onCommand(item.command, target)}
+          />
         ) : (
           <Menu.Item
             key={item.command}
@@ -155,6 +164,79 @@ export function WorkbenchContextMenu({
         )
       ))}
     </Menu>
+  );
+}
+
+function PhotoshopSubmenu({
+  targets,
+  opensLeft,
+  onCommand
+}: {
+  targets: PhotoshopDocumentTarget[];
+  opensLeft: boolean;
+  onCommand(target: PhotoshopDocumentTarget): void;
+}): React.ReactElement {
+  const i18n = useI18n();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const submenuRef = useRef<HTMLDivElement | null>(null);
+  const focusFirstTarget = () => {
+    submenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  };
+  return (
+    <div className="workbench-context-submenu">
+      <Menu.Item
+        ref={triggerRef}
+        aria-haspopup="menu"
+        icon={<Send size={14} />}
+        onClick={focusFirstTarget}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            event.stopPropagation();
+            focusFirstTarget();
+          }
+        }}
+      >
+        {workbenchContextMenuCommandLabel('send-to-photoshop', i18n)}
+        <ChevronRight className="workbench-context-submenu__chevron" size={12} />
+      </Menu.Item>
+      <Menu
+        ref={submenuRef}
+        className={opensLeft
+          ? 'workbench-context-submenu__menu workbench-context-submenu__menu--left'
+          : 'workbench-context-submenu__menu'}
+        ariaLabel={i18n.t('shell.contextMenu.photoshopDocuments')}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            event.stopPropagation();
+            triggerRef.current?.focus();
+          }
+        }}
+      >
+        {targets.length === 0 ? (
+          <Menu.Item disabled>{i18n.t('shell.contextMenu.noPhotoshopDocuments')}</Menu.Item>
+        ) : targets.map((target) => (
+          <Menu.Item
+            key={`${target.pluginSessionId}:${target.documentId}`}
+            title={target.title}
+            className={target.requirement === undefined ? undefined : 'workbench-context-submenu__target'}
+            disabled={target.disabled === true}
+            onClick={() => {
+              if (target.disabled === true) return;
+              onCommand(target);
+            }}
+          >
+            <span className="workbench-context-submenu__target-title">{target.title}</span>
+            {target.requirement === 'photoshop_26_8_for_avif' ? (
+              <span className="workbench-context-submenu__target-requirement">
+                {i18n.t('shell.contextMenu.photoshopRequiresAvif26_8')}
+              </span>
+            ) : null}
+          </Menu.Item>
+        ))}
+      </Menu>
+    </div>
   );
 }
 

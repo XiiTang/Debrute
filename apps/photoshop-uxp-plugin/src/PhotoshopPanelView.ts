@@ -1,0 +1,466 @@
+import { PHOTOSHOP_MAX_BATCH_ITEMS } from '@debrute/app-protocol';
+import {
+  resolvePhotoshopDestination,
+  type PhotoshopPluginRuntime,
+  type PhotoshopPluginSnapshot
+} from './PhotoshopPluginRuntime.js';
+
+const TREE_INDENT_PX = 14;
+
+export interface PhotoshopPanelPresentation {
+  connectionLabel: string;
+  sourceLabel: string;
+  sourceProblem: string | null;
+  destinationLabel: string;
+  destinationStatus: 'empty' | 'pending' | 'valid';
+  sendLabel: string;
+  sendDisabled: boolean;
+}
+
+export interface DestinationTreeItemPresentation {
+  kind: 'project' | 'directory';
+  key: string;
+  projectId: string;
+  directory: string;
+  label: string;
+  depth: number;
+  expanded: boolean;
+  expandable: boolean;
+  selected: boolean;
+  children: DestinationTreeNodePresentation[];
+}
+
+export interface DestinationTreeLoadingPresentation {
+  kind: 'loading';
+  key: string;
+  label: string;
+  depth: number;
+}
+
+export type DestinationTreeNodePresentation =
+  | DestinationTreeItemPresentation
+  | DestinationTreeLoadingPresentation;
+
+export interface DestinationTreePresentation {
+  roots: DestinationTreeItemPresentation[];
+}
+
+export function panelPresentation(snapshot: PhotoshopPluginSnapshot): PhotoshopPanelPresentation {
+  const count = snapshot.selection.items.length;
+  const documentTitle = snapshot.selection.documentTitle;
+  const sourceLabel = documentTitle === null
+    ? 'No open Document'
+    : count === 0
+      ? `${documentTitle} · Select layers or groups`
+      : `${documentTitle} · ${count} selected`;
+  const sourceProblem = count > PHOTOSHOP_MAX_BATCH_ITEMS
+    ? `Select no more than ${PHOTOSHOP_MAX_BATCH_ITEMS} layers or groups.`
+    : null;
+  const destinationValid = resolvePhotoshopDestination(snapshot) !== null;
+  const activeExport = snapshot.activeExport;
+  return {
+    connectionLabel: snapshot.connection.status === 'ready'
+      ? 'Connected'
+      : snapshot.connection.status === 'connecting' ? 'Connecting…' : 'Disconnected',
+    sourceLabel,
+    sourceProblem,
+    destinationLabel: destinationLabel(snapshot),
+    destinationStatus: snapshot.destination === null
+      ? 'empty'
+      : destinationValid ? 'valid' : 'pending',
+    sendLabel: activeExport === null
+      ? `Send ${count} file${count === 1 ? '' : 's'}`
+      : `Sending ${activeExport.itemCount} file${activeExport.itemCount === 1 ? '' : 's'} to ${activeExport.destinationLabel}…`,
+    sendDisabled: snapshot.connection.status !== 'ready'
+      || snapshot.busy
+      || snapshot.selection.documentId === null
+      || count === 0
+      || count > PHOTOSHOP_MAX_BATCH_ITEMS
+      || !destinationValid
+  };
+}
+
+export function destinationTreePresentation(
+  snapshot: PhotoshopPluginSnapshot
+): DestinationTreePresentation {
+  const expanded = new Set(snapshot.expandedDirectories.map((entry) => treeIdentity(
+    entry.projectId,
+    entry.directory
+  )));
+  const selected = snapshot.destination === null
+    ? null
+    : treeIdentity(snapshot.destination.projectId, snapshot.destination.directory);
+  const roots = [...snapshot.projects]
+    .sort((left, right) => naturalCompare(left.name, right.name))
+    .map((project): DestinationTreeItemPresentation => {
+      const key = treeIdentity(project.projectId, '');
+      const isExpanded = expanded.has(key);
+      const tree = snapshot.directoryTrees.find((candidate) => (
+        candidate.projectId === project.projectId
+        && candidate.projectRevision === project.revision
+      ));
+      let children: DestinationTreeNodePresentation[] = [];
+      if (isExpanded) {
+        children = !tree || tree.status === 'loading'
+          ? [{
+              kind: 'loading',
+              key: `${key}:loading`,
+              label: 'Loading directories…',
+              depth: 1
+            }]
+          : directoryTreeChildren({
+              projectId: project.projectId,
+              directories: tree.directories,
+              parentDirectory: '',
+              depth: 1,
+              expanded,
+              selected
+            });
+      }
+      return {
+        kind: 'project',
+        key,
+        projectId: project.projectId,
+        directory: '',
+        label: project.name,
+        depth: 0,
+        expanded: isExpanded,
+        expandable: true,
+        selected: selected === key,
+        children
+      };
+    });
+  return { roots };
+}
+
+export class PhotoshopPanelView {
+  private unsubscribe: (() => void) | undefined;
+  private focusDestinationAfterRender = false;
+  private revealDestinationAfterRender = false;
+
+  constructor(
+    private readonly root: HTMLElement,
+    private readonly runtime: PhotoshopPluginRuntime
+  ) {}
+
+  attach(): void {
+    if (this.unsubscribe) return;
+    this.revealDestinationAfterRender = true;
+    this.unsubscribe = this.runtime.subscribe((snapshot) => this.render(snapshot));
+  }
+
+  detach(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    this.root.replaceChildren();
+  }
+
+  private render(snapshot: PhotoshopPluginSnapshot): void {
+    const presentation = panelPresentation(snapshot);
+    const tree = destinationTreePresentation(snapshot);
+    const hasVisibleSelectedDestination = flattenDestinationTree(tree.roots).some(({ item }) => (
+      item.selected
+    ));
+    this.root.innerHTML = `
+      <main class="photoshop-panel">
+        <header class="photoshop-panel__header">
+          <p class="photoshop-panel__brand">Debrute</p>
+          <p class="photoshop-panel__connection photoshop-panel__connection--${snapshot.connection.status}">
+            <span aria-hidden="true"></span>${escapeHtml(presentation.connectionLabel)}
+          </p>
+        </header>
+        <section class="photoshop-panel__source" aria-label="Current Photoshop selection">
+          <p class="photoshop-panel__source-summary">${escapeHtml(presentation.sourceLabel)}</p>
+          ${presentation.sourceProblem === null
+            ? ''
+            : `<p class="photoshop-panel__source-problem">${escapeHtml(presentation.sourceProblem)}</p>`}
+        </section>
+        <section class="photoshop-panel__destination" aria-labelledby="destination-heading">
+          <div class="photoshop-panel__destination-heading">
+            <h1 id="destination-heading">Save to</h1>
+            <p class="photoshop-panel__destination-path" title="${escapeHtml(presentation.destinationLabel)}">
+              <span aria-hidden="true">${presentation.destinationStatus === 'valid'
+                ? '✓'
+                : presentation.destinationStatus === 'pending' ? '…' : '—'}</span>
+              ${escapeHtml(presentation.destinationLabel)}
+            </p>
+          </div>
+          <div class="photoshop-panel__browser">
+            <div class="photoshop-panel__tree" role="tree" aria-label="Debrute Project directories" ${hasVisibleSelectedDestination ? '' : 'tabindex="0"'}>
+              <div class="photoshop-panel__tree-content" role="none">
+                ${tree.roots.map(renderDestinationTreeNode).join('')}
+                ${tree.roots.length === 0
+                  ? '<p class="photoshop-panel__tree-empty">No live Projects</p>'
+                  : ''}
+              </div>
+            </div>
+          </div>
+        </section>
+        <footer class="photoshop-panel__footer">
+          ${snapshot.result === null
+            ? ''
+            : `<p class="photoshop-panel__result photoshop-panel__result--${snapshot.result.tone}" role="status">${escapeHtml(snapshot.result.message)}</p>`}
+          <button class="photoshop-panel__send" type="button" data-action="send" ${presentation.sendDisabled ? 'disabled' : ''}>
+            ${escapeHtml(presentation.sendLabel)}
+          </button>
+        </footer>
+      </main>`;
+    this.bind(tree);
+    if ((this.focusDestinationAfterRender || this.revealDestinationAfterRender)
+      && snapshot.destination !== null) {
+      const destinationElement = findTreeItem(
+        this.root,
+        snapshot.destination.projectId,
+        snapshot.destination.directory
+      );
+      if (destinationElement) {
+        if (this.revealDestinationAfterRender
+          && typeof destinationElement.scrollIntoViewIfNeeded === 'function') {
+          destinationElement.scrollIntoViewIfNeeded();
+        }
+        if (this.focusDestinationAfterRender) destinationElement.focus();
+        this.focusDestinationAfterRender = false;
+        this.revealDestinationAfterRender = false;
+      }
+    } else if (snapshot.destination === null) {
+      this.focusDestinationAfterRender = false;
+      this.revealDestinationAfterRender = false;
+    }
+  }
+
+  private bind(tree: DestinationTreePresentation): void {
+    const visibleItems = flattenDestinationTree(tree.roots);
+    for (const element of this.root.querySelectorAll<HTMLElement>('[role="treeitem"][data-project-id][data-directory]')) {
+      element.addEventListener('click', () => {
+        const projectId = element.getAttribute('data-project-id');
+        const directory = element.getAttribute('data-directory');
+        if (projectId !== null && directory !== null) {
+          this.focusDestinationAfterRender = true;
+          this.runtime.activateDestination(projectId, directory);
+        }
+      });
+      element.addEventListener('keydown', (event) => {
+        const projectId = element.getAttribute('data-project-id');
+        const directory = element.getAttribute('data-directory');
+        if (projectId === null || directory === null) return;
+        const currentIndex = visibleItems.findIndex(({ item }) => (
+          item.projectId === projectId && item.directory === directory
+        ));
+        if (currentIndex === -1) return;
+        const current = visibleItems[currentIndex];
+        if (!current) return;
+        let handled = true;
+        let action: (() => void) | undefined;
+        if (event.key === 'ArrowUp') {
+          const previous = visibleItems[currentIndex - 1]?.item;
+          if (previous) action = () => this.runtime.selectDestination(previous.projectId, previous.directory);
+        } else if (event.key === 'ArrowDown') {
+          const next = visibleItems[currentIndex + 1]?.item;
+          if (next) action = () => this.runtime.selectDestination(next.projectId, next.directory);
+        } else if (event.key === 'ArrowRight') {
+          if (current.item.expandable && !current.item.expanded) {
+            action = () => this.runtime.expandDestination(projectId, directory);
+          } else {
+            const firstChild = current.item.children.find((child) => child.kind !== 'loading');
+            if (firstChild) {
+              action = () => this.runtime.selectDestination(firstChild.projectId, firstChild.directory);
+            }
+          }
+        } else if (event.key === 'ArrowLeft') {
+          if (current.item.expanded) {
+            action = () => this.runtime.collapseDestination(projectId, directory);
+          } else if (current.parent) {
+            const parent = current.parent;
+            action = () => this.runtime.selectDestination(parent.projectId, parent.directory);
+          }
+        } else if (event.key === 'Enter' || event.key === ' ') {
+          action = () => this.runtime.activateDestination(projectId, directory);
+        } else {
+          handled = false;
+        }
+        if (handled) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (action) {
+            this.focusDestinationAfterRender = true;
+            action();
+          }
+        }
+      });
+    }
+    const treeElement = this.root.querySelector<HTMLElement>('[role="tree"]');
+    treeElement?.addEventListener('keydown', (event) => {
+      if (event.target !== treeElement || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      const target = event.key === 'ArrowDown'
+        ? visibleItems[0]?.item
+        : visibleItems[visibleItems.length - 1]?.item;
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.focusDestinationAfterRender = true;
+      this.runtime.selectDestination(target.projectId, target.directory);
+    });
+    this.root.querySelector<HTMLButtonElement>('[data-action="send"]')?.addEventListener('click', () => {
+      void this.runtime.sendSelection().catch(() => undefined);
+    });
+  }
+}
+
+function destinationLabel(snapshot: PhotoshopPluginSnapshot): string {
+  const destination = snapshot.destination;
+  if (destination === null) return 'No destination selected';
+  return destination.directory === ''
+    ? destination.projectName
+    : `${destination.projectName} / ${destination.directory}`;
+}
+
+function directChildren(
+  directories: readonly string[],
+  currentDirectory: string
+): Array<{ directory: string; label: string }> {
+  const prefix = currentDirectory === '' ? '' : `${currentDirectory}/`;
+  const children = new Map<string, string>();
+  for (const directory of directories) {
+    if (directory === '' || directory === currentDirectory || !directory.startsWith(prefix)) continue;
+    const remainder = directory.slice(prefix.length);
+    const label = remainder.split('/')[0];
+    if (!label) continue;
+    const child = prefix + label;
+    children.set(child, label);
+  }
+  return [...children]
+    .map(([directory, label]) => ({ directory, label }))
+    .sort((left, right) => naturalCompare(left.label, right.label));
+}
+
+function naturalCompare(left: string, right: string): number {
+  const primary = left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
+  return primary === 0
+    ? left.localeCompare(right, undefined, { numeric: true, sensitivity: 'variant' })
+    : primary;
+}
+
+function directoryTreeChildren(input: {
+  projectId: string;
+  directories: readonly string[];
+  parentDirectory: string;
+  depth: number;
+  expanded: ReadonlySet<string>;
+  selected: string | null;
+}): DestinationTreeItemPresentation[] {
+  return directChildren(input.directories, input.parentDirectory).map((child) => {
+    const key = treeIdentity(input.projectId, child.directory);
+    const children = directChildren(input.directories, child.directory);
+    const isExpanded = input.expanded.has(key);
+    return {
+      kind: 'directory',
+      key,
+      projectId: input.projectId,
+      directory: child.directory,
+      label: child.label,
+      depth: input.depth,
+      expanded: isExpanded,
+      expandable: children.length > 0,
+      selected: input.selected === key,
+      children: isExpanded
+        ? directoryTreeChildren({
+            ...input,
+            parentDirectory: child.directory,
+            depth: input.depth + 1
+          })
+        : []
+    };
+  });
+}
+
+function treeIdentity(projectId: string, directory: string): string {
+  return `${projectId.length}:${projectId}:${directory}`;
+}
+
+function renderDestinationTreeNode(node: DestinationTreeItemPresentation): string {
+  const expandedAttribute = node.expandable ? ` aria-expanded="${node.expanded}"` : '';
+  const groupId = node.children.length === 0
+    ? null
+    : `photoshop-directory-group-${encodeURIComponent(node.key)}`;
+  const children = node.children.length === 0
+    ? ''
+    : `<div class="photoshop-panel__tree-group" id="${escapeHtml(groupId ?? '')}" role="group">
+        ${node.children.map((child) => child.kind === 'loading'
+          ? `<p class="photoshop-panel__tree-loading" role="status" style="--tree-indent: ${child.depth * TREE_INDENT_PX}px">
+              ${treeGuideLines(child.depth)}${escapeHtml(child.label)}
+            </p>`
+          : renderDestinationTreeNode(child)).join('')}
+      </div>`;
+  return `<div class="photoshop-panel__tree-node" role="none">
+    <div class="photoshop-panel__tree-row${node.selected ? ' photoshop-panel__tree-row--selected' : ''}" role="treeitem"
+      data-project-id="${escapeHtml(node.projectId)}" data-directory="${escapeHtml(node.directory)}"
+      aria-level="${node.depth + 1}" aria-selected="${node.selected}"${expandedAttribute}
+      ${groupId === null ? '' : `aria-owns="${escapeHtml(groupId)}"`}
+      style="--tree-indent: ${node.depth * TREE_INDENT_PX}px"
+      tabindex="${node.selected ? '0' : '-1'}">
+      ${treeGuideLines(node.depth)}
+      ${folderIcon(node.expanded)}
+      <span class="photoshop-panel__tree-label">${escapeHtml(node.label)}</span>
+    </div>
+    ${children}
+  </div>`;
+}
+
+function folderIcon(open: boolean): string {
+  return open
+    ? `<svg data-debrute-icon="folder-open" aria-hidden="true" viewBox="0 0 20 20"><path d="M1 5h7l2 2h9l-3 11H1V5Zm3 5-1 6h11l2-6H4Z"/></svg>`
+    : `<svg data-debrute-icon="folder" aria-hidden="true" viewBox="0 0 20 20"><path d="M1 4h7l2 2h9v12H1V4Z"/></svg>`;
+}
+
+function treeGuideLines(depth: number): string {
+  return Array.from({ length: depth }, (_, index) => (
+    `<span class="photoshop-panel__tree-guide" aria-hidden="true" style="left: ${(index + 1) * TREE_INDENT_PX}px"></span>`
+  )).join('');
+}
+
+function flattenDestinationTree(
+  roots: readonly DestinationTreeItemPresentation[]
+): Array<{
+  item: DestinationTreeItemPresentation;
+  parent: DestinationTreeItemPresentation | null;
+}> {
+  const visible: Array<{
+    item: DestinationTreeItemPresentation;
+    parent: DestinationTreeItemPresentation | null;
+  }> = [];
+  const append = (
+    item: DestinationTreeItemPresentation,
+    parent: DestinationTreeItemPresentation | null
+  ): void => {
+    visible.push({ item, parent });
+    for (const child of item.children) {
+      if (child.kind !== 'loading') append(child, item);
+    }
+  };
+  for (const root of roots) append(root, null);
+  return visible;
+}
+
+function findTreeItem(
+  root: HTMLElement,
+  projectId: string,
+  directory: string
+): UxpTreeItemElement | undefined {
+  return [...root.querySelectorAll<UxpTreeItemElement>('[role="treeitem"]')].find((element) => (
+    element.getAttribute('data-project-id') === projectId
+    && element.getAttribute('data-directory') === directory
+  ));
+}
+
+interface UxpTreeItemElement extends HTMLButtonElement {
+  scrollIntoViewIfNeeded?: () => void;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}

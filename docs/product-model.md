@@ -76,9 +76,9 @@ The first supported integrations are FFmpeg, ImageMagick, MediaInfo, ExifTool, a
 Integrations are not required for Debrute startup and are not exposed through the `debrute` command. Third-party tools are optional local dependencies; Debrute does not bundle or redistribute them, and users are responsible for complying with each tool's license.
 
 The fixed catalog, platform backends, status model, and runtime-owned operation
-boundary are documented in [`integrations.md`](./integrations.md). Adobe Bridge
-is a separate link-scoped protocol between open Projects and Photoshop plugin
-clients; see [`photoshop-bridge.md`](./photoshop-bridge.md).
+boundary are documented in [`integrations.md`](./integrations.md). Photoshop
+file transfer is a separate application-specific protocol between open
+Projects and the UXP plugin; see [`photoshop.md`](./photoshop.md).
 
 ## Skills
 

@@ -12,6 +12,7 @@ export type ProjectPathKind = 'file' | 'directory';
 export interface ProjectPathEntry {
   projectRelativePath: string;
   kind: ProjectPathKind;
+  sizeBytes?: number;
 }
 
 export const PROJECT_TEXT_LANGUAGE_IDS = [

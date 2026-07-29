@@ -75,8 +75,8 @@ may invoke their own package-manager installation flows, but it does not bundle
 or redistribute them. Users are responsible for each tool's installation terms
 and license.
 
-Adobe Bridge is a separate Debrute-to-Photoshop protocol rather than a catalog
-integration. See [`photoshop-bridge.md`](./photoshop-bridge.md).
+Photoshop file transfer is an application-specific local protocol rather than a
+catalog integration. See [`photoshop.md`](./photoshop.md).
 
 ## Executable Authorities
 

@@ -8,8 +8,9 @@ contract.
 
 ## Runtime And Browser Authentication
 
-Runtime binds HTTP only to loopback and validates the native peer, Host, Origin,
-route group, and role-specific credential before business dispatch. Native CLI
+Runtime binds HTTP only to loopback and validates the native peer, Host,
+protocol-appropriate Origin policy, route group, and role-specific credential
+before business dispatch. Native CLI
 authorization is issued through its live Control connection and becomes invalid
 when that connection ends; it is never persisted or accepted in a URL.
 
@@ -34,9 +35,12 @@ the requested Project, but cannot mutate Project state. Source development
 sends the same relative requests through Vite to the exact Runtime origin
 without a token file or a second authentication system.
 
-Photoshop routes have their own narrow origin, plugin identity, pairing, and
-client-scoped protocol rather than inheriting Workbench or CLI authority. See
-[`photoshop-bridge.md`](./photoshop-bridge.md).
+Photoshop WebSockets require the exact `file://` origin emitted by UXP together
+with a loopback peer, exact gateway Host, fixed route, and subprotocol. UXP HTTP
+requests are accepted only when Origin is absent, as observed in Photoshop
+27.8, or exactly `file://`; file bytes additionally require the ephemeral socket
+bearer. Photoshop routes do not inherit Workbench or CLI authority. See
+[`photoshop.md`](./photoshop.md).
 
 ## Project Filesystem Boundary
 
@@ -132,9 +136,16 @@ GitHub metadata alone. Signed size, SHA-256, URL, asset identity, and macOS
 platform checks are enforced before replacement. See
 [`releases.md`](./releases.md).
 
-Photoshop plugins receive neither Workbench/CLI authority nor arbitrary filesystem
-access. Explicit client-to-Project links, Project-relative paths, client-scoped
-state, and short-lived transfer URLs define that separate boundary.
+The Photoshop plugin receives neither Workbench/CLI authority nor arbitrary
+filesystem access. Its fresh socket identity and bearer, exact command targets,
+Project-relative paths, bounded gateway routes, and plugin-owned temporary
+storage define that separate boundary. Its HTTP errors use one shared closed
+Photoshop protocol envelope. Runtime keeps Project, staging, I/O, and Photoshop
+host diagnostics in its local log and returns only reviewed path-free messages;
+Project roots, temporary paths, and other absolute host paths do not cross the
+plugin or Workbench boundary. The first version deliberately performs no user
+authorization ceremony; protection against another local process imitating the
+plugin remains deferred.
 
 ## Executable Authorities
 

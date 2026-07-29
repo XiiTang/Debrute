@@ -48,7 +48,6 @@ import {
   createProjectPathCommandCoordinator,
   type ProjectPathCommandCoordinator
 } from './services/projectPathCommandCoordinator.js';
-import { SendToPhotoshopDialog } from './adobe-bridge/SendToPhotoshopDialog';
 import {
   PendingWorkbenchContextMenuDismissal,
   WorkbenchContextMenu
@@ -231,17 +230,29 @@ function WorkbenchRuntimeApp({
     projectBindingLifecycle.subscribe,
     projectBindingLifecycle.getState
   );
-  const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
-  const runtimeProjectId = acceptedProject?.projectId;
   const [connectionEnded, setConnectionEnded] = useState<Error>();
-  const [notifications, setNotifications] = useState<string[]>([]);
+  const notificationIdRef = useRef(0);
+  const [notificationEntries, setNotificationEntries] = useState<Array<{ id: number; message: string }>>([]);
+  const notifications = notificationEntries.map((entry) => entry.message);
   const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
   const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
   const [projectOpenError, setProjectOpenError] = useState<string>();
   const initialProjectOpeningRef = useRef<ReturnType<ProjectBindingLifecycle['open']> | undefined>(undefined);
   const announcedProjectGenerationsRef = useRef(new Set<number>());
   const notify = useCallback((message: string) => {
-    setNotifications((current) => [message, ...current].slice(0, 4));
+    notificationIdRef.current += 1;
+    const entry = { id: notificationIdRef.current, message };
+    setNotificationEntries((current) => [entry, ...current].slice(0, 4));
+  }, []);
+  const startNotification = useCallback((message: string) => {
+    notificationIdRef.current += 1;
+    const id = notificationIdRef.current;
+    setNotificationEntries((current) => [{ id, message }, ...current].slice(0, 4));
+    return (nextMessage: string) => {
+      setNotificationEntries((current) => current.map((entry) => (
+        entry.id === id ? { ...entry, message: nextMessage } : entry
+      )));
+    };
   }, []);
   const presentationController = useWorkbenchPresentationController({
     globalProjection: api.globalProjection
@@ -279,16 +290,10 @@ function WorkbenchRuntimeApp({
     return {
       checkProductUpdate: () => controller().checkProductUpdate(),
       applyProductUpdate: () => controller().applyProductUpdate(),
-      reloadAdobeBridge: () => controller().reloadAdobeBridge(),
       saveGlobalSettings: (input) => controller().saveGlobalSettings(input),
       revealModelApiKey: (modelId) => controller().revealModelApiKey(modelId),
       rescanIntegrations: () => controller().rescanIntegrations(),
-      runIntegrationOperation: (input) => controller().runIntegrationOperation(input),
-      createAdobeBridgePairing: () => controller().createAdobeBridgePairing(),
-      cancelAdobeBridgePairing: (pairingId) => controller().cancelAdobeBridgePairing(pairingId),
-      removeAdobeBridgePairing: (pluginInstanceId) => controller().removeAdobeBridgePairing(pluginInstanceId),
-      linkAdobeBridgePhotoshop: (input) => controller().linkAdobeBridgePhotoshop(input),
-      unlinkAdobeBridgePhotoshop: (pluginInstanceId) => controller().unlinkAdobeBridgePhotoshop(pluginInstanceId)
+      runIntegrationOperation: (input) => controller().runIntegrationOperation(input)
     };
   }, [settingsFeatureController]);
   const canvasTextAppearance = settingsFeatureController?.globalSettings.status === 'ready'
@@ -378,8 +383,8 @@ function WorkbenchRuntimeApp({
     projectProjection,
     connectionEnded,
     notifications,
-    setNotifications,
     notify,
+    startNotification,
     announceProjectGeneration,
     presentationController,
     settingsFeatureController,
@@ -409,7 +414,6 @@ function WorkbenchRuntimeApp({
         <React.Suspense fallback={null}>
           <WorkbenchSettingsFeatureHost
             api={api}
-            projectId={runtimeProjectId}
             notify={notify}
             getCurrentI18n={presentationController.getCurrentI18n}
             onController={setSettingsFeatureController}
@@ -427,8 +431,8 @@ function WorkbenchProjectGenerationApp({
   projectProjection,
   connectionEnded,
   notifications,
-  setNotifications,
   notify,
+  startNotification,
   announceProjectGeneration,
   presentationController,
   settingsFeatureController,
@@ -448,8 +452,8 @@ function WorkbenchProjectGenerationApp({
   projectProjection: WorkbenchProjectProjectionState;
   connectionEnded: Error | undefined;
   notifications: string[];
-  setNotifications: React.Dispatch<React.SetStateAction<string[]>>;
   notify(message: string): void;
+  startNotification(message: string): (message: string) => void;
   announceProjectGeneration(input: {
     generation: number;
     projectName: string;
@@ -525,10 +529,6 @@ function WorkbenchProjectGenerationApp({
     target: WorkbenchContextMenuTarget;
     position: WorkbenchContextMenuPosition;
   }>();
-  const [sendToPhotoshopPath, setSendToPhotoshopPath] = useState<string>();
-  const [sendToPhotoshopBridgeError, setSendToPhotoshopBridgeError] = useState<string>();
-  const sendToPhotoshopBridgeLoadRef = useRef(0);
-  const [sendingToPhotoshop, setSendingToPhotoshop] = useState(false);
   const [nativeWindowState, setNativeWindowState] = useState<NativeWindowState>();
   const [workbenchViewportRect, setWorkbenchViewportRect] = useState(
     initialProjectPresentation.viewportRect
@@ -583,8 +583,8 @@ function WorkbenchProjectGenerationApp({
 
   const notifyCanvasFeedbackUnavailable = useCallback((message: string) => {
     const currentI18n = presentationController.getCurrentI18n();
-    setNotifications((current) => [currentI18n.t('canvas.feedback.unavailable', { message }), ...current].slice(0, 4));
-  }, [presentationController.getCurrentI18n]);
+    notify(currentI18n.t('canvas.feedback.unavailable', { message }));
+  }, [notify, presentationController.getCurrentI18n]);
   const feedbackInteraction = useCanvasFeedbackInteraction({
     api,
     projectId: runtimeProjectId,
@@ -682,35 +682,10 @@ function WorkbenchProjectGenerationApp({
     });
   }, [activeCanvasId, runtimeProjectId, floatingPanels]);
 
-  const sendProjectFileToPhotoshop = useCallback<WorkbenchActions['sendProjectFileToPhotoshop']>(async (input) => {
-    const result = await api.sendProjectFileToPhotoshop(input);
-    if (isCurrentProjectPathCommandScope()) {
-      notify(i18n.t('shell.notifications.sentToPhotoshop', { path: input.projectRelativePath }));
-    }
-    return result;
-  }, [i18n, isCurrentProjectPathCommandScope, notify]);
-  const openSendToPhotoshopPicker = useCallback<WorkbenchActions['openSendToPhotoshopPicker']>((projectRelativePath) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
-    const load = sendToPhotoshopBridgeLoadRef.current + 1;
-    sendToPhotoshopBridgeLoadRef.current = load;
-    setSendToPhotoshopBridgeError(undefined);
-    setSendToPhotoshopPath(projectRelativePath);
-    void api.ensureAdobeBridgeState().catch((error: unknown) => {
-      if (
-        sendToPhotoshopBridgeLoadRef.current === load
-        && isCurrentProjectPathCommandScope()
-      ) {
-        setSendToPhotoshopBridgeError(errorMessage(error));
-      }
-    });
-  }, [api, canStartProjectPathCommand, isCurrentProjectPathCommandScope]);
-  const closeSendToPhotoshopPicker = useCallback(() => {
-    sendToPhotoshopBridgeLoadRef.current += 1;
-    setSendToPhotoshopPath(undefined);
-    setSendToPhotoshopBridgeError(undefined);
-  }, []);
+  const sendProjectFileToPhotoshop = useCallback<WorkbenchActions['sendProjectFileToPhotoshop']>(
+    (input) => api.sendProjectFileToPhotoshop(input),
+    [api]
+  );
 
   const {
     ensureTextFileBuffer,
@@ -982,7 +957,6 @@ function WorkbenchProjectGenerationApp({
     }
     closeWorkbenchContextMenu();
     explorerController?.cancelEdit();
-    setSendToPhotoshopPath(undefined);
   }, [closeWorkbenchContextMenu, explorerController, isProjectOpening, projectPresentationBlocked]);
 
   const openInspectorPanel = useCallback(() => {
@@ -998,7 +972,7 @@ function WorkbenchProjectGenerationApp({
       await navigator.clipboard.writeText(projectRelativePath);
     } catch (error) {
       if (isCurrentProjectPathCommandScope()) {
-        setNotifications((current) => [i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) }), ...current].slice(0, 4));
+        notify(i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) }));
       }
     }
   }, [i18n, isCurrentProjectPathCommandScope]);
@@ -1049,7 +1023,7 @@ function WorkbenchProjectGenerationApp({
       opening: isProjectOpening
     },
     explorerSelection: explorerController?.selection ?? projectTreeSelectionFromPaths([]),
-    adobeBridge: globalProjection.adobeBridge,
+    photoshop: globalProjection.photoshop,
     canvasFeedback: feedbackInteraction.feedback,
     textFileBuffers,
     textEditorWindows,
@@ -1065,7 +1039,6 @@ function WorkbenchProjectGenerationApp({
   const actions: WorkbenchActions = useMemo(() => ({
     ...settingsActions,
     sendProjectFileToPhotoshop,
-    openSendToPhotoshopPicker,
     lookupGeneratedAssetMetadata: api.lookupGeneratedAssetMetadata,
     readProjectTextFile: api.readProjectTextFile,
     writeProjectTextFile: api.writeProjectTextFile,
@@ -1095,7 +1068,6 @@ function WorkbenchProjectGenerationApp({
   }), [
     settingsActions,
     sendProjectFileToPhotoshop,
-    openSendToPhotoshopPicker,
     ensureTextFileBuffer,
     updateTextFileBuffer,
     saveTextFileBuffer,
@@ -1238,9 +1210,8 @@ function WorkbenchProjectGenerationApp({
       notify(i18n.t('shell.notifications.resetCanvasLayoutFailed', { message: errorMessage(error) }));
     });
   }, [actions, activeCanvasId, i18n, notify]);
-  const persistedAdobeBridgeEnabled = globalProjection.settings.adobeBridge.enabled;
-  const readyAdobeBridge = globalProjection.adobeBridge.status === 'ready'
-    ? globalProjection.adobeBridge.value
+  const readyPhotoshop = globalProjection.photoshop.status === 'ready'
+    ? globalProjection.photoshop.value
     : undefined;
   const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
     ? snapshot.canvasRegistry.canvasOrder
@@ -1283,7 +1254,7 @@ function WorkbenchProjectGenerationApp({
       projection: activeProjection,
       canSelectCanvasNode: Boolean(activeCanvasRuntime),
       fileClipboard,
-      adobeBridgeEnabled: persistedAdobeBridgeEnabled
+      photoshop: readyPhotoshop
     },
     commandContext: {
       activeProjection,
@@ -1293,6 +1264,18 @@ function WorkbenchProjectGenerationApp({
       explorerCommands: explorerController,
       copyText: copyProjectRelativePath,
       notify,
+      startNotification,
+      photoshopLabels: {
+        sending: (path, documentTitle) => i18n.t('shell.notifications.sendingToPhotoshop', {
+          path,
+          document: documentTitle
+        }),
+        sent: (path, documentTitle) => i18n.t('shell.notifications.sentToPhotoshopDocument', {
+          path,
+          document: documentTitle
+        }),
+        failed: (message) => i18n.t('shell.notifications.sendToPhotoshopFailed', { message })
+      },
       closeContextMenu: closeWorkbenchContextMenu,
       openInspectorPanel,
       confirmPermanentDelete,
@@ -1317,7 +1300,9 @@ function WorkbenchProjectGenerationApp({
     isCurrentProjectPathCommandScope,
     notify,
     openInspectorPanel,
-    persistedAdobeBridgeEnabled
+    readyPhotoshop,
+    startNotification,
+    i18n
   ]);
   const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
     projectPathCommandCoordinator?.run(command, {
@@ -1613,7 +1598,6 @@ function WorkbenchProjectGenerationApp({
                       <React.Suspense fallback={<div className="settings-panel" aria-busy="true" />}>
                         <WorkbenchSettingsPanelFeature
                           controller={settingsFeatureController}
-                          projectId={runtimeProjectId}
                           locale={presentationController.locale}
                           resolvedTheme={presentationController.resolvedTheme}
                           actions={actions}
@@ -1642,40 +1626,6 @@ function WorkbenchProjectGenerationApp({
               runtime={activeCanvasRuntime}
               productPlatform={productPlatform}
               onClose={closeWorkbenchContextMenu}
-            />
-          ) : null}
-          {!projectPresentationBlocked && sendToPhotoshopPath && runtimeProjectId ? (
-            <SendToPhotoshopDialog
-              projectId={runtimeProjectId}
-              projectRelativePath={sendToPhotoshopPath}
-              enabled={persistedAdobeBridgeEnabled}
-              bridge={readyAdobeBridge}
-              loading={globalProjection.adobeBridge.status === 'loading' && !sendToPhotoshopBridgeError}
-              loadError={sendToPhotoshopBridgeError}
-              sending={sendingToPhotoshop}
-              onClose={closeSendToPhotoshopPicker}
-              onSend={(pluginInstanceId) => {
-                if (!canStartProjectPathCommand()) {
-                  return;
-                }
-                setSendingToPhotoshop(true);
-                void actions.sendProjectFileToPhotoshop({
-                  projectRelativePath: sendToPhotoshopPath,
-                  pluginInstanceId
-                }).then(() => {
-                  if (isCurrentProjectPathCommandScope()) {
-                    closeSendToPhotoshopPicker();
-                  }
-                }).catch((error) => {
-                  if (isCurrentProjectPathCommandScope()) {
-                    notify(i18n.t('shell.notifications.sendToPhotoshopFailed', { message: errorMessage(error) }));
-                  }
-                }).finally(() => {
-                  if (isCurrentProjectPathCommandScope()) {
-                    setSendingToPhotoshop(false);
-                  }
-                });
-              }}
             />
           ) : null}
         </div>
@@ -1714,7 +1664,7 @@ export function ProjectPathContextMenuHost({
       items={items}
       position={contextMenu.position}
       productPlatform={productPlatform}
-      onCommand={(command) => coordinator.run(command, contextMenu)}
+      onCommand={(command, photoshopTarget) => coordinator.run(command, contextMenu, photoshopTarget)}
       onClose={onClose}
     />
   );

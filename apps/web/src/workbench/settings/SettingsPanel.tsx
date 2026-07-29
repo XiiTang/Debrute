@@ -1,16 +1,10 @@
 import React, { useState } from 'react';
-import { AudioLines, Cable, Eye, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
-import type {
-  AdobeBridgeStateView,
-  DebruteGlobalAdobeBridgeSettings,
-  DebruteGlobalSettingsView,
-  IntegrationSettingsView
-} from '@debrute/app-protocol';
+import { AudioLines, Eye, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
+import type { DebruteGlobalSettingsView, IntegrationSettingsView } from '@debrute/app-protocol';
 import type { EventProjection, SettingsResource, WorkbenchActions, WorkbenchState } from '../../types.js';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage.js';
-import { AdobeBridgeSettingsPage } from './adobe-bridge/AdobeBridgeSettingsPage.js';
 import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage.js';
 import { SettingsResourcePanel } from './SettingsResourcePanel.js';
 import { useI18n } from '../i18n/index.js';
@@ -37,10 +31,7 @@ const SETTINGS_NAV_GROUPS = [
   {
     id: 'integrations',
     labelKey: 'settings.nav.integrationsGroup',
-    items: [
-      { id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench },
-      { id: 'adobe-bridge', labelKey: 'settings.nav.adobeBridge', icon: Cable }
-    ]
+    items: [{ id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench }]
   }
 ] as const;
 
@@ -50,8 +41,6 @@ interface SettingsPanelState {
   globalSettings: WorkbenchState['globalSettings'];
   integrations: SettingsResource<IntegrationSettingsView>;
   product: WorkbenchState['product'];
-  adobeBridge: WorkbenchState['adobeBridge'];
-  projectId?: WorkbenchState['projectId'];
   resolvedTheme: WorkbenchState['resolvedTheme'];
 }
 
@@ -64,10 +53,6 @@ export function SettingsPanel({
 }): React.ReactElement {
   const i18n = useI18n();
   const [activePage, setActivePage] = useState<SettingsPageId>('general');
-  const adobeBridgePage = adobeBridgeSettingsPageResource(state.globalSettings, state.adobeBridge);
-  const retryAdobeBridgePage = state.adobeBridge.status === 'error'
-    ? actions.reloadAdobeBridge
-    : undefined;
   return (
     <div className="settings-panel">
       <nav className="settings-directory" aria-label={i18n.t('settings.nav.sections')}>
@@ -96,10 +81,7 @@ export function SettingsPanel({
       </nav>
       <div className="settings-page">
         {activePage === 'general' ? (
-          <SettingsResourcePanel
-            title={i18n.t('settings.general.title')}
-            resource={state.globalSettings}
-          >
+          <SettingsResourcePanel title={i18n.t('settings.general.title')} resource={state.globalSettings}>
             {(settings) => (
               <GeneralSettingsPage
                 actions={actions}
@@ -110,10 +92,7 @@ export function SettingsPanel({
             )}
           </SettingsResourcePanel>
         ) : activePage === 'appearance' ? (
-          <SettingsResourcePanel
-            title={i18n.t('settings.appearance.title')}
-            resource={state.globalSettings}
-          >
+          <SettingsResourcePanel title={i18n.t('settings.appearance.title')} resource={state.globalSettings}>
             {(settings) => (
               <AppearanceSettingsPage
                 settings={settings}
@@ -161,26 +140,9 @@ export function SettingsPanel({
           <SettingsResourcePanel
             title={i18n.t('settings.integrations.title')}
             resource={state.integrations}
-            {...(state.integrations.status === 'error'
-              ? { onRetry: actions.rescanIntegrations }
-              : {})}
+            {...(state.integrations.status === 'error' ? { onRetry: actions.rescanIntegrations } : {})}
           >
             {(settings) => <IntegrationsSettingsPage settings={settings} actions={actions} />}
-          </SettingsResourcePanel>
-        ) : activePage === 'adobe-bridge' ? (
-          <SettingsResourcePanel
-            title={i18n.t('settings.adobeBridge.title')}
-            resource={adobeBridgePage}
-            {...(retryAdobeBridgePage ? { onRetry: retryAdobeBridgePage } : {})}
-          >
-            {({ persistedSettings, bridge }) => (
-              <AdobeBridgeSettingsPage
-                persistedSettings={persistedSettings}
-                bridge={bridge}
-                projectId={state.projectId}
-                actions={actions}
-              />
-            )}
           </SettingsResourcePanel>
         ) : null}
       </div>
@@ -192,32 +154,5 @@ function derivedSettingsResource<T>(
   resource: EventProjection<DebruteGlobalSettingsView>,
   pick: (settings: DebruteGlobalSettingsView) => T
 ): EventProjection<T> {
-  if (resource.status !== 'ready') {
-    return resource;
-  }
-  return { status: 'ready', value: pick(resource.value) };
-}
-
-interface AdobeBridgeSettingsPageValue {
-  persistedSettings: DebruteGlobalAdobeBridgeSettings;
-  bridge: AdobeBridgeStateView;
-}
-
-function adobeBridgeSettingsPageResource(
-  globalSettings: EventProjection<DebruteGlobalSettingsView>,
-  adobeBridge: SettingsResource<AdobeBridgeStateView>
-): SettingsResource<AdobeBridgeSettingsPageValue> {
-  if (adobeBridge.status === 'error') {
-    return adobeBridge;
-  }
-  if (globalSettings.status !== 'ready' || adobeBridge.status !== 'ready') {
-    return { status: 'loading' };
-  }
-  return {
-    status: 'ready',
-    value: {
-      persistedSettings: globalSettings.value.adobeBridge,
-      bridge: adobeBridge.value
-    }
-  };
+  return resource.status === 'ready' ? { status: 'ready', value: pick(resource.value) } : resource;
 }

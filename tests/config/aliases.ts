@@ -11,6 +11,5 @@ export const testAliases = [
   { find: /^react-dom\/server$/, replacement: resolve(workspaceRoot, 'node_modules/react-dom/server.node.js') },
   { find: '@debrute/app-protocol', replacement: resolve(workspaceRoot, 'packages/app-protocol/src/index.ts') },
   { find: '@debrute/canvas-core', replacement: resolve(workspaceRoot, 'packages/canvas-core/src/index.ts') },
-  { find: '@debrute/photoshop-bridge-plugin-core', replacement: resolve(workspaceRoot, 'packages/photoshop-bridge-plugin-core/src/index.ts') },
   { find: '@debrute/photoshop-uxp-plugin', replacement: resolve(workspaceRoot, 'apps/photoshop-uxp-plugin/src/main.ts') }
 ];

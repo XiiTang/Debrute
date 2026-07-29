@@ -1428,6 +1428,7 @@ impl ProjectService {
                 self.indexed_files.push(ProjectPathEntry {
                     project_relative_path: relative,
                     kind: super::ProjectPathKind::File,
+                    size_bytes: Some(metadata.len()),
                 });
                 continue;
             }
@@ -1437,6 +1438,7 @@ impl ProjectService {
             self.indexed_files.push(ProjectPathEntry {
                 project_relative_path: relative.clone(),
                 kind: super::ProjectPathKind::Directory,
+                size_bytes: None,
             });
             self.indexed_files
                 .extend(list_project_subtree_files(&self.root, &relative)?);

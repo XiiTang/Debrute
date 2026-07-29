@@ -13,6 +13,7 @@ import {
   explorerContextMenuProjectRelativePaths,
   projectedContextMenuNode,
   type ProjectPathCommand,
+  type PhotoshopDocumentTarget,
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget,
   type WorkbenchFileClipboard
@@ -38,6 +39,7 @@ type ExplorerContextCommands = Pick<ProjectExplorerController,
 
 export function runProjectPathCommand(input: {
   command: ProjectPathCommand;
+  photoshopTarget?: PhotoshopDocumentTarget;
   contextMenu: { target: WorkbenchContextMenuTarget; position: WorkbenchContextMenuPosition } | undefined;
   activeProjection: CanvasProjection | undefined;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
@@ -46,6 +48,12 @@ export function runProjectPathCommand(input: {
   explorerCommands: ExplorerContextCommands;
   copyText: (text: string) => void | Promise<void>;
   notify: (message: string) => void;
+  startNotification: (message: string) => (message: string) => void;
+  photoshopLabels: {
+    sending(path: string, documentTitle: string): string;
+    sent(path: string, documentTitle: string): string;
+    failed(message: string): string;
+  };
   closeContextMenu: () => void;
   openInspectorPanel: () => void;
   confirmPermanentDelete: (input: { entries: ProjectPathEntry[] }) => boolean;
@@ -211,8 +219,24 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'send-to-photoshop') {
-    if (primaryEntry.kind === 'file') {
-      input.actions.openSendToPhotoshopPicker(primaryEntry.projectRelativePath);
+    if (primaryEntry.kind === 'file' && input.photoshopTarget) {
+      const destination = input.photoshopTarget;
+      const updateNotification = input.startNotification(input.photoshopLabels.sending(
+        primaryEntry.projectRelativePath,
+        destination.title
+      ));
+      void input.actions.sendProjectFileToPhotoshop({
+        projectRelativePath: primaryEntry.projectRelativePath,
+        pluginSessionId: destination.pluginSessionId,
+        documentId: destination.documentId
+      }).then((result) => {
+        updateNotification(input.photoshopLabels.sent(
+          primaryEntry.projectRelativePath,
+          result.documentTitle
+        ));
+      }).catch((error) => {
+        updateNotification(input.photoshopLabels.failed(errorMessage(error)));
+      });
     }
     input.closeContextMenu();
     return true;
@@ -232,6 +256,10 @@ function runSinglePathFileCommand(
     return true;
   }
   return false;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function runExplorerSpecificCommand(

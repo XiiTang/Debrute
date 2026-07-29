@@ -281,6 +281,20 @@ fn visible_project_walk_excludes_internal_and_temporary_files() {
     .expect("temporary file should be written");
 
     let entries = list_project_files(project.as_ref()).expect("project walk should succeed");
+    assert_eq!(
+        entries
+            .iter()
+            .find(|entry| entry.project_relative_path == "assets/visible.txt")
+            .and_then(|entry| entry.size_bytes),
+        Some(7)
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .find(|entry| entry.project_relative_path == "assets")
+            .and_then(|entry| entry.size_bytes),
+        None
+    );
     let paths = entries
         .into_iter()
         .map(|entry| entry.project_relative_path)
@@ -1170,6 +1184,7 @@ fn canvas_map_parser_is_closed_and_expansion_uses_natural_order() {
         .map(|path| ProjectPathEntry {
             project_relative_path: path.to_owned(),
             kind: ProjectPathKind::File,
+            size_bytes: None,
         })
         .collect::<Vec<_>>();
     let expanded = expand_canvas_map(&map, &entries).expect("map should expand");
@@ -1923,6 +1938,7 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
         &[ProjectPathEntry {
             project_relative_path: "source/one.txt".to_owned(),
             kind: ProjectPathKind::File,
+            size_bytes: None,
         }],
         "target",
     )
@@ -1933,6 +1949,7 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
         &[ProjectPathEntry {
             project_relative_path: "target/one.txt".to_owned(),
             kind: ProjectPathKind::File,
+            size_bytes: None,
         }],
         "source",
         true,
@@ -1944,6 +1961,7 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
         &[ProjectPathEntry {
             project_relative_path: "target/note.txt".to_owned(),
             kind: ProjectPathKind::File,
+            size_bytes: None,
         }],
     )
     .expect("file should delete");
@@ -1968,6 +1986,39 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
         fs::read_to_string(project.as_ref().join("target/upload/file.txt"))
             .expect("uploaded file should be readable"),
         "uploaded"
+    );
+}
+
+#[test]
+fn temporary_upload_file_commits_without_consuming_source() {
+    let project = TemporaryDirectory::new("temporary-upload-project");
+    fs::create_dir(project.as_ref().join("target")).expect("upload target should be created");
+    let upload = TemporaryDirectory::new("temporary-upload-source");
+    let source = upload.as_ref().join("payload.png");
+    fs::write(&source, b"uploaded from a temporary file")
+        .expect("temporary upload fixture should be written");
+
+    let results = import_upload_project_entries(
+        project.as_ref(),
+        &[ProjectUploadEntry::TemporaryFile {
+            project_relative_path: "target/payload.png".to_owned(),
+            temporary_path: source.clone(),
+        }],
+        "target",
+        false,
+    )
+    .expect("temporary upload should commit");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].project_relative_path, "target/payload.png");
+    assert_eq!(
+        fs::read(project.as_ref().join("target/payload.png"))
+            .expect("committed upload should be readable"),
+        b"uploaded from a temporary file"
+    );
+    assert_eq!(
+        fs::read(&source).expect("temporary upload source should remain readable"),
+        b"uploaded from a temporary file"
     );
 }
 
@@ -2086,10 +2137,12 @@ fn project_copy_rejects_nested_symlinks_before_copying_any_entry() {
             ProjectPathEntry {
                 project_relative_path: "source/first.txt".to_owned(),
                 kind: ProjectPathKind::File,
+                size_bytes: None,
             },
             ProjectPathEntry {
                 project_relative_path: "source/folder".to_owned(),
                 kind: ProjectPathKind::Directory,
+                size_bytes: None,
             },
         ],
         "target",
@@ -2808,6 +2861,42 @@ fn registry_uses_typed_uses_serialized_mutations_and_snapshot_first_streams() {
     assert_eq!(project_id, reopened.session.project_id());
     drop(reopened.project_use);
     registry.close().expect("registry should close cleanly");
+}
+
+#[test]
+fn committed_project_revision_notifies_the_registry_change_projection() {
+    let project = TemporaryDirectory::new("registry-revision-change");
+    let home = TemporaryDirectory::new("registry-revision-change-home");
+    let changes = Arc::new(AtomicUsize::new(0));
+    let callback_changes = Arc::clone(&changes);
+    let registry = ProjectSessionRegistry::with_change_callback(
+        home.as_ref(),
+        Arc::new(FixedNodeAdapter),
+        feedback_artifacts(),
+        Arc::new(move || {
+            callback_changes.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    let opened = registry
+        .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+        .expect("Project should open");
+    let after_open = changes.load(Ordering::SeqCst);
+
+    opened
+        .session
+        .execute(ProjectCommand::CreateCanvas)
+        .expect("Project mutation should commit");
+
+    assert_eq!(changes.load(Ordering::SeqCst), after_open + 1);
+    fs::write(project.as_ref().join("external.txt"), "external")
+        .expect("external file should be written");
+    opened
+        .session
+        .apply_watched_change_for_test("external.txt")
+        .expect("watcher mutation should commit");
+    assert_eq!(changes.load(Ordering::SeqCst), after_open + 2);
+    drop(opened.project_use);
+    registry.close().expect("registry should close");
 }
 
 #[test]

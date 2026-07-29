@@ -6,8 +6,6 @@
     { "path": "packages/runtime-control-client" },
     { "path": "apps/desktop" },
     { "path": "apps/web" },
-    { "path": "packages/photoshop-bridge-plugin-core" },
-    { "path": "apps/photoshop-uxp-plugin" },
-    { "path": "apps/photoshop-cep-plugin" }
+    { "path": "apps/photoshop-uxp-plugin" }
   ]
 }

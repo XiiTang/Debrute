@@ -38,9 +38,7 @@ use debrute_runtime::{
     },
     global::DefaultFrontend,
     login::require_stable_runtime_entrypoint,
-    photoshop::{
-        PHOTOSHOP_BRIDGE_PROTOCOL_VERSION, PhotoshopDiscoveryPayload, PhotoshopDiscoveryServer,
-    },
+    photoshop::PhotoshopGatewayServer,
     product::{
         CommitPhase, CommitPlatform, DesktopHostRegistration, NativeUpdatePlatform,
         ProductBootstrap, ProductCommitCoordinator, ProductCommitError, ProductStore,
@@ -662,10 +660,8 @@ fn run_runtime_services(
             .into());
         }
         workbench.check_running()?;
-        let discovery = start_photoshop_discovery(state, &runtime_services, workbench.origin());
-        runtime_services
-            .photoshop()
-            .set_discovery_status(discovery.status());
+        let _photoshop_gateway =
+            PhotoshopGatewayServer::start(Arc::clone(runtime_services.photoshop()));
         let requested_completion = std::env::var_os("DEBRUTE_COMPLETE_PRODUCT_UPDATE")
             .map(|expected_version| {
                 expected_version.into_string().map_err(|_| {
@@ -836,32 +832,6 @@ fn activation_for_resume_target(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn start_photoshop_discovery(
-    state: &RuntimeControlState,
-    services: &WorkbenchRuntimeServices,
-    origin: &str,
-) -> PhotoshopDiscoveryServer {
-    let origin = origin.to_owned();
-    let instance_id = state.instance_id();
-    let photoshop = Arc::clone(services.photoshop());
-    PhotoshopDiscoveryServer::start(Arc::new(move || {
-        let enabled = photoshop.state().is_ok_and(|state| state.settings.enabled);
-        PhotoshopDiscoveryPayload {
-            product: "debrute",
-            product_version: env!("CARGO_PKG_VERSION").to_owned(),
-            bridge_version: PHOTOSHOP_BRIDGE_PROTOCOL_VERSION,
-            runtime_instance_id: instance_id.clone(),
-            enabled,
-            workbench_origin: origin.clone(),
-            api_base_url: format!("{origin}/api/adobe-bridge"),
-            ws_url: format!(
-                "{}/api/adobe-bridge/plugin/ws",
-                origin.replacen("http://", "ws://", 1)
-            ),
-        }
-    }))
-}
-
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 struct PlatformRuntimeActivation {
     state: Arc<RuntimeControlState>,
@@ -977,10 +947,9 @@ impl PlatformRuntimeActivation {
                 RuntimeActionError::WorkbenchUnavailable
                 | RuntimeActionError::WorkbenchLaunch(_) => ControlErrorCode::InvalidActivation,
             })?;
-        match open_url(&url) {
-            Ok(status) if status.success() => Ok(ActivationOutcome::Opened),
-            Ok(_) | Err(_) => Err(ControlErrorCode::InvalidActivation),
-        }
+        open_url(&url)
+            .map(|()| ActivationOutcome::Opened)
+            .map_err(|_| ControlErrorCode::InvalidActivation)
     }
 }
 
@@ -1058,13 +1027,22 @@ fn debrute_home() -> io::Result<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn open_url(url: &str) -> io::Result<std::process::ExitStatus> {
-    Command::new("/usr/bin/open").arg(url).status()
+fn open_url(url: &str) -> io::Result<()> {
+    let status = Command::new("/usr/bin/open").arg(url).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "open exited with status {status}"
+        )))
+    }
 }
 
 #[cfg(target_os = "windows")]
-fn open_url(url: &str) -> io::Result<std::process::ExitStatus> {
-    Command::new("explorer.exe").arg(url).status()
+fn open_url(url: &str) -> io::Result<()> {
+    // Explorer hands URLs to the registered browser but may still exit with code 1.
+    // A successfully spawned process is therefore the Windows commit boundary.
+    Command::new("explorer.exe").arg(url).spawn().map(|_| ())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

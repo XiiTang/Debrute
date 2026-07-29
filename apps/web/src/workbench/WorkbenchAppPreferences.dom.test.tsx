@@ -2,7 +2,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  type AdobeBridgeStateView,
   type DebruteShellApi,
   type DebruteGlobalSettingsView,
   type DebruteProductState,
@@ -60,11 +59,6 @@ const apiState = vi.hoisted(() => {
           throw new Error('WorkbenchApp test Global Projection was not configured.');
         }
         return state.globalProjection;
-      }
-      if (property === 'ensureAdobeBridgeState') {
-        return async () => {
-          await state.api!.adobeBridgeRefreshState();
-        };
       }
       const value = Reflect.get(state.api, property, state.api);
       if (property === 'openProject' && typeof value === 'function') {
@@ -157,9 +151,9 @@ describe('WorkbenchApp preferences and project behavior', () => {
       product: productStateFixture()
     });
     apiState.globalProjection.acceptEvent({
-      type: 'adobeBridge.state.changed',
+      type: 'photoshop.state.changed',
       revision: 0,
-      state: adobeBridgeStateFixture()
+      state: { sessions: [] }
     });
     apiState.projectProjection = createWorkbenchProjectProjection();
     apiState.listeners.clear();
@@ -388,21 +382,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await unmount(root, container);
     });
-  });
-
-  it('uses streamed Adobe live state without a duplicate REST load', async () => {
-    const adobeBridgeRefreshState = vi.fn(async () => ({ ok: true as const }));
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', { adobeBridgeRefreshState });
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
-    expect(adobeBridgeRefreshState).not.toHaveBeenCalled();
-
-    await unmount(root, container);
   });
 
   it('replaces the Project-scoped event subscription when the initial generation opens', async () => {
@@ -852,136 +831,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('loads Adobe state on first Send to Photoshop intent without opening Settings', async () => {
-    apiState.globalProjection = createWorkbenchGlobalProjection();
-    apiState.globalProjection.acceptSnapshot({ revision: 0, settings: globalSettingsFixture() });
-    apiState.globalProjection.acceptEvent({
-      type: 'integrations.changed',
-      revision: 0,
-      integrations: { integrations: [], backends: [] }
-    });
-    apiState.globalProjection.acceptEvent({
-      type: 'product.changed',
-      revision: 0,
-      product: productStateFixture()
-    });
-    const adobeBridgeRefreshState = vi.fn(async () => ({ ok: true as const }));
-    const projectSnapshot = stackOrderSnapshotFixture();
-    const projection = projectSnapshot.projections[0]!;
-    canvasRuntimeState.runtime = createCanvasEditorRuntime({
-      canvasId: projection.canvasId,
-      initialProjection: projection,
-      submitManualLayout: async () => undefined
-    });
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
-      adobeBridgeRefreshState,
-      openProject: vi.fn(async () => ({
-        projectId: 'project-1',
-        projectRevision: 1,
-        snapshot: projectSnapshot,
-        workingCopies: emptyWorkingCopies()
-      }))
-    }, WorkbenchAppWithMockedCanvas);
-
-    await vi.waitFor(() => expect(canvasRuntimeState.actions).toBeDefined());
-    await act(async () => {
-      canvasRuntimeState.actions!.openSendToPhotoshopPicker('flow/a.png');
-      await Promise.resolve();
-    });
-
-    expect(adobeBridgeRefreshState).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain('Loading Photoshop clients');
-
-    await act(async () => {
-      emitWorkbenchEvent({
-        type: 'adobeBridge.state.changed',
-        revision: 1,
-        state: adobeBridgeStateWithPhotoshopClient({
-          links: [{
-            linkId: 'link-1',
-            projectId: 'project-1',
-            pluginInstanceId: 'photoshop-1',
-            createdAt: '2026-07-10T00:00:00.000Z',
-            status: 'active'
-          }]
-        })
-      });
-    });
-
-    expect(container.textContent).toContain('Photoshop 2026');
-    await unmount(root, container);
-  });
-
-  describe('Adobe Bridge settings state', { tags: ['settings'] }, () => {
-    it('opens the streamed Adobe state without issuing a duplicate REST request', async () => {
-      const adobeBridgeRefreshState = vi.fn(async () => ({ ok: true as const }));
-      const { container, root } = await renderWorkbenchApp('/', { adobeBridgeRefreshState });
-
-      await act(async () => {
-        requireButton(container, 'Settings').click();
-        await Promise.resolve();
-      });
-      await waitForButton(container, 'Adobe Bridge');
-      await act(async () => {
-        requireButton(container, 'Adobe Bridge').click();
-        await Promise.resolve();
-      });
-      expect(container.querySelector('.adobe-bridge-settings-page')).not.toBeNull();
-      expect(adobeBridgeRefreshState).not.toHaveBeenCalled();
-
-      await unmount(root, container);
-    });
-
-    it('shows an authoritative Adobe link event without a stale request error', async () => {
-      const { link, container, root } = await startPendingAdobeLink();
-
-      await act(async () => {
-        emitWorkbenchEvent({
-          type: 'adobeBridge.state.changed', revision: 1,
-          state: adobeBridgeStateWithPhotoshopClient({
-            links: [{
-              linkId: 'link-1',
-              projectId: 'project-1',
-              pluginInstanceId: 'photoshop-1',
-              createdAt: '2026-07-10T00:00:00.000Z',
-              status: 'active'
-            }]
-          })
-        });
-        link.reject(new Error('stale link failure'));
-        await link.promise.catch(() => undefined);
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      expect(requireButton(container, 'Disconnect').disabled).toBe(false);
-      expect(container.querySelector('.adobe-bridge-settings-page .db-form-error')).toBeNull();
-      await unmount(root, container);
-    });
-
-    it('shows a current Adobe link error after an unrelated Adobe event', async () => {
-      const { link, container, root } = await startPendingAdobeLink();
-
-      await act(async () => {
-        emitWorkbenchEvent({
-          type: 'adobeBridge.state.changed', revision: 1,
-          state: adobeBridgeStateWithPhotoshopClient({
-            settings: { enabled: true, discoveryStatus: 'unavailable' }
-          })
-        });
-        link.reject(new Error('Photoshop link failed'));
-        await link.promise.catch(() => undefined);
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      expect(requireButton(container, 'Connect').disabled).toBe(false);
-      expect(container.querySelector('.adobe-bridge-settings-page .db-form-error')?.textContent)
-        .toBe('Photoshop link failed');
-      await unmount(root, container);
-    });
-  });
-
   describe('global settings save races', { tags: ['settings'] }, () => {
     it('does not roll a newer settings event back when an older save fails', async () => {
       const { save, container, root } = await startPendingDefaultFrontendSave();
@@ -1053,41 +902,6 @@ async function startPendingDefaultFrontendSave(): Promise<{
   expect(globalSettingsSave).toHaveBeenCalledTimes(1);
 
   return { save, container, root };
-}
-
-async function startPendingAdobeLink(): Promise<{
-  link: ReturnType<typeof deferred<{ ok: true }>>;
-  container: HTMLDivElement;
-  root: Root;
-}> {
-  const link = deferred<{ ok: true }>();
-  const { container, root } = await renderWorkbenchApp('/projects/project-1', {
-    adobeBridgeLinkPhotoshop: vi.fn(() => link.promise)
-  });
-
-  await act(async () => {
-    emitWorkbenchEvent({
-      type: 'adobeBridge.state.changed', revision: 1,
-      state: adobeBridgeStateWithPhotoshopClient()
-    });
-  });
-  await act(async () => {
-    requireButton(container, 'Settings').click();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-  const adobeBridgeButton = await waitForButton(container, 'Adobe Bridge');
-  await act(async () => {
-    adobeBridgeButton.click();
-    await Promise.resolve();
-  });
-  const connectButton = await waitForButton(container, 'Connect');
-  await act(async () => {
-    connectButton.click();
-    await Promise.resolve();
-  });
-
-  return { link, container, root };
 }
 
 async function renderWorkbenchApp(
@@ -1199,10 +1013,6 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       integrationId: 'imagemagick',
       operation: 'install'
     })),
-    adobeBridgeRefreshState: vi.fn(async () => ({ ok: true as const })),
-    adobeBridgeCreatePairing: vi.fn(async () => ({ pairingId: 'pairing-1', code: '123456', expiresAt: '2026-07-17T00:00:00Z' })),
-    adobeBridgeCancelPairing: vi.fn(async () => undefined),
-    adobeBridgeRemovePairing: vi.fn(async () => ({ ok: true as const })),
     openProject: vi.fn(async () => ({
       projectId: 'project-1',
       projectRevision: 1,
@@ -1255,7 +1065,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       video: [],
       audio: []
     },
-    adobeBridge: { enabled: true },
     ...overrides
   };
 }
@@ -1272,35 +1081,6 @@ function imageSettingsFixture(): ImageModelSettingRecord[] {
     requestModelIdOverride: null,
     apiKeySet: false
   }];
-}
-
-function adobeBridgeStateFixture(overrides: Partial<AdobeBridgeStateView> = {}): AdobeBridgeStateView {
-  return {
-    settings: { enabled: true, discoveryStatus: 'available' },
-    pairedPlugins: [],
-    clients: [],
-    projects: [],
-    links: [],
-    transfers: [],
-    ...overrides
-  };
-}
-
-function adobeBridgeStateWithPhotoshopClient(overrides: Partial<AdobeBridgeStateView> = {}): AdobeBridgeStateView {
-  return adobeBridgeStateFixture({
-    clients: [{
-      pluginInstanceId: 'photoshop-1',
-      hostApp: 'photoshop',
-      hostVersion: '2026',
-      clientRuntime: 'uxp',
-      displayName: 'Photoshop 2026',
-      documentCount: 0,
-      activeDocumentTitle: null,
-      connectedAt: '2026-07-10T00:00:00.000Z',
-      lastSeenAt: '2026-07-10T00:00:00.000Z'
-    }],
-    ...overrides
-  });
 }
 
 function deferred<T>(): {

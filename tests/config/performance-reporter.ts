@@ -221,7 +221,7 @@ function groupForProject(projectName: string): PerformanceGroupDefinition {
   if (projectName === 'contracts' || projectName.startsWith('unit-')) {
     return GROUP_1;
   }
-  if (projectName === 'dom-web') {
+  if (projectName.startsWith('dom-')) {
     return GROUP_2;
   }
   if (projectName === 'release') {

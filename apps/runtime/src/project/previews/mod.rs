@@ -1242,6 +1242,7 @@ mod tests {
                 &[ProjectPathEntry {
                     project_relative_path: "assets/source.png".to_owned(),
                     kind: ProjectPathKind::File,
+                    size_bytes: None,
                 }],
             )
             .unwrap();

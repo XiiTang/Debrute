@@ -132,6 +132,7 @@ impl ProjectNativeShellService {
             .map(|entry| ProjectPathEntry {
                 project_relative_path: entry.relative,
                 kind: entry.kind,
+                size_bytes: None,
             })
             .collect())
     }
@@ -647,10 +648,12 @@ mod tests {
             ProjectPathEntry {
                 project_relative_path: "folder/child/file.txt".to_owned(),
                 kind: ProjectPathKind::File,
+                size_bytes: None,
             },
             ProjectPathEntry {
                 project_relative_path: "folder".to_owned(),
                 kind: ProjectPathKind::Directory,
+                size_bytes: None,
             },
         ];
         let top_level =
@@ -663,6 +666,7 @@ mod tests {
             ProjectPathEntry {
                 project_relative_path: "missing.txt".to_owned(),
                 kind: ProjectPathKind::File,
+                size_bytes: None,
             },
         ];
         assert!(validate_entries(&root, &invalid).is_err());
@@ -671,6 +675,7 @@ mod tests {
             ProjectPathEntry {
                 project_relative_path: "folder/../outside".to_owned(),
                 kind: ProjectPathKind::File,
+                size_bytes: None,
             },
         ];
         assert!(validate_entries(&root, &invalid_nested).is_err());
@@ -688,6 +693,7 @@ mod tests {
             &ProjectPathEntry {
                 project_relative_path: "folder/file.txt".to_owned(),
                 kind: ProjectPathKind::File,
+                size_bytes: None,
             },
         )
         .unwrap();

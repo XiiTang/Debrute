@@ -1,15 +1,11 @@
-//! Photoshop-specific discovery, pairing, session, link, and transfer authority.
+//! Photoshop-specific UXP session and file-transfer integration.
 
-mod discovery;
 mod error;
-mod pairing;
-mod service;
-mod transfer;
+mod gateway;
+mod integration;
 mod types;
 
-pub use discovery::*;
 pub use error::*;
-pub use pairing::*;
-pub use service::*;
-pub(crate) use transfer::*;
+pub use gateway::*;
+pub use integration::*;
 pub use types::*;

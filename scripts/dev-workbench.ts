@@ -19,6 +19,7 @@ const developmentOptions = parseWorkbenchDevelopmentOptions(process.argv.slice(2
 let vite: ChildProcess | undefined;
 let stopping = false;
 let shutdown: Promise<void> | undefined;
+let removeRuntimeLost = () => undefined;
 const stopRuntimeOnExit = process.env.DEBRUTE_DEV_STOP_RUNTIME_ON_EXIT === '1';
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -40,6 +41,17 @@ if (registration.result !== 'dev_workbench_origin_registered') {
   control.close();
   throw new Error(`Runtime rejected source Workbench registration: ${registration.result}`);
 }
+removeRuntimeLost = control.onRuntimeLost((error) => {
+  if (stopping) return;
+  process.stderr.write(
+    `Debrute Runtime stopped during source development (${error.code}): ${error.message}. Restart pnpm dev.\n`
+  );
+  process.exitCode = 1;
+  void stopDevelopment().catch((cleanupError) => {
+    console.error(cleanupError);
+    process.exitCode = 1;
+  });
+});
 const launchUrl = new URL('/', viteOrigin);
 const openArguments = process.env.DEBRUTE_DEV_NO_OPEN === '1'
   ? []
@@ -83,6 +95,7 @@ try {
 function stopDevelopment(): Promise<void> {
   stopping = true;
   shutdown ??= (async () => {
+    removeRuntimeLost();
     const results = await Promise.allSettled([
       stopDevelopmentChild(vite, { label: 'Vite development server' }),
       (async () => {

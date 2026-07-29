@@ -1,6 +1,12 @@
-import type { ProjectPathEntry } from '@debrute/app-protocol';
+import {
+  PHOTOSHOP_MAX_FILE_BYTES,
+  photoshopPlacementFormatForPath,
+  type PhotoshopPlacementFormat,
+  type PhotoshopPlacementRequirement,
+  type PhotoshopStateView,
+  type ProjectPathEntry
+} from '@debrute/app-protocol';
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
-import { isSupportedAdobeBridgeWorkbenchFile } from '../adobe-bridge/adobeBridgeLabels';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 
@@ -28,6 +34,7 @@ export interface WorkbenchCanvasContextMenuTarget {
   source: 'canvas';
   kind: WorkbenchContextMenuTargetKind;
   projectRelativePath: string;
+  sizeBytes?: number;
 }
 
 export type WorkbenchExplorerContextMenuTarget =
@@ -65,9 +72,22 @@ export type WorkbenchContextMenuItem =
       disabled?: boolean;
     }
   | {
+      kind: 'photoshop-submenu';
+      command: 'send-to-photoshop';
+      targets: PhotoshopDocumentTarget[];
+    }
+  | {
       kind: 'separator';
       id: string;
     };
+
+export interface PhotoshopDocumentTarget {
+  pluginSessionId: string;
+  documentId: number;
+  title: string;
+  disabled?: boolean;
+  requirement?: PhotoshopPlacementRequirement;
+}
 
 export function buildWorkbenchContextMenuItems(input: {
   target: WorkbenchContextMenuTarget;
@@ -75,7 +95,7 @@ export function buildWorkbenchContextMenuItems(input: {
   canSelectCanvasNode?: boolean | undefined;
   canRevealInCanvas: boolean;
   fileClipboard?: WorkbenchFileClipboard | undefined;
-  adobeBridgeEnabled?: boolean | undefined;
+  photoshop?: PhotoshopStateView | undefined;
 }): WorkbenchContextMenuItem[] {
   if (input.target.source === 'explorer' && input.target.targetKind === 'root') {
     return [
@@ -116,7 +136,7 @@ function buildSinglePathContextMenuItems(input: {
   canSelectCanvasNode?: boolean | undefined;
   canRevealInCanvas: boolean;
   fileClipboard?: WorkbenchFileClipboard | undefined;
-  adobeBridgeEnabled?: boolean | undefined;
+  photoshop?: PhotoshopStateView | undefined;
 }): WorkbenchContextMenuItem[] {
   const explorerItem = input.target.source === 'explorer';
   const directory = input.targetEntry.kind === 'directory';
@@ -149,10 +169,11 @@ function buildSinglePathContextMenuItems(input: {
     action('open-terminal'),
     action('copy-path'),
     canvasProjectRoot ? undefined : action('copy-relative-path'),
-    input.targetEntry.kind === 'file'
-      && input.adobeBridgeEnabled === true
-      && isSupportedAdobeBridgeWorkbenchFile(input.targetEntry.projectRelativePath)
-      ? action('send-to-photoshop')
+    isPhotoshopTransferEligible(input.targetEntry)
+      ? photoshopSubmenu(
+          input.photoshop,
+          photoshopPlacementFormatForPath(input.targetEntry.projectRelativePath)!
+        )
       : undefined,
     action('reveal-in-system-file-manager')
   ]);
@@ -179,8 +200,20 @@ function groupedMenuItems(groups: Array<{ id: string; items: WorkbenchContextMen
 export function explorerContextMenuEntries(target: WorkbenchContextMenuTarget): ProjectPathEntry[] {
   return target.source === 'explorer' ? target.paths : [{
     projectRelativePath: target.projectRelativePath,
-    kind: target.kind
+    kind: target.kind,
+    ...(target.sizeBytes === undefined ? {} : { sizeBytes: target.sizeBytes })
   }];
+}
+
+export function isPhotoshopTransferEligible(entry: ProjectPathEntry): boolean {
+  if (entry.kind !== 'file'
+    || entry.sizeBytes === undefined
+    || entry.sizeBytes < 0
+    || entry.sizeBytes > PHOTOSHOP_MAX_FILE_BYTES
+  ) {
+    return false;
+  }
+  return photoshopPlacementFormatForPath(entry.projectRelativePath) !== undefined;
 }
 
 export function explorerContextMenuPrimaryEntry(target: WorkbenchContextMenuTarget): ProjectPathEntry | undefined {
@@ -244,6 +277,28 @@ function action(
 
 function separator(id: string): WorkbenchContextMenuItem {
   return { kind: 'separator', id };
+}
+
+function photoshopSubmenu(
+  state: PhotoshopStateView | undefined,
+  format: PhotoshopPlacementFormat
+): WorkbenchContextMenuItem {
+  return {
+    kind: 'photoshop-submenu',
+    command: 'send-to-photoshop',
+    targets: state?.sessions.flatMap((session) => {
+      const compatible = session.placementMimeTypes.includes(format.mimeType);
+      return session.documents.map((document) => ({
+        pluginSessionId: session.pluginSessionId,
+        documentId: document.documentId,
+        title: document.title,
+        ...(compatible ? {} : {
+          disabled: true,
+          ...(format.requirement === undefined ? {} : { requirement: format.requirement })
+        })
+      }));
+    }) ?? []
+  };
 }
 
 function compactMenuItems(items: Array<WorkbenchContextMenuItem | undefined>): WorkbenchContextMenuItem[] {

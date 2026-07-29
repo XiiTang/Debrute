@@ -1,6 +1,7 @@
 export type ProjectFileEntryLike = {
   kind: 'file' | 'directory';
   projectRelativePath: string;
+  sizeBytes?: number;
 };
 
 export type ProjectFileTreeNode = ProjectFileTreeDirectory | ProjectFileTreeFile;
@@ -16,6 +17,7 @@ export interface ProjectFileTreeFile {
   kind: 'file';
   name: string;
   path: string;
+  sizeBytes?: number;
 }
 
 interface MutableDirectory {
@@ -63,7 +65,8 @@ export function buildProjectFileTree(entries: ProjectFileEntryLike[]): ProjectFi
       current.files.set(name, {
         kind: 'file',
         name,
-        path: normalizedPath
+        path: normalizedPath,
+        ...(entry.sizeBytes === undefined ? {} : { sizeBytes: entry.sizeBytes })
       });
     }
   }

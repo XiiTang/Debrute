@@ -330,7 +330,7 @@ function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
     product: { status: 'ready', value: null },
     resolvedTheme: 'dark',
     projectOpen: { opening: false },
-    adobeBridge: { status: 'ready', value: { settings: { enabled: true, discoveryStatus: 'available' }, pairedPlugins: [], clients: [], projects: [], links: [], transfers: [] } },
+    photoshop: { status: 'ready', value: { sessions: [] } },
     canvasFeedback: undefined,
     textFileBuffers: {},
     textEditorWindows: {},
@@ -395,7 +395,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
     },
     chrome: { recentProjects: [] },
     models: { image: [], video: [], audio: [] },
-    adobeBridge: { enabled: true },
     ...overrides
   };
 }

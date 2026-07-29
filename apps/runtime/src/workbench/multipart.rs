@@ -43,19 +43,6 @@ pub(super) struct MultipartParts {
     directory: PathBuf,
 }
 
-#[derive(Debug)]
-pub(super) struct TemporaryBody {
-    pub path: PathBuf,
-    pub byte_length: u64,
-    directory: PathBuf,
-}
-
-impl Drop for TemporaryBody {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.directory);
-    }
-}
-
 impl Drop for MultipartParts {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.directory);
@@ -87,61 +74,6 @@ pub(super) async fn read_multipart_limited(
         .await
         .map_err(|error| multipart_error(error.to_string()))?;
     let result = parse_body(request, &boundary, directory.clone(), limits).await;
-    if result.is_err() {
-        let _ = tokio::fs::remove_dir_all(&directory).await;
-    }
-    result
-}
-
-pub(super) async fn read_temporary_body(
-    request: Request,
-    maximum: u64,
-) -> Result<TemporaryBody, RuntimeHttpServiceError> {
-    if request
-        .headers()
-        .get(header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .is_some_and(|length| length > maximum)
-    {
-        return Err(too_large());
-    }
-    let directory = std::env::temp_dir().join(format!("debrute-body-{}", Uuid::new_v4()));
-    tokio::fs::create_dir(&directory)
-        .await
-        .map_err(|error| multipart_error(error.to_string()))?;
-    let path = directory.join("body.upload");
-    let result = async {
-        let mut file = File::create_new(&path)
-            .await
-            .map_err(|error| multipart_error(error.to_string()))?;
-        let mut stream = request.into_body().into_data_stream();
-        let mut byte_length = 0u64;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|error| multipart_error(error.to_string()))?;
-            byte_length = byte_length
-                .checked_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX))
-                .ok_or_else(too_large)?;
-            if byte_length > maximum {
-                return Err(too_large());
-            }
-            file.write_all(&chunk)
-                .await
-                .map_err(|error| multipart_error(error.to_string()))?;
-        }
-        file.flush()
-            .await
-            .map_err(|error| multipart_error(error.to_string()))?;
-        file.sync_all()
-            .await
-            .map_err(|error| multipart_error(error.to_string()))?;
-        Ok(TemporaryBody {
-            path,
-            byte_length,
-            directory: directory.clone(),
-        })
-    }
-    .await;
     if result.is_err() {
         let _ = tokio::fs::remove_dir_all(&directory).await;
     }

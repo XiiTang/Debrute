@@ -17,7 +17,6 @@ glossaries instead.
 - [Product Version Is Runtime Owned](./0006-product-version-is-runtime-owned.md)
 - [Workbench Owns Its Visual Primitive Layer](./0007-workbench-owns-its-visual-primitive-layer.md)
 - [Signed Manifest Authenticates Product Updates](./0008-signed-manifest-authenticates-product-updates.md)
-- [Photoshop Bridge Uses A Link-Scoped Protocol](./0009-photoshop-bridge-uses-link-scoped-protocol.md)
 - [Integration Operations Are Catalog-Defined](./0010-integration-operations-are-catalog-defined.md)
 - [Remote Media Fetches Bind Validated DNS](./0011-remote-media-fetches-bind-validated-dns.md)
 - [Project Paths Are Realpath-Bound](./0012-project-paths-are-realpath-bound.md)
@@ -32,9 +31,9 @@ glossaries instead.
 
 This section groups Runtime, Desktop, and Web decisions. Model Operation and
 Agent Model Request decisions are grouped in the following sections. The
-packaged connection topology is defined jointly by ADR-0004, ADR-0009, and
-ADR-0020: deterministic private native control, one dynamic same-origin
-Workbench listener, and one narrow fixed Photoshop discovery listener.
+packaged connection topology is defined jointly by ADR-0004, ADR-0020, and
+ADR-0065: deterministic private native control, one dynamic same-origin
+Workbench listener, and one bounded-pool Photoshop gateway.
 
 - [Runtime Lifetime Is Independent Of Frontends](./0014-runtime-lifetime-is-independent-of-frontends.md)
 - [Runtime Uses One Process](./0015-runtime-uses-one-process.md)
@@ -57,6 +56,11 @@ Workbench listener, and one narrow fixed Photoshop discovery listener.
 - [Desktop Does Not Recover Lost Connections](./0032-desktop-does-not-recover-lost-connections.md)
 - [Workbench Connection Lifetime Follows Its Document](./0033-workbench-session-lifetime-follows-its-container.md)
 - [Workbench Optional Features Activate On Intent](./0060-workbench-optional-features-activate-on-intent.md)
+- [Photoshop Transfers Bind An Explicit Document](./0061-photoshop-transfers-bind-an-exact-document.md)
+- [Photoshop Receiver Lifetime Follows Photoshop](./0062-photoshop-receiver-lifetime-follows-photoshop.md)
+- [Photoshop Transfers Use Explicit Live Targets](./0063-photoshop-transfers-use-explicit-live-targets.md)
+- [Photoshop Connections Use Ephemeral Runtime Sessions](./0064-photoshop-connections-use-ephemeral-runtime-sessions.md)
+- [Photoshop Gateway Uses A Bounded Loopback Port Pool](./0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md)
 - [Unexpected Runtime Panics Fail The Process](./0056-unexpected-runtime-panics-fail-the-process.md)
 - [Model API Key Reveal Is Explicit And Transient](./0057-model-api-key-reveal-is-explicit-and-transient.md)
 
@@ -115,3 +119,7 @@ and enforced by Rust and contract tests.
 
 Project currently has no context-only ADR. Its qualifying decisions cross
 application or context boundaries and therefore live in the system-wide set.
+
+## Superseded Decisions
+
+- [Photoshop Bridge Uses A Link-Scoped Protocol](./0009-photoshop-bridge-uses-link-scoped-protocol.md) — its current Photoshop mechanics are superseded by ADRs 0063–0065.

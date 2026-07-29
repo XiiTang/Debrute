@@ -104,18 +104,6 @@ pub struct ModelConfig {
     pub request_model_id_override: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdobeBridgeSettings {
-    pub enabled: bool,
-}
-
-impl Default for AdobeBridgeSettings {
-    fn default() -> Self {
-        Self { enabled: true }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GlobalSettingsConfig {
@@ -123,7 +111,6 @@ pub struct GlobalSettingsConfig {
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
     pub models: Vec<ModelConfig>,
-    pub adobe_bridge: AdobeBridgeSettings,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,7 +132,6 @@ pub struct GlobalSettingsView {
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
     pub models: ModelSettingsView,
-    pub adobe_bridge: AdobeBridgeSettings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -398,7 +384,6 @@ fn project_view(snapshot: &GlobalConfigSnapshot, catalog: &ModelCatalog) -> Glob
         canvas: snapshot.settings.canvas.clone(),
         chrome: snapshot.settings.chrome.clone(),
         models: settings_view(snapshot, catalog),
-        adobe_bridge: snapshot.settings.adobe_bridge.clone(),
     }
 }
 
@@ -410,7 +395,7 @@ fn apply_patch(
     let patch = closed_patch_record(
         input,
         "Global settings patch",
-        &["workbench", "canvas", "modelSetting", "adobeBridge"],
+        &["workbench", "canvas", "modelSetting"],
     )?;
     if let Some(value) = patch.get("workbench") {
         let workbench = closed_patch_record(
@@ -453,13 +438,6 @@ fn apply_patch(
             &mut snapshot.settings.models,
             &mut snapshot.secrets.model_api_keys,
         )?;
-    }
-    if let Some(value) = patch.get("adobeBridge") {
-        let bridge = closed_patch_record(value, "Global settings adobeBridge", &["enabled"])?;
-        let Some(enabled) = bridge.get("enabled").and_then(Value::as_bool) else {
-            return validation("Adobe Bridge config must contain enabled.");
-        };
-        snapshot.settings.adobe_bridge.enabled = enabled;
     }
     Ok(snapshot)
 }

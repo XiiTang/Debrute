@@ -1,6 +1,7 @@
 import {
   buildWorkbenchContextMenuItems,
   type ProjectPathCommand,
+  type PhotoshopDocumentTarget,
   type WorkbenchContextMenuItem,
   type WorkbenchContextMenuTarget
 } from '../shell/contextMenu';
@@ -23,7 +24,8 @@ export interface ProjectPathCommandCoordinator {
   ): WorkbenchContextMenuItem[];
   run(
     command: ProjectPathCommand,
-    contextMenu: Parameters<typeof runProjectPathCommand>[0]['contextMenu']
+    contextMenu: Parameters<typeof runProjectPathCommand>[0]['contextMenu'],
+    photoshopTarget?: PhotoshopDocumentTarget
   ): void;
 }
 
@@ -42,7 +44,7 @@ export function createProjectPathCommandCoordinator(input: {
       });
       return input.canStartCommand() ? items : disableActions(items);
     },
-    run: (command, contextMenu) => {
+    run: (command, contextMenu, photoshopTarget) => {
       if (!input.canStartCommand()) {
         input.commandContext.closeContextMenu();
         return;
@@ -61,14 +63,21 @@ export function createProjectPathCommandCoordinator(input: {
           ? input.commandContext.getProjectSnapshot()
           : undefined,
         command,
-        contextMenu
+        contextMenu,
+        ...(photoshopTarget === undefined ? {} : { photoshopTarget })
       });
     }
   };
 }
 
 function disableActions(items: WorkbenchContextMenuItem[]): WorkbenchContextMenuItem[] {
-  return items.map((item) => item.kind === 'action'
-    ? { ...item, disabled: true }
-    : item);
+  return items.map((item) => {
+    if (item.kind === 'action') {
+      return { ...item, disabled: true };
+    }
+    if (item.kind === 'photoshop-submenu') {
+      return { ...item, targets: [] };
+    }
+    return item;
+  });
 }

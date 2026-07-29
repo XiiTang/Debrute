@@ -1106,11 +1106,13 @@ pub fn list_project_directory(
             result.push(ProjectPathEntry {
                 project_relative_path: relative,
                 kind: ProjectPathKind::Directory,
+                size_bytes: None,
             });
         } else if file_type.is_file() && is_project_visible_path(&relative) {
             result.push(ProjectPathEntry {
                 project_relative_path: relative,
                 kind: ProjectPathKind::File,
+                size_bytes: Some(entry.metadata()?.len()),
             });
         }
     }
@@ -1145,6 +1147,7 @@ pub(crate) fn list_explicit_project_path(
         return Ok(vec![ProjectPathEntry {
             project_relative_path: relative,
             kind: ProjectPathKind::File,
+            size_bytes: Some(metadata.len()),
         }]);
     }
     if !metadata.is_dir() {
@@ -1154,6 +1157,7 @@ pub(crate) fn list_explicit_project_path(
     let mut result = vec![ProjectPathEntry {
         project_relative_path: relative.clone(),
         kind: ProjectPathKind::Directory,
+        size_bytes: None,
     }];
     let mut pending = vec![relative];
     while let Some(directory) = pending.pop() {
@@ -1220,6 +1224,11 @@ where
                     ProjectPathKind::Directory
                 } else {
                     ProjectPathKind::File
+                },
+                size_bytes: if is_file {
+                    Some(entry.metadata()?.len())
+                } else {
+                    None
                 },
             });
             if is_dir {
@@ -1335,12 +1344,16 @@ impl ProjectIgnoreStack {
 }
 
 fn is_background_index_path(path: &str) -> bool {
-    is_project_visible_path(path)
-        && !path.split('/').any(|segment| {
-            DEFAULT_BACKGROUND_EXCLUDED_DIRECTORIES
-                .iter()
-                .any(|excluded| segment.eq_ignore_ascii_case(excluded))
-        })
+    is_project_visible_path(path) && !is_project_fixed_heavy_path(path)
+}
+
+#[must_use]
+pub(crate) fn is_project_fixed_heavy_path(path: &str) -> bool {
+    path.split('/').any(|segment| {
+        DEFAULT_BACKGROUND_EXCLUDED_DIRECTORIES
+            .iter()
+            .any(|excluded| segment.eq_ignore_ascii_case(excluded))
+    })
 }
 
 #[must_use]

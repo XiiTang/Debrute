@@ -18,7 +18,7 @@ describe('workbenchEvents', () => {
       'recentProjects.changed',
       'globalSettings.changed',
       'integrations.changed',
-      'adobeBridge.state.changed',
+      'photoshop.state.changed',
       'product.changed'
     ];
 

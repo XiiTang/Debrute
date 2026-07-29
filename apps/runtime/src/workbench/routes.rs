@@ -9,20 +9,16 @@
 use std::{
     any::Any,
     convert::Infallible,
-    fs::File,
     future::Future,
-    io::Read as _,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    thread,
-    time::Duration,
 };
 
 use axum::{
     Json, Router,
     body::{Body, Bytes, to_bytes},
-    extract::{Extension, Path, Query, Request, State},
+    extract::{Extension, Path, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header, header::SET_COOKIE},
     response::{IntoResponse, Response, sse::Event, sse::Sse},
     routing::{delete, get, patch, post, put},
@@ -34,11 +30,6 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     global::{GlobalRuntimeChange, GlobalRuntimeEvent},
-    photoshop::{
-        PHOTOSHOP_BRIDGE_MAX_FRAME_BYTES, PHOTOSHOP_BRIDGE_MAX_UPLOAD_BYTES,
-        PhotoshopBridgeErrorCode, PhotoshopHelloMessage, PhotoshopRuntimeMessage,
-        RuntimePhotoshopMessage,
-    },
     project::{ProjectChange, ProjectStreamItem},
 };
 
@@ -46,17 +37,13 @@ use super::{
     FeedbackWorkingCopy, ProductUpdateInitiator, RuntimeHttpServiceError, TextWorkingCopy,
     WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService, WorkbenchProjectBindingOutcome,
     WorkbenchRuntimeServices,
-    multipart::{MultipartLimits, read_multipart_limited, read_temporary_body},
+    multipart::{MultipartLimits, read_multipart_limited},
     public_project_snapshot,
     routing::{
-        BrowserSession, CliRequestAuthorization, PluginAuthorization, ProjectAuthorization,
-        WorkbenchRouterState, browser_session_cookie, error_response,
+        BrowserSession, CliRequestAuthorization, ProjectAuthorization, WorkbenchRouterState,
+        browser_session_cookie, error_response,
     },
     services::public_canvas_projection,
-    websocket::{
-        WebSocketConnection, WebSocketMessage, WebSocketUpgrade, read_message, read_text,
-        write_close, write_pong, write_text,
-    },
 };
 
 const MAX_JSON_BODY_BYTES: usize = 2 * 1024 * 1024;
@@ -209,6 +196,11 @@ pub(super) async fn workbench_connection(
             "integrations": integrations
         }));
     }
+    let _ = sender.try_send(json!({
+        "type": "photoshop.state.changed",
+        "revision": global_revision,
+        "state": services.photoshop().state()
+    }));
     let global_sender = sender.clone();
     let global_services = Arc::clone(&services);
     let global_credential = context.credential.clone();
@@ -298,26 +290,8 @@ pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
         .route("/projects/open", post(project_open))
         .route("/projects/choose", post(project_choose))
         .route("/projects/replace", post(project_replace))
-        .route("/adobe-bridge/state/refresh", post(photoshop_state_refresh))
-        .route("/adobe-bridge/pairings", post(photoshop_pairing_create))
         .route(
-            "/adobe-bridge/pairings/{pairing_id}",
-            delete(photoshop_pairing_cancel),
-        )
-        .route(
-            "/adobe-bridge/plugin-instances/{plugin_instance_id}/pairing",
-            delete(photoshop_pairing_remove),
-        )
-        .route(
-            "/projects/{project_id}/adobe-bridge/links",
-            post(photoshop_link),
-        )
-        .route(
-            "/projects/{project_id}/adobe-bridge/links/{plugin_instance_id}",
-            delete(photoshop_unlink),
-        )
-        .route(
-            "/projects/{project_id}/adobe-bridge/send-to-photoshop",
+            "/projects/{project_id}/photoshop/send",
             post(photoshop_send),
         )
         .merge(project_domain_router())
@@ -556,26 +530,6 @@ pub(super) fn cli_api_router() -> Router<WorkbenchRouterState> {
         .route("/model-operations", post(cli_model_operation_submit))
 }
 
-pub(super) fn plugin_api_router() -> Router<WorkbenchRouterState> {
-    Router::new()
-        .route("/ws", get(photoshop_plugin_websocket))
-        .route(
-            "/projects/{project_id}/link",
-            post(photoshop_plugin_link).delete(photoshop_plugin_link),
-        )
-        .route(
-            "/projects/{project_id}/uploads",
-            post(photoshop_plugin_upload),
-        )
-}
-
-pub(super) fn plugin_transfer_router() -> Router<WorkbenchRouterState> {
-    Router::new().route(
-        "/{transfer_id}/content",
-        get(photoshop_transfer_content).head(photoshop_transfer_content),
-    )
-}
-
 async fn clear_recent_projects(State(state): State<WorkbenchRouterState>) -> Response {
     let services = Arc::clone(&state.services);
     match services.global().clear_recent_projects() {
@@ -594,10 +548,7 @@ async fn global_settings_patch(
         Err(response) => return response,
     };
     match services.global().settings_save(&body) {
-        Ok(view) => {
-            services.photoshop().set_enabled(view.adobe_bridge.enabled);
-            Json(json!({"ok": true})).into_response()
-        }
+        Ok(_) => Json(json!({"ok": true})).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
     }
 }
@@ -809,100 +760,6 @@ fn project_binding_response(outcome: WorkbenchProjectBindingOutcome) -> Response
     }
 }
 
-async fn photoshop_state_refresh(State(state): State<WorkbenchRouterState>) -> Response {
-    let services = Arc::clone(&state.services);
-    match tokio::task::spawn_blocking(move || {
-        let view = services.photoshop().state()?;
-        services
-            .global()
-            .publish_external(GlobalRuntimeChange::PhotoshopBridgeChanged(view.clone()));
-        Ok::<_, crate::photoshop::PhotoshopBridgeError>(view)
-    })
-    .await
-    {
-        Ok(Ok(_)) => Json(json!({ "ok": true })).into_response(),
-        Ok(Err(error)) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-        Err(error) => error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "adobe_bridge_state_unavailable",
-            error.to_string(),
-        ),
-    }
-}
-
-async fn photoshop_pairing_create(
-    State(state): State<WorkbenchRouterState>,
-    Extension(browser): Extension<BrowserSession>,
-) -> Response {
-    let services = Arc::clone(&state.services);
-    match services.photoshop().create_pairing(&browser.0) {
-        Ok(pairing) => Json(pairing).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
-async fn photoshop_pairing_cancel(
-    State(state): State<WorkbenchRouterState>,
-    Extension(browser): Extension<BrowserSession>,
-    Path(pairing_id): Path<String>,
-) -> Response {
-    let services = Arc::clone(&state.services);
-    match services.photoshop().cancel_pairing(&browser.0, &pairing_id) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
-async fn photoshop_pairing_remove(
-    State(state): State<WorkbenchRouterState>,
-    Path(plugin_instance_id): Path<String>,
-) -> Response {
-    let services = Arc::clone(&state.services);
-    match services.photoshop().remove_pairing(&plugin_instance_id) {
-        Ok(_) => Json(json!({ "ok": true })).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
-async fn photoshop_link(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    request: Request,
-) -> Response {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        plugin_instance_id: String,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(body) => body,
-        Err(response) => return response,
-    };
-    let services = Arc::clone(&state.services);
-    match services
-        .photoshop()
-        .link_project_for_browser(&scope.project_id, &input.plugin_instance_id)
-    {
-        Ok(_) => Json(json!({ "ok": true })).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
-async fn photoshop_unlink(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, plugin_instance_id)): Path<(String, String)>,
-) -> Response {
-    let services = Arc::clone(&state.services);
-    match services
-        .photoshop()
-        .unlink_project_for_browser(&scope.project_id, &plugin_instance_id)
-    {
-        Ok(_) => Json(json!({ "ok": true })).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
 async fn photoshop_send(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
@@ -912,312 +769,27 @@ async fn photoshop_send(
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
         project_relative_path: String,
-        plugin_instance_id: String,
+        plugin_session_id: String,
+        document_id: u64,
     }
     let input: Input = match json_body(request).await {
         Ok(body) => body,
         Err(response) => return response,
     };
-    let services = Arc::clone(&state.services);
-    match services.photoshop().send_project_file(
-        &scope.project_id,
-        &input.plugin_instance_id,
-        &input.project_relative_path,
-        &state.origin,
-    ) {
-        Ok(dispatch) => {
-            if let Err(error) =
-                services.send_photoshop_message(&dispatch.plugin_session_id, dispatch.message)
-            {
-                services
-                    .photoshop()
-                    .disconnect_session(&dispatch.plugin_session_id);
-                return service_error_response(error);
-            }
-            Json(json!({"transfer": dispatch.transfer})).into_response()
-        }
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
-async fn photoshop_plugin_websocket(
-    State(state): State<WorkbenchRouterState>,
-    request: Request,
-) -> Response {
-    let services = Arc::clone(&state.services);
-    let upgrade = match WebSocketUpgrade::from_request(request) {
-        Ok(upgrade) => upgrade,
-        Err(response) => return response,
-    };
-    upgrade.on_upgrade(move |connection| {
-        tokio::spawn(run_photoshop_websocket(connection, services));
-    })
-}
-
-async fn run_photoshop_websocket(
-    connection: WebSocketConnection,
-    services: Arc<WorkbenchRuntimeServices>,
-) {
-    let (mut reader, mut writer) = tokio::io::split(connection.into_io());
-    let challenge = match services.photoshop().begin_handshake() {
-        Ok(challenge) => challenge,
-        Err(error) => {
-            let _ = write_photoshop_error(&mut writer, &error).await;
-            let _ = write_close(&mut writer).await;
-            return;
-        }
-    };
-    if write_photoshop_message(&mut writer, &challenge.message)
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let hello = tokio::time::timeout(
-        Duration::from_secs(5),
-        read_text(&mut reader, PHOTOSHOP_BRIDGE_MAX_FRAME_BYTES),
-    )
-    .await;
-    let Ok(Ok(Some(hello))) = hello else {
-        let _ = write_close(&mut writer).await;
-        return;
-    };
-    let hello = match serde_json::from_str::<PhotoshopHelloMessage>(&hello) {
-        Ok(hello) => hello,
-        Err(error) => {
-            let _ = write_photoshop_message(
-                &mut writer,
-                &RuntimePhotoshopMessage::BridgeError {
-                    code: PhotoshopBridgeErrorCode::InvalidTransferPayload,
-                    message: error.to_string(),
-                },
-            )
-            .await;
-            let _ = write_close(&mut writer).await;
-            return;
-        }
-    };
-    let admission = match services
+    match state
+        .services
         .photoshop()
-        .complete_handshake(&challenge.challenge_id, &hello)
+        .send_project_file(
+            &scope.project_id,
+            &input.project_relative_path,
+            &input.plugin_session_id,
+            input.document_id,
+        )
+        .await
     {
-        Ok(admission) => admission,
-        Err(error) => {
-            let _ = write_photoshop_error(&mut writer, &error).await;
-            let _ = write_close(&mut writer).await;
-            return;
-        }
-    };
-    let session_id = admission.grant.plugin_session_id.clone();
-    let ready = RuntimePhotoshopMessage::BridgeReady {
-        plugin_session_id: session_id.clone(),
-        bearer: admission.grant.bearer,
-        state: admission.grant.state,
-    };
-    let (sender, mut receiver) = mpsc::channel(64);
-    services.register_photoshop_socket(
-        session_id.clone(),
-        admission.replaced_session_id.as_deref(),
-        sender,
-    );
-    if write_photoshop_message(&mut writer, &ready).await.is_ok() {
-        loop {
-            tokio::select! {
-                outbound = receiver.recv() => {
-                    let Some(outbound) = outbound else { break; };
-                    if write_photoshop_message(&mut writer, &outbound).await.is_err() {
-                        break;
-                    }
-                }
-                incoming = read_message(&mut reader, PHOTOSHOP_BRIDGE_MAX_FRAME_BYTES) => {
-                    let incoming = match incoming {
-                        Ok(Some(WebSocketMessage::Text(incoming))) => incoming,
-                        Ok(Some(WebSocketMessage::Ping(payload))) => {
-                            if write_pong(&mut writer, &payload).await.is_err() { break; }
-                            continue;
-                        }
-                        Ok(Some(WebSocketMessage::Pong)) => continue,
-                        Ok(Some(WebSocketMessage::Close) | None) | Err(_) => break,
-                    };
-                    let message = match serde_json::from_str::<PhotoshopRuntimeMessage>(&incoming) {
-                        Ok(message) => message,
-                        Err(error) => {
-                            if write_photoshop_message(
-                                &mut writer,
-                                &RuntimePhotoshopMessage::BridgeError {
-                                    code: PhotoshopBridgeErrorCode::InvalidTransferPayload,
-                                    message: error.to_string(),
-                                },
-                            ).await.is_err() {
-                                break;
-                            }
-                            continue;
-                        }
-                    };
-                    if let Err(error) = services.photoshop().update_plugin_message(&session_id, message) {
-                        let _ = write_photoshop_error(&mut writer, &error).await;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    services.unregister_photoshop_socket(&session_id);
-    services.photoshop().disconnect_session(&session_id);
-    let _ = write_close(&mut writer).await;
-}
-
-async fn photoshop_plugin_link(
-    State(state): State<WorkbenchRouterState>,
-    Extension(plugin): Extension<PluginAuthorization>,
-    Path(project_id): Path<String>,
-    headers: HeaderMap,
-    method: Method,
-) -> Response {
-    if let Err(response) = require_plugin_instance(&headers, &plugin) {
-        return response;
-    }
-    let services = Arc::clone(&state.services);
-    let result = if method == Method::POST {
-        services
-            .photoshop()
-            .link_project_for_plugin(&plugin.bearer, &project_id)
-    } else {
-        services
-            .photoshop()
-            .unlink_project_for_plugin(&plugin.bearer, &project_id)
-    };
-    match result {
-        Ok(view) => Json(view).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
-async fn photoshop_plugin_upload(
-    State(state): State<WorkbenchRouterState>,
-    Extension(plugin): Extension<PluginAuthorization>,
-    Path(project_id): Path<String>,
-    headers: HeaderMap,
-    request: Request,
-) -> Response {
-    if let Err(response) = require_plugin_instance(&headers, &plugin) {
-        return response;
-    }
-    let transfer_id = match required_header(&headers, "x-debrute-transfer-id") {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let target_directory = match required_percent_header(&headers, "x-debrute-target-directory") {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let suggested_name = match required_percent_header(&headers, "x-debrute-suggested-name") {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let mime_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .unwrap_or_default()
-        .trim()
-        .to_owned();
-    let declared_byte_length = match headers
-        .get(header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-    {
-        Some(length) => length,
-        None => return invalid_header(),
-    };
-    let body = match read_temporary_body(request, PHOTOSHOP_BRIDGE_MAX_UPLOAD_BYTES as u64).await {
-        Ok(body) => body,
-        Err(error) => return service_error_response(error),
-    };
-    if body.byte_length != declared_byte_length {
-        return service_error_response(RuntimeHttpServiceError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_transfer_payload",
-            "Photoshop upload length does not match Content-Length.",
-        ));
-    }
-    let services = Arc::clone(&state.services);
-    match services.photoshop().import_png_file(
-        &plugin.bearer,
-        &transfer_id,
-        &project_id,
-        &target_directory,
-        &suggested_name,
-        &mime_type,
-        declared_byte_length,
-        body.path.clone(),
-    ) {
         Ok(result) => Json(result).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
     }
-}
-
-async fn photoshop_transfer_content(
-    State(state): State<WorkbenchRouterState>,
-    Extension(plugin): Extension<PluginAuthorization>,
-    Path(transfer_id): Path<String>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
-    method: Method,
-) -> Response {
-    let token = query.get("token").map(String::as_str).unwrap_or_default();
-    let services = Arc::clone(&state.services);
-    match services
-        .photoshop()
-        .take_download(&plugin.bearer, &transfer_id, token)
-    {
-        Ok(plan) => Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, plan.mime_type)
-            .header(header::CONTENT_LENGTH, plan.byte_length)
-            .header(
-                header::CONTENT_DISPOSITION,
-                format!(
-                    "attachment; filename=\"{}\"",
-                    safe_header_filename(&plan.file_name)
-                ),
-            )
-            .body(if method == Method::HEAD {
-                Body::empty()
-            } else {
-                Body::from_stream(BlockingFileStream::new(plan.file))
-            })
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
-    }
-}
-
-async fn write_photoshop_message<Writer>(
-    writer: &mut Writer,
-    message: &RuntimePhotoshopMessage,
-) -> std::io::Result<()>
-where
-    Writer: tokio::io::AsyncWrite + Unpin,
-{
-    let text = serde_json::to_string(message)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    write_text(writer, &text).await
-}
-
-async fn write_photoshop_error<Writer>(
-    writer: &mut Writer,
-    error: &crate::photoshop::PhotoshopBridgeError,
-) -> std::io::Result<()>
-where
-    Writer: tokio::io::AsyncWrite + Unpin,
-{
-    write_photoshop_message(
-        writer,
-        &RuntimePhotoshopMessage::BridgeError {
-            code: error.code(),
-            message: error.to_string(),
-        },
-    )
-    .await
 }
 
 async fn cli_run(State(state): State<WorkbenchRouterState>, request: Request) -> Response {
@@ -1362,8 +934,8 @@ fn global_event_value(event: GlobalRuntimeEvent) -> Value {
             "revision": event.revision,
             "integrations": integrations
         }),
-        GlobalRuntimeChange::PhotoshopBridgeChanged(state) => json!({
-            "type": "adobeBridge.state.changed",
+        GlobalRuntimeChange::PhotoshopChanged(state) => json!({
+            "type": "photoshop.state.changed",
             "revision": event.revision,
             "state": state
         }),
@@ -1465,106 +1037,6 @@ impl Stream for JsonEventStream {
     }
 }
 
-struct BlockingFileStream {
-    receiver: mpsc::Receiver<Result<Bytes, std::io::Error>>,
-}
-
-impl BlockingFileStream {
-    fn new(mut file: File) -> Self {
-        let (sender, receiver) = mpsc::channel(8);
-        thread::spawn(move || {
-            loop {
-                let mut buffer = vec![0_u8; 64 * 1024];
-                match file.read(&mut buffer) {
-                    Ok(0) => return,
-                    Ok(length) => {
-                        buffer.truncate(length);
-                        if sender.blocking_send(Ok(Bytes::from(buffer))).is_err() {
-                            return;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = sender.blocking_send(Err(error));
-                        return;
-                    }
-                }
-            }
-        });
-        Self { receiver }
-    }
-}
-
-impl Stream for BlockingFileStream {
-    type Item = Result<Bytes, std::io::Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(context)
-    }
-}
-
-fn require_plugin_instance(
-    headers: &HeaderMap,
-    plugin: &PluginAuthorization,
-) -> Result<(), Response> {
-    let supplied = required_header(headers, "x-debrute-plugin-instance")?;
-    if supplied == plugin.plugin_instance_id {
-        Ok(())
-    } else {
-        Err(error_response(
-            StatusCode::FORBIDDEN,
-            "forbidden",
-            "Photoshop plugin identity does not match its live bearer.",
-        ))
-    }
-}
-
-fn required_header(headers: &HeaderMap, name: &'static str) -> Result<String, Response> {
-    match one_header(headers, name) {
-        Ok(Some(value)) if !value.trim().is_empty() => Ok(value.to_owned()),
-        _ => Err(invalid_header()),
-    }
-}
-
-fn required_percent_header(headers: &HeaderMap, name: &'static str) -> Result<String, Response> {
-    percent_decode(&required_header(headers, name)?).ok_or_else(invalid_header)
-}
-
-fn percent_decode(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let high = hex_value(*bytes.get(index + 1)?)?;
-            let low = hex_value(*bytes.get(index + 2)?)?;
-            decoded.push(high << 4 | low);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(decoded).ok()
-}
-
-const fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
-fn safe_header_filename(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| {
-            character.is_ascii_graphic() && !matches!(character, '"' | '\\' | '\r' | '\n')
-        })
-        .collect()
-}
-
 pub(super) async fn json_body<T: DeserializeOwned>(request: Request) -> Result<T, Response> {
     let bytes = to_bytes(request.into_body(), MAX_JSON_BODY_BYTES)
         .await
@@ -1619,14 +1091,6 @@ pub(super) fn service_error_response(error: RuntimeHttpServiceError) -> Response
         })),
     )
         .into_response()
-}
-
-fn invalid_header() -> Response {
-    error_response(
-        StatusCode::BAD_REQUEST,
-        "invalid_header",
-        "Required Runtime header is absent or ambiguous.",
-    )
 }
 
 fn one_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<Option<&'a str>, ()> {

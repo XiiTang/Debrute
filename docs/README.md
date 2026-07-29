@@ -42,7 +42,7 @@ when prose and implementation differ.
 - [Model generation](./model-generation.md)
 - [Generated Assets and Model Runs](./generated-assets.md)
 - [Local integrations](./integrations.md)
-- [Photoshop Bridge](./photoshop-bridge.md)
+- [Photoshop file transfer](./photoshop.md)
 
 ## Engineering
 

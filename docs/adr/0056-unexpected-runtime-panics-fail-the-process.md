@@ -9,7 +9,7 @@ current process's availability rather than continue from potentially
 inconsistent in-memory authority; a later explicit launch starts a new Runtime
 under the existing no-automatic-restart contract.
 
-This includes Adobe Bridge authority and its Workbench socket registry:
+This includes Photoshop transfer authority and its socket registry:
 poisoned locks and impossible internal transitions panic. They are not exposed
 as a recoverable `state_poisoned` protocol or HTTP error.
 
@@ -18,11 +18,10 @@ or replaced plugin session and a duplicate client-supplied upload id remain
 typed protocol failures. A missing or duplicate session reverse index, a
 duplicate Runtime-generated id, a second socket registration for one accepted
 session, or a prepared transfer that cannot settle is an internal invariant
-failure and panics. A Project closing between Bridge listing and snapshot is a
-normal race and is omitted from that projection. Any other failure to publish
-the committed Global Bridge projection is process-fatal; a per-socket
-projection error is sent to that still-live socket, and only an invalid session
-or an unavailable outbound queue makes the socket stale.
+failure and panics. A Project closing between listing and snapshot is a normal
+race and is omitted from that projection. Any other failure to publish
+committed Photoshop state is process-fatal; an invalid session or unavailable
+outbound queue makes the socket stale.
 
 The same process-fatal rule applies when a monotonic Global event revision,
 integration-projection generation, or current-Runtime Model Operation issued

@@ -11,6 +11,7 @@ export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
     ...unitConfig.test,
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx']
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    exclude: ['src/**/*Interaction.test.ts', 'src/**/*Interaction.test.tsx']
   }
 });

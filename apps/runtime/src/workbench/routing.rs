@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
     extract::{ConnectInfo, OriginalUri, Request, State},
     http::{
-        HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
+        HeaderMap, HeaderName, Method, StatusCode,
         header::{AUTHORIZATION, COOKIE, HOST, ORIGIN},
     },
     middleware::{self, Next},
@@ -20,13 +20,9 @@ use super::{
     RuntimeProductHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
     WorkbenchLaunchService, WorkbenchRuntimeServices, authority::is_opaque_value,
 };
-use crate::photoshop::{PHOTOSHOP_CEP_FILE_ORIGIN, PHOTOSHOP_UXP_ORIGIN};
 use crate::project::is_valid_stable_project_id;
 
-use super::routes::{
-    browser_api_router, cli_api_router, plugin_api_router, plugin_transfer_router,
-    product_api_router,
-};
+use super::routes::{browser_api_router, cli_api_router, product_api_router};
 
 #[derive(Clone)]
 pub(super) struct WorkbenchRouterState {
@@ -52,12 +48,6 @@ pub(super) struct ProjectAuthorization {
     pub project_id: String,
     _binding_generation: u64,
     _lease: ProjectBindingLease,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct PluginAuthorization {
-    pub bearer: String,
-    pub plugin_instance_id: String,
 }
 
 pub(super) fn workbench_router(
@@ -106,25 +96,9 @@ pub(super) fn workbench_router(
         "/api/workbench/connection",
         post(super::routes::workbench_connection),
     );
-    let plugin_api =
-        plugin_api_router()
-            .fallback(route_not_found)
-            .layer(middleware::from_fn_with_state(
-                state.clone(),
-                authorize_plugin_api,
-            ));
-    let plugin_transfers =
-        plugin_transfer_router()
-            .fallback(route_not_found)
-            .layer(middleware::from_fn_with_state(
-                state.clone(),
-                authorize_plugin_api,
-            ));
     Router::new()
         .merge(connection_route)
         .nest("/api/cli", cli_api)
-        .nest("/api/adobe-bridge/plugin", plugin_api)
-        .nest("/api/adobe-bridge/transfers", plugin_transfers)
         .nest("/api", workbench_api)
         .fallback(serve_web_asset)
         .layer(middleware::from_fn_with_state(
@@ -143,7 +117,7 @@ async fn serve_web_asset(State(state): State<WorkbenchRouterState>, request: Req
         );
     }
     let path = request.uri().path().trim_start_matches('/');
-    if matches!(path.split('/').next(), Some("api" | "adobe-bridge")) {
+    if matches!(path.split('/').next(), Some("api")) {
         return route_not_found_response();
     }
     if path.split('/').any(|segment| {
@@ -430,144 +404,6 @@ async fn authorize_cli_api(
     next.run(request).await
 }
 
-async fn authorize_plugin_api(
-    State(state): State<WorkbenchRouterState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let Ok(Some(origin)) = one_header(request.headers(), ORIGIN) else {
-        return forbidden();
-    };
-    let origin = origin.to_owned();
-    if !matches!(
-        origin.as_str(),
-        PHOTOSHOP_UXP_ORIGIN | PHOTOSHOP_CEP_FILE_ORIGIN
-    ) {
-        return forbidden();
-    }
-    let path = request.uri().path();
-    let Some(allowed_methods) = plugin_allowed_methods(path) else {
-        return route_not_found_response();
-    };
-    if request.method() == Method::OPTIONS {
-        let requested_method = one_header(
-            request.headers(),
-            axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
-        )
-        .ok()
-        .flatten();
-        if requested_method.is_none_or(|method| {
-            !allowed_methods
-                .split(',')
-                .any(|allowed| allowed.trim() == method)
-        }) || !plugin_preflight_headers_allowed(request.headers())
-        {
-            return forbidden();
-        }
-        let mut response = plugin_cors_response(StatusCode::NO_CONTENT.into_response(), &origin);
-        response.headers_mut().insert(
-            axum::http::header::ACCESS_CONTROL_ALLOW_METHODS,
-            HeaderValue::from_static(allowed_methods),
-        );
-        response.headers_mut().insert(
-            axum::http::header::ACCESS_CONTROL_MAX_AGE,
-            HeaderValue::from_static("600"),
-        );
-        return response;
-    }
-    if request.headers().contains_key(COOKIE) {
-        return forbidden();
-    }
-    let is_websocket = path == "/ws"
-        && has_exact_header(request.headers(), axum::http::header::UPGRADE, "websocket");
-    let mut request = request;
-    if is_websocket {
-        if request.headers().contains_key(AUTHORIZATION) {
-            return forbidden();
-        }
-    } else {
-        let Ok(Some(authorization)) = one_header(request.headers(), AUTHORIZATION) else {
-            return forbidden();
-        };
-        let Some(bearer) = authorization.strip_prefix("Bearer ") else {
-            return forbidden();
-        };
-        let bearer = bearer.to_owned();
-        let services = &state.services;
-        let plugin_instance_id = match services.photoshop().state_for_bearer(&bearer) {
-            Ok(view) => view
-                .paired_plugins
-                .first()
-                .map(|plugin| plugin.plugin_instance_id.clone()),
-            Err(_) => None,
-        };
-        let Some(plugin_instance_id) = plugin_instance_id else {
-            return forbidden();
-        };
-        request.extensions_mut().insert(PluginAuthorization {
-            bearer,
-            plugin_instance_id,
-        });
-    }
-    let response = next.run(request).await;
-    plugin_cors_response(response, &origin)
-}
-
-fn plugin_cors_response(mut response: Response, origin: &str) -> Response {
-    if let Ok(value) = HeaderValue::from_str(origin) {
-        response
-            .headers_mut()
-            .insert(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
-    }
-    response.headers_mut().insert(
-        axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
-        HeaderValue::from_static(
-            "Authorization, Content-Type, X-Debrute-Plugin-Instance, X-Debrute-Transfer-Id, X-Debrute-Target-Directory, X-Debrute-Suggested-Name",
-        ),
-    );
-    response
-        .headers_mut()
-        .insert(axum::http::header::VARY, HeaderValue::from_static("Origin"));
-    response
-}
-
-fn plugin_allowed_methods(path: &str) -> Option<&'static str> {
-    let segments = path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-    match segments.as_slice() {
-        ["ws"] => Some("GET"),
-        ["projects", project_id, "link"] if is_opaque_value(project_id) => Some("POST, DELETE"),
-        ["projects", project_id, "uploads"] if is_opaque_value(project_id) => Some("POST"),
-        [transfer_id, "content"] if is_opaque_value(transfer_id) => Some("GET, HEAD"),
-        _ => None,
-    }
-}
-
-fn plugin_preflight_headers_allowed(headers: &HeaderMap) -> bool {
-    let Ok(requested) = one_header(headers, axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS)
-    else {
-        return false;
-    };
-    const ALLOWED: &[&str] = &[
-        "authorization",
-        "content-type",
-        "x-debrute-plugin-instance",
-        "x-debrute-transfer-id",
-        "x-debrute-target-directory",
-        "x-debrute-suggested-name",
-    ];
-    requested.is_none_or(|requested| {
-        requested.split(',').map(str::trim).all(|name| {
-            !name.is_empty()
-                && ALLOWED
-                    .iter()
-                    .any(|allowed| name.eq_ignore_ascii_case(allowed))
-        })
-    })
-}
-
 fn route_not_found_response() -> Response {
     error_response(
         StatusCode::NOT_FOUND,
@@ -685,26 +521,6 @@ fn is_passive_project_media_route(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn plugin_surface_has_exact_methods_and_origins() {
-        assert_eq!(plugin_allowed_methods("/ws"), Some("GET"));
-        assert_eq!(
-            plugin_allowed_methods("/projects/project-1/link"),
-            Some("POST, DELETE")
-        );
-        assert_eq!(
-            plugin_allowed_methods("/projects/project-1/uploads"),
-            Some("POST")
-        );
-        assert_eq!(
-            plugin_allowed_methods("/transfer-1/content"),
-            Some("GET, HEAD")
-        );
-        assert_eq!(plugin_allowed_methods("/projects/project-1/unknown"), None);
-        assert_ne!(PHOTOSHOP_UXP_ORIGIN, "null");
-        assert_ne!(PHOTOSHOP_CEP_FILE_ORIGIN, "null");
-    }
 
     #[test]
     fn static_asset_cache_detection_requires_a_content_hash_segment() {

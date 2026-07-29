@@ -7,8 +7,8 @@ already-live id. It does not derive aliases from paths, generate replacement
 ids, or preserve an old identity format.
 
 A session remains open only while at least one typed Project Use exists. The
-closed use vocabulary is Workbench, request, running terminal, transfer, and
-Photoshop link. Uses express actual ownership of live Project
+closed use vocabulary is Workbench, request, running terminal, and transfer.
+Uses express actual ownership of live Project
 resources; they are not client sessions, transport credentials, idle timers, or
 generic reference counts exposed on the wire. Releasing the last use closes the
 live session immediately and installs a closing transition for its canonical

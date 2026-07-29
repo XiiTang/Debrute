@@ -1,6 +1,5 @@
 import type {
   AddProjectPathToCanvasMapInput,
-  AdobeBridgeStateView,
   DebruteGlobalSettingsView,
   DebruteProductState,
   CanvasTextPreviewSourceAvailabilityRequest,
@@ -9,6 +8,7 @@ import type {
   CanvasVideoPreviewSourceResponse,
   GeneratedAssetMetadataLookup,
   IntegrationSettingsView,
+  PhotoshopStateView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   SaveCanvasTextPreviewSourceInput,
@@ -48,7 +48,7 @@ export interface WorkbenchState {
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
-  adobeBridge: SettingsResource<AdobeBridgeStateView>;
+  photoshop: EventProjection<PhotoshopStateView>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   textEditorWindows: Record<string, FloatingTextEditorWindowState>;
@@ -85,18 +85,11 @@ export interface FloatingTextEditorWindowState {
 export interface WorkbenchActions {
   checkProductUpdate: () => Promise<void>;
   applyProductUpdate: () => Promise<void>;
-  reloadAdobeBridge: () => Promise<void>;
   saveGlobalSettings: (input: SaveDebruteGlobalSettingsInput) => Promise<void>;
   revealModelApiKey: (modelId: string) => Promise<string>;
   rescanIntegrations: () => Promise<void>;
   runIntegrationOperation: (input: RunIntegrationOperationInput) => Promise<RunIntegrationOperationResult>;
-  createAdobeBridgePairing: () => Promise<{ pairingId: string; code: string; expiresAt: string }>;
-  cancelAdobeBridgePairing: (pairingId: string) => Promise<void>;
-  removeAdobeBridgePairing: (pluginInstanceId: string) => Promise<void>;
-  linkAdobeBridgePhotoshop: (input: { pluginInstanceId: string }) => Promise<void>;
-  unlinkAdobeBridgePhotoshop: (pluginInstanceId: string) => Promise<void>;
   sendProjectFileToPhotoshop: (input: SendProjectFileToPhotoshopInput) => Promise<SendProjectFileToPhotoshopResult>;
-  openSendToPhotoshopPicker: (projectRelativePath: string) => void;
   lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;

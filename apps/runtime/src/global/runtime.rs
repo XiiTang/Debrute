@@ -6,13 +6,13 @@ use serde_json::Value;
 use crate::integrations::{
     IntegrationOperation, IntegrationOperationResult, IntegrationService, IntegrationSettingsView,
 };
-use crate::photoshop::PhotoshopBridgeStateView;
+use crate::photoshop::PhotoshopStateView;
 
 use super::{
     models::{ModelCatalog, ModelSettingsView},
     store::{
-        AdobeBridgeSettings, ChromeSettings, GlobalConfigStore, GlobalSettingsError,
-        GlobalSettingsView, RecentProjectEntry, WorkbenchSettings,
+        ChromeSettings, GlobalConfigStore, GlobalSettingsError, GlobalSettingsView,
+        RecentProjectEntry, WorkbenchSettings,
     },
 };
 
@@ -25,7 +25,6 @@ pub struct DebruteGlobalSettingsView {
     pub canvas: super::store::CanvasSettings,
     pub chrome: ChromeSettings,
     pub models: ModelSettingsView,
-    pub adobe_bridge: AdobeBridgeSettings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,7 +38,7 @@ pub enum GlobalRuntimeChange {
     GlobalSettingsChanged(DebruteGlobalSettingsView),
     RecentProjectsChanged(Vec<RecentProjectEntry>),
     IntegrationsChanged(IntegrationSettingsView),
-    PhotoshopBridgeChanged(PhotoshopBridgeStateView),
+    PhotoshopChanged(PhotoshopStateView),
     ProductChanged(Value),
 }
 
@@ -391,6 +390,5 @@ fn complete_view(projection: GlobalSettingsView) -> DebruteGlobalSettingsView {
         canvas: projection.canvas,
         chrome: projection.chrome,
         models: projection.models,
-        adobe_bridge: projection.adobe_bridge,
     }
 }

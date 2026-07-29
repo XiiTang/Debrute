@@ -828,6 +828,7 @@ mod performance_tests {
             .map(|index| ProjectPathEntry {
                 project_relative_path: format!("unrelated/file-{index}.txt"),
                 kind: ProjectPathKind::File,
+                size_bytes: None,
             })
             .chain(
                 [
@@ -838,6 +839,7 @@ mod performance_tests {
                 .map(|path| ProjectPathEntry {
                     project_relative_path: path.to_owned(),
                     kind: ProjectPathKind::File,
+                    size_bytes: None,
                 }),
             )
             .collect::<Vec<_>>();

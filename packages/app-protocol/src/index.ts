@@ -15,8 +15,13 @@ import type {
 } from './project.js';
 import { PROJECT_TEXT_LANGUAGE_IDS } from './project.js';
 import type { DebruteProductPlatform } from './productPlatform.js';
+import {
+  isPhotoshopMimeType,
+  type PhotoshopMimeType
+} from './photoshopPlugin.js';
 
 export * from './runtimeControl.js';
+export * from './photoshopPlugin.js';
 export { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute } from './workbenchRoute.js';
 export type { DebruteShellApi, NativeWindowState } from './desktopShell.js';
 export type { DebruteProductPlatform } from './productPlatform.js';
@@ -125,10 +130,6 @@ interface DebruteGlobalChromeSettings {
   recentProjects: RecentProjectView[];
 }
 
-export interface DebruteGlobalAdobeBridgeSettings {
-  enabled: boolean;
-}
-
 export interface DebruteGlobalSettingsView {
   workbench: DebruteGlobalWorkbenchSettings;
   canvas: DebruteGlobalCanvasSettings;
@@ -138,14 +139,12 @@ export interface DebruteGlobalSettingsView {
     video: VideoModelSettingRecord[];
     audio: AudioModelSettingRecord[];
   };
-  adobeBridge: DebruteGlobalAdobeBridgeSettings;
 }
 
 export interface SaveDebruteGlobalSettingsInput {
   workbench?: Partial<DebruteGlobalWorkbenchSettings>;
   canvas?: { textAppearance: CanvasTextAppearance };
   modelSetting?: { modelId: string; setting: SaveModelSettingInput };
-  adobeBridge?: SaveAdobeBridgeSettingsInput;
 }
 
 export interface WorkbenchProjectFileOperationResult extends ProjectPathEntry, RevisionedProjectResult {}
@@ -748,195 +747,32 @@ export interface WorkbenchCanvasResetLayoutResult extends WorkbenchCanvasDocumen
 
 export interface WorkbenchCanvasFeedbackMutationResult extends RevisionedProjectResult {}
 
-export type AdobeBridgeDiscoveryStatus = 'available' | 'disabled' | 'unavailable';
-
-export interface AdobeBridgeSettings {
-  enabled: boolean;
-  discoveryStatus: AdobeBridgeDiscoveryStatus;
+export interface PhotoshopDocumentView {
+  documentId: number;
+  title: string;
 }
 
-export type AdobeBridgeHostApp = 'photoshop';
-export type AdobeBridgeClientRuntime = 'uxp' | 'cep';
-
-export interface AdobeBridgeClient {
-  pluginInstanceId: string;
-  hostApp: AdobeBridgeHostApp;
+export interface PhotoshopSessionView {
+  pluginSessionId: string;
   hostVersion: string;
-  clientRuntime: AdobeBridgeClientRuntime;
-  displayName: string;
-  documentCount: number;
-  activeDocumentTitle: string | null;
-  connectedAt: string;
-  lastSeenAt: string;
+  placementMimeTypes: PhotoshopMimeType[];
+  documents: PhotoshopDocumentView[];
 }
 
-export interface ProjectBridgeDirectory {
-  projectRelativePath: string;
-  name: string;
-  depth: number;
-}
-
-export interface ProjectBridgeClient {
-  projectId: string;
-  projectName: string;
-  projectRevision: number;
-  directories: ProjectBridgeDirectory[];
-}
-
-export interface AdobeBridgeLink {
-  linkId: string;
-  projectId: string;
-  pluginInstanceId: string;
-  createdAt: string;
-  status: 'active' | 'adobe-offline' | 'project-offline';
-}
-
-export type AdobeBridgeTransferDirection = 'photoshop-to-debrute' | 'debrute-to-photoshop';
-export type AdobeBridgeTransferStatus = 'pending' | 'running' | 'succeeded' | 'failed';
-
-export interface AdobeBridgeTransferView {
-  transferId: string;
-  direction: AdobeBridgeTransferDirection;
-  projectId: string;
-  pluginInstanceId: string;
-  projectRelativePath: string | null;
-  status: AdobeBridgeTransferStatus;
-  errorCode?: AdobeBridgeErrorCode;
-  message?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AdobeBridgeStateView {
-  settings: AdobeBridgeSettings;
-  pairedPlugins: Array<{
-    pluginInstanceId: string;
-    clientRuntime: AdobeBridgeClientRuntime;
-    createdAt: string;
-    connected: boolean;
-  }>;
-  clients: AdobeBridgeClient[];
-  projects: ProjectBridgeClient[];
-  links: AdobeBridgeLink[];
-  transfers: AdobeBridgeTransferView[];
-}
-
-export interface SaveAdobeBridgeSettingsInput {
-  enabled: boolean;
-}
-
-export interface CreateAdobeBridgeLinkInput {
-  pluginInstanceId: string;
+export interface PhotoshopStateView {
+  sessions: PhotoshopSessionView[];
 }
 
 export interface SendProjectFileToPhotoshopInput {
   projectRelativePath: string;
-  pluginInstanceId: string;
+  pluginSessionId: string;
+  documentId: number;
 }
 
 export interface SendProjectFileToPhotoshopResult {
-  transfer: AdobeBridgeTransferView;
-}
-
-export interface PhotoshopBridgeHelloMessage {
-  type: 'hello';
-  pluginInstanceId: string;
-  hostApp: 'photoshop';
-  hostVersion: string;
-  clientRuntime: AdobeBridgeClientRuntime;
-  documentCount: number;
-  activeDocumentTitle: string | null;
-  signature: string;
-  publicKey: string | null;
-  pairingCode: string | null;
-}
-
-export interface PhotoshopBridgeStatusMessage {
-  type: 'photoshop.status';
-  documentCount: number;
-  activeDocumentTitle: string | null;
-}
-
-export interface PhotoshopBridgeImportResultMessage {
-  type: 'transfer.import.result';
-  transferId: string;
-  ok: boolean;
-  errorCode?: AdobeBridgeErrorCode;
-  message?: string;
-}
-
-export interface PhotoshopBridgeChallengeMessage {
-  type: 'bridge.challenge';
-  bridgeVersion: number;
-  productVersion: string;
-  runtimeInstanceId: string;
-  challenge: string;
-}
-
-export interface PhotoshopBridgeReadyMessage {
-  type: 'bridge.ready';
-  pluginSessionId: string;
-  bearer: string;
-  state: AdobeBridgeStateView;
-}
-
-export interface PhotoshopBridgeStateMessage {
-  type: 'bridge.state';
-  state: AdobeBridgeStateView;
-}
-
-export interface PhotoshopBridgeImportRequestMessage {
-  type: 'transfer.import.request';
-  transferId: string;
-  projectId: string;
-  projectRelativePath: string;
+  commandId: string;
+  documentTitle: string;
   fileName: string;
-  mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/vnd.adobe.photoshop';
-  byteLength: number;
-  downloadUrl: string;
-}
-
-export type PhotoshopBridgeRuntimeMessage =
-  | PhotoshopBridgeChallengeMessage
-  | PhotoshopBridgeReadyMessage
-  | PhotoshopBridgeStateMessage
-  | PhotoshopBridgeImportRequestMessage
-  | { type: 'runtime_replacing'; runtimeInstanceId: string; deadline: string }
-  | { type: 'bridge.error'; code: AdobeBridgeErrorCode; message: string };
-
-export const adobeBridgeErrorCodes = [
-  'adobe_bridge_disabled',
-  'adobe_discovery_unavailable',
-  'adobe_client_offline',
-  'project_offline',
-  'project_not_linked',
-  'pairing_not_found',
-  'pairing_expired',
-  'pairing_code_invalid',
-  'pairing_attempts_exceeded',
-  'pairing_key_invalid',
-  'pairing_signature_invalid',
-  'pairing_registry_invalid',
-  'pairing_capacity_reached',
-  'plugin_session_invalid',
-  'plugin_session_replaced',
-  'target_directory_missing',
-  'target_directory_not_visible',
-  'unsupported_file_type',
-  'upload_too_large',
-  'invalid_transfer_payload',
-  'transfer_capacity_reached',
-  'no_active_document',
-  'photoshop_place_failed',
-  'transfer_url_expired',
-  'transfer_timeout',
-  'persistence_failed'
-] as const;
-
-export type AdobeBridgeErrorCode = typeof adobeBridgeErrorCodes[number];
-
-export function isAdobeBridgeErrorCode(value: string): value is AdobeBridgeErrorCode {
-  return (adobeBridgeErrorCodes as readonly string[]).includes(value);
 }
 
 interface WorkbenchFileWatchEvent {
@@ -951,7 +787,7 @@ export type WorkbenchEvent =
   | { type: 'recentProjects.changed'; revision: number; recentProjects: RecentProjectView[] }
   | { type: 'globalSettings.changed'; revision: number; settings: DebruteGlobalSettingsView }
   | { type: 'integrations.changed'; revision: number; integrations: IntegrationSettingsView }
-  | { type: 'adobeBridge.state.changed'; revision: number; state: AdobeBridgeStateView }
+  | { type: 'photoshop.state.changed'; revision: number; state: PhotoshopStateView }
   | { type: 'product.changed'; revision: number; product: DebruteProductState | null };
 
 type WorkbenchProjectConnectionFrame =
@@ -1022,8 +858,8 @@ const workbenchEventValidators = {
     && isProtocolObject(value.settings),
   'integrations.changed': (value) => isNonNegativeInteger(value.revision)
     && isProtocolObject(value.integrations),
-  'adobeBridge.state.changed': (value) => isNonNegativeInteger(value.revision)
-    && isProtocolObject(value.state),
+  'photoshop.state.changed': (value) => isNonNegativeInteger(value.revision)
+    && isPhotoshopStateView(value.state),
   'product.changed': (value) => isNonNegativeInteger(value.revision)
     && (value.product === null || isProtocolObject(value.product))
 } satisfies Record<WorkbenchEvent['type'], (value: Record<string, unknown>) => boolean>;
@@ -1140,9 +976,16 @@ function isRevisionedProjectEvent(value: Record<string, unknown>): boolean {
 }
 
 function isProjectPathEntry(value: unknown): boolean {
-  return isProtocolObject(value)
-    && typeof value.projectRelativePath === 'string'
-    && (value.kind === 'file' || value.kind === 'directory');
+  if (!isProtocolObject(value)
+    || Object.keys(value).some((key) => !['projectRelativePath', 'kind', 'sizeBytes'].includes(key))
+    || typeof value.projectRelativePath !== 'string'
+  ) {
+    return false;
+  }
+  if (value.kind === 'file') {
+    return isNonNegativeInteger(value.sizeBytes);
+  }
+  return value.kind === 'directory' && value.sizeBytes === undefined;
 }
 
 function isCanvasDocument(value: unknown): boolean {
@@ -1424,6 +1267,25 @@ function isProtocolObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isPhotoshopStateView(value: unknown): value is PhotoshopStateView {
+  return isProtocolObject(value)
+    && Object.keys(value).length === 1
+    && Array.isArray(value.sessions)
+    && value.sessions.every((session) => isProtocolObject(session)
+      && Object.keys(session).length === 4
+      && typeof session.pluginSessionId === 'string'
+      && typeof session.hostVersion === 'string'
+      && Array.isArray(session.placementMimeTypes)
+      && session.placementMimeTypes.length > 0
+      && session.placementMimeTypes.every(isPhotoshopMimeType)
+      && new Set(session.placementMimeTypes).size === session.placementMimeTypes.length
+      && Array.isArray(session.documents)
+      && session.documents.every((document) => isProtocolObject(document)
+        && Object.keys(document).length === 2
+        && isNonNegativeInteger(document.documentId)
+        && typeof document.title === 'string'));
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -1433,12 +1295,6 @@ function isNonNegativeInteger(value: unknown): value is number {
 }
 
 export interface WorkbenchApiClient {
-  adobeBridgeRefreshState(): Promise<{ ok: true }>;
-  adobeBridgeCreatePairing(): Promise<{ pairingId: string; code: string; expiresAt: string }>;
-  adobeBridgeCancelPairing(pairingId: string): Promise<void>;
-  adobeBridgeRemovePairing(pluginInstanceId: string): Promise<{ ok: true }>;
-  adobeBridgeLinkPhotoshop(input: CreateAdobeBridgeLinkInput): Promise<{ ok: true }>;
-  adobeBridgeUnlinkPhotoshop(pluginInstanceId: string): Promise<{ ok: true }>;
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
   openProject(target: WorkbenchProjectTarget): Promise<WorkbenchProjectOpenOutcome>;
   chooseProjectRoot(): Promise<string | undefined>;

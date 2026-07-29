@@ -1,136 +1,296 @@
 :root {
-  --bridge-bg: var(--uxp-host-background-color);
-  --bridge-surface: color-mix(in srgb, var(--bridge-bg) 86%, #d76522 14%);
-  --bridge-surface-2: color-mix(in srgb, var(--bridge-bg) 72%, #d76522 28%);
-  --bridge-text: var(--uxp-host-text-color);
-  --bridge-text-muted: color-mix(in srgb, var(--bridge-text) 76%, #8d755f 24%);
-  --bridge-border: color-mix(in srgb, var(--uxp-host-border-color) 76%, #8d755f 24%);
-  --bridge-error: var(--uxp-host-error-color);
-  --bridge-focus: color-mix(in srgb, var(--uxp-host-link-color) 72%, #8bc9c6 28%);
-  --bridge-edge: color-mix(in srgb, var(--bridge-text) 58%, var(--bridge-bg));
-  --bridge-grain-tint: color-mix(in srgb, var(--bridge-text) 45%, #d76522 55%);
-  --bridge-grain-opacity: 0.025;
-  --bridge-control-height: 28px;
-  --bridge-font-size: 12px;
-  --bridge-radius: 0;
+  --panel-bg: var(--uxp-host-background-color, #252525);
+  --panel-surface: rgba(127, 127, 127, .14);
+  --panel-surface-hover: rgba(127, 127, 127, .24);
+  --panel-surface-strong: rgba(215, 101, 34, .18);
+  --panel-selection: rgba(215, 101, 34, .16);
+  --panel-text: var(--uxp-host-text-color, #f1ede7);
+  --panel-muted: var(--uxp-host-text-color-secondary, #aaa5a0);
+  --panel-border: var(--uxp-host-border-color, #57524e);
+  --panel-guide: rgba(127, 127, 127, .28);
+  --panel-accent: #d76522;
+  --panel-success: #7ebc8a;
+  --panel-error: var(--uxp-host-error-color, #ee7770);
+  --panel-focus: var(--uxp-host-focus-color, #6da9e4);
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  width: 100%;
+  height: 100%;
 }
 
 body {
-  position: relative;
-  isolation: isolate;
   margin: 0;
-  background-color: var(--bridge-bg);
-  color: var(--bridge-text);
-  font-size: var(--bridge-font-size);
+  overflow: hidden;
+  background: var(--panel-bg);
+  color: var(--panel-text);
   font-family: inherit;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background: var(--bridge-grain-tint);
-  opacity: var(--bridge-grain-opacity);
-  pointer-events: none;
-  -webkit-mask-image: url("../../../assets/brand/materials/paper-grain.svg");
-  mask-image: url("../../../assets/brand/materials/paper-grain.svg");
-  -webkit-mask-repeat: repeat;
-  mask-repeat: repeat;
-}
-
-.bridge-panel {
-  display: grid;
-  gap: 10px;
-  padding: 10px;
-}
-
-.bridge-section {
-  display: grid;
-  gap: 6px;
-  border-bottom: 1px solid var(--bridge-border);
-  padding-bottom: 10px;
-}
-
-.bridge-section--status {
-  gap: 4px;
-}
-
-.bridge-section__title,
-.bridge-project-card h3,
-.bridge-status-line,
-.bridge-status-error {
-  margin: 0;
-}
-
-.bridge-section__title {
-  color: var(--bridge-text);
   font-size: 12px;
+}
+
+button { font-family: inherit; }
+
+h1,
+p { margin: 0; }
+
+.photoshop-panel {
+  display: flex;
+  width: 100%;
+  min-width: 300px;
+  height: 100vh;
+  min-height: 420px;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.photoshop-panel__header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+}
+
+.photoshop-panel__brand {
+  color: var(--panel-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.photoshop-panel__connection {
+  display: flex;
+  align-items: center;
+  color: var(--panel-muted);
+}
+
+.photoshop-panel__connection span {
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.photoshop-panel__connection--ready { color: var(--panel-success); }
+.photoshop-panel__connection--connecting { color: var(--panel-accent); }
+
+.photoshop-panel__source {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding: 9px 10px;
+  background: var(--panel-surface);
+}
+
+.photoshop-panel__source-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photoshop-panel__source-problem {
+  margin-top: 4px;
+  color: var(--panel-error);
+}
+
+.photoshop-panel__destination {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin-top: 12px;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 11px;
+}
+
+.photoshop-panel__destination-heading {
+  flex: 0 0 auto;
+}
+
+.photoshop-panel__destination-heading h1 {
+  color: var(--panel-muted);
+  font-size: 11px;
   font-weight: 700;
 }
 
-.bridge-project-card {
-  display: grid;
-  gap: 6px;
+.photoshop-panel__destination-path {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--panel-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bridge-status-line {
-  color: var(--bridge-text-muted);
+.photoshop-panel__destination-path span {
+  flex: 0 0 auto;
+  margin-right: 6px;
+  color: var(--panel-accent);
 }
 
-.bridge-status-error {
-  color: var(--bridge-error);
+.photoshop-panel__browser {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin-top: 9px;
+  overflow: hidden;
+  background: var(--panel-surface);
 }
 
-.bridge-selection-card,
-.bridge-action-button,
-.bridge-drop-target,
-.bridge-connection-actions input {
-  min-height: var(--bridge-control-height);
-  border: 1px solid var(--bridge-border);
-  border-radius: var(--bridge-radius);
-  background: var(--bridge-surface);
-  color: var(--bridge-text);
-  font: inherit;
-  text-align: left;
-  box-shadow: 2px 2px 0 var(--bridge-edge);
-}
-
-.bridge-selection-card,
-.bridge-action-button {
-  padding: 5px 8px;
-}
-
-.bridge-drop-target {
-  padding: 5px 8px;
-}
-
-.bridge-connection-actions {
-  display: grid;
-  gap: 6px;
-}
-
-.bridge-connection-actions input {
+.photoshop-panel__tree {
+  --tree-indent-step: 14px;
+  --tree-row-left-offset: 6px;
+  display: flex;
   width: 100%;
-  padding: 5px 8px;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: auto;
+  padding: 0 4px 10px;
 }
 
-.bridge-selection-card:hover,
-.bridge-action-button:hover,
-.bridge-drop-target:hover,
-.bridge-connection-actions input:hover {
-  background: var(--bridge-surface-2);
+.photoshop-panel__tree:focus {
+  outline: 2px solid var(--panel-focus);
+  outline-offset: -2px;
 }
 
-.bridge-selection-card:focus-visible,
-.bridge-action-button:focus-visible,
-.bridge-drop-target:focus-visible,
-.bridge-connection-actions input:focus-visible {
-  outline: 2px solid var(--bridge-focus);
+.photoshop-panel__tree-content {
+  width: max-content;
+  min-width: 100%;
+  flex: 0 0 auto;
+}
+
+.photoshop-panel__tree-node {
+  width: 100%;
+  min-width: max-content;
+}
+
+.photoshop-panel__tree-group {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: max-content;
+}
+
+.photoshop-panel__tree-row {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: max-content;
+  min-height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--panel-text);
+  cursor: pointer;
+  padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));
+  overflow: hidden;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.photoshop-panel__tree-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background: var(--panel-guide);
+}
+
+.photoshop-panel__tree-row:hover { background-color: var(--panel-surface-hover); }
+
+.photoshop-panel__tree-row--selected {
+  background-color: var(--panel-selection);
+  box-shadow: inset 3px 0 0 var(--panel-accent);
+}
+
+.photoshop-panel__tree-row:focus {
+  outline: 2px solid var(--panel-focus);
+  outline-offset: -2px;
+}
+
+.photoshop-panel__tree-row svg {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--panel-muted);
+  fill: currentColor;
+  z-index: 1;
+}
+
+.photoshop-panel__tree-label {
+  position: relative;
+  min-width: 0;
+  margin-left: 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.photoshop-panel__tree-loading {
+  position: relative;
+  min-height: 24px;
+  padding: 5px 12px 5px calc(var(--tree-row-left-offset) + var(--tree-indent) + 23px);
+  color: var(--panel-muted);
+  white-space: nowrap;
+}
+
+.photoshop-panel__tree-empty {
+  margin: auto;
+  padding: 16px;
+  color: var(--panel-muted);
+  text-align: center;
+}
+
+.photoshop-panel__footer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  margin-top: 12px;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 10px;
+}
+
+.photoshop-panel__result {
+  margin-bottom: 8px;
+  padding-left: 8px;
+  border-left: 2px solid currentColor;
+}
+
+.photoshop-panel__result--success { color: var(--panel-success); }
+.photoshop-panel__result--error { color: var(--panel-error); }
+
+.photoshop-panel__send {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--panel-accent);
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.photoshop-panel__send:focus {
+  outline: 1px solid var(--panel-focus);
   outline-offset: 2px;
 }
 
-.bridge-drop-target.is-drop-active {
-  outline: 2px solid var(--bridge-focus);
-  outline-offset: 1px;
+.photoshop-panel__send:disabled {
+  background: var(--panel-surface-strong);
+  color: var(--panel-muted);
+  cursor: default;
 }

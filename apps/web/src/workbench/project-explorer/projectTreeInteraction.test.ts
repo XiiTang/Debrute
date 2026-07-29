@@ -5,6 +5,7 @@ import {
   flattenProjectTree,
   projectTreeDropOperation,
   projectTreeDragEntries,
+  projectTreePathEntriesFromSelection,
   projectTreeDropTargetDirectory,
   isProjectTreeMoveNoop,
   isProjectTreeDropRejected,
@@ -15,7 +16,7 @@ import {
 
 describe('project tree interaction', () => {
   const tree = buildProjectFileTree([
-    { kind: 'file', projectRelativePath: 'assets/cover.png' },
+    { kind: 'file', projectRelativePath: 'assets/cover.png', sizeBytes: 57_000 },
     { kind: 'file', projectRelativePath: 'assets/pages/page-1.png' },
     { kind: 'file', projectRelativePath: 'briefs/concept.md' }
   ]);
@@ -28,6 +29,23 @@ describe('project tree interaction', () => {
       'assets/cover.png',
       'briefs'
     ]);
+  });
+
+  it('preserves file size in Project Path Command targets', () => {
+    const visibleItems = flattenProjectTree(tree, new Set(['assets']));
+
+    expect(projectTreePathEntriesFromSelection({
+      selection: {
+        selectedPaths: ['assets/cover.png'],
+        focusedPath: 'assets/cover.png',
+        anchorPath: 'assets/cover.png'
+      },
+      visibleItems
+    })).toEqual([{
+      projectRelativePath: 'assets/cover.png',
+      kind: 'file',
+      sizeBytes: 57_000
+    }]);
   });
 
   it('expands selected ancestors without auto-expanding unrelated root folders', () => {
@@ -146,7 +164,7 @@ describe('project tree interaction', () => {
     };
 
     expect(projectTreeDragEntries({ selection: state, visibleItems, path: 'assets/cover.png' })).toEqual([
-      { projectRelativePath: 'assets/cover.png', kind: 'file' },
+      { projectRelativePath: 'assets/cover.png', kind: 'file', sizeBytes: 57_000 },
       { projectRelativePath: 'briefs/concept.md', kind: 'file' }
     ]);
     expect(projectTreeDragEntries({ selection: state, visibleItems, path: 'briefs' })).toEqual([

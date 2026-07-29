@@ -51,13 +51,13 @@ mounts the Workbench composition root. Bootstrap keeps following ordered theme
 events and remains transparent until the presentation controller commits the
 current projection, then hands document-theme ownership to that controller.
 Theme, locale, recent Projects, Canvas
-Text Appearance, Product, Integration, and Adobe presentation read that same
+Text Appearance, Product, Integration, and Photoshop presentation read that same
 ordered in-memory projection rather than receiving copied bootstrap props or
 maintaining a second frontend settings store. During that wait the renderer is transparent, so
 Electron's authoritative native launch background remains visible. Product,
-Integration discovery, and Adobe live state are separate Global resources;
-Integration work starts only when Settings is activated. Adobe live state starts
-when Settings or Send to Photoshop first expresses intent. Accepted results enter
+Integration discovery, and live Photoshop state are separate Global resources;
+Integration work starts only when Settings is activated. The initial stream and
+subsequent events always project complete live Photoshop sessions and Documents. Accepted results enter
 the projection through ordered Global events. Their slower work
 cannot delay settings or the first Workbench shell. A
 requested Project binding is also prepared after the Global Settings frame and
@@ -324,18 +324,15 @@ are documented in [`desktop-shell.md`](./desktop-shell.md).
 ## Settings, Theme, And Language
 
 Settings has one directory and one content surface. Its current pages are
-General; Appearance; Image, Video, TTS, Music, and SFX Models; Integrations; and
-Adobe Bridge. Appearance composes the Workbench Theme mode with the separate
+General; Appearance; Image, Video, TTS, Music, and SFX Models; and Integrations.
+Appearance composes the Workbench Theme mode with the separate
 global Canvas Text Appearance controls; General retains language, default
 frontend, product information, and updates. Runtime-owned Global Settings is
 ready before React mounts. Product and Integration projections retain their own
 loading and ready states because they arrive independently; connection failure
-still ends the Workbench. The Adobe Bridge live resource additionally owns its
-retryable error state, including a typed failure of its initial streamed load.
-Persisted Adobe Bridge enablement comes from global
-settings while discovery, clients, links, and transfers remain separate live
-resources. The initial stream is the only source of those resources; Workbench
-does not follow it with duplicate initial GETs.
+still ends the Workbench. Photoshop live state has no persisted enablement,
+pairing, Project links, or separate refresh request. The initial stream and
+ordered Photoshop events are its only Workbench authority.
 
 Workbench sends closed partial settings mutations. Editable model text fields
 are trimmed before submission; Runtime accepts only already-canonical values
@@ -429,13 +426,21 @@ boundary, Canvas navigation remains Canvas-owned, Terminal opening remains
 Terminal-owned, and Photoshop transfer remains integration-owned. Project Paths
 remain the browser's normal file identity across all invocation surfaces.
 
+For one Project-backed PNG, JPEG, WebP, or PSD file whose snapshot `sizeBytes`
+is at most 256 MiB, the shared Explorer/Canvas context menu adds **Send to
+Photoshop**. A bounded keyboard-accessible submenu lists every live Photoshop
+Document, including equal titles, and each row owns the exact plugin-session
+and Document identity. Selection closes the menu and sends immediately; there
+is no dialog, remembered target, or Photoshop Settings page. One notification
+is updated in place from sending to its terminal result.
+
 Target selection belongs to the browser or Desktop shell rather than the Project
 binding lifecycle. While the selector is open, the current binding remains
 admitted; cancel submits no binding attempt and changes nothing. Once a concrete
 target enters the lifecycle, it closes Project Path Command admission
 synchronously, before transport or any asynchronous preparation, across
 Explorer, Canvas, keyboard, inline editing, and drag-and-drop entry points.
-Workbench closes unsubmitted context menus, inline edits, and Photoshop pickers,
+Workbench closes unsubmitted context menus and inline edits,
 then shows that the target Project is opening. Failed preparation or a
 focused-existing Desktop outcome reopens the unchanged binding's gate. An
 accepted `project.bound` retires the old gate and mounts fresh admission with the
@@ -476,7 +481,7 @@ Project transaction or changes an accepted modification.
 
 Integrations Settings behavior and the Photoshop transfer boundary are
 documented in [`integrations.md`](./integrations.md) and
-[`photoshop-bridge.md`](./photoshop-bridge.md).
+[`photoshop.md`](./photoshop.md).
 
 ## Executable Authorities
 

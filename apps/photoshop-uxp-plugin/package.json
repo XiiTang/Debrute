@@ -5,11 +5,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build",
+    "build": "pnpm --filter @debrute/app-protocol build && tsc --noEmit && vite build",
     "check": "tsc --noEmit --pretty false"
   },
   "dependencies": {
-    "@debrute/photoshop-bridge-plugin-core": "workspace:*"
+    "@debrute/app-protocol": "workspace:*",
+    "fflate": "0.8.2"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.3",

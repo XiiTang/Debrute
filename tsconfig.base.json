@@ -22,8 +22,7 @@
       "@debrute/app-protocol": ["./packages/app-protocol/src/index.ts"],
       "@debrute/architecture-rules": ["./packages/architecture-rules/src/index.mjs"],
       "@debrute/runtime-control-client": ["./packages/runtime-control-client/src/index.ts"],
-      "@debrute/canvas-core": ["./packages/canvas-core/src/index.ts"],
-      "@debrute/photoshop-bridge-plugin-core": ["./packages/photoshop-bridge-plugin-core/src/index.ts"]
+      "@debrute/canvas-core": ["./packages/canvas-core/src/index.ts"]
     }
   }
 }

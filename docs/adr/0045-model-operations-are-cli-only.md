@@ -10,7 +10,7 @@ Operation ACL, or initiator ownership.
 The five peer Model Kinds are image, video, text-to-speech, music, and sound
 effect. `audio` is only a configuration and implementation grouping for the
 latter three. Single and Batch are Execution Shapes rather than additional
-Model Kinds. Browser, Desktop-host, native control, and Photoshop Bridge
+Model Kinds. Browser, Desktop-host, native control, and Photoshop gateway
 sessions do not receive a CLI credential. Adding another initiating or
 controlling surface requires an explicit product decision rather than
 inheriting access from Project visibility.

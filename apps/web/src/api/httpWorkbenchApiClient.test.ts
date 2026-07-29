@@ -198,7 +198,7 @@ describe('Runtime Workbench connection', () => {
     client.onEvent(listener);
 
     expect(listener.mock.calls.map(([event]) => event.type)).toEqual([
-      'adobeBridge.state.changed',
+      'photoshop.state.changed',
       'product.changed'
     ]);
     expect(listener.mock.calls.at(-1)?.[0]).toEqual({
@@ -210,7 +210,7 @@ describe('Runtime Workbench connection', () => {
       status: 'active',
       revision: 1,
       settings: {},
-      adobeBridge: { status: 'ready' },
+      photoshop: { status: 'ready' },
       product: { status: 'ready', value: null }
     });
     client.dispose();
@@ -384,16 +384,9 @@ function createHarness(globalRevision = 1) {
             }
           }));
           controller.enqueue(sse(encoder, {
-            type: 'adobeBridge.state.changed',
+            type: 'photoshop.state.changed',
             revision: 1,
-            state: {
-              settings: { enabled: true, discoveryStatus: 'available' },
-              pairedPlugins: [],
-              clients: [],
-              projects: [],
-              links: [],
-              transfers: []
-            }
+            state: { sessions: [] }
           }));
           controller.enqueue(sse(encoder, { type: 'product.changed', revision: 1, product: null }));
         }

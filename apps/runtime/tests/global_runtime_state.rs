@@ -43,7 +43,6 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
         })
     );
     assert!(initial.chrome.recent_projects.is_empty());
-    assert!(initial.adobe_bridge.enabled);
     assert_eq!(initial.models.image.len(), 13);
     assert_eq!(initial.models.video.len(), 3);
     assert_eq!(initial.models.audio.len(), 16);
@@ -200,15 +199,13 @@ fn patch_persists_canonical_settings_and_redacts_model_secrets() {
                         "requestModelIdOverride": null,
                         "apiKey": "sk-image-123456fg"
                     }
-                },
-                "adobeBridge": { "enabled": false }
+                }
             }),
             &catalog,
         )
         .expect("valid patch should persist");
     assert!(result.changed);
     assert_eq!(result.view.workbench.locale, "zh-CN");
-    assert!(!result.view.adobe_bridge.enabled);
     let model = result
         .view
         .models
@@ -322,7 +319,7 @@ fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
 
     let malformed = store
         .patch(&json!({ "adobeBridge": { "enabled": "yes" } }), &catalog)
-        .expect_err("invalid bridge setting should fail");
+        .expect_err("removed Photoshop settings must be rejected");
     assert!(matches!(malformed, GlobalSettingsError::Validation(_)));
 
     fs::remove_dir_all(home).expect("temporary home should be removed");

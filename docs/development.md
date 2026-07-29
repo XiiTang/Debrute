@@ -55,11 +55,9 @@ scope.
 - `apps/desktop` - trayless Electron window host for native windows, menus, folder picking, and Product packaging.
 - `apps/runtime` - single-process Rust Runtime, native tray, Control/Workbench/Photoshop transports, domain services, Product updater, and external Agent-facing `debrute` CLI.
 - `apps/photoshop-uxp-plugin` - Photoshop UXP plugin surface.
-- `apps/photoshop-cep-plugin` - Photoshop CEP plugin surface.
 - `packages/canvas-core` - Canvas domain declarations and the browser-safe presentation values named by current production consumers. Authoritative Canvas document validation, projection, reconciliation, layout, feedback mutation, and persistence remain in Rust Runtime Project services.
 - `packages/app-protocol` - protocol types shared across the app boundary.
 - `packages/runtime-control-client` - TypeScript native Control transport used by Desktop and development launchers.
-- `packages/photoshop-bridge-plugin-core` - shared Photoshop bridge plugin logic.
 - `packages/architecture-rules` - repository architecture lint rules.
 - `skills/debrute-*` - Debrute-managed standard Skills packages for external Agents.
 
@@ -134,7 +132,7 @@ empty objects and unknown-only inputs are invalid requests.
 Internal Project documents and runtime state carry no generic `schemaVersion`.
 Explicitly exchanged or distributed contracts are versioned when the version is
 part of their trust or interoperability boundary: product payload/update
-manifests, Adobe Bridge discovery, package and host versions, release tags, and
+manifests, the Photoshop v1 protocol, package and host versions, release tags, and
 third-party protocols are examples.
 
 Negative tests express current security, ownership, and public contract
@@ -208,9 +206,8 @@ the current executable authorities for each contract.
 Electron window, preload, menu, and native-file-operation boundaries are
 documented in [`desktop-shell.md`](./desktop-shell.md). Runtime-owned optional
 tool detection and operations are documented in
-[`integrations.md`](./integrations.md). The shared Adobe Bridge protocol and its
-UXP and CEP adapters are documented in
-[`photoshop-bridge.md`](./photoshop-bridge.md).
+[`integrations.md`](./integrations.md). The Photoshop-specific Runtime protocol
+and UXP application are documented in [`photoshop.md`](./photoshop.md).
 
 ## Workbench Front-End
 
@@ -273,6 +270,32 @@ libvips installation. A missing download, checksum mismatch, link failure, or
 Runtime version mismatch stops the launch with the native-payload diagnostic;
 there is no alternate development backend.
 
+On Windows the launcher builds the Cargo binary in `target/debug`, then
+assembles `debrute-runtime.exe` and the complete flat native-raster Runtime
+inventory into `.scratch/rust-runtime-dev/windows-runtime`. Runtime executes
+only from that assembled directory during source development, so its loaded
+image and DLL locks do not block later Cargo output replacement. One strict
+assembly identity records the compiled binary identity and SHA-256, the
+validated native-raster manifest SHA-256, and the complete Runtime inventory
+SHA-256. Before reuse the launcher hashes the assembled executable and every
+payload file and requires the exact closed file names, count, sizes, and
+contents declared by the current manifest. A missing, extra, damaged, or stale
+file forces reassembly after the previous Runtime begins controlled shutdown,
+even when Cargo did not rebuild the executable. Control loss is not treated as
+proof that Windows has released the loaded executable and DLLs. Removing the
+previous assembly and activating the validated staging directory therefore
+share one five-second deadline; only `EBUSY`, `EMFILE`, `ENFILE`, `ENOTEMPTY`,
+and `EPERM` are retried with bounded backoff. Any other filesystem error fails
+immediately, and exhausting the deadline preserves the final operating-system
+error as the failure cause. The assembly identity is written only after the
+staging directory is active. The launcher also recognizes and stops a legacy
+source Runtime still executing directly from `target/debug` before rebuilding.
+
+The Windows assembly directory is disposable launcher-owned state under the
+repository's ignored `.scratch` tree. Developers do not create a configuration
+file, share that directory, or commit it; `pnpm dev` and `pnpm dev:electron`
+create and validate it on demand in every checkout.
+
 Prepared payloads live only at the platform-identity directory under
 `.scratch/native-raster-payloads`. Production and development commands do not
 select an arbitrary payload root through an environment variable. Unit tests
@@ -286,6 +309,13 @@ production build. `pnpm build` is the sole Desktop production build path and
 includes the Web build, Rust binaries, Desktop type check, Electron bundle, and
 complete Product seed. The package exposes no weaker build alias or unused
 sourcemap switch that can produce a product-looking partial result.
+
+Each source-development process binds its Vite proxy to the exact Runtime
+origin registered for that launch. If the Control connection reports Runtime
+loss, `pnpm dev` stops Vite and `pnpm dev:electron` stops both Vite and its
+Electron host, reports a non-zero terminal failure, and requires a fresh launch.
+Neither command keeps a stale frontend alive, reconnects it to another Runtime,
+or replays work from the ended session.
 
 The source-development launchers own their direct Vite and Electron children.
 On macOS they send `SIGTERM` and wait for the child to exit. On Windows they run
@@ -329,6 +359,17 @@ does not reopen the last Project.
 builds the current-platform CLI against the locked native payload. Product
 assembly signs and declares that binary together with Runtime, Web assets,
 Skills, and model documentation.
+
+`pnpm test:rust` preserves Cargo's normal parallel test execution except for
+the `workbench_http` integration target. Every test in that target owns a full
+Workbench HTTP server and composed Runtime services, so the test runner
+discovers those cases from Cargo and invokes each one in a clean, single-threaded
+test process. The fixture also uses the production shutdown order and a test-only
+120-second HTTP request timeout so a loaded development machine does not turn
+correct local service behavior into a 30-second client-default failure. Other
+Runtime integration targets are discovered from `apps/runtime/tests/` and
+remain parallel; adding a new target or `workbench_http` case does not require
+maintaining a second hard-coded test list.
 
 On macOS, `pnpm pack:local` rebuilds the current host Product and creates an
 unpacked `Debrute.app` under `apps/desktop/release/local/`. It ad-hoc signs the

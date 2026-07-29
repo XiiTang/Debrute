@@ -7,7 +7,6 @@ const paths = [
   'apps/desktop/release',
   'packages/app-protocol/dist',
   'packages/canvas-core/dist',
-  'packages/photoshop-bridge-plugin-core/dist',
   'packages/runtime-control-client/dist'
 ];
 

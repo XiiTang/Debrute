@@ -66,7 +66,8 @@ const MenuRoot = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
         if (!direction) {
           return;
         }
-        const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+          .filter((item) => item.closest('[role="menu"]') === event.currentTarget);
         const disabledIndexes = new Set<number>();
         for (const [index, item] of items.entries()) {
           if (item.disabled || item.hidden || item.getAttribute('aria-disabled') === 'true') {
@@ -89,7 +90,10 @@ const MenuRoot = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
   );
 });
 
-function MenuItem({
+const MenuItem = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'default' | 'danger';
+  icon?: React.ReactNode;
+}>(function MenuItem({
   variant = 'default',
   disabled,
   className,
@@ -97,13 +101,11 @@ function MenuItem({
   children,
   type = 'button',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'default' | 'danger';
-  icon?: React.ReactNode;
-}): React.ReactElement {
+}, ref): React.ReactElement {
   return (
     <button
       {...props}
+      ref={ref}
       type={type}
       role="menuitem"
       disabled={disabled}
@@ -114,7 +116,7 @@ function MenuItem({
       <span className="db-menu__item-label">{children}</span>
     </button>
   );
-}
+});
 
 function MenuSeparator(): React.ReactElement {
   return <div className="db-menu__separator" role="separator" />;

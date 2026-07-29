@@ -628,10 +628,49 @@ describe('workbench context menu commands', () => {
     });
     expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
   });
+
+  it('sends directly to the exact Photoshop session and Document with one evolving notification', async () => {
+    const sendProjectFileToPhotoshop = vi.fn(async () => ({
+      commandId: 'command-1',
+      documentTitle: 'Poster.psd',
+      fileName: 'cover.png'
+    }));
+    const updateNotification = vi.fn();
+    const startNotification = vi.fn(() => updateNotification);
+
+    runProjectPathCommand(commandInput({
+      command: 'send-to-photoshop',
+      target: {
+        source: 'explorer',
+        targetKind: 'item',
+        paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file', sizeBytes: 1024 }],
+        primaryPath: 'assets/cover.png',
+        targetDirectoryPath: 'assets'
+      },
+      photoshopTarget: {
+        pluginSessionId: 'session-2',
+        documentId: 42,
+        title: 'Poster.psd'
+      },
+      actions: { sendProjectFileToPhotoshop },
+      startNotification
+    }));
+
+    expect(sendProjectFileToPhotoshop).toHaveBeenCalledWith({
+      projectRelativePath: 'assets/cover.png',
+      pluginSessionId: 'session-2',
+      documentId: 42
+    });
+    expect(startNotification).toHaveBeenCalledWith('Sending assets/cover.png to Poster.psd');
+    await vi.waitFor(() => {
+      expect(updateNotification).toHaveBeenCalledWith('Sent assets/cover.png to Poster.psd');
+    });
+  });
 });
 
 function commandInput(overrides: {
   command: ProjectPathCommand;
+  photoshopTarget?: Parameters<typeof runProjectPathCommand>[0]['photoshopTarget'];
   actions?: Partial<Parameters<typeof runProjectPathCommand>[0]['actions']>;
   explorerCommands?: Partial<Parameters<typeof runProjectPathCommand>[0]['explorerCommands']>;
   target?: Parameters<typeof runProjectPathCommand>[0]['contextMenu'] extends infer T
@@ -648,9 +687,11 @@ function commandInput(overrides: {
   openInspectorPanel?: Parameters<typeof runProjectPathCommand>[0]['openInspectorPanel'];
   confirmPermanentDelete?: Parameters<typeof runProjectPathCommand>[0]['confirmPermanentDelete'];
   confirmMoveOverwrite?: (input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>; targetDirectoryProjectRelativePath: string }) => boolean;
+  startNotification?: Parameters<typeof runProjectPathCommand>[0]['startNotification'];
 }): Parameters<typeof runProjectPathCommand>[0] {
   return {
     command: overrides.command,
+    ...(overrides.photoshopTarget === undefined ? {} : { photoshopTarget: overrides.photoshopTarget }),
     contextMenu: {
       target: overrides.target ?? {
         source: 'explorer',
@@ -683,6 +724,12 @@ function commandInput(overrides: {
     },
     copyText: overrides.copyText ?? (() => undefined),
     notify: () => undefined,
+    startNotification: overrides.startNotification ?? (() => () => undefined),
+    photoshopLabels: {
+      sending: (path, title) => `Sending ${path} to ${title}`,
+      sent: (path, title) => `Sent ${path} to ${title}`,
+      failed: (message) => `Failed: ${message}`
+    },
     closeContextMenu: () => undefined,
     openInspectorPanel: overrides.openInspectorPanel ?? (() => undefined),
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),

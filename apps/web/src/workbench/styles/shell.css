@@ -52,6 +52,64 @@
   pointer-events: auto;
 }
 
+.workbench-context-submenu {
+  position: relative;
+}
+
+.workbench-context-submenu > .db-menu__item {
+  width: 100%;
+}
+
+.workbench-context-submenu__chevron {
+  position: absolute;
+  right: var(--db-space-3);
+}
+
+.workbench-context-submenu__menu {
+  position: absolute;
+  top: calc(var(--db-space-1) * -1);
+  left: calc(100% + var(--db-space-1));
+  display: none;
+  width: 220px;
+  max-height: min(416px, calc(100vh - 16px));
+  overflow-y: auto;
+}
+
+.workbench-context-submenu__menu--left {
+  right: calc(100% + var(--db-space-1));
+  left: auto;
+}
+
+.workbench-context-submenu__target {
+  min-height: 44px;
+}
+
+.workbench-context-submenu__target .db-menu__item-label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.workbench-context-submenu__target-title,
+.workbench-context-submenu__target-requirement {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-context-submenu__target-requirement {
+  color: var(--db-text-muted);
+  font-size: var(--db-font-xs);
+}
+
+.workbench-context-submenu:hover > .workbench-context-submenu__menu,
+.workbench-context-submenu:focus-within > .workbench-context-submenu__menu {
+  display: grid;
+}
+
 .workbench-project-opening-indicator {
   position: fixed;
   top: calc(var(--db-titlebar-height) + 10px);

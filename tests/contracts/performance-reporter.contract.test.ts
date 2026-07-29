@@ -55,12 +55,14 @@ describe('performance reporter contract', () => {
       files: [
         file('contracts', 'contract.test.ts', 1_000, 21_001),
         file('dom-web', 'view.dom.test.tsx', 1_000, 21_001),
+        file('dom-photoshop-uxp-plugin', 'panelInteraction.test.ts', 2_000, 20_000),
         file('release', 'runtime.release.test.ts', 1_000, 21_001),
         file('release', 'package.release.test.ts', 2_000, 20_000)
       ],
       tests: [
         test('unit-example', 'unit.test.ts', 'unit case', 251, 'passed'),
         test('dom-web', 'view.dom.test.tsx', 'DOM case', 501, 'passed'),
+        test('dom-photoshop-uxp-plugin', 'panelInteraction.test.ts', 'plugin DOM case', 500, 'passed'),
         test('release', 'package.release.test.ts', 'release case', 5_001, 'passed')
       ]
     }));
@@ -71,9 +73,9 @@ describe('performance reporter contract', () => {
       expect.objectContaining({ id: 'group-3', budgetMs: 20_000, slowTestBudgetMs: 5_000 })
     ]);
     expect(report.tests.map(({ budgetMs }) => budgetMs).sort((left, right) => left - right))
-      .toEqual([250, 500, 5_000]);
+      .toEqual([250, 500, 500, 5_000]);
     expect(report.groups.map(({ exceeded }) => exceeded)).toEqual([true, true, true]);
-    expect(report.tests.map(({ exceeded }) => exceeded)).toEqual([true, true, true]);
+    expect(report.tests.map(({ exceeded }) => exceeded)).toEqual([true, true, false, true]);
   });
 
   it('sorts file and case diagnostics by duration and caps each list at ten', () => {

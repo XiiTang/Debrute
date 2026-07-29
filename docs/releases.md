@@ -144,21 +144,19 @@ Desktop release assets:
 
 ```sh
 pnpm package:photoshop-uxp-plugin
-pnpm package:photoshop-cep-plugin
 pnpm package:photoshop-plugin
 ```
 
-The UXP command creates `debrute-photoshop-uxp-X.Y.Z.ccx`; the CEP command
-creates `debrute-photoshop-cep-X.Y.Z.zip`. Both packaging scripts validate the
-required archive entries, and the plugin package and manifest versions must
-match the root release version.
+Both commands create `debrute-photoshop-uxp-X.Y.Z.ccx`. The packaging script
+validates the required archive entries, and the plugin package and manifest
+versions must match the root release version.
 
 These plugin packages are not currently published by the tag-triggered GitHub
 Release workflow. Adding them to that workflow requires an intentional change
 to `scripts/release-asset-contract.mjs` and its release-contract tests; they must
 not be treated as public release assets until that contract changes. Runtime
 behavior and plugin boundaries are documented in
-[`photoshop-bridge.md`](./photoshop-bridge.md).
+[`photoshop.md`](./photoshop.md).
 
 ## macOS Signing
 
