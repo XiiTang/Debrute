@@ -12,6 +12,10 @@ const TERMINAL_PROTOCOL_VERSION = 1;
 export interface TerminalHubClient {
   bindProject(projectId: string, connectionCredential: string): void;
   unbindProject(): void;
+  subscribeSessions(
+    listener: (sessions: TerminalSessionView[]) => void,
+    onError: (error: Error) => void
+  ): TerminalEventSubscription;
   writeInput(terminalId: string, data: string): Promise<{ ok: true }>;
   resize(terminalId: string, cols: number, rows: number): Promise<TerminalSessionResult>;
   subscribe(
@@ -56,6 +60,8 @@ export function createTerminalHubClient(): TerminalHubClient {
   let disposed = false;
   const listeners = new Map<string, Set<(event: TerminalEvent) => void>>();
   const errorListeners = new Map<string, Set<(error: Error) => void>>();
+  const sessionListeners = new Set<(sessions: TerminalSessionView[]) => void>();
+  const sessionErrorListeners = new Set<(error: Error) => void>();
   const sessions = new Map<string, TerminalSessionView>();
   const checkpoints = new Map<string, TerminalCheckpoint>();
   const observationStates = new Map<string, TerminalObservationState>();
@@ -63,6 +69,7 @@ export function createTerminalHubClient(): TerminalHubClient {
   const unsentInputs = new Set<PendingTerminalInput>();
   const inputAcks = new Map<number, PendingTerminalInput>();
   const resizeStates = new Map<string, TerminalResizeState>();
+  let topologyRevision: number | undefined;
   let nextRequestId = 0;
 
   const notify = (terminalId: string, event: TerminalEvent) => {
@@ -72,6 +79,17 @@ export function createTerminalHubClient(): TerminalHubClient {
   };
   const failTerminal = (terminalId: string, error: Error) => {
     for (const listener of errorListeners.get(terminalId) ?? []) {
+      listener(error);
+    }
+  };
+  const publishSessions = () => {
+    const snapshot = [...sessions.values()];
+    for (const listener of sessionListeners) {
+      listener(snapshot);
+    }
+  };
+  const failSessions = (error: Error) => {
+    for (const listener of sessionErrorListeners) {
       listener(error);
     }
   };
@@ -109,6 +127,13 @@ export function createTerminalHubClient(): TerminalHubClient {
     inputAcks.clear();
     resizeStates.clear();
   };
+  const resetProjectState = () => {
+    sessions.clear();
+    checkpoints.clear();
+    observationStates.clear();
+    inputSequences.clear();
+    topologyRevision = undefined;
+  };
   const rejectUnsentTerminalPending = (terminalId: string) => {
     for (const pending of unsentInputs) {
       if (pending.terminalId === terminalId) {
@@ -141,6 +166,13 @@ export function createTerminalHubClient(): TerminalHubClient {
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const next = new WebSocket(url.toString());
     socket = next;
+    let sessionFailureReported = false;
+    const reportSessionFailure = (error: Error) => {
+      if (!sessionFailureReported) {
+        sessionFailureReported = true;
+        failSessions(error);
+      }
+    };
     next.addEventListener('open', () => {
       if (!binding || socket !== next) {
         next.close();
@@ -151,10 +183,6 @@ export function createTerminalHubClient(): TerminalHubClient {
         protocolVersion: TERMINAL_PROTOCOL_VERSION,
         connectionCredential: binding.connectionCredential
       }));
-      for (const terminalId of listeners.keys()) {
-        observationStates.set(terminalId, { status: 'pending' });
-        next.send(JSON.stringify({ type: 'observe', terminalId }));
-      }
     });
     next.addEventListener('message', (event) => {
       if (socket !== next) {
@@ -163,7 +191,9 @@ export function createTerminalHubClient(): TerminalHubClient {
       try {
         handleFrame(JSON.parse(String(event.data)) as TerminalServerFrame);
       } catch (error) {
-        rejectPending(error instanceof Error ? error.message : String(error));
+        const failure = error instanceof Error ? error : new Error(String(error));
+        rejectPending(failure.message);
+        reportSessionFailure(failure);
         next.close();
       }
     });
@@ -173,11 +203,13 @@ export function createTerminalHubClient(): TerminalHubClient {
       }
       socket = undefined;
       const connectionError = new Error('Terminal connection was lost.');
+      topologyRevision = undefined;
       for (const terminalId of listeners.keys()) {
         observationStates.set(terminalId, { status: 'failed', error: connectionError });
       }
       rejectPending('Terminal connection was lost; pending input was not replayed.');
       inputSequences.clear();
+      reportSessionFailure(connectionError);
       for (const terminalId of listeners.keys()) {
         failTerminal(terminalId, connectionError);
       }
@@ -189,6 +221,7 @@ export function createTerminalHubClient(): TerminalHubClient {
       for (const terminalId of listeners.keys()) {
         failTerminal(terminalId, new Error('Terminal connection failed.'));
       }
+      reportSessionFailure(new Error('Terminal connection failed.'));
     });
   };
   const send = (frame: object) => {
@@ -244,7 +277,37 @@ export function createTerminalHubClient(): TerminalHubClient {
       lastSequence: checkpoint.outputSequence
     });
   };
-  const acceptObservation = (checkpoint: TerminalCheckpoint) => {
+  const acceptTopology = (
+    revision: number,
+    nextSessions: TerminalSessionView[],
+    replaceExistingSessions: boolean
+  ) => {
+    const removedTerminalIds = new Set(sessions.keys());
+    const previousSessions = new Map(sessions);
+    sessions.clear();
+    for (const session of nextSessions) {
+      sessions.set(
+        session.id,
+        replaceExistingSessions ? session : previousSessions.get(session.id) ?? session
+      );
+      removedTerminalIds.delete(session.id);
+    }
+    topologyRevision = revision;
+    publishSessions();
+    for (const terminalId of removedTerminalIds) {
+      const error = new Error(`Terminal session was closed: ${terminalId}`);
+      rejectTerminalPending(terminalId, error);
+      checkpoints.delete(terminalId);
+      observationStates.set(terminalId, { status: 'failed', error });
+      inputSequences.delete(terminalId);
+      notify(terminalId, { type: 'closed', terminalId });
+    }
+  };
+  const acceptObservation = (session: TerminalSessionView, checkpoint: TerminalCheckpoint) => {
+    if (sessions.has(session.id)) {
+      sessions.set(session.id, session);
+      publishSessions();
+    }
     const becameReady = observationStates.get(checkpoint.terminalId)?.status !== 'ready';
     observationStates.set(checkpoint.terminalId, { status: 'ready' });
     checkpoints.set(checkpoint.terminalId, checkpoint);
@@ -266,18 +329,31 @@ export function createTerminalHubClient(): TerminalHubClient {
       if (frame.protocolVersion !== TERMINAL_PROTOCOL_VERSION) {
         throw new Error(`Unsupported Terminal protocol ${frame.protocolVersion}.`);
       }
-      sessions.clear();
-      frame.sessions.forEach((session) => sessions.set(session.id, session));
-      frame.checkpoints.forEach(acceptObservation);
+      if (topologyRevision !== undefined) {
+        throw new Error('Terminal topology was synchronized more than once.');
+      }
+      acceptTopology(frame.topologyRevision, frame.sessions, true);
+      for (const terminalId of listeners.keys()) {
+        observationStates.set(terminalId, { status: 'pending' });
+        send({ type: 'observe', terminalId });
+      }
       return;
     }
     if (frame.type === 'observed') {
-      acceptObservation(frame.checkpoint);
+      acceptObservation(frame.session, frame.checkpoint);
       return;
     }
     if (frame.type === 'topology') {
-      sessions.clear();
-      frame.sessions.forEach((session) => sessions.set(session.id, session));
+      if (topologyRevision === undefined) {
+        throw new Error('Terminal topology arrived before its initial synchronization.');
+      }
+      const expectedRevision = topologyRevision + 1;
+      if (frame.topologyRevision !== expectedRevision) {
+        throw new Error(
+          `Terminal topology revision is not contiguous: expected ${expectedRevision}, received ${frame.topologyRevision}.`
+        );
+      }
+      acceptTopology(frame.topologyRevision, frame.sessions, false);
       return;
     }
     if (frame.type === 'input-ack') {
@@ -289,28 +365,22 @@ export function createTerminalHubClient(): TerminalHubClient {
       return;
     }
     if (frame.type === 'resized') {
-      const current = sessions.get(frame.terminalId);
-      const state = resizeStates.get(frame.terminalId);
+      const terminalId = frame.session.id;
+      const state = resizeStates.get(terminalId);
       if (!state || state.inFlight.requestId !== frame.requestId) {
         return;
       }
-      if (current) {
-        const session = { ...current, cols: frame.cols, rows: frame.rows };
-        sessions.set(frame.terminalId, session);
-        state.inFlight.waiters.forEach((waiter) => waiter.resolve({ session }));
-      } else {
-        const error = new Error(`Terminal session is unavailable: ${frame.terminalId}`);
-        state.inFlight.waiters.forEach((waiter) => waiter.reject(error));
-        state.queued?.waiters.forEach((waiter) => waiter.reject(error));
-        resizeStates.delete(frame.terminalId);
-        return;
+      if (sessions.has(terminalId)) {
+        sessions.set(terminalId, frame.session);
+        publishSessions();
       }
+      state.inFlight.waiters.forEach((waiter) => waiter.resolve({ session: frame.session }));
       if (state.queued) {
         state.inFlight = state.queued;
         delete state.queued;
-        sendResize(frame.terminalId, state.inFlight);
+        sendResize(terminalId, state.inFlight);
       } else {
-        resizeStates.delete(frame.terminalId);
+        resizeStates.delete(terminalId);
       }
       return;
     }
@@ -324,7 +394,10 @@ export function createTerminalHubClient(): TerminalHubClient {
       return;
     }
     if (frame.type === 'status') {
-      sessions.set(frame.session.id, frame.session);
+      if (sessions.has(frame.session.id)) {
+        sessions.set(frame.session.id, frame.session);
+        publishSessions();
+      }
       notify(frame.session.id, { type: 'status', terminalId: frame.session.id, session: frame.session });
       return;
     }
@@ -386,10 +459,7 @@ export function createTerminalHubClient(): TerminalHubClient {
       binding = { projectId, connectionCredential };
       socket?.close();
       socket = undefined;
-      sessions.clear();
-      checkpoints.clear();
-      observationStates.clear();
-      inputSequences.clear();
+      resetProjectState();
       nextRequestId = 0;
       connect();
     },
@@ -398,13 +468,26 @@ export function createTerminalHubClient(): TerminalHubClient {
       socket?.close();
       socket = undefined;
       rejectPending('Terminal Project binding was released.');
-      sessions.clear();
-      checkpoints.clear();
-      observationStates.clear();
-      inputSequences.clear();
+      resetProjectState();
       nextRequestId = 0;
     },
+    subscribeSessions(listener, onError) {
+      sessionListeners.add(listener);
+      sessionErrorListeners.add(onError);
+      if (topologyRevision !== undefined) {
+        listener([...sessions.values()]);
+      }
+      return {
+        close() {
+          sessionListeners.delete(listener);
+          sessionErrorListeners.delete(onError);
+        }
+      };
+    },
     writeInput(terminalId, data) {
+      if (!listeners.has(terminalId)) {
+        return Promise.reject(new Error(`Terminal is not observed: ${terminalId}`));
+      }
       const observation = observationStates.get(terminalId);
       if (observation?.status === 'failed') {
         return Promise.reject(observation.error);
@@ -416,6 +499,9 @@ export function createTerminalHubClient(): TerminalHubClient {
       });
     },
     resize(terminalId, cols, rows) {
+      if (!listeners.has(terminalId)) {
+        return Promise.reject(new Error(`Terminal is not observed: ${terminalId}`));
+      }
       const observation = observationStates.get(terminalId);
       if (observation?.status === 'failed') {
         return Promise.reject(observation.error);
@@ -453,7 +539,11 @@ export function createTerminalHubClient(): TerminalHubClient {
       const checkpoint = checkpoints.get(terminalId);
       if (checkpoint) {
         replayCheckpoint(checkpoint);
-      } else if (wasEmpty && socket?.readyState === WebSocket.OPEN) {
+      } else if (
+        wasEmpty
+        && topologyRevision !== undefined
+        && socket?.readyState === WebSocket.OPEN
+      ) {
         observationStates.set(terminalId, { status: 'pending' });
         send({ type: 'observe', terminalId });
       } else if (wasEmpty) {
@@ -484,10 +574,9 @@ export function createTerminalHubClient(): TerminalHubClient {
       rejectPending('Terminal client was disposed.');
       listeners.clear();
       errorListeners.clear();
-      observationStates.clear();
-      checkpoints.clear();
-      sessions.clear();
-      inputSequences.clear();
+      resetProjectState();
+      sessionListeners.clear();
+      sessionErrorListeners.clear();
     }
   };
 }

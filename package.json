@@ -11,7 +11,8 @@
     "pnpm": ">=11.2.2 <12"
   },
   "scripts": {
-    "build": "pnpm generate:control-protocol && tsc -b tsconfig.build.json && pnpm --filter @debrute/desktop build",
+    "build": "pnpm generate:control-protocol && pnpm check:typescript && pnpm build:artifacts",
+    "build:artifacts": "pnpm --filter @debrute/desktop build:artifacts",
     "clean": "node scripts/clean.mjs",
     "brand:sync": "node scripts/sync-brand-assets.mjs",
     "pack:local": "pnpm --filter @debrute/desktop pack:local",
@@ -19,11 +20,13 @@
     "package:photoshop-uxp-plugin": "node scripts/package-photoshop-uxp-plugin.mjs",
     "package:photoshop-plugin": "pnpm package:photoshop-uxp-plugin",
     "dist": "pnpm --filter @debrute/desktop dist",
-    "check": "pnpm generate:control-protocol && tsc -b tsconfig.build.json --pretty false",
-    "check:rust": "cargo fmt --all -- --check && node scripts/run-cargo-with-native-raster.mjs -- clippy --workspace --all-targets -- -D warnings",
+    "check": "pnpm generate:control-protocol && pnpm check:typescript",
+    "check:rust": "cargo fmt --all -- --check && node scripts/run-cargo-with-native-raster.mjs -- clippy --workspace --lib --bins -- -D warnings",
+    "check:rust:all": "cargo fmt --all -- --check && node scripts/run-cargo-with-native-raster.mjs -- clippy --workspace --all-targets --features test-support,native-watcher-probe -- -D warnings",
+    "check:typescript": "tsc -b tsconfig.build.json --pretty false",
     "dev": "tsx --tsconfig tsconfig.base.json scripts/dev-workbench.ts",
     "dev:electron": "pnpm --filter @debrute/desktop dev:electron",
-    "generate:control-protocol": "node scripts/run-cargo-with-native-raster.mjs -- test --workspace export_bindings",
+    "generate:control-protocol": "node scripts/run-cargo-with-native-raster.mjs -- test -p debrute-runtime --lib export_bindings",
     "preview": "pnpm --filter @debrute/web preview",
     "test": "pnpm test:layout && vitest run",
     "test:rust": "node scripts/test-rust.mjs",
@@ -41,7 +44,8 @@
     "lint:arch": "node scripts/check-architecture.mjs",
     "native:raster:prepare": "node scripts/prepare-native-raster.mjs",
     "doctor": "node scripts/doctor.mjs",
-    "verify": "pnpm doctor && pnpm check && pnpm check:rust && pnpm test && pnpm test:rust && pnpm lint:arch && pnpm build"
+    "verify": "node scripts/verify.mjs",
+    "verify:all": "node scripts/verify.mjs --all-rust-targets"
   },
   "dependencies": {
     "@debrute/runtime-control-client": "workspace:*"

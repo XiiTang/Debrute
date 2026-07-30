@@ -80,8 +80,6 @@ function TerminalHarness({ api, session }: { api: WorkbenchApiClient; session: T
     resolvedTheme: 'dark',
     session,
     containerRef,
-    onSessionUpdate: () => undefined,
-    onSessionClose: () => undefined,
     onError: () => undefined
   });
   return <div ref={containerRef} />;

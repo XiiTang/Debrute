@@ -480,21 +480,33 @@ selection, and panel state remains frontend-local and is not a Working Copy.
 
 Runtime owns PTYs and holds a `running-terminal` Project Use independently of a
 Workbench connection. One Project-scoped WebSocket transports terminal
-topology, input, resize, output, and exit events. Unexpected socket loss is
+topology, observation, input, resize, output, and exit events. Its initial
+`sync` frame and subsequent contiguous, full `topology` snapshots are the only
+Workbench authority for the Terminal collection; Terminal create and close
+HTTP requests are commands and there is no parallel HTTP list projection. A
+missing or non-contiguous topology revision terminates the Terminal connection
+instead of accepting an uncertain collection. Unexpected socket loss is
 terminal for that loaded Workbench; it is not automatically reconnected and
 input is never replayed. Rebinding, preemption, or Workbench connection end
 closes that socket while the Runtime-owned PTY remains alive. Project or
 Runtime shutdown terminates owned PTYs.
 
+Binding the Terminal WebSocket does not observe any PTY. A Workbench listener
+explicitly observes one Terminal id, and the observation barrier returns that
+actor's current session view and exact emulator checkpoint together before its
+ordered output and status events. Background tab status is therefore an
+explicit product observation, not an implicit bind-time subscription.
+
 Every Workbench Terminal creation names its Project-relative working directory.
 Runtime starts the PTY at one internal initial size, then the mounted terminal
 sends its measured dimensions through the resize command. Creation does not
-accept dimension overrides. Because resize replies carry terminal identity and
-dimensions rather than a request identity, Web keeps at most one resize in
-flight per terminal and coalesces further measurements into one latest pending
-resize. Every caller settles without treating ordinary measurement replacement
-as a transport failure. Every Web event subscription supplies the error handler
-that owns actual transport failures.
+accept dimension overrides. Resize replies correlate the request and return the
+complete current Terminal session. Web keeps at most one resize in flight per
+terminal and coalesces further measurements into one latest pending resize.
+Every caller settles without treating ordinary measurement replacement as a
+transport failure. Input and resize are admitted only after that connection has
+an explicit observation for the Terminal. Every Web event subscription supplies
+the error handler that owns actual transport failures.
 
 ## Product Version Ownership
 

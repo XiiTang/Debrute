@@ -10,13 +10,16 @@ Debrute is a pnpm TypeScript monorepo with a Cargo workspace for the Rust Runtim
 - `pnpm doctor` checks local tooling.
 - `pnpm dev` starts or reuses the Workbench runtime and prints its launch URL.
 - `pnpm dev:electron` starts or attaches Electron to the shared Rust Runtime. Source-development Web is launched by `pnpm dev` or `pnpm dev:electron`; Vite proxies relative Workbench traffic to the exact Runtime origin without a token file or second backend.
-- `pnpm check` runs TypeScript project references.
-- `pnpm check:rust` checks Rust formatting and runs Clippy with warnings denied.
+- `pnpm check` generates the Runtime-owned Control bindings and runs the complete TypeScript project-reference check.
+- `pnpm check:rust` checks Rust formatting and runs Clippy with warnings denied for product libraries and binaries.
+- `pnpm check:rust:all` runs the exhaustive Rust formatting and all-target Clippy gate, including tests and examples.
 - `pnpm test` runs the Vitest suite; use `pnpm exec vitest run <file>` for focused tests.
-- `pnpm test:rust` runs the Cargo workspace test suite.
+- `pnpm test:rust` prepares the native raster payload once, runs Runtime tests through pinned cargo-nextest with at most four test processes, then runs the small host-applicable native crates once per Cargo test binary. Runtime integration modules compile into one harness; Windows-only native targets run on Windows.
+- `pnpm test:rust:native-watcher` separately verifies the production Project watcher factory and worker against the host operating-system watcher.
 - `pnpm lint:arch` validates package boundary rules.
-- `pnpm build` builds TypeScript, assets, and desktop output.
-- `pnpm verify` runs doctor, type checking, tests, architecture lint, and build.
+- `pnpm build` independently generates bindings, type-checks, and builds the complete Desktop product output.
+- `pnpm verify` is the timed daily gate: doctor, one binding generation, one TypeScript check, product-target Clippy, tests, architecture lint, and artifact build.
+- `pnpm verify:all` runs that same pipeline with exhaustive all-target Clippy; use it once after review for final handoff and before release work.
 
 ## Coding Style & Naming Conventions
 
@@ -41,6 +44,10 @@ pnpm check
 ```
 
 Do not run real browser tests or diagnostics unless explicitly requested. For requested live Canvas diagnostics, start the development Workbench with `pnpm dev -- --canvas-perf` or `pnpm dev:electron -- --canvas-perf`, use `window.__debruteCanvasPerf.startCapture()` before the interaction and `window.__debruteCanvasPerf.stopCapture()` after it, then inspect `trace.events`, `trace.sessions`, `counterTotals`, and `canvas`.
+
+During implementation, run the smallest affected Vitest files, Cargo targets, and type checks. Complete code review before the final whole-repository gate, then run `pnpm verify:all` once. `build:artifacts` scripts are internal verified-pipeline composition targets; developers and agents use the standalone `pnpm build` command instead.
+
+Run direct Runtime Cargo or nextest commands through `node scripts/run-cargo-with-native-raster.mjs -- ...`; the Runtime build requires the prepared native raster environment. `pnpm doctor` enforces cargo-nextest `0.9.140`. Rust test binaries omit embedded debug information for normal development speed; when a failing test needs debugger-quality symbols, rerun only that focused target with `CARGO_PROFILE_TEST_DEBUG=2`.
 
 ## Commit & Pull Request Guidelines
 

@@ -105,6 +105,20 @@ try {
   failures.push(`rustc could not be launched through the pinned rustup toolchain: ${message}`);
 }
 
+let nextestVersion = 'unknown';
+try {
+  nextestVersion = execFileSync('cargo', ['nextest', '--version'], { encoding: 'utf8' }).trim();
+  if (!nextestVersion.startsWith('cargo-nextest 0.9.140 ')) {
+    failures.push(`cargo-nextest 0.9.140 is required. Current: ${nextestVersion}`);
+  }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  failures.push(
+    `cargo-nextest 0.9.140 is required. Install it with `
+    + `\`cargo install cargo-nextest --locked --version 0.9.140\`. ${message}`
+  );
+}
+
 try {
   validateNativeRasterLock();
 } catch (error) {
@@ -121,4 +135,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`Debrute doctor passed. Node ${process.version}, pnpm ${pnpmVersion}, ${rustcVersion}, platform ${process.platform}.`);
+console.log(
+  `Debrute doctor passed. Node ${process.version}, pnpm ${pnpmVersion}, `
+  + `${rustcVersion}, ${nextestVersion.split('\n')[0]}, platform ${process.platform}.`
+);

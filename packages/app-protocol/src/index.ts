@@ -627,10 +627,6 @@ interface CreateTerminalSessionInput {
   cwdProjectRelativePath: string;
 }
 
-export interface TerminalSessionList {
-  sessions: TerminalSessionView[];
-}
-
 export interface TerminalSessionResult {
   session: TerminalSessionView;
 }
@@ -695,7 +691,6 @@ export interface TerminalEventSubscription {
 }
 
 export interface TerminalCheckpoint {
-  version: number;
   terminalId: string;
   outputSequence: number;
   cols: number;
@@ -713,10 +708,10 @@ export interface TerminalCheckpoint {
 }
 
 export type TerminalServerFrame =
-  | { type: 'sync'; protocolVersion: number; topologyRevision: number; sessions: TerminalSessionView[]; checkpoints: TerminalCheckpoint[] }
-  | { type: 'observed'; checkpoint: TerminalCheckpoint }
+  | { type: 'sync'; protocolVersion: number; topologyRevision: number; sessions: TerminalSessionView[] }
+  | { type: 'observed'; session: TerminalSessionView; checkpoint: TerminalCheckpoint }
   | { type: 'input-ack'; requestId: number; terminalId: string; sequence: number }
-  | { type: 'resized'; requestId: number; terminalId: string; cols: number; rows: number }
+  | { type: 'resized'; requestId: number; session: TerminalSessionView }
   | { type: 'topology'; topologyRevision: number; sessions: TerminalSessionView[] }
   | { type: 'output'; terminalId: string; sequence: number; dataBase64: string }
   | { type: 'status'; session: TerminalSessionView }
@@ -1301,7 +1296,10 @@ export interface WorkbenchApiClient {
   applyProductUpdate(): Promise<{ ok: true }>;
   globalSettingsSave(input: SaveDebruteGlobalSettingsInput): Promise<{ ok: true }>;
   revealModelApiKey(modelId: string): Promise<RevealModelApiKeyResponse>;
-  listTerminalSessions(): Promise<TerminalSessionList>;
+  subscribeTerminalSessions(
+    listener: (sessions: TerminalSessionView[]) => void,
+    onError: (error: Error) => void
+  ): TerminalEventSubscription;
   createTerminalSession(input: CreateTerminalSessionInput): Promise<TerminalSessionResult>;
   writeTerminalInput(input: TerminalInputWrite): Promise<{ ok: true }>;
   resizeTerminal(input: TerminalResize): Promise<TerminalSessionResult>;

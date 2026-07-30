@@ -2,7 +2,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-use super::protocol::{TERMINAL_PROTOCOL_VERSION, TerminalCheckpoint};
+use super::protocol::TerminalCheckpoint;
 
 const MAX_TITLE_BYTES: usize = 1024;
 const MAX_PENDING_CSI_BYTES: usize = 1024;
@@ -115,7 +115,6 @@ impl TerminalEmulator {
         let (cursor_row, cursor_col) = screen.cursor_position();
         let title = self.title(fallback_title);
         Ok(TerminalCheckpoint {
-            version: TERMINAL_PROTOCOL_VERSION,
             terminal_id: self.terminal_id.clone(),
             output_sequence: self.output_sequence,
             cols,
@@ -347,6 +346,12 @@ mod tests {
         assert!(rebuilt.screen().bracketed_paste());
         assert!(checkpoint.scrollback_rows >= 1);
         assert_eq!(checkpoint.output_sequence, 1);
+        assert!(
+            serde_json::to_value(&checkpoint)
+                .expect("checkpoint should serialize")
+                .get("version")
+                .is_none()
+        );
     }
 
     #[test]

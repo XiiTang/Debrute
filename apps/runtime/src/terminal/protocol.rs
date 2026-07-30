@@ -1,4 +1,4 @@
-//! Closed, versioned Project Terminal hub protocol values.
+//! Closed current Project Terminal hub protocol values.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +33,6 @@ pub struct TerminalSessionView {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(clippy::struct_excessive_bools)] // Independent terminal modes are explicit wire fields.
 pub struct TerminalCheckpoint {
-    pub version: u16,
     pub terminal_id: String,
     pub output_sequence: u64,
     pub cols: u16,
@@ -95,9 +94,9 @@ pub enum TerminalServerFrame {
         protocol_version: u16,
         topology_revision: u64,
         sessions: Vec<TerminalSessionView>,
-        checkpoints: Vec<TerminalCheckpoint>,
     },
     Observed {
+        session: Box<TerminalSessionView>,
         checkpoint: TerminalCheckpoint,
     },
     InputAck {
@@ -107,9 +106,7 @@ pub enum TerminalServerFrame {
     },
     Resized {
         request_id: u64,
-        terminal_id: String,
-        cols: u16,
-        rows: u16,
+        session: TerminalSessionView,
     },
     Topology {
         topology_revision: u64,
@@ -141,7 +138,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hub_frames_use_one_closed_versioned_json_vocabulary() {
+    fn hub_frames_use_one_closed_current_json_vocabulary() {
+        assert_eq!(TERMINAL_PROTOCOL_VERSION, 1);
         let frame = TerminalClientFrame::Input {
             request_id: 11,
             terminal_id: "terminal-1".to_owned(),

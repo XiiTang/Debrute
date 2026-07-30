@@ -864,7 +864,7 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     putFeedbackWorkingCopy: vi.fn(async (_projectId, value) => value),
     clearFeedbackWorkingCopy: vi.fn(async () => undefined),
     clearRecentProjectRoots: vi.fn(async () => ({ ok: true })),
-    listTerminalSessions: vi.fn(async () => ({ sessions: [] })),
+    subscribeTerminalSessions: vi.fn(() => ({ close: vi.fn() })),
     ...overrides
   } as unknown as WorkbenchApiClient;
 }

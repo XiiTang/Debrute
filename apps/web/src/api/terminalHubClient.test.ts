@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TerminalSessionView } from '@debrute/app-protocol';
 import { createTerminalHubClient } from './terminalHubClient';
 
 class FakeWebSocket extends EventTarget {
@@ -36,6 +37,105 @@ describe('multiplexed Terminal hub client', () => {
     vi.unstubAllGlobals();
   });
 
+  it('publishes the ordered Terminal collection and observes only explicit listeners after sync', () => {
+    const client = createTerminalHubClient();
+    client.bindProject('project-1', 'connection-1');
+    const socket = FakeWebSocket.instances[0]!;
+    socket.readyState = 0;
+    const snapshots: TerminalSessionView[][] = [];
+    client.subscribeSessions((sessions) => snapshots.push(sessions), vi.fn());
+    client.subscribe('terminal-1', vi.fn(), vi.fn());
+
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.emit('open');
+    expect(frameTypes(socket)).toEqual(['bind']);
+
+    socket.emit('message', {
+      type: 'sync',
+      protocolVersion: 1,
+      topologyRevision: 4,
+      sessions: [session()]
+    });
+
+    expect(snapshots).toEqual([[session()]]);
+    expect(frameTypes(socket)).toEqual(['bind', 'observe']);
+  });
+
+  it('closes the hub when an ordered topology revision is skipped', () => {
+    const { client, socket } = bindOpenClient();
+    const onError = vi.fn();
+    client.subscribeSessions(vi.fn(), onError);
+    synchronize(socket, [session()], 4);
+
+    socket.emit('message', {
+      type: 'topology',
+      topologyRevision: 6,
+      sessions: []
+    });
+
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Terminal topology revision is not contiguous: expected 5, received 6.'
+    }));
+    expect(socket.readyState).toBe(3);
+  });
+
+  it('projects topology removals and closes the removed Terminal subscription', async () => {
+    const { client, socket } = bindOpenClient();
+    const snapshots: TerminalSessionView[][] = [];
+    const events: unknown[] = [];
+    client.subscribeSessions((sessions) => snapshots.push(sessions), vi.fn());
+    synchronize(socket);
+    client.subscribe('terminal-1', (event) => events.push(event), vi.fn());
+    acceptObservation(socket);
+
+    socket.emit('message', {
+      type: 'topology',
+      topologyRevision: 2,
+      sessions: []
+    });
+
+    expect(snapshots.at(-1)).toEqual([]);
+    expect(events).toContainEqual({ type: 'closed', terminalId: 'terminal-1' });
+    await expect(client.writeInput('terminal-1', 'pwd\r')).rejects.toThrow(
+      'Terminal session was closed: terminal-1'
+    );
+    await expect(client.resize('terminal-1', 100, 30)).rejects.toThrow(
+      'Terminal session was closed: terminal-1'
+    );
+  });
+
+  it('does not let a collection snapshot overwrite newer observed session metadata', () => {
+    const { client, socket } = bindOpenClient();
+    const snapshots: TerminalSessionView[][] = [];
+    client.subscribeSessions((sessions) => snapshots.push(sessions), vi.fn());
+    synchronize(socket);
+    client.subscribe('terminal-1', vi.fn(), vi.fn());
+    acceptObservation(socket);
+    const exited = { ...session(), status: 'exited' as const, exitCode: 0, updatedAt: 'later' };
+    socket.emit('message', { type: 'status', session: exited });
+
+    socket.emit('message', {
+      type: 'topology',
+      topologyRevision: 2,
+      sessions: [session(), session('terminal-2')]
+    });
+
+    expect(snapshots.at(-1)).toEqual([exited, session('terminal-2')]);
+  });
+
+  it('rejects controls without an explicit Terminal observation', async () => {
+    const { client, socket } = bindOpenClient();
+    synchronize(socket);
+
+    await expect(client.writeInput('terminal-1', 'pwd\r')).rejects.toThrow(
+      'Terminal is not observed: terminal-1'
+    );
+    await expect(client.resize('terminal-1', 100, 30)).rejects.toThrow(
+      'Terminal is not observed: terminal-1'
+    );
+    expect(frameTypes(socket)).toEqual(['bind']);
+  });
+
   it('binds one Project socket, renders checkpoints, and acknowledges ordered input', async () => {
     const client = createTerminalHubClient();
     client.bindProject('project-1', 'connection-1');
@@ -50,28 +150,11 @@ describe('multiplexed Terminal hub client', () => {
 
     const events: unknown[] = [];
     client.subscribe('terminal-1', (event) => events.push(event), vi.fn());
+    synchronize(socket);
     socket.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session()],
-      checkpoints: [{
-        version: 1,
-        terminalId: 'terminal-1',
-        outputSequence: 4,
-        cols: 80,
-        rows: 24,
-        scrollbackRows: 0,
-        cursorRow: 0,
-        cursorCol: 0,
-        cursorHidden: false,
-        alternateScreen: false,
-        applicationCursor: false,
-        applicationKeypad: false,
-        bracketedPaste: false,
-        title: 'Terminal',
-        ansiBase64: btoa('ready\r\n')
-      }]
+      type: 'observed',
+      session: session(),
+      checkpoint: { ...checkpoint('terminal-1'), outputSequence: 4, ansiBase64: btoa('ready\r\n') }
     });
     expect(events).toContainEqual({
       type: 'replay',
@@ -90,15 +173,10 @@ describe('multiplexed Terminal hub client', () => {
 
   it('continues input sequence across observation replacement on one attachment', async () => {
     const { client, socket } = bindOpenClient();
-    socket.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session()],
-      checkpoints: [checkpoint('terminal-1')]
-    });
+    synchronize(socket);
 
     const firstSubscription = client.subscribe('terminal-1', vi.fn(), vi.fn());
+    acceptObservation(socket);
     const firstInput = client.writeInput('terminal-1', 'one');
     expect(JSON.parse(socket.sent.at(-1)!)).toEqual({
       type: 'input', requestId: 1, terminalId: 'terminal-1', sequence: 1, data: 'one'
@@ -108,10 +186,7 @@ describe('multiplexed Terminal hub client', () => {
 
     firstSubscription.close();
     client.subscribe('terminal-1', vi.fn(), vi.fn());
-    socket.emit('message', {
-      type: 'observed',
-      checkpoint: checkpoint('terminal-1')
-    });
+    acceptObservation(socket);
 
     const secondInput = client.writeInput('terminal-1', 'two');
     expect(JSON.parse(socket.sent.at(-1)!)).toEqual({
@@ -138,10 +213,8 @@ describe('multiplexed Terminal hub client', () => {
     socket.readyState = FakeWebSocket.OPEN;
     socket.emit('open');
     const nextSubscription = client.subscribe('terminal-1', vi.fn(), vi.fn());
-    socket.emit('message', {
-      type: 'observed',
-      checkpoint: checkpoint('terminal-1')
-    });
+    synchronize(socket);
+    acceptObservation(socket);
     const nextInput = client.writeInput('terminal-1', 'first-sent');
     expect(JSON.parse(socket.sent.at(-1)!)).toEqual({
       type: 'input', requestId: 1, terminalId: 'terminal-1', sequence: 1, data: 'first-sent'
@@ -153,25 +226,17 @@ describe('multiplexed Terminal hub client', () => {
 
   it('waits for Terminal observation before sending the initial resize', async () => {
     const { client, socket } = bindOpenClient();
-    socket.emit('message', {
-      type: 'topology',
-      topologyRevision: 2,
-      sessions: [session()]
-    });
-
-    const resized = client.resize('terminal-1', 100, 30);
-    expect(frameTypes(socket)).toEqual(['bind']);
+    synchronize(socket);
 
     client.subscribe('terminal-1', vi.fn(), vi.fn());
     expect(frameTypes(socket)).toEqual(['bind', 'observe']);
+    const resized = client.resize('terminal-1', 100, 30);
+    expect(frameTypes(socket)).toEqual(['bind', 'observe']);
 
-    socket.emit('message', {
-      type: 'observed',
-      checkpoint: checkpoint('terminal-1')
-    });
+    acceptObservation(socket);
     expect(frameTypes(socket)).toEqual(['bind', 'observe', 'resize']);
 
-    socket.emit('message', { type: 'resized', requestId: 1, terminalId: 'terminal-1', cols: 100, rows: 30 });
+    acceptResize(socket, 1, 'terminal-1', 100, 30);
     await expect(resized).resolves.toEqual({
       session: { ...session(), cols: 100, rows: 30 }
     });
@@ -189,20 +254,16 @@ describe('multiplexed Terminal hub client', () => {
 
     socket.readyState = FakeWebSocket.OPEN;
     socket.emit('open');
-    expect(socket.sent.map((value) => JSON.parse(value).type)).toEqual(['bind', 'observe']);
+    expect(socket.sent.map((value) => JSON.parse(value).type)).toEqual(['bind']);
 
-    socket.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session()],
-      checkpoints: [checkpoint('terminal-1')]
-    });
+    synchronize(socket);
+    expect(socket.sent.map((value) => JSON.parse(value).type)).toEqual(['bind', 'observe']);
+    acceptObservation(socket);
     expect(socket.sent.map((value) => JSON.parse(value).type)).toEqual([
       'bind', 'observe', 'resize'
     ]);
 
-    socket.emit('message', { type: 'resized', requestId: 1, terminalId: 'terminal-1', cols: 100, rows: 30 });
+    acceptResize(socket, 1, 'terminal-1', 100, 30);
     await expect(resized).resolves.toEqual({
       session: { ...session(), cols: 100, rows: 30 }
     });
@@ -210,20 +271,13 @@ describe('multiplexed Terminal hub client', () => {
 
   it('waits for Terminal observation before sending input', async () => {
     const { client, socket } = bindOpenClient();
-    socket.emit('message', {
-      type: 'topology',
-      topologyRevision: 2,
-      sessions: [session()]
-    });
+    synchronize(socket);
 
     client.subscribe('terminal-1', vi.fn(), vi.fn());
     const written = client.writeInput('terminal-1', 'pwd\r');
     expect(frameTypes(socket)).toEqual(['bind', 'observe']);
 
-    socket.emit('message', {
-      type: 'observed',
-      checkpoint: checkpoint('terminal-1')
-    });
+    acceptObservation(socket);
     expect(frameTypes(socket)).toEqual(['bind', 'observe', 'input']);
 
     socket.emit('message', { type: 'input-ack', requestId: 1, terminalId: 'terminal-1', sequence: 1 });
@@ -232,11 +286,7 @@ describe('multiplexed Terminal hub client', () => {
 
   it('rejects current and later controls after Terminal observation fails', async () => {
     const { client, socket } = bindOpenClient();
-    socket.emit('message', {
-      type: 'topology',
-      topologyRevision: 2,
-      sessions: [session()]
-    });
+    synchronize(socket);
 
     client.subscribe('terminal-1', vi.fn(), vi.fn());
     const rejections: string[] = [];
@@ -274,27 +324,19 @@ describe('multiplexed Terminal hub client', () => {
 
   it('does not resend an in-flight resize when a Terminal is re-observed', async () => {
     const { client, socket } = bindOpenClient();
-    socket.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session()],
-      checkpoints: [checkpoint('terminal-1')]
-    });
+    synchronize(socket);
 
     const subscription = client.subscribe('terminal-1', vi.fn(), vi.fn());
+    acceptObservation(socket);
     const resized = client.resize('terminal-1', 100, 30);
     subscription.close();
     client.subscribe('terminal-1', vi.fn(), vi.fn());
-    socket.emit('message', {
-      type: 'observed',
-      checkpoint: checkpoint('terminal-1')
-    });
+    acceptObservation(socket);
     expect(frameTypes(socket)).toEqual([
-      'bind', 'resize', 'unobserve', 'observe'
+      'bind', 'observe', 'resize', 'unobserve', 'observe'
     ]);
 
-    socket.emit('message', { type: 'resized', requestId: 1, terminalId: 'terminal-1', cols: 100, rows: 30 });
+    acceptResize(socket, 1, 'terminal-1', 100, 30);
     await expect(resized).resolves.toEqual({
       session: { ...session(), cols: 100, rows: 30 }
     });
@@ -302,15 +344,11 @@ describe('multiplexed Terminal hub client', () => {
 
   it('correlates a control error without disturbing another Terminal', async () => {
     const { client, socket } = bindOpenClient();
-    socket.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session('terminal-1'), session('terminal-2')],
-      checkpoints: [checkpoint('terminal-1'), checkpoint('terminal-2')]
-    });
+    synchronize(socket, [session('terminal-1'), session('terminal-2')]);
     client.subscribe('terminal-1', vi.fn(), vi.fn());
     client.subscribe('terminal-2', vi.fn(), vi.fn());
+    acceptObservation(socket, 'terminal-1');
+    acceptObservation(socket, 'terminal-2');
 
     const written = client.writeInput('terminal-1', 'pwd\r');
     const secondWritten = client.writeInput('terminal-1', 'echo ready\r');
@@ -348,10 +386,8 @@ describe('multiplexed Terminal hub client', () => {
     await expect(secondWritten).resolves.toEqual({ ok: true });
     socket.emit('message', {
       type: 'resized',
-      terminalId: 'terminal-2',
       requestId: resizeFrame.requestId,
-      cols: 100,
-      rows: 30
+      session: { ...session('terminal-2'), cols: 100, rows: 30 }
     });
     await expect(resized).resolves.toEqual({
       session: { ...session('terminal-2'), cols: 100, rows: 30 }
@@ -362,26 +398,17 @@ describe('multiplexed Terminal hub client', () => {
 
   it('ignores control responses from a replaced Project socket', async () => {
     const { client, socket: replaced } = bindOpenClient();
-    replaced.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session()],
-      checkpoints: [checkpoint('terminal-1')]
-    });
+    synchronize(replaced);
+    client.subscribe('terminal-1', vi.fn(), vi.fn());
+    acceptObservation(replaced);
     const replacedInput = client.writeInput('terminal-1', 'old');
 
     client.bindProject('project-2', 'connection-2');
     await expect(replacedInput).rejects.toThrow('binding was replaced');
     const current = FakeWebSocket.instances[1]!;
     current.emit('open');
-    current.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session()],
-      checkpoints: [checkpoint('terminal-1')]
-    });
+    synchronize(current);
+    acceptObservation(current);
     const currentInput = client.writeInput('terminal-1', 'new');
     const currentSettled = vi.fn();
     void currentInput.then(currentSettled, currentSettled);
@@ -420,25 +447,21 @@ describe('multiplexed Terminal hub client', () => {
 
   it('serializes rapid resizes and coalesces the latest pending dimensions', async () => {
     const { client, socket } = bindOpenClient();
-    socket.emit('message', {
-      type: 'sync',
-      protocolVersion: 1,
-      topologyRevision: 1,
-      sessions: [session()],
-      checkpoints: [checkpoint('terminal-1')]
-    });
+    synchronize(socket);
+    client.subscribe('terminal-1', vi.fn(), vi.fn());
+    acceptObservation(socket);
 
     const first = client.resize('terminal-1', 100, 30);
     const second = client.resize('terminal-1', 110, 35);
     const third = client.resize('terminal-1', 120, 40);
 
-    socket.emit('message', { type: 'resized', requestId: 1, terminalId: 'terminal-1', cols: 100, rows: 30 });
+    acceptResize(socket, 1, 'terminal-1', 100, 30);
     await expect(first).resolves.toEqual({ session: { ...session(), cols: 100, rows: 30 } });
-    socket.emit('message', { type: 'resized', requestId: 2, terminalId: 'terminal-1', cols: 120, rows: 40 });
+    acceptResize(socket, 2, 'terminal-1', 120, 40);
     await expect(second).resolves.toEqual({ session: { ...session(), cols: 120, rows: 40 } });
     await expect(third).resolves.toEqual({ session: { ...session(), cols: 120, rows: 40 } });
 
-    expect(socket.sent.slice(1).map((value) => JSON.parse(value))).toEqual([
+    expect(socket.sent.slice(2).map((value) => JSON.parse(value))).toEqual([
       { type: 'resize', requestId: 1, terminalId: 'terminal-1', cols: 100, rows: 30 },
       { type: 'resize', requestId: 2, terminalId: 'terminal-1', cols: 120, rows: 40 }
     ]);
@@ -454,6 +477,41 @@ function bindOpenClient() {
   return { client, socket };
 }
 
+function synchronize(
+  socket: FakeWebSocket,
+  sessions: TerminalSessionView[] = [session()],
+  topologyRevision = 1
+): void {
+  socket.emit('message', {
+    type: 'sync',
+    protocolVersion: 1,
+    topologyRevision,
+    sessions
+  });
+}
+
+function acceptObservation(socket: FakeWebSocket, terminalId = 'terminal-1'): void {
+  socket.emit('message', {
+    type: 'observed',
+    session: session(terminalId),
+    checkpoint: checkpoint(terminalId)
+  });
+}
+
+function acceptResize(
+  socket: FakeWebSocket,
+  requestId: number,
+  terminalId: string,
+  cols: number,
+  rows: number
+): void {
+  socket.emit('message', {
+    type: 'resized',
+    requestId,
+    session: { ...session(terminalId), cols, rows }
+  });
+}
+
 function frameTypes(socket: FakeWebSocket): string[] {
   return socket.sent.map((value) => JSON.parse(value).type as string);
 }
@@ -467,7 +525,6 @@ function session(id = 'terminal-1') {
 
 function checkpoint(terminalId: string) {
   return {
-    version: 1 as const,
     terminalId,
     outputSequence: 0,
     cols: 80,

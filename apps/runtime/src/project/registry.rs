@@ -330,12 +330,12 @@ impl RootTransition {
 }
 
 #[cfg(not(test))]
-fn default_watch_backend_factory() -> Arc<dyn ProjectWatchBackendFactory> {
+pub(super) fn default_watch_backend_factory() -> Arc<dyn ProjectWatchBackendFactory> {
     Arc::new(super::watcher::NativeProjectWatchBackendFactory)
 }
 
 #[cfg(test)]
-fn default_watch_backend_factory() -> Arc<dyn ProjectWatchBackendFactory> {
+pub(super) fn default_watch_backend_factory() -> Arc<dyn ProjectWatchBackendFactory> {
     Arc::new(super::watcher::NoopProjectWatchBackendFactory)
 }
 
@@ -384,6 +384,22 @@ impl ProjectSessionRegistry {
             feedback_artifacts,
             on_change,
             watch_backend_factory,
+        )
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn with_change_callback_and_deterministic_watcher(
+        debrute_home: impl Into<PathBuf>,
+        node_adapter: Arc<dyn ProjectNodeAdapter>,
+        feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+        on_change: Arc<dyn Fn() + Send + Sync>,
+    ) -> Self {
+        Self::with_dependencies(
+            debrute_home,
+            node_adapter,
+            feedback_artifacts,
+            on_change,
+            Arc::new(super::watcher::NoopProjectWatchBackendFactory),
         )
     }
 

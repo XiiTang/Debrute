@@ -6,12 +6,10 @@ import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../u
 import { useI18n, type WorkbenchI18n } from '../i18n';
 import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
 import { useXtermTerminal } from './useXtermTerminal';
-import { createTerminalMetadataEventHandler } from './terminalMetadataEvents';
 import {
+  acceptTerminalSessionSnapshot,
   beginClosingTerminalSession,
   finishClosingTerminalSession,
-  replaceTerminalSession,
-  selectNextTerminalSession,
   shouldShowTerminalEmptyState,
   type TerminalPanelState
 } from './terminalPanelState';
@@ -102,11 +100,19 @@ export function TerminalPanel({
   const [state, setState] = useState<TerminalPanelState>({
     sessions: [],
     activeSessionId: null,
+    activationTargetId: null,
     isLoading: true,
     error: null,
     closingSessionIds: []
   });
   const closingSessionIdsRef = useRef(new Set<string>());
+  const initialTopologyApiRef = useRef<WorkbenchApiClient | null>(null);
+  const initialTopologyAcceptedRef = useRef(false);
+  const skipAutomaticRootSessionRef = useRef(requestedCwdProjectRelativePath !== null);
+  if (initialTopologyApiRef.current !== api) {
+    initialTopologyApiRef.current = api;
+    initialTopologyAcceptedRef.current = false;
+  }
   const containerRef = useRef<HTMLDivElement | null>(null);
   const activeSession = useMemo(
     () => state.sessions.find((session) => session.id === state.activeSessionId) ?? null,
@@ -120,95 +126,67 @@ export function TerminalPanel({
     [state.activeSessionId, state.sessions]
   );
   const showError = useCallback((error: Error) => {
-    setState((current) => ({ ...current, error: error.message }));
+    setState((current) => ({ ...current, isLoading: false, error: error.message }));
   }, []);
-  const updateSession = useCallback((session: TerminalSessionView) => {
-    setState((current) => ({
-      ...current,
-      sessions: replaceTerminalSession(current.sessions, session),
-      activeSessionId: current.activeSessionId ?? session.id
-    }));
-  }, []);
-  const removeSession = useCallback((terminalId: string) => {
-    closingSessionIdsRef.current.delete(terminalId);
-    setState((current) => {
-      const sessions = current.sessions.filter((session) => session.id !== terminalId);
-      return {
-        ...current,
-        sessions,
-        closingSessionIds: current.closingSessionIds.filter((id) => id !== terminalId),
-        activeSessionId: current.activeSessionId === terminalId
-          ? selectNextTerminalSession(current.sessions, terminalId)
-          : current.activeSessionId
-      };
-    });
-  }, []);
-
   const createSession = useCallback(async (cwdProjectRelativePath = '') => {
     setState((current) => ({ ...current, error: null }));
     const result = await api.createTerminalSession({
       cwdProjectRelativePath
     });
-    setState((current) => ({
-      ...current,
-      sessions: replaceTerminalSession(current.sessions, result.session),
-      activeSessionId: result.session.id,
-      isLoading: false
-    }));
+    setState((current) => current.sessions.some((session) => session.id === result.session.id)
+      ? {
+          ...current,
+          activeSessionId: result.session.id,
+          activationTargetId: null
+        }
+      : {
+          ...current,
+          activationTargetId: result.session.id
+        });
   }, [api]);
 
   useEffect(() => {
-    let disposed = false;
-    void (async () => {
-      try {
-        const result = await api.listTerminalSessions();
-        if (disposed) {
-          return;
-        }
-        if (result.sessions.length === 0) {
-          if (requestedCwdProjectRelativePath !== null) {
-            setState((current) => ({ ...current, isLoading: false }));
-            return;
-          }
-          await createSession('');
-          return;
-        }
-        setState({
-          sessions: result.sessions,
-          activeSessionId: result.sessions[0]!.id,
-          isLoading: false,
-          error: null,
-          closingSessionIds: []
-        });
-      } catch (error) {
-        if (!disposed) {
-          setState((current) => ({ ...current, isLoading: false, error: error instanceof Error ? error.message : String(error) }));
+    const subscription = api.subscribeTerminalSessions((sessions) => {
+      const sessionIds = new Set(sessions.map((session) => session.id));
+      for (const terminalId of closingSessionIdsRef.current) {
+        if (!sessionIds.has(terminalId)) {
+          closingSessionIdsRef.current.delete(terminalId);
         }
       }
-    })();
-    return () => {
-      disposed = true;
-    };
-  }, [api, createSession]);
+      const isInitialSnapshot = !initialTopologyAcceptedRef.current;
+      initialTopologyAcceptedRef.current = true;
+      setState((current) => {
+        const accepted = acceptTerminalSessionSnapshot(current, sessions);
+        return isInitialSnapshot && sessions.length === 0 && current.error === null
+          ? { ...accepted, isLoading: true }
+          : accepted;
+      });
+      if (
+        isInitialSnapshot
+        && sessions.length === 0
+        && !skipAutomaticRootSessionRef.current
+      ) {
+        void createSession('').catch(showError);
+      }
+    }, (error) => {
+      setState((current) => ({ ...current, isLoading: false, error: error.message }));
+    });
+    return () => subscription.close();
+  }, [api, createSession, showError]);
 
   useEffect(() => {
     if (!backgroundTerminalSessionIdsKey) {
       return;
     }
-    const handleEvent = createTerminalMetadataEventHandler({
-      onSessionUpdate: updateSession,
-      onSessionClose: removeSession,
-      onError: showError
-    });
     const subscriptions = backgroundTerminalSessionIdsKey
       .split('\n')
-      .map((terminalId) => api.subscribeTerminalEvents(terminalId, handleEvent, showError));
+      .map((terminalId) => api.subscribeTerminalEvents(terminalId, () => undefined, showError));
     return () => {
       for (const subscription of subscriptions) {
         subscription.close();
       }
     };
-  }, [api, backgroundTerminalSessionIdsKey, removeSession, showError, updateSession]);
+  }, [api, backgroundTerminalSessionIdsKey, showError]);
 
   useEffect(() => {
     if (requestedCwdProjectRelativePath === null) {
@@ -223,8 +201,6 @@ export function TerminalPanel({
     resolvedTheme,
     session: activeSession,
     containerRef,
-    onSessionUpdate: updateSession,
-    onSessionClose: removeSession,
     onError: showError
   });
 
@@ -237,14 +213,13 @@ export function TerminalPanel({
     void (async () => {
       try {
         await api.closeTerminalSession({ terminalId: session.id });
-        removeSession(session.id);
       } catch (error) {
         closingSessionIdsRef.current.delete(session.id);
         setState((current) => finishClosingTerminalSession(current, session.id));
         showError(error instanceof Error ? error : new Error(String(error)));
       }
     })();
-  }, [api, removeSession, showError]);
+  }, [api, showError]);
 
   const showEmptyState = shouldShowTerminalEmptyState(state);
   const i18n = useI18n();
@@ -255,7 +230,11 @@ export function TerminalPanel({
         sessions={state.sessions}
         activeSessionId={state.activeSessionId}
         closingSessionIds={state.closingSessionIds}
-        onSelectSession={(terminalId) => setState((current) => ({ ...current, activeSessionId: terminalId }))}
+        onSelectSession={(terminalId) => setState((current) => ({
+          ...current,
+          activeSessionId: terminalId,
+          activationTargetId: null
+        }))}
         onCreateSession={() => void createSession('').catch(showError)}
         onCloseSession={closeSession}
       />

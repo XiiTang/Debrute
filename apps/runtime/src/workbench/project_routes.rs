@@ -1195,22 +1195,12 @@ pub(super) async fn video_preview(
     .await
 }
 
-pub(super) async fn terminals(
+pub(super) async fn terminal_create(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
 ) -> Response {
     let runtime = Arc::clone(&state.services);
-    if request.method() == Method::GET {
-        return match runtime.terminals().list(&scope.project_id) {
-            Ok(snapshot) => Json(json!({
-                "revision": snapshot.revision,
-                "sessions": snapshot.sessions
-            }))
-            .into_response(),
-            Err(error) => terminal_error(error),
-        };
-    }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
@@ -1310,28 +1300,10 @@ async fn run_terminal_websocket(
     let (sender, receiver) =
         mpsc::channel::<TerminalOutboundMessage>(TERMINAL_HUB_OUTBOUND_CAPACITY);
     let outbound_loss = Arc::new(tokio::sync::Notify::new());
-    let mut checkpoints = Vec::new();
-    for session in &topology.snapshot.sessions {
-        let Ok(observation) = runtime
-            .terminals()
-            .observe(&project_id, &session.id, &observer_id)
-        else {
-            continue;
-        };
-        checkpoints.push(observation.checkpoint.clone());
-        spawn_terminal_observation(
-            session.id.clone(),
-            observation,
-            sender.clone(),
-            Arc::clone(&observations),
-            Arc::clone(&outbound_loss),
-        );
-    }
     let sync = TerminalServerFrame::Sync {
         protocol_version: TERMINAL_PROTOCOL_VERSION,
         topology_revision: topology.snapshot.revision,
         sessions: topology.snapshot.sessions.clone(),
-        checkpoints,
     };
     if write_terminal_frame(&mut writer, &sync).await.is_err() {
         return;
@@ -1363,7 +1335,10 @@ async fn run_terminal_websocket(
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    topology_outbound_loss.notify_one();
+                    return;
+                }
             }
         }
     });
@@ -1504,6 +1479,7 @@ async fn handle_terminal_client_frame(
                 };
             permit.send(TerminalOutboundMessage::Frame(
                 TerminalServerFrame::Observed {
+                    session: Box::new(observation.session.clone()),
                     checkpoint: observation.checkpoint.clone(),
                 },
             ));
@@ -1568,9 +1544,7 @@ async fn handle_terminal_client_frame(
                 {
                     Ok(session) => TerminalServerFrame::Resized {
                         request_id,
-                        terminal_id: terminal_id.clone(),
-                        cols: session.cols,
-                        rows: session.rows,
+                        session,
                     },
                     Err(error) => terminal_protocol_error(
                         Some(request_id),
@@ -1683,10 +1657,15 @@ fn spawn_terminal_observation(
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
-        observations
+        let mut registry = observations
             .lock()
-            .expect("Terminal observation registry lock poisoned")
-            .remove(&terminal_id);
+            .expect("Terminal observation registry lock poisoned");
+        if registry
+            .get(&terminal_id)
+            .is_some_and(|current| Arc::ptr_eq(current, &stop))
+        {
+            registry.remove(&terminal_id);
+        }
     });
 }
 
@@ -2180,9 +2159,7 @@ mod tests {
                 operation_marker.store(true, Ordering::Release);
                 TerminalServerFrame::Resized {
                     request_id: 7,
-                    terminal_id: "terminal-1".to_owned(),
-                    cols: 100,
-                    rows: 40,
+                    session: terminal_session("terminal-1", 100, 40),
                 }
             });
             tokio::pin!(handling);
@@ -2208,11 +2185,9 @@ mod tests {
             Some(TerminalOutboundMessage::Frame(
                 TerminalServerFrame::Resized {
                     request_id: 7,
-                    terminal_id,
-                    cols: 100,
-                    rows: 40,
+                    session,
                 }
-            )) if terminal_id == "terminal-1"
+            )) if session.id == "terminal-1" && session.cols == 100 && session.rows == 40
         ));
     }
 
@@ -2227,9 +2202,7 @@ mod tests {
             operation_marker.store(true, Ordering::Release);
             TerminalServerFrame::Resized {
                 request_id: 8,
-                terminal_id: "terminal-2".to_owned(),
-                cols: 120,
-                rows: 50,
+                session: terminal_session("terminal-2", 120, 50),
             }
         })
         .await;
@@ -2264,6 +2237,21 @@ mod tests {
     }
 
     struct PendingTerminalWriter;
+
+    fn terminal_session(id: &str, cols: u16, rows: u16) -> crate::terminal::TerminalSessionView {
+        crate::terminal::TerminalSessionView {
+            id: id.to_owned(),
+            title: "Terminal".to_owned(),
+            cwd_project_relative_path: String::new(),
+            cols,
+            rows,
+            status: crate::terminal::TerminalSessionStatus::Running,
+            exit_code: None,
+            signal: None,
+            created_at: "2026-07-30T00:00:00Z".to_owned(),
+            updated_at: "2026-07-30T00:00:00Z".to_owned(),
+        }
+    }
 
     impl tokio::io::AsyncWrite for PendingTerminalWriter {
         fn poll_write(

@@ -24,6 +24,10 @@ The root package version, Cargo workspace, Desktop and plugin packages, Product
 manifest, and every official Skill metadata version form one release-version contract.
 `scripts/validate-release-version-contract.mjs` and release preflight reject a
 tag whose `vX.Y.Z` value or packaged component versions disagree.
+Release preflight also runs `pnpm check:rust:all`, so tests and examples remain
+inside the exhaustive Clippy contract even though daily `pnpm verify` limits
+Clippy to product libraries and binaries. Developers and agents run
+`pnpm verify:all` once after review before starting release work.
 
 Desktop assembly creates one strict Product seed containing Runtime and CLI,
 declared native workers, the target's checksum-pinned libvips payload, official
@@ -236,15 +240,18 @@ inside the startup or shutdown deadline, so one hung probe cannot suspend the
 job. Bounded polling waits for the one startup and the one shutdown already
 requested; it does not retry either product action.
 
-Before building either macOS architecture, its matrix job runs
-`pnpm test:rust:native-watcher`. The command starts four real recursive notify
-watchers in one directly supervised probe process and requires an event from
-each. A 15-second probe deadline kills that exact process and fails the release
-job; it does not retry, fall back to polling, or convert the macOS FSEvents
-startup hang tracked by [notify-rs/notify#942](https://github.com/notify-rs/notify/issues/942)
-into success. Project-session unit contracts stay deterministic through their
-injected watcher backend, while this native release gate retains explicit
-platform evidence on both macOS architectures.
+Before building any Desktop platform target, its matrix job runs
+`pnpm test:rust:native-watcher`. The command creates four real recursive notify
+watchers through the Runtime's production default factory and
+`ProjectFileWatcher` worker in one directly supervised probe process, writes a
+change under each root, and requires a worker-delivered event from each. A
+15-second probe deadline kills that exact process and fails the release job; it
+does not retry or fall back to polling. On macOS, the diagnostic identifies the
+FSEvents startup hang tracked by
+[notify-rs/notify#942](https://github.com/notify-rs/notify/issues/942), without
+converting it into success. Ordinary Runtime tests select the deterministic
+watcher backend, while this native release gate retains explicit
+production-wiring evidence on both macOS architectures and Windows.
 
 The publish job requires three Desktop installers, three complete Product
 archives, and the signed manifest pair. It rejects any unexpected or duplicate

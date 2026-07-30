@@ -178,7 +178,7 @@ describe('brand assets', () => {
     }
   });
 
-  it('wires brand generation into Web and Electron consumers', () => {
+  it('wires brand generation through the single Web artifact owner', () => {
     const root = process.cwd();
     const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
@@ -193,14 +193,14 @@ describe('brand assets', () => {
     const webHtml = readFileSync(join(root, 'apps/web/index.html'), 'utf8');
 
     expect(rootPackage.scripts['brand:sync']).toBe('node scripts/sync-brand-assets.mjs');
+    expect(webPackage.scripts['build:artifacts']).toContain('brand:sync');
+    expect(webPackage.scripts.build).toContain('pnpm build:artifacts');
     expect([
       ['root build', rootPackage.scripts.build],
       ['Web build', webPackage.scripts.build],
       ['Desktop build', desktopPackage.scripts.build],
       ['Desktop development bundle', desktopPackage.scripts['build:electron:dev']]
-    ].filter(([, command]) => command.includes('brand:sync')).map(([owner]) => owner)).toEqual([
-      'Web build'
-    ]);
+    ].filter(([, command]) => command.includes('brand:sync')).map(([owner]) => owner)).toEqual([]);
     expect(webHtml).toContain('<link rel="icon" type="image/svg+xml" href="/debrute.svg" />');
     expect(desktopPackage.build.directories.buildResources).toBe('build');
     expect(desktopPackage.build).not.toHaveProperty('icon');

@@ -1214,8 +1214,11 @@ impl TestRuntime {
         fs::write(assets.join("index.html"), "<main>Debrute Workbench</main>")
             .expect("index should be written");
         let state = Arc::new(RuntimeControlState::new("runtime-instance"));
-        let services = WorkbenchRuntimeServices::compose(root.join("home"), Arc::clone(&state))
-            .expect("Runtime services should compose");
+        let services = WorkbenchRuntimeServices::compose_for_integration_tests(
+            root.join("home"),
+            Arc::clone(&state),
+        )
+        .expect("Runtime services should compose");
         let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(
             Arc::clone(services.models()),
             Arc::clone(services.global()),

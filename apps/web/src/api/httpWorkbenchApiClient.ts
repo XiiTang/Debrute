@@ -13,7 +13,6 @@ import type {
   SaveDebruteGlobalSettingsInput,
   SendProjectFileToPhotoshopResult,
   TerminalEventSubscription,
-  TerminalSessionList,
   TerminalSessionResult,
   UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput,
@@ -234,6 +233,28 @@ export function createHttpWorkbenchApiClient(options: {
       return hub;
     });
     return terminalHubLoad;
+  };
+  const deferTerminalHubSubscription = (
+    subscribe: (hub: TerminalHubClient) => TerminalEventSubscription,
+    onError: (error: Error) => void
+  ): TerminalEventSubscription => {
+    let closed = false;
+    let subscription: TerminalEventSubscription | undefined;
+    void loadTerminalHub().then((hub) => {
+      if (!closed) {
+        subscription = subscribe(hub);
+      }
+    }).catch((error: unknown) => {
+      if (!closed) {
+        onError(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+    return {
+      close() {
+        closed = true;
+        subscription?.close();
+      }
+    };
   };
   const bindTerminalProject = (projectId: string, connectionCredential: string): void => {
     terminalBinding = { projectId, connectionCredential };
@@ -599,7 +620,10 @@ export function createHttpWorkbenchApiClient(options: {
     applyProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/apply'),
     globalSettingsSave: (input: SaveDebruteGlobalSettingsInput) => request<{ ok: true }>('PATCH', '/api/settings/global', input),
     revealModelApiKey: (modelId: string) => request('POST', '/api/settings/models/api-key/reveal', { modelId }),
-    listTerminalSessions: () => requestForCurrentProject<TerminalSessionList>('GET', '/terminals'),
+    subscribeTerminalSessions: (listener, onError) => deferTerminalHubSubscription(
+      (hub) => hub.subscribeSessions(listener, onError),
+      onError
+    ),
     createTerminalSession: (input) => requestForCurrentProject<TerminalSessionResult>('POST', '/terminals', input),
     writeTerminalInput: async (input) => (
       (await loadTerminalHub()).writeInput(input.terminalId, input.data)
@@ -611,25 +635,10 @@ export function createHttpWorkbenchApiClient(options: {
       'DELETE',
       `/terminals/${encodeURIComponent(input.terminalId)}`
     ),
-    subscribeTerminalEvents: (terminalId, listener, onError): TerminalEventSubscription => {
-      let closed = false;
-      let subscription: TerminalEventSubscription | undefined;
-      void loadTerminalHub().then((hub) => {
-        if (!closed) {
-          subscription = hub.subscribe(terminalId, listener, onError);
-        }
-      }).catch((error: unknown) => {
-        if (!closed) {
-          onError(error instanceof Error ? error : new Error(String(error)));
-        }
-      });
-      return {
-        close() {
-          closed = true;
-          subscription?.close();
-        }
-      };
-    },
+    subscribeTerminalEvents: (terminalId, listener, onError) => deferTerminalHubSubscription(
+      (hub) => hub.subscribe(terminalId, listener, onError),
+      onError
+    ),
     readProjectTextFile: (projectRelativePath) => requestForCurrentProject<WorkbenchProjectTextFile>('GET', `/files/text/${encodeProjectPath(projectRelativePath)}`),
     loadProjectDirectory: (projectRelativeDirectory) => requestProjectMutation(
       'POST',

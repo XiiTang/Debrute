@@ -49,6 +49,12 @@ use super::{
 const GLOBAL_EVENT_CAPACITY: usize = 256;
 pub(crate) const WORKBENCH_HTTP_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
+enum ProjectWatcherComposition {
+    Production,
+    #[cfg(feature = "test-support")]
+    Deterministic,
+}
+
 pub trait RuntimeProductHttpService: Send + Sync {
     fn state(&self) -> Result<Value, RuntimeHttpServiceError>;
     fn check(&self) -> Result<Value, RuntimeHttpServiceError>;
@@ -175,6 +181,37 @@ impl WorkbenchRuntimeServices {
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
+        Self::compose_with_project_watcher(
+            debrute_home,
+            runtime_state,
+            ProjectWatcherComposition::Production,
+        )
+    }
+
+    /// Composes Runtime services for integration tests that do not exercise the
+    /// operating-system Project watcher contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same typed composition errors as [`Self::compose`].
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn compose_for_integration_tests(
+        debrute_home: impl AsRef<Path>,
+        runtime_state: Arc<RuntimeControlState>,
+    ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
+        Self::compose_with_project_watcher(
+            debrute_home,
+            runtime_state,
+            ProjectWatcherComposition::Deterministic,
+        )
+    }
+
+    fn compose_with_project_watcher(
+        debrute_home: impl AsRef<Path>,
+        runtime_state: Arc<RuntimeControlState>,
+        project_watcher: ProjectWatcherComposition,
+    ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         let debrute_home = debrute_home.as_ref().to_path_buf();
         let workers = RuntimeWorkerServices::new();
         let platform = current_platform();
@@ -194,20 +231,33 @@ impl WorkbenchRuntimeServices {
         );
         let photoshop_holder = Arc::new(Mutex::new(Weak::<PhotoshopIntegration>::new()));
         let project_photoshop_holder = Arc::clone(&photoshop_holder);
-        let projects = ProjectSessionRegistry::with_change_callback(
-            &debrute_home,
-            Arc::new(NativeProjectNodeAdapter::new(Arc::clone(&previews))),
-            feedback,
-            Arc::new(move || {
-                if let Some(photoshop) = project_photoshop_holder
-                    .lock()
-                    .expect("Photoshop integration holder lock poisoned")
-                    .upgrade()
-                {
-                    photoshop.broadcast_projects();
-                }
-            }),
-        );
+        let node_adapter = Arc::new(NativeProjectNodeAdapter::new(Arc::clone(&previews)));
+        let on_project_change: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            if let Some(photoshop) = project_photoshop_holder
+                .lock()
+                .expect("Photoshop integration holder lock poisoned")
+                .upgrade()
+            {
+                photoshop.broadcast_projects();
+            }
+        });
+        let projects = match project_watcher {
+            ProjectWatcherComposition::Production => ProjectSessionRegistry::with_change_callback(
+                &debrute_home,
+                node_adapter,
+                feedback,
+                on_project_change,
+            ),
+            #[cfg(feature = "test-support")]
+            ProjectWatcherComposition::Deterministic => {
+                ProjectSessionRegistry::with_change_callback_and_deterministic_watcher(
+                    &debrute_home,
+                    node_adapter,
+                    feedback,
+                    on_project_change,
+                )
+            }
+        };
         let terminals = TerminalService::new(projects.clone());
         let native_shell = Arc::new(ProjectNativeShellService::new(&workers));
         let catalog = Arc::new(ModelCatalog::bundled().map_err(|error| {

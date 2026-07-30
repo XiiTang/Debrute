@@ -12,8 +12,6 @@ export interface UseXtermTerminalInput {
   resolvedTheme: WorkbenchResolvedTheme;
   session: TerminalSessionView | null;
   containerRef: RefObject<HTMLDivElement | null>;
-  onSessionUpdate(session: TerminalSessionView): void;
-  onSessionClose(terminalId: string): void;
   onError(error: Error): void;
 }
 
@@ -54,7 +52,7 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
           terminalId: session.id,
           cols: dimensions.cols,
           rows: dimensions.rows
-        }).then((result) => input.onSessionUpdate(result.session)).catch(input.onError);
+        }).catch(input.onError);
       }
     };
     const dataDisposable = terminal.onData((data) => {
@@ -65,8 +63,6 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
     });
     const renderTerminalEvent = createTerminalEventRenderer({
       write: (data) => terminal.write(data),
-      onSessionUpdate: input.onSessionUpdate,
-      onSessionClose: input.onSessionClose,
       onError: input.onError
     });
     const subscription = input.api.subscribeTerminalEvents(session.id, renderTerminalEvent, input.onError);
@@ -82,7 +78,7 @@ export function useXtermTerminal(input: UseXtermTerminalInput): void {
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, [input.api, input.containerRef, input.session?.id, input.onError, input.onSessionClose, input.onSessionUpdate]);
+  }, [input.api, input.containerRef, input.session?.id, input.onError]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

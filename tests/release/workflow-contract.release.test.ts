@@ -65,7 +65,7 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip');
   });
 
-  it('blocks each macOS release build on the supervised native Project watcher probe', () => {
+  it('blocks every Desktop release build on the supervised native Project watcher probe', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
     const watcherProbeIndex = buildDesktopBlock.indexOf('- name: Verify native Project watcher');
     const watcherProbeStep = buildDesktopBlock.slice(
@@ -74,7 +74,7 @@ describe('GitHub release workflow contract', () => {
     );
 
     expect(watcherProbeIndex).toBeGreaterThan(-1);
-    expect(watcherProbeStep).toContain("if: matrix.platform == 'darwin'");
+    expect(watcherProbeStep).not.toContain('if:');
     expect(watcherProbeStep).toContain('run: pnpm test:rust:native-watcher');
     expect(watcherProbeIndex).toBeLessThan(buildDesktopBlock.indexOf('- run: pnpm build'));
   });

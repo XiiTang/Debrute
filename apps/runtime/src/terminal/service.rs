@@ -111,6 +111,7 @@ pub struct TerminalTopologySnapshot {
 }
 
 pub struct TerminalObservation {
+    pub session: TerminalSessionView,
     pub checkpoint: TerminalCheckpoint,
     receiver: mpsc::Receiver<TerminalEvent>,
     terminal: Weak<TerminalHandle>,
@@ -120,6 +121,25 @@ pub struct TerminalObservation {
 }
 
 impl TerminalObservation {
+    fn from_snapshot(
+        terminal: &Arc<TerminalHandle>,
+        observer_id: String,
+        observation_id: Uuid,
+        active: Arc<AtomicBool>,
+        receiver: mpsc::Receiver<TerminalEvent>,
+        snapshot: TerminalObservationSnapshot,
+    ) -> Self {
+        Self {
+            session: snapshot.session,
+            checkpoint: snapshot.checkpoint,
+            receiver,
+            terminal: Arc::downgrade(terminal),
+            observer_id,
+            observation_id,
+            active,
+        }
+    }
+
     /// Waits for the next ordered Terminal event.
     ///
     /// # Errors
@@ -391,27 +411,6 @@ impl TerminalService {
         Ok(reservation)
     }
 
-    /// Lists the current memory-only Terminal entities for one open Project.
-    ///
-    /// # Errors
-    /// Returns an error when the Project is not open.
-    pub fn list(&self, project_id: &str) -> Result<TerminalTopologySnapshot, TerminalError> {
-        self.inner
-            .registry
-            .get(project_id)
-            .map_err(project_terminal_error)?;
-        let projects = lock(&self.inner.projects, "Terminal project registry");
-        projects.get(project_id).map_or_else(
-            || {
-                Ok(TerminalTopologySnapshot {
-                    revision: 0,
-                    sessions: Vec::new(),
-                })
-            },
-            |project| Ok(snapshot(project)),
-        )
-    }
-
     /// Registers one hub attachment as an observer and returns its exact checkpoint barrier.
     ///
     /// # Errors
@@ -430,40 +429,78 @@ impl TerminalService {
         let (events, receiver) = mpsc::sync_channel(TERMINAL_EVENT_CAPACITY);
         if let Some(checkpoint) = terminal.final_checkpoint() {
             drop(events);
-            return Ok(TerminalObservation {
-                checkpoint: checkpoint?,
-                receiver,
-                terminal: Arc::downgrade(&terminal),
+            return Ok(TerminalObservation::from_snapshot(
+                &terminal,
                 observer_id,
                 observation_id,
                 active,
-            });
+                receiver,
+                TerminalObservationSnapshot {
+                    session: terminal.view(),
+                    checkpoint: checkpoint?,
+                },
+            ));
         }
-        let (reply, checkpoint) = mpsc::channel();
-        terminal.send(ActorCommand::Observe {
+        let (reply, snapshot) = mpsc::channel();
+        if let Err(error) = terminal.send(ActorCommand::Observe {
             observer_id: observer_id.clone(),
             observation_id,
             active: Arc::clone(&active),
             events,
             reply,
-        })?;
-        let checkpoint = checkpoint
-            .recv_timeout(TERMINAL_CLOSE_REQUEST_TIMEOUT)
-            .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => TerminalError::new(
+        }) {
+            if error.code() == "terminal_unavailable" {
+                terminal.join_actor();
+                if let Some(checkpoint) = terminal.final_checkpoint() {
+                    return Ok(TerminalObservation::from_snapshot(
+                        &terminal,
+                        observer_id,
+                        observation_id,
+                        active,
+                        receiver,
+                        TerminalObservationSnapshot {
+                            session: terminal.view(),
+                            checkpoint: checkpoint?,
+                        },
+                    ));
+                }
+            }
+            return Err(error);
+        }
+        let snapshot = match snapshot.recv_timeout(TERMINAL_CLOSE_REQUEST_TIMEOUT) {
+            Ok(snapshot) => snapshot?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(TerminalError::new(
                     "terminal_observe_timeout",
                     format!("Terminal observation timed out: {terminal_id}"),
-                ),
-                mpsc::RecvTimeoutError::Disconnected => actor_unavailable(terminal_id),
-            })??;
-        Ok(TerminalObservation {
-            checkpoint,
-            receiver,
-            terminal: Arc::downgrade(&terminal),
+                ));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                terminal.join_actor();
+                let Some(checkpoint) = terminal.final_checkpoint() else {
+                    return Err(actor_unavailable(terminal_id));
+                };
+                return Ok(TerminalObservation::from_snapshot(
+                    &terminal,
+                    observer_id,
+                    observation_id,
+                    active,
+                    receiver,
+                    TerminalObservationSnapshot {
+                        session: terminal.view(),
+                        checkpoint: checkpoint?,
+                    },
+                ));
+            }
+        };
+        Ok(TerminalObservation::from_snapshot(
+            &terminal,
             observer_id,
             observation_id,
             active,
-        })
+            receiver,
+            snapshot,
+        ))
     }
 
     /// Writes one strictly increasing input sequence after ordered PTY acceptance.
@@ -920,7 +957,7 @@ enum ActorCommand {
         observation_id: Uuid,
         events: mpsc::SyncSender<TerminalEvent>,
         active: Arc<AtomicBool>,
-        reply: mpsc::Sender<Result<TerminalCheckpoint, TerminalError>>,
+        reply: mpsc::Sender<Result<TerminalObservationSnapshot, TerminalError>>,
     },
     Unobserve {
         observer_id: String,
@@ -954,6 +991,11 @@ struct ObserverState {
     observation_id: Uuid,
     events: mpsc::SyncSender<TerminalEvent>,
     active: Arc<AtomicBool>,
+}
+
+struct TerminalObservationSnapshot {
+    session: TerminalSessionView,
+    checkpoint: TerminalCheckpoint,
 }
 
 enum PtyWrite {
@@ -1419,6 +1461,10 @@ fn run_terminal_actor(mut actor: TerminalActor, receiver: mpsc::Receiver<ActorCo
                     actor
                         .emulator
                         .checkpoint(&actor.view.title)
+                        .map(|checkpoint| TerminalObservationSnapshot {
+                            session: actor.view.clone(),
+                            checkpoint,
+                        })
                         .map_err(|message| {
                             TerminalError::new("terminal_checkpoint_too_large", message)
                         })
@@ -2287,6 +2333,10 @@ mod writer_tests {
         let observation = service
             .observe(&project_id, &session.id, "hub")
             .expect("terminal should be observed");
+        assert_eq!(
+            observation.session, session,
+            "observation must expose the session state from the checkpoint barrier"
+        );
         let terminal = service
             .terminal(&project_id, &session.id)
             .expect("terminal should remain registered");
@@ -2457,6 +2507,14 @@ mod tests {
             )
         });
         assert!(exited, "terminal should publish its natural exit");
+        let retired_observation = service
+            .observe(&project_id, &session.id, "late-hub")
+            .expect("retired terminal should expose its final observation");
+        assert_eq!(
+            retired_observation.session.status,
+            TerminalSessionStatus::Exited,
+            "a late observer must receive the final session state with its checkpoint"
+        );
         drop(open_use);
         let released = (0..50).any(|_| {
             if registry.get(&project_id).is_err() {

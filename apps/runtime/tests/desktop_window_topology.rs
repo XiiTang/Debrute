@@ -37,6 +37,14 @@ struct WorkbenchDesktopActivation {
     services: Arc<WorkbenchRuntimeServices>,
 }
 
+fn compose_test_services(
+    root: &Path,
+    state: &Arc<RuntimeControlState>,
+) -> Arc<WorkbenchRuntimeServices> {
+    WorkbenchRuntimeServices::compose_for_integration_tests(root.join("home"), Arc::clone(state))
+        .expect("Runtime services should compose")
+}
+
 impl RuntimeActivationService for DesktopActivation {
     fn activate(
         &self,
@@ -414,8 +422,7 @@ fn desktop_project_activation_reuses_its_true_empty_source_window() {
     let project = project_fixture(root.join("project-a"), "Project A");
     let state = Arc::new(RuntimeControlState::new("runtime-instance"));
     state.set_recent_projects(0, Vec::new());
-    let services = WorkbenchRuntimeServices::compose(root.join("home"), Arc::clone(&state))
-        .expect("Runtime services should compose");
+    let services = compose_test_services(&root, &state);
     assert!(
         state.install_activation_service(Arc::new(WorkbenchDesktopActivation {
             state: Arc::downgrade(&state),
@@ -523,8 +530,7 @@ fn desktop_project_activation_does_not_replace_a_bound_window() {
     };
 
     let state = Arc::new(RuntimeControlState::new("runtime-instance"));
-    let services = WorkbenchRuntimeServices::compose(root.join("home"), Arc::clone(&state))
-        .expect("Runtime services should compose");
+    let services = compose_test_services(&root, &state);
     assert!(
         state.install_activation_service(Arc::new(WorkbenchDesktopActivation {
             state: Arc::downgrade(&state),

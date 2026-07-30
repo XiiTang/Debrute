@@ -67,6 +67,19 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('activates Terminal transport when the collection projection is subscribed', async () => {
+    createHarness();
+    const client = createHttpWorkbenchApiClient();
+    await client.openProject({ projectRoot: '/tmp/project' });
+    expect(StubWebSocket.created).toBe(0);
+
+    const subscription = client.subscribeTerminalSessions(vi.fn(), vi.fn());
+
+    await vi.waitFor(() => expect(StubWebSocket.created).toBe(1));
+    subscription.close();
+    client.dispose();
+  });
+
   it('marks a Project binding carried by the initial Workbench connection', async () => {
     createHarness();
     vi.stubGlobal('location', {

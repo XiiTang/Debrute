@@ -90,21 +90,16 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
     document.body.append(container);
     const root = createRoot(container);
     const created = sessionFixture('one');
-    const api = {
-      listTerminalSessions: vi.fn(async () => ({ sessions: [] })),
-      createTerminalSession: vi.fn(async () => ({ session: created })),
-      closeTerminalSession: vi.fn(async () => ({ ok: true as const })),
-      subscribeTerminalEvents: vi.fn(() => ({ close: vi.fn() })),
-      writeTerminalInput: vi.fn(async () => ({ ok: true as const })),
-      resizeTerminal: vi.fn(async () => ({ session: created }))
-    } as unknown as WorkbenchApiClient;
+    const harness = createTerminalApiHarness({
+      createTerminalSession: vi.fn(async () => ({ session: created }))
+    });
 
     try {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
             <TerminalPanel
-              api={api}
+              api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
               onRequestedCwdConsumed={() => undefined}
@@ -113,9 +108,100 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
         );
       });
 
-      expect(api.createTerminalSession).toHaveBeenCalledOnce();
-      expect(api.createTerminalSession).toHaveBeenCalledWith({ cwdProjectRelativePath: '' });
+      await act(async () => harness.emitSessions([]));
+      expect(harness.api.createTerminalSession).toHaveBeenCalledOnce();
+      expect(harness.api.createTerminalSession).toHaveBeenCalledWith({ cwdProjectRelativePath: '' });
+      expect(container.textContent).not.toContain('one');
+      expect(container.querySelector('[data-testid="terminal-panel-loading-state"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="terminal-panel-empty-state"]')).toBeNull();
+
+      await act(async () => harness.emitSessions([created]));
       expect(container.textContent).toContain('one');
+    } finally {
+      await unmount(root, container);
+      terminalHookState.activeInput = null;
+    }
+  });
+
+  it('keeps the current terminal active until topology accepts a newly created session', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const existing = sessionFixture('one');
+    const created = sessionFixture('two');
+    const harness = createTerminalApiHarness({
+      createTerminalSession: vi.fn(async () => ({ session: created }))
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <TerminalPanel
+              api={harness.api}
+              resolvedTheme="light"
+              requestedCwdProjectRelativePath={null}
+              onRequestedCwdConsumed={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => harness.emitSessions([existing]));
+      expect(terminalHookState.activeInput?.session?.id).toBe('one');
+
+      const createButton = container.querySelector('button[aria-label="New Terminal"]') as HTMLButtonElement;
+      await act(async () => {
+        createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(harness.api.createTerminalSession).toHaveBeenCalledWith({ cwdProjectRelativePath: '' });
+      expect(terminalHookState.activeInput?.session?.id).toBe('one');
+
+      await act(async () => harness.emitSessions([existing, created]));
+      expect(terminalHookState.activeInput?.session?.id).toBe('two');
+    } finally {
+      await unmount(root, container);
+      terminalHookState.activeInput = null;
+    }
+  });
+
+  it('activates a created session when topology arrives before the create response', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const existing = sessionFixture('one');
+    const created = sessionFixture('two');
+    let resolveCreate!: (value: { session: TerminalSessionView }) => void;
+    const harness = createTerminalApiHarness({
+      createTerminalSession: vi.fn(() => new Promise<{ session: TerminalSessionView }>((resolve) => {
+        resolveCreate = resolve;
+      }))
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <TerminalPanel
+              api={harness.api}
+              resolvedTheme="light"
+              requestedCwdProjectRelativePath={null}
+              onRequestedCwdConsumed={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => harness.emitSessions([existing]));
+
+      const createButton = container.querySelector('button[aria-label="New Terminal"]') as HTMLButtonElement;
+      await act(async () => {
+        createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await act(async () => harness.emitSessions([existing, created]));
+      expect(terminalHookState.activeInput?.session?.id).toBe('one');
+
+      await act(async () => resolveCreate({ session: created }));
+      expect(terminalHookState.activeInput?.session?.id).toBe('two');
     } finally {
       await unmount(root, container);
       terminalHookState.activeInput = null;
@@ -127,23 +213,18 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
     document.body.append(container);
     const root = createRoot(container);
     let resolveClose!: () => void;
-    const api = {
-      listTerminalSessions: vi.fn(async () => ({ sessions: [sessionFixture('one')] })),
-      createTerminalSession: vi.fn(),
+    const harness = createTerminalApiHarness({
       closeTerminalSession: vi.fn(() => new Promise<{ ok: true }>((resolve) => {
         resolveClose = () => resolve({ ok: true });
-      })),
-      subscribeTerminalEvents: vi.fn(() => ({ close: vi.fn() })),
-      writeTerminalInput: vi.fn(async () => ({ ok: true })),
-      resizeTerminal: vi.fn(async () => ({ session: sessionFixture('one') }))
-    } as unknown as WorkbenchApiClient;
+      }))
+    });
 
     try {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
             <TerminalPanel
-              api={api}
+              api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
               onRequestedCwdConsumed={() => undefined}
@@ -151,25 +232,28 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
           </I18nProvider>
         );
       });
+      await act(async () => harness.emitSessions([sessionFixture('one')]));
 
       const closeButton = container.querySelector('button[aria-label="Close Terminal one"]') as HTMLButtonElement;
       await act(async () => {
         closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(api.closeTerminalSession).toHaveBeenCalledWith({ terminalId: 'one' });
+      expect(harness.api.closeTerminalSession).toHaveBeenCalledWith({ terminalId: 'one' });
       expect(container.textContent).toContain('one');
       expect(closeButton.disabled).toBe(true);
 
       await act(async () => {
-        terminalHookState.activeInput?.onSessionUpdate(sessionFixture('one', 'terminating'));
+        harness.emitSessions([sessionFixture('one', 'terminating')]);
       });
       expect(container.textContent).toContain('terminating');
 
       await act(async () => {
-        terminalHookState.activeInput?.onSessionClose('one');
         resolveClose();
       });
+      expect(container.textContent).toContain('one');
+
+      await act(async () => harness.emitSessions([]));
 
       expect(container.querySelector('[data-testid="terminal-panel-empty-state"]')).not.toBeNull();
     } finally {
@@ -182,23 +266,18 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const api = {
-      listTerminalSessions: vi.fn(async () => ({ sessions: [sessionFixture('one')] })),
-      createTerminalSession: vi.fn(),
+    const harness = createTerminalApiHarness({
       closeTerminalSession: vi.fn(() => {
         throw new Error('close failed');
-      }),
-      subscribeTerminalEvents: vi.fn(() => ({ close: vi.fn() })),
-      writeTerminalInput: vi.fn(async () => ({ ok: true })),
-      resizeTerminal: vi.fn(async () => ({ session: sessionFixture('one') }))
-    } as unknown as WorkbenchApiClient;
+      })
+    });
 
     try {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
             <TerminalPanel
-              api={api}
+              api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
               onRequestedCwdConsumed={() => undefined}
@@ -206,13 +285,14 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
           </I18nProvider>
         );
       });
+      await act(async () => harness.emitSessions([sessionFixture('one')]));
 
       const closeButton = container.querySelector('button[aria-label="Close Terminal one"]') as HTMLButtonElement;
       await act(async () => {
         closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(api.closeTerminalSession).toHaveBeenCalledWith({ terminalId: 'one' });
+      expect(harness.api.closeTerminalSession).toHaveBeenCalledWith({ terminalId: 'one' });
       expect(container.textContent).toContain('close failed');
       expect((container.querySelector('button[aria-label="Close Terminal one"]') as HTMLButtonElement).disabled).toBe(false);
     } finally {
@@ -221,22 +301,18 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
     }
   });
 
-  it('renders a terminal error when listing sessions throws synchronously', async () => {
+  it('renders a terminal error when the collection stream fails', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const api = {
-      listTerminalSessions: () => {
-        throw new Error('Debrute project is not open.');
-      }
-    } as unknown as WorkbenchApiClient;
+    const harness = createTerminalApiHarness();
 
     try {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
             <TerminalPanel
-              api={api}
+              api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
               onRequestedCwdConsumed={() => undefined}
@@ -244,6 +320,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
           </I18nProvider>
         );
       });
+      await act(async () => harness.emitError(new Error('Debrute project is not open.')));
 
       expect(container.textContent).toContain('Debrute project is not open.');
       expect(container.querySelector('[data-testid="terminal-panel-loading-state"]')).toBeNull();
@@ -259,6 +336,36 @@ async function unmount(root: Root, container: HTMLElement): Promise<void> {
     root.unmount();
   });
   container.remove();
+}
+
+function createTerminalApiHarness(overrides: Record<string, unknown> = {}) {
+  let sessionsListener: ((sessions: TerminalSessionView[]) => void) | undefined;
+  let sessionsErrorListener: ((error: Error) => void) | undefined;
+  const api = {
+    subscribeTerminalSessions: vi.fn((
+      listener: (sessions: TerminalSessionView[]) => void,
+      onError: (error: Error) => void
+    ) => {
+      sessionsListener = listener;
+      sessionsErrorListener = onError;
+      return { close: vi.fn() };
+    }),
+    createTerminalSession: vi.fn(async () => ({ session: sessionFixture('created') })),
+    closeTerminalSession: vi.fn(async () => ({ ok: true as const })),
+    subscribeTerminalEvents: vi.fn(() => ({ close: vi.fn() })),
+    writeTerminalInput: vi.fn(async () => ({ ok: true as const })),
+    resizeTerminal: vi.fn(async () => ({ session: sessionFixture('one') })),
+    ...overrides
+  };
+  return {
+    api: api as typeof api & WorkbenchApiClient,
+    emitSessions(sessions: TerminalSessionView[]) {
+      sessionsListener?.(sessions);
+    },
+    emitError(error: Error) {
+      sessionsErrorListener?.(error);
+    }
+  };
 }
 
 function sessionFixture(id: string, status: TerminalSessionView['status'] = 'running'): TerminalSessionView {

@@ -435,7 +435,7 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
         )
         .route(
             "/projects/{project_id}/terminals",
-            get(super::project_routes::terminals).post(super::project_routes::terminals),
+            post(super::project_routes::terminal_create),
         )
         .route(
             "/projects/{project_id}/terminals/{terminal_id}",

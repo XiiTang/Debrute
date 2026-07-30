@@ -5,6 +5,9 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const probeDeadlineMs = 15_000;
+const probeTimeoutDiagnostic = process.platform === 'darwin'
+  ? ' see notify-rs/notify#942.'
+  : '';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cargoRunner = resolve(repositoryRoot, 'scripts/run-cargo-with-native-raster.mjs');
 const targetRoot = resolveTargetRoot();
@@ -23,6 +26,8 @@ await run(process.execPath, [
   'build',
   '-p',
   'debrute-runtime',
+  '--features',
+  'native-watcher-probe',
   '--example',
   'native_project_watcher_probe'
 ]);
@@ -116,7 +121,7 @@ function runProbe(probeRoot) {
         rejectOnce(new Error(
           killFailed
             ? `Native Project watcher probe exceeded ${probeDeadlineMs} ms and PID ${String(child.pid)} could not be killed.`
-            : `Native Project watcher probe exceeded ${probeDeadlineMs} ms and was killed; see notify-rs/notify#942.`
+            : `Native Project watcher probe exceeded ${probeDeadlineMs} ms and was killed.${probeTimeoutDiagnostic}`
         ));
         return;
       }

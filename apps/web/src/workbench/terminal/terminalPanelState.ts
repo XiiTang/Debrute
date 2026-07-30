@@ -3,29 +3,56 @@ import type { TerminalSessionView } from '@debrute/app-protocol';
 export interface TerminalPanelState {
   sessions: TerminalSessionView[];
   activeSessionId: string | null;
+  activationTargetId: string | null;
   isLoading: boolean;
   error: string | null;
   closingSessionIds: string[];
 }
 
-export function selectNextTerminalSession(
-  sessions: TerminalSessionView[],
-  closedSessionId: string
-): string | null {
-  const index = sessions.findIndex((session) => session.id === closedSessionId);
-  if (index < 0) {
-    return sessions[0]?.id ?? null;
+export function acceptTerminalSessionSnapshot(
+  state: TerminalPanelState,
+  sessions: TerminalSessionView[]
+): TerminalPanelState {
+  const sessionIds = new Set(sessions.map((session) => session.id));
+  const activationAccepted = state.activationTargetId !== null
+    && sessionIds.has(state.activationTargetId);
+  let activeSessionId = activationAccepted ? state.activationTargetId : state.activeSessionId;
+  if (activeSessionId === null || !sessionIds.has(activeSessionId)) {
+    activeSessionId = selectSurvivingTerminalSession(state.sessions, sessions, state.activeSessionId);
   }
-  return sessions[index + 1]?.id ?? sessions[index - 1]?.id ?? null;
+  return {
+    ...state,
+    sessions,
+    activeSessionId,
+    activationTargetId: activationAccepted ? null : state.activationTargetId,
+    isLoading: false,
+    closingSessionIds: state.closingSessionIds.filter((id) => sessionIds.has(id))
+  };
 }
 
-export function replaceTerminalSession(
+function selectSurvivingTerminalSession(
+  previousSessions: TerminalSessionView[],
   sessions: TerminalSessionView[],
-  session: TerminalSessionView
-): TerminalSessionView[] {
-  return sessions.some((item) => item.id === session.id)
-    ? sessions.map((item) => item.id === session.id ? session : item)
-    : [...sessions, session];
+  previousActiveSessionId: string | null
+): string | null {
+  const sessionIds = new Set(sessions.map((session) => session.id));
+  const previousIndex = previousActiveSessionId === null
+    ? -1
+    : previousSessions.findIndex((session) => session.id === previousActiveSessionId);
+  if (previousIndex >= 0) {
+    const following = previousSessions.slice(previousIndex + 1)
+      .find((session) => sessionIds.has(session.id));
+    if (following) {
+      return following.id;
+    }
+    const preceding = previousSessions.slice(0, previousIndex)
+      .reverse()
+      .find((session) => sessionIds.has(session.id));
+    if (preceding) {
+      return preceding.id;
+    }
+  }
+  return sessions[0]?.id ?? null;
 }
 
 export function beginClosingTerminalSession(

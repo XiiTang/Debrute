@@ -241,10 +241,13 @@ state.
 pnpm install
 pnpm doctor
 pnpm check
+pnpm check:rust
+pnpm check:rust:all
 pnpm test
 pnpm lint:arch
 pnpm build
 pnpm verify
+pnpm verify:all
 pnpm pack:local
 pnpm install:local
 pnpm dist
@@ -255,7 +258,9 @@ pnpm clean
 node scripts/run-cargo-with-native-raster.mjs -- run -p debrute-runtime --bin debrute -- project validate path/to/project
 ```
 
-`pnpm doctor` checks the local Node/pnpm/tooling surface needed for development and supported Product packaging. `pnpm check` uses the project-reference graph to type-check packages, Web, and the Electron Desktop from its one NodeNext `noEmit` configuration. esbuild alone emits the Electron JavaScript bundle. `pnpm verify` runs doctor, that complete type check, tests, architecture lint, and the production build.
+`pnpm doctor` checks the local Node/pnpm/tooling surface needed for development and supported Product packaging. `pnpm check` generates Control bindings from the exact owning Runtime library, then uses the project-reference graph to type-check packages, Web, and the Electron Desktop from its one NodeNext `noEmit` configuration. `pnpm check:rust` formats and lints product libraries and binaries; `pnpm check:rust:all` is the exhaustive all-target lint gate for tests and examples as well.
+
+`pnpm verify` is the timed daily repository gate. It runs doctor, Control generation once, the complete TypeScript check once, product-target Clippy, TypeScript and Rust tests, architecture lint, and a production artifact build that does not repeat generation or type checking. `pnpm verify:all` runs the same stages with all-target Clippy instead. During implementation, use focused tests and checks, complete code review, then run `pnpm verify:all` once for final handoff. Each verification run prints per-stage and total wall-clock durations, including the failed stage when it stops early.
 
 `pnpm dev` starts or reuses the shared Rust Runtime, starts Vite, and prints the
 browser Workbench URL. Opening it creates a fresh POST SSE Workbench connection.
@@ -305,10 +310,12 @@ second command-line or process-environment contract.
 `pnpm dev:electron` uses the same native Control endpoint, so it attaches to the existing Runtime instead of starting a competing backend.
 Its internal Desktop development bundle intentionally skips Product-seed
 assembly after naming that responsibility directly; it is not a second
-production build. `pnpm build` is the sole Desktop production build path and
-includes the Web build, Rust binaries, Desktop type check, Electron bundle, and
-complete Product seed. The package exposes no weaker build alias or unused
-sourcemap switch that can produce a product-looking partial result.
+production build. `pnpm build` remains the standalone Desktop production build
+path and includes current bindings, the complete TypeScript check, Web assets,
+Rust binaries, the Electron bundle, and the complete Product seed. Internal
+`build:artifacts` scripts are used only after those checks by the timed
+verification pipeline; they are not an independent developer build command or
+a second product contract.
 
 Each source-development process binds its Vite proxy to the exact Runtime
 origin registered for that launch. If the Control connection reports Runtime
@@ -360,16 +367,39 @@ builds the current-platform CLI against the locked native payload. Product
 assembly signs and declares that binary together with Runtime, Web assets,
 Skills, and model documentation.
 
-`pnpm test:rust` preserves Cargo's normal parallel test execution except for
-the `workbench_http` integration target. Every test in that target owns a full
-Workbench HTTP server and composed Runtime services, so the test runner
-discovers those cases from Cargo and invokes each one in a clean, single-threaded
-test process. The fixture also uses the production shutdown order and a test-only
-120-second HTTP request timeout so a loaded development machine does not turn
-correct local service behavior into a 30-second client-default failure. Other
-Runtime integration targets are discovered from `apps/runtime/tests/` and
-remain parallel; adding a new target or `workbench_http` case does not require
-maintaining a second hard-coded test list.
+`pnpm test:rust` prepares the locked native raster payload once. It runs Runtime
+tests through cargo-nextest `0.9.140`, then runs the small host-applicable native
+crates once per Cargo test binary. Runtime integration modules compile into one
+`runtime_integration` harness while nextest still gives each Runtime test its
+own process. macOS runs the native support libraries that contain macOS tests;
+Windows additionally runs the Windows-only native libraries and native-process
+integration targets. The repository-owned nextest profile allows at most four
+Runtime test processes, reports a test as slow after 60 seconds, and terminates
+it only after three such periods so the 120-second HTTP request bound and
+cleanup retain margin.
+Rust libraries opt out of doctests because the workspace contains no executable
+Rust documentation examples. The test profile omits embedded debug information
+so macOS does not repeatedly load large test symbols. For a focused diagnostic,
+temporarily restore full symbols without changing repository configuration:
+
+```bash
+CARGO_PROFILE_TEST_DEBUG=2 node scripts/run-cargo-with-native-raster.mjs -- \
+  nextest run -p debrute-runtime --features test-support -E 'test(your_test_name)'
+```
+
+All direct Runtime Cargo and nextest commands use
+`scripts/run-cargo-with-native-raster.mjs`; invoking Cargo directly does not
+provide the native raster link and loader environment. `pnpm doctor` reports a
+missing or mismatched nextest version. Install the pinned local tool with:
+
+```bash
+cargo install cargo-nextest --locked --version 0.9.140
+```
+
+Runtime HTTP and Desktop-topology fixtures compose the same production services
+with a deterministic watcher backend. They retain production request,
+publication, shutdown, and ownership behavior without starting macOS FSEvents
+or the Windows watcher during unrelated integration tests.
 
 On macOS, `pnpm pack:local` rebuilds the current host Product and creates an
 unpacked `Debrute.app` under `apps/desktop/release/local/`. It ad-hoc signs the

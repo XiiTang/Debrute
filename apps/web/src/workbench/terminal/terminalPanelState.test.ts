@@ -1,41 +1,54 @@
 import { describe, expect, it } from 'vitest';
 import type { TerminalSessionView } from '@debrute/app-protocol';
 import {
+  acceptTerminalSessionSnapshot,
   beginClosingTerminalSession,
   isTerminalSessionClosing,
-  replaceTerminalSession,
-  selectNextTerminalSession,
   shouldShowTerminalEmptyState,
   type TerminalPanelState
 } from './terminalPanelState';
 
 describe('terminalPanelState', { tags: ['terminal'] }, () => {
-  it('selects the next session after closing the active session', () => {
-    const sessions = [
-      sessionFixture('one'),
-      sessionFixture('two'),
-      sessionFixture('three')
-    ];
+  it('accepts complete topology snapshots and preserves an activation target until it appears', () => {
+    const state: TerminalPanelState = {
+      sessions: [],
+      activeSessionId: null,
+      activationTargetId: 'two',
+      isLoading: true,
+      error: null,
+      closingSessionIds: []
+    };
 
-    expect(selectNextTerminalSession(sessions, 'two')).toBe('three');
-    expect(selectNextTerminalSession(sessions, 'three')).toBe('two');
-    expect(selectNextTerminalSession([sessionFixture('one')], 'one')).toBeNull();
+    const initial = acceptTerminalSessionSnapshot(state, [sessionFixture('one')]);
+    expect(initial.activeSessionId).toBe('one');
+    expect(initial.activationTargetId).toBe('two');
+    expect(initial.isLoading).toBe(false);
+
+    const created = acceptTerminalSessionSnapshot(initial, [sessionFixture('one'), sessionFixture('two')]);
+    expect(created.activeSessionId).toBe('two');
+    expect(created.activationTargetId).toBeNull();
   });
 
-  it('replaces an existing session without reordering tabs', () => {
-    const sessions = [sessionFixture('one'), sessionFixture('two')];
-    const updated = { ...sessionFixture('one'), status: 'exited' as const };
+  it('selects a surviving neighbor and clears removed closing sessions', () => {
+    const state: TerminalPanelState = {
+      sessions: [sessionFixture('one'), sessionFixture('two'), sessionFixture('three')],
+      activeSessionId: 'two',
+      activationTargetId: null,
+      isLoading: false,
+      error: null,
+      closingSessionIds: ['two']
+    };
 
-    expect(replaceTerminalSession(sessions, updated)).toEqual([
-      updated,
-      sessionFixture('two')
-    ]);
+    const accepted = acceptTerminalSessionSnapshot(state, [sessionFixture('one'), sessionFixture('three')]);
+    expect(accepted.activeSessionId).toBe('three');
+    expect(accepted.closingSessionIds).toEqual([]);
   });
 
   it('tracks session close requests without duplicate pending entries', () => {
     const state = {
       sessions: [sessionFixture('one')],
       activeSessionId: 'one',
+      activationTargetId: null,
       isLoading: false,
       error: null,
       closingSessionIds: []
@@ -52,6 +65,7 @@ describe('terminalPanelState', { tags: ['terminal'] }, () => {
     const state: TerminalPanelState = {
       sessions: [sessionFixture('one', 'terminating')],
       activeSessionId: 'one',
+      activationTargetId: null,
       isLoading: false,
       error: null,
       closingSessionIds: []
@@ -64,6 +78,7 @@ describe('terminalPanelState', { tags: ['terminal'] }, () => {
     const emptyState: TerminalPanelState = {
       sessions: [],
       activeSessionId: null,
+      activationTargetId: null,
       isLoading: false,
       error: null,
       closingSessionIds: []

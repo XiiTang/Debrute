@@ -9,6 +9,8 @@ mod files;
 mod generated_assets;
 mod media;
 mod native_shell;
+#[cfg(feature = "native-watcher-probe")]
+mod native_watcher_probe;
 mod paths;
 mod platform;
 mod previews;
@@ -26,6 +28,9 @@ pub use files::*;
 pub use generated_assets::*;
 pub use media::*;
 pub use native_shell::*;
+#[cfg(feature = "native-watcher-probe")]
+#[doc(hidden)]
+pub use native_watcher_probe::run_native_project_watcher_probe;
 pub use paths::*;
 pub(crate) use platform::{rename_no_replace, replace_file};
 pub use previews::*;

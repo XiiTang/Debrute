@@ -1597,6 +1597,7 @@ function WorkbenchProjectGenerationApp({
                     terminalPanel={(
                       <React.Suspense fallback={<div className="terminal-panel" aria-busy="true" />}>
                         <TerminalPanel
+                          key={runtimeProjectId}
                           api={api}
                           resolvedTheme={presentationController.resolvedTheme}
                           requestedCwdProjectRelativePath={requestedTerminalCwd}

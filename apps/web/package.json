@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Debrute browser workbench.",
   "scripts": {
-    "build": "pnpm --workspace-root brand:sync && tsc --noEmit && vite build && node ../../scripts/check-web-build-budget.mjs",
+    "build": "pnpm check && pnpm build:artifacts",
+    "build:artifacts": "pnpm --workspace-root brand:sync && vite build && node ../../scripts/check-web-build-budget.mjs",
     "check": "tsc --noEmit --pretty false",
     "dev": "vite --host 127.0.0.1",
     "preview": "vite preview --host 127.0.0.1"

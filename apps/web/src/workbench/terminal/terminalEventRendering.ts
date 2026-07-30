@@ -1,9 +1,7 @@
-import type { TerminalEvent, TerminalSessionView } from '@debrute/app-protocol';
+import type { TerminalEvent } from '@debrute/app-protocol';
 
 export interface TerminalEventRendererInput {
   write(data: string): void;
-  onSessionUpdate(session: TerminalSessionView): void;
-  onSessionClose(terminalId: string): void;
   onError(error: Error): void;
 }
 
@@ -25,14 +23,6 @@ export function createTerminalEventRenderer(input: TerminalEventRendererInput): 
         input.write(event.data);
         lastRenderedSequence = event.sequence;
       }
-      return;
-    }
-    if (event.type === 'status') {
-      input.onSessionUpdate(event.session);
-      return;
-    }
-    if (event.type === 'closed') {
-      input.onSessionClose(event.terminalId);
       return;
     }
     if (event.type === 'error') {

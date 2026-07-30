@@ -63,6 +63,14 @@ because local machine load cannot distinguish a code regression from external
 contention. Timeouts remain separate hung-test limits: 5, 5, and 30 seconds
 respectively.
 
+Whole-repository verification has a separate sequential timing report. Daily
+`pnpm verify` generates Control bindings and runs the complete TypeScript check
+once, lints Rust product libraries and binaries, runs every TypeScript and Rust
+test, checks architecture, and builds production artifacts without repeating
+generation or type checking. Final `pnpm verify:all` selects all-target Clippy
+instead of product-target Clippy; it does not run both. A failed stage stops the
+pipeline and the summary retains the completed and failed-stage durations.
+
 ## Resource Ownership
 
 Release tests own every temporary payload, package, and manifest they create
@@ -89,16 +97,16 @@ creation seam. They still execute the production Project watcher worker,
 filtering, path-local coalescing, publication barrier, rescan handling, and
 session lifecycle, but do not make unrelated Registry contracts depend on an
 operating-system watcher. The separate `pnpm test:rust:native-watcher` command
-builds one direct native probe without a time limit on compilation, then gives
-the probe process 15 seconds to start four real recursive watchers, observe one
-change through each, and close. A deadline kills only that exact probe process
-and fails explicitly with the notify-rs/notify#942 diagnostic; the command does
-not retry or select another backend. It remains outside ordinary `pnpm verify`
-and is required by both macOS release matrix jobs. Live Runtime integration
-tests may still traverse the production watcher path when that behavior belongs
-to their system boundary; the injected backend removes native initialization
-from Project-session unit contracts rather than globally replacing production
-integration.
+builds the production watcher probe without a time limit on compilation, then
+gives the probe process 15 seconds to create four recursive watchers through the
+Runtime's default watcher factory and `ProjectFileWatcher` worker, observe a
+real file change through each worker, and close. A deadline kills only that
+exact probe process and fails explicitly with the notify-rs/notify#942
+diagnostic on macOS; the command does not retry or select another backend. It
+remains outside ordinary `pnpm verify` and is required by every Desktop release
+matrix target. Ordinary Runtime integration composition always selects the
+deterministic backend; the separate probe is the sole test command for
+production native watcher wiring and host delivery.
 
 Development-launcher contract tests execute the shared direct-child stop
 boundary and verify that both launchers attempt all cleanup, always close their
@@ -293,11 +301,14 @@ connection.
 | `pnpm test:release` | release project |
 | `pnpm test:watch` | unit, contract, and DOM watch mode |
 | `pnpm test:layout` | project ownership and layout contract |
+| `pnpm test:rust` | Runtime through pinned nextest plus one-pass host-native Cargo tests |
 | `pnpm test:rust:native-watcher` | supervised real native Project watcher contract |
 | `pnpm test:profile` | complete suite plus timing JSON |
 | `pnpm test:stability` | three complete fixed-seed runs without retry |
 | `pnpm test:coverage` | merged local V8 coverage for contributing projects |
 | `pnpm test:canvas-text` | native `canvas-text` tag selection |
+| `pnpm verify` | timed daily repository gate with product-target Clippy |
+| `pnpm verify:all` | timed final repository gate with all-target Clippy |
 
 Normal runs print the resolved worker plan, group and total durations, slowest
 files and cases, and exceeded diagnostic thresholds. Profile output is written atomically to

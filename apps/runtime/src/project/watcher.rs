@@ -43,10 +43,10 @@ impl ProjectWatchBackendFactory for NativeProjectWatchBackendFactory {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(super) struct NoopProjectWatchBackendFactory;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl ProjectWatchBackendFactory for NoopProjectWatchBackendFactory {
     fn start(
         &self,

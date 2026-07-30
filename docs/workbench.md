@@ -44,6 +44,13 @@ binding-outcome interpretation, and Project-URL commit eligibility. It delegates
 transport to the HTTP client and accepted-state publication to the projection;
 it does not own React presentation or command completion.
 
+The Terminal hub owns a separate Project-scoped collection projection. It
+accepts one initial synchronized snapshot and only contiguous full topology
+revisions after it; `TerminalPanel` renders that projection rather than issuing
+a parallel HTTP list request. Create and close responses express command
+outcomes and activation intent, while topology establishes collection
+membership. Output and controls remain explicit per-Terminal observations.
+
 The document does not mount React from guessed defaults. Bootstrap first waits
 for the Runtime-owned Global Settings snapshot, applies its resolved theme,
 and accepts that frame into `WorkbenchGlobalProjection` before it imports and

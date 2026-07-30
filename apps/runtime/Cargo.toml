@@ -4,6 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+autotests = false
+
+[features]
+default = []
+native-watcher-probe = []
+test-support = []
+
+[lib]
+doctest = false
 
 [dependencies]
 axum.workspace = true
@@ -55,3 +64,12 @@ winreg.workspace = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "native_project_watcher_probe"
+required-features = ["native-watcher-probe"]
+
+[[test]]
+name = "runtime_integration"
+path = "tests/runtime_integration.rs"
+required-features = ["test-support"]

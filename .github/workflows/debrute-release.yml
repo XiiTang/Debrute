@@ -24,6 +24,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: taiki-e/install-action@v2.79.11
+        with:
+          tool: nextest@0.9.140
+          fallback: none
       - run: pnpm install --frozen-lockfile
       - name: Prepare pinned native raster payload
         run: pnpm native:raster:prepare
@@ -34,6 +38,7 @@ jobs:
       - run: node scripts/validate-release-version-contract.mjs
       - run: pnpm doctor
       - run: pnpm check
+      - run: pnpm check:rust:all
       - run: pnpm test
       - run: pnpm lint:arch
 
@@ -66,11 +71,16 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Install pinned cargo-nextest
+        if: matrix.platform == 'win32'
+        uses: taiki-e/install-action@v2.79.11
+        with:
+          tool: nextest@0.9.140
+          fallback: none
       - run: pnpm install --frozen-lockfile
       - name: Prepare pinned native raster payload
         run: pnpm native:raster:prepare
       - name: Verify native Project watcher
-        if: matrix.platform == 'darwin'
         run: pnpm test:rust:native-watcher
       - name: Test Windows Rust product commit primitives
         if: matrix.platform == 'win32'
