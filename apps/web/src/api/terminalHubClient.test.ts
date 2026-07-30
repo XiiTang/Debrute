@@ -61,6 +61,50 @@ describe('multiplexed Terminal hub client', () => {
     expect(frameTypes(socket)).toEqual(['bind', 'observe']);
   });
 
+  it('keeps identical collection callbacks registered until each subscription closes', () => {
+    const { client, socket } = bindOpenClient();
+    const listener = vi.fn();
+    const onError = vi.fn();
+    const first = client.subscribeSessions(listener, onError);
+    client.subscribeSessions(listener, onError);
+    synchronize(socket);
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    first.close();
+    socket.emit('message', {
+      type: 'topology',
+      topologyRevision: 2,
+      sessions: [session(), session('terminal-2')]
+    });
+    socket.emit('error');
+
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps identical Terminal callbacks registered until each observation closes', () => {
+    const { client, socket } = bindOpenClient();
+    synchronize(socket);
+    const listener = vi.fn();
+    const onError = vi.fn();
+    const first = client.subscribe('terminal-1', listener, onError);
+    client.subscribe('terminal-1', listener, onError);
+    acceptObservation(socket);
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    first.close();
+    socket.emit('message', {
+      type: 'error',
+      requestId: null,
+      terminalId: 'terminal-1',
+      code: 'terminal_not_found',
+      message: 'Terminal not found: terminal-1'
+    });
+
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
   it('closes the hub when an ordered topology revision is skipped', () => {
     const { client, socket } = bindOpenClient();
     const onError = vi.fn();

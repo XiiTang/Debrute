@@ -54,14 +54,22 @@ type TerminalObservationState =
   | { status: 'ready' }
   | { status: 'failed'; error: Error };
 
+interface TerminalSessionSubscription {
+  listener(sessions: TerminalSessionView[]): void;
+  onError(error: Error): void;
+}
+
+interface TerminalObservationSubscription {
+  listener(event: TerminalEvent): void;
+  onError(error: Error): void;
+}
+
 export function createTerminalHubClient(): TerminalHubClient {
   let binding: { projectId: string; connectionCredential: string } | undefined;
   let socket: WebSocket | undefined;
   let disposed = false;
-  const listeners = new Map<string, Set<(event: TerminalEvent) => void>>();
-  const errorListeners = new Map<string, Set<(error: Error) => void>>();
-  const sessionListeners = new Set<(sessions: TerminalSessionView[]) => void>();
-  const sessionErrorListeners = new Set<(error: Error) => void>();
+  const terminalSubscriptions = new Map<string, Set<TerminalObservationSubscription>>();
+  const sessionSubscriptions = new Set<TerminalSessionSubscription>();
   const sessions = new Map<string, TerminalSessionView>();
   const checkpoints = new Map<string, TerminalCheckpoint>();
   const observationStates = new Map<string, TerminalObservationState>();
@@ -73,24 +81,24 @@ export function createTerminalHubClient(): TerminalHubClient {
   let nextRequestId = 0;
 
   const notify = (terminalId: string, event: TerminalEvent) => {
-    for (const listener of listeners.get(terminalId) ?? []) {
-      listener(event);
+    for (const subscription of terminalSubscriptions.get(terminalId) ?? []) {
+      subscription.listener(event);
     }
   };
   const failTerminal = (terminalId: string, error: Error) => {
-    for (const listener of errorListeners.get(terminalId) ?? []) {
-      listener(error);
+    for (const subscription of terminalSubscriptions.get(terminalId) ?? []) {
+      subscription.onError(error);
     }
   };
   const publishSessions = () => {
     const snapshot = [...sessions.values()];
-    for (const listener of sessionListeners) {
-      listener(snapshot);
+    for (const subscription of sessionSubscriptions) {
+      subscription.listener(snapshot);
     }
   };
   const failSessions = (error: Error) => {
-    for (const listener of sessionErrorListeners) {
-      listener(error);
+    for (const subscription of sessionSubscriptions) {
+      subscription.onError(error);
     }
   };
   const rejectTerminalPending = (terminalId: string, error: Error) => {
@@ -204,13 +212,13 @@ export function createTerminalHubClient(): TerminalHubClient {
       socket = undefined;
       const connectionError = new Error('Terminal connection was lost.');
       topologyRevision = undefined;
-      for (const terminalId of listeners.keys()) {
+      for (const terminalId of terminalSubscriptions.keys()) {
         observationStates.set(terminalId, { status: 'failed', error: connectionError });
       }
       rejectPending('Terminal connection was lost; pending input was not replayed.');
       inputSequences.clear();
       reportSessionFailure(connectionError);
-      for (const terminalId of listeners.keys()) {
+      for (const terminalId of terminalSubscriptions.keys()) {
         failTerminal(terminalId, connectionError);
       }
     });
@@ -218,7 +226,7 @@ export function createTerminalHubClient(): TerminalHubClient {
       if (socket !== next) {
         return;
       }
-      for (const terminalId of listeners.keys()) {
+      for (const terminalId of terminalSubscriptions.keys()) {
         failTerminal(terminalId, new Error('Terminal connection failed.'));
       }
       reportSessionFailure(new Error('Terminal connection failed.'));
@@ -333,7 +341,7 @@ export function createTerminalHubClient(): TerminalHubClient {
         throw new Error('Terminal topology was synchronized more than once.');
       }
       acceptTopology(frame.topologyRevision, frame.sessions, true);
-      for (const terminalId of listeners.keys()) {
+      for (const terminalId of terminalSubscriptions.keys()) {
         observationStates.set(terminalId, { status: 'pending' });
         send({ type: 'observe', terminalId });
       }
@@ -472,20 +480,19 @@ export function createTerminalHubClient(): TerminalHubClient {
       nextRequestId = 0;
     },
     subscribeSessions(listener, onError) {
-      sessionListeners.add(listener);
-      sessionErrorListeners.add(onError);
+      const subscription = { listener, onError };
+      sessionSubscriptions.add(subscription);
       if (topologyRevision !== undefined) {
         listener([...sessions.values()]);
       }
       return {
         close() {
-          sessionListeners.delete(listener);
-          sessionErrorListeners.delete(onError);
+          sessionSubscriptions.delete(subscription);
         }
       };
     },
     writeInput(terminalId, data) {
-      if (!listeners.has(terminalId)) {
+      if (!terminalSubscriptions.has(terminalId)) {
         return Promise.reject(new Error(`Terminal is not observed: ${terminalId}`));
       }
       const observation = observationStates.get(terminalId);
@@ -499,7 +506,7 @@ export function createTerminalHubClient(): TerminalHubClient {
       });
     },
     resize(terminalId, cols, rows) {
-      if (!listeners.has(terminalId)) {
+      if (!terminalSubscriptions.has(terminalId)) {
         return Promise.reject(new Error(`Terminal is not observed: ${terminalId}`));
       }
       const observation = observationStates.get(terminalId);
@@ -529,13 +536,11 @@ export function createTerminalHubClient(): TerminalHubClient {
       });
     },
     subscribe(terminalId, listener, onError) {
-      const terminalListeners = listeners.get(terminalId) ?? new Set();
-      const wasEmpty = terminalListeners.size === 0;
-      terminalListeners.add(listener);
-      listeners.set(terminalId, terminalListeners);
-      const current = errorListeners.get(terminalId) ?? new Set();
-      current.add(onError);
-      errorListeners.set(terminalId, current);
+      const subscriptions = terminalSubscriptions.get(terminalId) ?? new Set();
+      const wasEmpty = subscriptions.size === 0;
+      const subscription = { listener, onError };
+      subscriptions.add(subscription);
+      terminalSubscriptions.set(terminalId, subscriptions);
       const checkpoint = checkpoints.get(terminalId);
       if (checkpoint) {
         replayCheckpoint(checkpoint);
@@ -551,11 +556,9 @@ export function createTerminalHubClient(): TerminalHubClient {
       }
       return {
         close() {
-          listeners.get(terminalId)?.delete(listener);
-          errorListeners.get(terminalId)?.delete(onError);
-          if (listeners.get(terminalId)?.size === 0) {
-            listeners.delete(terminalId);
-            errorListeners.delete(terminalId);
+          terminalSubscriptions.get(terminalId)?.delete(subscription);
+          if (terminalSubscriptions.get(terminalId)?.size === 0) {
+            terminalSubscriptions.delete(terminalId);
             checkpoints.delete(terminalId);
             observationStates.delete(terminalId);
             rejectUnsentTerminalPending(terminalId);
@@ -572,11 +575,9 @@ export function createTerminalHubClient(): TerminalHubClient {
       socket?.close();
       socket = undefined;
       rejectPending('Terminal client was disposed.');
-      listeners.clear();
-      errorListeners.clear();
+      terminalSubscriptions.clear();
       resetProjectState();
-      sessionListeners.clear();
-      sessionErrorListeners.clear();
+      sessionSubscriptions.clear();
     }
   };
 }

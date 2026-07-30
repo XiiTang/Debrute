@@ -427,7 +427,7 @@ impl TerminalService {
         let observation_id = Uuid::new_v4();
         let active = Arc::new(AtomicBool::new(true));
         let (events, receiver) = mpsc::sync_channel(TERMINAL_EVENT_CAPACITY);
-        if let Some(checkpoint) = terminal.final_checkpoint() {
+        if let Some(snapshot) = terminal.final_observation_snapshot() {
             drop(events);
             return Ok(TerminalObservation::from_snapshot(
                 &terminal,
@@ -435,10 +435,7 @@ impl TerminalService {
                 observation_id,
                 active,
                 receiver,
-                TerminalObservationSnapshot {
-                    session: terminal.view(),
-                    checkpoint: checkpoint?,
-                },
+                snapshot?,
             ));
         }
         let (reply, snapshot) = mpsc::channel();
@@ -451,17 +448,14 @@ impl TerminalService {
         }) {
             if error.code() == "terminal_unavailable" {
                 terminal.join_actor();
-                if let Some(checkpoint) = terminal.final_checkpoint() {
+                if let Some(snapshot) = terminal.final_observation_snapshot() {
                     return Ok(TerminalObservation::from_snapshot(
                         &terminal,
                         observer_id,
                         observation_id,
                         active,
                         receiver,
-                        TerminalObservationSnapshot {
-                            session: terminal.view(),
-                            checkpoint: checkpoint?,
-                        },
+                        snapshot?,
                     ));
                 }
             }
@@ -477,7 +471,7 @@ impl TerminalService {
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 terminal.join_actor();
-                let Some(checkpoint) = terminal.final_checkpoint() else {
+                let Some(snapshot) = terminal.final_observation_snapshot() else {
                     return Err(actor_unavailable(terminal_id));
                 };
                 return Ok(TerminalObservation::from_snapshot(
@@ -486,10 +480,7 @@ impl TerminalService {
                     observation_id,
                     active,
                     receiver,
-                    TerminalObservationSnapshot {
-                        session: terminal.view(),
-                        checkpoint: checkpoint?,
-                    },
+                    snapshot?,
                 ));
             }
         };
@@ -814,6 +805,17 @@ impl TerminalHandle {
             .lock()
             .expect("Terminal checkpoint lock poisoned")
             .clone()
+    }
+
+    fn final_observation_snapshot(
+        &self,
+    ) -> Option<Result<TerminalObservationSnapshot, TerminalError>> {
+        self.final_checkpoint().map(|checkpoint| {
+            checkpoint.map(|checkpoint| TerminalObservationSnapshot {
+                session: self.view(),
+                checkpoint,
+            })
+        })
     }
 
     fn retired_sort_key(&self) -> Option<String> {
