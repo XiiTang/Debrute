@@ -122,6 +122,34 @@ struct ProcessAdmissionState {
     waiters: usize,
 }
 
+#[derive(Debug, Default)]
+struct CleanupOutcome {
+    exit_code: Option<i32>,
+    diagnostics: String,
+}
+
+impl CleanupOutcome {
+    fn record(&mut self, context: &str, result: std::io::Result<()>) {
+        if let Err(error) = result {
+            append_diagnostic(&mut self.diagnostics, &format!("{context}: {error}"));
+        }
+    }
+
+    fn record_reap(&mut self, result: std::io::Result<Option<std::process::ExitStatus>>) {
+        match result {
+            Ok(Some(status)) => self.exit_code = status.code(),
+            Ok(None) => append_diagnostic(
+                &mut self.diagnostics,
+                "worker process did not exit after force-kill",
+            ),
+            Err(error) => append_diagnostic(
+                &mut self.diagnostics,
+                &format!("worker process reap failed: {error}"),
+            ),
+        }
+    }
+}
+
 impl Default for BoundedProcessSupervisor {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_CONCURRENT_PROCESSES)
@@ -189,12 +217,14 @@ impl BoundedProcessSupervisor {
         let tree = match debrute_native_process::ChildProcessTree::attach(&child) {
             Ok(tree) => tree,
             Err(error) => {
-                kill_and_reap_bounded(&mut child);
-                return failed_output(
+                let cleanup = kill_and_reap_bounded(&mut child);
+                let mut output = failed_output(
                     request.kind,
                     ProcessErrorKind::SpawnError,
                     &error.to_string(),
                 );
+                apply_cleanup(&mut output, &cleanup);
+                return output;
             }
         };
         let stdout = match child.stdout.take() {
@@ -202,13 +232,14 @@ impl BoundedProcessSupervisor {
                 match spawn_output_reader(reader, request.output_limit, "debrute-worker-stdout") {
                     Ok(reader) => Some(reader),
                     Err(error) => {
-                        let _ = tree.force_kill();
-                        let _ = wait_for_child(&mut child, FORCE_KILL_GRACE);
-                        return failed_output(
+                        let cleanup = force_kill_and_reap(&tree, &mut child);
+                        let mut output = failed_output(
                             request.kind,
                             ProcessErrorKind::OutputError,
                             &error.to_string(),
                         );
+                        apply_cleanup(&mut output, &cleanup);
+                        return output;
                     }
                 }
             }
@@ -219,13 +250,13 @@ impl BoundedProcessSupervisor {
                 match spawn_output_reader(reader, request.output_limit, "debrute-worker-stderr") {
                     Ok(reader) => Some(reader),
                     Err(error) => {
-                        let _ = tree.force_kill();
-                        let _ = wait_for_child(&mut child, FORCE_KILL_GRACE);
+                        let cleanup = force_kill_and_reap(&tree, &mut child);
                         let mut output = failed_output(
                             request.kind,
                             ProcessErrorKind::OutputError,
                             &error.to_string(),
                         );
+                        apply_cleanup(&mut output, &cleanup);
                         adopt_output(&mut output, stdout, None);
                         return output;
                     }
@@ -234,57 +265,44 @@ impl BoundedProcessSupervisor {
             None => None,
         };
         let started = Instant::now();
-        let (exit_code, error_kind, teardown_error) = loop {
+        let (error_kind, cleanup) = loop {
             if cancellation.is_cancelled() {
-                let teardown = terminate_then_kill(&tree, &mut child);
                 break (
-                    child
-                        .try_wait()
-                        .ok()
-                        .flatten()
-                        .and_then(|status| status.code()),
                     Some(ProcessErrorKind::Cancelled),
-                    teardown.err().map(|error| error.to_string()),
+                    terminate_then_kill(&tree, &mut child),
                 );
             }
             if started.elapsed() >= request.timeout {
-                let teardown = terminate_then_kill(&tree, &mut child);
                 break (
-                    child
-                        .try_wait()
-                        .ok()
-                        .flatten()
-                        .and_then(|status| status.code()),
                     Some(ProcessErrorKind::Timeout),
-                    teardown.err().map(|error| error.to_string()),
+                    terminate_then_kill(&tree, &mut child),
                 );
             }
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    let code = status.code();
-                    let cleanup_error = tree.force_kill().err();
+                    let mut cleanup = CleanupOutcome {
+                        exit_code: status.code(),
+                        diagnostics: String::new(),
+                    };
+                    cleanup.record("worker process tree cleanup failed", tree.force_kill());
                     break (
-                        code,
-                        if cleanup_error.is_some() && status.success() {
-                            Some(ProcessErrorKind::CleanupError)
-                        } else if status.success() {
+                        if status.success() {
                             None
                         } else {
                             Some(ProcessErrorKind::NonzeroExit)
                         },
-                        cleanup_error
-                            .map(|error| format!("worker process tree cleanup failed: {error}")),
+                        cleanup,
                     );
                 }
                 Ok(None) => thread::sleep(WAIT_POLL),
                 Err(error) => {
-                    let _ = tree.force_kill();
-                    let _ = wait_for_child(&mut child, FORCE_KILL_GRACE);
+                    let cleanup = force_kill_and_reap(&tree, &mut child);
                     let mut output = failed_output(
                         request.kind,
                         ProcessErrorKind::OutputError,
                         &error.to_string(),
                     );
+                    apply_cleanup(&mut output, &cleanup);
                     adopt_output(&mut output, stdout, stderr);
                     return output;
                 }
@@ -293,13 +311,14 @@ impl BoundedProcessSupervisor {
         let mut output = ProcessOutput {
             kind: request.kind,
             ok: error_kind.is_none(),
-            exit_code,
+            exit_code: cleanup.exit_code,
             error_kind,
             stdout: String::new(),
-            stderr: teardown_error.unwrap_or_default(),
+            stderr: String::new(),
             stdout_truncated: false,
             stderr_truncated: false,
         };
+        apply_cleanup(&mut output, &cleanup);
         adopt_output(&mut output, stdout, stderr);
         output
     }
@@ -360,23 +379,21 @@ impl Drop for ProcessPermit<'_> {
 fn terminate_then_kill(
     tree: &debrute_native_process::ChildProcessTree,
     child: &mut std::process::Child,
-) -> std::io::Result<()> {
-    let terminate_error = tree.terminate().err();
-    if wait_for_child(child, TERMINATE_GRACE)?.is_some() {
-        tree.force_kill()?;
-        return Ok(());
+) -> CleanupOutcome {
+    let mut cleanup = CleanupOutcome::default();
+    cleanup.record("worker process tree terminate failed", tree.terminate());
+    match wait_for_child(child, TERMINATE_GRACE) {
+        Ok(Some(status)) => {
+            cleanup.exit_code = status.code();
+            cleanup.record("worker process tree cleanup failed", tree.force_kill());
+            return cleanup;
+        }
+        Ok(None) => {}
+        Err(error) => cleanup.record("worker process grace wait failed", Err(error)),
     }
-    tree.force_kill()?;
-    if wait_for_child(child, FORCE_KILL_GRACE)?.is_none() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "worker process did not exit after force-kill",
-        ));
-    }
-    if let Some(error) = terminate_error {
-        return Err(error);
-    }
-    Ok(())
+    cleanup.record("worker process tree force-kill failed", tree.force_kill());
+    cleanup.record_reap(wait_for_child(child, FORCE_KILL_GRACE));
+    cleanup
 }
 
 fn wait_for_child(
@@ -395,9 +412,28 @@ fn wait_for_child(
     }
 }
 
-fn kill_and_reap_bounded(child: &mut std::process::Child) {
-    let _ = child.kill();
-    let _ = wait_for_child(child, FORCE_KILL_GRACE);
+fn force_kill_and_reap(
+    tree: &debrute_native_process::ChildProcessTree,
+    child: &mut std::process::Child,
+) -> CleanupOutcome {
+    let kill_result = tree.force_kill();
+    reap_after_kill(child, "worker process tree force-kill failed", kill_result)
+}
+
+fn kill_and_reap_bounded(child: &mut std::process::Child) -> CleanupOutcome {
+    let kill_result = child.kill();
+    reap_after_kill(child, "worker process kill failed", kill_result)
+}
+
+fn reap_after_kill(
+    child: &mut std::process::Child,
+    kill_context: &str,
+    kill_result: std::io::Result<()>,
+) -> CleanupOutcome {
+    let mut cleanup = CleanupOutcome::default();
+    cleanup.record(kill_context, kill_result);
+    cleanup.record_reap(wait_for_child(child, FORCE_KILL_GRACE));
+    cleanup
 }
 
 struct OutputCapture {
@@ -505,9 +541,7 @@ fn adopt_output(
         output.stdout = value;
         output.stdout_truncated = truncated;
         if let Some(error) = error {
-            output.ok = false;
-            output.error_kind = Some(ProcessErrorKind::OutputError);
-            append_diagnostic(&mut output.stderr, &error);
+            record_process_failure(output, ProcessErrorKind::OutputError, &error);
         }
     }
     if let Some(reader) = stderr {
@@ -515,11 +549,28 @@ fn adopt_output(
         append_diagnostic(&mut output.stderr, &value);
         output.stderr_truncated = truncated;
         if let Some(error) = error {
-            output.ok = false;
-            output.error_kind = Some(ProcessErrorKind::OutputError);
-            append_diagnostic(&mut output.stderr, &error);
+            record_process_failure(output, ProcessErrorKind::OutputError, &error);
         }
     }
+}
+
+fn apply_cleanup(output: &mut ProcessOutput, cleanup: &CleanupOutcome) {
+    output.exit_code = cleanup.exit_code.or(output.exit_code);
+    if !cleanup.diagnostics.is_empty() {
+        record_process_failure(output, ProcessErrorKind::CleanupError, &cleanup.diagnostics);
+    }
+}
+
+fn record_process_failure(
+    output: &mut ProcessOutput,
+    error_kind: ProcessErrorKind,
+    diagnostic: &str,
+) {
+    output.ok = false;
+    if output.error_kind.is_none() || output.error_kind == Some(ProcessErrorKind::CleanupError) {
+        output.error_kind = Some(error_kind);
+    }
+    append_diagnostic(&mut output.stderr, diagnostic);
 }
 
 fn append_diagnostic(target: &mut String, value: &str) {
@@ -649,6 +700,48 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_terminates_the_owned_worker_tree() {
+        let supervisor = BoundedProcessSupervisor::new(1);
+        let cancellation = ProcessCancellation::default();
+        let request_cancellation = cancellation.clone();
+        let canceller = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(30));
+            request_cancellation.cancel();
+        });
+        let request = ProcessRequest::new(
+            WorkerKind::MediaProbe,
+            "/bin/sh",
+            vec!["-c".to_owned(), "sleep 30 & wait".to_owned()],
+            Duration::from_secs(2),
+        );
+
+        let output = supervisor.run(request, &cancellation);
+
+        canceller.join().expect("canceller should finish");
+        assert_eq!(output.error_kind, Some(ProcessErrorKind::Cancelled));
+    }
+
+    #[test]
+    fn failed_direct_kill_still_reaps_the_child() {
+        let mut child = Command::new("/usr/bin/true")
+            .spawn()
+            .expect("fixture process should spawn");
+        assert!(child.wait().expect("fixture process should exit").success());
+
+        let cleanup = reap_after_kill(
+            &mut child,
+            "worker process kill failed",
+            Err(std::io::Error::other("kill denied")),
+        );
+
+        assert_eq!(cleanup.exit_code, Some(0));
+        assert_eq!(
+            cleanup.diagnostics,
+            "worker process kill failed: kill denied"
+        );
+    }
+
+    #[test]
     fn cancellation_before_admission_never_spawns() {
         let supervisor = BoundedProcessSupervisor::new(1);
         let cancellation = ProcessCancellation::default();
@@ -681,5 +774,107 @@ mod tests {
         .unwrap();
         assert_eq!(result, Some(ProcessErrorKind::Backpressure));
         drop(permit);
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+
+    fn successful_output() -> ProcessOutput {
+        ProcessOutput {
+            kind: WorkerKind::IntegrationProbe,
+            ok: true,
+            exit_code: Some(0),
+            error_kind: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        }
+    }
+
+    fn output_with_error(error_kind: ProcessErrorKind) -> ProcessOutput {
+        let mut output = successful_output();
+        output.ok = false;
+        output.exit_code = None;
+        output.error_kind = Some(error_kind);
+        output
+    }
+
+    #[test]
+    fn secondary_failures_do_not_replace_the_primary_process_error() {
+        for primary in [
+            ProcessErrorKind::Timeout,
+            ProcessErrorKind::Cancelled,
+            ProcessErrorKind::NonzeroExit,
+        ] {
+            let mut output = output_with_error(primary);
+
+            record_process_failure(
+                &mut output,
+                ProcessErrorKind::OutputError,
+                "worker output reader failed",
+            );
+            record_process_failure(
+                &mut output,
+                ProcessErrorKind::CleanupError,
+                "worker process tree cleanup failed",
+            );
+
+            assert_eq!(output.error_kind, Some(primary));
+            assert_eq!(
+                output.stderr,
+                "worker output reader failed\nworker process tree cleanup failed"
+            );
+        }
+    }
+
+    #[test]
+    fn cleanup_failure_fails_an_otherwise_successful_process() {
+        let mut output = successful_output();
+
+        record_process_failure(
+            &mut output,
+            ProcessErrorKind::CleanupError,
+            "worker process tree cleanup failed",
+        );
+
+        assert!(!output.ok);
+        assert_eq!(output.error_kind, Some(ProcessErrorKind::CleanupError));
+        assert_eq!(output.stderr, "worker process tree cleanup failed");
+    }
+
+    #[test]
+    fn output_failure_replaces_a_cleanup_only_error() {
+        let mut output = output_with_error(ProcessErrorKind::CleanupError);
+
+        record_process_failure(
+            &mut output,
+            ProcessErrorKind::OutputError,
+            "worker output reader failed",
+        );
+
+        assert_eq!(output.error_kind, Some(ProcessErrorKind::OutputError));
+        assert_eq!(output.stderr, "worker output reader failed");
+    }
+
+    #[test]
+    fn cleanup_outcome_retains_every_failure() {
+        let mut cleanup = CleanupOutcome::default();
+
+        cleanup.record(
+            "worker process tree force-kill failed",
+            Err(std::io::Error::other("kill denied")),
+        );
+        cleanup.record(
+            "worker process reap failed",
+            Err(std::io::Error::other("wait denied")),
+        );
+
+        assert_eq!(
+            cleanup.diagnostics,
+            "worker process tree force-kill failed: kill denied\nworker process reap failed: wait denied"
+        );
     }
 }

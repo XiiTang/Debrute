@@ -236,8 +236,7 @@ impl ChildProcessTree {
         }
         let tree = Self { job: job as isize };
         if let Err(error) = resume_process(child) {
-            let _ = tree.force_kill();
-            return Err(error);
+            return Err(combine_cleanup_error(error, tree.force_kill()));
         }
         Ok(tree)
     }
@@ -282,6 +281,17 @@ impl ChildProcessTree {
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn combine_cleanup_error(primary: io::Error, cleanup: io::Result<()>) -> io::Error {
+    match cleanup {
+        Ok(()) => primary,
+        Err(cleanup) => io::Error::new(
+            primary.kind(),
+            format!("{primary}; process tree cleanup also failed: {cleanup}"),
+        ),
     }
 }
 
@@ -665,5 +675,24 @@ impl Drop for ChildProcessTree {
                 .expect("Child process monitor thread panicked");
         }
         let _ = self.force_kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_failure_is_appended_without_replacing_the_primary_error_kind() {
+        let error = combine_cleanup_error(
+            io::Error::new(io::ErrorKind::PermissionDenied, "resume denied"),
+            Err(io::Error::other("kill denied")),
+        );
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            error.to_string(),
+            "resume denied; process tree cleanup also failed: kill denied"
+        );
     }
 }
