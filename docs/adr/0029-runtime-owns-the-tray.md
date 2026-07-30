@@ -4,17 +4,37 @@ The single Rust Runtime process owns Debrute's macOS menu-bar item and Windows
 notification-area icon. Desktop remains a trayless Electron window host, and no
 Supervisor process exists merely to keep the tray alive after Runtime exits.
 
-The tray is a narrow lifecycle and frontend-entry surface. Its menu contains a
-non-interactive Runtime status, **Open Desktop**, **Open in Browser**, **Start at
-Login**, and **Quit Debrute**. It has no update controls, recent Projects,
-diagnostics, restart action, or URL copying. macOS activation opens the menu. On
-Windows, primary activation opens Desktop and secondary activation opens the
-menu.
+The tray is a narrow lifecycle and explicit Workbench-entry surface. Its menu
+contains, in order, a non-interactive Runtime status, **New Desktop Window**,
+**Open in Browser**, **Copy URL**, **Recent Projects**, **Start at Login**, and
+**Quit Debrute**. Both left and right clicks open this same menu on macOS and
+Windows; clicking the tray icon never chooses a frontend.
+
+**Recent Projects** consumes Runtime's one ordered Global projection and has
+exactly three submenus: **Desktop**, **Browser**, and **Copy URL**. Each repeats
+the same canonical Project-root labels in the same order and maps its item to
+the stable Project id. The Recent menu is disabled when the projection is
+empty. Desktop activation follows the shared multi-window admission contract:
+focus the matching Project window, reuse one eligible truly empty window, or
+create a new window; it never replaces another Project. Browser activation
+opens the selected Project in a browser.
+
+Root and Recent **Copy URL** actions only place the exact current Runtime-owned
+Workbench URL on the operating-system clipboard. They do not open or bind a
+Workbench, create a Project session, or reorder Recent Projects. The copied URL
+is the same credential-free loopback Workbench URL the corresponding browser
+action would open: the packaged Runtime origin in Product builds or the one
+registered source-Workbench origin during development. It is current-session
+state rather than a persisted public endpoint. Runtime uses the single native
+clipboard command for the platform (`/usr/bin/pbcopy` or `clip.exe`) and reports
+failure without trying another transport. Workbench actions and Recent Projects
+remain disabled until Runtime is `Ready`.
 
 Tray creation is a required startup step on macOS and Windows. If the platform
 cannot create it, Runtime exits before starting its services or publishing
-`Ready`; the launcher reports the startup failure. There is no invisible
-trayless Runtime mode, degraded lifecycle state, or retry loop.
+`Ready`; the launcher reports the startup failure. A later menu-rebuild failure
+requests Product Quit rather than leaving stale actions visible. There is no
+invisible trayless Runtime mode, degraded lifecycle state, or retry loop.
 
 On macOS, the Runtime executable is packaged and launched inside an
 `LSUIElement` application bundle so the status item has a stable native

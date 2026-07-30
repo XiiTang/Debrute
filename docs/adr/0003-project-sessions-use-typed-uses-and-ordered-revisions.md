@@ -134,8 +134,8 @@ presented binding before transport or any asynchronous preparation begins.
 Commands already submitted retain their captured Project id and binding
 generation; commands not yet submitted do not cross that boundary. Runtime
 replacement waits for active Project request leases to drain before committing
-the new binding. Failed preparation or a focused-existing Desktop outcome
-restores command admission to the unchanged requesting binding. An accepted
+the new binding. Failed preparation restores command admission to the unchanged
+requesting binding. An accepted
 `project.bound` mounts the new generation with fresh command authority. Neither
 Web transport abort nor Project switching claims to cancel or roll back an
 accepted Runtime command.
@@ -156,7 +156,7 @@ returns the preparation error while A and B retain their original owners. If
 serialization and first-frame delivery succeed, the later owner change is the
 single commit.
 
-The explicit-open ownership rule, the same-Desktop-host focus exception, and the
+The browser explicit-open ownership rule, native Desktop activation rule, and
 detached **Open Here** behavior are defined by
 [ADR 0033](./0033-workbench-session-lifetime-follows-its-container.md). When that
 routing selects an ownership transfer, Runtime sends `project.preempted`, clears

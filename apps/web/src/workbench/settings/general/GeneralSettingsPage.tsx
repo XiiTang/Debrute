@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { RefreshCw, RotateCw } from '../../ui/index.js';
 import type {
-  DebruteDefaultFrontend,
   DebruteGlobalSettingsView,
   DebruteProductState,
   ManagedCliDiagnostic,
@@ -36,17 +35,11 @@ export function GeneralSettingsPage({
   const i18n = useI18n();
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
   const [localeDraft, setLocaleDraft] = useState(settings.workbench.locale);
-  const [defaultFrontendDraft, setDefaultFrontendDraft] = useState(settings.workbench.defaultFrontend);
   const [localeOperation, setLocaleOperation] = useState<OperationState>({ status: 'idle' });
-  const [defaultFrontendOperation, setDefaultFrontendOperation] = useState<OperationState>({ status: 'idle' });
 
   useEffect(() => {
     setLocaleDraft(settings.workbench.locale);
   }, [settings.workbench.locale]);
-
-  useEffect(() => {
-    setDefaultFrontendDraft(settings.workbench.defaultFrontend);
-  }, [settings.workbench.defaultFrontend]);
 
   const run = async (action: () => Promise<void>) => {
     setOperation({ status: 'loading' });
@@ -65,16 +58,6 @@ export function GeneralSettingsPage({
       setLocaleOperation({ status: 'idle' });
     } catch (error) {
       setLocaleOperation({ status: 'error', message: errorMessage(error) });
-    }
-  };
-
-  const saveDefaultFrontend = async (defaultFrontend: DebruteDefaultFrontend) => {
-    setDefaultFrontendOperation({ status: 'loading' });
-    try {
-      await onSettingsChange({ workbench: { defaultFrontend } });
-      setDefaultFrontendOperation({ status: 'idle' });
-    } catch (error) {
-      setDefaultFrontendOperation({ status: 'error', message: errorMessage(error) });
     }
   };
 
@@ -105,30 +88,6 @@ export function GeneralSettingsPage({
       </section>
       <section className="settings-group">
         <h3>{i18n.t('settings.general.application')}</h3>
-        <Field
-          label={i18n.t('settings.general.defaultFrontend.label')}
-          description={i18n.t('settings.general.defaultFrontend.description')}
-        >
-          <Select
-            value={defaultFrontendDraft}
-            invalid={defaultFrontendOperation.status === 'error'}
-            disabled={defaultFrontendOperation.status === 'loading'}
-            onChange={(event) => {
-              const defaultFrontend = event.currentTarget.value as DebruteDefaultFrontend;
-              setDefaultFrontendDraft(defaultFrontend);
-              void saveDefaultFrontend(defaultFrontend);
-            }}
-          >
-            <option value="desktop">{i18n.t('settings.general.defaultFrontend.desktop')}</option>
-            <option value="browser">{i18n.t('settings.general.defaultFrontend.browser')}</option>
-            <option value="runtime-only">{i18n.t('settings.general.defaultFrontend.runtimeOnly')}</option>
-          </Select>
-        </Field>
-        {defaultFrontendOperation.status === 'error' ? (
-          <small className="db-form-error">
-            {i18n.t('settings.general.defaultFrontend.saveFailed', { message: defaultFrontendOperation.message })}
-          </small>
-        ) : null}
         <div className="settings-property-grid">
           <small><span>{i18n.t('settings.general.name')}</span>Debrute</small>
           <small><span>{i18n.t('settings.general.surface')}</span>{i18n.t('settings.general.surface.desktopPackaged')}</small>

@@ -32,8 +32,17 @@ struct DesktopActivation {
     state: Weak<RuntimeControlState>,
 }
 
+struct WorkbenchDesktopActivation {
+    state: Weak<RuntimeControlState>,
+    services: Arc<WorkbenchRuntimeServices>,
+}
+
 impl RuntimeActivationService for DesktopActivation {
-    fn activate(&self, intent: &ActivationIntent) -> Result<ActivationOutcome, ControlErrorCode> {
+    fn activate(
+        &self,
+        intent: &ActivationIntent,
+        _preferred_desktop_window_key: Option<&str>,
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         let route = match intent {
             ActivationIntent::OpenDesktop => WorkbenchRoute::Root,
             ActivationIntent::OpenKnownProject {
@@ -56,6 +65,49 @@ impl RuntimeActivationService for DesktopActivation {
                 Err(ControlErrorCode::DesktopUnavailable)
             }
         }
+    }
+}
+
+impl RuntimeActivationService for WorkbenchDesktopActivation {
+    fn activate(
+        &self,
+        intent: &ActivationIntent,
+        preferred_desktop_window_key: Option<&str>,
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
+        if matches!(intent, ActivationIntent::OpenDesktop) {
+            return DesktopActivation {
+                state: self.state.clone(),
+            }
+            .activate(intent, None);
+        }
+        let (project_id, project_root) = match intent {
+            ActivationIntent::OpenProject {
+                project_root,
+                frontend: ProjectFrontend::Desktop,
+            } => (
+                self.services
+                    .discover_project(project_root)
+                    .map_err(|_| ControlErrorCode::InvalidActivation)?,
+                project_root.clone(),
+            ),
+            ActivationIntent::OpenKnownProject {
+                project_id,
+                frontend: ProjectFrontend::Desktop,
+            } => (
+                project_id.clone(),
+                self.services
+                    .project_root_for_stable_id(project_id)
+                    .map_err(|_| ControlErrorCode::InvalidActivation)?,
+            ),
+            _ => return Err(ControlErrorCode::InvalidActivation),
+        };
+        self.services
+            .activate_desktop_project(&project_id, &project_root, preferred_desktop_window_key)
+            .map(|outcome| match outcome {
+                DesktopOpenResult::Opened => ActivationOutcome::Opened,
+                DesktopOpenResult::FocusedExisting => ActivationOutcome::FocusedExisting,
+            })
+            .map_err(|_| ControlErrorCode::DesktopUnavailable)
     }
 }
 
@@ -83,6 +135,7 @@ fn desktop_promotion_requires_the_initial_recent_project_projection() {
         "promote",
         ControlRequest::Activate {
             intent: ActivationIntent::OpenDesktop,
+            preferred_desktop_window_key: None,
         },
     );
 
@@ -121,6 +174,11 @@ fn recent_project_projection_ignores_stale_revisions_without_a_delivery_result()
             project_root: "/projects/stale".to_owned(),
         }],
     );
+    assert_eq!(
+        state.recent_projects_projection_after(None),
+        Some((2, current_projects.clone()))
+    );
+    assert_eq!(state.recent_projects_projection_after(Some(2)), None);
     assert!(state.finish_startup());
     assert!(
         state.install_activation_service(Arc::new(DesktopActivation {
@@ -143,6 +201,7 @@ fn recent_project_projection_ignores_stale_revisions_without_a_delivery_result()
         "promote",
         ControlRequest::Activate {
             intent: ActivationIntent::OpenDesktop,
+            preferred_desktop_window_key: None,
         },
     );
 
@@ -199,6 +258,7 @@ fn desktop_promotion_and_projection_update_enqueue_monotonic_revisions() {
                 "promote",
                 ControlRequest::Activate {
                     intent: ActivationIntent::OpenDesktop,
+                    preferred_desktop_window_key: None,
                 },
             );
         });
@@ -278,6 +338,7 @@ fn launcher_is_promoted_then_project_open_focus_and_close_are_single_instance() 
         "promote",
         ControlRequest::Activate {
             intent: ActivationIntent::OpenDesktop,
+            preferred_desktop_window_key: None,
         },
     );
     assert!(matches!(
@@ -345,7 +406,113 @@ fn launcher_is_promoted_then_project_open_focus_and_close_are_single_instance() 
 }
 
 #[test]
-fn desktop_route_tracks_in_window_replacement_and_web_preemption() {
+fn desktop_project_activation_reuses_its_true_empty_source_window() {
+    let root = std::env::temp_dir().join(format!("dbrt-desktop-empty-{}", Uuid::new_v4()));
+    let assets = root.join("assets");
+    fs::create_dir_all(&assets).expect("assets should be created");
+    fs::write(assets.join("index.html"), "<main>Debrute</main>").expect("index should be written");
+    let project = project_fixture(root.join("project-a"), "Project A");
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    state.set_recent_projects(0, Vec::new());
+    let services = WorkbenchRuntimeServices::compose(root.join("home"), Arc::clone(&state))
+        .expect("Runtime services should compose");
+    assert!(
+        state.install_activation_service(Arc::new(WorkbenchDesktopActivation {
+            state: Arc::downgrade(&state),
+            services: Arc::clone(&services),
+        }))
+    );
+    let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(
+        Arc::clone(services.models()),
+        Arc::clone(services.global()),
+        services.projects().clone(),
+        Arc::clone(services.generated_assets()),
+        Arc::clone(services.model_operations()),
+        None,
+        None,
+    ));
+    let http =
+        WorkbenchHttpServer::start(assets, Arc::clone(&state), Arc::clone(&services), cli, None)
+            .expect("Workbench server should start");
+    state
+        .install_workbench(http.launch_service())
+        .expect("Workbench authority should install");
+    assert!(state.finish_startup());
+
+    let (mut desktop, server_stream) = UnixStream::pair().expect("stream pair should open");
+    desktop
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("read should be bounded");
+    let server_state = Arc::clone(&state);
+    let server = std::thread::spawn(move || {
+        serve_control_connection(server_stream, &server_state, 8)
+            .expect("connection should close cleanly");
+    });
+    request_handshake(&mut desktop, ClientRole::Launcher).expect("handshake should succeed");
+    send_request(
+        &mut desktop,
+        "promote",
+        ControlRequest::Activate {
+            intent: ActivationIntent::OpenDesktop,
+            preferred_desktop_window_key: None,
+        },
+    );
+    let _ = read_server_frame(&mut desktop).expect("recent Projects should arrive");
+    let window_key = expect_open_event(&mut desktop, &WorkbenchRoute::Root);
+    expect_activation(
+        &mut desktop,
+        "promote",
+        ActivationOutcome::PromotedToDesktopHost,
+    );
+    send_request(
+        &mut desktop,
+        "ticket",
+        ControlRequest::CreateDesktopLaunchTicket {
+            window_key: window_key.clone(),
+        },
+    );
+    let ServerMessage::Response {
+        response: ControlResponse::DesktopLaunchTicket { ticket, .. },
+        ..
+    } = read_server_frame(&mut desktop).expect("launch ticket should arrive")
+    else {
+        panic!("expected Desktop launch ticket");
+    };
+    let client = Client::new();
+    let (_cookie, _credential, mut events) = open_http_connection(
+        &client,
+        http.origin(),
+        &json!({"desktopLaunchTicket": ticket}),
+    );
+
+    send_request(
+        &mut desktop,
+        "open-project",
+        ControlRequest::Activate {
+            intent: ActivationIntent::OpenProject {
+                project_root: project.root.to_string_lossy().into_owned(),
+                frontend: ProjectFrontend::Desktop,
+            },
+            preferred_desktop_window_key: Some(window_key.clone()),
+        },
+    );
+
+    assert_eq!(
+        events.next_of_type("project.bound")["project"]["projectId"],
+        project.id
+    );
+    expect_control_focus(&mut desktop, &window_key);
+    expect_activation(&mut desktop, "open-project", ActivationOutcome::Opened);
+
+    drop(events);
+    drop(desktop);
+    server.join().expect("server should finish");
+    drop(http);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn desktop_project_activation_does_not_replace_a_bound_window() {
     let root = std::env::temp_dir().join(format!("dbrt-desktop-route-{}", Uuid::new_v4()));
     let assets = root.join("assets");
     fs::create_dir_all(&assets).expect("assets should be created");
@@ -356,13 +523,14 @@ fn desktop_route_tracks_in_window_replacement_and_web_preemption() {
     };
 
     let state = Arc::new(RuntimeControlState::new("runtime-instance"));
-    assert!(
-        state.install_activation_service(Arc::new(DesktopActivation {
-            state: Arc::downgrade(&state),
-        }))
-    );
     let services = WorkbenchRuntimeServices::compose(root.join("home"), Arc::clone(&state))
         .expect("Runtime services should compose");
+    assert!(
+        state.install_activation_service(Arc::new(WorkbenchDesktopActivation {
+            state: Arc::downgrade(&state),
+            services: Arc::clone(&services),
+        }))
+    );
     let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(
         Arc::clone(services.models()),
         Arc::clone(services.global()),
@@ -372,8 +540,9 @@ fn desktop_route_tracks_in_window_replacement_and_web_preemption() {
         None,
         None,
     ));
-    let http = WorkbenchHttpServer::start(assets, Arc::clone(&state), services, cli, None)
-        .expect("Workbench server should start");
+    let http =
+        WorkbenchHttpServer::start(assets, Arc::clone(&state), Arc::clone(&services), cli, None)
+            .expect("Workbench server should start");
     state
         .install_workbench(http.launch_service())
         .expect("Workbench authority should install");
@@ -456,6 +625,7 @@ fn bind_desktop_project(
         "promote",
         ControlRequest::Activate {
             intent: ActivationIntent::OpenDesktop,
+            preferred_desktop_window_key: None,
         },
     );
     let _ = read_server_frame(desktop).expect("recent projects should arrive");
@@ -521,16 +691,15 @@ fn preempt_desktop_project(
     binding: &mut DesktopProjectBinding,
 ) {
     let mut second = open_second_desktop_workbench(desktop, origin, state, projects, binding);
-    let mut web_events = move_target_to_web(origin, &projects.target, binding);
-    replace_web_target_from_bound_desktop(
+    let web_events = move_target_to_web(origin, &projects.target, binding);
+    reject_desktop_replacement_and_activate_new_window(
         desktop,
         origin,
-        state,
         projects,
         binding,
         &mut second,
-        &mut web_events,
     );
+    drop(web_events);
 }
 
 struct DesktopWorkbenchConnection {
@@ -620,14 +789,12 @@ fn move_target_to_web(
     web_events
 }
 
-fn replace_web_target_from_bound_desktop(
+fn reject_desktop_replacement_and_activate_new_window(
     desktop: &mut UnixStream,
     origin: &str,
-    state: &RuntimeControlState,
     projects: &ProjectReplacementFixtures,
     binding: &DesktopProjectBinding,
     second: &mut DesktopWorkbenchConnection,
-    web_events: &mut HttpSseEvents,
 ) {
     open_http_project(
         &binding.client,
@@ -649,47 +816,51 @@ fn replace_web_target_from_bound_desktop(
         .header(WORKBENCH_CONNECTION_HEADER, &second.credential)
         .json(&json!({ "projectRoot": projects.target.root.to_string_lossy() }))
         .send()
-        .expect("Desktop replacement should complete");
+        .expect("Desktop replacement rejection should complete");
     let replacement_status = replacement.status().as_u16();
     let replacement_body = replacement.text().expect("replacement body should read");
     assert_eq!(
-        replacement_status, 200,
-        "Desktop replacement failed: {replacement_body}"
+        replacement_status, 409,
+        "Desktop replacement should be rejected: {replacement_body}"
     );
     assert_eq!(
-        serde_json::from_str::<Value>(&replacement_body).expect("replacement should be JSON"),
-        json!({ "outcome": "bound", "projectId": projects.target.id })
+        serde_json::from_str::<Value>(&replacement_body)
+            .expect("replacement rejection should be JSON")["error"]["code"],
+        "desktop_project_requires_activation"
     );
-    assert_eq!(
-        second.events.next_of_type("project.bound")["project"]["projectId"],
-        projects.target.id
-    );
-    loop {
-        if web_events.next()["type"] == "project.preempted" {
-            break;
-        }
-    }
-    assert!(matches!(
-        state.open_desktop_window(&WorkbenchRoute::Project {
-            project_id: projects.target.id.clone(),
-        }),
-        Ok(DesktopOpenResult::FocusedExisting)
-    ));
-    expect_control_focus(desktop, &second.window_key);
 
-    let (released_cookie, released_credential, mut released_events) =
-        open_http_connection(&binding.client, origin, &json!({}));
-    open_http_project(
-        &binding.client,
-        origin,
-        &projects.source.root,
+    send_project_activation_in_window(
+        desktop,
+        "focus-source",
         &projects.source.id,
-        &released_cookie,
-        &released_credential,
+        &second.window_key,
+    );
+    expect_control_focus(desktop, &second.window_key);
+    expect_activation(desktop, "focus-source", ActivationOutcome::FocusedExisting);
+
+    send_project_activation_in_window(
+        desktop,
+        "open-detached-target",
+        &projects.target.id,
+        &binding.window_key,
+    );
+    let activated_window = expect_control_open(
+        desktop,
+        &WorkbenchRoute::Project {
+            project_id: projects.target.id.clone(),
+        },
+    );
+    expect_activation(desktop, "open-detached-target", ActivationOutcome::Opened);
+    send_request(
+        desktop,
+        "close-activated",
+        ControlRequest::DesktopWindowClosed {
+            window_key: activated_window,
+        },
     );
     assert_eq!(
-        released_events.next_of_type("project.bound")["project"]["projectId"],
-        projects.source.id
+        read_server_frame(desktop).expect("close response should arrive"),
+        ServerMessage::response("close-activated", ControlResponse::Ok)
     );
 }
 
@@ -836,6 +1007,26 @@ fn send_project_activation(stream: &mut UnixStream, request_id: &str, project_id
                 project_id: project_id.to_owned(),
                 frontend: ProjectFrontend::Desktop,
             },
+            preferred_desktop_window_key: None,
+        },
+    );
+}
+
+fn send_project_activation_in_window(
+    stream: &mut UnixStream,
+    request_id: &str,
+    project_id: &str,
+    window_key: &str,
+) {
+    send_request(
+        stream,
+        request_id,
+        ControlRequest::Activate {
+            intent: ActivationIntent::OpenKnownProject {
+                project_id: project_id.to_owned(),
+                frontend: ProjectFrontend::Desktop,
+            },
+            preferred_desktop_window_key: Some(window_key.to_owned()),
         },
     );
 }

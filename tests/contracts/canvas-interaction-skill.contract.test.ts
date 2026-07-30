@@ -13,10 +13,14 @@ describe('Debrute repository Skill', () => {
     expect(skill).toContain('debrute.package: "debrute"');
     expect(skill).toContain('debrute commands');
     expect(skill).toContain('## Visual Workbench');
+    expect(skill).toContain('debrute workbench start --frontend browser');
+    expect(skill).toContain('debrute workbench start --frontend desktop');
     expect(skill).toContain('debrute workbench start /absolute/path/to/project --frontend browser');
     expect(skill).toContain('debrute workbench start /absolute/path/to/project --frontend desktop');
-    expect(skill).toContain('Interactive users can also open projects from the Workbench `Open Project` picker.');
-    expect(skill).toContain('`--frontend browser` opens the Project in the system browser.');
+    expect(skill).not.toMatch(/^debrute workbench start$/m);
+    expect(skill).toContain('users can also open projects from the Workbench `Open Project` picker.');
+    expect(skill).toContain('`--frontend browser` opens the root Workbench or Project in the system browser.');
+    expect(skill).toContain('Debrute has no default frontend or implicit fallback.');
     expect(skill).toContain('Qoder: use /browser to inspect the opened Debrute Workbench tab');
     expect(skill).toContain('Antigravity: use /browser to inspect the opened Debrute Workbench tab');
     expect(skill).toContain('Cline: use the browser to inspect the opened Debrute Workbench tab');

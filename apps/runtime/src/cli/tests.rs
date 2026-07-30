@@ -216,6 +216,24 @@ fn parser_enforces_registered_syntax_shapes() {
     .unwrap_err();
     assert_eq!(invalid_allowed_value.code(), "invalid_input");
 
+    let missing_frontend = parse_cli_args(&["workbench".into(), "start".into()]).unwrap_err();
+    assert_eq!(missing_frontend.code(), "missing_argument");
+    assert!(missing_frontend.message().contains("--frontend"));
+
+    for frontend in ["desktop", "browser"] {
+        let parsed = parse_cli_args(&[
+            "workbench".into(),
+            "start".into(),
+            "--frontend".into(),
+            frontend.into(),
+        ])
+        .unwrap_or_else(|error| panic!("explicit {frontend} frontend should parse: {error}"));
+        assert_eq!(
+            parsed.options.get("frontend").map(String::as_str),
+            Some(frontend)
+        );
+    }
+
     for (option, value) in [("--state", "pending"), ("--model-kind", "audio")] {
         let invalid_operation_filter = parse_cli_args(&[
             "operation".into(),

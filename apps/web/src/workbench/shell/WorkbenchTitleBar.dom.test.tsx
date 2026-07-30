@@ -15,7 +15,7 @@ describe('WorkbenchTitleBar', () => {
             platform: 'darwin',
             host: 'desktop', locale: 'en',
             projectTitle: 'Alpha',
-            recentProjectRoots: ['/tmp/alpha']
+            recentProjects: [{ projectId: 'alpha', projectRoot: '/tmp/alpha' }]
           })}
           nativeWindowState={{ maximized: false }}
           onCommand={() => undefined}
@@ -38,7 +38,7 @@ describe('WorkbenchTitleBar', () => {
             platform: 'win32',
             host: 'desktop', locale: 'en',
             projectTitle: 'Beta',
-            recentProjectRoots: ['/tmp/beta']
+            recentProjects: [{ projectId: 'beta', projectRoot: '/tmp/beta' }]
           })}
           nativeWindowState={{ maximized: true }}
           onCommand={() => undefined}
@@ -68,7 +68,7 @@ describe('WorkbenchTitleBar', () => {
             platform: 'win32',
             host: 'desktop', locale: 'en',
             projectTitle: 'Beta',
-            recentProjectRoots: []
+            recentProjects: []
           })}
           nativeWindowState={undefined}
           onCommand={() => undefined}
@@ -90,7 +90,7 @@ describe('WorkbenchTitleBar', () => {
             platform: 'win32',
             host: 'web', locale: 'en',
             projectTitle: undefined,
-            recentProjectRoots: []
+            recentProjects: []
           })}
           nativeWindowState={{ maximized: false }}
           onCommand={() => undefined}
@@ -119,7 +119,7 @@ describe('WorkbenchTitleBar', () => {
                 platform: 'win32',
                 host: 'web', locale: 'en',
                 projectTitle: 'Alpha',
-                recentProjectRoots: ['/tmp/alpha']
+                recentProjects: [{ projectId: 'alpha', projectRoot: '/tmp/alpha' }]
               })}
               nativeWindowState={{ maximized: false }}
               onCommand={onCommand}
@@ -170,7 +170,7 @@ describe('WorkbenchTitleBar', () => {
       expect(onCommand).toHaveBeenCalledOnce();
       expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({
         commandId: 'project.open-recent',
-        payload: { projectRoot: '/tmp/alpha' }
+        payload: { projectId: 'alpha', projectRoot: '/tmp/alpha' }
       }));
       expect(fileButton.getAttribute('aria-expanded')).toBe('false');
     } finally {

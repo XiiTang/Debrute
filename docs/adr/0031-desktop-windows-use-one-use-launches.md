@@ -43,9 +43,20 @@ invalidates all records, removes native listeners, destroys the windows, closes
 Control, and exits Desktop. Late ticket or load results from invalidated records
 have no authority to show windows, mutate topology, or surface another failure.
 
-Replacing a Project in that Workbench retargets the Runtime window route.
-Opening a Project already owned by another Desktop window focuses the existing
-window. A browser preemption retargets the old Desktop window to Root in the
-Runtime topology, but the renderer keeps its last Project presentation visible
-as a detached, read-only surface. An explicit **Open Here** action may preempt
-back. Closing the window removes its topology entry.
+Ordinary Desktop Project opens are Runtime activation commands. Runtime focuses
+an existing window for the same Project. Otherwise it directly binds the
+initiating BrowserWindow only when that live document was launched at Root and
+has never accepted a Project binding. An activation without a native source may
+reuse the sole such empty window; zero or multiple eligible windows opens a new
+Project-routed window. The Host resolves a native BrowserWindow to its opaque
+Runtime key for this preference, so Main does not mirror the key registry.
+Startup arguments, native file-open events, second instances, menus, recent
+Projects, Jump Lists, and the Windows Web title bar use that one path. Explicit
+**New Window** activation always creates a new Root window. Desktop connections
+cannot invoke the browser Project-replacement endpoint.
+
+A browser preemption retargets the old Desktop window to Root in Runtime
+topology, but the renderer keeps its last Project presentation visible as a
+detached, read-only surface. That document is not an empty-window reuse
+candidate. An explicit **Open Here** action may preempt back in that same window.
+Closing the window removes its topology entry.

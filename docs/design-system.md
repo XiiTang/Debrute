@@ -109,9 +109,9 @@ font, font size, line height, font weight, letter spacing, and ligature controls
 Font selection is a closed catalog control and never accepts an arbitrary
 family name, path, or user-entered identifier. It lists the five catalog display
 names without a specimen, per-option font rendering, editable search, or
-temporary preview. Language, default-frontend, product-information, and update
-controls remain on the separate General page. Valid control changes update the
-real Canvas text surfaces immediately.
+temporary preview. Language, product-information, and update controls remain on
+the separate General page. Valid control changes update the real Canvas text
+surfaces immediately.
 
 ## Theme Language
 

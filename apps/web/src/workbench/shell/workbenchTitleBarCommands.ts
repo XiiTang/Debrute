@@ -1,4 +1,4 @@
-import type { NativeMenuCommandId } from '@debrute/app-protocol';
+import type { NativeMenuCommand } from '@debrute/app-protocol';
 import type { DebruteShellApi } from '../../api/shellApi';
 import type { WorkbenchApiClient } from '../../types';
 import type { WorkbenchMenuCommandId, WorkbenchMenuItem } from './workbenchTitleBarState';
@@ -17,9 +17,12 @@ export async function executeTitleBarMenuCommand(
   if (!item.enabled) {
     return;
   }
-  if (context.shell && isNativeMenuCommand(item.commandId)) {
-    await context.shell.executeNativeMenuCommand({ commandId: item.commandId });
-    return;
+  if (context.shell) {
+    const nativeCommand = nativeMenuCommand(item);
+    if (nativeCommand) {
+      await context.shell.executeNativeMenuCommand(nativeCommand);
+      return;
+    }
   }
   await executeBrowserMenuCommand(item.commandId, item.payload, context);
 }
@@ -73,8 +76,18 @@ function executeDocumentEditCommand(
   document.execCommand(commandById[commandId]);
 }
 
-function isNativeMenuCommand(commandId: WorkbenchMenuCommandId): commandId is NativeMenuCommandId {
-  return commandId !== 'project.open-picker'
-    && commandId !== 'project.open-recent'
-    && commandId !== 'project.clear-recent';
+function nativeMenuCommand(
+  item: Extract<WorkbenchMenuItem, { kind: 'command' }>
+): NativeMenuCommand | undefined {
+  if (item.commandId === 'project.clear-recent') {
+    return undefined;
+  }
+  if (item.commandId === 'project.open-recent') {
+    const projectId = item.payload?.projectId;
+    if (typeof projectId !== 'string' || projectId.length === 0) {
+      throw new Error('Desktop Project activation requires projectId.');
+    }
+    return { commandId: 'project.open-known', projectId };
+  }
+  return { commandId: item.commandId };
 }

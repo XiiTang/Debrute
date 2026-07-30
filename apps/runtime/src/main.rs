@@ -36,7 +36,6 @@ use debrute_runtime::{
         },
         serve_control_connection,
     },
-    global::DefaultFrontend,
     login::require_stable_runtime_entrypoint,
     photoshop::PhotoshopGatewayServer,
     product::{
@@ -161,6 +160,7 @@ fn run(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
                 Uuid::new_v4().to_string(),
                 ControlRequest::Activate {
                     intent: ActivationIntent::EnsureRuntime,
+                    preferred_desktop_window_key: None,
                 },
             )?;
             Ok(())
@@ -784,28 +784,19 @@ fn resume_product_surface(
     match intent {
         ResumeIntent::Cli => Ok(()),
         ResumeIntent::Browser { target } => state
-            .activate_intent(&activation_for_resume_target(
-                target,
-                ProjectFrontend::Browser,
-            ))
+            .activate_intent(
+                &activation_for_resume_target(target, ProjectFrontend::Browser),
+                None,
+            )
             .map(|_| ())
             .map_err(|error| {
                 ProductCommitError::Platform(format!("browser resume failed: {error:?}"))
             }),
-        ResumeIntent::Bootstrap { target } => state
-            .activate_intent(&activation_for_resume_target(
-                target,
-                ProjectFrontend::Default,
-            ))
-            .map(|_| ())
-            .map_err(|error| {
-                ProductCommitError::Platform(format!("bootstrap resume failed: {error:?}"))
-            }),
         ResumeIntent::Desktop { target } => state
-            .activate_intent(&activation_for_resume_target(
-                target,
-                ProjectFrontend::Desktop,
-            ))
+            .activate_intent(
+                &activation_for_resume_target(target, ProjectFrontend::Desktop),
+                None,
+            )
             .map(|_| ())
             .map_err(|error| {
                 ProductCommitError::Platform(format!("Desktop resume failed: {error:?}"))
@@ -822,7 +813,6 @@ fn activation_for_resume_target(
         ResumeTarget::Root => match frontend {
             ProjectFrontend::Desktop => ActivationIntent::OpenDesktop,
             ProjectFrontend::Browser => ActivationIntent::OpenBrowser,
-            ProjectFrontend::Default => ActivationIntent::OpenDefaultFrontend,
         },
         ResumeTarget::Project { project_id } => ActivationIntent::OpenKnownProject {
             project_id: project_id.clone(),
@@ -832,7 +822,6 @@ fn activation_for_resume_target(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 struct PlatformRuntimeActivation {
     state: Arc<RuntimeControlState>,
     services: Arc<WorkbenchRuntimeServices>,
@@ -841,10 +830,13 @@ struct PlatformRuntimeActivation {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl RuntimeActivationService for PlatformRuntimeActivation {
-    fn activate(&self, intent: &ActivationIntent) -> Result<ActivationOutcome, ControlErrorCode> {
+    fn activate(
+        &self,
+        intent: &ActivationIntent,
+        preferred_desktop_window_key: Option<&str>,
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         match intent {
             ActivationIntent::EnsureRuntime => Ok(ActivationOutcome::Ensured),
-            ActivationIntent::OpenDefaultFrontend => self.open_default(&WorkbenchRoute::Root),
             ActivationIntent::OpenDesktop => self.open_desktop(&WorkbenchRoute::Root),
             ActivationIntent::OpenBrowser => self.open_browser(&WorkbenchRoute::Root),
             ActivationIntent::OpenProject {
@@ -857,8 +849,11 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
                     .map_err(|_| ControlErrorCode::InvalidActivation)?;
                 let target = WorkbenchRoute::Project { project_id };
                 match frontend {
-                    ProjectFrontend::Default => self.open_default(&target),
-                    ProjectFrontend::Desktop => self.open_desktop(&target),
+                    ProjectFrontend::Desktop => self.open_desktop_project(
+                        &target,
+                        project_root,
+                        preferred_desktop_window_key,
+                    ),
                     ProjectFrontend::Browser => self.open_browser(&target),
                 }
             }
@@ -870,8 +865,17 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
                     project_id: project_id.clone(),
                 };
                 match frontend {
-                    ProjectFrontend::Default => self.open_default(&target),
-                    ProjectFrontend::Desktop => self.open_desktop(&target),
+                    ProjectFrontend::Desktop => {
+                        let project_root = self
+                            .services
+                            .project_root_for_stable_id(project_id)
+                            .map_err(|_| ControlErrorCode::InvalidActivation)?;
+                        self.open_desktop_project(
+                            &target,
+                            &project_root,
+                            preferred_desktop_window_key,
+                        )
+                    }
                     ProjectFrontend::Browser => self.open_browser(&target),
                 }
             }
@@ -881,19 +885,35 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl PlatformRuntimeActivation {
-    fn open_default(&self, target: &WorkbenchRoute) -> Result<ActivationOutcome, ControlErrorCode> {
-        let frontend = self
-            .services
-            .global()
-            .settings_get()
-            .map_err(|_| ControlErrorCode::InvalidActivation)?
-            .workbench
-            .default_frontend;
-        match frontend {
-            DefaultFrontend::Desktop => self.open_desktop(target),
-            DefaultFrontend::Browser => self.open_browser(target),
-            DefaultFrontend::RuntimeOnly => Ok(ActivationOutcome::Ensured),
+    fn open_desktop_project(
+        &self,
+        target: &WorkbenchRoute,
+        project_root: &str,
+        preferred_window_key: Option<&str>,
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
+        let _launch = self
+            .desktop_launch
+            .lock()
+            .expect("Desktop launch lock poisoned");
+        if !self.state.has_desktop_host() {
+            Self::launch_desktop_host(target)?;
+            return Ok(ActivationOutcome::Opened);
         }
+        let WorkbenchRoute::Project { project_id } = target else {
+            return Err(ControlErrorCode::InvalidRoute);
+        };
+        self.services
+            .activate_desktop_project(project_id, project_root, preferred_window_key)
+            .map(|outcome| match outcome {
+                DesktopOpenResult::Opened => ActivationOutcome::Opened,
+                DesktopOpenResult::FocusedExisting => ActivationOutcome::FocusedExisting,
+            })
+            .map_err(|error| match error.code {
+                "desktop_window_activation_failed" | "desktop_window_focus_failed" => {
+                    ControlErrorCode::DesktopUnavailable
+                }
+                _ => ControlErrorCode::InvalidActivation,
+            })
     }
 
     fn open_desktop(&self, target: &WorkbenchRoute) -> Result<ActivationOutcome, ControlErrorCode> {

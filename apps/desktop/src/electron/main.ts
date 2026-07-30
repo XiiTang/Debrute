@@ -4,19 +4,22 @@ import { join } from 'node:path';
 import type {
   ActivationIntent,
   ControlEvent,
+  NativeMenuCommand,
   RecentProject
 } from '@debrute/app-protocol';
 import type { RuntimeControlClient } from '@debrute/runtime-control-client';
 
-import { buildDesktopApplicationMenu } from './desktopApplicationMenu.js';
+import {
+  buildDesktopApplicationMenu,
+  buildDesktopDockMenu
+} from './desktopApplicationMenu.js';
+import { createDesktopOpenAdmission } from './desktopOpenAdmission.js';
 import { requireDesktopPlatform } from './desktopPlatform.js';
 import { DesktopWindowHost } from './desktopWindowHost.js';
 import { DesktopProductQuit } from './desktopProductQuit.js';
 import { ElectronDesktopWindow } from './electronDesktopWindow.js';
 import {
-  nativeWindowIpcChannels,
-  registerNativeWindowIpc,
-  type ApplicationMenuCommand
+  registerNativeWindowIpc
 } from './nativeWindowShell.js';
 import {
   parseDesktopOpenIntent,
@@ -41,7 +44,16 @@ let appQuitAllowed = false;
 const productQuit = new DesktopProductQuit();
 let runtimeLossReported = false;
 let recentProjects: RecentProject[] = [];
-const pendingOpenIntents: DesktopOpenIntent[] = [];
+const desktopOpenAdmission = createDesktopOpenAdmission<Electron.BrowserWindow>(async (
+  intent,
+  preferredWindow
+) => {
+  const activeHost = windowHost;
+  if (!activeHost) {
+    throw new Error('Debrute window host is not available for Desktop activation.');
+  }
+  await activateOpenIntent(activeHost, intent, preferredWindow);
+});
 
 if (app.requestSingleInstanceLock()) {
   registerDesktopLifecycle();
@@ -61,12 +73,13 @@ function registerDesktopLifecycle(): void {
 
   app.on('open-file', (event, projectRoot) => {
     event.preventDefault();
-    void dispatchOpenIntent({ kind: 'open-project-path', projectRoot });
+    runDesktopAction(dispatchDesktopOpen({ kind: 'open-project-path', projectRoot }));
   });
 
   app.on('second-instance', (_event, argv) => {
-    void dispatchOpenIntent(parseDesktopOpenIntent(argv) ?? { kind: 'new-window' })
-      .catch(reportDesktopError);
+    runDesktopAction(dispatchDesktopOpen(
+      parseDesktopOpenIntent(argv) ?? { kind: 'new-window' }
+    ));
   });
 
   app.on('window-all-closed', () => {
@@ -90,7 +103,14 @@ function registerDesktopLifecycle(): void {
 
 async function startDesktop(): Promise<void> {
   if (desktopPlatform === 'darwin') {
-    app.dock?.setIcon(nativeImage.createFromPath(dockIconPath));
+    const dock = app.dock;
+    if (!dock) {
+      throw new Error('Debrute Desktop requires the macOS Dock integration.');
+    }
+    dock.setIcon(nativeImage.createFromPath(dockIconPath));
+    dock.setMenu(Menu.buildFromTemplate(buildDesktopDockMenu(() => {
+      runDesktopAction(dispatchDesktopOpen({ kind: 'new-window' }));
+    })));
   }
   registerNativeWindowIpc<Electron.WebContents, Electron.BrowserWindow>({
     ipcMain,
@@ -150,27 +170,20 @@ async function startDesktop(): Promise<void> {
   }
   installApplicationMenu();
 
-  const initialIntent = parseDesktopOpenIntent(process.argv) ?? { kind: 'new-window' };
-  await dispatchOpenIntent(initialIntent);
-  while (pendingOpenIntents.length > 0) {
-    await dispatchOpenIntent(pendingOpenIntents.shift());
-  }
+  await desktopOpenAdmission.start(parseDesktopOpenIntent(process.argv));
 }
 
-async function dispatchOpenIntent(intent: DesktopOpenIntent | undefined): Promise<void> {
-  if (!intent) {
-    return;
-  }
-  if (!control) {
-    pendingOpenIntents.push(intent);
-    return;
-  }
+async function activateOpenIntent(
+  activeHost: DesktopWindowHost<Electron.BrowserWindow, ElectronDesktopWindow>,
+  intent: DesktopOpenIntent,
+  preferredWindow?: Electron.BrowserWindow
+): Promise<void> {
   const activation: ActivationIntent = intent.kind === 'open-project-path'
     ? { kind: 'open_project', project_root: intent.projectRoot, frontend: 'desktop' }
     : intent.kind === 'open-project-id'
       ? { kind: 'open_known_project', project_id: intent.projectId, frontend: 'desktop' }
       : { kind: 'open_desktop' };
-  const response = await control.activate(activation);
+  const response = await activeHost.activate(activation, preferredWindow);
   if (response.result === 'rejected') {
     throw new Error(`Runtime rejected Desktop activation: ${response.code}`);
   }
@@ -201,20 +214,21 @@ function installApplicationMenu(): void {
     ? [{ label: 'No Recent Projects', enabled: false }]
     : recentProjects.map((project) => ({
         label: project.projectRoot,
-        click: (_item, window) => void openProjectInWindow(
-          window as Electron.BrowserWindow | undefined,
-          project
-        )
+        click: (_item, window) => runDesktopAction(dispatchDesktopOpen(
+          { kind: 'open-project-id', projectId: project.projectId },
+          desktopBrowserWindow(window)
+        ))
       }));
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildDesktopApplicationMenu({
     platform: desktopPlatform,
     recentItems,
-    newWindow: () => void dispatchOpenIntent({ kind: 'new-window' }),
-    openProject: (window) => void chooseProject(window as Electron.BrowserWindow | undefined),
-    openProjectInNewWindow: () => void chooseProject(undefined, true),
+    newWindow: () => runDesktopAction(dispatchDesktopOpen({ kind: 'new-window' })),
+    openProject: (window) => runDesktopAction(chooseProject(
+      window as Electron.BrowserWindow | undefined
+    )),
     reloadWorkbench: (window) => {
       if (window instanceof BrowserWindow && !window.isDestroyed()) {
-        void reloadWindow(window).catch(reportDesktopError);
+        runDesktopAction(reloadWindow(window));
       }
     },
     quitProduct: requestProductQuit
@@ -222,8 +236,7 @@ function installApplicationMenu(): void {
 }
 
 async function chooseProject(
-  window: Electron.BrowserWindow | undefined,
-  openInNewWindow = false
+  window: Electron.BrowserWindow | undefined
 ): Promise<void> {
   const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] };
   const result = window && !window.isDestroyed()
@@ -231,25 +244,8 @@ async function chooseProject(
     : await dialog.showOpenDialog(options);
   const projectRoot = result.filePaths[0];
   if (!result.canceled && projectRoot) {
-    if (openInNewWindow) {
-      await dispatchOpenIntent({ kind: 'open-project-path', projectRoot });
-    } else {
-      await openProjectInWindow(window, { projectId: '', projectRoot });
-    }
+    await dispatchDesktopOpen({ kind: 'open-project-path', projectRoot }, window);
   }
-}
-
-async function openProjectInWindow(
-  window: Electron.BrowserWindow | undefined,
-  project: RecentProject
-): Promise<void> {
-  if (window && !window.isDestroyed()) {
-    window.webContents.send(nativeWindowIpcChannels.openProjectRequested, project.projectRoot);
-    return;
-  }
-  await dispatchOpenIntent(project.projectId
-    ? { kind: 'open-project-id', projectId: project.projectId }
-    : { kind: 'open-project-path', projectRoot: project.projectRoot });
 }
 
 async function reloadWindow(window: Electron.BrowserWindow): Promise<void> {
@@ -261,15 +257,24 @@ async function reloadWindow(window: Electron.BrowserWindow): Promise<void> {
 
 async function executeNativeMenuCommand(
   window: Electron.BrowserWindow,
-  command: ApplicationMenuCommand
+  command: NativeMenuCommand
 ): Promise<void> {
   if (window.isDestroyed()) {
     throw new Error('Debrute native window is not available.');
   }
   switch (command.commandId) {
-    case 'window.new': await dispatchOpenIntent({ kind: 'new-window' }); return;
+    case 'window.new': await dispatchDesktopOpen({ kind: 'new-window' }); return;
     case 'project.open-picker': await chooseProject(window); return;
-    case 'project.open-picker-new-window': await chooseProject(undefined, true); return;
+    case 'project.open-known': {
+      if (typeof command.projectId !== 'string' || command.projectId.length === 0) {
+        throw new Error('Native Project activation requires projectId.');
+      }
+      await dispatchDesktopOpen(
+        { kind: 'open-project-id', projectId: command.projectId },
+        window
+      );
+      return;
+    }
     case 'window.close': window.close(); return;
     case 'view.reload': await reloadWindow(window); return;
     case 'view.toggle-devtools': window.webContents.toggleDevTools(); return;
@@ -289,7 +294,26 @@ function requestProductQuit(): void {
   if (productQuit.requested || appQuitAllowed) {
     return;
   }
-  void productQuit.request(control).catch(reportDesktopError);
+  runDesktopAction(productQuit.request(control));
+}
+
+function runDesktopAction(action: Promise<void>): void {
+  void action.catch(reportDesktopError);
+}
+
+function dispatchDesktopOpen(
+  intent: DesktopOpenIntent,
+  preferredWindow?: Electron.BrowserWindow
+): Promise<void> {
+  return intent.kind === 'new-window'
+    ? desktopOpenAdmission.dispatch(intent)
+    : desktopOpenAdmission.dispatch(intent, preferredWindow);
+}
+
+function desktopBrowserWindow(
+  window: Electron.BaseWindow | null | undefined
+): Electron.BrowserWindow | undefined {
+  return window instanceof BrowserWindow && !window.isDestroyed() ? window : undefined;
 }
 
 function runtimeLaunchConfiguration(): {

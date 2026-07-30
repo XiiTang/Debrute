@@ -29,7 +29,7 @@ describe('executeTitleBarMenuCommand', () => {
     expect(execCommand).not.toHaveBeenCalled();
   });
 
-  it('uses the Workbench action for current-window opens and the shell for new windows', async () => {
+  it('routes every Desktop Project open through the native activation commands', async () => {
     const executeNativeMenuCommand = vi.fn(async () => ({ ok: true as const }));
     const openProjectFromPicker = vi.fn(async () => undefined);
     const context = {
@@ -43,13 +43,45 @@ describe('executeTitleBarMenuCommand', () => {
       kind: 'command', id: 'open', label: 'Open Project', commandId: 'project.open-picker', enabled: true
     }, context);
     await executeTitleBarMenuCommand({
-      kind: 'command', id: 'open-new', label: 'Open Project in New Window', commandId: 'project.open-picker-new-window', enabled: true
+      kind: 'command',
+      id: 'recent:alpha',
+      label: '/projects/alpha',
+      commandId: 'project.open-recent',
+      enabled: true,
+      payload: { projectId: 'alpha', projectRoot: '/projects/alpha' }
     }, context);
 
-    expect(openProjectFromPicker).toHaveBeenCalledTimes(1);
-    expect(executeNativeMenuCommand).toHaveBeenCalledWith({
-      commandId: 'project.open-picker-new-window'
-    });
+    expect(openProjectFromPicker).not.toHaveBeenCalled();
+    expect(executeNativeMenuCommand.mock.calls).toEqual([
+      [{ commandId: 'project.open-picker' }],
+      [{ commandId: 'project.open-known', projectId: 'alpha' }]
+    ]);
+  });
+
+  it('keeps browser Project opens in the current tab', async () => {
+    const openProjectRoot = vi.fn(async () => undefined);
+    const openProjectFromPicker = vi.fn(async () => undefined);
+    const context = {
+      api: {} as WorkbenchApiClient,
+      shell: undefined,
+      openProjectFromPicker,
+      openProjectRoot
+    };
+
+    await executeTitleBarMenuCommand({
+      kind: 'command', id: 'open', label: 'Open Project', commandId: 'project.open-picker', enabled: true
+    }, context);
+    await executeTitleBarMenuCommand({
+      kind: 'command',
+      id: 'recent:alpha',
+      label: '/projects/alpha',
+      commandId: 'project.open-recent',
+      enabled: true,
+      payload: { projectId: 'alpha', projectRoot: '/projects/alpha' }
+    }, context);
+
+    expect(openProjectFromPicker).toHaveBeenCalledOnce();
+    expect(openProjectRoot).toHaveBeenCalledWith('/projects/alpha');
   });
 });
 
@@ -62,7 +94,6 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     executeNativeMenuCommand: async () => ({ ok: true }),
     takeDesktopLaunchTicket: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
-    onOpenProjectRequested: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
   };

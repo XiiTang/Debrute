@@ -3,7 +3,7 @@ use std::{error::Error, fmt};
 use ts_rs::TS;
 
 pub const CONTROL_PROTOCOL: &str = "debrute-control";
-pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 4;
 pub const CONTROL_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 pub const PRODUCT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -65,12 +65,23 @@ impl ClientMessage {
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 #[ts(export, export_to = "runtime-control/")]
 pub enum ControlRequest {
-    Activate { intent: ActivationIntent },
+    Activate {
+        intent: ActivationIntent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        preferred_desktop_window_key: Option<String>,
+    },
     Inspect,
     CreateCliAuthorization,
-    RegisterDevWorkbenchOrigin { origin: String },
-    CreateDesktopLaunchTicket { window_key: String },
-    DesktopWindowClosed { window_key: String },
+    RegisterDevWorkbenchOrigin {
+        origin: String,
+    },
+    CreateDesktopLaunchTicket {
+        window_key: String,
+    },
+    DesktopWindowClosed {
+        window_key: String,
+    },
     QuitProduct,
 }
 
@@ -79,7 +90,6 @@ pub enum ControlRequest {
 #[ts(export, export_to = "runtime-control/")]
 pub enum ActivationIntent {
     EnsureRuntime,
-    OpenDefaultFrontend,
     OpenDesktop,
     OpenBrowser,
     OpenProject {
@@ -96,7 +106,6 @@ pub enum ActivationIntent {
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "runtime-control/")]
 pub enum ProjectFrontend {
-    Default,
     Desktop,
     Browser,
 }

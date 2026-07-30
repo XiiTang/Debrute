@@ -61,7 +61,7 @@ export interface RuntimeControlClient {
   readonly role: ClientRole;
   waitUntilReady(): Promise<void>;
   inspect(): Promise<ControlResponse>;
-  activate(intent: ActivationIntent): Promise<ControlResponse>;
+  activate(intent: ActivationIntent, preferredDesktopWindowKey?: string): Promise<ControlResponse>;
   createCliAuthorization(): Promise<ControlResponse>;
   registerDevWorkbenchOrigin(origin: string): Promise<ControlResponse>;
   createDesktopLaunchTicket(windowKey: string): Promise<ControlResponse>;
@@ -236,8 +236,17 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
     return await this.request({ command: 'inspect' }, false);
   }
 
-  async activate(intent: ActivationIntent): Promise<ControlResponse> {
-    return await this.request({ command: 'activate', intent }, true);
+  async activate(
+    intent: ActivationIntent,
+    preferredDesktopWindowKey?: string
+  ): Promise<ControlResponse> {
+    return await this.request({
+      command: 'activate',
+      intent,
+      ...(preferredDesktopWindowKey !== undefined
+        ? { preferred_desktop_window_key: preferredDesktopWindowKey }
+        : {})
+    }, true);
   }
 
   async createCliAuthorization(): Promise<ControlResponse> {

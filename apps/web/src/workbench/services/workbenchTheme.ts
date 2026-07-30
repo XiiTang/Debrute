@@ -7,8 +7,7 @@ export type WorkbenchResolvedTheme = 'dark' | 'light';
 
 export const DEFAULT_GLOBAL_WORKBENCH_SETTINGS: DebruteGlobalSettingsView['workbench'] = {
   locale: 'en',
-  themePreference: 'system',
-  defaultFrontend: 'desktop'
+  themePreference: 'system'
 };
 
 export function resolveWorkbenchThemePreference(

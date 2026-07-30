@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { NativeMenuCommand } from '@debrute/app-protocol';
 import {
   createNativeWindowPreloadApi,
   desktopBrowserWindowChromeOptions,
@@ -22,7 +23,7 @@ describe('native window shell', () => {
     await api.minimizeNativeWindow();
     await api.toggleMaximizeNativeWindow();
     await api.closeNativeWindow();
-    await api.executeNativeMenuCommand({ commandId: 'window.new' });
+    await api.executeNativeMenuCommand({ commandId: 'project.open-known', projectId: 'alpha' });
     const listener = vi.fn();
     const unsubscribe = api.onNativeWindowStateChanged(listener);
     const stateListener = on.mock.calls[0]?.[1] as ((event: unknown, state: { maximized: boolean }) => void);
@@ -34,7 +35,10 @@ describe('native window shell', () => {
       [nativeWindowIpcChannels.minimize],
       [nativeWindowIpcChannels.toggleMaximize],
       [nativeWindowIpcChannels.close],
-      [nativeWindowIpcChannels.executeMenuCommand, { commandId: 'window.new' }]
+      [nativeWindowIpcChannels.executeMenuCommand, {
+        commandId: 'project.open-known',
+        projectId: 'alpha'
+      }]
     ]);
     expect(on).toHaveBeenCalledWith(nativeWindowIpcChannels.stateChanged, stateListener);
     expect(listener).toHaveBeenCalledWith({ maximized: true });
@@ -42,7 +46,10 @@ describe('native window shell', () => {
   });
 
   it('binds every native-window handler to the BrowserWindow for event.sender', async () => {
-    const handlers = new Map<string, (event: { sender: object }, input: { commandId: 'window.new' }) => unknown>();
+    const handlers = new Map<
+      string,
+      (event: { sender: object }, input: NativeMenuCommand) => unknown
+    >();
     const window = nativeWindow();
     const sender = {};
     const fromWebContents = vi.fn(() => window);
@@ -59,7 +66,10 @@ describe('native window shell', () => {
     await handlers.get(nativeWindowIpcChannels.minimize)?.({ sender }, { commandId: 'window.new' });
     await handlers.get(nativeWindowIpcChannels.toggleMaximize)?.({ sender }, { commandId: 'window.new' });
     await handlers.get(nativeWindowIpcChannels.close)?.({ sender }, { commandId: 'window.new' });
-    await handlers.get(nativeWindowIpcChannels.executeMenuCommand)?.({ sender }, { commandId: 'window.new' });
+    await handlers.get(nativeWindowIpcChannels.executeMenuCommand)?.(
+      { sender },
+      { commandId: 'project.open-known', projectId: 'alpha' }
+    );
     const ticket = await handlers.get(nativeWindowIpcChannels.takeDesktopLaunchTicket)?.(
       { sender },
       { commandId: 'window.new' }
@@ -70,13 +80,19 @@ describe('native window shell', () => {
     expect(window.minimize).toHaveBeenCalledOnce();
     expect(window.maximize).toHaveBeenCalledOnce();
     expect(window.close).toHaveBeenCalledOnce();
-    expect(executeNativeMenuCommand).toHaveBeenCalledWith(window, { commandId: 'window.new' });
+    expect(executeNativeMenuCommand).toHaveBeenCalledWith(window, {
+      commandId: 'project.open-known',
+      projectId: 'alpha'
+    });
     expect(takeDesktopLaunchTicket).toHaveBeenCalledWith(window);
     expect(ticket).toBe('ticket-1');
   });
 
   it('rejects native menu commands without a sender window', async () => {
-    const handlers = new Map<string, (event: { sender: object }, input: { commandId: 'window.new' }) => unknown>();
+    const handlers = new Map<
+      string,
+      (event: { sender: object }, input: NativeMenuCommand) => unknown
+    >();
     const executeNativeMenuCommand = vi.fn(async () => undefined);
     registerNativeWindowIpc({
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },

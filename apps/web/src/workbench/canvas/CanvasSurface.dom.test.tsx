@@ -2207,7 +2207,7 @@ function workbenchStateFixture(
       platform: 'win32',
       host: 'web', locale: 'en',
       projectTitle: 'Project',
-      recentProjectRoots: []
+      recentProjects: []
     }),
     projectOpen: {
       opening: false
@@ -2216,7 +2216,7 @@ function workbenchStateFixture(
     globalSettings: {
       status: 'ready',
       value: {
-        workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
+        workbench: { locale: 'en', themePreference: 'system' },
         canvas: {
           textAppearance: {
             fontId: 'noto-sans-mono-cjk-sc',

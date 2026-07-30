@@ -84,6 +84,22 @@ initialization, including libvips startup, use an isolated Runtime process; they
 do not call a native shutdown function and attempt to reinitialize it in the
 same test process.
 
+Project-session tests inject a deterministic backend at the native watcher
+creation seam. They still execute the production Project watcher worker,
+filtering, path-local coalescing, publication barrier, rescan handling, and
+session lifecycle, but do not make unrelated Registry contracts depend on an
+operating-system watcher. The separate `pnpm test:rust:native-watcher` command
+builds one direct native probe without a time limit on compilation, then gives
+the probe process 15 seconds to start four real recursive watchers, observe one
+change through each, and close. A deadline kills only that exact probe process
+and fails explicitly with the notify-rs/notify#942 diagnostic; the command does
+not retry or select another backend. It remains outside ordinary `pnpm verify`
+and is required by both macOS release matrix jobs. Live Runtime integration
+tests may still traverse the production watcher path when that behavior belongs
+to their system boundary; the injected backend removes native initialization
+from Project-session unit contracts rather than globally replacing production
+integration.
+
 Development-launcher contract tests execute the shared direct-child stop
 boundary and verify that both launchers attempt all cleanup, always close their
 Control connection, and aggregate failures. The Windows contract additionally
@@ -197,30 +213,39 @@ bridge, or registration effect. A development process without `--canvas-perf`
 also creates none of those objects; the flag is the single boundary that admits
 the diagnostic chain.
 
-1. Start `pnpm dev:electron`, open a real Project in Desktop, and wait for its
-   Project tree and Canvas rather than treating the initial loading shell as
-   success.
-2. Open the same stable Project route in a real browser. Web must take the
+1. Start `pnpm dev:electron` at Root. Open a real Project through File > Open
+   Project and wait for its Project tree and Canvas rather than treating the
+   initial loading shell as success. The same native window must accept the
+   Project; no second window may be created.
+2. From that Project window, open a different Project through File > Open
+   Project or Open Recent. Desktop must create another window without replacing
+   the first. Opening either Project again must focus its existing window. A
+   second truly empty window may be reused only when it is the source of the
+   activation, or when a source-free activation has exactly one eligible empty
+   window. On macOS, the Dock **New Window** action must always create a fresh
+   root window. Repeat the different-Project check through Finder or a second-
+   instance argument on the applicable platform.
+3. Open the same stable Project route in a real browser. Web must take the
    Project, while the existing Desktop window stays open with its last
    presentation, becomes read-only, and exposes **Open Here**.
-3. Choose **Open Here** in Desktop. Desktop must regain the Project and the Web
+4. Choose **Open Here** in Desktop. Desktop must regain the Project and the Web
    page must become the corresponding detached, read-only presentation. Neither
    direction reconnects, retries, closes the other container, or loses its
    frontend-local view state.
-4. Inspect representative raster `<img>` elements before and after a real
+5. Inspect representative raster `<img>` elements before and after a real
    Canvas zoom. Their `currentSrc` width and `naturalWidth` must advance when a
    higher quantized tier is needed, while the previously loaded image remains
    visible during handoff. Activating a text node must not remove raster nodes,
    and ready text/image publications must advance in bounded groups of at most
    three operations per animation frame until every current visible result is
    mounted.
-5. While a Project Path context menu is open, verify that surface readiness can
+6. While a Project Path context menu is open, verify that surface readiness can
    enable or disable Reveal in Canvas. Camera, selection, drag, and same-ready
    resize changes must not rerender the Workbench composition root or restart
    image resource effects; closing the menu removes its surface subscription.
    Capture `window.__debruteCanvasPerf` around zoom and drag interactions and
    compare resource and render counters before and after the interaction.
-6. Require a clean browser error/warning log and no React maximum-update-depth,
+7. Require a clean browser error/warning log and no React maximum-update-depth,
    failed media request, or silent placeholder state.
 
 The Electron run also verifies that the single Rust process launched from the
@@ -268,6 +293,7 @@ connection.
 | `pnpm test:release` | release project |
 | `pnpm test:watch` | unit, contract, and DOM watch mode |
 | `pnpm test:layout` | project ownership and layout contract |
+| `pnpm test:rust:native-watcher` | supervised real native Project watcher contract |
 | `pnpm test:profile` | complete suite plus timing JSON |
 | `pnpm test:stability` | three complete fixed-seed runs without retry |
 | `pnpm test:coverage` | merged local V8 coverage for contributing projects |

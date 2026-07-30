@@ -37,7 +37,7 @@ describe('Runtime Control client', () => {
     })).toThrowError(/invalid current-user SID/);
   });
 
-  it('uses protocol v2 and sends one activation request after a ready handshake', async () => {
+  it('uses protocol v3 and sends one activation request after a ready handshake', async () => {
     let requestCount = 0;
     await withControlServer((socket) => {
       readFrames(socket, (message) => {
@@ -69,6 +69,76 @@ describe('Runtime Control client', () => {
         outcome: 'opened'
       });
       expect(requestCount).toBe(1);
+      client.close();
+    });
+  });
+
+  it('sends a preferred Desktop window only with its Project activation', async () => {
+    await withControlServer((socket) => {
+      readFrames(socket, (message) => {
+        if (message.type === 'handshake') {
+          acceptHandshake(socket, 'ready');
+          return;
+        }
+        expect(message.request).toEqual({
+          command: 'activate',
+          intent: {
+            kind: 'open_known_project',
+            project_id: 'project-alpha',
+            frontend: 'desktop'
+          },
+          preferred_desktop_window_key: 'window-1'
+        });
+        respond(socket, message.request_id, {
+          result: 'activation',
+          outcome: 'opened'
+        });
+      });
+    }, async (socketPath) => {
+      const client = await connectClient(socketPath, 'launcher');
+      await expect(client.activate({
+        kind: 'open_known_project',
+        project_id: 'project-alpha',
+        frontend: 'desktop'
+      }, 'window-1')).resolves.toEqual({
+        result: 'activation',
+        outcome: 'opened'
+      });
+      client.close();
+    });
+  });
+
+  it('preserves an explicitly invalid empty Desktop key for Runtime rejection', async () => {
+    await withControlServer((socket) => {
+      readFrames(socket, (message) => {
+        if (message.type === 'handshake') {
+          acceptHandshake(socket, 'ready');
+          return;
+        }
+        expect(message.request).toEqual({
+          command: 'activate',
+          intent: {
+            kind: 'open_known_project',
+            project_id: 'project-alpha',
+            frontend: 'desktop'
+          },
+          preferred_desktop_window_key: ''
+        });
+        respond(socket, message.request_id, {
+          result: 'rejected',
+          code: 'invalid_desktop_window'
+        });
+      });
+    }, async (socketPath) => {
+      const client = await connectClient(socketPath, 'launcher');
+      await expect(client.activate({
+        kind: 'open_known_project',
+        project_id: 'project-alpha',
+        frontend: 'desktop'
+      }, '')).resolves.toEqual({
+        result: 'rejected',
+        code: 'invalid_desktop_window'
+      });
       client.close();
     });
   });

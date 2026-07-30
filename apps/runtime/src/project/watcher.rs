@@ -8,17 +8,58 @@ use std::{
     time::{Duration, Instant},
 };
 
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::Event;
+#[cfg(not(test))]
+use notify::{RecursiveMode, Watcher};
 
 use super::{ProjectError, is_gitignore_path, is_project_indexed_path, is_project_visible_path};
 
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(40);
 
+pub(super) type ProjectWatchEventHandler = Box<dyn FnMut(notify::Result<Event>) + Send + 'static>;
+pub(super) type ProjectWatchGuard = Box<dyn Send>;
+
+pub(super) trait ProjectWatchBackendFactory: Send + Sync {
+    fn start(
+        &self,
+        project_root: &Path,
+        event_handler: ProjectWatchEventHandler,
+    ) -> notify::Result<ProjectWatchGuard>;
+}
+
+#[cfg(not(test))]
+pub(super) struct NativeProjectWatchBackendFactory;
+
+#[cfg(not(test))]
+impl ProjectWatchBackendFactory for NativeProjectWatchBackendFactory {
+    fn start(
+        &self,
+        project_root: &Path,
+        event_handler: ProjectWatchEventHandler,
+    ) -> notify::Result<ProjectWatchGuard> {
+        let mut watcher = notify::recommended_watcher(event_handler)?;
+        watcher.watch(project_root, RecursiveMode::Recursive)?;
+        Ok(Box::new(watcher))
+    }
+}
+
+#[cfg(test)]
+pub(super) struct NoopProjectWatchBackendFactory;
+
+#[cfg(test)]
+impl ProjectWatchBackendFactory for NoopProjectWatchBackendFactory {
+    fn start(
+        &self,
+        _project_root: &Path,
+        _event_handler: ProjectWatchEventHandler,
+    ) -> notify::Result<ProjectWatchGuard> {
+        Ok(Box::new(()))
+    }
+}
+
 enum WatchMessage {
     Event(notify::Result<Event>),
     Stop,
-    #[cfg(test)]
-    BackendError(String),
 }
 
 pub(super) enum ProjectWatchSignal {
@@ -27,7 +68,7 @@ pub(super) enum ProjectWatchSignal {
 }
 
 pub(super) struct ProjectFileWatcher {
-    watcher: Option<RecommendedWatcher>,
+    watch_guard: Option<ProjectWatchGuard>,
     sender: mpsc::Sender<WatchMessage>,
     worker: Option<JoinHandle<()>>,
 }
@@ -41,18 +82,18 @@ impl ProjectFileWatcher {
     /// Returns an error when the watcher or worker cannot be created.
     pub(super) fn start(
         project_root: &Path,
+        backend_factory: &dyn ProjectWatchBackendFactory,
         is_explicit_dependency: Arc<dyn Fn(&str) -> bool + Send + Sync>,
         on_change: Arc<dyn Fn(ProjectWatchSignal) + Send + Sync>,
     ) -> Result<Self, ProjectError> {
         let root = project_root.to_path_buf();
         let (sender, receiver) = mpsc::channel();
         let event_sender = sender.clone();
-        let mut watcher = notify::recommended_watcher(move |event| {
+        let event_handler: ProjectWatchEventHandler = Box::new(move |event| {
             let _ = event_sender.send(WatchMessage::Event(event));
-        })
-        .map_err(|error| watch_error(&error))?;
-        watcher
-            .watch(project_root, RecursiveMode::Recursive)
+        });
+        let watch_guard = backend_factory
+            .start(project_root, event_handler)
             .map_err(|error| watch_error(&error))?;
         let worker = thread::Builder::new()
             .name("debrute-project-watch".to_owned())
@@ -60,7 +101,7 @@ impl ProjectFileWatcher {
                 watch_worker(&root, &receiver, &is_explicit_dependency, &on_change);
             })?;
         Ok(Self {
-            watcher: Some(watcher),
+            watch_guard: Some(watch_guard),
             sender,
             worker: Some(worker),
         })
@@ -69,18 +110,11 @@ impl ProjectFileWatcher {
     /// Stops observation and joins the delivery worker.
     ///
     pub(super) fn close(&mut self) {
-        self.watcher.take();
+        self.watch_guard.take();
         let _ = self.sender.send(WatchMessage::Stop);
         if let Some(worker) = self.worker.take() {
             worker.join().expect("Project watcher thread panicked");
         }
-    }
-
-    #[cfg(test)]
-    pub(super) fn report_backend_error_for_test(&self, message: &str) -> Result<(), ProjectError> {
-        self.sender
-            .send(WatchMessage::BackendError(message.to_owned()))
-            .map_err(|error| ProjectError::service("project_watcher_failed", error.to_string()))
     }
 }
 
@@ -124,10 +158,6 @@ fn watch_worker(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Ok(WatchMessage::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            #[cfg(test)]
-            Ok(WatchMessage::BackendError(message)) => {
-                on_change(ProjectWatchSignal::RescanRequired(message));
-            }
         }
     }
 }

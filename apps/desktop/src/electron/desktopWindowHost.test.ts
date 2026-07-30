@@ -1,4 +1,4 @@
-import type { ControlEvent, ControlResponse } from '@debrute/app-protocol';
+import type { ActivationIntent, ControlEvent, ControlResponse } from '@debrute/app-protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -8,6 +8,27 @@ import {
 } from './desktopWindowHost.js';
 
 describe('DesktopWindowHost', () => {
+  it('keeps Runtime window keys inside the Host when activating from a native window', async () => {
+    const control = new FakeControl();
+    const nativeWindow = new FakeWindow();
+    const host = createHost(control, [nativeWindow]);
+    await control.emit(openEvent('window-1'));
+    const intent: ActivationIntent = {
+      kind: 'open_known_project',
+      project_id: 'project-alpha',
+      frontend: 'desktop'
+    };
+
+    await host.activate(intent, nativeWindow.identity);
+    await expect(host.activate(intent, {})).rejects.toThrow(
+      'Desktop activation source window is not hosted.'
+    );
+
+    expect(control.activations).toEqual([
+      { intent, preferredWindowKey: 'window-1' }
+    ]);
+  });
+
   it('makes the one-use launch ticket available to preload while the window loads', async () => {
     const control = new FakeControl();
     const nativeWindow = new FakeWindow();
@@ -427,11 +448,23 @@ class FakeControl implements DesktopWindowHostControl {
   readonly closedSignal = deferred<void>();
   readonly windowClosedReported = deferred<void>();
   closed = false;
+  activations: Array<{
+    intent: ActivationIntent;
+    preferredWindowKey: string | undefined;
+  }> = [];
   closedWindows: string[] = [];
   ticketRequests: string[] = [];
   ticketGates: Promise<void>[] = [];
   themePreference = 'system';
   closeWindowResponse: ControlResponse = { result: 'ok' };
+
+  async activate(
+    intent: ActivationIntent,
+    preferredWindowKey?: string
+  ): Promise<ControlResponse> {
+    this.activations.push({ intent, preferredWindowKey });
+    return { result: 'activation', outcome: 'opened' };
+  }
 
   async createDesktopLaunchTicket(windowKey: string): Promise<ControlResponse> {
     this.ticketRequests.push(windowKey);

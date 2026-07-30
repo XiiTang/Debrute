@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
-    control::RuntimeControlState,
+    control::{DesktopOpenResult, RuntimeControlState, WorkbenchRoute},
     executable_path::resolve_executable,
     generation::GenerationService,
     global::{
@@ -429,6 +429,13 @@ impl WorkbenchRuntimeServices {
                     "Workbench connection is not live.",
                 )
             })?;
+        if context.desktop.is_some() {
+            return Err(RuntimeHttpServiceError::new(
+                StatusCode::CONFLICT,
+                "desktop_project_requires_activation",
+                "Desktop Project opens require native Desktop activation.",
+            ));
+        }
         let source_project_id = context.project_id.clone().ok_or_else(|| {
             RuntimeHttpServiceError::new(
                 StatusCode::CONFLICT,
@@ -439,9 +446,6 @@ impl WorkbenchRuntimeServices {
         let opened = self.open_project_use(project_root, ProjectUseKind::Workbench)?;
         let target_project_id = opened.session.project_id().to_owned();
         self.remember_recent_project(&opened.session)?;
-        if let Some(outcome) = self.desktop_existing_owner_outcome(&context, &target_project_id)? {
-            return Ok(outcome);
-        }
         let prepared = self.prepare_project_binding(connection_credential, opened)?;
         let project_session = Arc::clone(&prepared.session);
         let outcome = self
@@ -459,14 +463,6 @@ impl WorkbenchRuntimeServices {
             .map_err(project_replacement_error)?;
         if outcome == ProjectBindOutcome::AlreadyBound {
             project_session.start_background_file_index();
-            if let Some(binding) = context.desktop.as_ref() {
-                self.runtime_state.retarget_desktop_window(
-                    binding,
-                    crate::control::WorkbenchRoute::Project {
-                        project_id: target_project_id.clone(),
-                    },
-                );
-            }
             return Ok(WorkbenchProjectBindingOutcome::Bound(
                 BoundWorkbenchProject {
                     project_id: target_project_id,
@@ -481,14 +477,6 @@ impl WorkbenchRuntimeServices {
         else {
             unreachable!("already-bound replacement returned above")
         };
-        if let Some(binding) = context.desktop.as_ref() {
-            self.runtime_state.retarget_desktop_window(
-                binding,
-                crate::control::WorkbenchRoute::Project {
-                    project_id: target_project_id.clone(),
-                },
-            );
-        }
         if let Some(binding) = preempted.and_then(|connection| connection.desktop) {
             self.runtime_state
                 .retarget_desktop_window(&binding, crate::control::WorkbenchRoute::Root);
@@ -571,6 +559,60 @@ impl WorkbenchRuntimeServices {
                     "Project id is not present in Recent Projects.",
                 )
             })
+    }
+
+    /// Focuses an existing Desktop owner or binds the selected true-empty
+    /// Desktop connection, opening a new Project-routed window when neither
+    /// destination exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns a service error when Project binding, Desktop window creation,
+    /// or focusing the committed destination fails.
+    pub fn activate_desktop_project(
+        &self,
+        project_id: &str,
+        project_root: &str,
+        preferred_window_key: Option<&str>,
+    ) -> Result<DesktopOpenResult, RuntimeHttpServiceError> {
+        if self
+            .runtime_state
+            .focus_desktop_project_window(project_id)
+            .map_err(desktop_activation_error)?
+        {
+            return Ok(DesktopOpenResult::FocusedExisting);
+        }
+        let Some(connection) = self
+            .connections
+            .reusable_desktop_connection(preferred_window_key)
+        else {
+            return self
+                .runtime_state
+                .open_desktop_window(&WorkbenchRoute::Project {
+                    project_id: project_id.to_owned(),
+                })
+                .map_err(desktop_activation_error);
+        };
+        let binding = connection.binding;
+        match self.bind_opened_project(&connection.credential, project_root)? {
+            WorkbenchProjectBindingOutcome::FocusedExistingDesktop { .. } => {
+                Ok(DesktopOpenResult::FocusedExisting)
+            }
+            WorkbenchProjectBindingOutcome::Bound(_) => {
+                let focused = self
+                    .runtime_state
+                    .focus_desktop_window(&binding)
+                    .map_err(desktop_activation_error)?;
+                if !focused {
+                    return Err(RuntimeHttpServiceError::new(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "desktop_window_focus_failed",
+                        "Runtime no longer owns the reused Desktop window.",
+                    ));
+                }
+                Ok(DesktopOpenResult::Opened)
+            }
+        }
     }
 
     fn bind_opened_project(
@@ -899,6 +941,14 @@ impl Drop for WorkbenchRuntimeServices {
         self.finish_workbench_connection_closer();
         self.shutdown_owned_work();
     }
+}
+
+fn desktop_activation_error(error: impl std::fmt::Display) -> RuntimeHttpServiceError {
+    RuntimeHttpServiceError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "desktop_window_activation_failed",
+        error.to_string(),
+    )
 }
 
 fn project_initial_binding_error(error: ProjectBindError) -> RuntimeHttpServiceError {

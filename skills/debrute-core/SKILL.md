@@ -28,7 +28,7 @@ debrute runtime doctor
 debrute project init /path/to/project
 debrute project status /path/to/project
 debrute project validate /path/to/project
-debrute workbench start
+debrute workbench start --frontend browser
 debrute canvas-map push /path/to/project canvas-1
 debrute generated-asset lookup /path/to/project --path generated/example.png
 debrute models image list
@@ -64,10 +64,11 @@ for detached work, use the returned Operation id with `operation wait`.
 
 Use the Workbench when visual inspection helps: Canvas layout, image previews, generated assets, or project file structure.
 
-Start the Runtime and activate the configured default Workbench frontend:
+Start the Runtime and activate one explicit Workbench frontend:
 
 ```sh
-debrute workbench start
+debrute workbench start --frontend browser
+debrute workbench start --frontend desktop
 ```
 
 Open a Project directly in a specific frontend by passing its absolute local path:
@@ -77,7 +78,10 @@ debrute workbench start /absolute/path/to/project --frontend browser
 debrute workbench start /absolute/path/to/project --frontend desktop
 ```
 
-`--frontend browser` opens the Project in the system browser. `--frontend desktop` opens or focuses the Debrute Desktop window. Without `--frontend`, Runtime uses the Workbench default frontend setting. Interactive users can also open projects from the Workbench `Open Project` picker.
+`--frontend browser` opens the root Workbench or Project in the system browser.
+`--frontend desktop` opens or focuses the Debrute Desktop window. The option is
+required; Debrute has no default frontend or implicit fallback. Interactive
+users can also open projects from the Workbench `Open Project` picker.
 
 After browser activation, use the current agent environment's GUI/browser capability to inspect the opened Debrute tab. After Desktop activation, use its desktop-app capability.
 

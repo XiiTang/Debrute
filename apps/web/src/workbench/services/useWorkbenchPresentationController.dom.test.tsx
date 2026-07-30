@@ -85,7 +85,7 @@ function settingsFixture(
   themePreference: 'dark' | 'light'
 ): DebruteGlobalSettingsView {
   return {
-    workbench: { locale, themePreference, defaultFrontend: 'desktop' },
+    workbench: { locale, themePreference },
     canvas: {
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',

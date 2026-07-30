@@ -1,12 +1,34 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
-use debrute_runtime::control::{ControlErrorCode, RuntimeControlState, RuntimeStatus};
+use debrute_runtime::control::{
+    ActivationIntent, ActivationOutcome, ControlErrorCode, RuntimeActivationService,
+    RuntimeControlState, RuntimeStatus,
+};
 use uuid::Uuid;
+
+struct CountingActivation {
+    calls: Arc<AtomicUsize>,
+}
+
+impl RuntimeActivationService for CountingActivation {
+    fn activate(
+        &self,
+        _intent: &ActivationIntent,
+        _preferred_desktop_window_key: Option<&str>,
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(ActivationOutcome::Opened)
+    }
+}
 
 #[test]
 fn product_quit_has_no_frontend_blocker_or_flush_protocol() {
@@ -24,9 +46,37 @@ fn product_quit_has_no_frontend_blocker_or_flush_protocol() {
 }
 
 #[test]
+fn queued_activation_is_rejected_after_product_quit_before_reaching_the_platform() {
+    let state = RuntimeControlState::new("runtime-instance");
+    assert!(state.finish_startup());
+    let calls = Arc::new(AtomicUsize::new(0));
+    assert!(
+        state.install_activation_service(Arc::new(CountingActivation {
+            calls: Arc::clone(&calls),
+        }))
+    );
+
+    state
+        .request_product_quit()
+        .expect("ready Runtime should accept Product Quit");
+
+    assert_eq!(
+        state.activate_intent(&ActivationIntent::OpenDesktop, None),
+        Err(ControlErrorCode::RuntimeExiting)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn update_crosses_one_commit_boundary_and_requests_replacement() {
     let state = Arc::new(RuntimeControlState::new("runtime-instance"));
     assert!(state.finish_startup());
+    let calls = Arc::new(AtomicUsize::new(0));
+    assert!(
+        state.install_activation_service(Arc::new(CountingActivation {
+            calls: Arc::clone(&calls),
+        }))
+    );
     let transaction_id = Uuid::new_v4().to_string();
     let (committed, commit_observed) = mpsc::sync_channel(1);
     assert!(state.request_product_update(
@@ -50,6 +100,11 @@ fn update_crosses_one_commit_boundary_and_requests_replacement() {
         state.request_product_quit(),
         Err(ControlErrorCode::UpdateCommitInProgress)
     );
+    assert_eq!(
+        state.activate_intent(&ActivationIntent::OpenDesktop, None),
+        Err(ControlErrorCode::UpdateCommitInProgress)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]

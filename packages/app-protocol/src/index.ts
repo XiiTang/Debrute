@@ -31,7 +31,7 @@ export type {
   WriteProjectTextFileInput
 } from './project.js';
 
-export type { NativeMenuCommandId } from './workbenchChrome.js';
+export type { NativeMenuCommand, NativeMenuCommandId } from './workbenchChrome.js';
 
 interface ProjectHealthSummary {
   projectName: string;
@@ -94,7 +94,6 @@ export interface DebruteHttpErrorBody {
 
 export type WorkbenchLocale = 'en' | 'zh-CN';
 export type WorkbenchThemePreference = 'system' | 'dark' | 'light';
-export type DebruteDefaultFrontend = 'desktop' | 'browser' | 'runtime-only';
 export type CanvasFontId =
   | 'noto-sans-mono-cjk-sc'
   | 'lilex'
@@ -119,7 +118,6 @@ interface RecentProjectView {
 interface DebruteGlobalWorkbenchSettings {
   locale: WorkbenchLocale;
   themePreference: WorkbenchThemePreference;
-  defaultFrontend: DebruteDefaultFrontend;
 }
 
 interface DebruteGlobalCanvasSettings {

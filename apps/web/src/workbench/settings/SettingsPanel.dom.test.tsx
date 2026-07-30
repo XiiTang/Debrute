@@ -686,7 +686,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           actions={actions()}
           product={{ status: 'ready', value: productState() }}
           settings={{
-            workbench: { locale: 'zh-CN', themePreference: 'system', defaultFrontend: 'browser' },
+            workbench: { locale: 'zh-CN', themePreference: 'system' },
             canvas: { textAppearance: globalSettingsFixture().canvas.textAppearance },
             chrome: { recentProjects: [] },
             models: { image: [], video: [], audio: [] }
@@ -701,57 +701,17 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     expect(html).not.toContain('<h2');
     expect(html).toContain('语言');
     expect(html).toContain('简体中文');
-    expect(html).toContain('默认前端');
-    expect(html).toContain('浏览器');
-    expect(html).toContain('仅运行 Runtime');
+    expect(html).toContain('应用');
+    expect(html).toContain('Debrute');
     expect(saved).toEqual([]);
   });
 
-  it('saves the default frontend through global settings', async () => {
+  it('preserves a rejected General language draft and shows its error', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const onSettingsChange = vi.fn(async () => undefined);
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <GeneralSettingsPage
-              actions={actions()}
-              product={{ status: 'ready', value: productState() }}
-              settings={readyResourceValue(stateWithSettings().globalSettings)}
-              onSettingsChange={onSettingsChange}
-            />
-          </I18nProvider>
-        );
-      });
-
-      const select = Array.from(container.querySelectorAll('select'))
-        .find((candidate) => candidate.textContent?.includes('Runtime only'));
-      if (!(select instanceof HTMLSelectElement)) {
-        throw new Error('Expected default frontend select.');
-      }
-      await act(async () => {
-        setSelectValue(select, 'runtime-only');
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-
-      expect(onSettingsChange).toHaveBeenCalledWith({
-        workbench: { defaultFrontend: 'runtime-only' }
-      });
-    } finally {
-      await unmount(root, container);
-    }
-  });
-
-  it('preserves rejected General preference drafts and shows each error in its owning section', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const onSettingsChange = vi.fn(async (input: Parameters<WorkbenchActions['saveGlobalSettings']>[0]) => {
-      if (input.workbench?.locale) throw new Error('language unavailable');
-      throw new Error('frontend unavailable');
+    const onSettingsChange = vi.fn(async () => {
+      throw new Error('language unavailable');
     });
 
     try {
@@ -769,63 +729,18 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       });
 
       const language = requireSelectWithOption(container, 'Simplified Chinese');
-      const defaultFrontend = requireSelectWithOption(container, 'Runtime only');
       await changeSelect(language, 'zh-CN');
-      await changeSelect(defaultFrontend, 'runtime-only');
 
       expect(language.value).toBe('zh-CN');
-      expect(defaultFrontend.value).toBe('runtime-only');
 
       const languageSection = requireSettingsSection(container, 'Language');
-      const applicationSection = requireSettingsSection(container, 'Application');
       expect(languageSection.textContent).toContain('Failed to save language preference: language unavailable');
-      expect(applicationSection.textContent).toContain('Failed to save default frontend: frontend unavailable');
     } finally {
       await unmount(root, container);
     }
   });
 
-  it('keeps unrelated General preference fields enabled while one save is pending', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const save = deferred<void>();
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <GeneralSettingsPage
-              actions={actions()}
-              product={{ status: 'ready', value: productState() }}
-              settings={readyResourceValue(stateWithSettings().globalSettings)}
-              onSettingsChange={() => save.promise}
-            />
-          </I18nProvider>
-        );
-      });
-
-      const language = requireSelectWithOption(container, 'Simplified Chinese');
-      const defaultFrontend = requireSelectWithOption(container, 'Runtime only');
-      await act(async () => {
-        setSelectValue(language, 'zh-CN');
-        language.dispatchEvent(new Event('change', { bubbles: true }));
-        await Promise.resolve();
-      });
-
-      expect(language.disabled).toBe(true);
-      expect(defaultFrontend.disabled).toBe(false);
-
-      await act(async () => {
-        save.resolve(undefined);
-        await save.promise;
-      });
-    } finally {
-      await unmount(root, container);
-    }
-  });
-
-  it('synchronizes each General draft when its persisted preference changes', async () => {
+  it('synchronizes the General language draft when its persisted value changes', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -847,11 +762,10 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       };
       await renderSettings(globalSettingsFixture());
       await renderSettings(globalSettingsFixture({
-        workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'browser' }
+        workbench: { locale: 'zh-CN', themePreference: 'light' }
       }));
 
       expect(requireSelectWithOption(container, 'Simplified Chinese').value).toBe('zh-CN');
-      expect(requireSelectWithOption(container, 'Runtime only').value).toBe('browser');
     } finally {
       await unmount(root, container);
     }
@@ -942,7 +856,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
 function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
     snapshot: undefined,
-    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjectRoots: [] }),
+    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjects: [] }),
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
     integrations: { status: 'ready', value: { integrations: [], backends: [] } },
     product: { status: 'ready', value: productState() },
@@ -960,7 +874,7 @@ function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchSt
 
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
-    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
+    workbench: { locale: 'en', themePreference: 'system' },
     canvas: {
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',

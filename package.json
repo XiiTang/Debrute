@@ -27,6 +27,7 @@
     "preview": "pnpm --filter @debrute/web preview",
     "test": "pnpm test:layout && vitest run",
     "test:rust": "node scripts/test-rust.mjs",
+    "test:rust:native-watcher": "node scripts/test-native-project-watcher.mjs",
     "test:unit": "vitest run --project=unit-* --project=contracts",
     "test:dom": "vitest run --project=dom-web",
     "test:release": "vitest run --project=release",

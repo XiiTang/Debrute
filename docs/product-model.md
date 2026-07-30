@@ -103,7 +103,10 @@ These surfaces share one local runtime authority. See
 browser authentication, global state, project sessions, terminal ownership, and
 whole-product versioning.
 
-`debrute workbench start [<project>] --frontend default|desktop|browser` sends one native Control activation and reports the accepted target as an Agent Record. It does not print or persist an authenticated URL. Interactive users can also open Projects through the Workbench picker.
+`debrute workbench start [<project>] --frontend desktop|browser` requires one
+explicit frontend, sends one native Control activation, and reports the accepted
+target as an Agent Record. It does not print or persist an authenticated URL.
+Interactive users can also open Projects through the Workbench picker.
 
 Project, Canvas Map, and Model Request commands are Runtime-backed. During a
 command, the CLI keeps its native Control connection alive so the corresponding

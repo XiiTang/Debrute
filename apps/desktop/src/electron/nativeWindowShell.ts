@@ -1,13 +1,9 @@
 import type {
   DebruteProductPlatform,
   DebruteShellApi,
-  NativeWindowState,
-  NativeMenuCommandId
+  NativeMenuCommand,
+  NativeWindowState
 } from '@debrute/app-protocol';
-
-export interface ApplicationMenuCommand {
-  commandId: NativeMenuCommandId;
-}
 
 export const nativeWindowIpcChannels = {
   getState: 'debrute-shell:getNativeWindowState',
@@ -16,8 +12,7 @@ export const nativeWindowIpcChannels = {
   close: 'debrute-shell:closeNativeWindow',
   executeMenuCommand: 'debrute-shell:executeNativeMenuCommand',
   stateChanged: 'debrute-shell:nativeWindowStateChanged',
-  takeDesktopLaunchTicket: 'debrute-shell:takeDesktopLaunchTicket',
-  openProjectRequested: 'debrute-shell:openProjectRequested'
+  takeDesktopLaunchTicket: 'debrute-shell:takeDesktopLaunchTicket'
 } as const;
 
 export type NativeWindowPreloadApi = Pick<
@@ -52,7 +47,7 @@ interface NativeWindow {
 interface NativeWindowIpcMain<Sender> {
   handle(
     channel: string,
-    handler: (event: { sender: Sender }, input: ApplicationMenuCommand) => unknown
+    handler: (event: { sender: Sender }, input: NativeMenuCommand) => unknown
   ): unknown;
 }
 
@@ -89,7 +84,7 @@ export function createNativeWindowPreloadApi<Event>(
 export function registerNativeWindowIpc<Sender, Window extends NativeWindow>(input: {
   ipcMain: NativeWindowIpcMain<Sender>;
   browserWindow: { fromWebContents(sender: Sender): Window | null };
-  executeNativeMenuCommand(window: Window, command: ApplicationMenuCommand): Promise<void>;
+  executeNativeMenuCommand(window: Window, command: NativeMenuCommand): Promise<void>;
   takeDesktopLaunchTicket(window: Window): string | undefined;
 }): void {
   input.ipcMain.handle(nativeWindowIpcChannels.getState, (event) => (

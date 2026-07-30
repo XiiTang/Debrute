@@ -18,15 +18,11 @@ describe('Workbench i18n', () => {
       .toBe('Demo 的已保存视图状态无效，已重置。');
   });
 
-  it('provides field-specific General preference save failures in both locales', () => {
+  it('provides the General language save failure in both locales', () => {
     expect(createI18n('en').t('settings.general.language.saveFailed', { message: 'offline' }))
       .toBe('Failed to save language preference: offline');
-    expect(createI18n('en').t('settings.general.defaultFrontend.saveFailed', { message: 'offline' }))
-      .toBe('Failed to save default frontend: offline');
     expect(createI18n('zh-CN').t('settings.general.language.saveFailed', { message: '离线' }))
       .toBe('保存语言偏好失败：离线');
-    expect(createI18n('zh-CN').t('settings.general.defaultFrontend.saveFailed', { message: '离线' }))
-      .toBe('保存默认前端失败：离线');
   });
 
   it('throws for missing translations instead of falling back to English', () => {

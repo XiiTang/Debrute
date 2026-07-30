@@ -1,6 +1,12 @@
-import type { ControlEvent, ControlResponse, WorkbenchThemePreference } from '@debrute/app-protocol';
+import type {
+  ActivationIntent,
+  ControlEvent,
+  ControlResponse,
+  WorkbenchThemePreference
+} from '@debrute/app-protocol';
 
 export interface DesktopWindowHostControl {
+  activate(intent: ActivationIntent, preferredWindowKey?: string): Promise<ControlResponse>;
   createDesktopLaunchTicket(windowKey: string): Promise<ControlResponse>;
   desktopWindowClosed(windowKey: string): Promise<ControlResponse>;
   onEvent(listener: (event: ControlEvent) => void): () => void;
@@ -71,6 +77,20 @@ export class DesktopWindowHost<
       record.launchTicket = undefined;
     }
     return ticket;
+  }
+
+  activate(
+    intent: ActivationIntent,
+    preferredIdentity?: NativeIdentity
+  ): Promise<ControlResponse> {
+    if (preferredIdentity === undefined) {
+      return this.control.activate(intent);
+    }
+    const record = this.findRecord(preferredIdentity);
+    if (!record || record.window.isDestroyed()) {
+      return Promise.reject(new Error('Desktop activation source window is not hosted.'));
+    }
+    return this.control.activate(intent, record.windowKey);
   }
 
   async reload(identity: NativeIdentity): Promise<void> {

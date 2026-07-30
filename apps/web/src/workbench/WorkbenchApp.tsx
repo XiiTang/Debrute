@@ -929,16 +929,6 @@ function WorkbenchProjectGenerationApp({
     return projectBindingLifecycle.open({ projectRoot });
   }, [projectBindingLifecycle, setProjectOpenAttemptedPath, setProjectOpenError]);
 
-  useEffect(() => {
-    const shell = getDebruteShellApi();
-    if (!shell) {
-      return;
-    }
-    return shell.onOpenProjectRequested((projectRoot) => {
-      void openProjectRoot(projectRoot).then(presentProjectOpenOutcome);
-    });
-  }, [openProjectRoot, presentProjectOpenOutcome]);
-
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
     if (!canStartProjectPathCommand()) {
       return;
@@ -999,7 +989,7 @@ function WorkbenchProjectGenerationApp({
     host: getDebruteShellApi() ? 'desktop' : 'web',
     locale: presentationController.locale,
     projectTitle: snapshot?.metadata.project.name,
-    recentProjectRoots: presentationController.settings.chrome.recentProjects.map((project) => project.projectRoot)
+    recentProjects: presentationController.settings.chrome.recentProjects
   }), [presentationController.locale, presentationController.settings.chrome.recentProjects, snapshot?.metadata.project.name]);
   const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
     runtimeProjectId ? [] : ['terminal']

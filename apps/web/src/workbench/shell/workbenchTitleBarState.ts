@@ -5,7 +5,7 @@ type WorkbenchHostKind = 'web' | 'desktop';
 
 export type WorkbenchMenuId = 'file' | 'edit' | 'view';
 
-export type WorkbenchMenuCommandId = NativeMenuCommandId
+export type WorkbenchMenuCommandId = Exclude<NativeMenuCommandId, 'project.open-known'>
   | 'project.open-recent'
   | 'project.clear-recent';
 
@@ -45,12 +45,17 @@ export interface WorkbenchTitleBarState {
   menus: WorkbenchMenu[];
 }
 
+interface WorkbenchRecentProject {
+  projectId: string;
+  projectRoot: string;
+}
+
 export function buildWorkbenchTitleBarState(input: {
   platform: DebruteProductPlatform;
   host: WorkbenchHostKind;
   locale: WorkbenchLocale;
   projectTitle?: string | undefined;
-  recentProjectRoots: string[];
+  recentProjects: readonly WorkbenchRecentProject[];
 }): WorkbenchTitleBarState {
   const i18n = createI18n(input.locale);
   return {
@@ -76,18 +81,21 @@ function buildWorkbenchMenus(input: {
   platform: DebruteProductPlatform;
   host: WorkbenchHostKind;
   i18n: WorkbenchI18n;
-  recentProjectRoots: string[];
+  recentProjects: readonly WorkbenchRecentProject[];
 }): WorkbenchMenu[] {
   const desktop = input.host === 'desktop';
   const fileItems: WorkbenchMenuItem[] = [];
-  const recentItems: WorkbenchMenuItem[] = input.recentProjectRoots.length > 0
-    ? input.recentProjectRoots.map((projectRoot) => ({
+  const recentItems: WorkbenchMenuItem[] = input.recentProjects.length > 0
+    ? input.recentProjects.map((project) => ({
         kind: 'command' as const,
-        id: `recent:${projectRoot}`,
-        label: projectRoot,
+        id: `recent:${project.projectId}`,
+        label: project.projectRoot,
         commandId: 'project.open-recent' as const,
         enabled: true,
-        payload: { projectRoot }
+        payload: {
+          projectId: project.projectId,
+          projectRoot: project.projectRoot
+        }
       }))
     : [{
         kind: 'command',
@@ -116,27 +124,18 @@ function buildWorkbenchMenus(input: {
     commandId: 'project.open-picker',
     enabled: true
   });
-  if (desktop) {
-    fileItems.push({
-      kind: 'command',
-      id: 'project.open-picker-new-window',
-      label: input.i18n.t('shell.titleBar.openProjectNewWindow'),
-      commandId: 'project.open-picker-new-window',
-      enabled: true
-    });
-  }
   fileItems.push({
     kind: 'submenu',
     id: 'project.open-recent',
     label: input.i18n.t('shell.titleBar.openRecent'),
-    enabled: input.recentProjectRoots.length > 0,
+    enabled: input.recentProjects.length > 0,
     items: recentItems
   }, {
     kind: 'command',
     id: 'project.clear-recent',
     label: input.i18n.t('shell.titleBar.clearRecent'),
     commandId: 'project.clear-recent',
-    enabled: input.recentProjectRoots.length > 0
+    enabled: input.recentProjects.length > 0
   });
   if (desktop) {
     fileItems.push({

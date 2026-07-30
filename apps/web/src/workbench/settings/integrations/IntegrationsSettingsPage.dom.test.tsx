@@ -323,7 +323,7 @@ function withI18n(element: React.ReactElement): React.ReactElement {
 function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
     snapshot: undefined,
-    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjectRoots: [] }),
+    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjects: [] }),
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
     integrations: { status: 'ready', value: integrationSettingsFixture() },
@@ -382,7 +382,7 @@ function installedImageMagickSettings(): IntegrationSettingsView {
 
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
-    workbench: { locale: 'en', themePreference: 'system', defaultFrontend: 'desktop' },
+    workbench: { locale: 'en', themePreference: 'system' },
     canvas: {
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',

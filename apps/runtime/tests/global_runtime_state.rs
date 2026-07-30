@@ -7,7 +7,7 @@ use std::{
 };
 
 use debrute_runtime::global::{
-    AudioModelKind, DefaultFrontend, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService,
+    AudioModelKind, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService,
     GlobalSettingsError, ModelCatalog,
 };
 use debrute_runtime::integrations::{
@@ -28,7 +28,6 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
         .expect("default settings should load");
     assert_eq!(initial.workbench.locale, "en");
     assert_eq!(initial.workbench.theme_preference, "system");
-    assert_eq!(initial.workbench.default_frontend, DefaultFrontend::Desktop);
     assert_eq!(
         serde_json::to_value(&initial.canvas).expect("Canvas settings should serialize"),
         json!({
@@ -189,8 +188,7 @@ fn patch_persists_canonical_settings_and_redacts_model_secrets() {
             &json!({
                 "workbench": {
                     "locale": "zh-CN",
-                    "themePreference": "light",
-                    "defaultFrontend": "browser"
+                    "themePreference": "light"
                 },
                 "modelSetting": {
                     "modelId": "gpt-image-2",
@@ -224,7 +222,6 @@ fn patch_persists_canonical_settings_and_redacts_model_secrets() {
     assert!(!public_json.contains("apiKeyPreview"));
     let settings = fs::read_to_string(home.join("config/global_settings.json"))
         .expect("settings should be written");
-    assert!(settings.contains("\"defaultFrontend\": \"browser\""));
     assert!(!settings.contains("sk-image-123456fg"));
     let secrets = fs::read_to_string(home.join("config/secrets.json"))
         .expect("secrets should be written separately");
@@ -270,16 +267,6 @@ fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
     assert_eq!(
         invalid.to_string(),
         "Workbench locale must be \"en\" or \"zh-CN\"."
-    );
-    let invalid_frontend = store
-        .patch(
-            &json!({ "workbench": { "defaultFrontend": "unsupported" } }),
-            &catalog,
-        )
-        .expect_err("unsupported frontend should fail");
-    assert_eq!(
-        invalid_frontend.to_string(),
-        "Global settings defaultFrontend must be \"desktop\", \"browser\", or \"runtime-only\"."
     );
     let unknown = store
         .patch(

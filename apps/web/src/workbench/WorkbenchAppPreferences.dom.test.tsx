@@ -196,7 +196,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
         emitWorkbenchEvent({
           type: 'globalSettings.changed', revision: 1,
           settings: globalSettingsFixture({
-            workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'browser' }
+            workbench: { locale: 'zh-CN', themePreference: 'light' }
           })
         });
       });
@@ -514,168 +514,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('keeps a native Project-open failure on the unbound Canvas surface', async () => {
-    let openProjectRequested: ((projectRoot: string) => void) | undefined;
-    window.debruteShell = shellApiFixture({
-      onOpenProjectRequested: (listener) => {
-        openProjectRequested = listener;
-        return () => { openProjectRequested = undefined; };
-      }
-    });
-    const { container, root } = await renderWorkbenchApp('/', {
-      openProject: vi.fn(async () => {
-        throw new Error('native open failed');
-      })
-    });
-
-    await act(async () => {
-      openProjectRequested?.('/projects/missing');
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const openPanel = container.querySelector('.project-open-panel');
-    const error = openPanel?.querySelector('.project-open-panel__error');
-    expect(error?.textContent).toContain('Open project failed: native open failed');
-    expect(error?.previousElementSibling?.textContent).toContain('Open Project');
-    expect(openPanel?.textContent).toContain('/projects/missing');
-    await unmount(root, container);
-  });
-
-  it('shows a bound Project replacement failure as a notification and keeps the Project', async () => {
-    let openProjectRequested: ((projectRoot: string) => void) | undefined;
-    window.debruteShell = shellApiFixture({
-      onOpenProjectRequested: (listener) => {
-        openProjectRequested = listener;
-        return () => { openProjectRequested = undefined; };
-      }
-    });
-    const openProject = vi.fn<WorkbenchApiClient['openProject']>(async (target) => {
-      if ('projectRoot' in target) {
-        throw new Error('replacement failed');
-      }
-      return {
-        projectId: 'project-1',
-        projectRevision: 1,
-        snapshot: snapshotFixture(),
-        workingCopies: emptyWorkingCopies()
-      };
-    });
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
-
-    await act(async () => {
-      openProjectRequested?.('/projects/missing');
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(container.querySelector('.db-notification-stack')?.textContent)
-      .toContain('Open project failed: replacement failed');
-    expect(container.querySelector('.project-open-panel__error')).toBeNull();
-    expect(container.textContent).toContain('Demo');
-    expect(container.querySelector('[data-testid="workbench-project-opening"]')).toBeNull();
-    await unmount(root, container);
-  });
-
-  it('routes a native macOS Project-open intent through the current document replacement transaction', async () => {
-    let openProjectRequested: ((projectRoot: string) => void) | undefined;
-    window.debruteShell = shellApiFixture({
-      onOpenProjectRequested: (listener) => {
-        openProjectRequested = listener;
-        return () => { openProjectRequested = undefined; };
-      }
-    });
-    const openProject = vi.fn(async () => ({
-      projectId: 'project-2',
-      projectRevision: 1,
-      snapshot: snapshotFixture(),
-      workingCopies: emptyWorkingCopies()
-    }));
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
-
-    await act(async () => {
-      detachCurrentProject();
-      await Promise.resolve();
-    });
-    expect(container.querySelector('[data-testid="workbench-detached-dialog-layer"]')).not.toBeNull();
-
-    await act(async () => {
-      openProjectRequested?.('/projects/second');
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(openProject).toHaveBeenLastCalledWith({ projectRoot: '/projects/second' });
-    expect(container.querySelector('[data-testid="workbench-detached-dialog-layer"]')).toBeNull();
-    await unmount(root, container);
-  });
-
-  it('shows Project replacement opening and refuses new Canvas path drops', async () => {
-    let openProjectRequested: ((projectRoot: string) => void) | undefined;
-    const replacement = deferred<Awaited<ReturnType<WorkbenchApiClient['openProject']>>>();
-    const addProjectPathToCanvasMap = vi.fn(async () => ({
-      projectId: 'project-1',
-      projectRevision: 2,
-      canvasId: 'canvas-1',
-      projectRelativePath: 'flow/new.png'
-    }));
-    window.debruteShell = shellApiFixture({
-      onOpenProjectRequested: (listener) => {
-        openProjectRequested = listener;
-        return () => { openProjectRequested = undefined; };
-      }
-    });
-    const openProject = vi.fn<WorkbenchApiClient['openProject']>((input) => 'projectRoot' in input
-      ? replacement.promise
-      : Promise.resolve({
-          projectId: 'project-1',
-          projectRevision: 1,
-          snapshot: stackOrderSnapshotFixture(),
-          workingCopies: emptyWorkingCopies()
-        }));
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
-      openProject,
-      addProjectPathToCanvasMap
-    });
-
-    await act(async () => {
-      openProjectRequested?.('/projects/second');
-      await Promise.resolve();
-    });
-
-    expect(container.querySelector('[data-testid="workbench-project-opening"]')?.textContent)
-      .toContain('Opening project');
-
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: {
-        getData: () => JSON.stringify([{
-          kind: 'file',
-          projectRelativePath: 'flow/new.png'
-        }])
-      }
-    });
-    await act(async () => {
-      container.querySelector('[data-testid="canvas-surface"]')?.dispatchEvent(drop);
-      await Promise.resolve();
-    });
-
-    expect(addProjectPathToCanvasMap).not.toHaveBeenCalled();
-
-    await act(async () => {
-      replacement.resolve({
-        projectId: 'project-2',
-        projectRevision: 1,
-        snapshot: snapshotFixture(),
-        workingCopies: emptyWorkingCopies()
-      });
-      await Promise.resolve();
-    });
-
-    expect(container.querySelector('[data-testid="workbench-project-opening"]')).toBeNull();
-    await unmount(root, container);
-  });
-
   it('recreates Project-scoped presentation when a new binding generation is accepted', async () => {
     const { container, root } = await renderWorkbenchApp('/projects/project-1');
     await act(async () => {
@@ -833,13 +671,13 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
   describe('global settings save races', { tags: ['settings'] }, () => {
     it('does not roll a newer settings event back when an older save fails', async () => {
-      const { save, container, root } = await startPendingDefaultFrontendSave();
+      const { save, container, root } = await startPendingLocaleSave();
 
       await act(async () => {
         emitWorkbenchEvent({
           type: 'globalSettings.changed', revision: 1,
           settings: globalSettingsFixture({
-            workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'runtime-only' }
+            workbench: { locale: 'zh-CN', themePreference: 'light' }
           })
         });
         save.reject(new Error('save failed'));
@@ -854,13 +692,13 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     it('does not replace a newer settings event when the save is acknowledged', async () => {
-      const { save, container, root } = await startPendingDefaultFrontendSave();
+      const { save, container, root } = await startPendingLocaleSave();
 
       await act(async () => {
         emitWorkbenchEvent({
           type: 'globalSettings.changed', revision: 1,
           settings: globalSettingsFixture({
-            workbench: { locale: 'zh-CN', themePreference: 'light', defaultFrontend: 'runtime-only' }
+            workbench: { locale: 'zh-CN', themePreference: 'light' }
           })
         });
         save.resolve({ ok: true });
@@ -876,7 +714,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 });
 
-async function startPendingDefaultFrontendSave(): Promise<{
+async function startPendingLocaleSave(): Promise<{
   save: ReturnType<typeof deferred<{ ok: true }>>;
   container: HTMLDivElement;
   root: Root;
@@ -890,14 +728,14 @@ async function startPendingDefaultFrontendSave(): Promise<{
     await Promise.resolve();
   });
   await waitForButton(container, 'General');
-  const defaultFrontend = Array.from(container.querySelectorAll('select'))
-    .find((select) => select.textContent?.includes('Runtime only'));
-  if (!(defaultFrontend instanceof HTMLSelectElement)) {
-    throw new Error('Expected default frontend select.');
+  const locale = Array.from(container.querySelectorAll('select'))
+    .find((select) => select.textContent?.includes('Simplified Chinese'));
+  if (!(locale instanceof HTMLSelectElement)) {
+    throw new Error('Expected language select.');
   }
   await act(async () => {
-    setSelectValue(defaultFrontend, 'browser');
-    defaultFrontend.dispatchEvent(new Event('change', { bubbles: true }));
+    setSelectValue(locale, 'zh-CN');
+    locale.dispatchEvent(new Event('change', { bubbles: true }));
   });
   expect(globalSettingsSave).toHaveBeenCalledTimes(1);
 
@@ -1048,7 +886,7 @@ function productStateFixture(): DebruteProductState {
 
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
-    workbench: { locale: 'en', themePreference: 'dark', defaultFrontend: 'desktop' },
+    workbench: { locale: 'en', themePreference: 'dark' },
     canvas: {
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',
@@ -1138,7 +976,6 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     executeNativeMenuCommand: async () => ({ ok: true }),
     takeDesktopLaunchTicket: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
-    onOpenProjectRequested: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
   };

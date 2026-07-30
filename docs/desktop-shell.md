@@ -60,21 +60,42 @@ visible. It begins normal painting only after applying the snapshot's resolved
 theme, so a slow Project or Integration resource cannot produce an intermediate
 default-theme frame.
 
-Electron Main owns the native Project selector and window topology, not Project
-binding. Cancelling the selector emits no renderer open intent. After selection,
-Main sends the concrete Project root to the requesting renderer, which enters
-the same Workbench binding lifecycle as a browser-selected target.
+Electron Main owns the native Project selector and submits every ordinary
+Desktop Project open to Runtime activation. This includes startup arguments,
+Finder or Dock file opens, second-instance arguments, the application menu,
+Open Recent, the Windows Web title bar, and Windows Jump Lists. The selector's
+parent window is also the preferred empty-window candidate: cancelling does
+nothing, and selecting a directory still never asks that window's renderer to
+replace its Project. `DesktopWindowHost` resolves that native identity to its
+opaque Runtime key. Main does not receive or mirror the key, and the Desktop
+bridge has no renderer-open event or second in-window replacement path.
 
-If another window in the same Desktop host already owns the selected Project,
-Desktop focuses that existing window and leaves the requesting window's current
-binding unchanged. Otherwise the requesting renderer acquires the Project at
-Runtime's atomic binding commit, including when a browser Workbench previously
-owned it; the destination does not present a second **Open Here** confirmation.
-A displaced Electron window remains open with its last Project presentation,
-becomes read-only, and alone offers **Open Here**. Runtime treats that detached
-window as unbound in Desktop topology; the preserved presentation is
-frontend-local context, not Project command authority. Its **Open Here** action
-enters the same binding lifecycle to request the Project back.
+Runtime focuses the existing Desktop window when it already routes the target
+Project. Otherwise it may bind an existing live Desktop document only when that
+document was launched at Root and has never accepted a Project binding. Runtime
+prefers the eligible initiating window. When an activation has no native source,
+it reuses an empty window only if exactly one is eligible; zero or multiple
+candidates create a new Project-routed window. The binding publishes the normal
+`project.bound` baseline on the existing Workbench connection—there is no
+renderer IPC, reload, retarget endpoint, retry, or fallback. Browser Project
+selection keeps its same-tab binding behavior. Runtime rejects the browser
+replacement endpoint for a Desktop connection, so Desktop cannot bypass native
+multi-window activation.
+
+A browser may still displace a Desktop Project owner. The Electron window then
+remains open with its last Project presentation, becomes read-only, and alone
+offers **Open Here**. Runtime treats that detached window as unbound in Desktop
+topology; the preserved presentation is frontend-local context, not Project
+command authority. Because it previously accepted a Project binding, it is not
+an empty-window reuse candidate. **Open Here** is the deliberate same-window
+ownership reacquisition path and is not an ordinary Desktop Project open.
+
+Before Runtime Control is ready, one admission closure orders Desktop opens.
+An explicit first-process Project argument runs first; otherwise the first
+queued native open replaces the default root window, and only an empty queue
+creates that default. Intents arriving during the first activation are drained
+in order before admission becomes live. The closure does not deduplicate,
+retry, replay, or persist opens.
 
 The red close button closes one window. A non-final close reports that window
 key to Runtime. The final close instead closes the Desktop Control connection
@@ -170,6 +191,20 @@ command ran, while an unknown or unsupported command is rejected. macOS Start
 Speaking and Stop Speaking remain native application-menu roles only; because
 macOS Desktop does not render the Web menus, those roles are not duplicated in
 the Web-to-Electron command protocol.
+
+File > New Window and `CmdOrCtrl+N` activate a root window. On macOS, the Dock
+menu exposes the same single **New Window** action. File > Open Project and all
+recent-Project surfaces use Project activation. Their native source affects
+only which truly empty window may be reused; it never permits replacing a
+Project-bound or detached window.
+
+After open admission becomes live, native event and menu callbacks pass their
+action promise through one Desktop error reporter. Opens queued before that
+boundary are owned by the awaited startup sequence, so the same failure is not
+also reported by a native callback. Renderer-originated IPC handlers remain
+awaited and return their rejection to the renderer instead of also reporting it
+as a second native error. Runtime-loss and window-host failures retain their
+existing dedicated lifecycle handling.
 
 Runtime sends Desktop a snapshot-first recent-Projects projection over Control.
 Electron mirrors it into native recent-document and menu affordances but does

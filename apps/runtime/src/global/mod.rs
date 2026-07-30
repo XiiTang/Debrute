@@ -14,8 +14,8 @@ pub use runtime::{
     GlobalRuntimeService,
 };
 pub use store::{
-    CanvasFontId, CanvasSettings, CanvasTextAppearance, ChromeSettings, DefaultFrontend,
-    GlobalConfigSnapshot, GlobalConfigStore, GlobalMutationResult, GlobalSettingsConfig,
-    GlobalSettingsError, GlobalSettingsView, ModelConfig, RecentProjectEntry,
-    RecentProjectsMutationResult, SecretsConfig, WorkbenchSettings,
+    CanvasFontId, CanvasSettings, CanvasTextAppearance, ChromeSettings, GlobalConfigSnapshot,
+    GlobalConfigStore, GlobalMutationResult, GlobalSettingsConfig, GlobalSettingsError,
+    GlobalSettingsView, ModelConfig, RecentProjectEntry, RecentProjectsMutationResult,
+    SecretsConfig, WorkbenchSettings,
 };

@@ -70,8 +70,8 @@ unbound or failed startup has no Project result; the Workbench does not split a
 successful binding into independently optional fields or reconstruct a partial
 Project from them.
 
-Replacing Project A with Project B is a prepared handoff on the same Workbench
-connection. Runtime first opens and validates B while A remains authoritative,
+In a browser, replacing Project A with Project B is a prepared handoff on the
+same Workbench connection. Runtime first opens and validates B while A remains authoritative,
 then creates B's Project subscription and uses that subscription's initial
 snapshot to build the complete `project.bound` projection. It also loads B's
 Working Copies and secures delivery of the first bound frame before changing
@@ -87,18 +87,25 @@ exact connection and releases B's Workbench Project Use. It does not roll back
 to A because the client may already have observed B. Selecting the already-bound
 Project remains a no-op.
 
-An explicit open from one Workbench directly acquires its concrete target at
-that commit, displacing any different browser-tab or Desktop-window owner. The
-requesting destination does not show an ownership confirmation; the displaced
-Workbench becomes detached and offers **Open Here**. Within one Desktop host,
-opening a Project owned by another Desktop window instead focuses that existing
-window and leaves the requesting window's binding unchanged.
+A browser open, or **Open Here** from a detached Desktop Workbench, directly
+acquires its concrete target at that commit and may displace a different owner.
+The requesting destination does not show another ownership confirmation; the
+displaced Workbench becomes detached and offers **Open Here**.
+
+Ordinary Desktop opens do not replace the requesting Workbench. Native Desktop
+activation focuses an existing window for the same Project. Otherwise it may
+bind a live Desktop Workbench only when the current document started at Root and
+has never accepted a Project binding, preferring an eligible initiating window
+or a sole eligible empty window when no source exists. It opens a new window
+instead of reusing a Project-bound, detached, or ambiguous empty window. The
+Desktop connection is rejected by `/api/projects/replace`; only detached **Open
+Here** deliberately reacquires ownership in that same window.
 
 Only after `WorkbenchProjectProjection` accepts the complete `project.bound`
 baseline may the binding lifecycle commit the canonical Project URL. A failed
-preparation or focused-existing Desktop outcome preserves the requesting
-Workbench's accepted Project and URL. An accepted replacement retires the source
-binding and is never rolled back by a later frontend completion.
+preparation preserves the requesting Workbench's accepted Project and URL. An
+accepted replacement retires the source binding and is never rolled back by a
+later frontend completion.
 
 Every Project-scoped mutation is authorized against the connection's current
 binding generation as well as its Project id. Work begun for A cannot commit to
@@ -226,11 +233,11 @@ An unbound Workbench, its Project-opening progress and initial Project-open
 failure, an absent Canvas, and Canvas repair place their focused content directly
 over this background, centered below the title-bar hit area. The initial failure
 remains visible below the corresponding Project action until another attempt
-begins. During a bound A-to-B open, A's last accepted presentation remains visible
-with an opening state and no new Project Path Command admission; failed
-preparation restores A and reports a non-blocking notification. Selector cancel,
-a repeated open ignored while another attempt is active, a focused-existing
-Desktop outcome, and a superseded attempt report no error.
+begins. During a browser bound A-to-B open, A's last accepted presentation
+remains visible with an opening state and no new Project Path Command admission;
+failed preparation restores A and reports a non-blocking notification. Selector
+cancel, a repeated open ignored while another attempt is active, and a
+superseded attempt report no error.
 The shared appearance does not create a Canvas domain object or admit Canvas
 interaction before a real Canvas projection exists. The Not Found page is not a
 Workbench shell and keeps its independent error presentation.
@@ -326,8 +333,8 @@ are documented in [`desktop-shell.md`](./desktop-shell.md).
 Settings has one directory and one content surface. Its current pages are
 General; Appearance; Image, Video, TTS, Music, and SFX Models; and Integrations.
 Appearance composes the Workbench Theme mode with the separate
-global Canvas Text Appearance controls; General retains language, default
-frontend, product information, and updates. Runtime-owned Global Settings is
+global Canvas Text Appearance controls; General retains language, product
+information, and updates. Runtime-owned Global Settings is
 ready before React mounts. Product and Integration projections retain their own
 loading and ready states because they arrive independently; connection failure
 still ends the Workbench. Photoshop live state has no persisted enablement,
@@ -434,18 +441,20 @@ and Document identity. Selection closes the menu and sends immediately; there
 is no dialog, remembered target, or Photoshop Settings page. One notification
 is updated in place from sending to its terminal result.
 
-Target selection belongs to the browser or Desktop shell rather than the Project
+Browser target selection and detached Desktop **Open Here** enter the Project
 binding lifecycle. While the selector is open, the current binding remains
 admitted; cancel submits no binding attempt and changes nothing. Once a concrete
 target enters the lifecycle, it closes Project Path Command admission
 synchronously, before transport or any asynchronous preparation, across
 Explorer, Canvas, keyboard, inline editing, and drag-and-drop entry points.
-Workbench closes unsubmitted context menus and inline edits,
-then shows that the target Project is opening. Failed preparation or a
-focused-existing Desktop outcome reopens the unchanged binding's gate. An
-accepted `project.bound` retires the old gate and mounts fresh admission with the
-new generation. A second open in the same Workbench does not start another
-concurrent transport attempt.
+Workbench closes unsubmitted context menus and inline edits, then shows that the
+target Project is opening. Failed preparation reopens the unchanged binding's
+gate. An accepted `project.bound` retires the old gate and mounts fresh admission
+with the new generation. A second open in the same Workbench does not start
+another concurrent transport attempt. Ordinary Desktop selectors submit native
+activation instead. If the initiating document is a true empty-window candidate,
+Runtime commits the ordinary `project.bound` lifecycle there; otherwise its
+gate remains unchanged while Runtime focuses or opens the destination window.
 
 A command submitted before that boundary remains owned by its captured Project
 id and binding generation. Runtime's Project binding lease lets the accepted

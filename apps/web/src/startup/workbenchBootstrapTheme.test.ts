@@ -29,7 +29,7 @@ describe('Workbench bootstrap theme', () => {
 
 function settingsFixture(themePreference: 'light' | 'dark'): DebruteGlobalSettingsView {
   return {
-    workbench: { locale: 'en', themePreference, defaultFrontend: 'desktop' },
+    workbench: { locale: 'en', themePreference },
     canvas: {
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',

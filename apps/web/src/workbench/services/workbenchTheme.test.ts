@@ -10,8 +10,7 @@ describe('Workbench theme helpers', () => {
   it('defines the current default global Workbench settings', () => {
     expect(DEFAULT_GLOBAL_WORKBENCH_SETTINGS).toEqual({
       locale: 'en',
-      themePreference: 'system',
-      defaultFrontend: 'desktop'
+      themePreference: 'system'
     });
   });
 

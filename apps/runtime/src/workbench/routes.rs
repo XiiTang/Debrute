@@ -34,9 +34,9 @@ use crate::{
 };
 
 use super::{
-    FeedbackWorkingCopy, ProductUpdateInitiator, RuntimeHttpServiceError, TextWorkingCopy,
-    WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService, WorkbenchProjectBindingOutcome,
-    WorkbenchRuntimeServices,
+    DesktopConnectionAdmission, FeedbackWorkingCopy, ProductUpdateInitiator,
+    RuntimeHttpServiceError, TextWorkingCopy, WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService,
+    WorkbenchProjectBindingOutcome, WorkbenchRuntimeServices,
     multipart::{MultipartLimits, read_multipart_limited},
     public_project_snapshot,
     routing::{
@@ -101,6 +101,7 @@ pub(super) async fn workbench_connection(
                     "Desktop launch ticket is invalid or already consumed.",
                 );
             };
+            let reusable_empty = matches!(consumption.route, crate::control::WorkbenchRoute::Root);
             let route_project_id = match consumption.route {
                 crate::control::WorkbenchRoute::Root => None,
                 crate::control::WorkbenchRoute::Project { project_id } => Some(project_id),
@@ -114,7 +115,10 @@ pub(super) async fn workbench_connection(
             }
             (
                 consumption.browser_session,
-                Some(consumption.desktop),
+                Some(DesktopConnectionAdmission {
+                    binding: consumption.desktop,
+                    reusable_empty,
+                }),
                 route_project_id,
             )
         } else {

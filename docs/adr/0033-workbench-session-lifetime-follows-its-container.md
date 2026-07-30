@@ -18,14 +18,21 @@ There is no idle timer, unload release request, attachment anchor, reconnect
 reservation, heartbeat, recovery deadline, or Reconnect button. Refreshing
 creates an entirely new connection and snapshots.
 
-Each Project has at most one Workbench owner. Once a browser tab or Electron
-BrowserWindow explicitly opens a concrete Project target, that requesting
-Workbench directly acquires the target at Runtime's atomic binding commit. If a
-different Workbench owned the Project, that previous owner is displaced; the
-requesting destination does not ask for a second ownership confirmation. The
-only duplicate-open exception is within one Desktop host: when Desktop window D2
-opens a Project already owned by Desktop window D1, Desktop focuses D1, leaves
-D1 as owner, and leaves D2's existing binding unchanged.
+Each Project has at most one Workbench owner. A browser open or a detached
+Desktop **Open Here** directly acquires the target at Runtime's atomic binding
+commit. If a different Workbench owned the Project, that previous owner is
+displaced; the requesting destination does not ask for a second ownership
+confirmation.
+
+An ordinary Desktop Project open is a container activation, not a replacement
+on the initiating Workbench connection. Runtime focuses a Desktop window that
+already routes the target. Otherwise it may commit the existing Project binding
+transaction into an eligible empty Desktop document: root-routed, live, and
+never previously Project-bound during that document lifetime. It prefers the
+eligible initiating window; without one, it reuses only a sole unambiguous
+candidate. Runtime opens a new Project-routed BrowserWindow when no such window
+is selected. It leaves Project-bound and detached documents unchanged and
+rejects the replacement endpoint for Desktop connections.
 
 A displaced page remains loaded on a detached, read-only surface with its last
 presentation but has no Project command authority. It alone offers **Open Here**,

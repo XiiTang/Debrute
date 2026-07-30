@@ -131,15 +131,14 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
     let frontend = parsed
         .options
         .get("frontend")
-        .map_or("default", String::as_str);
+        .expect("the parser requires an explicit frontend")
+        .as_str();
     let frontend = match frontend {
-        "default" => ProjectFrontend::Default,
         "desktop" => ProjectFrontend::Desktop,
         "browser" => ProjectFrontend::Browser,
         _ => unreachable!("the parser enforces the frontend value set"),
     };
     let intent = match (&parsed.project_root, frontend) {
-        (None, ProjectFrontend::Default) => ActivationIntent::OpenDefaultFrontend,
         (None, ProjectFrontend::Desktop) => ActivationIntent::OpenDesktop,
         (None, ProjectFrontend::Browser) => ActivationIntent::OpenBrowser,
         (Some(project_root), frontend) => ActivationIntent::OpenProject {
@@ -151,7 +150,10 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
         .wait_ready_and_request_until(
             deadline,
             Uuid::new_v4().to_string(),
-            ControlRequest::Activate { intent },
+            ControlRequest::Activate {
+                intent,
+                preferred_desktop_window_key: None,
+            },
         )
         .map_err(|error| control_failure(parsed.command, &error))?;
     match response {

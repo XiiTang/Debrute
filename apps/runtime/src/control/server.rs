@@ -3,7 +3,7 @@ use std::{
     error::Error,
     fmt,
     io::{self, Read, Write},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard},
     thread,
     time::{Duration, Instant},
 };
@@ -37,7 +37,7 @@ pub struct RuntimeControlState {
     inner: Mutex<RuntimeControlInner>,
     desktop: DesktopWindowTopology,
     lifecycle: Mutex<RuntimeLifecycle>,
-    product_commit: Mutex<()>,
+    product_transition: RwLock<()>,
     activation_service: Mutex<Option<Arc<dyn RuntimeActivationService>>>,
 }
 
@@ -47,7 +47,11 @@ pub trait RuntimeActivationService: Send + Sync {
     /// # Errors
     ///
     /// Returns a closed Control error when the requested target cannot be opened.
-    fn activate(&self, intent: &ActivationIntent) -> Result<ActivationOutcome, ControlErrorCode>;
+    fn activate(
+        &self,
+        intent: &ActivationIntent,
+        preferred_desktop_window_key: Option<&str>,
+    ) -> Result<ActivationOutcome, ControlErrorCode>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,7 +118,7 @@ impl RuntimeControlState {
             }),
             desktop: DesktopWindowTopology::new(),
             lifecycle: Mutex::new(RuntimeLifecycle::Starting),
-            product_commit: Mutex::new(()),
+            product_transition: RwLock::new(()),
             activation_service: Mutex::new(None),
         }
     }
@@ -170,6 +174,17 @@ impl RuntimeControlState {
         {
             let _ = connection.sender.send(ServerMessage::event(event.clone()));
         }
+    }
+
+    /// Returns the current ordered recent-Project projection when its Global revision changed.
+    #[must_use]
+    pub fn recent_projects_projection_after(
+        &self,
+        known_revision: Option<u64>,
+    ) -> Option<(u64, Vec<RecentProject>)> {
+        let inner = self.lock_inner();
+        let revision = inner.recent_projects_revision?;
+        (known_revision != Some(revision)).then(|| (revision, inner.recent_projects.clone()))
     }
 
     pub fn set_theme_preference(&self, theme_preference: &str) {
@@ -236,6 +251,21 @@ impl RuntimeControlState {
         self.desktop.open(route)
     }
 
+    #[must_use]
+    pub fn has_desktop_host(&self) -> bool {
+        self.desktop.has_host()
+    }
+
+    pub(crate) fn focus_desktop_project_window(
+        &self,
+        project_id: &str,
+    ) -> Result<bool, DesktopOpenError> {
+        if self.status() != RuntimeStatus::Ready {
+            return Err(DesktopOpenError::HostUnavailable);
+        }
+        self.desktop.focus_project(project_id)
+    }
+
     pub(crate) fn retarget_desktop_window(
         &self,
         binding: &crate::workbench::DesktopLaunchBinding,
@@ -290,14 +320,14 @@ impl RuntimeControlState {
         if thread::Builder::new()
             .name("debrute-product-update".to_owned())
             .spawn(move || {
-                let commit_guard = state.lock_product_commit();
+                let transition_guard = state.lock_product_transition();
                 let lifecycle = state.lock_lifecycle();
                 if !matches!(
                     &*lifecycle,
                     RuntimeLifecycle::UpdatePreparing(current) if current == &transaction_id
                 ) {
                     drop(lifecycle);
-                    drop(commit_guard);
+                    drop(transition_guard);
                     on_cancel("Product Quit won before the update commit boundary.");
                     return;
                 }
@@ -306,14 +336,14 @@ impl RuntimeControlState {
                     let mut lifecycle = state.lock_lifecycle();
                     *lifecycle = RuntimeLifecycle::Ready;
                     drop(lifecycle);
-                    drop(commit_guard);
+                    drop(transition_guard);
                     on_cancel(&error);
                     return;
                 }
                 let mut lifecycle = state.lock_lifecycle();
                 *lifecycle = RuntimeLifecycle::Replacing(transaction_id);
                 drop(lifecycle);
-                drop(commit_guard);
+                drop(transition_guard);
                 state.broadcast_event_with_flush_budget(
                     &ControlEvent::ProductReplacing,
                     Duration::from_millis(250),
@@ -351,18 +381,28 @@ impl RuntimeControlState {
     pub fn activate_intent(
         &self,
         intent: &ActivationIntent,
+        preferred_desktop_window_key: Option<&str>,
     ) -> Result<ActivationOutcome, ControlErrorCode> {
+        let _transition = self.read_product_transition();
+        match self.status() {
+            RuntimeStatus::Starting => return Err(ControlErrorCode::RuntimeStarting),
+            RuntimeStatus::Exiting => return Err(ControlErrorCode::RuntimeExiting),
+            RuntimeStatus::Replacing => {
+                return Err(ControlErrorCode::UpdateCommitInProgress);
+            }
+            RuntimeStatus::Ready => {}
+        }
         if matches!(intent, ActivationIntent::EnsureRuntime) {
             return Ok(ActivationOutcome::Ensured);
         }
         let service = self.lock_activation_service().clone();
         service.map_or(Err(ControlErrorCode::InvalidActivation), |service| {
-            service.activate(intent)
+            service.activate(intent, preferred_desktop_window_key)
         })
     }
 
     fn begin_product_quit(&self) -> QuitAdmission {
-        let _commit = self.lock_product_commit();
+        let _transition = self.lock_product_transition();
         let mut lifecycle = self.lock_lifecycle();
         match &*lifecycle {
             RuntimeLifecycle::Exiting => return QuitAdmission::AlreadyAccepted,
@@ -472,9 +512,14 @@ impl RuntimeControlState {
         request: &ControlRequest,
     ) -> ControlResponse {
         match request {
-            ControlRequest::Activate { intent } => {
-                self.activate_for_connection(connection_id, intent)
-            }
+            ControlRequest::Activate {
+                intent,
+                preferred_desktop_window_key,
+            } => self.activate_for_connection(
+                connection_id,
+                intent,
+                preferred_desktop_window_key.as_deref(),
+            ),
             ControlRequest::CreateCliAuthorization => {
                 let mut inner = self.lock_inner();
                 let Some(workbench) = inner.workbench.as_ref() else {
@@ -586,7 +631,20 @@ impl RuntimeControlState {
         &self,
         connection_id: &ConnectionId,
         intent: &ActivationIntent,
+        preferred_desktop_window_key: Option<&str>,
     ) -> ControlResponse {
+        if preferred_desktop_window_key.is_some() && !activation_targets_desktop(intent) {
+            return ControlResponse::Rejected {
+                code: ControlErrorCode::InvalidActivation,
+            };
+        }
+        if let Some(window_key) = preferred_desktop_window_key
+            && !self.desktop.owns_window(&connection_id.0, window_key)
+        {
+            return ControlResponse::Rejected {
+                code: ControlErrorCode::InvalidDesktopWindow,
+            };
+        }
         let launcher_desktop = self
             .lock_inner()
             .connections
@@ -598,7 +656,7 @@ impl RuntimeControlState {
             });
         if launcher_desktop {
             if self.desktop.has_host() {
-                return match self.activate_intent(intent) {
+                return match self.activate_intent(intent, None) {
                     Ok(_) => ControlResponse::Activation {
                         outcome: ActivationOutcome::HandledByExistingDesktop,
                     },
@@ -640,7 +698,7 @@ impl RuntimeControlState {
                 },
             ));
             drop(inner);
-            return match self.activate_intent(intent) {
+            return match self.activate_intent(intent, None) {
                 Ok(_) => ControlResponse::Activation {
                     outcome: ActivationOutcome::PromotedToDesktopHost,
                 },
@@ -654,7 +712,7 @@ impl RuntimeControlState {
                 }
             };
         }
-        match self.activate_intent(intent) {
+        match self.activate_intent(intent, preferred_desktop_window_key) {
             Ok(outcome) => ControlResponse::Activation { outcome },
             Err(code) => ControlResponse::Rejected { code },
         }
@@ -716,10 +774,16 @@ impl RuntimeControlState {
             .expect("Runtime lifecycle lock poisoned")
     }
 
-    fn lock_product_commit(&self) -> MutexGuard<'_, ()> {
-        self.product_commit
-            .lock()
-            .expect("Product commit lock poisoned")
+    fn read_product_transition(&self) -> RwLockReadGuard<'_, ()> {
+        self.product_transition
+            .read()
+            .expect("Product transition lock poisoned")
+    }
+
+    fn lock_product_transition(&self) -> RwLockWriteGuard<'_, ()> {
+        self.product_transition
+            .write()
+            .expect("Product transition lock poisoned")
     }
 
     fn lock_activation_service(&self) -> MutexGuard<'_, Option<Arc<dyn RuntimeActivationService>>> {

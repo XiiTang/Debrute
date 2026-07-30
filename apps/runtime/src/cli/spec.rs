@@ -47,9 +47,9 @@ const NO_OPTIONS: &[CliOptionSpec] = &[];
 const WORKBENCH_OPTIONS: &[CliOptionSpec] = &[option(
     "frontend",
     CliOptionKind::Value,
+    true,
     false,
-    false,
-    &["default", "desktop", "browser"],
+    &["desktop", "browser"],
 )];
 const RESET_LAYOUT_OPTIONS: &[CliOptionSpec] = &[
     option("all", CliOptionKind::Flag, false, false, &[]),
@@ -473,7 +473,7 @@ const SPECS: &[CliCommandSpec] = &[
         "write",
         "none",
         "none",
-        "[<project>] [--frontend default|desktop|browser]",
+        "[<project>] --frontend desktop|browser",
         "accepted frontend and target record",
         0,
         1,

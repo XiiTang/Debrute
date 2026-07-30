@@ -25,7 +25,7 @@ use super::{
     copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
     import_upload_project_entries, is_gitignore_path, list_project_files_until, move_project_paths,
     rename_project_path,
-    watcher::{ProjectFileWatcher, ProjectWatchSignal},
+    watcher::{ProjectFileWatcher, ProjectWatchBackendFactory, ProjectWatchSignal},
     write_project_text_file,
 };
 
@@ -236,6 +236,7 @@ struct ProjectSessionRegistryInner {
     debrute_home: PathBuf,
     node_adapter: Arc<dyn ProjectNodeAdapter>,
     feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+    watch_backend_factory: Arc<dyn ProjectWatchBackendFactory>,
     state: Mutex<ProjectSessionRegistryState>,
     on_change: Arc<dyn Fn() + Send + Sync>,
 }
@@ -328,6 +329,16 @@ impl RootTransition {
     }
 }
 
+#[cfg(not(test))]
+fn default_watch_backend_factory() -> Arc<dyn ProjectWatchBackendFactory> {
+    Arc::new(super::watcher::NativeProjectWatchBackendFactory)
+}
+
+#[cfg(test)]
+fn default_watch_backend_factory() -> Arc<dyn ProjectWatchBackendFactory> {
+    Arc::new(super::watcher::NoopProjectWatchBackendFactory)
+}
+
 impl ProjectSessionRegistry {
     #[must_use]
     pub fn new(
@@ -350,11 +361,45 @@ impl ProjectSessionRegistry {
         feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
         on_change: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
+        Self::with_dependencies(
+            debrute_home,
+            node_adapter,
+            feedback_artifacts,
+            on_change,
+            default_watch_backend_factory(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_change_callback_and_watch_backend_factory(
+        debrute_home: impl Into<PathBuf>,
+        node_adapter: Arc<dyn ProjectNodeAdapter>,
+        feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+        on_change: Arc<dyn Fn() + Send + Sync>,
+        watch_backend_factory: Arc<dyn ProjectWatchBackendFactory>,
+    ) -> Self {
+        Self::with_dependencies(
+            debrute_home,
+            node_adapter,
+            feedback_artifacts,
+            on_change,
+            watch_backend_factory,
+        )
+    }
+
+    fn with_dependencies(
+        debrute_home: impl Into<PathBuf>,
+        node_adapter: Arc<dyn ProjectNodeAdapter>,
+        feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+        on_change: Arc<dyn Fn() + Send + Sync>,
+        watch_backend_factory: Arc<dyn ProjectWatchBackendFactory>,
+    ) -> Self {
         Self {
             inner: Arc::new(ProjectSessionRegistryInner {
                 debrute_home: debrute_home.into(),
                 node_adapter,
                 feedback_artifacts,
+                watch_backend_factory,
                 state: Mutex::new(ProjectSessionRegistryState::default()),
                 on_change,
             }),
@@ -454,7 +499,7 @@ impl ProjectSessionRegistry {
                 Arc::clone(&self.inner.feedback_artifacts),
                 Arc::clone(&self.inner.on_change),
             ));
-            session.prepare_for_publication()?;
+            session.prepare_for_publication(self.inner.watch_backend_factory.as_ref())?;
             Ok(session)
         });
         let mut state = lock(&self.inner.state);
@@ -1118,24 +1163,15 @@ impl ProjectSession {
         self.apply_watched_file_change(path.to_owned())
     }
 
-    #[cfg(test)]
-    pub(super) fn report_watcher_backend_error_for_test(
-        &self,
-        message: &str,
+    fn prepare_for_publication(
+        self: &Arc<Self>,
+        watch_backend_factory: &dyn ProjectWatchBackendFactory,
     ) -> Result<(), ProjectError> {
-        lock(&self.watcher)
-            .as_ref()
-            .ok_or_else(|| {
-                ProjectError::service("project_watcher_failed", "Project watcher is not running.")
-            })?
-            .report_backend_error_for_test(message)
-    }
-
-    fn prepare_for_publication(self: &Arc<Self>) -> Result<(), ProjectError> {
         let weak = Arc::downgrade(self);
         let explicit_dependency_session = Arc::downgrade(self);
         let watcher = ProjectFileWatcher::start(
             &self.root,
+            watch_backend_factory,
             Arc::new(move |project_relative_path| {
                 explicit_dependency_session
                     .upgrade()

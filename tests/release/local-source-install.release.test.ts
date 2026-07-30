@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { CONTROL_PROTOCOL_VERSION } from '@debrute/app-protocol';
 import { describe, expect, it } from 'vitest';
 import { localElectronBuilderArguments } from '../../apps/desktop/scripts/package-local-macos.mjs';
 import { validateProductSeed } from '../../scripts/assemble-product-seed.mjs';
@@ -174,7 +175,7 @@ function writeProduct(directory: string, version: string, payload: string): void
     product: 'debrute',
     productVersion: version,
     controlProtocol: 'debrute-control',
-    controlProtocolVersion: 2,
+    controlProtocolVersion: CONTROL_PROTOCOL_VERSION,
     platform: 'macos',
     architecture: process.arch,
     entrypoints,

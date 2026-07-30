@@ -5,9 +5,14 @@ export interface DesktopApplicationMenuInput {
   recentItems: Electron.MenuItemConstructorOptions[];
   newWindow(): void;
   openProject(window: Electron.BaseWindow | undefined): void;
-  openProjectInNewWindow(): void;
   reloadWorkbench(window: Electron.BaseWindow | undefined): void;
   quitProduct(): void;
+}
+
+export function buildDesktopDockMenu(
+  newWindow: () => void
+): Electron.MenuItemConstructorOptions[] {
+  return [{ label: 'New Window', click: newWindow }];
 }
 
 export function buildDesktopApplicationMenu(
@@ -44,11 +49,6 @@ export function buildDesktopApplicationMenu(
           label: 'Open Project…',
           accelerator: 'CmdOrCtrl+O',
           click: (_item, window) => input.openProject(window)
-        },
-        {
-          label: 'Open Project in New Window…',
-          accelerator: 'CmdOrCtrl+Shift+O',
-          click: input.openProjectInNewWindow
         },
         { label: 'Open Recent', submenu: input.recentItems },
         { type: 'separator' },

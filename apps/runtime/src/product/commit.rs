@@ -92,7 +92,6 @@ pub enum ResumeIntent {
     Desktop { target: ResumeTarget },
     Browser { target: ResumeTarget },
     Cli,
-    Bootstrap { target: ResumeTarget },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -634,9 +633,9 @@ fn desktop_identity_matches(
 
 fn validate_resume_intent(intent: &ResumeIntent) -> Result<(), String> {
     match intent {
-        ResumeIntent::Desktop { target }
-        | ResumeIntent::Browser { target }
-        | ResumeIntent::Bootstrap { target } => validate_resume_target(target),
+        ResumeIntent::Desktop { target } | ResumeIntent::Browser { target } => {
+            validate_resume_target(target)
+        }
         ResumeIntent::Cli => Ok(()),
     }
 }

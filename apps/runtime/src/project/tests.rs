@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -14,6 +15,7 @@ use fs2::FileExt;
 use serde_json::json;
 use uuid::Uuid;
 
+use super::watcher::{ProjectWatchBackendFactory, ProjectWatchEventHandler, ProjectWatchGuard};
 use super::*;
 
 #[test]
@@ -62,7 +64,122 @@ fn project_registry(
     home: impl Into<PathBuf>,
     node_adapter: Arc<dyn ProjectNodeAdapter>,
 ) -> ProjectSessionRegistry {
-    ProjectSessionRegistry::new(home, node_adapter, feedback_artifacts())
+    project_registry_with_watcher(home, node_adapter).0
+}
+
+fn project_registry_with_watcher(
+    home: impl Into<PathBuf>,
+    node_adapter: Arc<dyn ProjectNodeAdapter>,
+) -> (ProjectSessionRegistry, TestProjectWatchBackendFactory) {
+    let watcher_factory = TestProjectWatchBackendFactory::default();
+    let registry = ProjectSessionRegistry::with_change_callback_and_watch_backend_factory(
+        home,
+        node_adapter,
+        feedback_artifacts(),
+        Arc::new(|| {}),
+        Arc::new(watcher_factory.clone()),
+    );
+    (registry, watcher_factory)
+}
+
+#[derive(Clone, Default)]
+struct TestProjectWatchBackendFactory {
+    state: Arc<TestProjectWatchBackendState>,
+}
+
+#[derive(Default)]
+struct TestProjectWatchBackendState {
+    registrations: Mutex<HashMap<PathBuf, Arc<Mutex<ProjectWatchEventHandler>>>>,
+    starts: AtomicUsize,
+}
+
+struct TestProjectWatchBackend {
+    state: Arc<TestProjectWatchBackendState>,
+    event_handler: Arc<Mutex<ProjectWatchEventHandler>>,
+    root: Option<PathBuf>,
+}
+
+impl ProjectWatchBackendFactory for TestProjectWatchBackendFactory {
+    fn start(
+        &self,
+        path: &Path,
+        event_handler: ProjectWatchEventHandler,
+    ) -> notify::Result<ProjectWatchGuard> {
+        self.state.starts.fetch_add(1, Ordering::SeqCst);
+        let root = path.to_path_buf();
+        let event_handler = Arc::new(Mutex::new(event_handler));
+        self.state
+            .registrations
+            .lock()
+            .expect("watch registrations should lock")
+            .insert(root.clone(), Arc::clone(&event_handler));
+        Ok(Box::new(TestProjectWatchBackend {
+            state: Arc::clone(&self.state),
+            event_handler,
+            root: Some(root),
+        }))
+    }
+}
+
+impl Drop for TestProjectWatchBackend {
+    fn drop(&mut self) {
+        let Some(root) = self.root.take() else {
+            return;
+        };
+        let mut registrations = self
+            .state
+            .registrations
+            .lock()
+            .expect("watch registrations should lock");
+        if registrations
+            .get(&root)
+            .is_some_and(|handler| Arc::ptr_eq(handler, &self.event_handler))
+        {
+            registrations.remove(&root);
+        }
+    }
+}
+
+impl TestProjectWatchBackendFactory {
+    fn start_count(&self) -> usize {
+        self.state.starts.load(Ordering::SeqCst)
+    }
+
+    fn emit_paths(&self, root: &Path, paths: &[&str]) {
+        let root = root
+            .canonicalize()
+            .expect("watched Project root should be canonical");
+        let event_handler = self.event_handler(&root);
+        let paths = paths.iter().map(|path| root.join(path)).collect();
+        event_handler
+            .lock()
+            .expect("watch event handler should lock")(Ok(notify::Event {
+            kind: notify::EventKind::Any,
+            paths,
+            attrs: notify::event::EventAttributes::default(),
+        }));
+    }
+
+    fn emit_backend_error(&self, root: &Path, message: &str) {
+        let root = root
+            .canonicalize()
+            .expect("watched Project root should be canonical");
+        self.event_handler(&root)
+            .lock()
+            .expect("watch event handler should lock")(Err(notify::Error::generic(
+            message,
+        )));
+    }
+
+    fn event_handler(&self, root: &Path) -> Arc<Mutex<ProjectWatchEventHandler>> {
+        self.state
+            .registrations
+            .lock()
+            .expect("watch registrations should lock")
+            .get(root)
+            .cloned()
+            .expect("Project root should have an active watcher")
+    }
 }
 
 fn next_project_event(subscription: &mut ProjectSubscription, context: &str) -> ProjectEvent {
@@ -1122,7 +1239,8 @@ fn staged_identity_failure_cleans_every_managed_temporary_path() {
 fn watcher_backend_error_forces_a_full_project_refresh() {
     let project = TemporaryDirectory::new("watcher-backend-rescan");
     let home = TemporaryDirectory::new("watcher-backend-rescan-home");
-    let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
+    let (registry, watcher_factory) =
+        project_registry_with_watcher(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
         .open_project(project.as_ref(), ProjectUseKind::Request)
         .expect("Project should open");
@@ -1139,10 +1257,7 @@ fn watcher_backend_error_forces_a_full_project_refresh() {
         "unknown: true\n",
     )
     .expect("malformed hidden document should be written");
-    opened
-        .session
-        .report_watcher_backend_error_for_test("injected dropped event")
-        .expect("backend error should be queued");
+    watcher_factory.emit_backend_error(project.as_ref(), "injected dropped event");
     let ProjectStreamItem::Event(event) = subscription
         .recv_timeout(Duration::from_secs(5))
         .expect("stream should remain open")
@@ -2225,12 +2340,13 @@ fn upload_manifest_rejects_file_ancestor_before_overwrite_effects() {
 }
 
 #[test]
-fn project_watcher_publishes_external_file_changes_in_one_batched_revision() {
+fn project_watcher_publishes_backend_file_changes_in_one_batched_revision() {
     let project = TemporaryDirectory::new("watcher");
     let home = TemporaryDirectory::new("watcher-home");
-    let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
+    let (registry, watcher_factory) =
+        project_registry_with_watcher(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
-        .open_project(project.as_ref(), ProjectUseKind::Workbench)
+        .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
         .expect("Project should open");
     let mut subscription = opened
         .session
@@ -2244,6 +2360,7 @@ fn project_watcher_publishes_external_file_changes_in_one_batched_revision() {
 
     fs::write(project.as_ref().join("external.txt"), "external")
         .expect("external write should succeed");
+    watcher_factory.emit_paths(project.as_ref(), &["external.txt"]);
     let Some(ProjectStreamItem::Event(event)) = subscription
         .recv_timeout(Duration::from_secs(10))
         .expect("Project stream should remain open")
@@ -2275,7 +2392,8 @@ fn project_watcher_publishes_external_file_changes_in_one_batched_revision() {
 fn watcher_coalescing_is_path_local_under_unrelated_event_pressure() {
     let project = TemporaryDirectory::new("watcher-pressure");
     let home = TemporaryDirectory::new("watcher-pressure-home");
-    let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
+    let (registry, watcher_factory) =
+        project_registry_with_watcher(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
         .open_project(project.as_ref(), ProjectUseKind::Workbench)
         .expect("Project should open");
@@ -2288,12 +2406,14 @@ fn watcher_coalescing_is_path_local_under_unrelated_event_pressure() {
         ProjectStreamItem::Snapshot(_)
     ));
     let noise_root = project.as_ref().to_path_buf();
+    let noise_watcher_factory = watcher_factory.clone();
     let noise = thread::spawn(move || {
         let started = Instant::now();
         let mut index = 0_u64;
         while started.elapsed() < Duration::from_millis(600) {
             fs::write(noise_root.join("noise.txt"), index.to_string())
                 .expect("noise write should succeed");
+            noise_watcher_factory.emit_paths(&noise_root, &["noise.txt"]);
             index += 1;
             thread::sleep(Duration::from_millis(5));
         }
@@ -2301,6 +2421,7 @@ fn watcher_coalescing_is_path_local_under_unrelated_event_pressure() {
     thread::sleep(Duration::from_millis(20));
     let started = Instant::now();
     fs::write(project.as_ref().join("target.txt"), "target").expect("target write should succeed");
+    watcher_factory.emit_paths(project.as_ref(), &["target.txt"]);
     loop {
         let remaining = Duration::from_millis(400).saturating_sub(started.elapsed());
         let Some(ProjectStreamItem::Event(event)) = subscription
@@ -2340,7 +2461,7 @@ fn watcher_changes_during_background_index_are_not_lost() {
     drop(setup);
 
     let gate = Arc::new(BlockingAdapterGate::default());
-    let registry = project_registry(
+    let (registry, watcher_factory) = project_registry_with_watcher(
         home.as_ref(),
         Arc::new(BlockingLayoutAdapter {
             calls: AtomicUsize::new(0),
@@ -2361,6 +2482,7 @@ fn watcher_changes_during_background_index_are_not_lost() {
     drop(entered);
     fs::write(project.as_ref().join("during-open.txt"), "visible")
         .expect("external write during open should succeed");
+    watcher_factory.emit_paths(project.as_ref(), &["during-open.txt"]);
     *gate.released.lock().expect("gate should lock") = true;
     gate.release_ready.notify_all();
 
@@ -2473,7 +2595,7 @@ fn watcher_changes_during_initial_snapshot_are_not_lost() {
         calls: AtomicUsize::new(0),
         gate: Arc::clone(&gate),
     });
-    let registry = project_registry(home.as_ref(), adapter.clone());
+    let (registry, watcher_factory) = project_registry_with_watcher(home.as_ref(), adapter.clone());
     let opener_registry = registry.clone();
     let project_root = project.as_ref().to_path_buf();
     let opener = thread::spawn(move || {
@@ -2495,6 +2617,7 @@ fn watcher_changes_during_initial_snapshot_are_not_lost() {
     );
     fs::write(project.as_ref().join("during-open.txt"), "visible")
         .expect("external write during initial snapshot should succeed");
+    watcher_factory.emit_paths(project.as_ref(), &["during-open.txt"]);
     *gate.released.lock().expect("gate should lock") = true;
     gate.release_ready.notify_all();
 
@@ -2869,13 +2992,15 @@ fn committed_project_revision_notifies_the_registry_change_projection() {
     let home = TemporaryDirectory::new("registry-revision-change-home");
     let changes = Arc::new(AtomicUsize::new(0));
     let callback_changes = Arc::clone(&changes);
-    let registry = ProjectSessionRegistry::with_change_callback(
+    let watcher_factory = TestProjectWatchBackendFactory::default();
+    let registry = ProjectSessionRegistry::with_change_callback_and_watch_backend_factory(
         home.as_ref(),
         Arc::new(FixedNodeAdapter),
         feedback_artifacts(),
         Arc::new(move || {
             callback_changes.fetch_add(1, Ordering::SeqCst);
         }),
+        Arc::new(watcher_factory),
     );
     let opened = registry
         .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
@@ -2905,7 +3030,8 @@ fn concurrent_project_opens_share_one_session_and_issue_one_project_use_each() {
 
     let project = TemporaryDirectory::new("concurrent-registry");
     let home = TemporaryDirectory::new("concurrent-registry-home");
-    let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
+    let (registry, watcher_factory) =
+        project_registry_with_watcher(home.as_ref(), Arc::new(FixedNodeAdapter));
     let start = Arc::new(Barrier::new(CLIENTS));
     let release = Arc::new(Barrier::new(CLIENTS + 1));
     let (sender, receiver) = mpsc::channel();
@@ -2943,6 +3069,7 @@ fn concurrent_project_opens_share_one_session_and_issue_one_project_use_each() {
         "all concurrent opens must share one live Project session"
     );
     assert_eq!(registry.list().expect("registry should list").len(), 1);
+    assert_eq!(watcher_factory.start_count(), 1);
 
     release.wait();
     for handle in handles {

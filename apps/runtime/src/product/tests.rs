@@ -263,9 +263,6 @@ fn target_runtime_ready_removes_pending_and_previous_before_resuming_fixed_surfa
             target: ResumeTarget::Root,
         },
         ResumeIntent::Cli,
-        ResumeIntent::Bootstrap {
-            target: ResumeTarget::Root,
-        },
     ];
     for intent in intents {
         let fixture = Fixture::new();
@@ -677,15 +674,14 @@ fn native_resume_claim_is_durable_and_intent_bound() {
             .claim_resume(&transaction_id, &ResumeIntent::Cli)
             .unwrap()
     );
+
+    let different_intent = ResumeIntent::Browser {
+        target: ResumeTarget::Root,
+    };
     assert!(
         fixture
             .store
-            .claim_resume(
-                &transaction_id,
-                &ResumeIntent::Bootstrap {
-                    target: ResumeTarget::Root,
-                },
-            )
+            .claim_resume(&transaction_id, &different_intent)
             .is_err()
     );
 }

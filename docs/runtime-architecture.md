@@ -65,13 +65,14 @@ same state to begin controlled shutdown. A terminal state cannot be overwritten
 by later startup completion. Operating-system termination ends the process
 directly.
 
-The tray exposes Runtime status, explicit Desktop and browser entry points,
-Start at Login, and Product Quit. It does not expose update controls, recent
-Projects, diagnostics, restart, or copied launch URLs. macOS activation opens
-the menu; Windows primary activation opens Desktop and secondary activation
-opens the menu. A tray creation failure exits Runtime before services start or
-`Ready` is published, and the launcher reports the startup failure. There is
-no trayless fallback, retry loop, or degraded Runtime status.
+The tray exposes Runtime status; explicit root Desktop, browser, and Copy URL
+actions; the ordered Recent Project projection under Desktop, Browser, and Copy
+URL submenus; Start at Login; and Product Quit. Both primary and secondary tray
+activation open this same menu on macOS and Windows. Workbench actions remain
+disabled until Runtime is `Ready`. Copy URL resolves the exact current
+credential-free loopback Workbench URL without opening or binding a Workbench
+or changing Recent order. A tray creation or menu-rebuild failure exits Runtime
+instead of keeping a stale or trayless control surface.
 
 Browser activation resolves the exact current Runtime-owned Workbench URL and
 hands it to the operating system. macOS requires `/usr/bin/open` to exit
@@ -354,8 +355,8 @@ ID, font size, line-height ratio, requested integer weight, letter spacing, and
 ligatures. Recent Projects persist only the mapping from stable Project id to
 canonical root. Non-secret settings and secrets use separate atomic files;
 public projections expose only whether a key is set and a non-secret preview.
-The typed default frontend is exactly `desktop`, `browser`, or `runtime-only`;
-invalid values do not enter Runtime state. Global events carry an ordered
+Runtime stores no default frontend. Every frontend-opening command or menu item
+selects `desktop` or `browser` explicitly. Global events carry an ordered
 `globalRevision` independent of Project state.
 
 An absent global settings or secrets file uses the current first-launch
@@ -439,21 +440,28 @@ Workbench, Terminal, Transfer, Photoshop, or request-specific cleanup results.
 There is no idle retention, grace period, reservation worker, or fixed session
 cap.
 
-Opening from an unbound Workbench and replacing from a bound Workbench are the
-only binding operations. Target validation finishes before an atomic replace;
-opening the current target is a no-op. Each Project has at most one Workbench.
-An explicit open from a requesting Workbench acquires the concrete target at the
-atomic binding commit and displaces any different Workbench owner without a
-second destination confirmation. Preparation does not modify either owner; a
-failure leaves both bindings unchanged. The only duplicate-open exception is
-inside one Desktop host: if another Desktop window owns the target, Runtime
-focuses that existing window and leaves the requesting window's binding
-unchanged. Runtime sends `project.preempted` only when an ownership transfer
-commits. A displaced Desktop window stays open on the unbound topology route,
-while its renderer preserves the last Project presentation as a read-only
-detached surface with **Open Here**. It is not closed, silently rebound, or
-allowed to retain Project command authority. **Open Here** is another explicit
-request to acquire that same Project under this rule.
+Desktop Project commands enter Runtime through native activation, not through
+the bound-connection replacement endpoint. Runtime focuses a Desktop window
+already routed to the target. Otherwise it may directly bind a live root-routed
+Desktop document which has never accepted a Project binding, preferring the
+eligible source window or, without a source, a sole eligible candidate. Zero or
+multiple candidates cause Runtime to open a new Project-routed window.
+Project-bound and detached documents are never reused. Root activation always
+opens a new root window. The replacement endpoint rejects Desktop connections.
+
+Opening from an unbound Workbench and browser replacement from a bound
+Workbench are the binding operations. Target validation finishes before an
+atomic replace; opening the current target is a no-op. Each Project has at most
+one Workbench. A browser replacement or detached **Open Here** acquires the
+concrete target at the atomic binding commit and displaces any different
+Workbench owner without a second destination confirmation. Preparation does
+not modify either owner; a failure leaves both bindings unchanged. Runtime sends
+`project.preempted` only when an ownership transfer commits. A displaced Desktop
+window stays open on the unbound topology route, while its renderer preserves
+the last Project presentation as a read-only detached surface with **Open
+Here**. It is not closed, silently rebound, or allowed to retain Project command
+authority. **Open Here** is another explicit request to acquire that same
+Project under this rule.
 
 Project mutations are serialized and semantically validated. Commands return
 their outcome; ordered stream events carry authoritative state. A stale or

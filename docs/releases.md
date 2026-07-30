@@ -74,9 +74,18 @@ Before replacement, macOS additionally mounts the DMG read-only and opens only
 the fixed `Debrute.app` directory at the mount root; it does not inventory or
 choose among application bundles. Runtime requires that exact path to be a real
 directory rather than a symbolic link, then verifies its application bundle id,
-code signature, Gatekeeper assessment, and stapled notarization ticket. Runtime
-stages and validates both the matching Desktop
-installer and complete Product archive. Product Quit accepted before the
+code signature, Gatekeeper assessment, and stapled notarization ticket. It
+copies and verifies a UUID-named staged application before retiring the
+installed application and moving the staged application into its place. A
+failed move first restores the retired application; only a successful restore
+permits staged cleanup. If restoration fails, both recovery paths are retained
+and reported. Failures from the primary operation, staged or retired cleanup,
+installer descriptor restoration, and DMG detach are reported together; once a
+mount is known, detach is attempted exactly once even when installation or
+descriptor restoration failed.
+
+Runtime stages and validates both the matching Desktop installer and complete
+Product archive. Product Quit accepted before the
 durable update commit boundary wins; after commit begins, replacement wins.
 Runtime installs Desktop, advances `current`, and starts the exact target
 Runtime without asking Workbenches for unload decisions or migrating live
@@ -91,7 +100,7 @@ neither update caller assembles a partial command, chooses another entrypoint,
 or retries through the ordinary launch path. The target Runtime waits for the
 old Control owner to exit, reports Ready, finalizes stable entrypoints and
 official Skills, cleans the old version, and restores only the initiating
-Desktop, browser, CLI, or bootstrap surface. No cross-platform replacement
+Desktop, browser, or CLI surface. No cross-platform replacement
 helper, automatic update retry, or background polling is used. A crash leaves
 one forward-only pending transaction that the target Runtime or installed
 Desktop seed can continue. If native
@@ -226,6 +235,16 @@ Runtime processes by name. Every CLI invocation and CDP fetch has its own bound
 inside the startup or shutdown deadline, so one hung probe cannot suspend the
 job. Bounded polling waits for the one startup and the one shutdown already
 requested; it does not retry either product action.
+
+Before building either macOS architecture, its matrix job runs
+`pnpm test:rust:native-watcher`. The command starts four real recursive notify
+watchers in one directly supervised probe process and requires an event from
+each. A 15-second probe deadline kills that exact process and fails the release
+job; it does not retry, fall back to polling, or convert the macOS FSEvents
+startup hang tracked by [notify-rs/notify#942](https://github.com/notify-rs/notify/issues/942)
+into success. Project-session unit contracts stay deterministic through their
+injected watcher backend, while this native release gate retains explicit
+platform evidence on both macOS architectures.
 
 The publish job requires three Desktop installers, three complete Product
 archives, and the signed manifest pair. It rejects any unexpected or duplicate

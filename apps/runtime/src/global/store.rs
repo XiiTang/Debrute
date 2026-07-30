@@ -14,20 +14,11 @@ use super::models::{ModelCatalog, ModelSettingsView, settings_view};
 
 const RECENT_PROJECT_LIMIT: usize = 12;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DefaultFrontend {
-    Desktop,
-    Browser,
-    RuntimeOnly,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkbenchSettings {
     pub locale: String,
     pub theme_preference: String,
-    pub default_frontend: DefaultFrontend,
 }
 
 impl Default for WorkbenchSettings {
@@ -35,7 +26,6 @@ impl Default for WorkbenchSettings {
         Self {
             locale: "en".to_owned(),
             theme_preference: "system".to_owned(),
-            default_frontend: DefaultFrontend::Desktop,
         }
     }
 }
@@ -401,7 +391,7 @@ fn apply_patch(
         let workbench = closed_patch_record(
             value,
             "Global settings workbench",
-            &["locale", "themePreference", "defaultFrontend"],
+            &["locale", "themePreference"],
         )?;
         if let Some(locale) = workbench.get("locale") {
             string(locale, "Workbench locale")?.clone_into(&mut snapshot.settings.workbench.locale);
@@ -409,9 +399,6 @@ fn apply_patch(
         if let Some(theme) = workbench.get("themePreference") {
             string(theme, "Workbench theme preference")?
                 .clone_into(&mut snapshot.settings.workbench.theme_preference);
-        }
-        if let Some(frontend) = workbench.get("defaultFrontend") {
-            snapshot.settings.workbench.default_frontend = parse_default_frontend(frontend)?;
         }
         validate_workbench(&snapshot.settings.workbench)?;
     }
@@ -657,17 +644,6 @@ fn validate_workbench(settings: &WorkbenchSettings) -> Result<(), GlobalSettings
         );
     }
     Ok(())
-}
-
-fn parse_default_frontend(value: &Value) -> Result<DefaultFrontend, GlobalSettingsError> {
-    match string(value, "Global settings defaultFrontend")? {
-        "desktop" => Ok(DefaultFrontend::Desktop),
-        "browser" => Ok(DefaultFrontend::Browser),
-        "runtime-only" => Ok(DefaultFrontend::RuntimeOnly),
-        _ => validation(
-            "Global settings defaultFrontend must be \"desktop\", \"browser\", or \"runtime-only\".",
-        ),
-    }
 }
 
 fn record<'a>(

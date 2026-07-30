@@ -16,8 +16,13 @@ use debrute_runtime::control::{
 struct BrowserActivation;
 
 impl RuntimeActivationService for BrowserActivation {
-    fn activate(&self, intent: &ActivationIntent) -> Result<ActivationOutcome, ControlErrorCode> {
+    fn activate(
+        &self,
+        intent: &ActivationIntent,
+        preferred_desktop_window_key: Option<&str>,
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         assert_eq!(intent, &ActivationIntent::OpenBrowser);
+        assert_eq!(preferred_desktop_window_key, None);
         Ok(ActivationOutcome::Opened)
     }
 }
@@ -44,6 +49,7 @@ fn server_executes_one_ready_activation() {
                 "activate-1",
                 ControlRequest::Activate {
                     intent: ActivationIntent::OpenBrowser,
+                    preferred_desktop_window_key: None,
                 },
             )
             .expect("activation should succeed"),

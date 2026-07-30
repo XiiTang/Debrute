@@ -55,6 +55,7 @@ fn client_polls_until_ready_then_sends_the_request_once() {
                 "activate-1",
                 ControlRequest::Activate {
                     intent: ActivationIntent::OpenBrowser,
+                    preferred_desktop_window_key: None,
                 },
             )
         );
@@ -78,6 +79,7 @@ fn client_polls_until_ready_then_sends_the_request_once() {
                 "activate-1",
                 ControlRequest::Activate {
                     intent: ActivationIntent::OpenBrowser,
+                    preferred_desktop_window_key: None,
                 },
             )
             .expect("activation should complete"),
@@ -223,6 +225,7 @@ fn ready_observed_by_handshake_retires_the_original_deadline() {
                 "activate-after-deadline",
                 ControlRequest::Activate {
                     intent: ActivationIntent::OpenBrowser,
+                    preferred_desktop_window_key: None,
                 },
             )
         );
@@ -246,6 +249,7 @@ fn ready_observed_by_handshake_retires_the_original_deadline() {
             "activate-after-deadline",
             ControlRequest::Activate {
                 intent: ActivationIntent::OpenBrowser,
+                preferred_desktop_window_key: None,
             },
         ),
         Ok(ControlResponse::Activation {
@@ -290,6 +294,7 @@ fn ready_observed_by_inspection_retires_the_original_deadline() {
                     request_id,
                     ControlRequest::Activate {
                         intent: ActivationIntent::OpenBrowser,
+                        preferred_desktop_window_key: None,
                     },
                 )
             );
@@ -314,6 +319,7 @@ fn ready_observed_by_inspection_retires_the_original_deadline() {
                 request_id,
                 ControlRequest::Activate {
                     intent: ActivationIntent::OpenBrowser,
+                    preferred_desktop_window_key: None,
                 },
             ),
             Ok(ControlResponse::Activation {
@@ -366,6 +372,7 @@ fn ready_deadline_expires_without_sending_the_gated_request() {
             "activate-never",
             ControlRequest::Activate {
                 intent: ActivationIntent::OpenBrowser,
+                preferred_desktop_window_key: None,
             },
         ),
         Err(NativeControlClientError::RuntimeReadyTimeout)

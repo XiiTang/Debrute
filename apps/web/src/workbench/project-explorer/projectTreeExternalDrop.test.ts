@@ -213,7 +213,6 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     executeNativeMenuCommand: async () => ({ ok: true }),
     takeDesktopLaunchTicket: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
-    onOpenProjectRequested: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
   };

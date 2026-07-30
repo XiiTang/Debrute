@@ -315,71 +315,120 @@ fn install_desktop_native(
     desktop: &DesktopHostRegistration,
     installer: &VerifiedDesktopInstaller,
 ) -> Result<(), NativeInstallError> {
-    let attach = with_inherited_file_path(installer.file(), |installer_path| {
-        command_output(
-            "/usr/bin/hdiutil",
-            &["attach", "-nobrowse", "-readonly", installer_path],
-        )
-    })?;
+    let (attach, restore_descriptor) =
+        with_inherited_file_path(installer.file(), |installer_path| {
+            command_output(
+                "/usr/bin/hdiutil",
+                &["attach", "-nobrowse", "-readonly", installer_path],
+            )
+        })?;
+    let attach = match attach {
+        Ok(attach) => attach,
+        Err(error) => {
+            return finish_macos_install_step(
+                "attach verified Desktop DMG",
+                Err(error),
+                [(
+                    "restore installer descriptor flags".to_owned(),
+                    restore_descriptor,
+                )],
+            );
+        }
+    };
     let mount = attach
         .lines()
         .filter_map(|line| line.split('\t').next_back().map(str::trim))
         .find(|field| field.starts_with("/Volumes/"))
-        .map(PathBuf::from)
-        .ok_or(NativeInstallError::InvalidDmgMount)?;
-    let result = (|| {
-        let source_application = mounted_desktop_application(&mount)?;
-        let info = source_application.join("Contents/Info.plist");
-        let bundle_id = command_output(
-            "/usr/bin/plutil",
-            &["-extract", "CFBundleIdentifier", "raw", path_text(&info)?],
-        )?;
-        if bundle_id.trim() != "io.github.xiitang.debrute" {
-            return Err(NativeInstallError::BundleIdentifier(
-                bundle_id.trim().to_owned(),
-            ));
-        }
-        command_success(
-            "/usr/bin/codesign",
-            &[
-                "--verify",
-                "--deep",
-                "--strict",
-                "--verbose=2",
-                path_text(&source_application)?,
-            ],
-        )?;
-        command_success(
-            "/usr/sbin/spctl",
-            &["-a", "-t", "exec", "-vv", path_text(&source_application)?],
-        )?;
-        command_success(
-            "/usr/bin/xcrun",
-            &["stapler", "validate", path_text(&source_application)?],
-        )?;
-        store.inspect_seed_identity_unlocked(
-            &source_application.join("Contents/Resources/product-seed"),
-        )?;
+        .map(PathBuf::from);
+    let Some(mount) = mount else {
+        return finish_macos_install_step(
+            "locate mounted Desktop DMG",
+            Err(NativeInstallError::InvalidDmgMount),
+            [(
+                "restore installer descriptor flags".to_owned(),
+                restore_descriptor,
+            )],
+        );
+    };
+    let result = install_mounted_macos_desktop(store, desktop, &mount);
+    let detach =
+        path_text(&mount).and_then(|mount| command_success("/usr/bin/hdiutil", &["detach", mount]));
+    finish_macos_install_step(
+        "install mounted Desktop application",
+        result,
+        [
+            (
+                "restore installer descriptor flags".to_owned(),
+                restore_descriptor,
+            ),
+            (format!("detach Desktop DMG at {}", mount.display()), detach),
+        ],
+    )
+}
 
-        let destination = desktop
-            .executable
-            .ancestors()
-            .find(|ancestor| {
-                ancestor
-                    .extension()
-                    .is_some_and(|extension| extension == "app")
-            })
-            .ok_or(NativeInstallError::InvalidInstalledApplication)?;
-        let parent = destination
-            .parent()
-            .ok_or(NativeInstallError::InvalidInstalledApplication)?;
-        let staged = parent.join(format!(".Debrute-update-{}.app", Uuid::new_v4()));
-        let retired = parent.join(format!(".Debrute-retired-{}.app", Uuid::new_v4()));
-        command_success(
-            "/usr/bin/ditto",
-            &[path_text(&source_application)?, path_text(&staged)?],
-        )?;
-        store.inspect_seed_identity_unlocked(&staged.join("Contents/Resources/product-seed"))?;
+#[cfg(target_os = "macos")]
+fn install_mounted_macos_desktop(
+    store: &ProductStore,
+    desktop: &DesktopHostRegistration,
+    mount: &Path,
+) -> Result<(), NativeInstallError> {
+    let source_application = mounted_desktop_application(mount)?;
+    let info = source_application.join("Contents/Info.plist");
+    let bundle_id = command_output(
+        "/usr/bin/plutil",
+        &["-extract", "CFBundleIdentifier", "raw", path_text(&info)?],
+    )?;
+    if bundle_id.trim() != "io.github.xiitang.debrute" {
+        return Err(NativeInstallError::BundleIdentifier(
+            bundle_id.trim().to_owned(),
+        ));
+    }
+    command_success(
+        "/usr/bin/codesign",
+        &[
+            "--verify",
+            "--deep",
+            "--strict",
+            "--verbose=2",
+            path_text(&source_application)?,
+        ],
+    )?;
+    command_success(
+        "/usr/sbin/spctl",
+        &["-a", "-t", "exec", "-vv", path_text(&source_application)?],
+    )?;
+    command_success(
+        "/usr/bin/xcrun",
+        &["stapler", "validate", path_text(&source_application)?],
+    )?;
+    store.inspect_seed_identity_unlocked(
+        &source_application.join("Contents/Resources/product-seed"),
+    )?;
+
+    let destination = desktop
+        .executable
+        .ancestors()
+        .find(|ancestor| {
+            ancestor
+                .extension()
+                .is_some_and(|extension| extension == "app")
+        })
+        .ok_or(NativeInstallError::InvalidInstalledApplication)?;
+    let parent = destination
+        .parent()
+        .ok_or(NativeInstallError::InvalidInstalledApplication)?;
+    let staged = parent.join(format!(".Debrute-update-{}.app", Uuid::new_v4()));
+    let retired = parent.join(format!(".Debrute-retired-{}.app", Uuid::new_v4()));
+    let staging = command_success(
+        "/usr/bin/ditto",
+        &[path_text(&source_application)?, path_text(&staged)?],
+    )
+    .and_then(|()| {
+        store
+            .inspect_seed_identity_unlocked(&staged.join("Contents/Resources/product-seed"))
+            .map_err(NativeInstallError::from)
+    })
+    .and_then(|_| {
         command_success(
             "/usr/bin/codesign",
             &[
@@ -389,18 +438,106 @@ fn install_desktop_native(
                 "--verbose=2",
                 path_text(&staged)?,
             ],
-        )?;
-        fs::rename(destination, &retired)?;
-        if let Err(error) = fs::rename(&staged, destination) {
-            let _ = fs::rename(&retired, destination);
-            let _ = fs::remove_dir_all(&staged);
-            return Err(error.into());
+        )
+    });
+    if let Err(error) = staging {
+        return finish_macos_install_step(
+            format!("stage Desktop application at {}", staged.display()),
+            Err(error),
+            [(
+                format!("remove staged application at {}", staged.display()),
+                remove_macos_application(&staged).map_err(NativeInstallError::from),
+            )],
+        );
+    }
+    replace_macos_application(
+        destination,
+        &staged,
+        &retired,
+        |from, to| fs::rename(from, to),
+        remove_macos_application,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn replace_macos_application(
+    destination: &Path,
+    staged: &Path,
+    retired: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
+    mut remove: impl FnMut(&Path) -> io::Result<()>,
+) -> Result<(), NativeInstallError> {
+    if let Err(error) = rename(destination, retired) {
+        return finish_macos_install_step(
+            format!(
+                "retire installed application from {} to {}",
+                destination.display(),
+                retired.display()
+            ),
+            Err(error.into()),
+            [(
+                format!("remove staged application at {}", staged.display()),
+                remove(staged).map_err(NativeInstallError::from),
+            )],
+        );
+    }
+
+    if let Err(install_error) = rename(staged, destination) {
+        let restore = rename(retired, destination);
+        if let Err(restore_error) = restore {
+            return finish_macos_install_step(
+                format!(
+                    "install staged application from {} to {}",
+                    staged.display(),
+                    destination.display()
+                ),
+                Err(install_error.into()),
+                [(
+                    format!(
+                        "restore retired application from {} to {}; recovery paths: staged={}, retired={}",
+                        retired.display(),
+                        destination.display(),
+                        staged.display(),
+                        retired.display()
+                    ),
+                    Err(restore_error.into()),
+                )],
+            );
         }
-        fs::remove_dir_all(retired)?;
-        Ok(())
-    })();
-    let detach = command_success("/usr/bin/hdiutil", &["detach", path_text(&mount)?]);
-    result.and(detach)
+        return finish_macos_install_step(
+            format!(
+                "install staged application from {} to {}",
+                staged.display(),
+                destination.display()
+            ),
+            Err(install_error.into()),
+            [(
+                format!("remove staged application at {}", staged.display()),
+                remove(staged).map_err(NativeInstallError::from),
+            )],
+        );
+    }
+
+    finish_macos_install_step(
+        format!(
+            "install staged application from {} to {}",
+            staged.display(),
+            destination.display()
+        ),
+        Ok(()),
+        [(
+            format!("remove retired application at {}", retired.display()),
+            remove(retired).map_err(NativeInstallError::from),
+        )],
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn remove_macos_application(path: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -415,10 +552,19 @@ fn mounted_desktop_application(mount: &Path) -> Result<PathBuf, NativeInstallErr
 }
 
 #[cfg(target_os = "macos")]
+type InheritedFilePathResult<T> = Result<
+    (
+        Result<T, NativeInstallError>,
+        Result<(), NativeInstallError>,
+    ),
+    NativeInstallError,
+>;
+
+#[cfg(target_os = "macos")]
 fn with_inherited_file_path<T>(
     file: &fs::File,
     use_path: impl FnOnce(&str) -> Result<T, NativeInstallError>,
-) -> Result<T, NativeInstallError> {
+) -> InheritedFilePathResult<T> {
     let original = FdFlag::from_bits_retain(fcntl(file, FcntlArg::F_GETFD)?);
     let mut inherited = original;
     inherited.remove(FdFlag::FD_CLOEXEC);
@@ -428,9 +574,37 @@ fn with_inherited_file_path<T>(
     let restore = fcntl(file, FcntlArg::F_SETFD(original))
         .map(|_| ())
         .map_err(|error| NativeInstallError::Io(error.into()));
-    match (result, restore) {
-        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-        (Ok(value), Ok(())) => Ok(value),
+    Ok((result, restore))
+}
+
+#[cfg(target_os = "macos")]
+fn finish_macos_install_step<T>(
+    operation: impl Into<String>,
+    result: Result<T, NativeInstallError>,
+    followups: impl IntoIterator<Item = (String, Result<(), NativeInstallError>)>,
+) -> Result<T, NativeInstallError> {
+    let mut followup_failures = followups
+        .into_iter()
+        .filter_map(|(operation, result)| {
+            result.err().map(|error| NativeInstallFailure {
+                operation,
+                error: Box::new(error),
+            })
+        })
+        .collect::<Vec<_>>();
+    match result {
+        Ok(value) if followup_failures.is_empty() => Ok(value),
+        Ok(_) => Err(NativeInstallError::Failures(followup_failures)),
+        Err(error) => {
+            followup_failures.insert(
+                0,
+                NativeInstallFailure {
+                    operation: operation.into(),
+                    error: Box::new(error),
+                },
+            );
+            Err(NativeInstallError::Failures(followup_failures))
+        }
     }
 }
 
@@ -493,11 +667,26 @@ enum NativeInstallError {
     #[cfg(target_os = "macos")]
     NonUtf8Output,
     NonUtf8Path,
+    #[cfg(target_os = "macos")]
+    Failures(Vec<NativeInstallFailure>),
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct NativeInstallFailure {
+    operation: String,
+    error: Box<NativeInstallError>,
 }
 
 impl fmt::Display for NativeInstallError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("native Desktop install failed: ")?;
+        self.fmt_detail(formatter)
+    }
+}
+
+impl NativeInstallError {
+    fn fmt_detail(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Product(error) => write!(formatter, "{error}"),
@@ -523,6 +712,17 @@ impl fmt::Display for NativeInstallError {
             #[cfg(target_os = "macos")]
             Self::NonUtf8Output => formatter.write_str("native command output is not UTF-8"),
             Self::NonUtf8Path => formatter.write_str("native install path is not UTF-8"),
+            #[cfg(target_os = "macos")]
+            Self::Failures(failures) => {
+                for (index, failure) in failures.iter().enumerate() {
+                    if index > 0 {
+                        formatter.write_str("; ")?;
+                    }
+                    write!(formatter, "{}: ", failure.operation)?;
+                    failure.error.fmt_detail(formatter)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -532,6 +732,10 @@ impl Error for NativeInstallError {
         match self {
             Self::Io(error) => Some(error),
             Self::Product(error) => Some(error),
+            #[cfg(target_os = "macos")]
+            Self::Failures(failures) => failures
+                .first()
+                .map(|failure| failure.error.as_ref() as &(dyn Error + 'static)),
             _ => None,
         }
     }
@@ -559,6 +763,7 @@ impl From<super::ProductStoreError> for NativeInstallError {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -610,10 +815,172 @@ mod tests {
         fs::write(&root, b"verified-bytes").unwrap();
         let file = fs::File::open(&root).unwrap();
 
-        let output =
+        let (output, restore) =
             with_inherited_file_path(&file, |path| command_output("/bin/cat", &[path])).unwrap();
 
-        assert_eq!(output, "verified-bytes");
+        assert_eq!(output.unwrap(), "verified-bytes");
+        restore.unwrap();
         let _ = fs::remove_file(root);
+    }
+
+    #[test]
+    fn install_failure_reports_every_cleanup_failure() {
+        let error = finish_macos_install_step::<()>(
+            "install application",
+            Err(io_failure("install failed")),
+            [
+                (
+                    "restore descriptor".to_owned(),
+                    Err(io_failure("restore failed")),
+                ),
+                ("detach DMG".to_owned(), Err(io_failure("detach failed"))),
+            ],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("install application: install failed"));
+        assert!(error.contains("restore descriptor: restore failed"));
+        assert!(error.contains("detach DMG: detach failed"));
+    }
+
+    #[test]
+    fn failed_application_swap_restores_old_application_before_cleaning_staged_copy() {
+        let rename_calls = Cell::new(0);
+        let remove_calls = Cell::new(0);
+        let error = replace_macos_application(
+            Path::new("/Applications/Debrute.app"),
+            Path::new("/Applications/.Debrute-update.app"),
+            Path::new("/Applications/.Debrute-retired.app"),
+            |_, _| {
+                let call = rename_calls.get();
+                rename_calls.set(call + 1);
+                match call {
+                    0 | 2 => Ok(()),
+                    1 => Err(io::Error::other("install failed")),
+                    _ => unreachable!(),
+                }
+            },
+            |_| {
+                remove_calls.set(remove_calls.get() + 1);
+                Err(io::Error::other("staged cleanup failed"))
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(rename_calls.get(), 3);
+        assert_eq!(remove_calls.get(), 1);
+        assert!(error.contains("install failed"));
+        assert!(error.contains("remove staged application"));
+        assert!(error.contains("staged cleanup failed"));
+    }
+
+    #[test]
+    fn failed_restore_retains_both_recovery_applications() {
+        let rename_calls = Cell::new(0);
+        let remove_called = Cell::new(false);
+        let error = replace_macos_application(
+            Path::new("/Applications/Debrute.app"),
+            Path::new("/Applications/.Debrute-update.app"),
+            Path::new("/Applications/.Debrute-retired.app"),
+            |_, _| {
+                let call = rename_calls.get();
+                rename_calls.set(call + 1);
+                match call {
+                    0 => Ok(()),
+                    1 => Err(io::Error::other("install failed")),
+                    2 => Err(io::Error::other("restore failed")),
+                    _ => unreachable!(),
+                }
+            },
+            |_| {
+                remove_called.set(true);
+                Ok(())
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(rename_calls.get(), 3);
+        assert!(!remove_called.get());
+        assert!(error.contains("install failed"));
+        assert!(error.contains("restore failed"));
+        assert!(error.contains("recovery paths"));
+        assert!(error.contains(".Debrute-update.app"));
+        assert!(error.contains(".Debrute-retired.app"));
+    }
+
+    #[test]
+    fn failed_retirement_reports_staged_cleanup_failure() {
+        let remove_calls = Cell::new(0);
+        let error = replace_macos_application(
+            Path::new("/Applications/Debrute.app"),
+            Path::new("/Applications/.Debrute-update.app"),
+            Path::new("/Applications/.Debrute-retired.app"),
+            |_, _| Err(io::Error::other("retire failed")),
+            |_| {
+                remove_calls.set(remove_calls.get() + 1);
+                Err(io::Error::other("staged cleanup failed"))
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(remove_calls.get(), 1);
+        assert!(error.contains("retire failed"));
+        assert!(error.contains("staged cleanup failed"));
+    }
+
+    #[test]
+    fn successful_application_swap_reports_retired_cleanup_failure() {
+        let rename_calls = Cell::new(0);
+        let error = replace_macos_application(
+            Path::new("/Applications/Debrute.app"),
+            Path::new("/Applications/.Debrute-update.app"),
+            Path::new("/Applications/.Debrute-retired.app"),
+            |_, _| {
+                rename_calls.set(rename_calls.get() + 1);
+                Ok(())
+            },
+            |path| {
+                assert_eq!(path, Path::new("/Applications/.Debrute-retired.app"));
+                Err(io::Error::other("retired cleanup failed"))
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(rename_calls.get(), 2);
+        assert!(error.contains("remove retired application"));
+        assert!(error.contains("retired cleanup failed"));
+    }
+
+    #[test]
+    fn successful_application_swap_removes_only_the_retired_application() {
+        let rename_calls = Cell::new(0);
+        let remove_calls = Cell::new(0);
+        replace_macos_application(
+            Path::new("/Applications/Debrute.app"),
+            Path::new("/Applications/.Debrute-update.app"),
+            Path::new("/Applications/.Debrute-retired.app"),
+            |_, _| {
+                rename_calls.set(rename_calls.get() + 1);
+                Ok(())
+            },
+            |path| {
+                remove_calls.set(remove_calls.get() + 1);
+                assert_eq!(path, Path::new("/Applications/.Debrute-retired.app"));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(rename_calls.get(), 2);
+        assert_eq!(remove_calls.get(), 1);
+    }
+
+    fn io_failure(message: &str) -> NativeInstallError {
+        NativeInstallError::Io(io::Error::other(message.to_owned()))
     }
 }

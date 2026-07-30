@@ -20,6 +20,16 @@ Debrute does not add a helper layer required only by a different installation
 layout. Update authenticity remains governed by
 [ADR 0008](./0008-signed-manifest-authenticates-product-updates.md).
 
+The macOS adapter performs one in-process application swap after validating the
+mounted bundle and a copied staged bundle. It retires the installed application,
+moves the staged application into place, and removes the retired copy. If the
+second move fails, it restores the retired copy before removing the staged copy;
+a failed restore retains and reports both recovery paths. One labeled error
+combiner preserves the primary failure together with staged or retired cleanup,
+installer-descriptor restoration, and DMG-detach failures. Once the mount point
+is known, detach is attempted exactly once. There is no retry, migration helper,
+or alternate installer path.
+
 The Windows filesystem boundary is the in-process
 `packages/windows-product-fs` safety capsule. It is the sole workspace crate
 permitted to contain reviewed `unsafe` Windows API calls, limited to junction

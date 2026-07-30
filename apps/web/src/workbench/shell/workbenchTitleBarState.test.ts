@@ -9,7 +9,7 @@ describe('Workbench title-bar state', () => {
     const state = buildWorkbenchTitleBarState({
       platform: 'darwin',
       projectTitle: 'Storyboard',
-      recentProjectRoots: ['/projects/alpha'],
+      recentProjects: [{ projectId: 'alpha', projectRoot: '/projects/alpha' }],
       host: 'desktop',
       locale: 'en'
     });
@@ -27,7 +27,10 @@ describe('Workbench title-bar state', () => {
     const state = buildWorkbenchTitleBarState({
       platform: 'win32',
       projectTitle: 'Cutout Project',
-      recentProjectRoots: ['/projects/alpha', '/projects/beta'],
+      recentProjects: [
+        { projectId: 'alpha', projectRoot: '/projects/alpha' },
+        { projectId: 'beta', projectRoot: '/projects/beta' }
+      ],
       host: 'desktop',
       locale: 'en'
     });
@@ -43,7 +46,7 @@ describe('Workbench title-bar state', () => {
     const state = buildWorkbenchTitleBarState({
       platform: 'darwin',
       projectTitle: undefined,
-      recentProjectRoots: [],
+      recentProjects: [],
       host: 'web',
       locale: 'en'
     });
@@ -63,7 +66,7 @@ describe('Workbench title-bar state', () => {
     const state = buildWorkbenchTitleBarState({
       platform: 'darwin',
       projectTitle: 'Storyboard',
-      recentProjectRoots: ['/projects/alpha'],
+      recentProjects: [{ projectId: 'alpha', projectRoot: '/projects/alpha' }],
       host: 'web',
       locale: 'en'
     });
@@ -81,7 +84,7 @@ describe('Workbench title-bar state', () => {
       platform: 'darwin',
       host: 'web',
       locale: 'zh-CN',
-      recentProjectRoots: []
+      recentProjects: []
     });
 
     expect(state.menus.map((menu) => menu.label)).toEqual(['文件', '编辑']);
