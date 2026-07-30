@@ -10,8 +10,8 @@ use std::{
 };
 
 use debrute_runtime::control::{
-    ActivationIntent, ActivationOutcome, ControlErrorCode, RuntimeActivationService,
-    RuntimeControlState, RuntimeStatus,
+    ActivationIntent, ActivationOutcome, ControlErrorCode, ProductUpdateTransitionFailure,
+    RuntimeActivationService, RuntimeControlState, RuntimeStatus,
 };
 use uuid::Uuid;
 
@@ -81,6 +81,7 @@ fn update_crosses_one_commit_boundary_and_requests_replacement() {
     let (committed, commit_observed) = mpsc::sync_channel(1);
     assert!(state.request_product_update(
         &transaction_id,
+        Box::new(|| {}),
         Box::new(move || {
             committed.send(()).expect("commit should be observed");
             Ok(())
@@ -116,6 +117,7 @@ fn update_commit_keeps_the_ready_status_readable() {
     let (release, commit_release) = mpsc::sync_channel(1);
     assert!(state.request_product_update(
         &transaction_id,
+        Box::new(|| {}),
         Box::new(move || {
             commit_started
                 .send(())
@@ -147,14 +149,15 @@ fn update_commit_keeps_the_ready_status_readable() {
 }
 
 #[test]
-fn failed_update_commit_returns_to_ready() {
+fn failed_reversible_update_preparation_returns_to_ready() {
     let state = Arc::new(RuntimeControlState::new("runtime-instance"));
     assert!(state.finish_startup());
     let transaction_id = Uuid::new_v4().to_string();
     let (cancelled, cancellation) = mpsc::sync_channel(1);
     assert!(state.request_product_update(
         &transaction_id,
-        Box::new(|| Err("commit failed".to_owned())),
+        Box::new(|| {}),
+        Box::new(|| Err(ProductUpdateTransitionFailure::preparing("commit failed"))),
         Box::new(move |reason| {
             cancelled
                 .send(reason.to_owned())
@@ -169,6 +172,62 @@ fn failed_update_commit_returns_to_ready() {
         "commit failed"
     );
     assert_eq!(state.status(), RuntimeStatus::Ready);
+}
+
+#[test]
+fn forward_only_update_failure_keeps_replacement_ownership() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    assert!(state.finish_startup());
+    let transaction_id = Uuid::new_v4().to_string();
+    let (cancelled, cancellation) = mpsc::sync_channel(1);
+    assert!(state.request_product_update(
+        &transaction_id,
+        Box::new(|| {}),
+        Box::new(|| Err(ProductUpdateTransitionFailure::committing("target failed"))),
+        Box::new(move |reason| {
+            cancelled
+                .send(reason.to_owned())
+                .expect("failure should be observed");
+        }),
+    ));
+
+    assert_eq!(
+        cancellation.recv_timeout(Duration::from_secs(1)).unwrap(),
+        "target failed"
+    );
+    assert_eq!(state.status(), RuntimeStatus::Replacing);
+    assert_eq!(
+        state.request_product_quit(),
+        Err(ControlErrorCode::UpdateCommitInProgress)
+    );
+}
+
+#[test]
+fn accepted_update_closes_new_work_and_drains_existing_work_before_preparation() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    assert!(state.finish_startup());
+    let permit = state
+        .begin_product_work()
+        .expect("Ready Runtime should admit work");
+    let (started, observed) = mpsc::sync_channel(1);
+    assert!(state.request_product_update(
+        &Uuid::new_v4().to_string(),
+        Box::new(|| {}),
+        Box::new(move || {
+            started.send(()).unwrap();
+            Ok(())
+        }),
+        Box::new(|reason| panic!("update should not be cancelled: {reason}")),
+    ));
+
+    assert!(state.begin_product_work().is_none());
+    assert_eq!(
+        state.request_product_quit(),
+        Err(ControlErrorCode::UpdateCommitInProgress)
+    );
+    assert!(observed.recv_timeout(Duration::from_millis(100)).is_err());
+    drop(permit);
+    observed.recv_timeout(Duration::from_secs(1)).unwrap();
 }
 
 #[test]

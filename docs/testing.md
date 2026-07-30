@@ -133,9 +133,12 @@ registered syntax is the parser's input.
 
 DOM tests exercise rendered state and the action a user can perform. Settings
 coverage verifies the navigation groups and default page, and Product update
-behavior by invoking the visible action and observing its result or exact
-failure. Absence assertions are used when absence is part of the rendered
-contract, such as hiding ready content while a resource is loading.
+behavior through both direct Install buttons: General Settings and the title
+bar. Workbench coverage also requires the global blocking surface for
+`preparing` and `committing`; the Desktop probe tests the closed native failure
+record used when Runtime never becomes Ready. Absence assertions are used when
+absence is part of the rendered contract, such as hiding ready content while a
+resource is loading.
 
 ## Model Generation Acceptance
 

@@ -29,7 +29,8 @@ pub use protocol::{
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use server::{
-    ControlServerError, ControlTransport, RuntimeActionError, RuntimeActivationService,
-    RuntimeControlState, WorkbenchInstallError, serve_control_connection,
+    ControlServerError, ControlTransport, ProductUpdateTransitionFailure, RuntimeActionError,
+    RuntimeActivationService, RuntimeControlState, RuntimeWorkPermit, WorkbenchInstallError,
+    serve_control_connection,
 };
 pub use writer::OutboundError;

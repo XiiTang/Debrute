@@ -767,7 +767,10 @@ fn activate_session_epoch(state: &mut SchedulerState, project_root: &Path, sessi
         if render.project_root != project_root || render.session_epoch == session_epoch {
             continue;
         }
-        render.epoch = render.epoch.saturating_add(1);
+        render.epoch = render
+            .epoch
+            .checked_add(1)
+            .expect("Canvas feedback render epoch exhausted");
         render.queued = None;
         render.queued_for_start = false;
         if let Some(active) = &render.active {
@@ -888,7 +891,10 @@ fn enqueue_descriptor(
         });
     render.descriptor = descriptor.clone();
     render.project_revision = project_revision;
-    render.epoch = render.epoch.saturating_add(1);
+    render.epoch = render
+        .epoch
+        .checked_add(1)
+        .expect("Canvas feedback render epoch exhausted");
     render.queued = Some(QueuedEpoch {
         epoch: render.epoch,
         job_id: Uuid::new_v4(),
@@ -939,7 +945,10 @@ fn start_ready(
             cancellation: cancellation.clone(),
         };
         render.active = Some(active);
-        state.active_count += 1;
+        state.active_count = state
+            .active_count
+            .checked_add(1)
+            .expect("active Canvas feedback render count overflow");
         let root = render.project_root.clone();
         let artifact = queued.artifact;
         let key_for_worker = key.clone();
@@ -989,7 +998,10 @@ fn complete_epoch(
         render.active = Some(active);
         return;
     }
-    state.active_count = state.active_count.saturating_sub(1);
+    state.active_count = state
+        .active_count
+        .checked_sub(1)
+        .expect("active Canvas feedback render count underflow");
     let latest = render.epoch == epoch && !active.cancellation_is_cancelled();
     if latest {
         match result {
@@ -1040,7 +1052,10 @@ fn remove_obsolete_states(
         let Some(render) = state.states.get_mut(&key) else {
             continue;
         };
-        render.epoch = render.epoch.saturating_add(1);
+        render.epoch = render
+            .epoch
+            .checked_add(1)
+            .expect("Canvas feedback render epoch exhausted");
         render.queued = None;
         render.queued_for_start = false;
         if let Some(active) = &render.active {
@@ -1066,7 +1081,10 @@ fn cancel_project_state(state: &mut SchedulerState, project_root: &Path, session
         if render.project_root != project_root || render.session_epoch != session_epoch {
             continue;
         }
-        render.epoch = render.epoch.saturating_add(1);
+        render.epoch = render
+            .epoch
+            .checked_add(1)
+            .expect("Canvas feedback render epoch exhausted");
         render.queued = None;
         render.queued_for_start = false;
         if let Some(active) = &render.active {
@@ -1560,6 +1578,54 @@ mod tests {
                 .check()
                 .is_err()
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "Canvas feedback render epoch exhausted")]
+    fn render_epoch_exhaustion_fails_fast() {
+        let root = PathBuf::from("/tmp/debrute-feedback-epoch-exhaustion");
+        let session_epoch = Uuid::new_v4();
+        let entry = CanvasFeedbackEntry {
+            project_relative_path: "images/cover.png".to_owned(),
+            marks: Vec::new(),
+            next_moment_label: 1,
+            next_spatial_label: 1,
+            items: Vec::new(),
+            updated_at: "2026-07-15T01:02:03.004Z".to_owned(),
+        };
+        let descriptor = ArtifactDescriptor {
+            artifact_project_path: canvas_feedback_rendered_project_path("images/cover.png"),
+            diagnostic_project_relative_path: "images/cover.png".to_owned(),
+            artifact: CanvasFeedbackArtifact::Image {
+                project_relative_path: "images/cover.png".to_owned(),
+                entry: Arc::new(entry),
+            },
+        };
+        let key = render_key(&root, session_epoch, &descriptor.artifact_project_path);
+        let mut state = SchedulerState {
+            states: HashMap::new(),
+            latest_document_revisions: HashMap::new(),
+            latest_source_revisions: HashMap::new(),
+            ready: VecDeque::new(),
+            active_count: 0,
+            max_concurrent: 1,
+            shutting_down: false,
+        };
+        state.states.insert(
+            key,
+            RenderState {
+                project_root: root.clone(),
+                session_epoch,
+                project_revision: 1,
+                descriptor: descriptor.clone(),
+                epoch: u64::MAX,
+                queued: None,
+                active: None,
+                queued_for_start: false,
+            },
+        );
+
+        enqueue_descriptor(&mut state, &root, session_epoch, 2, descriptor);
     }
 
     #[test]

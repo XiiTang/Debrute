@@ -15,7 +15,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use super::ProductBootstrap;
 use super::commit::{
     CommitPhase, InstalledDesktopIdentity, ProductCommitCoordinator, ProductCommitError,
-    ProductIdentity, ResumeIntent, ResumeTarget, RunningProductIdentity, UpdatePlatformAdapter,
+    ProductIdentity, ProductUpdateFailureStage, ResumeIntent, ResumeTarget, RunningProductIdentity,
+    UpdatePlatformAdapter,
 };
 use super::manifest::{
     ProductEntrypoints, ProductManifest, ProductManifestFile, ProductPlatform, ReleaseArchitecture,
@@ -23,6 +24,12 @@ use super::manifest::{
     verify_signed_release_manifest,
 };
 use super::store::{CommitPlatform, ProductStore};
+
+fn desktop_resume() -> ResumeIntent {
+    ResumeIntent::Desktop {
+        target: ResumeTarget::Root,
+    }
+}
 use super::store::{VerifiedDesktopInstaller, VerifiedRuntimeEntrypoint};
 use ed25519_dalek::{Signer as _, SigningKey};
 use serde_json::json;
@@ -132,7 +139,7 @@ fn current_never_advances_until_matching_desktop_is_installed() {
     let platform = RecordingPlatform::new(&fixture.root, "0.0.9");
     let coordinator = fixture.coordinator(platform.clone());
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
 
     assert!(matches!(
@@ -158,7 +165,7 @@ fn recovery_revalidates_the_persisted_installer_before_desktop_install() {
     let platform = RecordingPlatform::new(&fixture.root, "0.0.4");
     let coordinator = fixture.coordinator(platform.clone());
     coordinator
-        .begin(&target, staged_asset.clone(), ResumeIntent::Cli)
+        .begin(&target, staged_asset.clone(), desktop_resume())
         .unwrap();
     fs::write(staged_asset.path(), "tampered installer").unwrap();
 
@@ -234,7 +241,7 @@ fn unrelated_or_older_callers_cannot_continue_or_downgrade_a_pending_commit() {
     let platform = RecordingPlatform::new(&fixture.root, "0.0.4");
     let coordinator = fixture.coordinator(platform.clone());
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
 
     assert!(matches!(
@@ -244,7 +251,7 @@ fn unrelated_or_older_callers_cannot_continue_or_downgrade_a_pending_commit() {
         Err(ProductCommitError::RecoveryIdentityDenied { .. })
     ));
     assert!(matches!(
-        coordinator.begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli,),
+        coordinator.begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume()),
         Err(ProductCommitError::PendingCommitExists)
     ));
     assert_eq!(
@@ -254,7 +261,7 @@ fn unrelated_or_older_callers_cannot_continue_or_downgrade_a_pending_commit() {
 }
 
 #[test]
-fn target_runtime_ready_removes_pending_and_previous_before_resuming_fixed_surface() {
+fn target_runtime_ready_resumes_then_removes_previous_and_pending() {
     let intents = [
         ResumeIntent::Desktop {
             target: ResumeTarget::Root,
@@ -262,7 +269,6 @@ fn target_runtime_ready_removes_pending_and_previous_before_resuming_fixed_surfa
         ResumeIntent::Browser {
             target: ResumeTarget::Root,
         },
-        ResumeIntent::Cli,
     ];
     for intent in intents {
         let fixture = Fixture::new();
@@ -293,31 +299,85 @@ fn target_runtime_ready_removes_pending_and_previous_before_resuming_fixed_surfa
 }
 
 #[test]
-fn ready_resume_failure_keeps_one_idempotent_pending_dispatch() {
+fn ready_resume_failure_does_not_revoke_ready_or_block_cleanup() {
     let fixture = Fixture::new();
     fixture.bootstrap_product("0.0.3");
     let target = fixture.materialize_product("0.0.4");
     let platform = RecordingPlatform::new_with_resume_failures(&fixture.root, "0.0.4", 1);
     let coordinator = fixture.coordinator(platform.clone());
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
     coordinator.continue_commit().unwrap();
 
     let ready = fixture.coordinator(platform.with_runtime("0.0.4"));
-    assert!(ready.complete_ready().is_err());
+    ready.complete_ready().unwrap();
+    assert!(fixture.store.pending().unwrap().is_none());
+    assert!(!fixture.store.version_path("0.0.3").exists());
+    let attempts = platform.resume_attempt_ids();
+    assert_eq!(attempts.len(), 1);
+}
+
+#[test]
+fn post_ready_cleanup_failure_keeps_a_retryable_runtime_ready_transaction() {
+    let fixture = Fixture::new();
+    fixture.bootstrap_product("0.0.3");
+    let target = fixture.materialize_product("0.0.4");
+    let platform = RecordingPlatform::new(&fixture.root, "0.0.4");
+    let coordinator = fixture.coordinator(platform.clone());
+    coordinator
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
+        .unwrap();
+    coordinator.continue_commit().unwrap();
+    let old_version = fixture.store.version_path("0.0.3");
+    fs::remove_dir_all(&old_version).unwrap();
+    fs::write(&old_version, "block cleanup").unwrap();
+
+    let ready = fixture.coordinator(platform.with_runtime("0.0.4"));
+    ready.complete_ready().unwrap();
     assert_eq!(
         fixture.store.pending().unwrap().unwrap().phase,
         CommitPhase::RuntimeReady
     );
-    assert!(!fixture.store.version_path("0.0.3").exists());
+    fs::remove_file(old_version).unwrap();
 
     ready.complete_ready().unwrap();
     assert!(fixture.store.pending().unwrap().is_none());
-    assert_eq!(platform.resumed_intents(), vec![ResumeIntent::Cli]);
-    let attempts = platform.resume_attempt_ids();
-    assert_eq!(attempts.len(), 2);
-    assert_eq!(attempts[0], attempts[1]);
+    assert_eq!(platform.resumed_intents(), vec![desktop_resume()]);
+}
+
+#[test]
+fn forward_failure_record_is_bound_to_the_exact_pending_transaction() {
+    let fixture = Fixture::new();
+    fixture.bootstrap_product("0.0.3");
+    let target = fixture.materialize_product("0.0.4");
+    let platform = RecordingPlatform::new(&fixture.root, "0.0.4");
+    let coordinator = fixture.coordinator(platform);
+    let transaction_id = coordinator
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
+        .unwrap();
+
+    coordinator
+        .record_failure(
+            &transaction_id,
+            ProductUpdateFailureStage::Committing,
+            "Target Runtime failed before Ready.",
+        )
+        .unwrap();
+    let failure = fixture
+        .store
+        .product_update_failure(&transaction_id)
+        .unwrap();
+    assert_eq!(failure.transaction_id, transaction_id);
+    assert_eq!(failure.target_version, "0.0.4");
+    assert_eq!(failure.stage, ProductUpdateFailureStage::Committing);
+    assert_eq!(failure.message, "Target Runtime failed before Ready.");
+    assert!(
+        fixture
+            .store
+            .product_update_failure(&Uuid::new_v4().to_string())
+            .is_err()
+    );
 }
 
 #[test]
@@ -388,7 +448,7 @@ fn desktop_seed_preflight_rejects_an_active_product_commit() {
     let target = fixture.materialize_product("0.0.4");
     fixture
         .coordinator(RecordingPlatform::new(&fixture.root, "0.0.3"))
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
     let pending = fixture.store.pending().unwrap().unwrap();
     let current = fixture.store.current_version().unwrap();
@@ -434,7 +494,7 @@ fn installed_target_is_adopted_without_reinstall_by_either_recovery_owner() {
         };
         let coordinator = fixture.coordinator(running);
         coordinator
-            .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+            .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
             .unwrap();
 
         coordinator.continue_commit().unwrap();
@@ -455,7 +515,7 @@ fn same_version_with_wrong_full_identity_cannot_advance_or_complete_commit() {
     let platform = RecordingPlatform::new(&fixture.root, "0.0.4");
     let coordinator = fixture.coordinator(platform.clone());
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
 
     let wrong_seed = ProductIdentity::new(
@@ -512,7 +572,7 @@ fn installed_desktop_must_match_the_complete_product_identity() {
     platform.set_installed(InstalledDesktopIdentity::new(wrong));
     let coordinator = fixture.coordinator(platform.clone());
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
 
     assert!(matches!(
@@ -533,7 +593,7 @@ fn recovery_reverifies_signed_evidence_instead_of_trusting_pending_fields() {
     let staged = fixture.desktop_asset("0.0.4");
     let coordinator = fixture.coordinator(RecordingPlatform::new(&fixture.root, "0.0.4"));
     coordinator
-        .begin(&target, staged.clone(), ResumeIntent::Cli)
+        .begin(&target, staged.clone(), desktop_resume())
         .unwrap();
 
     let pending_path = fixture.store.root().join("pending-commit/0-staged.json");
@@ -569,7 +629,7 @@ fn pending_state_rejects_gaps_oversize_and_invalid_resume_target() {
     ));
 
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
     let directory = fixture.store.root().join("pending-commit");
     fs::rename(
@@ -636,24 +696,17 @@ fn resume_receipt_survives_both_sides_restarting_after_dispatch() {
     let platform = RecordingPlatform::new(&fixture.root, "0.0.4");
     let coordinator = fixture.coordinator(platform.clone());
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
     coordinator.continue_commit().unwrap();
     platform.fail_next_resume_after_persist();
     let ready_platform = platform.with_runtime("0.0.4");
     let ready = fixture.coordinator(ready_platform.clone());
-    assert!(ready.complete_ready().is_err());
-    assert_eq!(platform.resumed_intents(), vec![ResumeIntent::Cli]);
-
-    let restarted_platform = ready_platform.restarted();
-    let restarted = fixture.coordinator(restarted_platform.clone());
-    restarted.complete_ready().unwrap();
-
+    ready.complete_ready().unwrap();
+    assert_eq!(platform.resumed_intents(), vec![desktop_resume()]);
     assert!(fixture.store.pending().unwrap().is_none());
-    assert_eq!(
-        restarted_platform.resumed_intents(),
-        vec![ResumeIntent::Cli]
-    );
+    let restarted_platform = ready_platform.restarted();
+    assert_eq!(restarted_platform.resumed_intents(), vec![desktop_resume()]);
 }
 
 #[test]
@@ -665,13 +718,13 @@ fn native_resume_claim_is_durable_and_intent_bound() {
     assert!(
         fixture
             .store
-            .claim_resume(&transaction_id, &ResumeIntent::Cli)
+            .claim_resume(&transaction_id, &desktop_resume())
             .unwrap()
     );
     assert!(
         !fixture
             .store
-            .claim_resume(&transaction_id, &ResumeIntent::Cli)
+            .claim_resume(&transaction_id, &desktop_resume())
             .unwrap()
     );
 
@@ -693,7 +746,7 @@ fn staged_install_failure_bootstraps_the_old_runtime_for_explicit_continuation()
     let target = fixture.materialize_product("0.0.4");
     fixture
         .coordinator(RecordingPlatform::new(&fixture.root, "0.0.3"))
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
     let home = fixture.root.join("bootstrap-home");
     let bootstrap = ProductBootstrap::new(
@@ -724,7 +777,7 @@ fn retired_pending_tombstone_replays_update_cleanup_after_restart() {
     let target = fixture.materialize_product("0.0.4");
     let coordinator = fixture.coordinator(RecordingPlatform::new(&fixture.root, "0.0.4"));
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
     let marker = fixture
         .store
@@ -803,7 +856,7 @@ fn installer_and_runtime_adapters_consume_the_verified_open_file_identity() {
     let platform = ReplacingPathPlatform::new(&fixture.root);
     let coordinator = ProductCommitCoordinator::new(Arc::clone(&fixture.store), platform.clone());
     coordinator
-        .begin(&target, fixture.desktop_asset("0.0.4"), ResumeIntent::Cli)
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
 
     coordinator.continue_commit().unwrap();

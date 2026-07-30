@@ -65,8 +65,33 @@
 
 .workbench-titlebar__menubar,
 .workbench-titlebar__window-controls,
+.workbench-titlebar__update-button,
 .workbench-titlebar__menu-popover {
   -webkit-app-region: no-drag;
+}
+
+.workbench-titlebar__update-button {
+  height: 24px;
+  margin-right: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--db-radius-sm);
+  background: var(--db-primary-bg);
+  color: var(--db-primary-fg);
+  font: inherit;
+  font-size: var(--db-font-sm);
+  line-height: 1;
+  box-shadow: var(--db-shadow-control);
+  cursor: pointer;
+}
+
+.workbench-titlebar__update-button:hover {
+  background: color-mix(in srgb, var(--db-primary-bg) 88%, var(--db-brand-ink-deep));
+}
+
+.workbench-titlebar__update-button:focus-visible {
+  outline: 0;
+  box-shadow: var(--db-focus-ring), var(--db-shadow-control);
 }
 
 .workbench-titlebar__menubar {

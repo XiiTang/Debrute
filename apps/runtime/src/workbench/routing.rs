@@ -81,7 +81,10 @@ pub(super) fn workbench_router(
             state.clone(),
             authorize_cli_api,
         ));
-    let mut browser_routes = browser_api_router();
+    let mut browser_routes = browser_api_router().layer(middleware::from_fn_with_state(
+        state.clone(),
+        admit_runtime_product_work,
+    ));
     if state.product.is_some() {
         browser_routes = browser_routes.merge(product_api_router());
     }
@@ -106,6 +109,24 @@ pub(super) fn workbench_router(
             validate_native_boundary,
         ))
         .with_state(state)
+}
+
+async fn admit_runtime_product_work(
+    State(state): State<WorkbenchRouterState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if matches!(*request.method(), Method::GET | Method::HEAD) {
+        return next.run(request).await;
+    }
+    let Some(_permit) = state.services.runtime_state().begin_product_work() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "product_update_preparing",
+            "Runtime is preparing a Product update and is not accepting new work.",
+        );
+    };
+    next.run(request).await
 }
 
 async fn serve_web_asset(State(state): State<WorkbenchRouterState>, request: Request) -> Response {

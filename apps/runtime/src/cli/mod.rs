@@ -5,7 +5,10 @@ mod service;
 mod spec;
 
 pub use parser::{CliParseError, ParsedCliCommand, parse_cli_args};
-pub use records::{agent_record, progress_record};
+pub use records::{
+    CliFields, CliPrimitive, CliProgress, CliRecord, CliResult, CliStreamEvent, agent_record,
+    progress_record,
+};
 pub use service::RuntimeCliService;
 pub use spec::{
     CliCommandPolicy, CliCommandSpec, CliOptionKind, CliOptionSpec, command_errors, command_spec,

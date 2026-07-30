@@ -2,8 +2,8 @@
 
 Every product update records one fixed continuation derived from its initiating
 surface. A Desktop update opens Desktop after the target Runtime is ready, a
-browser update opens one newly authenticated browser page, and a CLI update
-restores Runtime only. Continuation never substitutes or falls back to another
+browser update opens one newly authenticated browser page. The CLI cannot
+initiate an update. Continuation never substitutes or falls back to another
 surface.
 
 The continuation identifies only the initiating surface. It does not migrate

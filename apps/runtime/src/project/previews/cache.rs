@@ -48,7 +48,10 @@ impl Semaphore {
             }
         }
         cancellation.check()?;
-        state.active += 1;
+        state.active = state
+            .active
+            .checked_add(1)
+            .expect("active preview permit count overflow");
         Ok(SemaphorePermit { semaphore: self })
     }
 }
@@ -64,7 +67,10 @@ impl Drop for SemaphorePermit<'_> {
             .state
             .lock()
             .expect("preview semaphore lock poisoned");
-        state.active = state.active.saturating_sub(1);
+        state.active = state
+            .active
+            .checked_sub(1)
+            .expect("active preview permit count underflow");
         self.semaphore.available.notify_one();
     }
 }
@@ -100,10 +106,16 @@ impl KeyedLocks {
             .lock()
             .expect("preview keyed activity lock poisoned");
         if activity.active {
-            activity.waiters += 1;
+            activity.waiters = activity
+                .waiters
+                .checked_add(1)
+                .expect("preview keyed waiter count overflow");
             while activity.active {
                 if let Err(error) = cancellation.check() {
-                    activity.waiters = activity.waiters.saturating_sub(1);
+                    activity.waiters = activity
+                        .waiters
+                        .checked_sub(1)
+                        .expect("preview keyed waiter count underflow");
                     return Err(error);
                 }
                 activity = reservation
@@ -113,7 +125,10 @@ impl KeyedLocks {
                     .expect("preview keyed wait lock poisoned")
                     .0;
             }
-            activity.waiters = activity.waiters.saturating_sub(1);
+            activity.waiters = activity
+                .waiters
+                .checked_sub(1)
+                .expect("preview keyed waiter count underflow");
         }
         cancellation.check()?;
         activity.active = true;
@@ -361,5 +376,14 @@ mod tests {
         assert!(locks.locks.lock().unwrap().contains_key(&key));
         drop(second);
         assert!(locks.locks.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "active preview permit count underflow")]
+    fn extra_preview_permit_release_fails_fast() {
+        let semaphore = Semaphore::new(1);
+        drop(SemaphorePermit {
+            semaphore: &semaphore,
+        });
     }
 }

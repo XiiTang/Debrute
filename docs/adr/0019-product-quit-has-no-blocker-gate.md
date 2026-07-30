@@ -15,4 +15,6 @@ quit, and a Workbench is not required to exist.
 
 This deliberately favors simple, deterministic product shutdown over trying to
 make every asynchronous task finish perfectly. Product update has one separate
-durable commit boundary: Product Quit wins before it, replacement wins after it.
+admission boundary: once a GUI Install action is accepted, replacement wins,
+new mutating work is closed, and already admitted short work drains before the
+reversible preparation phase begins.

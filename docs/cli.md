@@ -23,7 +23,7 @@ Named `operation`, `batch_item`, `artifact`, `model`, and diagnostic records
 follow on separate lines. Error records may contain a redacted `log`; they do
 not have a generic message field. Exit status is deliberately coarse: `0`
 means success, `2` means CLI syntax or input is invalid, and `1` means every
-other failure. An invalid Project is caller input and also exits `2`. A Batch
+other failure, including a missing or corrupt Project. A Batch
 whose accepted Items all settled is successful even when
 some Items failed, so its final Operation record exits `0` and reports the Item
 failures in progress records.
@@ -63,11 +63,10 @@ including while the owner reports `Starting`. Because Stop has no Ready gate,
 a stalled or invalid handshake remains `runtime_health_failed`; it is never
 relabeled as `runtime_ready_timeout`.
 
-The CLI adapter is a required part of every ready Runtime. Product Update is a
-separate launch-mode capability: `debrute update` uses it in a packaged Product,
-while a source-development Runtime returns `product_update_unavailable` because
-that mode has no Product updater. The CLI does not retry the request through
-another backend.
+The CLI adapter is a required part of every ready Runtime. The CLI can inspect
+its managed Product identity through diagnostics, but it cannot discover,
+install, continue, or retry a Product update. Product installation is a GUI
+action; Runtime owns discovery and the durable update transaction.
 
 ## Model Requests
 

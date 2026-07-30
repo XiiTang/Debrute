@@ -1,10 +1,13 @@
 # Product Update Commits Desktop Before Current
 
-A whole-product update first stages and validates one complete inactive Runtime
-Product version, then records one bounded pending commit, closes Desktop, installs
-the matching Desktop version, and only afterward atomically retargets `current`.
-The new Runtime must become ready before the pending record and previous version
-are removed. If the process stops after Desktop installation but before pointer
+A whole-product update first closes new mutating work, drains already admitted
+short work, stages and validates one complete inactive Runtime Product version,
+then records one bounded pending commit and installs the matching Desktop
+version, and only afterward atomically retargets `current`.
+The new Runtime must become Ready and durably record `RuntimeReady` before the
+pending record and previous version are removed. Initiating-surface resume and
+old-version cleanup happen after that Ready cut and cannot revoke it. If the
+process stops after Desktop installation but before pointer
 commit, the exact new Desktop seed or the old Runtime may validate and continue
 that one pending commit; an older Desktop may never downgrade `current`, and
 mismatched Desktop-host sessions are rejected. This was chosen over switching

@@ -1071,9 +1071,8 @@ function productState(): DebruteProductState {
       skillsRoot: '/Users/me/.agents/skills'
     },
     update: {
-      type: 'idle',
-      currentVersion: '0.2.0',
-      updateAvailable: false
+      type: 'up_to_date',
+      currentVersion: '0.2.0'
     }
   };
 }

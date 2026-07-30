@@ -267,6 +267,28 @@ pub enum ProductReleaseError {
     AssetDigestMismatch(String),
 }
 
+impl ProductReleaseError {
+    #[must_use]
+    pub fn is_transient_discovery(&self) -> bool {
+        match self {
+            Self::Http(_) | Self::Io(_) => true,
+            Self::HttpStatus { status, .. } => {
+                *status == StatusCode::REQUEST_TIMEOUT
+                    || *status == StatusCode::TOO_MANY_REQUESTS
+                    || status.is_server_error()
+            }
+            Self::InvalidGitHubResponse
+            | Self::MissingOrDuplicateAsset(_)
+            | Self::InvalidDownloadUrl(_)
+            | Self::InputTooLarge(_)
+            | Self::InvalidSignatureText
+            | Self::InvalidManifest(_)
+            | Self::AssetSizeMismatch(_)
+            | Self::AssetDigestMismatch(_) => false,
+        }
+    }
+}
+
 impl fmt::Display for ProductReleaseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "Product release transport failed: {self:?}")
@@ -319,5 +341,31 @@ mod tests {
         });
         assert!(named_asset_url(&[], MANIFEST_NAME).is_err());
         assert!(named_asset_url(&[asset.clone(), asset], MANIFEST_NAME).is_err());
+    }
+
+    #[test]
+    fn automatic_discovery_suppresses_only_transient_transport_failures() {
+        assert!(
+            ProductReleaseError::Io(io::Error::new(io::ErrorKind::TimedOut, "offline"))
+                .is_transient_discovery()
+        );
+        assert!(
+            ProductReleaseError::HttpStatus {
+                label: "latest release",
+                status: StatusCode::SERVICE_UNAVAILABLE,
+            }
+            .is_transient_discovery()
+        );
+        assert!(
+            !ProductReleaseError::HttpStatus {
+                label: "latest release",
+                status: StatusCode::UNAUTHORIZED,
+            }
+            .is_transient_discovery()
+        );
+        assert!(
+            !ProductReleaseError::InvalidManifest("signature mismatch".to_owned())
+                .is_transient_discovery()
+        );
     }
 }

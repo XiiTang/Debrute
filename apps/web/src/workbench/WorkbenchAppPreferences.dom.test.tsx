@@ -712,6 +712,58 @@ describe('WorkbenchApp preferences and project behavior', () => {
       await unmount(root, container);
     });
   });
+
+  it('installs an available Product directly from the title bar', async () => {
+    const applyProductUpdate = vi.fn(async () => ({ ok: true as const }));
+    const { container, root } = await renderWorkbenchApp('/', { applyProductUpdate });
+
+    await act(async () => {
+      emitWorkbenchEvent({
+        type: 'product.changed',
+        revision: 1,
+        product: {
+          ...productStateFixture(),
+          update: {
+            type: 'available',
+            currentVersion: '0.2.0',
+            updateVersion: '0.3.0'
+          }
+        }
+      });
+    });
+    await act(async () => {
+      requireButton(container, 'Update 0.3.0').click();
+      await Promise.resolve();
+    });
+
+    expect(applyProductUpdate).toHaveBeenCalledOnce();
+    await unmount(root, container);
+  });
+
+  it('replaces the Workbench with a global blocking surface during installation', async () => {
+    const { container, root } = await renderWorkbenchApp('/');
+
+    await act(async () => {
+      emitWorkbenchEvent({
+        type: 'product.changed',
+        revision: 1,
+        product: {
+          ...productStateFixture(),
+          update: {
+            type: 'preparing',
+            currentVersion: '0.2.0',
+            updateVersion: '0.3.0',
+            stage: 'closing_new_work'
+          }
+        }
+      });
+    });
+
+    expect(container.querySelector('[data-testid="workbench-product-update-blocking"]')).not.toBeNull();
+    expect(container.textContent).toContain('Preparing the complete Debrute update');
+    expect(findButton(container, 'Update 0.3.0')).toBeUndefined();
+    await unmount(root, container);
+  });
 });
 
 async function startPendingLocaleSave(): Promise<{
@@ -880,7 +932,7 @@ function productStateFixture(): DebruteProductState {
       skillsVersion: 'test',
       skillsRoot: '/tmp/debrute-skills'
     },
-    update: { type: 'idle', currentVersion: 'test', updateAvailable: false }
+    update: { type: 'up_to_date', currentVersion: 'test' }
   };
 }
 

@@ -40,7 +40,7 @@ Successful task responses include generated media under `content.video_url`. Whe
 
 Seedance accepts a text prompt and optional media references in the task `content` array. Media references use image, video, and audio URL forms documented by Ark. Publicly reachable URLs and Ark `asset://` references are accepted for video references. Image and audio inputs may use supported data URL forms when documented for the selected mode.
 
-Debrute does not expose the official `content` array in its CLI. Debrute Agents provide `prompt`, `intent`, and `references`; Debrute constructs Seedance `content` internally.
+Debrute does not expose the official `content` array in its CLI. Debrute Agents provide `prompt`, `intent`, and `references`; Debrute constructs Seedance `content` internally. The request boundary materializes the default `intent: "generate"`; the adapter requires that canonical value and has no fallback intent.
 
 ## Core Parameters
 

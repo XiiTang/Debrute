@@ -2322,9 +2322,8 @@ function productState() {
       skillsRoot: '/home/me/.agents/skills'
     },
     update: {
-      type: 'idle' as const,
-      currentVersion: '0.2.0',
-      updateAvailable: false as const
+      type: 'up_to_date' as const,
+      currentVersion: '0.2.0'
     }
   };
 }

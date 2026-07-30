@@ -28,11 +28,10 @@ use crate::{
         ProjectDiagnosticSeverity, ProjectError, ProjectSessionRegistry, ProjectSnapshot,
         ProjectUseKind, open_no_symlink_existing_project_file,
     },
-    workbench::{
-        RuntimeCliHttpService, RuntimeCliRecordStream, RuntimeHttpServiceError,
-        RuntimeProductHttpService,
-    },
+    workbench::{RuntimeCliHttpService, RuntimeCliRecordStream, RuntimeHttpServiceError},
 };
+
+use super::records::{CliFields, CliProgress, CliRecord, CliResult, CliStreamEvent};
 
 #[derive(Clone)]
 pub struct RuntimeCliService {
@@ -41,7 +40,6 @@ pub struct RuntimeCliService {
     projects: ProjectSessionRegistry,
     generated_assets: Arc<GeneratedAssetMetadataService>,
     model_operations: Arc<ModelOperationService<GenerationService>>,
-    product: Option<Arc<dyn RuntimeProductHttpService>>,
     active_product: Option<PathBuf>,
 }
 
@@ -58,7 +56,7 @@ pub(super) struct CliCommandRequest {
 pub(super) struct CliFailure {
     pub(super) code: String,
     pub(super) message: String,
-    pub(super) fields: Map<String, Value>,
+    pub(super) fields: CliFields,
 }
 
 impl CliFailure {
@@ -66,12 +64,16 @@ impl CliFailure {
         Self {
             code: code.into(),
             message: message.into(),
-            fields: Map::new(),
+            fields: CliFields::default(),
         }
     }
 
-    pub(super) fn with_field(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
-        self.fields.insert(key.into(), value.into());
+    pub(super) fn with_field(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<super::records::CliPrimitive>,
+    ) -> Self {
+        self.fields.insert(key, value.into());
         self
     }
 }
@@ -85,7 +87,6 @@ impl RuntimeCliService {
         projects: ProjectSessionRegistry,
         generated_assets: Arc<GeneratedAssetMetadataService>,
         model_operations: Arc<ModelOperationService<GenerationService>>,
-        product: Option<Arc<dyn RuntimeProductHttpService>>,
         active_product: Option<PathBuf>,
     ) -> Self {
         Self {
@@ -94,14 +95,12 @@ impl RuntimeCliService {
             projects,
             generated_assets,
             model_operations,
-            product,
             active_product,
         }
     }
 
-    fn run_command(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn run_command(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         match request.command.as_str() {
-            "update" => self.update(request),
             "runtime.status" => self.runtime_status(request),
             "runtime.doctor" => self.runtime_doctor(request),
             "skills.status" => self.skills_status(request),
@@ -140,24 +139,7 @@ impl RuntimeCliService {
         }
     }
 
-    fn update(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
-        require_no_arguments(request)?;
-        let Some(product) = &self.product else {
-            return Err(CliFailure::new(
-                "product_update_unavailable",
-                "Product updates are unavailable in this Runtime.",
-            ));
-        };
-        let result = product
-            .apply(&json!({}), crate::workbench::ProductUpdateInitiator::Cli)
-            .map_err(|error| CliFailure::new("product_update_failed", error.message))?;
-        Ok(ok(
-            &request.command,
-            result.get("fields").cloned().unwrap_or(result),
-        ))
-    }
-
-    fn runtime_status(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn runtime_status(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         require_no_arguments(request)?;
         let settings = self
             .global
@@ -199,14 +181,9 @@ impl RuntimeCliService {
         ))
     }
 
-    fn runtime_doctor(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn runtime_doctor(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let status = self.runtime_status(request)?;
-        let fields = status
-            .get("fields")
-            .and_then(Value::as_object)
-            .ok_or_else(|| {
-                CliFailure::new("internal_error", "Runtime status fields are unavailable.")
-            })?;
+        let fields = status.fields();
         let mut records = Vec::new();
         for (field, code, message) in [
             (
@@ -225,7 +202,11 @@ impl RuntimeCliService {
                 "No available audio model is configured.",
             ),
         ] {
-            if fields.get(field).and_then(Value::as_u64) == Some(0) {
+            if fields
+                .get(field)
+                .and_then(super::records::CliPrimitive::as_u64)
+                == Some(0)
+            {
                 records.push(json!({"name": "diagnostic", "fields": {
                     "code": code, "severity": "warning", "message": message
                 }}));
@@ -249,7 +230,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn skills_status(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn skills_status(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         require_no_arguments(request)?;
         let product = self.active_product.clone();
         let Some(product) = product else {
@@ -276,7 +257,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn list_image_models(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn list_image_models(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         require_no_arguments(request)?;
         let settings = self.settings()?;
         let configured = settings
@@ -300,7 +281,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn list_video_models(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn list_video_models(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         require_no_arguments(request)?;
         let settings = self.settings()?;
         let records = settings.models.video.iter()
@@ -322,7 +303,7 @@ impl RuntimeCliService {
         &self,
         request: &CliCommandRequest,
         kind: AudioModelKind,
-    ) -> Result<Value, CliFailure> {
+    ) -> Result<CliResult, CliFailure> {
         require_no_arguments(request)?;
         let settings = self.settings()?;
         let records = settings.models.audio.iter()
@@ -341,7 +322,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn describe_image_model(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn describe_image_model(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let model_id = one_positional(request)?;
         let entry = self
             .models
@@ -362,7 +343,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn describe_video_model(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn describe_video_model(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let model_id = one_positional(request)?;
         let entry = self
             .models
@@ -387,7 +368,7 @@ impl RuntimeCliService {
         &self,
         request: &CliCommandRequest,
         kind: AudioModelKind,
-    ) -> Result<Value, CliFailure> {
+    ) -> Result<CliResult, CliFailure> {
         let model_id = one_positional(request)?;
         let entry = self
             .models
@@ -415,7 +396,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn project_command(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn project_command(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let root = required_project_root(request)?;
         if request.command != "project.init" {
             ensure_project_initialized(root)?;
@@ -458,7 +439,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn canvas_command(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn canvas_command(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let root = required_project_root(request)?;
         ensure_project_initialized(root)?;
         let opened = self.open_project(root)?;
@@ -492,7 +473,7 @@ impl RuntimeCliService {
         Ok(ok(&request.command, fields))
     }
 
-    fn generated_asset_lookup(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn generated_asset_lookup(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let root = required_project_root(request)?;
         ensure_project_initialized(root)?;
         let _opened = self.open_project(root)?;
@@ -508,7 +489,7 @@ impl RuntimeCliService {
         Ok(ok(&request.command, generated_asset_fields(&lookup)))
     }
 
-    fn operation_list(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn operation_list(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let query = ModelOperationListQuery {
             state: request
                 .options
@@ -550,7 +531,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn operation_inspect(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn operation_inspect(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let snapshot = self
             .model_operations
             .inspect(one_positional(request)?)
@@ -562,7 +543,7 @@ impl RuntimeCliService {
         ))
     }
 
-    fn operation_cancel(&self, request: &CliCommandRequest) -> Result<Value, CliFailure> {
+    fn operation_cancel(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         match self.model_operations.cancel(one_positional(request)?) {
             Ok(snapshot) => Ok(ok_records(
                 &request.command,
@@ -596,7 +577,7 @@ impl RuntimeCliService {
 }
 
 impl RuntimeCliHttpService for RuntimeCliService {
-    fn run(&self, request: &Value) -> Result<Value, RuntimeHttpServiceError> {
+    fn run(&self, request: &Value) -> Result<CliResult, RuntimeHttpServiceError> {
         let request = parse_request(request)?;
         Ok(match self.run_command(&request) {
             Ok(result) => result,
@@ -604,7 +585,7 @@ impl RuntimeCliHttpService for RuntimeCliService {
         })
     }
 
-    fn submit(&self, request: &Value, input: &[u8]) -> Result<Value, RuntimeHttpServiceError> {
+    fn submit(&self, request: &Value, input: &[u8]) -> Result<CliResult, RuntimeHttpServiceError> {
         let request = parse_request(request)?;
         let shape = match request.command.as_str() {
             "request.single" => ExecutionShape::Single,
@@ -680,21 +661,19 @@ impl RuntimeCliHttpService for RuntimeCliService {
                     || !sender.is_closed() && observer_is_alive(),
                     |snapshot| {
                         sender
-                            .blocking_send(json!({
-                                "type": "progress",
-                                "fields": {
-                                    "event": "operation.observed",
-                                    "records": operation_records(snapshot)
-                                }
-                            }))
+                            .blocking_send(CliStreamEvent::Progress {
+                                fields: CliProgress {
+                                    event: "operation.observed".to_owned(),
+                                    records: typed_records(operation_records(snapshot)),
+                                },
+                            })
                             .is_ok()
                     },
                     |outcome| {
                         sender
-                            .blocking_send(json!({
-                            "type": "progress",
-                            "fields": batch_outcome_progress(outcome)
-                                }))
+                            .blocking_send(CliStreamEvent::Progress {
+                                fields: batch_outcome_progress(outcome),
+                            })
                             .is_ok()
                     },
                 ) {
@@ -702,10 +681,7 @@ impl RuntimeCliHttpService for RuntimeCliService {
                     Ok(None) => return,
                     Err(error) => failure_value(&request.command, operation_failure(error)),
                 };
-                let _ = sender.blocking_send(json!({
-                    "type": "result",
-                    "result": result
-                }));
+                let _ = sender.blocking_send(CliStreamEvent::Result { result });
             })
             .map_err(|error| {
                 RuntimeHttpServiceError::new(
@@ -845,7 +821,7 @@ fn model_detail(
     capabilities: &Value,
     arguments_schema: &Value,
     documentation: &super::model_docs::ModelDocumentation,
-) -> Value {
+) -> CliResult {
     let mut model_fields = Map::new();
     model_fields.insert("id".to_owned(), Value::String(model_id.to_owned()));
     if let Some(kind) = kind {
@@ -1030,7 +1006,7 @@ fn operation_records(snapshot: &ModelOperationSnapshot) -> Vec<Value> {
     records
 }
 
-fn terminal_operation_result(command: &str, snapshot: &ModelOperationSnapshot) -> Value {
+fn terminal_operation_result(command: &str, snapshot: &ModelOperationSnapshot) -> CliResult {
     let records = operation_records(snapshot);
     match snapshot.state {
         crate::model_operation::OperationState::Succeeded => {
@@ -1052,7 +1028,7 @@ fn terminal_operation_result(command: &str, snapshot: &ModelOperationSnapshot) -
     }
 }
 
-fn batch_outcome_progress(outcome: &BatchItemOutcome) -> Value {
+fn batch_outcome_progress(outcome: &BatchItemOutcome) -> CliProgress {
     let mut records = vec![json!({
         "name": "batch_item",
         "fields": {
@@ -1066,7 +1042,10 @@ fn batch_outcome_progress(outcome: &BatchItemOutcome) -> Value {
         }
     })];
     records.extend(outcome.artifacts.iter().map(artifact_record));
-    json!({"event": "batch_item.settled", "records": records})
+    CliProgress {
+        event: "batch_item.settled".to_owned(),
+        records: typed_records(records),
+    }
 }
 
 fn artifact_record(artifact: &crate::model_operation::ArtifactPointer) -> Value {
@@ -1185,9 +1164,7 @@ pub(super) fn project_failure(error: ProjectError) -> CliFailure {
     let mut failure = CliFailure::new(code, error.to_string());
     for key in ["path", "canvas_id", "project_relative_path"] {
         if let Some(value) = error.field(key) {
-            failure
-                .fields
-                .insert(key.to_owned(), Value::String(value.to_owned()));
+            failure.fields.insert(key.to_owned(), value.into());
         }
     }
     failure
@@ -1218,12 +1195,20 @@ pub(super) fn ensure_project_initialized(root: &Path) -> Result<(), CliFailure> 
     }
 }
 
-pub(super) fn ok(command: &str, fields: Value) -> Value {
-    json!({"status": "ok", "command": command, "fields": primitive_object(fields)})
+pub(super) fn ok(command: &str, fields: Value) -> CliResult {
+    CliResult::Ok {
+        command: command.to_owned(),
+        records: Vec::new(),
+        fields: typed_fields(fields),
+    }
 }
 
-fn ok_records(command: &str, records: Vec<Value>, fields: Value) -> Value {
-    json!({"status": "ok", "command": command, "records": records, "fields": primitive_object(fields)})
+fn ok_records(command: &str, records: Vec<Value>, fields: Value) -> CliResult {
+    CliResult::Ok {
+        command: command.to_owned(),
+        records: typed_records(records),
+        fields: typed_fields(fields),
+    }
 }
 
 fn error_records(
@@ -1232,49 +1217,37 @@ fn error_records(
     log: Option<&str>,
     records: Vec<Value>,
     fields: Value,
-) -> Value {
-    let mut result = Map::from_iter([
-        ("status".to_owned(), Value::String("error".to_owned())),
-        ("command".to_owned(), Value::String(command.to_owned())),
-        ("code".to_owned(), Value::String(code.to_owned())),
-        ("records".to_owned(), Value::Array(records)),
-        ("fields".to_owned(), primitive_object(fields)),
-    ]);
-    if let Some(log) = log {
-        result.insert("log".to_owned(), Value::String(log.to_owned()));
+) -> CliResult {
+    CliResult::Error {
+        command: command.to_owned(),
+        code: code.to_owned(),
+        log: log.map(str::to_owned),
+        records: typed_records(records),
+        fields: typed_fields(fields),
     }
-    Value::Object(result)
 }
 
-pub(super) fn failure_value(command: &str, failure: CliFailure) -> Value {
-    error_value(
-        command,
-        &failure.code,
-        &failure.message,
-        Value::Object(failure.fields),
-    )
+pub(super) fn failure_value(command: &str, failure: CliFailure) -> CliResult {
+    CliResult::Error {
+        command: command.to_owned(),
+        code: failure.code,
+        log: Some(failure.message),
+        records: Vec::new(),
+        fields: failure.fields,
+    }
 }
 
-fn error_value(command: &str, code: &str, message: &str, fields: Value) -> Value {
-    json!({
-        "status": "error", "command": command, "code": code, "log": message,
-        "fields": primitive_object(fields)
-    })
+fn typed_fields(value: Value) -> CliFields {
+    CliFields::try_from_value(&value).expect("CLI result fields must be primitive")
 }
 
-fn primitive_object(value: Value) -> Value {
-    Value::Object(value.as_object().map_or_else(Map::new, |object| {
-        object
-            .iter()
-            .filter(|(_, value)| {
-                matches!(
-                    value,
-                    Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
-                )
-            })
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect()
-    }))
+fn typed_records(records: Vec<Value>) -> Vec<CliRecord> {
+    records
+        .into_iter()
+        .map(|record| {
+            CliRecord::try_from_value(record).expect("CLI record must have the closed shape")
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1313,6 +1286,7 @@ mod operation_record_tests {
                 },
             ),
         );
+        let batch = serde_json::to_value(batch).unwrap();
         assert_eq!(batch["status"], "ok");
 
         let single = terminal_operation_result(
@@ -1326,6 +1300,7 @@ mod operation_record_tests {
                 },
             ),
         );
+        let single = serde_json::to_value(single).unwrap();
         assert_eq!(single["status"], "error");
         assert_eq!(single["code"], "operation_failed");
         assert!(single.get("log").is_none());
@@ -1342,6 +1317,7 @@ mod operation_record_tests {
                 },
             ),
         );
+        let cancelled = serde_json::to_value(cancelled).unwrap();
         assert_eq!(cancelled["status"], "error");
         assert_eq!(cancelled["code"], "operation_cancelled");
         assert!(cancelled.get("log").is_none());

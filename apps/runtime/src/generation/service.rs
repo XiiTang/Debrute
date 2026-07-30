@@ -740,6 +740,22 @@ mod tests {
                 json!({"prompt": "make an image", "watermark": false}),
             ),
             (
+                "doubao-seedance-2-0-260128",
+                json!({
+                    "prompt": "make a video",
+                    "intent": "generate",
+                    "watermark": false
+                }),
+            ),
+            (
+                "doubao-seedance-2-0-fast-260128",
+                json!({
+                    "prompt": "make a video",
+                    "intent": "generate",
+                    "watermark": false
+                }),
+            ),
+            (
                 "doubao-seedance-2-0-mini-260615",
                 json!({
                     "prompt": "make a video",
@@ -882,7 +898,10 @@ mod tests {
         let (video, video_requests) = run_fixture(
             ModelKind::Video,
             "doubao-seedance-2-0-260128",
-            &Map::from_iter([("prompt".to_owned(), json!("slow pan"))]),
+            &Map::from_iter([
+                ("prompt".to_owned(), json!("slow pan")),
+                ("intent".to_owned(), json!("generate")),
+            ]),
             vec![
                 fixture_json(&json!({"id": "task-1"})),
                 fixture_json(&json!({
@@ -2507,6 +2526,26 @@ mod tests {
         );
         assert!(fast_body.get("intent").is_none());
         assert!(fast_body.get("references").is_none());
+    }
+
+    #[test]
+    fn seedance_adapters_require_the_materialized_intent() {
+        for model_id in [
+            "doubao-seedance-2-0-260128",
+            "doubao-seedance-2-0-fast-260128",
+            "doubao-seedance-2-0-mini-260615",
+        ] {
+            let (result, requests, remaining) = execute_fixture(
+                ModelKind::Video,
+                model_id,
+                &Map::from_iter([("prompt".to_owned(), json!("slow pan"))]),
+                Vec::new(),
+            );
+
+            assert_eq!(result.unwrap_err().code(), "generation_argument_invalid");
+            assert!(requests.is_empty(), "{model_id} submitted without intent");
+            assert_eq!(remaining, 0);
+        }
     }
 
     #[test]

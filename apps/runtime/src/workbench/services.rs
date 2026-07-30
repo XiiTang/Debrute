@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
+    cli::{CliResult, CliStreamEvent},
     control::{DesktopOpenResult, RuntimeControlState, WorkbenchRoute},
     executable_path::resolve_executable,
     generation::GenerationService,
@@ -59,7 +60,7 @@ pub trait RuntimeProductHttpService: Send + Sync {
     fn state(&self) -> Result<Value, RuntimeHttpServiceError>;
     fn check(&self) -> Result<Value, RuntimeHttpServiceError>;
     fn apply(
-        &self,
+        self: Arc<Self>,
         input: &Value,
         initiator: ProductUpdateInitiator,
     ) -> Result<Value, RuntimeHttpServiceError>;
@@ -69,12 +70,11 @@ pub trait RuntimeProductHttpService: Send + Sync {
 pub enum ProductUpdateInitiator {
     Desktop { project_id: Option<String> },
     Browser { project_id: Option<String> },
-    Cli,
 }
 
 pub trait RuntimeCliHttpService: Send + Sync {
-    fn run(&self, request: &Value) -> Result<Value, RuntimeHttpServiceError>;
-    fn submit(&self, request: &Value, input: &[u8]) -> Result<Value, RuntimeHttpServiceError>;
+    fn run(&self, request: &Value) -> Result<CliResult, RuntimeHttpServiceError>;
+    fn submit(&self, request: &Value, input: &[u8]) -> Result<CliResult, RuntimeHttpServiceError>;
     fn run_stream(
         &self,
         request: &Value,
@@ -83,19 +83,19 @@ pub trait RuntimeCliHttpService: Send + Sync {
 }
 
 pub struct RuntimeCliRecordStream {
-    receiver: tokio::sync::mpsc::Receiver<Value>,
+    receiver: tokio::sync::mpsc::Receiver<CliStreamEvent>,
 }
 
 impl RuntimeCliRecordStream {
     #[must_use]
-    pub fn bounded(capacity: usize) -> (tokio::sync::mpsc::Sender<Value>, Self) {
+    pub fn bounded(capacity: usize) -> (tokio::sync::mpsc::Sender<CliStreamEvent>, Self) {
         let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
         (sender, Self { receiver })
     }
 }
 
 impl Stream for RuntimeCliRecordStream {
-    type Item = Value;
+    type Item = CliStreamEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.receiver.poll_recv(context)
@@ -284,6 +284,7 @@ impl WorkbenchRuntimeServices {
         let callback_global = Arc::clone(&global);
         let photoshop = Arc::new(PhotoshopIntegration::new(
             runtime_state.instance_id(),
+            Arc::clone(&runtime_state),
             projects.clone(),
             Arc::new(move |state| {
                 callback_global.publish_external(GlobalRuntimeChange::PhotoshopChanged(state));
@@ -412,6 +413,11 @@ impl WorkbenchRuntimeServices {
     #[must_use]
     pub fn connections(&self) -> &Arc<WorkbenchConnectionRegistry> {
         &self.connections
+    }
+
+    #[must_use]
+    pub fn runtime_state(&self) -> &Arc<RuntimeControlState> {
+        &self.runtime_state
     }
 
     pub fn ensure_accepting_workbench_connections(&self) -> Result<(), RuntimeHttpServiceError> {

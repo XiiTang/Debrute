@@ -10,8 +10,9 @@ use std::{
 
 use debrute_runtime::{
     cli::{
-        CliCommandPolicy, CliParseError, ParsedCliCommand, agent_record, command_errors,
-        command_spec, command_specs, parse_cli_args, progress_record,
+        CliCommandPolicy, CliFields, CliParseError, CliProgress, CliResult, CliStreamEvent,
+        ParsedCliCommand, agent_record, command_errors, command_spec, command_specs,
+        parse_cli_args, progress_record,
     },
     control::{
         ActivationIntent, ActivationOutcome, ClientRole, ControlErrorCode, ControlRequest,
@@ -19,7 +20,7 @@ use debrute_runtime::{
         RuntimeStatus, endpoint::ControlEndpointAdapter,
     },
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 #[cfg(target_os = "macos")]
@@ -44,11 +45,11 @@ fn main() -> ExitCode {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            print_result(&failure(
+            let _ = print_result(&failure(
                 "internal_error",
                 "internal_error",
                 &error.to_string(),
-                json!({}),
+                CliFields::default(),
             ));
             return ExitCode::from(1);
         }
@@ -60,24 +61,25 @@ fn main() -> ExitCode {
     match result {
         Ok(result) => {
             let code = exit_code_for_result(&result);
-            print_result(&result);
-            ExitCode::from(code)
+            if print_result(&result).is_err() {
+                ExitCode::from(1)
+            } else {
+                ExitCode::from(code)
+            }
         }
         Err(error) => {
-            let result = failure(
-                &error.command,
-                &error.code,
-                &error.message,
-                Value::Object(error.fields),
-            );
+            let result = failure(&error.command, &error.code, &error.message, error.fields);
             let code = exit_code_for_result(&result);
-            print_result(&result);
-            ExitCode::from(code)
+            if print_result(&result).is_err() {
+                ExitCode::from(1)
+            } else {
+                ExitCode::from(code)
+            }
         }
     }
 }
 
-async fn run(parsed: ParsedCliCommand) -> Result<Value, CliRunError> {
+async fn run(parsed: ParsedCliCommand) -> Result<CliResult, CliRunError> {
     match parsed.policy {
         CliCommandPolicy::Local => Ok(run_local(&parsed)),
         CliCommandPolicy::Observe => run_observe(&parsed).await,
@@ -89,26 +91,26 @@ async fn run(parsed: ParsedCliCommand) -> Result<Value, CliRunError> {
     }
 }
 
-fn run_local(parsed: &ParsedCliCommand) -> Value {
+fn run_local(parsed: &ParsedCliCommand) -> CliResult {
     if parsed.command == "commands" {
         let records = command_specs().iter().map(spec_record).collect::<Vec<_>>();
-        return json!({
+        return closed_result(json!({
             "status": "ok", "command": "commands", "records": records,
             "fields": {"count": command_specs().len()}
-        });
+        }));
     }
     let spec = command_spec(&parsed.positional)
         .expect("the parser resolves the command path before selecting Local policy");
-    json!({
+    closed_result(json!({
         "status": "ok", "command": "help", "records": [spec_record(spec)]
-    })
+    }))
 }
 
-async fn run_observe(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
+async fn run_observe(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
     let deadline = Instant::now() + RUNTIME_STARTUP_TIMEOUT;
     let Some(mut client) = connect_existing(ready_time_remaining(deadline, parsed.command)?)?
     else {
-        return Ok(stopped_observe_result(parsed.command));
+        return Ok(closed_result(stopped_observe_result(parsed.command)));
     };
     match client.status() {
         RuntimeStatus::Ready => {
@@ -117,15 +119,15 @@ async fn run_observe(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
             drop(client);
             result
         }
-        phase => Ok(transitioning_observe_result(
+        phase => Ok(closed_result(transitioning_observe_result(
             parsed.command,
             phase,
             client.instance_id(),
-        )),
+        ))),
     }
 }
 
-fn run_activate(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
+fn run_activate(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
     let deadline = Instant::now() + RUNTIME_STARTUP_TIMEOUT;
     let mut client = ensure_runtime(deadline)?;
     let frontend = parsed
@@ -157,7 +159,7 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
         )
         .map_err(|error| control_failure(parsed.command, &error))?;
     match response {
-        ControlResponse::Activation { outcome } => Ok(json!({
+        ControlResponse::Activation { outcome } => Ok(closed_result(json!({
             "status": "ok",
             "command": parsed.command,
             "fields": {
@@ -168,7 +170,7 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
                 ),
                 "outcome": activation_outcome(outcome)
             }
-        })),
+        }))),
         ControlResponse::Rejected { code } => Err(rejected_failure(parsed.command, code)),
         _ => Err(CliRunError::new(
             parsed.command,
@@ -178,7 +180,7 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
     }
 }
 
-fn run_stop(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
+fn run_stop(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
     let Some(mut client) = connect_existing(CONTROL_TIMEOUT)? else {
         return Err(CliRunError::new(
             parsed.command,
@@ -190,11 +192,11 @@ fn run_stop(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
         .quit_product(Uuid::new_v4().to_string())
         .map_err(|error| control_failure(parsed.command, &error))?;
     match response {
-        ControlResponse::Ok => Ok(json!({
+        ControlResponse::Ok => Ok(closed_result(json!({
             "status": "ok",
             "command": parsed.command,
             "fields": {"accepted": true}
-        })),
+        }))),
         ControlResponse::Rejected { code } => Err(rejected_failure(parsed.command, code)),
         _ => Err(CliRunError::new(
             parsed.command,
@@ -204,7 +206,7 @@ fn run_stop(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
     }
 }
 
-async fn run_http(parsed: &ParsedCliCommand, stream: bool) -> Result<Value, CliRunError> {
+async fn run_http(parsed: &ParsedCliCommand, stream: bool) -> Result<CliResult, CliRunError> {
     let deadline = Instant::now() + RUNTIME_STARTUP_TIMEOUT;
     let mut control = ensure_runtime(deadline)?;
     let (origin, authorization) = create_cli_authorization(&mut control, deadline)?;
@@ -215,7 +217,7 @@ async fn run_http(parsed: &ParsedCliCommand, stream: bool) -> Result<Value, CliR
     result
 }
 
-async fn run_submit(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
+async fn run_submit(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
     let input_path = parsed.options.get("input").ok_or_else(|| {
         CliRunError::new(parsed.command, "missing_argument", "--input is required.")
     })?;
@@ -254,7 +256,7 @@ async fn run_submit(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
             )
         })?;
     let submitted = if response.status().is_success() {
-        response.json::<Value>().await.map_err(|error| {
+        response.json::<CliResult>().await.map_err(|error| {
             CliRunError::new(
                 parsed.command,
                 "submission_outcome_unknown",
@@ -264,7 +266,7 @@ async fn run_submit(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
     } else {
         parse_http_response(parsed.command, response).await?
     };
-    if submitted.get("status").and_then(Value::as_str) == Some("error")
+    if submitted.error_code().is_some()
         || parsed
             .options
             .get("no-wait")
@@ -274,15 +276,11 @@ async fn run_submit(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
         return Ok(submitted);
     }
     let operation_id = submitted
-        .get("records")
-        .and_then(Value::as_array)
-        .and_then(|records| {
-            records.iter().find_map(|record| {
-                (record.get("name").and_then(Value::as_str) == Some("operation"))
-                    .then(|| record.pointer("/fields/id").and_then(Value::as_str))
-                    .flatten()
-            })
-        })
+        .records()
+        .iter()
+        .find(|record| record.name == "operation")
+        .and_then(|record| record.fields.get("id"))
+        .and_then(debrute_runtime::cli::CliPrimitive::as_str)
         .ok_or_else(|| {
             CliRunError::new(
                 parsed.command,
@@ -293,10 +291,10 @@ async fn run_submit(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
         .to_owned();
     print_progress(
         parsed.command,
-        &json!({
-            "event": "operation.accepted",
-            "records": submitted["records"].clone()
-        }),
+        &CliProgress {
+            event: "operation.accepted".to_owned(),
+            records: submitted.records().to_vec(),
+        },
     )?;
     let wait_request = json!({
         "command": "operation.wait",
@@ -304,7 +302,7 @@ async fn run_submit(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
         "options": {},
         "projectRoot": null
     });
-    let mut result = post_request(
+    let result = post_request(
         parsed.command,
         &origin,
         &authorization,
@@ -313,14 +311,8 @@ async fn run_submit(parsed: &ParsedCliCommand) -> Result<Value, CliRunError> {
         false,
     )
     .await?;
-    if let Some(result) = result.as_object_mut() {
-        result.insert(
-            "command".to_owned(),
-            Value::String(parsed.command.to_owned()),
-        );
-    }
     drop(control);
-    Ok(result)
+    Ok(result.with_command(parsed.command))
 }
 
 async fn post_command(
@@ -328,7 +320,7 @@ async fn post_command(
     origin: &str,
     authorization: &str,
     stream: bool,
-) -> Result<Value, CliRunError> {
+) -> Result<CliResult, CliRunError> {
     post_request(
         parsed.command,
         origin,
@@ -356,7 +348,7 @@ async fn post_request(
     request: Value,
     stream: bool,
     print_observed: bool,
-) -> Result<Value, CliRunError> {
+) -> Result<CliResult, CliRunError> {
     let route = if stream {
         "/api/cli/run-stream"
     } else {
@@ -373,7 +365,7 @@ async fn post_request(
         return parse_http_response(command, response).await;
     }
     if !stream {
-        return response.json::<Value>().await.map_err(|error| {
+        return response.json::<CliResult>().await.map_err(|error| {
             CliRunError::new(command, "runtime_health_failed", error.to_string())
         });
     }
@@ -393,7 +385,7 @@ async fn post_request(
             }
             consume_stream_event(
                 command,
-                serde_json::from_slice(line).map_err(|error| {
+                serde_json::from_slice::<CliStreamEvent>(line).map_err(|error| {
                     CliRunError::new(command, "runtime_health_failed", error.to_string())
                 })?,
                 &mut result,
@@ -404,7 +396,7 @@ async fn post_request(
     if buffer.iter().any(|byte| !byte.is_ascii_whitespace()) {
         consume_stream_event(
             command,
-            serde_json::from_slice(&buffer).map_err(|error| {
+            serde_json::from_slice::<CliStreamEvent>(&buffer).map_err(|error| {
                 CliRunError::new(command, "runtime_health_failed", error.to_string())
             })?,
             &mut result,
@@ -423,9 +415,9 @@ async fn post_request(
 async fn parse_http_response(
     command: &str,
     response: reqwest::Response,
-) -> Result<Value, CliRunError> {
+) -> Result<CliResult, CliRunError> {
     if response.status().is_success() {
-        return response.json::<Value>().await.map_err(|error| {
+        return response.json::<CliResult>().await.map_err(|error| {
             CliRunError::new(command, "runtime_health_failed", error.to_string())
         });
     }
@@ -482,27 +474,20 @@ fn read_model_input(path: &str, command: &str) -> Result<Vec<u8>, CliRunError> {
 
 fn consume_stream_event(
     command: &str,
-    event: Value,
-    result: &mut Option<Value>,
+    event: CliStreamEvent,
+    result: &mut Option<CliResult>,
     print_observed: bool,
 ) -> Result<(), CliRunError> {
-    match event.get("type").and_then(Value::as_str) {
-        Some("progress") => {
-            let fields = event.get("fields").ok_or_else(|| {
-                CliRunError::new(
-                    command,
-                    "runtime_health_failed",
-                    "CLI progress fields are missing.",
-                )
-            })?;
-            if print_observed
-                || fields.get("event").and_then(Value::as_str) != Some("operation.observed")
-            {
-                print_progress(command, fields)?;
+    match event {
+        CliStreamEvent::Progress { fields } => {
+            if print_observed || fields.event != "operation.observed" {
+                print_progress(command, &fields)?;
             }
             Ok(())
         }
-        Some("result") => {
+        CliStreamEvent::Result {
+            result: final_result,
+        } => {
             if result.is_some() {
                 return Err(CliRunError::new(
                     command,
@@ -510,23 +495,17 @@ fn consume_stream_event(
                     "Runtime sent multiple final CLI results.",
                 ));
             }
-            *result = event.get("result").cloned();
+            *result = Some(final_result);
             Ok(())
         }
-        _ => Err(CliRunError::new(
-            command,
-            "runtime_health_failed",
-            "Runtime sent an unknown CLI stream event.",
-        )),
     }
 }
 
-fn print_progress(command: &str, fields: &Value) -> Result<(), CliRunError> {
-    let record = progress_record(command, fields)
-        .map_err(|error| CliRunError::new(command, "internal_error", error.to_string()))?;
-    println!("{record}");
-    stdout()
-        .flush()
+fn print_progress(command: &str, progress: &CliProgress) -> Result<(), CliRunError> {
+    let record = progress_record(command, progress);
+    let mut output = stdout().lock();
+    writeln!(output, "{record}")
+        .and_then(|()| output.flush())
         .map_err(|error| CliRunError::new(command, "internal_error", error.to_string()))
 }
 
@@ -790,6 +769,7 @@ fn normalize_http_error(code: &str) -> &str {
         | "request_body_too_large"
         | "invalid_input"
         | "invalid_multipart" => "invalid_input",
+        "product_update_preparing" => "product_update_failed",
         _ => "runtime_health_failed",
     }
 }
@@ -813,43 +793,43 @@ const fn status_name(status: RuntimeStatus) -> &'static str {
     }
 }
 
-fn print_result(result: &Value) {
-    match agent_record(result) {
-        Ok(record) => println!("{record}"),
-        Err(error) => println!(
-            "debrute error cmd=internal_error code=internal_error\nlog=\"{}\"",
-            error.to_string().replace('"', "\\\"")
-        ),
+fn print_result(result: &CliResult) -> std::io::Result<()> {
+    let record = agent_record(result);
+    let mut output = stdout().lock();
+    writeln!(output, "{record}")?;
+    output.flush()
+}
+
+fn exit_code_for_result(result: &CliResult) -> u8 {
+    match result.error_code() {
+        None => 0,
+        Some(
+            "invalid_command" | "invalid_argument" | "missing_argument" | "invalid_input"
+            | "invalid_json_input",
+        ) => 2,
+        Some(_) => 1,
     }
 }
 
-fn exit_code_for_result(result: &Value) -> u8 {
-    if result.get("status").and_then(Value::as_str) != Some("error") {
-        return 0;
-    }
-    match result
-        .get("code")
-        .and_then(Value::as_str)
-        .unwrap_or("internal_error")
-    {
-        "invalid_command" | "invalid_argument" | "missing_argument" | "invalid_input"
-        | "invalid_json_input" | "project_invalid" => 2,
-        _ => 1,
+fn failure(command: &str, code: &str, message: &str, fields: CliFields) -> CliResult {
+    CliResult::Error {
+        command: command.to_owned(),
+        code: code.to_owned(),
+        log: Some(message.to_owned()),
+        records: Vec::new(),
+        fields,
     }
 }
 
-fn failure(command: &str, code: &str, message: &str, fields: Value) -> Value {
-    json!({
-        "status": "error", "command": command, "code": code, "log": message,
-        "fields": fields
-    })
+fn closed_result(value: Value) -> CliResult {
+    CliResult::try_from_value(value).expect("local CLI result must have the closed shape")
 }
 
 struct CliRunError {
     command: String,
     code: String,
     message: String,
-    fields: Map<String, Value>,
+    fields: CliFields,
 }
 
 impl CliRunError {
@@ -862,7 +842,7 @@ impl CliRunError {
             command: command.into(),
             code: code.into(),
             message: message.into(),
-            fields: Map::new(),
+            fields: CliFields::default(),
         }
     }
 }
@@ -876,7 +856,10 @@ mod tests {
 
     use debrute_runtime::control::{ClientRole, NativeControlClient};
 
-    use super::{control_failure, readiness_control_failure};
+    use super::{
+        CliFields, control_failure, exit_code_for_result, failure, normalize_http_error,
+        readiness_control_failure,
+    };
 
     #[test]
     fn stalled_handshake_is_ready_timeout_only_for_runtime_acquisition() {
@@ -888,6 +871,45 @@ mod tests {
         assert_eq!(
             readiness_control_failure("runtime", &error).code,
             "runtime_ready_timeout"
+        );
+    }
+
+    #[test]
+    fn exit_two_is_reserved_for_invocation_and_input_errors() {
+        assert_eq!(
+            exit_code_for_result(&failure(
+                "request.single",
+                "invalid_input",
+                "bad input",
+                CliFields::default()
+            )),
+            2
+        );
+        assert_eq!(
+            exit_code_for_result(&failure(
+                "project.validate",
+                "project_invalid",
+                "bad Project",
+                CliFields::default()
+            )),
+            1
+        );
+        assert_eq!(
+            exit_code_for_result(&failure(
+                "runtime.status",
+                "runtime_health_failed",
+                "offline",
+                CliFields::default()
+            )),
+            1
+        );
+    }
+
+    #[test]
+    fn update_admission_failure_uses_the_closed_product_error() {
+        assert_eq!(
+            normalize_http_error("product_update_preparing"),
+            "product_update_failed"
         );
     }
 

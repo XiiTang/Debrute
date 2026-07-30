@@ -9,13 +9,16 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::project::{
-    ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathKind, ProjectSessionRegistry,
-    ProjectSessionSummary, ProjectUploadEntry, ProjectUse, ProjectUseKind,
-    assert_project_tree_visible_mutation_path, assert_project_tree_visible_path,
-    is_project_fixed_heavy_path, list_project_directory, normalize_project_directory_path,
-    open_no_symlink_existing_project_file, resolve_no_symlink_existing_project_path,
-    resolve_project_path,
+use crate::{
+    control::{RuntimeControlState, RuntimeWorkPermit},
+    project::{
+        ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathKind,
+        ProjectSessionRegistry, ProjectSessionSummary, ProjectUploadEntry, ProjectUse,
+        ProjectUseKind, assert_project_tree_visible_mutation_path,
+        assert_project_tree_visible_path, is_project_fixed_heavy_path, list_project_directory,
+        normalize_project_directory_path, open_no_symlink_existing_project_file,
+        resolve_no_symlink_existing_project_path, resolve_project_path,
+    },
 };
 
 use super::{
@@ -48,6 +51,7 @@ struct PlaceCommand {
     byte_length: u64,
     completion: oneshot::Sender<Result<(), PhotoshopError>>,
     _project_use: ProjectUse,
+    _product_work: RuntimeWorkPermit,
 }
 
 struct ExportCommand {
@@ -61,6 +65,7 @@ struct ExportCommand {
     uploaded_bytes: u64,
     upload_in_progress: bool,
     _project_use: ProjectUse,
+    _product_work: RuntimeWorkPermit,
 }
 
 #[derive(Default)]
@@ -83,6 +88,7 @@ pub struct PhotoshopContent {
 
 pub struct PhotoshopIntegration {
     runtime_instance_id: String,
+    runtime_state: Arc<RuntimeControlState>,
     projects: ProjectSessionRegistry,
     state: Mutex<State>,
     observer: PhotoshopStateObserver,
@@ -92,11 +98,13 @@ impl PhotoshopIntegration {
     #[must_use]
     pub fn new(
         runtime_instance_id: String,
+        runtime_state: Arc<RuntimeControlState>,
         projects: ProjectSessionRegistry,
         observer: PhotoshopStateObserver,
     ) -> Self {
         Self {
             runtime_instance_id,
+            runtime_state,
             projects,
             state: Mutex::new(State::default()),
             observer,
@@ -459,6 +467,7 @@ impl PhotoshopIntegration {
         ),
         PhotoshopError,
     > {
+        let product_work = self.begin_product_transfer()?;
         let command_id = Uuid::new_v4().to_string();
         let relative = assert_project_tree_visible_path(project_relative_path)?;
         let mime_type = photoshop_mime_type(&relative)?;
@@ -505,6 +514,7 @@ impl PhotoshopIntegration {
                             byte_length,
                             completion,
                             _project_use: project_use,
+                            _product_work: product_work,
                         }),
                     )
                     .is_none(),
@@ -604,6 +614,7 @@ impl PhotoshopIntegration {
         directory: &str,
         items: Vec<PhotoshopExportItem>,
     ) -> Result<(), PhotoshopError> {
+        let product_work = self.begin_product_transfer()?;
         validate_command_id(command_id)?;
         if items.is_empty() || items.len() > PHOTOSHOP_MAX_BATCH_ITEMS {
             return Err(PhotoshopError::new(
@@ -687,6 +698,7 @@ impl PhotoshopIntegration {
                             uploaded_bytes: 0,
                             upload_in_progress: false,
                             _project_use: project_use,
+                            _product_work: product_work,
                         }),
                     )
                     .is_none(),
@@ -699,6 +711,15 @@ impl PhotoshopIntegration {
                 command_id: command_id.to_owned(),
             },
         )
+    }
+
+    fn begin_product_transfer(&self) -> Result<RuntimeWorkPermit, PhotoshopError> {
+        self.runtime_state.begin_product_work().ok_or_else(|| {
+            PhotoshopError::new(
+                PhotoshopErrorCode::Unavailable,
+                "Runtime is preparing a Product update and is not accepting new Photoshop transfers.",
+            )
+        })
     }
 
     fn reserve_export_session(
@@ -1205,7 +1226,8 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
-        sync::Arc,
+        sync::{Arc, mpsc as std_mpsc},
+        time::Duration,
     };
 
     use tokio::sync::mpsc;
@@ -1251,6 +1273,12 @@ mod tests {
         ));
         let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
         ProjectSessionRegistry::new(home, Arc::new(DefaultProjectNodeAdapter), feedback)
+    }
+
+    fn ready_runtime_state() -> Arc<RuntimeControlState> {
+        let state = Arc::new(RuntimeControlState::new("runtime-1"));
+        assert!(state.finish_startup());
+        state
     }
 
     fn connect(
@@ -1316,8 +1344,12 @@ mod tests {
             .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let project_id = opened.session.summary().unwrap().project_id;
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects.clone(), Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects.clone(),
+            Arc::new(|_| {}),
+        );
         let (admission, mut outbound) = connect(
             &integration,
             vec![
@@ -1415,8 +1447,12 @@ mod tests {
             .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let project_id = opened.session.summary().unwrap().project_id;
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects, Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects,
+            Arc::new(|_| {}),
+        );
         let documents = vec![PhotoshopDocumentView {
             document_id: 10,
             title: "A.psd".to_owned(),
@@ -1490,8 +1526,12 @@ mod tests {
     fn session_start_rejects_empty_or_duplicate_placement_capabilities() {
         let home = TemporaryDirectory::new("invalid-capability-home");
         let projects = registry(home.as_ref());
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects, Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects,
+            Arc::new(|_| {}),
+        );
 
         for placement_mime_types in [
             Vec::new(),
@@ -1519,8 +1559,12 @@ mod tests {
             .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let project_id = opened.session.summary().unwrap().project_id;
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects, Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects,
+            Arc::new(|_| {}),
+        );
         let (admission, mut outbound) = connect(
             &integration,
             vec![PhotoshopDocumentView {
@@ -1575,8 +1619,12 @@ mod tests {
     fn failed_project_broadcast_retires_the_stale_photoshop_session() {
         let home = TemporaryDirectory::new("stale-broadcast-home");
         let projects = registry(home.as_ref());
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects, Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects,
+            Arc::new(|_| {}),
+        );
         let (admission, outbound) = connect(&integration, Vec::new());
         drop(outbound);
 
@@ -1596,8 +1644,12 @@ mod tests {
     fn closed_project_registry_broadcasts_an_empty_projection() {
         let home = TemporaryDirectory::new("closed-broadcast-home");
         let projects = registry(home.as_ref());
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects.clone(), Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects.clone(),
+            Arc::new(|_| {}),
+        );
         let (_admission, mut outbound) = connect(&integration, Vec::new());
 
         projects.close().unwrap();
@@ -1632,8 +1684,12 @@ mod tests {
             .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects, Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects,
+            Arc::new(|_| {}),
+        );
         let (admission, mut outbound) = connect(&integration, Vec::new());
 
         integration
@@ -1716,8 +1772,12 @@ mod tests {
             .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
-        let integration =
-            PhotoshopIntegration::new("runtime-1".to_owned(), projects.clone(), Arc::new(|_| {}));
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects.clone(),
+            Arc::new(|_| {}),
+        );
         let (admission, mut outbound) = connect(
             &integration,
             vec![PhotoshopDocumentView {
@@ -1806,10 +1866,89 @@ mod tests {
     }
 
     #[test]
+    fn product_update_rejects_new_photoshop_transfers_and_drains_the_admitted_transfer() {
+        let project = TemporaryDirectory::new("product-update-project");
+        let home = TemporaryDirectory::new("product-update-home");
+        let projects = registry(home.as_ref());
+        let opened = projects
+            .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+            .unwrap();
+        let summary = opened.session.summary().unwrap();
+        let runtime_state = ready_runtime_state();
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            Arc::clone(&runtime_state),
+            projects,
+            Arc::new(|_| {}),
+        );
+        let (admitted, mut admitted_outbound) = connect(&integration, Vec::new());
+        let (rejected, _rejected_outbound) = connect(&integration, Vec::new());
+        integration
+            .handle_message(
+                &admitted.plugin_session_id,
+                PluginPhotoshopMessage::ExportStart {
+                    command_id: "admitted-export".to_owned(),
+                    project_id: summary.project_id.clone(),
+                    project_revision: summary.project_revision,
+                    directory: String::new(),
+                    items: vec![PhotoshopExportItem {
+                        item_id: "one".to_owned(),
+                        source_name: "Layer".to_owned(),
+                    }],
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            admitted_outbound.try_recv().unwrap(),
+            RuntimePhotoshopMessage::ExportReady { command_id }
+                if command_id == "admitted-export"
+        ));
+
+        let (committed_sender, committed_receiver) = std_mpsc::channel();
+        assert!(runtime_state.request_product_update(
+            &Uuid::new_v4().to_string(),
+            Box::new(|| {}),
+            Box::new(move || {
+                committed_sender.send(()).unwrap();
+                Ok(())
+            }),
+            Box::new(|_| {}),
+        ));
+        assert!(
+            committed_receiver
+                .recv_timeout(Duration::from_millis(50))
+                .is_err()
+        );
+
+        let error = integration
+            .handle_message(
+                &rejected.plugin_session_id,
+                PluginPhotoshopMessage::ExportStart {
+                    command_id: "rejected-export".to_owned(),
+                    project_id: summary.project_id,
+                    project_revision: summary.project_revision,
+                    directory: String::new(),
+                    items: vec![PhotoshopExportItem {
+                        item_id: "one".to_owned(),
+                        source_name: "Layer".to_owned(),
+                    }],
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.code(), PhotoshopErrorCode::Unavailable);
+
+        integration.disconnect(&admitted.plugin_session_id);
+        committed_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+    }
+
+    #[test]
     fn document_snapshots_replace_atomically_and_reconnects_are_fresh() {
         let home = TemporaryDirectory::new("sessions-home");
         let integration = PhotoshopIntegration::new(
             "runtime-1".to_owned(),
+            ready_runtime_state(),
             registry(home.as_ref()),
             Arc::new(|_| {}),
         );

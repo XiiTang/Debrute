@@ -111,6 +111,43 @@ impl NativeUpdatePlatform {
             &self.stable_runtime_entrypoint,
         )
     }
+
+    /// Launches the registered Desktop with the one native Product-update
+    /// failure surface. The Desktop reads the persisted failure through the
+    /// bundled Runtime probe before showing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductCommitError`] if the Desktop process cannot be started.
+    pub fn launch_update_failure(&self, transaction_id: &str) -> Result<(), ProductCommitError> {
+        launch_product_update_failure(&self.desktop, transaction_id)
+    }
+}
+
+/// Launches the registered Desktop's native Product-update failure surface.
+///
+/// # Errors
+///
+/// Returns [`ProductCommitError`] if the Desktop process cannot be started.
+pub fn launch_product_update_failure(
+    desktop: &DesktopHostRegistration,
+    transaction_id: &str,
+) -> Result<(), ProductCommitError> {
+    let mut command = Command::new(&desktop.executable);
+    command
+        .args(&desktop.arguments)
+        .arg("--product-update-failure")
+        .arg(transaction_id)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| {
+            ProductCommitError::Platform(format!(
+                "failed to launch Desktop Product-update failure surface: {error}"
+            ))
+        })
 }
 
 impl sealed::Sealed for NativeUpdatePlatform {}
@@ -243,7 +280,9 @@ fn launch_target_runtime_update(
                 OsStr::new(&launch.product_version),
             ))
             .arg(launch.application()?)
-            .arg("--args");
+            .arg("--args")
+            .arg("--stable-runtime-entrypoint")
+            .arg(&launch.stable_runtime_entrypoint);
         command
     };
     #[cfg(target_os = "windows")]

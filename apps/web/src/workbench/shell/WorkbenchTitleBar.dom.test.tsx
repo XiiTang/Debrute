@@ -177,6 +177,42 @@ describe('WorkbenchTitleBar', () => {
       await unmount(root, container);
     }
   });
+
+  it('installs an available Product update directly from the title bar', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onInstallProductUpdate = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <WorkbenchTitleBar
+              state={buildWorkbenchTitleBarState({
+                platform: 'darwin',
+                host: 'desktop', locale: 'en',
+                projectTitle: 'Alpha',
+                recentProjects: []
+              })}
+              nativeWindowState={{ maximized: false }}
+              updateVersion="1.2.3"
+              onCommand={() => undefined}
+              onInstallProductUpdate={onInstallProductUpdate}
+              onWindowCommand={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        requireButton(container, 'Update 1.2.3').click();
+      });
+      expect(onInstallProductUpdate).toHaveBeenCalledOnce();
+    } finally {
+      await unmount(root, container);
+    }
+  });
 });
 
 function requireButton(container: HTMLElement, label: string): HTMLButtonElement {

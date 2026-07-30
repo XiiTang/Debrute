@@ -76,7 +76,10 @@ impl TerminalEmulator {
         let observer_bytes = self.observer_output.process(bytes);
         self.normal_shadow.process(bytes);
         self.parser.process(bytes);
-        self.output_sequence = self.output_sequence.saturating_add(1);
+        self.output_sequence = self
+            .output_sequence
+            .checked_add(1)
+            .expect("Terminal output sequence exhausted");
         let device_response = std::mem::take(&mut self.parser.callbacks_mut().device_response);
         ProcessedTerminalOutput {
             sequence: self.output_sequence,
@@ -352,6 +355,14 @@ mod tests {
                 .get("version")
                 .is_none()
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "Terminal output sequence exhausted")]
+    fn output_sequence_exhaustion_fails_fast() {
+        let mut emulator = TerminalEmulator::new("terminal-1", 2, 12);
+        emulator.output_sequence = u64::MAX;
+        emulator.process_output(b"final output");
     }
 
     #[test]

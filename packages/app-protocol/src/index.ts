@@ -509,18 +509,19 @@ export type ManagedCliDiagnostic =
       logPath?: string;
     };
 
-type ProductUpdateOperation = 'check' | 'apply';
-
 export type ProductUpdateState =
   | {
-      type: 'idle';
+      type: 'unknown';
       currentVersion: string;
-      lastCheckedAt?: string;
-      updateAvailable: false;
     }
   | {
       type: 'checking';
       currentVersion: string;
+    }
+  | {
+      type: 'up_to_date';
+      currentVersion: string;
+      lastCheckedAt?: string;
     }
   | {
       type: 'available';
@@ -530,14 +531,26 @@ export type ProductUpdateState =
       releaseDate?: string;
     }
   | {
-      type: 'installing';
+      type: 'preparing';
       currentVersion: string;
       updateVersion: string;
+      stage: 'closing_new_work';
     }
   | {
-      type: 'error';
+      type: 'committing';
       currentVersion: string;
-      operation: ProductUpdateOperation;
+      updateVersion: string;
+      stage: 'continuing_transaction' | 'installing_and_selecting';
+    }
+  | {
+      type: 'discovery_failed';
+      currentVersion: string;
+      message: string;
+    }
+  | {
+      type: 'install_failed';
+      currentVersion: string;
+      stage: 'preparing' | 'committing';
       message: string;
       updateVersion?: string;
       logPath?: string;

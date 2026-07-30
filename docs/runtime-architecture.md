@@ -65,6 +65,12 @@ same state to begin controlled shutdown. A terminal state cannot be overwritten
 by later startup completion. Operating-system termination ends the process
 directly.
 
+The update-admission state rejects new mutating Workbench and CLI requests and
+new Photoshop transfers while allowing observation and existing Photoshop
+sessions to remain connected. Already admitted mutations and transfers retain
+one Runtime work permit through completion; the forward-only Product commit
+waits until those permits drain.
+
 The tray exposes Runtime status; explicit root Desktop, browser, and Copy URL
 actions; the ordered Recent Project projection under Desktop, Browser, and Copy
 URL submenus; Start at Login; and Product Quit. Both primary and secondary tray
@@ -514,9 +520,11 @@ Desktop, Runtime, CLI, Web assets, official Skills, and model documentation
 share one Product version. Desktop embeds a complete seed for fresh install.
 Runtime validates and materializes immutable versions under
 `~/.debrute/products/versions/<version>`, selects `current`, and publishes stable
-entrypoints. Product Quit accepted before the update commit boundary wins;
-after commit begins, replacement wins. Update continuation does not migrate
-Workbench connections, terminal sessions, or Project Uses. See
+entrypoints. Acceptance of a title-bar or General Settings Install action wins
+over Product Quit, closes new mutating work, and drains admitted short work
+before reversible preparation; the durable transaction is then forward-only.
+Update continuation does not migrate Workbench connections, terminal sessions,
+or Project Uses. See
 [`releases.md`](./releases.md).
 
 ## Executable Authorities

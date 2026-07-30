@@ -5,6 +5,10 @@ export interface DesktopRuntimeLaunchConfiguration {
   entrypoint: string;
   arguments: string[];
   webAssetsDirectory: string;
+  failureProbe?: {
+    entrypoint: string;
+    productRoot: string;
+  };
 }
 
 export function desktopRuntimeLaunchConfiguration(input: {
@@ -43,6 +47,10 @@ export function desktopRuntimeLaunchConfiguration(input: {
       '--desktop-entrypoint', input.executablePath,
       '--desktop-arguments-json', '[]'
     ],
-    webAssetsDirectory: path.join(seed, 'web')
+    webAssetsDirectory: path.join(seed, 'web'),
+    failureProbe: {
+      entrypoint: path.join(seed, runtimeExecutable),
+      productRoot: path.join(debruteHome, 'products')
+    }
   };
 }

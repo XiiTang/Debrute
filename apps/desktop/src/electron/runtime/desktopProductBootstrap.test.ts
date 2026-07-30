@@ -33,7 +33,11 @@ describe('desktopRuntimeLaunchConfiguration', () => {
         '--desktop-entrypoint', '/Applications/Debrute.app/Contents/MacOS/Debrute',
         '--desktop-arguments-json', '[]'
       ],
-      webAssetsDirectory: '/Applications/Debrute.app/Contents/Resources/product-seed/web'
+      webAssetsDirectory: '/Applications/Debrute.app/Contents/Resources/product-seed/web',
+      failureProbe: {
+        entrypoint: '/Applications/Debrute.app/Contents/Resources/product-seed/runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime',
+        productRoot: '/Users/person/.debrute/products'
+      }
     });
   });
 
@@ -45,7 +49,11 @@ describe('desktopRuntimeLaunchConfiguration', () => {
       platform: 'win32'
     })).toMatchObject({
       entrypoint: expect.stringMatching(/product-seed[\\/]runtime[\\/]debrute-runtime\.exe$/),
-      arguments: expect.arrayContaining(['bootstrap', '--product-root', '--bin-directory'])
+      arguments: expect.arrayContaining(['bootstrap', '--product-root', '--bin-directory']),
+      failureProbe: {
+        entrypoint: expect.stringMatching(/product-seed[\\/]runtime[\\/]debrute-runtime\.exe$/),
+        productRoot: expect.stringMatching(/\.debrute[\\/]products$/)
+      }
     });
   });
 

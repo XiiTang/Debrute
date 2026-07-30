@@ -28,6 +28,10 @@ import {
 } from './nativeRecentProjects.js';
 import { connectOrLaunchDesktopRuntime } from './runtime/desktopRuntimeLauncher.js';
 import { desktopRuntimeLaunchConfiguration } from './runtime/desktopProductBootstrap.js';
+import {
+  productUpdateFailureTransaction,
+  readDesktopProductUpdateFailure
+} from './runtime/desktopProductUpdateFailure.js';
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } = electron;
 const projectIconPath = join(__dirname, 'icon.png');
@@ -44,6 +48,7 @@ let appQuitAllowed = false;
 const productQuit = new DesktopProductQuit();
 let runtimeLossReported = false;
 let recentProjects: RecentProject[] = [];
+let productUpdateFailureShown = false;
 const desktopOpenAdmission = createDesktopOpenAdmission<Electron.BrowserWindow>(async (
   intent,
   preferredWindow
@@ -77,6 +82,16 @@ function registerDesktopLifecycle(): void {
   });
 
   app.on('second-instance', (_event, argv) => {
+    try {
+      const transactionId = productUpdateFailureTransaction(argv);
+      if (transactionId) {
+        runDesktopAction(showProductUpdateFailure(transactionId));
+        return;
+      }
+    } catch (error) {
+      reportDesktopError(error);
+      return;
+    }
     runDesktopAction(dispatchDesktopOpen(
       parseDesktopOpenIntent(argv) ?? { kind: 'new-window' }
     ));
@@ -102,6 +117,13 @@ function registerDesktopLifecycle(): void {
 }
 
 async function startDesktop(): Promise<void> {
+  const updateFailureTransaction = productUpdateFailureTransaction(process.argv);
+  if (updateFailureTransaction) {
+    await showProductUpdateFailure(updateFailureTransaction);
+    appQuitAllowed = true;
+    app.quit();
+    return;
+  }
   if (desktopPlatform === 'darwin') {
     const dock = app.dock;
     if (!dock) {
@@ -320,6 +342,7 @@ function runtimeLaunchConfiguration(): {
   entrypoint: string;
   arguments: string[];
   webAssetsDirectory: string;
+  failureProbe?: { entrypoint: string; productRoot: string };
 } {
   return desktopRuntimeLaunchConfiguration({
     ...(process.env.DEBRUTE_RUNTIME_ENTRYPOINT
@@ -333,6 +356,30 @@ function runtimeLaunchConfiguration(): {
     executablePath: process.execPath,
     platform: desktopPlatform
   });
+}
+
+async function showProductUpdateFailure(transactionId: string): Promise<void> {
+  if (productUpdateFailureShown) {
+    return;
+  }
+  productUpdateFailureShown = true;
+  const runtime = runtimeLaunchConfiguration();
+  const logPath = join(app.getPath('logs'), 'debrute-runtime.log');
+  try {
+    if (!runtime.failureProbe) {
+      throw new Error('The installed Desktop does not provide a Product-update failure probe.');
+    }
+    const failure = readDesktopProductUpdateFailure(runtime.failureProbe, transactionId);
+    dialog.showErrorBox(
+      `Debrute ${failure.targetVersion} could not start`,
+      `${failure.message}\n\nStage: ${failure.stage}\nRuntime log: ${logPath}\n\nRestart Debrute after resolving the reported problem; the same update transaction will continue.`
+    );
+  } catch (error) {
+    dialog.showErrorBox(
+      'Debrute update could not complete',
+      `${messageFromUnknown(error)}\n\nRuntime log: ${logPath}\nTransaction: ${transactionId}`
+    );
+  }
 }
 
 function reportDesktopError(error: unknown): void {

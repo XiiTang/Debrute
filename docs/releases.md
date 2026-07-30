@@ -14,9 +14,19 @@ Preview native libraries, and a strict Product manifest. Bootstrap validates
 the seed, installs it under the user's Product root, and retargets stable
 Runtime and CLI entrypoints to that version.
 
-Settings under **General** and `debrute update` both call the same runtime product update capability. A product update keeps Desktop, runtime, CLI, and official Skills on the same product version.
+Runtime discovers Product updates. An available update exposes the same direct
+Install action in the Workbench title bar and **Settings > General**. Either
+button is the user's final authorization: Debrute immediately prepares the
+complete update, installs it, and restarts without a second confirmation. A
+Product update keeps Desktop, Runtime, CLI, Web assets, official Skills, model
+documentation, and declared native workers on the same Product version.
+Photoshop plugins are separately packaged and are not replaced by this Product
+update.
 
-Runtime updates select the Desktop asset that matches the current platform and architecture from the release asset contract below. If a newer release does not contain a matching Desktop asset, Debrute reports an update error instead of treating the product as up to date.
+Runtime updates select the Desktop asset that matches the current platform and
+architecture from the release asset contract below. If a newer release does
+not contain a matching Desktop asset, Debrute reports an update error instead
+of treating the Product as up to date.
 
 ## Product Assembly And Materialization
 
@@ -61,13 +71,20 @@ decision is recorded in
 
 ## Update Lifecycle
 
-The General Settings page reads runtime product state, explicitly checks for an
-update, and applies an available update. `debrute update` calls the same apply
-operation; when no release is cached, apply performs a check first. Debrute does
-not use Electron `autoUpdater`, updater YAML/blockmap files, release channels,
-background polling, or a second Desktop-only update service.
+Packaged Runtime performs one discovery check after becoming Ready and schedules
+the next check at a fixed 24-hour interval through its existing supervision
+loop. Each due check uses one bounded, short-lived worker; there is no permanent
+updater thread. Transient automatic discovery failures preserve the previous
+state without surfacing an error, while signature, manifest, and release-contract
+failures remain visible. Manual checks report all failures. Source-development
+Runtime has no Product update service.
 
-The runtime reads GitHub's latest-release response only to locate the named
+The title bar and General Settings read the same Runtime-owned Product state and
+call the same apply operation. The CLI has no Product update command. Debrute
+does not use Electron `autoUpdater`, updater YAML/blockmap files, release
+channels, or a second Desktop-owned discovery/update service.
+
+Runtime reads GitHub's latest-release response only to locate the named
 manifest and detached signature. It enforces small download limits, verifies the
 exact manifest bytes with the compiled Ed25519 public key, rejects unsupported
 fields and duplicate targets, then accepts only the fixed Debrute GitHub URL and
@@ -88,11 +105,16 @@ installer descriptor restoration, and DMG detach are reported together; once a
 mount is known, detach is attempted exactly once even when installation or
 descriptor restoration failed.
 
-Runtime stages and validates both the matching Desktop installer and complete
-Product archive. Product Quit accepted before the
-durable update commit boundary wins; after commit begins, replacement wins.
-Runtime installs Desktop, advances `current`, and starts the exact target
-Runtime without asking Workbenches for unload decisions or migrating live
+Acceptance of either GUI Install action immediately places
+Runtime in `Preparing`: Product replacement wins over a concurrent Product Quit,
+new mutating Workbench and CLI requests and new Photoshop transfers are rejected,
+already admitted mutations and Photoshop transfers drain, and
+observation/progress connections may remain open. Runtime
+then stages and validates both the matching Desktop installer and complete
+Product archive. A failure before the durable transaction
+returns Runtime to Ready; after the durable transaction begins, the update is
+forward-only. Runtime installs Desktop, advances `current`, and starts the exact
+target Runtime without asking Workbenches for unload decisions or migrating live
 connections, terminals, or Project Uses. The running Runtime commit path and
 installed-Desktop pending recovery use one target-Runtime update launch
 contract containing the verified target executable, selected Product version
@@ -102,17 +124,28 @@ the exact verified target binary. Ordinary first launch is not routed through
 this update handoff. A missing input or native launch error fails explicitly;
 neither update caller assembles a partial command, chooses another entrypoint,
 or retries through the ordinary launch path. The target Runtime waits for the
-old Control owner to exit, reports Ready, finalizes stable entrypoints and
-official Skills, cleans the old version, and restores only the initiating
-Desktop, browser, or CLI surface. No cross-platform replacement
-helper, automatic update retry, or background polling is used. A crash leaves
-one forward-only pending transaction that the target Runtime or installed
-Desktop seed can continue. If native
+old Control owner to exit, reports Ready, and finalizes stable entrypoints and
+official Skills. It durably records `RuntimeReady` before attempting the
+initiating Desktop/browser continuation or old-version cleanup. Those
+post-Ready conveniences cannot revoke Ready; cleanup remains retryable on the
+next launch. No cross-platform replacement helper or automatic install retry is
+used. A crash leaves one forward-only pending transaction that the target
+Runtime or installed Desktop seed can continue. If native
 Desktop installation fails before its durable boundary, the still-current
 Runtime exposes an explicit apply error and only a new user-initiated Apply or
-`debrute update` continues that same signed transaction; bootstrap does not
-retry it automatically. Update failures remain explicit runtime product error
-states and do not silently report the product as current.
+Install action continues that same signed transaction; bootstrap does not retry
+that reversible phase automatically. Update failures remain explicit Runtime
+Product states and do not silently report the Product as current.
+
+Once replacement is forward-only, Runtime persists the first failure against
+the exact transaction before launching a Desktop-native failure surface. The
+installed Desktop asks its bundled Runtime to read that closed record and shows
+the target version, failure stage, message, Runtime log path, and retry guidance.
+This surface does not depend on Workbench HTTP or the target Runtime reaching
+Ready, so it remains available after the GUI connection has disappeared. A
+release gate must still validate this real packaged Desktop handoff on macOS and
+Windows; if the operating system cannot launch Desktop at all, no in-product UI
+can be guaranteed.
 
 After the target Runtime reports Ready, it durably claims the initiating-surface
 continuation before opening Desktop or a browser page. Recovery therefore does

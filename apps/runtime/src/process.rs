@@ -333,15 +333,24 @@ impl BoundedProcessSupervisor {
             if state.waiters >= MAX_PROCESS_ADMISSION_WAITERS {
                 return Err(ProcessErrorKind::Backpressure);
             }
-            state.waiters += 1;
+            state.waiters = state
+                .waiters
+                .checked_add(1)
+                .expect("process waiter count overflow");
             let deadline = Instant::now() + request_timeout.min(MAX_PROCESS_ADMISSION_WAIT);
             while state.active >= self.capacity {
                 if cancellation.is_cancelled() {
-                    state.waiters = state.waiters.saturating_sub(1);
+                    state.waiters = state
+                        .waiters
+                        .checked_sub(1)
+                        .expect("process waiter count underflow");
                     return Err(ProcessErrorKind::Cancelled);
                 }
                 if Instant::now() >= deadline {
-                    state.waiters = state.waiters.saturating_sub(1);
+                    state.waiters = state
+                        .waiters
+                        .checked_sub(1)
+                        .expect("process waiter count underflow");
                     return Err(ProcessErrorKind::Backpressure);
                 }
                 let (next, _) = self
@@ -350,12 +359,18 @@ impl BoundedProcessSupervisor {
                     .expect("process supervisor wait lock poisoned");
                 state = next;
             }
-            state.waiters = state.waiters.saturating_sub(1);
+            state.waiters = state
+                .waiters
+                .checked_sub(1)
+                .expect("process waiter count underflow");
         }
         if cancellation.is_cancelled() {
             return Err(ProcessErrorKind::Cancelled);
         }
-        state.active += 1;
+        state.active = state
+            .active
+            .checked_add(1)
+            .expect("active process permit count overflow");
         Ok(ProcessPermit { supervisor: self })
     }
 }
@@ -371,7 +386,10 @@ impl Drop for ProcessPermit<'_> {
             .state
             .lock()
             .expect("process supervisor lock poisoned");
-        state.active = state.active.saturating_sub(1);
+        state.active = state
+            .active
+            .checked_sub(1)
+            .expect("active process permit count underflow");
         self.supervisor.available.notify_one();
     }
 }
@@ -774,6 +792,15 @@ mod tests {
         .unwrap();
         assert_eq!(result, Some(ProcessErrorKind::Backpressure));
         drop(permit);
+    }
+
+    #[test]
+    #[should_panic(expected = "active process permit count underflow")]
+    fn extra_process_permit_release_fails_fast() {
+        let supervisor = BoundedProcessSupervisor::new(1);
+        drop(ProcessPermit {
+            supervisor: &supervisor,
+        });
     }
 }
 

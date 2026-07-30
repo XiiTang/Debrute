@@ -9,8 +9,8 @@ mod store;
 
 pub use commit::{
     CommitPhase, InstalledDesktopIdentity, PendingCommit, ProductCommitCoordinator,
-    ProductCommitError, ProductIdentity, ResumeIntent, ResumeTarget, RunningProductIdentity,
-    UpdatePlatformAdapter,
+    ProductCommitError, ProductIdentity, ProductUpdateFailure, ProductUpdateFailureStage,
+    ResumeIntent, ResumeTarget, RunningProductIdentity, UpdatePlatformAdapter,
 };
 pub use manifest::{
     ProductEntrypoints, ProductManifest, ProductManifestError, ProductManifestFile,
@@ -18,7 +18,7 @@ pub use manifest::{
     StagedDesktopAsset, StagedProductArchive, TrustedReleaseAsset, TrustedReleaseManifest,
     verify_official_signed_release_manifest,
 };
-pub use platform::NativeUpdatePlatform;
+pub use platform::{NativeUpdatePlatform, launch_product_update_failure};
 pub use release::{GitHubProductReleaseSource, ProductReleaseError, ProductReleaseSource};
 pub use service::RuntimeProductService;
 pub use store::{

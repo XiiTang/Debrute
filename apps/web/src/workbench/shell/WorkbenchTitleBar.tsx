@@ -16,14 +16,18 @@ type WorkbenchMenuCommandItem = Extract<WorkbenchMenuItem, { kind: 'command' }>;
 export interface WorkbenchTitleBarProps {
   state: WorkbenchTitleBarState;
   nativeWindowState: { maximized: boolean } | undefined;
+  updateVersion?: string;
   onCommand(item: WorkbenchMenuCommandItem): void;
+  onInstallProductUpdate?(): void;
   onWindowCommand(command: 'minimize' | 'toggle-maximize' | 'close'): void;
 }
 
 export function WorkbenchTitleBar({
   state,
   nativeWindowState,
+  updateVersion,
   onCommand,
+  onInstallProductUpdate,
   onWindowCommand
 }: WorkbenchTitleBarProps): React.ReactElement {
   const i18n = useI18n();
@@ -120,6 +124,16 @@ export function WorkbenchTitleBar({
         <div className="workbench-titlebar__title" title={state.title}>{state.title}</div>
       </div>
       <div className="workbench-titlebar__right">
+        {updateVersion && onInstallProductUpdate ? (
+          <button
+            type="button"
+            className="workbench-titlebar__update-button"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            onClick={onInstallProductUpdate}
+          >
+            {i18n.t('shell.titleBar.installUpdate', { version: updateVersion })}
+          </button>
+        ) : null}
         {state.presentation.showWindowControls ? (
           <div className="workbench-titlebar__window-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <IconButton variant="titlebar" size="window" label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus />} onClick={() => onWindowCommand('minimize')} />

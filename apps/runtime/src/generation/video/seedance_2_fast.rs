@@ -112,7 +112,12 @@ fn request_body(context: &mut ExecutionContext<'_>) -> Result<Value, GenerationE
     let intent = arguments
         .remove("intent")
         .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_else(|| "generate".to_owned());
+        .ok_or_else(|| {
+            GenerationError::new(
+                "generation_argument_invalid",
+                "doubao-seedance-2-0-fast-260128 requires a materialized string intent.",
+            )
+        })?;
     let references = arguments
         .remove("references")
         .map(|value| {

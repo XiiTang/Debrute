@@ -19,10 +19,11 @@ fn rust_cli_local_commands_use_the_stable_agent_protocol() {
         .expect("CLI should run");
     assert!(commands.status.success());
     let stdout = String::from_utf8(commands.stdout).unwrap();
-    assert!(stdout.starts_with("debrute ok cmd=commands\ncommand name=update"));
+    assert!(stdout.starts_with("debrute ok cmd=commands\ncommand name=runtime.status"));
+    assert!(!stdout.contains("command name=update"));
     assert!(stdout.contains("command name=request.single"));
     assert!(stdout.contains("command name=operation.wait"));
-    assert!(stdout.ends_with("count=35\n"));
+    assert!(stdout.ends_with("count=34\n"));
 }
 
 #[test]

@@ -28,6 +28,37 @@ pub enum CommitPhase {
     RuntimeReady,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductUpdateFailureStage {
+    Committing,
+    RuntimeReady,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProductUpdateFailure {
+    pub transaction_id: String,
+    pub target_version: String,
+    pub stage: ProductUpdateFailureStage,
+    pub message: String,
+}
+
+impl ProductUpdateFailure {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let transaction_id = Uuid::parse_str(&self.transaction_id)
+            .map_err(|_| "transactionId must be a canonical UUID".to_owned())?;
+        if transaction_id.hyphenated().to_string() != self.transaction_id {
+            return Err("transactionId must be a canonical UUID".to_owned());
+        }
+        validate_release_version(&self.target_version).map_err(|error| error.to_string())?;
+        if self.message.trim().is_empty() || self.message.len() > 64 * 1024 {
+            return Err("Product update failure message must contain 1 to 65536 bytes".to_owned());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductIdentity {
     product_version: String,
@@ -91,7 +122,6 @@ pub enum RunningProductIdentity {
 pub enum ResumeIntent {
     Desktop { target: ResumeTarget },
     Browser { target: ResumeTarget },
-    Cli,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -511,18 +541,46 @@ impl<P: UpdatePlatformAdapter> ProductCommitCoordinator<P> {
             .launch_runtime(&pending.target_version, entrypoint)
     }
 
+    /// Durably records the first forward-only failure for the current
+    /// transaction. The Desktop failure surface reads this exact record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductCommitError`] if the transaction changed or persistence
+    /// fails.
+    pub fn record_failure(
+        &self,
+        transaction_id: &str,
+        stage: ProductUpdateFailureStage,
+        message: impl Into<String>,
+    ) -> Result<(), ProductCommitError> {
+        let _transaction = self.store.lock_transaction()?;
+        let pending = self.required_pending()?;
+        if pending.transaction_id != transaction_id {
+            return Err(ProductCommitError::PendingCommitChanged);
+        }
+        self.store
+            .write_update_failure_unlocked(&ProductUpdateFailure {
+                transaction_id: transaction_id.to_owned(),
+                target_version: pending.target_version,
+                stage,
+                message: message.into(),
+            })?;
+        Ok(())
+    }
+
     /// Completes the transaction only after the selected target Runtime reports
-    /// Ready, removes the previous product, durably records the Ready cut, and
-    /// idempotently dispatches the fixed initiating-surface continuation before
-    /// removing pending state.
+    /// Ready, durably records the Ready cut, then best-effort dispatches the
+    /// fixed initiating-surface continuation and removes the previous Product.
     ///
     /// # Errors
     ///
     /// Returns [`ProductCommitError`] if the Ready reporter is not the exact
-    /// target, `current` disagrees, cleanup fails, or continuation dispatch
-    /// fails.
+    /// target or `current` disagrees. Once the Ready cut is durable, a resume
+    /// failure cannot block Ready and cleanup remains retryable; neither can
+    /// make the target Runtime stop being Ready.
     pub fn complete_ready(&self) -> Result<(), ProductCommitError> {
-        let (transaction_id, resume_intent) = {
+        let (transaction_id, resume_intent, from_version, target_version) = {
             let _transaction = self.store.lock_transaction()?;
             let mut pending = self.required_pending()?;
             if !matches!(
@@ -561,17 +619,42 @@ impl<P: UpdatePlatformAdapter> ProductCommitCoordinator<P> {
             self.store
                 .validate_version_unlocked(&expected_ready.product_version)?;
             if pending.phase == CommitPhase::CurrentSelected {
-                self.store.remove_version_unlocked(&pending.from_version)?;
                 pending.phase = CommitPhase::RuntimeReady;
                 self.store.write_pending_unlocked(&pending)?;
             }
-            (pending.transaction_id, pending.resume_intent)
+            (
+                pending.transaction_id,
+                pending.resume_intent,
+                pending.from_version,
+                pending.target_version,
+            )
         };
-        self.platform.resume(&transaction_id, &resume_intent)?;
+        if let Err(error) = self.platform.resume(&transaction_id, &resume_intent) {
+            let _ = self.record_failure(
+                &transaction_id,
+                ProductUpdateFailureStage::RuntimeReady,
+                format!(
+                    "Product resumed as Ready, but its initiating surface could not reopen: {error}"
+                ),
+            );
+        }
         let _transaction = self.store.lock_transaction()?;
         let pending = self.required_pending()?;
         if pending.transaction_id != transaction_id || pending.phase != CommitPhase::RuntimeReady {
             return Err(ProductCommitError::PendingCommitChanged);
+        }
+        if let Err(error) = self.store.remove_version_unlocked(&from_version) {
+            let _ = self
+                .store
+                .write_update_failure_unlocked(&ProductUpdateFailure {
+                    transaction_id,
+                    target_version,
+                    stage: ProductUpdateFailureStage::RuntimeReady,
+                    message: format!(
+                        "Product is Ready, but old Product cleanup will be retried: {error}"
+                    ),
+                });
+            return Ok(());
         }
         self.store.clear_pending_unlocked(&pending.target_version)?;
         Ok(())
@@ -636,7 +719,6 @@ fn validate_resume_intent(intent: &ResumeIntent) -> Result<(), String> {
         ResumeIntent::Desktop { target } | ResumeIntent::Browser { target } => {
             validate_resume_target(target)
         }
-        ResumeIntent::Cli => Ok(()),
     }
 }
 

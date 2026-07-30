@@ -1,7 +1,12 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex, MutexGuard, TryLockError},
+    sync::{
+        Arc, Mutex, MutexGuard, TryLockError,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::{Duration, Instant},
 };
 
 use axum::http::StatusCode;
@@ -11,17 +16,19 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    control::RuntimeControlState,
+    control::{ProductUpdateTransitionFailure, RuntimeControlState},
     global::GlobalRuntimeService,
     workbench::{ProductUpdateInitiator, RuntimeHttpServiceError, RuntimeProductHttpService},
 };
 
 use super::{
-    NativeUpdatePlatform, ProductCommitCoordinator, ProductStore, ReleaseArchitecture,
-    ReleaseAssetKind, ReleasePlatform, ResumeIntent, ResumeTarget, TrustedReleaseManifest,
-    extract_product_archive,
+    CommitPhase, NativeUpdatePlatform, ProductCommitCoordinator, ProductStore,
+    ProductUpdateFailureStage, ReleaseArchitecture, ReleaseAssetKind, ReleasePlatform,
+    ResumeIntent, ResumeTarget, TrustedReleaseManifest, extract_product_archive,
     release::{GitHubProductReleaseSource, ProductReleaseSource},
 };
+
+const AUTOMATIC_DISCOVERY_INTERVAL: Duration = Duration::from_hours(24);
 
 pub struct RuntimeProductService {
     current_version: String,
@@ -35,6 +42,8 @@ pub struct RuntimeProductService {
     source: Arc<dyn ProductReleaseSource>,
     operation: Mutex<()>,
     projection: Arc<Mutex<ProductProjection>>,
+    next_automatic_discovery: Mutex<Instant>,
+    automatic_discovery_in_flight: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -46,7 +55,32 @@ struct ProductProjection {
 enum ProductResumeSource {
     Desktop { target: ResumeTarget },
     Browser { target: ResumeTarget },
-    Cli,
+}
+
+#[derive(Clone, Copy)]
+enum DiscoveryOrigin {
+    Automatic,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PreparingStage {
+    ClosingNewWork,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CommittingStage {
+    ContinuingTransaction,
+    InstallingAndSelecting,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum InstallFailureStage {
+    Preparing,
+    Committing,
 }
 
 fn resume_target(project_id: Option<String>) -> ResumeTarget {
@@ -58,13 +92,15 @@ fn resume_target(project_id: Option<String>) -> ResumeTarget {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum UpdateState {
-    Idle {
+    Unknown {
+        #[serde(rename = "currentVersion")]
+        current_version: String,
+    },
+    UpToDate {
         #[serde(rename = "currentVersion")]
         current_version: String,
         #[serde(rename = "lastCheckedAt", skip_serializing_if = "Option::is_none")]
         last_checked_at: Option<String>,
-        #[serde(rename = "updateAvailable")]
-        update_available: bool,
     },
     Checking {
         #[serde(rename = "currentVersion")]
@@ -80,19 +116,32 @@ enum UpdateState {
         #[serde(rename = "releaseDate")]
         release_date: String,
     },
-    Installing {
+    Preparing {
         #[serde(rename = "currentVersion")]
         current_version: String,
         #[serde(rename = "updateVersion")]
         update_version: String,
+        stage: PreparingStage,
     },
-    Error {
+    Committing {
         #[serde(rename = "currentVersion")]
         current_version: String,
-        operation: &'static str,
+        #[serde(rename = "updateVersion")]
+        update_version: String,
+        stage: CommittingStage,
+    },
+    DiscoveryFailed {
+        #[serde(rename = "currentVersion")]
+        current_version: String,
         message: String,
+    },
+    InstallFailed {
+        #[serde(rename = "currentVersion")]
+        current_version: String,
         #[serde(rename = "updateVersion", skip_serializing_if = "Option::is_none")]
         update_version: Option<String>,
+        stage: InstallFailureStage,
+        message: String,
     },
 }
 
@@ -128,17 +177,27 @@ impl RuntimeProductService {
                 error.to_string(),
             )
         })? {
-            Some(pending) => UpdateState::Error {
-                current_version: current_version.clone(),
-                operation: "apply",
-                message: "A previously interrupted Product update requires explicit continuation."
-                    .to_owned(),
-                update_version: Some(pending.target_version),
+            Some(pending) => match pending.phase {
+                CommitPhase::Staged | CommitPhase::DesktopInstalled => UpdateState::InstallFailed {
+                    current_version: current_version.clone(),
+                    stage: InstallFailureStage::Committing,
+                    message:
+                        "A previously interrupted Product update requires explicit continuation."
+                            .to_owned(),
+                    update_version: Some(pending.target_version),
+                },
+                CommitPhase::CurrentSelected => UpdateState::Committing {
+                    current_version: current_version.clone(),
+                    update_version: pending.target_version,
+                    stage: CommittingStage::ContinuingTransaction,
+                },
+                CommitPhase::RuntimeReady => UpdateState::UpToDate {
+                    current_version: current_version.clone(),
+                    last_checked_at: None,
+                },
             },
-            None => UpdateState::Idle {
+            None => UpdateState::Unknown {
                 current_version: current_version.clone(),
-                last_checked_at: None,
-                update_available: false,
             },
         };
         Ok(Self::new(
@@ -183,6 +242,8 @@ impl RuntimeProductService {
             global,
             source,
             operation: Mutex::new(()),
+            next_automatic_discovery: Mutex::new(Instant::now()),
+            automatic_discovery_in_flight: AtomicBool::new(false),
         });
         service.publish_state();
         service
@@ -207,23 +268,29 @@ impl RuntimeProductService {
         state
     }
 
-    fn perform_check(&self) -> Value {
-        {
+    fn perform_check(&self, origin: DiscoveryOrigin) -> Value {
+        let previous = {
             let mut projection = self
                 .projection
                 .lock()
                 .expect("Product projection lock poisoned");
-            projection.available = None;
-            projection.update = UpdateState::Checking {
-                current_version: self.current_version.clone(),
-            };
+            let previous = projection.clone();
+            if matches!(origin, DiscoveryOrigin::Manual) {
+                projection.update = UpdateState::Checking {
+                    current_version: self.current_version.clone(),
+                };
+            }
+            previous
+        };
+        if matches!(origin, DiscoveryOrigin::Manual) {
+            self.publish_state();
         }
-        self.publish_state();
         let result = self.source.latest();
         let mut projection = self
             .projection
             .lock()
             .expect("Product projection lock poisoned");
+        let mut publish = true;
         match result {
             Ok(Some(release)) => {
                 let current = Version::parse(&self.current_version);
@@ -241,12 +308,11 @@ impl RuntimeProductService {
                             self.architecture,
                         );
                         if desktop.is_none() || product.is_none() {
-                            projection.update = UpdateState::Error {
+                            projection.available = None;
+                            projection.update = UpdateState::DiscoveryFailed {
                                 current_version: self.current_version.clone(),
-                                operation: "check",
                                 message: "The release does not contain the complete matching Desktop and Product pair."
                                     .to_owned(),
-                                update_version: Some(release.version().to_owned()),
                             };
                         } else {
                             projection.update = UpdateState::Available {
@@ -259,40 +325,123 @@ impl RuntimeProductService {
                         }
                     }
                     (Ok(_), Ok(_)) => {
-                        projection.update = UpdateState::Idle {
+                        projection.available = None;
+                        projection.update = UpdateState::UpToDate {
                             current_version: self.current_version.clone(),
                             last_checked_at: Some(crate::now_rfc3339()),
-                            update_available: false,
                         };
                     }
                     _ => {
-                        projection.update = UpdateState::Error {
+                        projection.available = None;
+                        projection.update = UpdateState::DiscoveryFailed {
                             current_version: self.current_version.clone(),
-                            operation: "check",
                             message: "Product version comparison failed.".to_owned(),
-                            update_version: Some(release.version().to_owned()),
                         };
                     }
                 }
             }
             Ok(None) => {
-                projection.update = UpdateState::Idle {
+                projection.available = None;
+                projection.update = UpdateState::UpToDate {
                     current_version: self.current_version.clone(),
                     last_checked_at: Some(crate::now_rfc3339()),
-                    update_available: false,
                 };
             }
             Err(error) => {
-                projection.update = UpdateState::Error {
-                    current_version: self.current_version.clone(),
-                    operation: "check",
-                    message: error.to_string(),
-                    update_version: None,
-                };
+                if matches!(origin, DiscoveryOrigin::Automatic) && error.is_transient_discovery() {
+                    *projection = previous;
+                    publish = false;
+                } else {
+                    projection.available = None;
+                    projection.update = UpdateState::DiscoveryFailed {
+                        current_version: self.current_version.clone(),
+                        message: error.to_string(),
+                    };
+                }
             }
         }
         drop(projection);
-        self.publish_state()
+        if publish {
+            self.publish_state()
+        } else {
+            self.product_state()
+        }
+    }
+
+    /// Starts one due automatic discovery worker without retaining an updater thread.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an authoritative Product operation or scheduling lock is poisoned.
+    pub fn poll_automatic_discovery(self: &Arc<Self>) {
+        let now = Instant::now();
+        {
+            let mut next = self
+                .next_automatic_discovery
+                .lock()
+                .expect("Product automatic-discovery schedule lock poisoned");
+            if now < *next
+                || self
+                    .automatic_discovery_in_flight
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_err()
+            {
+                return;
+            }
+            *next = now + AUTOMATIC_DISCOVERY_INTERVAL;
+        }
+        let service = Arc::clone(self);
+        if thread::Builder::new()
+            .name("debrute-product-discovery".to_owned())
+            .spawn(move || {
+                let _operation = service
+                    .operation
+                    .lock()
+                    .expect("Product operation lock poisoned");
+                if service.reject_active_install().is_ok() {
+                    service.perform_check(DiscoveryOrigin::Automatic);
+                }
+                service
+                    .automatic_discovery_in_flight
+                    .store(false, Ordering::Release);
+            })
+            .is_err()
+        {
+            self.automatic_discovery_in_flight
+                .store(false, Ordering::Release);
+        }
+    }
+
+    /// Publishes the selected startup Product as Ready after durable completion.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the authoritative Product projection lock is poisoned.
+    pub fn mark_startup_ready(&self) {
+        let mut projection = self
+            .projection
+            .lock()
+            .expect("Product projection lock poisoned");
+        projection.available = None;
+        projection.update = UpdateState::UpToDate {
+            current_version: self.current_version.clone(),
+            last_checked_at: None,
+        };
+        drop(projection);
+        self.publish_state();
+    }
+
+    /// Publishes a retryable target-Runtime finalization failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the authoritative Product projection lock is poisoned.
+    pub fn mark_startup_failure(&self, update_version: String, message: String) {
+        self.set_install_failure(
+            InstallFailureStage::Committing,
+            message,
+            Some(update_version),
+        );
     }
 
     fn stage_available(
@@ -353,7 +502,6 @@ impl RuntimeProductService {
 
     fn resolve_resume_source(initiator: ProductUpdateInitiator) -> ProductResumeSource {
         match initiator {
-            ProductUpdateInitiator::Cli => ProductResumeSource::Cli,
             ProductUpdateInitiator::Desktop { project_id } => ProductResumeSource::Desktop {
                 target: resume_target(project_id),
             },
@@ -365,19 +513,23 @@ impl RuntimeProductService {
 
     fn resume_intent(source: ProductResumeSource) -> ResumeIntent {
         match source {
-            ProductResumeSource::Cli => ResumeIntent::Cli,
             ProductResumeSource::Desktop { target } => ResumeIntent::Desktop { target },
             ProductResumeSource::Browser { target } => ResumeIntent::Browser { target },
         }
     }
 
-    fn set_apply_error(&self, message: String, update_version: Option<String>) -> Value {
+    fn set_install_failure(
+        &self,
+        stage: InstallFailureStage,
+        message: String,
+        update_version: Option<String>,
+    ) -> Value {
         self.projection
             .lock()
             .expect("Product projection lock poisoned")
-            .update = UpdateState::Error {
+            .update = UpdateState::InstallFailed {
             current_version: self.current_version.clone(),
-            operation: "apply",
+            stage,
             message,
             update_version,
         };
@@ -390,7 +542,7 @@ impl RuntimeProductService {
                 .lock()
                 .expect("Product projection lock poisoned")
                 .update,
-            UpdateState::Installing { .. }
+            UpdateState::Preparing { .. } | UpdateState::Committing { .. }
         ) {
             Err(RuntimeHttpServiceError::new(
                 StatusCode::CONFLICT,
@@ -415,19 +567,13 @@ impl RuntimeProductService {
     }
 
     fn start_transition(
-        &self,
+        self: &Arc<Self>,
         target_version: String,
-        commit: Box<dyn FnOnce() -> Result<(), String> + Send>,
+        transition: Box<dyn FnOnce() -> Result<(), ProductUpdateTransitionFailure> + Send>,
     ) -> Result<Value, RuntimeHttpServiceError> {
-        self.projection
-            .lock()
-            .expect("Product projection lock poisoned")
-            .update = UpdateState::Installing {
-            current_version: self.current_version.clone(),
-            update_version: target_version.clone(),
-        };
-        self.publish_state();
         let transition_id = Uuid::new_v4().to_string();
+        let accepted_service = Arc::clone(self);
+        let accepted_update_version = target_version.clone();
         let global = Arc::clone(&self.global);
         let cancel_projection = Arc::clone(&self.projection);
         let cancel_current_version = self.current_version.clone();
@@ -436,18 +582,36 @@ impl RuntimeProductService {
         let cancel_update_version = target_version.clone();
         let accepted = self.runtime.request_product_update(
             &transition_id,
-            commit,
-            Box::new(move |message| {
-                cancel_projection
+            Box::new(move || {
+                accepted_service
+                    .projection
                     .lock()
                     .expect("Product projection lock poisoned")
-                    .update = UpdateState::Error {
+                    .update = UpdateState::Preparing {
+                    current_version: accepted_service.current_version.clone(),
+                    update_version: accepted_update_version,
+                    stage: PreparingStage::ClosingNewWork,
+                };
+                accepted_service.publish_state();
+            }),
+            transition,
+            Box::new(move |message| {
+                let mut projection = cancel_projection
+                    .lock()
+                    .expect("Product projection lock poisoned");
+                let stage = if matches!(projection.update, UpdateState::Committing { .. }) {
+                    InstallFailureStage::Committing
+                } else {
+                    InstallFailureStage::Preparing
+                };
+                projection.update = UpdateState::InstallFailed {
                     current_version: cancel_current_version.clone(),
-                    operation: "apply",
                     message: message.to_owned(),
                     update_version: Some(cancel_update_version.clone()),
+                    stage,
                 };
-                let state = product_state_value(
+                drop(projection);
+                let published_state = product_state_value(
                     &cancel_current_version,
                     cancel_platform,
                     &cancel_debrute_home,
@@ -456,11 +620,12 @@ impl RuntimeProductService {
                         .expect("Product projection lock poisoned")
                         .update,
                 );
-                global.publish_product_changed(state);
+                global.publish_product_changed(published_state);
             }),
         );
         if !accepted {
-            self.set_apply_error(
+            self.set_install_failure(
+                InstallFailureStage::Preparing,
                 "Runtime cannot enter the Product update transition.".to_owned(),
                 Some(target_version),
             );
@@ -472,6 +637,32 @@ impl RuntimeProductService {
         }
         Ok(json!({ "state": self.product_state() }))
     }
+
+    fn committing_failure(
+        &self,
+        coordinator: &ProductCommitCoordinator<NativeUpdatePlatform>,
+        transaction_id: &str,
+        error: impl std::fmt::Display,
+    ) -> ProductUpdateTransitionFailure {
+        let mut message = error.to_string();
+        match coordinator.record_failure(
+            transaction_id,
+            ProductUpdateFailureStage::Committing,
+            message.clone(),
+        ) {
+            Ok(()) => {
+                if let Err(launch_error) = self.native.launch_update_failure(transaction_id) {
+                    message.push_str(" Desktop failure surface could not be launched: ");
+                    message.push_str(&launch_error.to_string());
+                }
+            }
+            Err(record_error) => {
+                message.push_str(" Failure persistence also failed: ");
+                message.push_str(&record_error.to_string());
+            }
+        }
+        ProductUpdateTransitionFailure::committing(message)
+    }
 }
 
 impl RuntimeProductHttpService for RuntimeProductService {
@@ -482,12 +673,12 @@ impl RuntimeProductHttpService for RuntimeProductService {
     fn check(&self) -> Result<Value, RuntimeHttpServiceError> {
         let _operation = self.lock_operation()?;
         self.reject_active_install()?;
-        Ok(self.perform_check())
+        Ok(self.perform_check(DiscoveryOrigin::Manual))
     }
 
     #[allow(clippy::too_many_lines)]
     fn apply(
-        &self,
+        self: Arc<Self>,
         input: &Value,
         initiator: ProductUpdateInitiator,
     ) -> Result<Value, RuntimeHttpServiceError> {
@@ -499,14 +690,31 @@ impl RuntimeProductHttpService for RuntimeProductService {
             .pending()
             .map_err(|error| update_error(&error.to_string()))?
         {
+            if pending.phase == CommitPhase::RuntimeReady {
+                return Ok(json!({ "state": self.product_state() }));
+            }
             let store = Arc::clone(&self.store);
             let native = self.native.clone();
+            let service = Arc::clone(&self);
+            let target_version = pending.target_version.clone();
+            let transaction_id = pending.transaction_id.clone();
             return self.start_transition(
-                pending.target_version,
+                target_version.clone(),
                 Box::new(move || {
-                    ProductCommitCoordinator::new(store, native)
-                        .continue_commit()
-                        .map_err(|error| error.to_string())
+                    service
+                        .projection
+                        .lock()
+                        .expect("Product projection lock poisoned")
+                        .update = UpdateState::Committing {
+                        current_version: service.current_version.clone(),
+                        update_version: target_version,
+                        stage: CommittingStage::ContinuingTransaction,
+                    };
+                    service.publish_state();
+                    let coordinator = ProductCommitCoordinator::new(store, native);
+                    coordinator.continue_commit().map_err(|error| {
+                        service.committing_failure(&coordinator, &transaction_id, error)
+                    })
                 }),
             );
         }
@@ -518,7 +726,7 @@ impl RuntimeProductHttpService for RuntimeProductService {
             UpdateState::Available { .. }
         );
         if needs_check {
-            self.perform_check();
+            self.perform_check(DiscoveryOrigin::Manual);
         }
         let release = self
             .projection
@@ -531,32 +739,36 @@ impl RuntimeProductHttpService for RuntimeProductService {
         };
         let resume_source = Self::resolve_resume_source(initiator);
         let target_version = release.version().to_owned();
-        self.projection
-            .lock()
-            .expect("Product projection lock poisoned")
-            .update = UpdateState::Installing {
-            current_version: self.current_version.clone(),
-            update_version: target_version.clone(),
-        };
-        self.publish_state();
-        let (materialized, desktop_asset) = match self.stage_available(&release) {
-            Ok(staged) => staged,
-            Err(error) => {
-                let state = self.set_apply_error(error.message, Some(target_version));
-                return Ok(json!({ "state": state }));
-            }
-        };
         let resume_intent = Self::resume_intent(resume_source);
-        let store = Arc::clone(&self.store);
-        let native = self.native.clone();
+        let service = Arc::clone(&self);
         self.start_transition(
             target_version,
             Box::new(move || {
-                let coordinator = ProductCommitCoordinator::new(store, native);
-                coordinator
+                let (materialized, desktop_asset) = service
+                    .stage_available(&release)
+                    .map_err(|error| ProductUpdateTransitionFailure::preparing(error.message))?;
+                let coordinator = ProductCommitCoordinator::new(
+                    Arc::clone(&service.store),
+                    service.native.clone(),
+                );
+                let transaction_id = coordinator
                     .begin(&materialized, desktop_asset, resume_intent)
-                    .and_then(|_| coordinator.continue_commit())
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| {
+                        ProductUpdateTransitionFailure::preparing(error.to_string())
+                    })?;
+                service
+                    .projection
+                    .lock()
+                    .expect("Product projection lock poisoned")
+                    .update = UpdateState::Committing {
+                    current_version: service.current_version.clone(),
+                    update_version: release.version().to_owned(),
+                    stage: CommittingStage::InstallingAndSelecting,
+                };
+                service.publish_state();
+                coordinator.continue_commit().map_err(|error| {
+                    service.committing_failure(&coordinator, &transaction_id, error)
+                })
             }),
         )
     }
@@ -651,5 +863,25 @@ mod tests {
             let source = RuntimeProductService::resolve_resume_source(initiator);
             assert_eq!(RuntimeProductService::resume_intent(source), expected);
         }
+    }
+
+    #[test]
+    fn update_transition_stages_serialize_to_the_closed_product_contract() {
+        let preparing = serde_json::to_value(UpdateState::Preparing {
+            current_version: "0.2.0".to_owned(),
+            update_version: "0.3.0".to_owned(),
+            stage: PreparingStage::ClosingNewWork,
+        })
+        .unwrap();
+        let committing = serde_json::to_value(UpdateState::Committing {
+            current_version: "0.2.0".to_owned(),
+            update_version: "0.3.0".to_owned(),
+            stage: CommittingStage::InstallingAndSelecting,
+        })
+        .unwrap();
+        assert_eq!(preparing["type"], "preparing");
+        assert_eq!(preparing["stage"], "closing_new_work");
+        assert_eq!(committing["type"], "committing");
+        assert_eq!(committing["stage"], "installing_and_selecting");
     }
 }

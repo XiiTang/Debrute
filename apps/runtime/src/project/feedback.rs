@@ -371,7 +371,7 @@ pub(crate) fn update_canvas_feedback_document(
                             "Canvas feedback moment item requires momentTimeSeconds.".to_owned(),
                         )
                     })?)?;
-                next_item.moment = Some(moment_ref_for_time(&mut entry, time));
+                next_item.moment = Some(moment_ref_for_time(&mut entry, time)?);
             } else if item.moment_time_seconds.is_some() {
                 return Err(ProjectError::Validation(
                     "Canvas feedback file item cannot include momentTimeSeconds.".to_owned(),
@@ -801,21 +801,24 @@ fn normalized_comment(comment: &str) -> Result<String, ProjectError> {
 fn moment_ref_for_time(
     entry: &mut CanvasFeedbackEntry,
     current_time_seconds: f64,
-) -> CanvasFeedbackMomentRef {
+) -> Result<CanvasFeedbackMomentRef, ProjectError> {
     if let Some(moment) = entry
         .items
         .iter()
         .filter_map(|item| item.moment.as_ref())
         .find(|moment| moment.current_time_seconds.to_bits() == current_time_seconds.to_bits())
     {
-        return moment.clone();
+        return Ok(moment.clone());
     }
+    let next_moment_label = entry.next_moment_label.checked_add(1).ok_or_else(|| {
+        ProjectError::Validation("Canvas feedback moment label is exhausted.".to_owned())
+    })?;
     let moment = CanvasFeedbackMomentRef {
         label: format!("M{}", entry.next_moment_label),
         current_time_seconds,
     };
-    entry.next_moment_label = entry.next_moment_label.saturating_add(1);
-    moment
+    entry.next_moment_label = next_moment_label;
+    Ok(moment)
 }
 
 fn moment_label_number(label: &str) -> Result<u64, ProjectError> {
@@ -961,6 +964,41 @@ mod tests {
             items: Vec::new(),
             updated_at: T0.to_owned(),
         }
+    }
+
+    #[test]
+    fn moment_label_exhaustion_rejects_the_update_without_wrapping() {
+        let mut document = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
+        let mut entry = marked_entry("video/clip.mp4");
+        entry.next_moment_label = u64::MAX;
+        document
+            .entries
+            .insert(entry.project_relative_path.clone(), entry);
+
+        let error = update_canvas_feedback_document(
+            &document,
+            &UpdateCanvasFeedbackEntryInput::AddItem {
+                project_relative_path: "video/clip.mp4".to_owned(),
+                item: NewCanvasFeedbackItem {
+                    id: "final-moment".to_owned(),
+                    created_at: T0.to_owned(),
+                    kind: CanvasFeedbackItemKind::Comment,
+                    scope: CanvasFeedbackScope::Moment,
+                    moment_time_seconds: Some(1.0),
+                    geometry: None,
+                    comment: "exhausted".to_owned(),
+                },
+            },
+            T1.to_owned(),
+        )
+        .expect_err("an exhausted persisted label must reject the update");
+
+        assert_eq!(error.code(), "project_invalid");
+        assert!(error.to_string().contains("moment label is exhausted"));
+        assert_eq!(
+            document.entries["video/clip.mp4"].next_moment_label,
+            u64::MAX
+        );
     }
 
     #[test]

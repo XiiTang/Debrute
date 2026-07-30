@@ -801,6 +801,14 @@ async fn cli_run(State(state): State<WorkbenchRouterState>, request: Request) ->
         Ok(body) => body,
         Err(response) => return response,
     };
+    let _permit = if cli_request_requires_product_work(&body) {
+        let Some(permit) = state.services.runtime_state().begin_product_work() else {
+            return product_work_unavailable_response();
+        };
+        Some(permit)
+    } else {
+        None
+    };
     match state.cli.run(&body) {
         Ok(value) => Json(value).into_response(),
         Err(error) => service_error_response(error),
@@ -811,6 +819,9 @@ async fn cli_model_operation_submit(
     State(state): State<WorkbenchRouterState>,
     request: Request,
 ) -> Response {
+    let Some(_permit) = state.services.runtime_state().begin_product_work() else {
+        return product_work_unavailable_response();
+    };
     const INPUT_LIMIT: u64 = crate::model_operation::MAX_MODEL_OPERATION_INPUT_BYTES as u64;
     let mut parts = match read_multipart_limited(
         request,
@@ -871,6 +882,24 @@ async fn cli_model_operation_submit(
         Ok(value) => Json(value).into_response(),
         Err(error) => service_error_response(error),
     }
+}
+
+fn cli_request_requires_product_work(request: &Value) -> bool {
+    let Some(command) = request.get("command").and_then(Value::as_str) else {
+        return false;
+    };
+    crate::cli::command_specs()
+        .iter()
+        .find(|spec| spec.command == command)
+        .is_some_and(|spec| spec.writes != "none")
+}
+
+fn product_work_unavailable_response() -> Response {
+    error_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "product_update_preparing",
+        "Runtime is preparing a Product update and is not accepting new work.",
+    )
 }
 
 async fn cli_run_stream(
@@ -1111,6 +1140,38 @@ fn one_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<Option<&
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_product_work_admission_follows_the_closed_command_write_contract() {
+        for command in [
+            "runtime.status",
+            "models.video.list",
+            "project.validate",
+            "operation.inspect",
+            "operation.wait",
+        ] {
+            assert!(
+                !cli_request_requires_product_work(&json!({ "command": command })),
+                "read-only command must remain observable: {command}"
+            );
+        }
+        for command in [
+            "project.init",
+            "canvas.create",
+            "operation.cancel",
+            "request.single",
+            "request.batch",
+        ] {
+            assert!(
+                cli_request_requires_product_work(&json!({ "command": command })),
+                "mutating command must participate in Product work drain: {command}"
+            );
+        }
+        assert!(!cli_request_requires_product_work(&json!({
+            "command": "unknown.command"
+        })));
+        assert!(!cli_request_requires_product_work(&json!({})));
+    }
 
     #[test]
     fn project_and_global_events_have_closed_snapshot_first_envelopes() {

@@ -170,22 +170,6 @@ const fn option(
 
 const SPECS: &[CliCommandSpec] = &[
     spec(
-        "update",
-        &["update"],
-        CliCommandPolicy::Run,
-        "runtime",
-        "write",
-        "none",
-        "logs",
-        "no args",
-        "product update record",
-        0,
-        0,
-        None,
-        NO_OPTIONS,
-        &["product_update_unavailable"],
-    ),
-    spec(
         "runtime.status",
         &["runtime", "status"],
         CliCommandPolicy::Observe,

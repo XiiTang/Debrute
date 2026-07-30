@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::{
-    CliCommandPolicy, RuntimeCliService, agent_record, command_errors, command_specs,
-    parse_cli_args, progress_record,
+    CliCommandPolicy, CliProgress, CliResult, RuntimeCliService, agent_record, command_errors,
+    command_specs, parse_cli_args, progress_record,
 };
 
 #[test]
@@ -23,7 +23,6 @@ fn registry_exactly_matches_the_final_cli_matrix() {
     assert_eq!(
         commands,
         vec![
-            "update",
             "runtime.status",
             "runtime.doctor",
             "runtime.stop",
@@ -199,7 +198,8 @@ fn parser_enforces_registered_syntax_shapes() {
     .unwrap_err();
     assert_eq!(missing_name.code(), "missing_argument");
 
-    let unexpected = parse_cli_args(&["update".into(), "extra".into()]).unwrap_err();
+    let unexpected =
+        parse_cli_args(&["runtime".into(), "status".into(), "extra".into()]).unwrap_err();
     assert_eq!(unexpected.code(), "invalid_argument");
 
     let missing_required =
@@ -264,7 +264,7 @@ fn parser_enforces_registered_syntax_shapes() {
 
 #[test]
 fn agent_records_match_the_unversioned_golden_encoding() {
-    let rendered = agent_record(&json!({
+    let rendered = agent_record(&serde_json::from_value::<CliResult>(json!({
         "status": "ok",
         "command": "models.image.list",
         "records": [
@@ -273,7 +273,7 @@ fn agent_records_match_the_unversioned_golden_encoding() {
         ],
         "fields": {"count": 2}
     }))
-    .expect("record should render");
+    .expect("closed result"));
     assert_eq!(
         rendered,
         concat!(
@@ -286,15 +286,14 @@ fn agent_records_match_the_unversioned_golden_encoding() {
     assert_eq!(
         progress_record(
             "request.batch",
-            &json!({
+            &serde_json::from_value::<CliProgress>(json!({
                 "event": "batch_item.settled",
                 "records": [
                     {"name": "batch_item", "fields": {"item_index": 0, "model": "gpt-image-2", "status": "succeeded"}},
                     {"name": "artifact", "fields": {"artifact_index": 0, "role": "primary-image", "project_relative_path": "generated/cover.jpg", "mime_type": "image/jpeg"}}
                 ]
-            })
-        )
-        .expect("progress should render"),
+            })).expect("closed progress")
+        ),
         concat!(
             "debrute progress cmd=request.batch event=batch_item.settled\n",
             "batch_item item_index=0 model=gpt-image-2 status=succeeded\n",
@@ -305,13 +304,15 @@ fn agent_records_match_the_unversioned_golden_encoding() {
 
 #[test]
 fn agent_errors_use_code_and_optional_log_without_a_message_field() {
-    let rendered = agent_record(&json!({
-        "status": "error",
-        "command": "operation.wait",
-        "code": "operation_failed",
-        "log": "missing\u{1b}]52;c;AAAA\u{7}"
-    }))
-    .expect("record should render");
+    let rendered = agent_record(
+        &serde_json::from_value::<CliResult>(json!({
+            "status": "error",
+            "command": "operation.wait",
+            "code": "operation_failed",
+            "log": "missing\u{1b}]52;c;AAAA\u{7}"
+        }))
+        .expect("closed result"),
+    );
     assert_eq!(
         rendered,
         "debrute error cmd=operation.wait code=operation_failed\nlog=\"missing\\u001b]52;c;AAAA\\u0007\""
@@ -330,6 +331,7 @@ fn runtime_observation_reports_the_ready_native_tray_contract() {
                 "options": {}
             }))
             .expect("Runtime observation should run");
+        let result = serde_json::to_value(result).unwrap();
         assert_eq!(result["status"], "ok");
         assert_eq!(result["fields"]["runtime_state"], "ready");
         assert_eq!(result["fields"]["native_tray"], "active");
@@ -347,6 +349,7 @@ fn runtime_cli_service_owns_model_and_project_commands() {
             "options": {}
         }))
         .expect("model command should return a record");
+    let models = serde_json::to_value(models).unwrap();
     assert_eq!(models["status"], "ok");
     assert_eq!(models["command"], "models.image.list");
     assert_eq!(models["fields"]["count"], 0);
@@ -362,6 +365,7 @@ fn runtime_cli_service_owns_model_and_project_commands() {
             "projectRoot": project.to_string_lossy()
         }))
         .expect("Project init should return a record");
+    let initialized = serde_json::to_value(initialized).unwrap();
     assert_eq!(initialized["status"], "ok", "{initialized}");
     assert_eq!(initialized["fields"]["canvases"], 1);
     assert!(project.join(".debrute/project.json").is_file());
@@ -381,6 +385,7 @@ fn project_status_never_initializes_an_uninitialized_directory() {
             "projectRoot": project.to_string_lossy()
         }))
         .expect("Project status business error should return");
+    let status = serde_json::to_value(status).unwrap();
     assert_eq!(status["status"], "error");
     assert_eq!(status["code"], "project_not_found");
     assert!(!project.join(".debrute").exists());
@@ -400,6 +405,7 @@ fn project_validate_completes_the_file_index_before_checking_canvas_map_drift() 
             "projectRoot": project
         }))
         .expect("Project init should return");
+    let initialized = serde_json::to_value(initialized).unwrap();
     assert_eq!(initialized["status"], "ok", "{initialized}");
     fs::create_dir(project.join("nested")).expect("nested fixture should exist");
     fs::write(project.join("nested/asset.txt"), "asset").expect("asset should write");
@@ -418,6 +424,7 @@ fn project_validate_completes_the_file_index_before_checking_canvas_map_drift() 
             "projectRoot": project
         }))
         .expect("Project validation should return");
+    let validated = serde_json::to_value(validated).unwrap();
 
     assert_eq!(validated["status"], "ok", "{validated}");
     assert_eq!(validated["fields"]["warnings"], 1);
@@ -445,6 +452,7 @@ fn model_describe_uses_the_request_command() {
             "options": {}
         }))
         .expect("model describe should return a record");
+    let described = serde_json::to_value(described).unwrap();
     assert_eq!(described["status"], "ok");
     let markdown = described["fields"]["description_markdown"]
         .as_str()
@@ -466,6 +474,7 @@ fn model_operation_submission_is_atomic_before_acceptance() {
             "projectRoot": project,
         }))
         .unwrap();
+    let initialized = serde_json::to_value(initialized).unwrap();
     assert_eq!(initialized["status"], "ok", "{initialized}");
 
     let rejected = fixture
@@ -480,6 +489,7 @@ fn model_operation_submission_is_atomic_before_acceptance() {
             br#"{"model":"missing-model","arguments":{}}"#,
         )
         .unwrap();
+    let rejected = serde_json::to_value(rejected).unwrap();
     assert_eq!(rejected["status"], "error");
     assert_eq!(rejected["code"], "model_unavailable");
 
@@ -496,6 +506,7 @@ fn model_operation_submission_is_atomic_before_acceptance() {
             br#"{"model":"missing-model","arguments":{}}"#,
         )
         .unwrap();
+    let invalid_project = serde_json::to_value(invalid_project).unwrap();
     assert_eq!(invalid_project["status"], "error");
     assert_eq!(invalid_project["code"], "project_invalid");
 
@@ -503,8 +514,8 @@ fn model_operation_submission_is_atomic_before_acceptance() {
         .service
         .run(&json!({"command": "operation.list", "positional": [], "options": {}}))
         .unwrap();
-    assert_eq!(listed["status"], "ok");
-    assert_eq!(listed["records"].as_array().unwrap().len(), 0);
+    assert_eq!(listed.error_code(), None);
+    assert!(listed.records().is_empty());
 }
 
 #[test]
@@ -521,18 +532,6 @@ fn runtime_cli_requires_both_argument_collections() {
         assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "cli_request_invalid");
     }
-}
-
-#[test]
-fn source_runtime_update_reports_product_unavailable() {
-    let fixture = CliFixture::new();
-    let result = fixture
-        .service
-        .run(&json!({"command": "update", "positional": [], "options": {}}))
-        .expect("valid CLI request should produce one record");
-    assert_eq!(result["status"], "error");
-    assert_eq!(result["code"], "product_update_unavailable");
-    assert!(command_errors("update").contains("product_update_unavailable"));
 }
 
 #[tokio::test]
@@ -575,7 +574,6 @@ impl CliFixture {
             services.projects().clone(),
             Arc::clone(services.generated_assets()),
             Arc::clone(services.model_operations()),
-            None,
             None,
         );
         Self {

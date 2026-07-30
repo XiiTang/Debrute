@@ -3,7 +3,7 @@ use std::{
     error::Error,
     fmt,
     io::{self, Read, Write},
-    sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard},
     thread,
     time::{Duration, Instant},
 };
@@ -38,7 +38,36 @@ pub struct RuntimeControlState {
     desktop: DesktopWindowTopology,
     lifecycle: Mutex<RuntimeLifecycle>,
     product_transition: RwLock<()>,
+    active_product_work: Mutex<usize>,
+    product_work_drained: Condvar,
     activation_service: Mutex<Option<Arc<dyn RuntimeActivationService>>>,
+}
+
+pub struct RuntimeWorkPermit {
+    state: Arc<RuntimeControlState>,
+}
+
+pub struct ProductUpdateTransitionFailure {
+    pub message: String,
+    pub reversible: bool,
+}
+
+impl ProductUpdateTransitionFailure {
+    #[must_use]
+    pub fn preparing(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            reversible: true,
+        }
+    }
+
+    #[must_use]
+    pub fn committing(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            reversible: false,
+        }
+    }
 }
 
 pub trait RuntimeActivationService: Send + Sync {
@@ -119,6 +148,8 @@ impl RuntimeControlState {
             desktop: DesktopWindowTopology::new(),
             lifecycle: Mutex::new(RuntimeLifecycle::Starting),
             product_transition: RwLock::new(()),
+            active_product_work: Mutex::new(0),
+            product_work_drained: Condvar::new(),
             activation_service: Mutex::new(None),
         }
     }
@@ -148,6 +179,31 @@ impl RuntimeControlState {
             *self.lock_lifecycle(),
             RuntimeLifecycle::Exiting | RuntimeLifecycle::Replacing(_)
         )
+    }
+
+    #[must_use]
+    /// Admits one unit of Product work only while Runtime has full Ready admission.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an authoritative lock is poisoned or the active-work counter overflows.
+    pub fn begin_product_work(self: &Arc<Self>) -> Option<RuntimeWorkPermit> {
+        let lifecycle = self.lock_lifecycle();
+        if *lifecycle != RuntimeLifecycle::Ready {
+            return None;
+        }
+        let mut active = self
+            .active_product_work
+            .lock()
+            .expect("Runtime product-work lock poisoned");
+        *active = active
+            .checked_add(1)
+            .expect("active Runtime product-work count overflow");
+        drop(active);
+        drop(lifecycle);
+        Some(RuntimeWorkPermit {
+            state: Arc::clone(self),
+        })
     }
 
     /// Replaces the Desktop recent-Project projection when the revision advances.
@@ -307,7 +363,8 @@ impl RuntimeControlState {
     pub fn request_product_update(
         self: &Arc<Self>,
         transaction_id: &str,
-        commit: Box<dyn FnOnce() -> Result<(), String> + Send>,
+        on_accepted: Box<dyn FnOnce() + Send>,
+        commit: Box<dyn FnOnce() -> Result<(), ProductUpdateTransitionFailure> + Send>,
         on_cancel: Box<dyn FnOnce(&str) + Send>,
     ) -> bool {
         let mut lifecycle = self.lock_lifecycle();
@@ -315,12 +372,15 @@ impl RuntimeControlState {
             return false;
         }
         *lifecycle = RuntimeLifecycle::UpdatePreparing(transaction_id.to_owned());
+        drop(lifecycle);
+        on_accepted();
         let state = Arc::clone(self);
         let transaction_id = transaction_id.to_owned();
         if thread::Builder::new()
             .name("debrute-product-update".to_owned())
             .spawn(move || {
                 let transition_guard = state.lock_product_transition();
+                state.wait_for_product_work_to_drain();
                 let lifecycle = state.lock_lifecycle();
                 if !matches!(
                     &*lifecycle,
@@ -334,10 +394,20 @@ impl RuntimeControlState {
                 drop(lifecycle);
                 if let Err(error) = commit() {
                     let mut lifecycle = state.lock_lifecycle();
-                    *lifecycle = RuntimeLifecycle::Ready;
+                    *lifecycle = if error.reversible {
+                        RuntimeLifecycle::Ready
+                    } else {
+                        RuntimeLifecycle::Replacing(transaction_id.clone())
+                    };
                     drop(lifecycle);
                     drop(transition_guard);
-                    on_cancel(&error);
+                    on_cancel(&error.message);
+                    if !error.reversible {
+                        state.broadcast_event_with_flush_budget(
+                            &ControlEvent::ProductReplacing,
+                            Duration::from_millis(250),
+                        );
+                    }
                     return;
                 }
                 let mut lifecycle = state.lock_lifecycle();
@@ -351,6 +421,7 @@ impl RuntimeControlState {
             })
             .is_err()
         {
+            let mut lifecycle = self.lock_lifecycle();
             *lifecycle = RuntimeLifecycle::Ready;
             return false;
         }
@@ -384,13 +455,13 @@ impl RuntimeControlState {
         preferred_desktop_window_key: Option<&str>,
     ) -> Result<ActivationOutcome, ControlErrorCode> {
         let _transition = self.read_product_transition();
-        match self.status() {
-            RuntimeStatus::Starting => return Err(ControlErrorCode::RuntimeStarting),
-            RuntimeStatus::Exiting => return Err(ControlErrorCode::RuntimeExiting),
-            RuntimeStatus::Replacing => {
+        match &*self.lock_lifecycle() {
+            RuntimeLifecycle::Starting => return Err(ControlErrorCode::RuntimeStarting),
+            RuntimeLifecycle::Exiting => return Err(ControlErrorCode::RuntimeExiting),
+            RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
                 return Err(ControlErrorCode::UpdateCommitInProgress);
             }
-            RuntimeStatus::Ready => {}
+            RuntimeLifecycle::Ready => {}
         }
         if matches!(intent, ActivationIntent::EnsureRuntime) {
             return Ok(ActivationOutcome::Ensured);
@@ -406,10 +477,10 @@ impl RuntimeControlState {
         let mut lifecycle = self.lock_lifecycle();
         match &*lifecycle {
             RuntimeLifecycle::Exiting => return QuitAdmission::AlreadyAccepted,
-            RuntimeLifecycle::Replacing(_) => return QuitAdmission::UpdateWon,
-            RuntimeLifecycle::Starting
-            | RuntimeLifecycle::Ready
-            | RuntimeLifecycle::UpdatePreparing(_) => {}
+            RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
+                return QuitAdmission::UpdateWon;
+            }
+            RuntimeLifecycle::Starting | RuntimeLifecycle::Ready => {}
         }
         *lifecycle = RuntimeLifecycle::Exiting;
         QuitAdmission::Started
@@ -786,10 +857,39 @@ impl RuntimeControlState {
             .expect("Product transition lock poisoned")
     }
 
+    fn wait_for_product_work_to_drain(&self) {
+        let mut active = self
+            .active_product_work
+            .lock()
+            .expect("Runtime product-work lock poisoned");
+        while *active != 0 {
+            active = self
+                .product_work_drained
+                .wait(active)
+                .expect("Runtime product-work drain lock poisoned");
+        }
+    }
+
     fn lock_activation_service(&self) -> MutexGuard<'_, Option<Arc<dyn RuntimeActivationService>>> {
         self.activation_service
             .lock()
             .expect("Runtime activation service lock poisoned")
+    }
+}
+
+impl Drop for RuntimeWorkPermit {
+    fn drop(&mut self) {
+        let mut active = self
+            .state
+            .active_product_work
+            .lock()
+            .expect("Runtime product-work lock poisoned");
+        *active = active
+            .checked_sub(1)
+            .expect("active Runtime product-work count underflow");
+        if *active == 0 {
+            self.state.product_work_drained.notify_all();
+        }
     }
 }
 

@@ -472,6 +472,11 @@ function WorkbenchProjectGenerationApp({
   projectBindingLifecycle: ProjectBindingLifecycle;
   isProjectOpening: boolean;
 }): React.ReactElement {
+  const installProductUpdateFromTitleBar = useCallback(() => {
+    void api.applyProductUpdate().catch((error: unknown) => {
+      notify(errorMessage(error));
+    });
+  }, [api, notify]);
   const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
   const hasAcceptedProject = acceptedProject !== undefined;
   const snapshot = acceptedProject?.presentedSnapshot;
@@ -999,6 +1004,12 @@ function WorkbenchProjectGenerationApp({
   if (globalProjection.status === 'uninitialized') {
     throw new Error('Workbench project generation requires the initial Global snapshot.');
   }
+  const productUpdate = globalProjection.product.status === 'ready'
+    ? globalProjection.product.value?.update
+    : undefined;
+  const titleBarUpdateVersion = productUpdate?.type === 'available' || productUpdate?.type === 'install_failed'
+    ? productUpdate.updateVersion
+    : undefined;
   const state: WorkbenchState = {
     snapshot,
     projectId: runtimeProjectId,
@@ -1308,6 +1319,10 @@ function WorkbenchProjectGenerationApp({
             <WorkbenchTitleBar
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
+              {...(titleBarUpdateVersion ? {
+                updateVersion: titleBarUpdateVersion,
+                onInstallProductUpdate: installProductUpdateFromTitleBar
+              } : {})}
               onCommand={handleTitleBarCommand}
               onWindowCommand={handleTitleBarWindowCommand}
             />
@@ -1330,12 +1345,41 @@ function WorkbenchProjectGenerationApp({
             <WorkbenchTitleBar
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
+              {...(titleBarUpdateVersion ? {
+                updateVersion: titleBarUpdateVersion,
+                onInstallProductUpdate: installProductUpdateFromTitleBar
+              } : {})}
               onCommand={handleTitleBarCommand}
               onWindowCommand={handleTitleBarWindowCommand}
             />
             <div className="boot-screen boot-screen--with-titlebar">
               <Loader2 className="spin" size={22} />
               <span>{i18n.t('shell.boot.openingProject')}</span>
+            </div>
+          </div>
+        </WorkbenchIconProvider>
+      </I18nProvider>
+    );
+  }
+
+  if (productUpdate?.type === 'preparing' || productUpdate?.type === 'committing') {
+    const message = productUpdate.type === 'preparing'
+      ? i18n.t('shell.productUpdate.preparing')
+      : i18n.t('shell.productUpdate.committing');
+    return (
+      <I18nProvider locale={presentationController.locale}>
+        <WorkbenchIconProvider>
+          <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
+            <WorkbenchTitleBar
+              state={effectiveTitleBarState}
+              nativeWindowState={nativeWindowState}
+              onCommand={handleTitleBarCommand}
+              onWindowCommand={handleTitleBarWindowCommand}
+            />
+            <div className="boot-screen boot-screen--with-titlebar" role="status" aria-live="polite" data-testid="workbench-product-update-blocking">
+              <Loader2 className="spin" size={22} />
+              <strong>{message}</strong>
+              <span>{i18n.t('shell.productUpdate.doNotClose')}</span>
             </div>
           </div>
         </WorkbenchIconProvider>
@@ -1401,6 +1445,10 @@ function WorkbenchProjectGenerationApp({
           <WorkbenchTitleBar
             state={effectiveTitleBarState}
             nativeWindowState={nativeWindowState}
+            {...(titleBarUpdateVersion ? {
+              updateVersion: titleBarUpdateVersion,
+              onInstallProductUpdate: installProductUpdateFromTitleBar
+            } : {})}
             onCommand={handleTitleBarCommand}
             onWindowCommand={handleTitleBarWindowCommand}
           />

@@ -436,7 +436,6 @@ fn desktop_project_activation_reuses_its_true_empty_source_window() {
         Arc::clone(services.generated_assets()),
         Arc::clone(services.model_operations()),
         None,
-        None,
     ));
     let http =
         WorkbenchHttpServer::start(assets, Arc::clone(&state), Arc::clone(&services), cli, None)
@@ -543,7 +542,6 @@ fn desktop_project_activation_does_not_replace_a_bound_window() {
         services.projects().clone(),
         Arc::clone(services.generated_assets()),
         Arc::clone(services.model_operations()),
-        None,
         None,
     ));
     let http =

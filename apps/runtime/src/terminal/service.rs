@@ -400,7 +400,10 @@ impl TerminalService {
             }
         }
         let project = projects.entry(project_id.to_owned()).or_default();
-        project.reservations += 1;
+        project.reservations = project
+            .reservations
+            .checked_add(1)
+            .expect("Terminal reservation count overflow");
         let reservation = TerminalReservation {
             service: Arc::downgrade(&self.inner),
             project_id: project_id.to_owned(),
@@ -909,7 +912,10 @@ impl TerminalHandle {
 
 impl TerminalReservation {
     fn commit(&mut self, project: &mut ProjectTerminals) {
-        project.reservations = project.reservations.saturating_sub(1);
+        project.reservations = project
+            .reservations
+            .checked_sub(1)
+            .expect("Terminal reservation count underflow");
         self.active = false;
     }
 }
@@ -927,7 +933,10 @@ impl Drop for TerminalReservation {
             .lock()
             .expect("Terminal project registry lock poisoned");
         if let Some(project) = projects.get_mut(&self.project_id) {
-            project.reservations = project.reservations.saturating_sub(1);
+            project.reservations = project
+                .reservations
+                .checked_sub(1)
+                .expect("Terminal reservation count underflow");
         }
         self.active = false;
     }
@@ -2591,6 +2600,19 @@ mod tests {
         drop(open_use);
         registry.close().unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "Terminal reservation count underflow")]
+    fn extra_terminal_reservation_commit_fails_fast() {
+        let mut project = ProjectTerminals::default();
+        let mut reservation = TerminalReservation {
+            service: Weak::new(),
+            project_id: "project-1".to_owned(),
+            active: true,
+        };
+
+        reservation.commit(&mut project);
     }
 
     #[test]

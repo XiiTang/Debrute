@@ -146,7 +146,7 @@ function ProductUpdateSection({
         {'updateVersion' in state && state.updateVersion ? <small><span>{i18n.t('settings.general.latestVersion')}</span>{state.updateVersion}</small> : null}
         {'lastCheckedAt' in state && state.lastCheckedAt ? <small><span>{i18n.t('settings.general.lastChecked')}</span>{state.lastCheckedAt}</small> : null}
       </div>
-      <small className={state.type === 'error' || operation.status === 'error' ? 'db-form-error' : 'db-form-help'}>
+      <small className={state.type === 'discovery_failed' || state.type === 'install_failed' || operation.status === 'error' ? 'db-form-error' : 'db-form-help'}>
         {operation.status === 'error' ? operation.message : stateMessage(state, i18n)}
       </small>
       <Toolbar ariaLabel={i18n.t('settings.general.updateActions')} className="db-action-row">
@@ -156,7 +156,7 @@ function ProductUpdateSection({
           </Button>
         ) : null}
         {action === 'apply' ? (
-          <Button type="button" disabled={busy || state.type === 'installing'} iconStart={<RotateCw size={14} />} onClick={() => void run(() => actions.applyProductUpdate())}>
+          <Button type="button" disabled={busy} iconStart={<RotateCw size={14} />} onClick={() => void run(() => actions.applyProductUpdate())}>
             {i18n.t('settings.general.installAndRestart')}
           </Button>
         ) : null}
@@ -166,7 +166,10 @@ function ProductUpdateSection({
 }
 
 function statusLabel(state: ProductUpdateState, i18n: WorkbenchI18n): string {
-  if (state.type === 'idle') {
+  if (state.type === 'unknown') {
+    return i18n.t('settings.general.updateStatus.unknown');
+  }
+  if (state.type === 'up_to_date') {
     return i18n.t('settings.general.updateStatus.upToDate');
   }
   if (state.type === 'checking') {
@@ -175,20 +178,26 @@ function statusLabel(state: ProductUpdateState, i18n: WorkbenchI18n): string {
   if (state.type === 'available') {
     return i18n.t('settings.general.updateStatus.available');
   }
-  if (state.type === 'installing') {
-    return i18n.t('settings.general.updateStatus.installing');
+  if (state.type === 'preparing') {
+    return i18n.t('settings.general.updateStatus.preparing');
   }
-  return i18n.t('settings.general.updateStatus.error');
+  if (state.type === 'committing') {
+    return i18n.t('settings.general.updateStatus.committing');
+  }
+  if (state.type === 'install_failed' || state.type === 'discovery_failed') {
+    return i18n.t('settings.general.updateStatus.error');
+  }
+  return i18n.t('settings.general.updateStatus.upToDate');
 }
 
 function statusTone(state: ProductUpdateState): StatusTone {
-  if (state.type === 'error') {
+  if (state.type === 'install_failed' || state.type === 'discovery_failed') {
     return 'danger';
   }
   if (state.type === 'available') {
     return 'warning';
   }
-  if (state.type === 'checking' || state.type === 'installing') {
+  if (state.type === 'checking' || state.type === 'preparing' || state.type === 'committing') {
     return 'loading';
   }
   return 'neutral';
@@ -201,24 +210,27 @@ function stateMessage(state: ProductUpdateState, i18n: WorkbenchI18n): string {
   if (state.type === 'available') {
     return i18n.t('settings.general.updateMessage.available');
   }
-  if (state.type === 'installing') {
-    return i18n.t('settings.general.updateMessage.installing');
+  if (state.type === 'preparing') {
+    return i18n.t('settings.general.updateMessage.preparing');
   }
-  if (state.type === 'error') {
+  if (state.type === 'committing') {
+    return i18n.t('settings.general.updateMessage.committing');
+  }
+  if (state.type === 'install_failed' || state.type === 'discovery_failed') {
     return state.message;
+  }
+  if (state.type === 'unknown') {
+    return i18n.t('settings.general.updateMessage.unknown');
   }
   return i18n.t('settings.general.updateMessage.upToDate');
 }
 
 function productUpdateActionForState(state: ProductUpdateState): ProductUpdateAction {
-  if (state.type === 'idle' || state.type === 'checking') {
+  if (state.type === 'unknown' || state.type === 'checking' || state.type === 'up_to_date' || state.type === 'discovery_failed') {
     return 'check';
   }
-  if (state.type === 'available' || state.type === 'installing') {
+  if (state.type === 'available' || state.type === 'install_failed') {
     return 'apply';
-  }
-  if (state.type === 'error') {
-    return state.operation === 'check' ? 'check' : 'apply';
   }
   return 'none';
 }

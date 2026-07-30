@@ -37,6 +37,9 @@ A successful task supplies `content.video_url` and may supply
   `extend_direction`, `tools`, `callback_url`, `safety_identifier`, and
   `execution_expires_after` are optional exact fields.
 
+The request boundary materializes the default `intent: "generate"`; the
+adapter requires that canonical value and has no fallback intent.
+
 This Model supports `480p` and `720p`. It materializes `watermark: false`; an
 explicit `true` remains explicit. If the remote endpoint rejects `false`,
 Debrute returns that error without changing the value or retrying.

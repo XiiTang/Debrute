@@ -1226,7 +1226,6 @@ impl TestRuntime {
             Arc::clone(services.generated_assets()),
             Arc::clone(services.model_operations()),
             None,
-            None,
         ));
         let server = WorkbenchHttpServer::start(
             assets,

@@ -41,7 +41,8 @@ use debrute_runtime::{
     product::{
         CommitPhase, CommitPlatform, DesktopHostRegistration, NativeUpdatePlatform,
         ProductBootstrap, ProductCommitCoordinator, ProductCommitError, ProductStore,
-        ReleaseArchitecture, ReleasePlatform, ResumeIntent, ResumeTarget, RuntimeProductService,
+        ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform, ResumeIntent,
+        ResumeTarget, RuntimeProductService, launch_product_update_failure,
         read_desktop_host_registration,
     },
     project::initialize_raster_preview_engine,
@@ -102,6 +103,9 @@ fn main() -> ExitCode {
     } else if command.as_deref() == Some(std::ffi::OsStr::new("complete-product-update")) {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
         run_complete_product_update(&arguments)
+    } else if command.as_deref() == Some(std::ffi::OsStr::new("read-product-update-failure")) {
+        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
+        run_read_product_update_failure(&arguments)
     } else {
         let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
         run(&arguments)
@@ -109,10 +113,79 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            if is_target_runtime_update_command(command.as_deref())
+                && let Err(report_error) = report_target_runtime_update_failure(error.as_ref())
+            {
+                eprintln!(
+                    "Debrute could not publish the Product-update failure surface: {report_error}"
+                );
+            }
             eprintln!("Debrute Runtime failed: {error}");
             ExitCode::FAILURE
         }
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn is_target_runtime_update_command(command: Option<&std::ffi::OsStr>) -> bool {
+    std::env::var_os("DEBRUTE_COMPLETE_PRODUCT_UPDATE").is_some()
+        && matches!(
+            command,
+            Some(value)
+                if value == "--stable-runtime-entrypoint"
+                    || value == "complete-product-update"
+        )
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn report_target_runtime_update_failure(
+    error: &(dyn Error + 'static),
+) -> Result<(), Box<dyn Error>> {
+    let Some(expected_version) = std::env::var_os("DEBRUTE_COMPLETE_PRODUCT_UPDATE") else {
+        return Ok(());
+    };
+    let expected_version = expected_version
+        .into_string()
+        .map_err(|_| "Product completion version must be UTF-8")?;
+    let debrute_home = debrute_home()?;
+    let store = ProductStore::new(
+        debrute_home.join("products"),
+        current_commit_platform(),
+        current_release_architecture()?,
+    );
+    let pending = store
+        .pending()?
+        .ok_or("Target Runtime failure has no pending Product update")?;
+    if pending.target_version != expected_version {
+        return Err("Target Runtime failure does not match the pending Product version".into());
+    }
+    if pending.phase != CommitPhase::CurrentSelected {
+        return Ok(());
+    }
+    let desktop = desktop_host_from_environment()?
+        .or(read_desktop_host_registration(&debrute_home)?)
+        .ok_or("Target Runtime failure has no registered Desktop host")?;
+    persist_and_launch_product_update_failure(
+        &store,
+        &desktop,
+        &pending.transaction_id,
+        ProductUpdateFailureStage::Committing,
+        format!("Target Runtime did not become Ready: {error}"),
+    )
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn persist_and_launch_product_update_failure(
+    store: &ProductStore,
+    desktop: &DesktopHostRegistration,
+    transaction_id: &str,
+    stage: ProductUpdateFailureStage,
+    message: String,
+) -> Result<(), Box<dyn Error>> {
+    store.record_product_update_failure(transaction_id, stage, message)?;
+    launch_product_update_failure(desktop, transaction_id)?;
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -125,6 +198,43 @@ fn run_preflight_desktop_seed(arguments: &[OsString]) -> Result<(), Box<dyn Erro
     );
     let identity = store.preflight_desktop_seed(&parsed.seed)?;
     println!("product_version={}", identity.product_version());
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_read_product_update_failure(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    let [
+        product_root_flag,
+        product_root,
+        transaction_flag,
+        transaction_id,
+    ] = arguments
+    else {
+        return Err(
+            "Product update failure probe requires --product-root PATH --transaction-id ID".into(),
+        );
+    };
+    if product_root_flag != "--product-root" || transaction_flag != "--transaction-id" {
+        return Err(
+            "Product update failure probe requires --product-root PATH --transaction-id ID".into(),
+        );
+    }
+    let product_root = PathBuf::from(product_root);
+    if !product_root.is_absolute() {
+        return Err("Product update failure product root must be absolute".into());
+    }
+    let transaction_id = transaction_id
+        .to_str()
+        .ok_or("Product update failure transaction ID must be UTF-8")?;
+    let store = ProductStore::new(
+        product_root,
+        current_commit_platform(),
+        current_release_architecture()?,
+    );
+    println!(
+        "{}",
+        serde_json::to_string(&store.product_update_failure(transaction_id)?)?
+    );
     Ok(())
 }
 
@@ -203,6 +313,7 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
                 .desktop
                 .clone()
                 .ok_or("Pending Product recovery requires the installed Desktop identity")?;
+            let failure_desktop = desktop.clone();
             let platform = NativeUpdatePlatform::for_desktop_seed(
                 Arc::clone(&store),
                 &parsed.seed,
@@ -215,10 +326,29 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
                 }),
             )?;
             if pending.phase == CommitPhase::RuntimeReady {
-                platform.launch_selected_runtime(&pending.target_version)?;
+                if let Err(error) = platform.launch_selected_runtime(&pending.target_version) {
+                    persist_and_launch_product_update_failure(
+                        &store,
+                        &failure_desktop,
+                        &pending.transaction_id,
+                        ProductUpdateFailureStage::RuntimeReady,
+                        format!("Ready Product could not relaunch its selected Runtime: {error}"),
+                    )?;
+                    return Err(error.into());
+                }
                 return Ok(());
             }
-            ProductCommitCoordinator::new(store, platform).continue_commit()?;
+            let coordinator = ProductCommitCoordinator::new(Arc::clone(&store), platform);
+            if let Err(error) = coordinator.continue_commit() {
+                persist_and_launch_product_update_failure(
+                    &store,
+                    &failure_desktop,
+                    &pending.transaction_id,
+                    ProductUpdateFailureStage::Committing,
+                    format!("Pending Product recovery could not continue: {error}"),
+                )?;
+                return Err(error.into());
+            }
             return Ok(());
         }
     }
@@ -553,6 +683,7 @@ fn run_runtime_services(
                 )
             })?;
         let mut product: Option<Arc<dyn RuntimeProductHttpService>> = None;
+        let mut product_scheduler: Option<Arc<RuntimeProductService>> = None;
         let mut update_platform = None;
         if let Some(active_product) = active_product.as_ref() {
             let store = Arc::new(ProductStore::new(
@@ -624,6 +755,7 @@ fn run_runtime_services(
                 Arc::clone(runtime_services.global()),
             )
             .map_err(|error| io::Error::other(error.message))?;
+            product_scheduler = Some(Arc::clone(&product_service));
             product = Some(product_service);
             update_platform = Some((store, native));
         }
@@ -633,7 +765,6 @@ fn run_runtime_services(
             runtime_services.projects().clone(),
             Arc::clone(runtime_services.generated_assets()),
             Arc::clone(runtime_services.model_operations()),
-            product.clone(),
             active_product.clone(),
         ));
         shutdown_workbench = Some(WorkbenchHttpServer::start(
@@ -720,8 +851,35 @@ fn run_runtime_services(
             )
             .finalize_current(None)?;
             if state.finish_startup() {
-                ProductCommitCoordinator::new(Arc::clone(store), native.clone())
-                    .complete_ready()?;
+                let completion = ProductCommitCoordinator::new(Arc::clone(store), native.clone())
+                    .complete_ready();
+                match completion {
+                    Ok(()) => {
+                        if let Some(product) = &product_scheduler {
+                            product.mark_startup_ready();
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "Debrute Product Ready finalization failed and remains retryable: {error}"
+                        );
+                        let reached_ready = match store.pending() {
+                            Ok(None) => true,
+                            Ok(Some(pending)) => pending.phase == CommitPhase::RuntimeReady,
+                            Err(_) => false,
+                        };
+                        if let Some(product) = &product_scheduler {
+                            if reached_ready {
+                                product.mark_startup_ready();
+                            } else {
+                                product.mark_startup_failure(
+                                    expected_version.clone(),
+                                    error.to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
             }
         } else {
             state.finish_startup();
@@ -729,6 +887,9 @@ fn run_runtime_services(
 
         loop {
             workbench.check_running()?;
+            if let Some(product) = &product_scheduler {
+                product.poll_automatic_discovery();
+            }
             if state.is_stopping() {
                 return Ok(());
             }
@@ -782,7 +943,6 @@ fn resume_product_surface(
     state: &Arc<RuntimeControlState>,
 ) -> Result<(), ProductCommitError> {
     match intent {
-        ResumeIntent::Cli => Ok(()),
         ResumeIntent::Browser { target } => state
             .activate_intent(
                 &activation_for_resume_target(target, ProjectFrontend::Browser),

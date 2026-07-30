@@ -13,7 +13,7 @@ use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use super::{
-    commit::{CommitPhase, PendingCommit, ProductIdentity, ResumeIntent},
+    commit::{CommitPhase, PendingCommit, ProductIdentity, ProductUpdateFailure, ResumeIntent},
     manifest::{
         DEBRUTE_UPDATE_PUBLIC_KEY_BYTES, PRODUCT_MANIFEST_NAME, ProductManifest,
         ProductManifestError, ProductPlatform, RELEASE_MANIFEST_NAME, RELEASE_SIGNATURE_NAME,
@@ -28,6 +28,7 @@ const PENDING_STATE_MAX_BYTES: u64 = 1024 * 1024;
 const RELEASE_MANIFEST_MAX_BYTES: u64 = 256 * 1024;
 const RELEASE_SIGNATURE_MAX_BYTES: u64 = 8 * 1024;
 const PENDING_COMMIT_DIRECTORY: &str = "pending-commit";
+const PRODUCT_UPDATE_FAILURE_FILE: &str = "failure.json";
 const RESUME_RECEIPT_DIRECTORY: &str = "resume-receipts";
 const PENDING_PHASE_FILES: [(CommitPhase, &str); 4] = [
     (CommitPhase::Staged, "0-staged.json"),
@@ -593,10 +594,11 @@ impl ProductStore {
             }
             Err(error) => return Err(error),
         };
-        let allowed = PENDING_PHASE_FILES
+        let mut allowed = PENDING_PHASE_FILES
             .iter()
             .map(|(_, name)| *name)
             .collect::<HashSet<_>>();
+        allowed.insert(PRODUCT_UPDATE_FAILURE_FILE);
         for entry in entries {
             let entry = entry?;
             let name = entry.file_name();
@@ -690,6 +692,137 @@ impl ProductStore {
             )));
         }
         write_new_file_atomic(&destination, &bytes)
+    }
+
+    pub(crate) fn write_update_failure_unlocked(
+        &self,
+        failure: &ProductUpdateFailure,
+    ) -> Result<(), ProductStoreError> {
+        failure
+            .validate()
+            .map_err(ProductStoreError::InvalidPendingCommit)?;
+        let pending = self.pending_unlocked()?.ok_or_else(|| {
+            ProductStoreError::InvalidPendingCommit(
+                "Product update failure requires a pending transaction".to_owned(),
+            )
+        })?;
+        if pending.transaction_id != failure.transaction_id
+            || pending.target_version != failure.target_version
+        {
+            return Err(ProductStoreError::InvalidPendingCommit(
+                "Product update failure does not match the pending transaction".to_owned(),
+            ));
+        }
+        let directory = self.root.join(PENDING_COMMIT_DIRECTORY);
+        ensure_managed_directory(&directory)?;
+        let destination = directory.join(PRODUCT_UPDATE_FAILURE_FILE);
+        match fs::symlink_metadata(&destination) {
+            Ok(metadata)
+                if metadata.file_type().is_file() && !metadata.file_type().is_symlink() =>
+            {
+                let existing: ProductUpdateFailure = serde_json::from_slice(&read_file_with_limit(
+                    &destination,
+                    PENDING_STATE_MAX_BYTES,
+                )?)
+                .map_err(|error| ProductStoreError::InvalidPendingCommit(error.to_string()))?;
+                existing
+                    .validate()
+                    .map_err(ProductStoreError::InvalidPendingCommit)?;
+                if existing.transaction_id == failure.transaction_id
+                    && existing.target_version == failure.target_version
+                {
+                    return Ok(());
+                }
+                return Err(ProductStoreError::InvalidPendingCommit(
+                    "Product update failure record does not match pending".to_owned(),
+                ));
+            }
+            Ok(_) => return Err(ProductStoreError::ManagedPathType(destination)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let bytes = serde_json::to_vec_pretty(failure)
+            .map_err(|error| ProductStoreError::InvalidPendingCommit(error.to_string()))?;
+        ensure_immutable_file(&destination, &bytes)
+    }
+
+    /// Reads the exact persisted forward-only failure for a Desktop fallback
+    /// surface.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductStoreError`] when the requested transaction or record
+    /// is invalid.
+    pub fn product_update_failure(
+        &self,
+        transaction_id: &str,
+    ) -> Result<ProductUpdateFailure, ProductStoreError> {
+        if !is_canonical_uuid(transaction_id) {
+            return Err(ProductStoreError::InvalidPendingCommit(
+                "Product update failure transactionId must be a canonical UUID".to_owned(),
+            ));
+        }
+        let _transaction = self.lock_transaction()?;
+        let pending = self.pending_unlocked()?.ok_or_else(|| {
+            ProductStoreError::InvalidPendingCommit(
+                "Product update failure has no pending transaction".to_owned(),
+            )
+        })?;
+        if pending.transaction_id != transaction_id {
+            return Err(ProductStoreError::InvalidPendingCommit(
+                "Product update failure transaction does not match pending".to_owned(),
+            ));
+        }
+        let path = self
+            .root
+            .join(PENDING_COMMIT_DIRECTORY)
+            .join(PRODUCT_UPDATE_FAILURE_FILE);
+        let bytes = read_file_with_limit(&path, PENDING_STATE_MAX_BYTES)?;
+        let failure: ProductUpdateFailure = serde_json::from_slice(&bytes)
+            .map_err(|error| ProductStoreError::InvalidPendingCommit(error.to_string()))?;
+        failure
+            .validate()
+            .map_err(ProductStoreError::InvalidPendingCommit)?;
+        if failure.transaction_id != pending.transaction_id
+            || failure.target_version != pending.target_version
+        {
+            return Err(ProductStoreError::InvalidPendingCommit(
+                "Product update failure does not match pending".to_owned(),
+            ));
+        }
+        Ok(failure)
+    }
+
+    /// Persists the first forward-only failure for the exact pending
+    /// transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductStoreError`] when the transaction does not match or
+    /// durable persistence fails.
+    pub fn record_product_update_failure(
+        &self,
+        transaction_id: &str,
+        stage: super::ProductUpdateFailureStage,
+        message: impl Into<String>,
+    ) -> Result<(), ProductStoreError> {
+        let _transaction = self.lock_transaction()?;
+        let pending = self.pending_unlocked()?.ok_or_else(|| {
+            ProductStoreError::InvalidPendingCommit(
+                "Product update failure requires a pending transaction".to_owned(),
+            )
+        })?;
+        if pending.transaction_id != transaction_id {
+            return Err(ProductStoreError::InvalidPendingCommit(
+                "Product update failure transaction does not match pending".to_owned(),
+            ));
+        }
+        self.write_update_failure_unlocked(&ProductUpdateFailure {
+            transaction_id: transaction_id.to_owned(),
+            target_version: pending.target_version,
+            stage,
+            message: message.into(),
+        })
     }
 
     /// Durably claims one initiating-surface continuation before native
