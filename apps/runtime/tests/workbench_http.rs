@@ -4,7 +4,7 @@ use std::{
     fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::Arc,
     time::Duration,
 };
 
@@ -25,7 +25,6 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-static WORKBENCH_HTTP_TEST_ADMISSION: Mutex<()> = Mutex::new(());
 const WORKBENCH_HTTP_TEST_TIMEOUT: Duration = Duration::from_mins(2);
 
 #[test]
@@ -1200,14 +1199,10 @@ struct TestRuntime {
     root: PathBuf,
     server: WorkbenchHttpServer,
     services: Option<Arc<WorkbenchRuntimeServices>>,
-    _admission: MutexGuard<'static, ()>,
 }
 
 impl TestRuntime {
     fn start() -> Self {
-        let admission = WORKBENCH_HTTP_TEST_ADMISSION
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let root = std::env::temp_dir().join(format!("dbrt-http-{}", Uuid::new_v4()));
         let assets = root.join("assets");
         fs::create_dir_all(&assets).expect("assets should be created");
@@ -1243,7 +1238,6 @@ impl TestRuntime {
             root,
             server,
             services: Some(services),
-            _admission: admission,
         }
     }
 

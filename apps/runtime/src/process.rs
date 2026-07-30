@@ -804,6 +804,58 @@ mod tests {
     }
 }
 
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn timeout_terminates_and_reaps_the_owned_worker() {
+        let supervisor = BoundedProcessSupervisor::new(1);
+        let output = supervisor.run(
+            windows_wait_request(Duration::from_millis(30)),
+            &ProcessCancellation::default(),
+        );
+
+        assert!(!output.ok);
+        assert_eq!(output.error_kind, Some(ProcessErrorKind::Timeout));
+        assert!(output.exit_code.is_some());
+        assert!(output.stderr.is_empty());
+    }
+
+    #[test]
+    fn cancellation_terminates_and_reaps_the_owned_worker() {
+        let supervisor = BoundedProcessSupervisor::new(1);
+        let cancellation = ProcessCancellation::default();
+        let request_cancellation = cancellation.clone();
+        let canceller = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(30));
+            request_cancellation.cancel();
+        });
+
+        let output = supervisor.run(windows_wait_request(Duration::from_secs(2)), &cancellation);
+
+        canceller.join().expect("canceller should finish");
+        assert!(!output.ok);
+        assert_eq!(output.error_kind, Some(ProcessErrorKind::Cancelled));
+        assert!(output.exit_code.is_some());
+        assert!(output.stderr.is_empty());
+    }
+
+    fn windows_wait_request(timeout: Duration) -> ProcessRequest {
+        ProcessRequest::new(
+            WorkerKind::IntegrationProbe,
+            "cmd.exe",
+            vec![
+                "/D".to_owned(),
+                "/S".to_owned(),
+                "/C".to_owned(),
+                "ping -n 30 127.0.0.1 >NUL".to_owned(),
+            ],
+            timeout,
+        )
+    }
+}
+
 #[cfg(test)]
 mod failure_tests {
     use super::*;
