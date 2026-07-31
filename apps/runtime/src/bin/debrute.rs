@@ -805,7 +805,7 @@ fn exit_code_for_result(result: &CliResult) -> u8 {
         None => 0,
         Some(
             "invalid_command" | "invalid_argument" | "missing_argument" | "invalid_input"
-            | "invalid_json_input",
+            | "invalid_json_input" | "project_invalid",
         ) => 2,
         Some(_) => 1,
     }
@@ -892,7 +892,7 @@ mod tests {
                 "bad Project",
                 CliFields::default()
             )),
-            1
+            2
         );
         assert_eq!(
             exit_code_for_result(&failure(

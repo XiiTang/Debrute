@@ -23,7 +23,7 @@ Named `operation`, `batch_item`, `artifact`, `model`, and diagnostic records
 follow on separate lines. Error records may contain a redacted `log`; they do
 not have a generic message field. Exit status is deliberately coarse: `0`
 means success, `2` means CLI syntax or input is invalid, and `1` means every
-other failure, including a missing or corrupt Project. A Batch
+other failure. An invalid Project is caller input and also exits `2`. A Batch
 whose accepted Items all settled is successful even when
 some Items failed, so its final Operation record exits `0` and reports the Item
 failures in progress records.
