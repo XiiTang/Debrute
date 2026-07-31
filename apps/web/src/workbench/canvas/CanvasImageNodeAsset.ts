@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import { canvasRasterPreviewWidth, type ProjectedCanvasNode } from '@debrute/canvas-core';
 import { canvasImageSource, type CanvasLoadedImage } from './canvasImagePreviews';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
@@ -38,6 +38,43 @@ export type CanvasImageNodeResolvedSource =
       sourceRevisionKey: string | undefined;
     };
 
+export type CanvasImageNodeSourceRequest =
+  | {
+      kind: 'source';
+      projectRelativePath: string;
+      fileUrl: string;
+      revision: string;
+      sourceWidth: number;
+      previewWidth: number;
+      sourceRevisionKey: string;
+    }
+  | {
+      kind: 'not-eligible';
+      projectRelativePath: string;
+      reason: 'unavailable' | 'not-previewable';
+      sourceRevisionKey: string | undefined;
+    };
+
+export interface CanvasImageNodeSourceInput {
+  projectRelativePath: ProjectedCanvasNode['projectRelativePath'];
+  nodeKind: ProjectedCanvasNode['nodeKind'];
+  mediaKind: ProjectedCanvasNode['mediaKind'];
+  displayWidth: ProjectedCanvasNode['width'];
+  availability: ProjectedCanvasNode['availability'];
+}
+
+export function canvasImageNodeSourceInputForNode(
+  node: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'nodeKind' | 'mediaKind' | 'width' | 'availability'>
+): CanvasImageNodeSourceInput {
+  return {
+    projectRelativePath: node.projectRelativePath,
+    nodeKind: node.nodeKind,
+    mediaKind: node.mediaKind,
+    displayWidth: node.width,
+    availability: node.availability
+  };
+}
+
 export type CanvasImageNodeAssetEvent =
   | {
       type: 'source-resolved';
@@ -59,28 +96,70 @@ export function initialCanvasImageNodeAssetState(): CanvasImageNodeAssetState {
   };
 }
 
-export function resolveCanvasImageNodeSource(input: {
-  node: ProjectedCanvasNode;
+export function canvasImageNodeSourceRequest(input: {
+  source: CanvasImageNodeSourceInput;
   resourceZoom: number;
   devicePixelRatio: number;
-  retryKey: number;
-}): CanvasImageNodeResolvedSource {
-  const sourceRevisionKey = sourceRevisionKeyForNode(input.node);
-  if (input.node.availability.state !== 'available') {
-    return { kind: 'not-eligible', reason: 'unavailable', sourceRevisionKey };
+}): CanvasImageNodeSourceRequest {
+  const sourceRevisionKey = sourceRevisionKeyForInput(input.source);
+  if (input.source.availability.state !== 'available') {
+    return {
+      kind: 'not-eligible',
+      projectRelativePath: input.source.projectRelativePath,
+      reason: 'unavailable',
+      sourceRevisionKey
+    };
   }
-  const availableSourceRevisionKey = `${input.node.projectRelativePath}\u001f${input.node.availability.revision}`;
-  const source = canvasImageSource({
-    node: input.node,
-    resourceZoom: input.resourceZoom,
-    devicePixelRatio: input.devicePixelRatio
-  });
-  if (!source) {
-    return { kind: 'not-eligible', reason: 'not-previewable', sourceRevisionKey };
+  if (input.source.nodeKind !== 'file'
+    || input.source.mediaKind !== 'image'
+    || input.source.availability.canvasImagePreviewable !== true) {
+    return {
+      kind: 'not-eligible',
+      projectRelativePath: input.source.projectRelativePath,
+      reason: 'not-previewable',
+      sourceRevisionKey
+    };
+  }
+  const sourceWidth = input.source.availability.canvasImagePreviewSourceWidth;
+  if (typeof sourceWidth !== 'number' || !Number.isFinite(sourceWidth) || sourceWidth <= 0) {
+    throw new Error('Canvas previewable image nodes must include a positive finite source width.');
   }
   return {
     kind: 'source',
-    sourceRevisionKey: availableSourceRevisionKey,
+    projectRelativePath: input.source.projectRelativePath,
+    fileUrl: input.source.availability.fileUrl,
+    revision: input.source.availability.revision,
+    sourceWidth,
+    previewWidth: canvasRasterPreviewWidth({
+      nodeDisplayWidth: input.source.displayWidth,
+      sourceWidth,
+      resourceZoom: input.resourceZoom,
+      devicePixelRatio: input.devicePixelRatio
+    }),
+    sourceRevisionKey: `${input.source.projectRelativePath}\u001f${input.source.availability.revision}`
+  };
+}
+
+export function resolveCanvasImageNodeSource(input: {
+  request: CanvasImageNodeSourceRequest;
+  retryKey: number;
+}): CanvasImageNodeResolvedSource {
+  if (input.request.kind === 'not-eligible') {
+    return {
+      kind: 'not-eligible',
+      reason: input.request.reason,
+      sourceRevisionKey: input.request.sourceRevisionKey
+    };
+  }
+  const source = canvasImageSource({
+    projectRelativePath: input.request.projectRelativePath,
+    fileUrl: input.request.fileUrl,
+    revision: input.request.revision,
+    previewWidth: input.request.previewWidth
+  });
+  return {
+    kind: 'source',
+    sourceRevisionKey: input.request.sourceRevisionKey,
     image: {
       ...source,
       loadKey: `${source.src}:${input.retryKey}`
@@ -235,9 +314,9 @@ function reduceResolvedSource(
   };
 }
 
-function sourceRevisionKeyForNode(node: ProjectedCanvasNode): string | undefined {
-  if (node.availability.state !== 'available') {
+function sourceRevisionKeyForInput(input: CanvasImageNodeSourceInput): string | undefined {
+  if (input.availability.state !== 'available') {
     return undefined;
   }
-  return `${node.projectRelativePath}\u001f${node.availability.revision}`;
+  return `${input.projectRelativePath}\u001f${input.availability.revision}`;
 }

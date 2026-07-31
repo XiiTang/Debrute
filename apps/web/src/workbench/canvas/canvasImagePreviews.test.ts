@@ -1,18 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { canvasImageSource } from './canvasImagePreviews';
+import { canvasImageNodeSourceInputForNode, canvasImageNodeSourceRequest } from './CanvasImageNodeAsset';
+import {
+  canvasImageSource as canvasImageSourceFromRequest,
+  type CanvasImageSource
+} from './canvasImagePreviews';
 
 describe('canvas image preview URLs', () => {
   it('uses dynamic preview URLs without falling back to original files by screen width', () => {
     const node = nodeFixture('flow/cover.png', 2400, 'image/png');
 
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node,
       resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toEqual({ src: previewUrl('flow/cover.png', 300), previewWidth: 300 });
 
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node,
       resourceZoom: 1,
       devicePixelRatio: 1
@@ -20,7 +24,7 @@ describe('canvas image preview URLs', () => {
   });
 
   it('returns source metadata with the chosen dynamic preview width', () => {
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node: nodeFixture('flow/cover.png', 2400, 'image/png'),
       resourceZoom: 0.2,
       devicePixelRatio: 1
@@ -31,19 +35,19 @@ describe('canvas image preview URLs', () => {
   });
 
   it('does not return raw Canvas image URLs for unsupported image nodes', () => {
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node: nodeFixture('flow/animated.gif', 1000, 'image/gif'),
       resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toBeUndefined();
 
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node: { ...nodeFixture('flow/movie.mp4', 1000, 'video/mp4'), mediaKind: 'video' },
       resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toBeUndefined();
 
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node: nodeFixture('flow/animated.webp', 1000, 'image/webp', false),
       resourceZoom: 0.1,
       devicePixelRatio: 1
@@ -53,13 +57,13 @@ describe('canvas image preview URLs', () => {
   it('scales dynamic previews below source width and caps them at source width', () => {
     const node = nodeFixture('flow/small.png', 1200, 'image/png', true, 300);
 
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node,
       resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toEqual({ src: previewUrl('flow/small.png', 150), previewWidth: 150 });
 
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node,
       resourceZoom: 2,
       devicePixelRatio: 2
@@ -67,7 +71,7 @@ describe('canvas image preview URLs', () => {
   });
 
   it('keeps preview URLs limited to path, revision, and dynamic width', () => {
-    expect(canvasImageSource({
+    expect(imageSourceForNode({
       node: nodeFixture('flow/cover art.png', 1000, 'image/png'),
       resourceZoom: 0.2,
       devicePixelRatio: 1
@@ -79,12 +83,12 @@ describe('canvas image preview URLs', () => {
 
   it('rejects raw-file URLs outside the exact Runtime response shape', () => {
     const path = '阿咕/阿咕-形象总览.png';
-    expect(() => canvasImageSource({
+    expect(() => imageSourceForNode({
       node: nodeFixture(path, 5120, 'image/png', true, 5120, `https://elsewhere.invalid${rawUrl(path)}`),
       resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
-    expect(() => canvasImageSource({
+    expect(() => imageSourceForNode({
       node: nodeFixture(path, 5120, 'image/png', true, 5120, `${rawUrl(path)}&ignored=test-token`),
       resourceZoom: 0.1,
       devicePixelRatio: 1
@@ -138,4 +142,25 @@ function previewUrl(path: string, width: number): string {
 
 function isStillRasterMimeType(mimeType: string): boolean {
   return mimeType === 'image/png' || mimeType === 'image/jpeg' || mimeType === 'image/webp';
+}
+
+function imageSourceForNode(input: {
+  node: ProjectedCanvasNode;
+  resourceZoom: number;
+  devicePixelRatio: number;
+}): CanvasImageSource | undefined {
+  const request = canvasImageNodeSourceRequest({
+    source: canvasImageNodeSourceInputForNode(input.node),
+    resourceZoom: input.resourceZoom,
+    devicePixelRatio: input.devicePixelRatio
+  });
+  if (request.kind === 'not-eligible') {
+    return undefined;
+  }
+  return canvasImageSourceFromRequest({
+    projectRelativePath: request.projectRelativePath,
+    fileUrl: request.fileUrl,
+    revision: request.revision,
+    previewWidth: request.previewWidth
+  });
 }

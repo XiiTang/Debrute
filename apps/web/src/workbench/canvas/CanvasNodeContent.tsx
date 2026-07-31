@@ -4,6 +4,7 @@ import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatial
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
+import { canvasImageNodeSourceInputForNode } from './CanvasImageNodeAsset';
 import { useCanvasImageNodeAsset, type CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import {
@@ -289,7 +290,10 @@ function CanvasImageNodeContent({
   node: ProjectedCanvasNode;
   culled: boolean;
 }): React.ReactElement {
-  const imageState = useCanvasImageNodeAsset({ node, culled });
+  const imageState = useCanvasImageNodeAsset({
+    source: canvasImageNodeSourceInputForNode(node),
+    culled
+  });
 
   return <CanvasImageNodePreview node={node} imageState={imageState} />;
 }

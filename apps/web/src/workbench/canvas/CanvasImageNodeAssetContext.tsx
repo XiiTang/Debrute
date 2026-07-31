@@ -1,13 +1,14 @@
 import React, { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from './CanvasPerfMonitor';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import {
+  canvasImageNodeSourceRequest,
   canvasImageNodeAssetReducer,
   deriveCanvasImageNodeRenderState,
   initialCanvasImageNodeAssetState,
   resolveCanvasImageNodeSource,
   shouldPublishCanvasImageNodeSourceImmediately,
+  type CanvasImageNodeSourceInput,
   type CanvasImageNodeRenderState,
   type CanvasImageNodeResolvedSource
 } from './CanvasImageNodeAsset';
@@ -42,10 +43,11 @@ export function CanvasImageNodeAssetProvider({
 }
 
 export function useCanvasImageNodeAsset(input: {
-  node: ProjectedCanvasNode;
+  source: CanvasImageNodeSourceInput;
   culled: boolean;
 }): CanvasImageNodeAssetHookState {
   const context = useCanvasImageNodeAssetContext();
+  const { perfMonitor, previewResourceScheduler } = context;
   const [state, setState] = useState(initialCanvasImageNodeAssetState);
   const dispatch = useCallback((event: Parameters<typeof canvasImageNodeAssetReducer>[1]) => {
     setState((current) => canvasImageNodeAssetReducer(current, event));
@@ -56,19 +58,55 @@ export function useCanvasImageNodeAsset(input: {
   const previousCulledRef = useRef(input.culled);
   const latestScheduleKeyRef = useRef<string | undefined>(undefined);
   const latestCulledRef = useRef(input.culled);
+  const latestLoadedRef = useRef(state.loaded);
   const latestNextLoadKeyRef = useRef<string | undefined>(state.next?.loadKey);
+  const latestPerfMonitorRef = useRef(perfMonitor);
   const decodedNextLoadKeysRef = useRef(new Set<string>());
   latestCulledRef.current = input.culled;
+  latestLoadedRef.current = state.loaded;
   latestNextLoadKeyRef.current = state.next?.loadKey;
-  const source = useMemo(() => resolveCanvasImageNodeSource({
-    node: input.node,
+  latestPerfMonitorRef.current = perfMonitor;
+  const sourceRequest = useMemo(() => canvasImageNodeSourceRequest({
+    source: input.source,
     resourceZoom: context.resourceZoom,
-    devicePixelRatio: context.devicePixelRatio,
-    retryKey: state.retryKey
+    devicePixelRatio: context.devicePixelRatio
   }), [
     context.devicePixelRatio,
     context.resourceZoom,
-    input.node,
+    input.source.availability,
+    input.source.displayWidth,
+    input.source.mediaKind,
+    input.source.nodeKind,
+    input.source.projectRelativePath
+  ]);
+  const projectRelativePath = sourceRequest.projectRelativePath;
+  const sourceRequestReason = sourceRequest.kind === 'not-eligible'
+    ? sourceRequest.reason
+    : undefined;
+  const sourceRequestFileUrl = sourceRequest.kind === 'source'
+    ? sourceRequest.fileUrl
+    : undefined;
+  const sourceRequestRevision = sourceRequest.kind === 'source'
+    ? sourceRequest.revision
+    : undefined;
+  const sourceRequestSourceWidth = sourceRequest.kind === 'source'
+    ? sourceRequest.sourceWidth
+    : undefined;
+  const sourceRequestPreviewWidth = sourceRequest.kind === 'source'
+    ? sourceRequest.previewWidth
+    : undefined;
+  const source = useMemo(() => resolveCanvasImageNodeSource({
+    request: sourceRequest,
+    retryKey: state.retryKey
+  }), [
+    projectRelativePath,
+    sourceRequest.kind,
+    sourceRequest.sourceRevisionKey,
+    sourceRequestFileUrl,
+    sourceRequestPreviewWidth,
+    sourceRequestReason,
+    sourceRequestRevision,
+    sourceRequestSourceWidth,
     state.retryKey
   ]);
   const scheduleKey = source.kind === 'source'
@@ -82,30 +120,32 @@ export function useCanvasImageNodeAsset(input: {
     const becameVisibleAfterCull = previousCulledRef.current && !input.culled;
     previousCulledRef.current = input.culled;
     const retryRequested = retryRequestedRef.current;
-    const interaction = context.previewResourceScheduler.getInteractionState();
+    const interaction = previewResourceScheduler.getInteractionState();
+    const loaded = latestLoadedRef.current;
     const shouldRunImmediately = shouldPublishCanvasImageNodeSourceImmediately({
       source,
       didResolveUrl: didResolveUrlRef.current,
       revisionChanged,
       retryRequested,
-      hasLoadedImage: Boolean(state.loaded),
+      hasLoadedImage: Boolean(loaded),
       culled: input.culled,
       becameVisibleAfterCull,
       dragActive: interaction.dragActive,
-      loadedLoadKey: state.loaded?.loadKey
+      loadedLoadKey: loaded?.loadKey
     });
     retryRequestedRef.current = false;
 
     const publishSource = () => {
-      const currentInteraction = context.previewResourceScheduler.getInteractionState();
+      const currentInteraction = previewResourceScheduler.getInteractionState();
+      const currentLoaded = latestLoadedRef.current;
       if (source.kind === 'source') {
         didResolveUrlRef.current = true;
       }
       recordSourceCounter({
-        context,
-        node: input.node,
+        perfMonitor: latestPerfMonitorRef.current,
+        projectRelativePath,
         source,
-        loadedLoadKey: state.loaded?.loadKey,
+        loadedLoadKey: currentLoaded?.loadKey,
         culled: input.culled,
         cameraState: currentInteraction.cameraState,
         revisionChanged
@@ -128,13 +168,13 @@ export function useCanvasImageNodeAsset(input: {
     }
 
     if (input.culled) {
-      context.previewResourceScheduler.cancel('image', input.node.projectRelativePath);
+      previewResourceScheduler.cancel('image', projectRelativePath);
       return undefined;
     }
 
-    context.previewResourceScheduler.enqueue({
+    previewResourceScheduler.enqueue({
       kind: 'image',
-      nodeId: input.node.projectRelativePath,
+      nodeId: projectRelativePath,
       sourceKey: scheduleKey,
       targetWidth: source.image.previewWidth,
       isCurrent: () => latestScheduleKeyRef.current === scheduleKey,
@@ -143,31 +183,30 @@ export function useCanvasImageNodeAsset(input: {
     });
     return undefined;
   }, [
-    context,
     input.culled,
-    input.node,
+    previewResourceScheduler,
+    projectRelativePath,
     source,
-    scheduleKey,
-    state.loaded
+    scheduleKey
   ]);
 
   useEffect(() => () => {
-    context.previewResourceScheduler.cancel('image', input.node.projectRelativePath);
-  }, [context.previewResourceScheduler, input.node.projectRelativePath]);
+    previewResourceScheduler.cancel('image', projectRelativePath);
+  }, [previewResourceScheduler, projectRelativePath]);
 
   const retry = useCallback(() => {
     retryRequestedRef.current = true;
-    recordImageNodeCounter(context, 'image-node-retry', {
-      projectRelativePath: input.node.projectRelativePath
+    recordImageNodeCounter(perfMonitor, 'image-node-retry', {
+      projectRelativePath
     });
     dispatch({ type: 'retry' });
-  }, [context, input.node.projectRelativePath]);
+  }, [perfMonitor, projectRelativePath]);
 
   const enqueueDecodedHandoff = useCallback((next: { loadKey: string; previewWidth: number }) => {
     const { loadKey } = next;
-    context.previewResourceScheduler.enqueuePublication({
+    previewResourceScheduler.enqueuePublication({
       kind: 'image',
-      nodeId: input.node.projectRelativePath,
+      nodeId: projectRelativePath,
       sourceKey: loadKey,
       targetWidth: next.previewWidth,
       isCurrent: () => latestNextLoadKeyRef.current === loadKey,
@@ -176,8 +215,8 @@ export function useCanvasImageNodeAsset(input: {
         if (latestNextLoadKeyRef.current !== loadKey || latestCulledRef.current) {
           return;
         }
-        recordImageNodeCounter(context, 'image-node-handoff-promote', {
-          projectRelativePath: input.node.projectRelativePath,
+        recordImageNodeCounter(perfMonitor, 'image-node-handoff-promote', {
+          projectRelativePath,
           loadKey
         });
         startTransition(() => {
@@ -190,20 +229,20 @@ export function useCanvasImageNodeAsset(input: {
         });
       }
     });
-  }, [context, input.node.projectRelativePath]);
+  }, [perfMonitor, previewResourceScheduler, projectRelativePath]);
 
   const resolveNext = useCallback((loadKey: string) => {
     const next = state.next;
     if (!next || next.loadKey !== loadKey) {
       return;
     }
-    recordImageNodeCounter(context, 'image-node-next-load-resolve', {
-      projectRelativePath: input.node.projectRelativePath,
+    recordImageNodeCounter(perfMonitor, 'image-node-next-load-resolve', {
+      projectRelativePath,
       loadKey
     });
     decodedNextLoadKeysRef.current.add(loadKey);
     enqueueDecodedHandoff(next);
-  }, [context, enqueueDecodedHandoff, input.node.projectRelativePath, state.next]);
+  }, [enqueueDecodedHandoff, perfMonitor, projectRelativePath, state.next]);
 
   useEffect(() => {
     const next = state.next;
@@ -221,16 +260,16 @@ export function useCanvasImageNodeAsset(input: {
     if (latestNextLoadKeyRef.current !== loadKey) {
       return;
     }
-    recordImageNodeCounter(context, 'image-node-next-load-reject', {
-      projectRelativePath: input.node.projectRelativePath,
+    recordImageNodeCounter(perfMonitor, 'image-node-next-load-reject', {
+      projectRelativePath,
       loadKey
     });
     dispatch({
       type: 'next-failed',
       loadKey,
-      message: `Unable to load ${input.node.projectRelativePath}.`
+      message: `Unable to load ${projectRelativePath}.`
     });
-  }, [context, input.node.projectRelativePath]);
+  }, [perfMonitor, projectRelativePath]);
 
   return {
     ...deriveCanvasImageNodeRenderState({
@@ -252,8 +291,8 @@ export function useCanvasImageNodeAssetContext(): CanvasImageNodeAssetContextVal
 }
 
 function recordSourceCounter(input: {
-  context: CanvasImageNodeAssetContextValue;
-  node: ProjectedCanvasNode;
+  perfMonitor: CanvasImageNodeAssetContextValue['perfMonitor'];
+  projectRelativePath: string;
   source: CanvasImageNodeResolvedSource;
   loadedLoadKey: string | undefined;
   culled: boolean;
@@ -261,21 +300,21 @@ function recordSourceCounter(input: {
   revisionChanged: boolean;
 }): void {
   if (input.source.kind === 'not-eligible') {
-    recordImageNodeCounter(input.context, 'image-node-url-unavailable', {
-      projectRelativePath: input.node.projectRelativePath,
+    recordImageNodeCounter(input.perfMonitor, 'image-node-url-unavailable', {
+      projectRelativePath: input.projectRelativePath,
       reason: input.source.reason
     });
     return;
   }
   if (input.revisionChanged) {
-    recordImageNodeCounter(input.context, 'image-node-source-reset', {
-      projectRelativePath: input.node.projectRelativePath,
+    recordImageNodeCounter(input.perfMonitor, 'image-node-source-reset', {
+      projectRelativePath: input.projectRelativePath,
       sourceRevisionKey: input.source.sourceRevisionKey
     });
   }
   if (input.loadedLoadKey === input.source.image.loadKey) {
-    recordImageNodeCounter(input.context, 'image-node-url-unchanged', {
-      projectRelativePath: input.node.projectRelativePath,
+    recordImageNodeCounter(input.perfMonitor, 'image-node-url-unchanged', {
+      projectRelativePath: input.projectRelativePath,
       loadKey: input.source.image.loadKey
     });
     return;
@@ -283,37 +322,37 @@ function recordSourceCounter(input: {
   const shouldSkipCulledWork = input.culled
     && (input.cameraState !== 'idle' || input.loadedLoadKey !== undefined);
   if (shouldSkipCulledWork) {
-    recordImageNodeCounter(input.context, 'image-node-upgrade-skip-culled', {
-      projectRelativePath: input.node.projectRelativePath,
+    recordImageNodeCounter(input.perfMonitor, 'image-node-upgrade-skip-culled', {
+      projectRelativePath: input.projectRelativePath,
       loadKey: input.source.image.loadKey
     });
     return;
   }
   if (input.cameraState === 'moving' && input.loadedLoadKey !== undefined) {
-    recordImageNodeCounter(input.context, 'image-node-upgrade-skip-moving', {
-      projectRelativePath: input.node.projectRelativePath,
+    recordImageNodeCounter(input.perfMonitor, 'image-node-upgrade-skip-moving', {
+      projectRelativePath: input.projectRelativePath,
       loadKey: input.source.image.loadKey
     });
     return;
   }
-  recordImageNodeCounter(input.context, 'image-node-url-resolve', {
-    projectRelativePath: input.node.projectRelativePath,
+  recordImageNodeCounter(input.perfMonitor, 'image-node-url-resolve', {
+    projectRelativePath: input.projectRelativePath,
     loadKey: input.source.image.loadKey,
     previewWidth: input.source.image.previewWidth
   });
-  recordImageNodeCounter(input.context, 'image-node-next-load-start', {
-    projectRelativePath: input.node.projectRelativePath,
+  recordImageNodeCounter(input.perfMonitor, 'image-node-next-load-start', {
+    projectRelativePath: input.projectRelativePath,
     loadKey: input.source.image.loadKey,
     previewWidth: input.source.image.previewWidth
   });
 }
 
 function recordImageNodeCounter(
-  context: CanvasImageNodeAssetContextValue,
+  perfMonitor: CanvasImageNodeAssetContextValue['perfMonitor'],
   name: CanvasPerfCounterName,
   detail: Record<string, unknown>
 ): void {
-  context.perfMonitor?.recordCounter({
+  perfMonitor?.recordCounter({
     sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
     timestamp: performance.now(),
     source: 'CanvasImageNodeAsset',
