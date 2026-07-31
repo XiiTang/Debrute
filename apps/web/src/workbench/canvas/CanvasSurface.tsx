@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type {
   CanvasDocument,
   CanvasFeedbackDocument,
@@ -10,13 +11,10 @@ import type {
 } from '@debrute/canvas-core';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
+import type { CanvasPoint, ResizeHandle } from '../services/canvasInteraction.js';
+import { projectPathCommandEntryForCanvasNode } from '../services/projectPathCommandTarget.js';
 import {
-  isAdditiveCanvasSelectionModifier,
-  type CanvasPoint,
-  type ResizeHandle
-} from '../services/canvasInteraction';
-import {
-  type CanvasFeedbackBarTarget
+  type CanvasFeedbackNodeBarTarget
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
 import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
@@ -47,28 +45,35 @@ import type {
 } from './runtime/CanvasEditorRuntime';
 import { createCanvasStageRuntime, type CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
-import { isCanvasItemSelected, selectedNodeProjectRelativePaths, toggleCanvasSelectionItem } from './runtime/canvasSelection';
 import {
+  canvasNodeSelection,
+  isCanvasNodeSelected,
+  selectedNodeProjectRelativePaths
+} from './runtime/canvasSelection.js';
+import {
+  useCanvasPointerInteraction,
   useCanvasSelection,
   useCanvasSurfaceSize
-} from './runtime/useCanvasRuntimeSnapshot';
+} from './runtime/useCanvasRuntimeSnapshot.js';
 import {
   canvasNodesWithLayoutOverrides
 } from './canvasManualLayoutDraft';
 import {
   canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
+  canvasFeedbackBarTargetForSelection,
   canvasMapProjectTreeDropInput,
   canvasPerfDebugSnapshot,
   canvasPerfFinalState,
   devicePixelRatioValue,
   domRectToFloatingBarRect,
   isCanvasMapProjectTreeDragOver,
+  isCanvasPrimaryPointerEvent,
   isProjectedVideoNode,
   pointerEventModifiers,
   recordCanvasPerfFrame,
   selectedSingleVideoPath,
-  syncCanvasPerfDragSessionState,
+  syncCanvasPerfPointerInteractionSessionState,
   syncCanvasPerfSessionState,
   canvasPreviewResourceInteractionState,
   type CanvasPerfDebugSnapshotContext,
@@ -86,6 +91,8 @@ interface CanvasSurfaceProps {
   canvasFeedback: CanvasFeedbackDocument | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   minimapOpen?: boolean | undefined;
+  productPlatform: DebruteProductPlatform;
+  cutPaths?: readonly string[] | undefined;
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
   interactionBlocked?: boolean | undefined;
@@ -101,6 +108,8 @@ export function CanvasSurface({
   canvasFeedback,
   feedbackInteraction,
   minimapOpen,
+  productPlatform,
+  cutPaths = [],
   onCurrentNodesChange,
   onOpenContextMenu,
   interactionBlocked = false,
@@ -140,6 +149,8 @@ export function CanvasSurface({
       feedbackInteraction={feedbackInteraction}
       perfMonitor={perfMonitor}
       minimapOpen={minimapOpen}
+      productPlatform={productPlatform}
+      cutPaths={cutPaths}
       onCurrentNodesChange={onCurrentNodesChange}
       onOpenContextMenu={onOpenContextMenu}
       interactionBlocked={interactionBlocked}
@@ -158,6 +169,8 @@ function CanvasSurfaceRuntime({
   feedbackInteraction,
   perfMonitor,
   minimapOpen,
+  productPlatform,
+  cutPaths = [],
   onCurrentNodesChange,
   onOpenContextMenu,
   interactionBlocked = false,
@@ -173,12 +186,14 @@ function CanvasSurfaceRuntime({
   const onFeedbackBarTargetChange = feedbackInteraction?.handleTargetChange;
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const cutPathSet = useMemo(() => new Set(cutPaths), [cutPaths]);
   const selection = useCanvasSelection(runtime);
+  const pointerInteraction = useCanvasPointerInteraction(runtime);
   const surfaceSize = useCanvasSurfaceSize(runtime);
   const initialRuntimeSnapshot = runtime.getSnapshot();
   const [cameraState, setCameraState] = useState(initialRuntimeSnapshot.cameraState);
-  const [dragActive, setDragActive] = useState(initialRuntimeSnapshot.dragState !== undefined);
-  const interactionActive = cameraState !== 'idle' || dragActive;
+  const [pointerInteractionActive, setPointerInteractionActive] = useState(initialRuntimeSnapshot.pointerInteraction !== undefined);
+  const interactionActive = cameraState !== 'idle' || pointerInteractionActive;
   const [resourceZoomState, setResourceZoomState] = useState(() => (
     initialCanvasResourceZoomState(initialRuntimeSnapshot.camera.z)
   ));
@@ -186,7 +201,7 @@ function CanvasSurfaceRuntime({
   const selectionRef = useRef<CanvasSelection | undefined>(selection);
   const fittedCanvasIdRef = useRef<string | undefined>(undefined);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
-  const canvasPerfDragSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
+  const canvasPerfPointerInteractionSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const reactCommitCountRef = useRef(0);
   const [hoveredNodePath, setHoveredNodePath] = useState<string>();
   const [playingVideoPaths, setPlayingVideoPaths] = useState<ReadonlySet<string>>(() => new Set());
@@ -320,12 +335,19 @@ function CanvasSurfaceRuntime({
         return;
       }
       const selectedVideoPath = selectedSingleVideoPath(selectionRef.current, projectedNodes);
+      const activeElement = document.activeElement;
+      const focusedCanvasNodePath = activeElement
+        ?.closest('[data-canvas-node-path]')
+        ?.getAttribute('data-canvas-node-path');
+      if (!selectedVideoPath || focusedCanvasNodePath !== selectedVideoPath) {
+        return;
+      }
       videoHotkeyController.handleKeyDown({
         key: event.key,
         shiftKey: event.shiftKey,
         preventDefault: () => event.preventDefault(),
         selectedVideoPath,
-        activeElement: document.activeElement
+        activeElement
       });
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -357,11 +379,11 @@ function CanvasSurfaceRuntime({
   useEffect(() => () => previewResourceScheduler.dispose(), [previewResourceScheduler]);
 
   useEffect(() => {
-    previewResourceScheduler.setInteractionState({
+    previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState({
       cameraState,
-      dragActive
-    });
-  }, [cameraState, dragActive, previewResourceScheduler]);
+      pointerInteraction: pointerInteractionActive ? runtime.getSnapshot().pointerInteraction : undefined
+    }));
+  }, [cameraState, pointerInteractionActive, previewResourceScheduler, runtime]);
 
   const syncResourceZoomForSnapshot = useCallback((input: {
     cameraState: CanvasRuntimeSnapshot['cameraState'];
@@ -402,9 +424,9 @@ function CanvasSurfaceRuntime({
     }
     const unbindStage = stageRuntime.bindStage(stage);
     if (interactionBlocked) {
-      const dragState = runtime.getSnapshot().dragState;
-      if (dragState) {
-        runtime.input.cancelPointer(dragState.pointerId);
+      const pointerInteraction = runtime.getSnapshot().pointerInteraction;
+      if (pointerInteraction) {
+        runtime.input.cancelPointer(pointerInteraction.pointerId);
       }
       return unbindStage;
     }
@@ -465,7 +487,7 @@ function CanvasSurfaceRuntime({
       const snapshot = runtime.getSnapshot();
       previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState({
         cameraState,
-        dragState: snapshot.dragState
+        pointerInteraction: snapshot.pointerInteraction
       }));
       setCameraState(cameraState);
       syncResourceZoomForSnapshot({
@@ -493,48 +515,48 @@ function CanvasSurfaceRuntime({
 
   useEffect(() => {
     const initialSnapshot = runtime.getSnapshot();
-    syncCanvasPerfDragSessionState({
+    syncCanvasPerfPointerInteractionSessionState({
       perfMonitor,
-      sessionRef: canvasPerfDragSessionRef,
+      sessionRef: canvasPerfPointerInteractionSessionRef,
       reactCommitCountRef,
-      dragState: initialSnapshot.dragState,
+      pointerInteraction: initialSnapshot.pointerInteraction,
       snapshot: initialSnapshot,
       finalState: canvasPerfFinalState({
         snapshot: initialSnapshot,
         renderSnapshot: renderLifecycle.getSnapshot()
       })
     });
-    if (initialSnapshot.dragState) {
+    if (initialSnapshot.pointerInteraction) {
       recordCanvasPerfFrame({
         perfMonitor,
-        sessionRef: canvasPerfDragSessionRef,
+        sessionRef: canvasPerfPointerInteractionSessionRef,
         cameraState: initialSnapshot.cameraState,
         renderSnapshot: renderLifecycle.getSnapshot(),
         reactCommitCountRef
       });
     }
-    return runtime.subscribeDragState((nextDragState) => {
+    return runtime.subscribePointerInteraction((nextPointerInteraction) => {
       const snapshot = runtime.getSnapshot();
       previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState({
         cameraState: snapshot.cameraState,
-        dragState: nextDragState
+        pointerInteraction: nextPointerInteraction
       }));
-      setDragActive(nextDragState !== undefined);
-      syncCanvasPerfDragSessionState({
+      setPointerInteractionActive(nextPointerInteraction !== undefined);
+      syncCanvasPerfPointerInteractionSessionState({
         perfMonitor,
-        sessionRef: canvasPerfDragSessionRef,
+        sessionRef: canvasPerfPointerInteractionSessionRef,
         reactCommitCountRef,
-        dragState: nextDragState,
+        pointerInteraction: nextPointerInteraction,
         snapshot,
         finalState: canvasPerfFinalState({
           snapshot,
           renderSnapshot: renderLifecycle.getSnapshot()
         })
       });
-      if (nextDragState) {
+      if (nextPointerInteraction) {
         recordCanvasPerfFrame({
           perfMonitor,
-          sessionRef: canvasPerfDragSessionRef,
+          sessionRef: canvasPerfPointerInteractionSessionRef,
           cameraState: snapshot.cameraState,
           renderSnapshot: renderLifecycle.getSnapshot(),
           reactCommitCountRef
@@ -552,67 +574,84 @@ function CanvasSurfaceRuntime({
     setResourceZoomState(initialCanvasResourceZoomState(runtime.getSnapshot().camera.z));
   }, [canvas.id, runtime]);
 
-  const pointerCanvasPoint = useCallback((event: Pick<React.PointerEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>): CanvasPoint => (
-    runtime.coordinates.screenToCanvas({ x: event.clientX, y: event.clientY })
-  ), [runtime]);
+  const pointerScreenPoint = useCallback((
+    event: Pick<React.PointerEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>
+  ): CanvasPoint => ({ x: event.clientX, y: event.clientY }), []);
 
   const beginNodeMove = useCallback((node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const item = { kind: 'node' as const, projectRelativePath: node.projectRelativePath };
-    const currentSelection = selectionRef.current;
-    const nextSelection = isAdditiveCanvasSelectionModifier(event)
-      ? toggleCanvasSelectionItem(selectionRef.current, item)
-      : isCanvasItemSelected(currentSelection, item)
-        ? currentSelection
-        : item;
-    if (!nextSelection) {
-      runtime.setSelection(undefined);
+    if (!isCanvasPrimaryPointerEvent(event, productPlatform) || interactionBlocked) {
       return;
     }
-    runtime.setSelection(nextSelection);
+    surfaceRef.current?.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
     runtime.input.beginNodeMove({
       pointerId: event.pointerId,
       projectRelativePath: node.projectRelativePath,
-      start: pointerCanvasPoint(event),
-      selection: nextSelection
+      screenPoint: pointerScreenPoint(event),
+      modifiers: pointerEventModifiers(event, productPlatform)
     });
-  }, [pointerCanvasPoint, runtime]);
+  }, [interactionBlocked, pointerScreenPoint, productPlatform, runtime]);
 
   const beginNodeResize = useCallback((node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isCanvasPrimaryPointerEvent(event, productPlatform) || interactionBlocked) {
+      return;
+    }
     event.stopPropagation();
+    surfaceRef.current?.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     runtime.input.beginNodeResize({
       pointerId: event.pointerId,
       handle,
-      start: pointerCanvasPoint(event),
+      screenPoint: pointerScreenPoint(event),
       projectRelativePath: node.projectRelativePath,
-      modifiers: pointerEventModifiers(event)
+      modifiers: pointerEventModifiers(event, productPlatform)
     });
-    runtime.setSelection({ kind: 'node', projectRelativePath: node.projectRelativePath });
-  }, [pointerCanvasPoint, runtime]);
+  }, [interactionBlocked, pointerScreenPoint, productPlatform, runtime]);
+
+  const beginSelectionMarquee = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (
+      !isCanvasPrimaryPointerEvent(event, productPlatform)
+      || interactionBlocked
+      || !isTrueCanvasBlankTarget(event.currentTarget, event.target)
+    ) {
+      return;
+    }
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    runtime.input.beginSelectionMarquee({
+      pointerId: event.pointerId,
+      screenPoint: pointerScreenPoint(event),
+      modifiers: pointerEventModifiers(event, productPlatform),
+      topEdgeInset: canvasTopEdgeInset(event.currentTarget)
+    });
+  }, [interactionBlocked, pointerScreenPoint, productPlatform, runtime]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<Element>) => {
     runtime.input.updatePointer({
       pointerId: event.pointerId,
-      point: pointerCanvasPoint(event),
-      modifiers: pointerEventModifiers(event)
+      screenPoint: pointerScreenPoint(event),
+      modifiers: pointerEventModifiers(event, productPlatform)
     });
-  }, [pointerCanvasPoint, runtime]);
+  }, [pointerScreenPoint, productPlatform, runtime]);
 
   const handlePointerUp = useCallback(async (event: React.PointerEvent<Element>) => {
     await runtime.input.finishPointer({
       pointerId: event.pointerId,
-      point: pointerCanvasPoint(event),
-      modifiers: pointerEventModifiers(event)
+      screenPoint: pointerScreenPoint(event),
+      modifiers: pointerEventModifiers(event, productPlatform)
     });
-  }, [pointerCanvasPoint, runtime]);
+  }, [pointerScreenPoint, productPlatform, runtime]);
 
   const handlePointerUpEvent = useCallback((event: React.PointerEvent<Element>) => {
     void handlePointerUp(event).catch(() => undefined);
   }, [handlePointerUp]);
 
+  const cancelPointerEvent = useCallback((event: React.PointerEvent<Element>) => {
+    runtime.input.cancelPointer(event.pointerId);
+  }, [runtime]);
+
   const selectNode = useCallback((node: ProjectedCanvasNode) => {
-    runtime.setSelection({ kind: 'node', projectRelativePath: node.projectRelativePath });
+    runtime.setSelection(canvasNodeSelection([node.projectRelativePath]));
   }, [runtime]);
 
   const handleNodePointerEnter = useCallback((node: ProjectedCanvasNode) => {
@@ -626,20 +665,27 @@ function CanvasSurfaceRuntime({
   const handleNodeContextMenu = useCallback((node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => {
     event.preventDefault();
     event.stopPropagation();
-    runtime.setSelection({ kind: 'node', projectRelativePath: node.projectRelativePath });
-    const sizeBytes = node.nodeKind === 'file' && node.availability.state === 'available'
-      ? node.availability.size
-      : undefined;
+    const currentSelection = runtime.getSnapshot().selection;
+    const preserveSelection = isCanvasNodeSelected(currentSelection, node.projectRelativePath);
+    if (!preserveSelection) {
+      runtime.setSelection(canvasNodeSelection([node.projectRelativePath]));
+    }
+    const selectedPaths = preserveSelection
+      ? selectedNodeProjectRelativePaths(currentSelection)
+      : [node.projectRelativePath];
+    const selectedEntries = selectedPaths.flatMap((path) => {
+      const selectedNode = projectedNodes.find((candidate) => candidate.projectRelativePath === path);
+      return selectedNode ? [projectPathCommandEntryForCanvasNode(selectedNode)] : [];
+    });
     onOpenContextMenu?.({
       source: 'canvas',
-      kind: node.nodeKind,
-      projectRelativePath: node.projectRelativePath,
-      ...(sizeBytes === undefined ? {} : { sizeBytes })
+      invocationEntry: projectPathCommandEntryForCanvasNode(node),
+      selectedEntries
     }, {
       x: event.clientX,
       y: event.clientY
     });
-  }, [onOpenContextMenu, runtime]);
+  }, [onOpenContextMenu, projectedNodes, runtime]);
 
   const renderedNodes = [...renderSnapshot.nodesByPath.values()];
   const selectedNodePathsForVideo = useMemo(
@@ -647,11 +693,12 @@ function CanvasSurfaceRuntime({
     [selection]
   );
   const activeInlineTextPath = useMemo(() => {
-    if (selection?.kind !== 'node') {
+    if (selection?.kind !== 'nodes' || selection.projectRelativePaths.length !== 1) {
       return undefined;
     }
+    const selectedPath = selection.projectRelativePaths[0]!;
     return projectedNodes.find((node) => (
-      node.projectRelativePath === selection.projectRelativePath
+      node.projectRelativePath === selectedPath
       && node.mediaKind === 'text'
     ))?.projectRelativePath;
   }, [projectedNodes, selection]);
@@ -748,8 +795,8 @@ function CanvasSurfaceRuntime({
     node: ProjectedCanvasNode;
     surfaceRect: DOMRect;
     camera: CanvasRuntimeSnapshot['camera'];
-  }): CanvasFeedbackBarTarget | undefined => {
-    let feedbackBarTarget: CanvasFeedbackBarTarget | undefined;
+  }): CanvasFeedbackNodeBarTarget => {
+    let feedbackBarTarget: CanvasFeedbackNodeBarTarget | undefined;
     const videoTarget = input.node.mediaKind === 'video'
       ? videoTargetsRef.current.get(input.node.projectRelativePath)
       : undefined;
@@ -774,7 +821,6 @@ function CanvasSurfaceRuntime({
       node: input.node,
       surfaceRect: domRectToFloatingBarRect(input.surfaceRect),
       camera: input.camera,
-      entry: canvasFeedback?.entries[input.node.projectRelativePath],
       canStartVideoMomentFeedback: Boolean(startVideoMomentFeedback),
       startVideoMomentFeedback,
       seekToMoment: input.node.mediaKind === 'video'
@@ -790,7 +836,7 @@ function CanvasSurfaceRuntime({
         : undefined
     });
     return feedbackBarTarget;
-  }, [canvasFeedback, onLocalFeedbackDraft, videoTargetRevision]);
+  }, [onLocalFeedbackDraft, videoTargetRevision]);
 
   const handleLocalFeedbackDraft = useCallback((draft: {
     projectRelativePath: string;
@@ -813,7 +859,7 @@ function CanvasSurfaceRuntime({
     if (!feedbackBarTarget) {
       return;
     }
-    const scope = node.mediaKind === 'video' ? 'moment' : 'file';
+    const scope = node.mediaKind === 'video' ? 'moment' : 'node';
     const momentTimeSeconds = scope === 'moment'
       ? feedbackComposition?.momentTimeSeconds
       : undefined;
@@ -858,19 +904,34 @@ function CanvasSurfaceRuntime({
   }, [feedbackBarTargetForNode, feedbackInteraction, projectedNodes, runtime]);
 
   const emitFeedbackBarTarget = useCallback(() => {
-    if (!onFeedbackBarTargetChange || !canvasFeedback || !hoveredNodePath) {
+    if (!onFeedbackBarTargetChange || !canvasFeedback) {
       onFeedbackBarTargetChange?.(undefined);
       return;
     }
-
-    const node = projectedNodes.find((item) => item.projectRelativePath === hoveredNodePath);
     const surfaceRect = surfaceRef.current?.getBoundingClientRect();
-    if (!node || !surfaceRect) {
+    if (!surfaceRect) {
       onFeedbackBarTargetChange(undefined);
       return;
     }
-
     const camera = runtime.getSnapshot().camera;
+    if (selection?.kind === 'nodes' && selection.projectRelativePaths.length > 1) {
+      onFeedbackBarTargetChange(canvasFeedbackBarTargetForSelection({
+        projectRelativePaths: selection.projectRelativePaths,
+        nodes: renderedNodes,
+        surfaceRect: domRectToFloatingBarRect(surfaceRect),
+        camera
+      }));
+      return;
+    }
+    if (hoveredNodePath === undefined) {
+      onFeedbackBarTargetChange(undefined);
+      return;
+    }
+    const node = renderedNodes.find((item) => item.projectRelativePath === hoveredNodePath);
+    if (!node) {
+      onFeedbackBarTargetChange(undefined);
+      return;
+    }
     const feedbackBarTarget = feedbackBarTargetForNode({
       node,
       surfaceRect,
@@ -886,8 +947,9 @@ function CanvasSurfaceRuntime({
     feedbackBarTargetForNode,
     hoveredNodePath,
     onFeedbackBarTargetChange,
-    projectedNodes,
-    runtime
+    renderedNodes,
+    runtime,
+    selection
   ]);
 
   useEffect(() => {
@@ -895,13 +957,14 @@ function CanvasSurfaceRuntime({
   }, [emitFeedbackBarTarget, surfaceSize]);
 
   useEffect(() => {
-    const currentTargetPath = feedbackInteraction?.currentTargetProjectRelativePath;
-    if (!currentTargetPath) {
+    if (!feedbackInteraction) {
       return;
     }
-    const targetStillExists = projectedNodes.some((node) => (
-      node.nodeKind === 'file' && node.projectRelativePath === currentTargetPath
-    ));
+    const currentTargetPath = feedbackInteraction.currentTargetProjectRelativePath;
+    if (currentTargetPath === undefined) {
+      return;
+    }
+    const targetStillExists = projectedNodes.some((node) => node.projectRelativePath === currentTargetPath);
     if (!targetStillExists) {
       feedbackInteraction.invalidateTarget(currentTargetPath);
     }
@@ -916,10 +979,18 @@ function CanvasSurfaceRuntime({
       ref={surfaceRef}
       className="canvas-surface"
       data-testid="canvas-surface"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          runtime.setSelection(undefined);
+      tabIndex={0}
+      onPointerDown={beginSelectionMarquee}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUpEvent}
+      onPointerCancel={cancelPointerEvent}
+      onLostPointerCapture={cancelPointerEvent}
+      onContextMenu={(event) => {
+        if (!isTrueCanvasBlankTarget(event.currentTarget, event.target)) {
+          return;
         }
+        event.preventDefault();
+        runtime.setSelection(undefined);
       }}
       onDragOver={(event) => {
         if (!isCanvasMapProjectTreeDragOver(event.dataTransfer)) {
@@ -991,9 +1062,14 @@ function CanvasSurfaceRuntime({
                 <CanvasSurfaceNodeShell
                   key={node.projectRelativePath}
                   node={node}
-                  selected={isCanvasItemSelected(selection, { kind: 'node', projectRelativePath: node.projectRelativePath })}
-                  textEditorActive={selection?.kind === 'node'
-                    && selection.projectRelativePath === node.projectRelativePath
+                  selected={isCanvasNodeSelected(selection, node.projectRelativePath)}
+                  cut={cutPathSet.has(node.projectRelativePath)}
+                  showResizeHandles={selection?.kind === 'nodes'
+                    && selection.projectRelativePaths.length === 1
+                    && selection.projectRelativePaths[0] === node.projectRelativePath}
+                  textEditorActive={selection?.kind === 'nodes'
+                    && selection.projectRelativePaths.length === 1
+                    && selection.projectRelativePaths[0] === node.projectRelativePath
                     && node.mediaKind === 'text'}
                   hovered={hoveredNodePath === node.projectRelativePath}
                   culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
@@ -1020,8 +1096,6 @@ function CanvasSurfaceRuntime({
                   onLocalFeedbackDraft={handleLocalFeedbackDraft}
                   onFeedbackItemActivate={handleFeedbackItemActivate}
                   onPointerDown={beginNodeMove}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUpEvent}
                   onPointerEnter={handleNodePointerEnter}
                   onPointerLeave={handleNodePointerLeave}
                   onSelectNode={selectNode}
@@ -1038,6 +1112,11 @@ function CanvasSurfaceRuntime({
           </CanvasTextPreviewProvider>
         </CanvasVideoPreviewProvider>
       </div>
+      <CanvasSelectionMarqueeOverlay
+        interaction={pointerInteraction}
+        runtime={runtime}
+        surfaceElement={surfaceRef.current}
+      />
       {projectedNodes.length === 0 ? (
         <div className="canvas-empty-state" data-testid="canvas-empty-state">
           <strong>No Canvas Map nodes</strong>
@@ -1050,6 +1129,8 @@ function CanvasSurfaceRuntime({
 function CanvasSurfaceNodeShell({
   node,
   selected,
+  cut,
+  showResizeHandles,
   textEditorActive,
   hovered,
   culled,
@@ -1066,8 +1147,6 @@ function CanvasSurfaceNodeShell({
   onLocalFeedbackDraft,
   onFeedbackItemActivate,
   onPointerDown,
-  onPointerMove,
-  onPointerUp,
   onPointerEnter,
   onPointerLeave,
   onSelectNode,
@@ -1081,6 +1160,8 @@ function CanvasSurfaceNodeShell({
 }: {
   node: ProjectedCanvasNode;
   selected: boolean;
+  cut: boolean;
+  showResizeHandles: boolean;
   textEditorActive: boolean;
   hovered: boolean;
   culled: boolean;
@@ -1100,8 +1181,6 @@ function CanvasSurfaceNodeShell({
   }) => void) | undefined;
   onFeedbackItemActivate?: ((projectRelativePath: string, itemId: string) => void) | undefined;
   onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
-  onPointerMove: (event: React.PointerEvent<Element>) => void;
-  onPointerUp: (event: React.PointerEvent<Element>) => void;
   onPointerEnter: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onPointerLeave: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
@@ -1143,6 +1222,8 @@ function CanvasSurfaceNodeShell({
     <CanvasNodeShell
       node={node}
       selected={selected}
+      cut={cut}
+      showResizeHandles={showResizeHandles}
       textEditorActive={textEditorActive}
       hovered={hovered}
       culled={culled}
@@ -1165,8 +1246,6 @@ function CanvasSurfaceNodeShell({
       onLocalFeedbackDraft={onLocalFeedbackDraft}
       onFeedbackItemActivate={onFeedbackItemActivate}
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onSelectNode={onSelectNode}
@@ -1180,4 +1259,61 @@ function CanvasSurfaceNodeShell({
       onVideoPreviewError={reportVideoPreviewError}
     />
   );
+}
+
+function CanvasSelectionMarqueeOverlay({
+  interaction,
+  runtime,
+  surfaceElement
+}: {
+  interaction: CanvasRuntimeSnapshot['pointerInteraction'];
+  runtime: CanvasEditorRuntime;
+  surfaceElement: HTMLElement | null;
+}): React.ReactElement | null {
+  if (
+    interaction?.kind !== 'selection-marquee'
+    || interaction.phase !== 'active'
+    || !interaction.rect
+    || !surfaceElement
+  ) {
+    return null;
+  }
+  const screenRect = runtime.coordinates.canvasRectToScreen(interaction.rect);
+  const surfaceRect = surfaceElement.getBoundingClientRect();
+  return (
+    <div
+      className="canvas-selection-marquee"
+      data-testid="canvas-selection-marquee"
+      style={{
+        left: screenRect.x - surfaceRect.left,
+        top: screenRect.y - surfaceRect.top,
+        width: screenRect.width,
+        height: screenRect.height
+      }}
+    />
+  );
+}
+
+function isTrueCanvasBlankTarget(surface: HTMLElement, target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || !surface.contains(target)) {
+    return false;
+  }
+  return !target.closest([
+    '[data-canvas-entity="node"]',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    '[contenteditable="true"]',
+    '[data-canvas-interaction-owner]'
+  ].join(','));
+}
+
+function canvasTopEdgeInset(surface: HTMLElement): number {
+  const titleBar = document.querySelector<HTMLElement>('[data-testid="workbench-titlebar"]');
+  if (!titleBar) {
+    return 0;
+  }
+  const surfaceRect = surface.getBoundingClientRect();
+  return Math.max(0, titleBar.getBoundingClientRect().bottom - surfaceRect.top);
 }

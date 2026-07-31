@@ -1,17 +1,18 @@
 import type React from 'react';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type {
-  CanvasFeedbackEntry,
   ProjectedCanvasNode
 } from '@debrute/canvas-core';
 import type {
   CanvasEditorRuntime,
-  CanvasRuntimeDragState,
+  CanvasRuntimePointerInteraction,
   CanvasRuntimePointerModifiers,
   CanvasRuntimeSnapshot
 } from './runtime/CanvasEditorRuntime';
 import {
   canvasFeedbackLocalToolsetForMediaKind,
-  type CanvasFeedbackBarTarget,
+  type CanvasFeedbackNodeBarTarget,
+  type CanvasFeedbackSelectionBarTarget,
   type FloatingBarRect
 } from '../shell/floatingBars';
 import { hasInternalProjectTreeDrag, readInternalProjectTreeDragEntries } from '../project-explorer/ProjectTree';
@@ -53,10 +54,22 @@ export function isCanvasMapProjectTreeDragOver(dataTransfer: Pick<DataTransfer, 
   return hasInternalProjectTreeDrag(dataTransfer);
 }
 
-export function pointerEventModifiers(event: Pick<React.PointerEvent<Element>, 'shiftKey'>): CanvasRuntimePointerModifiers {
+export function pointerEventModifiers(
+  event: Pick<React.PointerEvent<Element>, 'shiftKey' | 'metaKey' | 'ctrlKey'>,
+  platform: DebruteProductPlatform
+): CanvasRuntimePointerModifiers {
   return {
-    shiftKey: event.shiftKey
+    shiftKey: event.shiftKey,
+    metaKey: platform === 'darwin' && event.metaKey,
+    ctrlKey: platform !== 'darwin' && event.ctrlKey
   };
+}
+
+export function isCanvasPrimaryPointerEvent(
+  event: Pick<React.PointerEvent<Element>, 'button' | 'ctrlKey'>,
+  platform: DebruteProductPlatform
+): boolean {
+  return event.button === 0 && !(platform === 'darwin' && event.ctrlKey);
 }
 
 export interface CanvasPerfRuntimeSession {
@@ -139,11 +152,11 @@ export function syncCanvasPerfSessionState(input: {
   }
 }
 
-export function syncCanvasPerfDragSessionState(input: {
+export function syncCanvasPerfPointerInteractionSessionState(input: {
   perfMonitor: CanvasPerfMonitor | undefined;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
   reactCommitCountRef: { current: number };
-  dragState: CanvasRuntimeDragState | undefined;
+  pointerInteraction: CanvasRuntimePointerInteraction | undefined;
   snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
   finalState?: Partial<CanvasPerfFinalState> | undefined;
 }): void {
@@ -152,13 +165,17 @@ export function syncCanvasPerfDragSessionState(input: {
     return;
   }
   const timestamp = canvasPerfTimestamp();
-  if (input.dragState) {
+  if (input.pointerInteraction) {
     if (!input.sessionRef.current) {
       const sessionId = perfMonitor.startSession({
-        type: input.dragState.kind === 'move-node' ? 'drag-move-node' : 'drag-resize-node',
+        type: input.pointerInteraction.kind === 'selection-marquee'
+          ? 'selection-marquee'
+          : input.pointerInteraction.kind === 'move-node'
+            ? 'drag-move-node'
+            : 'drag-resize-node',
         timestamp,
         source: 'CanvasSurface',
-        detail: canvasPerfDragSessionDetail(input.dragState)
+        detail: canvasPerfPointerInteractionSessionDetail(input.pointerInteraction)
       });
       input.sessionRef.current = {
         sessionId,
@@ -245,7 +262,13 @@ function counterDeltaSum(
   return names.reduce((total, name) => total + counterDelta(current, previous, name), 0);
 }
 
-function canvasPerfDragSessionDetail(state: CanvasRuntimeDragState): Record<string, unknown> {
+function canvasPerfPointerInteractionSessionDetail(state: CanvasRuntimePointerInteraction): Record<string, unknown> {
+  if (state.kind === 'selection-marquee') {
+    return {
+      pointerId: state.pointerId,
+      phase: state.phase
+    };
+  }
   if (state.kind === 'move-node') {
     return {
       pointerId: state.pointerId,
@@ -317,11 +340,11 @@ function canvasPerfTimestamp(): number {
 }
 
 export function canvasPreviewResourceInteractionState(
-  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'dragState'>
+  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'pointerInteraction'>
 ): CanvasPreviewResourceInteractionState {
   return {
     cameraState: snapshot.cameraState,
-    dragActive: snapshot.dragState !== undefined
+    dragActive: snapshot.pointerInteraction !== undefined
   };
 }
 
@@ -338,24 +361,59 @@ export function canvasFeedbackBarTargetForProjectedNode(input: {
   node: ProjectedCanvasNode;
   surfaceRect: FloatingBarRect;
   camera: CanvasCamera;
-  entry: CanvasFeedbackEntry | undefined;
   canStartVideoMomentFeedback?: boolean | undefined;
   startVideoMomentFeedback?: ((mode: 'comment' | 'pin' | 'rect') => void) | undefined;
   seekToMoment?: ((seconds: number) => void) | undefined;
-}): CanvasFeedbackBarTarget | undefined {
-  if (input.node.nodeKind !== 'file') {
-    return undefined;
-  }
+}): CanvasFeedbackNodeBarTarget {
   return {
+    kind: 'node',
     projectRelativePath: input.node.projectRelativePath,
-    nodeRect: nodeRectForFloatingBar(input.node),
+    anchorRect: nodeRectForFloatingBar(input.node),
     surfaceRect: input.surfaceRect,
     camera: input.camera,
-    entry: input.entry,
     localToolset: canvasFeedbackLocalToolsetForMediaKind(input.node.mediaKind),
     canStartVideoMomentFeedback: input.canStartVideoMomentFeedback ?? false,
     startVideoMomentFeedback: input.startVideoMomentFeedback,
     seekToMoment: input.seekToMoment
+  };
+}
+
+export function canvasFeedbackBarTargetForSelection(input: {
+  projectRelativePaths: readonly string[];
+  nodes: readonly ProjectedCanvasNode[];
+  surfaceRect: FloatingBarRect;
+  camera: CanvasCamera;
+}): CanvasFeedbackSelectionBarTarget | undefined {
+  if (input.projectRelativePaths.length < 2) {
+    return undefined;
+  }
+  const nodesByPath = new Map(input.nodes.map((node) => [node.projectRelativePath, node]));
+  const selectedNodes = input.projectRelativePaths.map((path) => nodesByPath.get(path));
+  if (selectedNodes.some((node) => !node)) {
+    return undefined;
+  }
+  const first = selectedNodes[0]!;
+  let left = first.x;
+  let top = first.y;
+  let right = first.x + first.width;
+  let bottom = first.y + first.height;
+  for (const node of selectedNodes.slice(1)) {
+    left = Math.min(left, node!.x);
+    top = Math.min(top, node!.y);
+    right = Math.max(right, node!.x + node!.width);
+    bottom = Math.max(bottom, node!.y + node!.height);
+  }
+  return {
+    kind: 'selection',
+    projectRelativePaths: [...input.projectRelativePaths],
+    anchorRect: {
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top
+    },
+    surfaceRect: input.surfaceRect,
+    camera: input.camera
   };
 }
 
@@ -373,10 +431,11 @@ export function devicePixelRatioValue(): number {
 }
 
 export function selectedSingleVideoPath(selection: CanvasSelection | undefined, nodes: readonly ProjectedCanvasNode[]): string | undefined {
-  if (!selection || selection.kind !== 'node') {
+  if (selection?.kind !== 'nodes' || selection.projectRelativePaths.length !== 1) {
     return undefined;
   }
-  const node = nodes.find((item) => item.projectRelativePath === selection.projectRelativePath);
+  const selectedPath = selection.projectRelativePaths[0]!;
+  const node = nodes.find((item) => item.projectRelativePath === selectedPath);
   return node && isProjectedVideoNode(node) ? node.projectRelativePath : undefined;
 }
 

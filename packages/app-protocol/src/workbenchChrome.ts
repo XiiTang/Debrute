@@ -21,3 +21,11 @@ export type NativeMenuCommand =
     };
 
 export type NativeMenuCommandId = NativeMenuCommand['commandId'];
+
+export type NativeEditCommandId = Extract<NativeMenuCommandId,
+  | 'edit.cut'
+  | 'edit.copy'
+  | 'edit.paste'
+  | 'edit.delete'
+  | 'edit.select-all'
+>;

@@ -1,6 +1,7 @@
 export type CanvasPerfSessionType =
   | 'camera-pan'
   | 'camera-minimap'
+  | 'selection-marquee'
   | 'drag-move-node'
   | 'drag-resize-node';
 
@@ -66,6 +67,7 @@ export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;
 export const CANVAS_PERF_INTERACTION_SESSION_TYPES = [
   'camera-pan',
   'camera-minimap',
+  'selection-marquee',
   'drag-move-node',
   'drag-resize-node'
 ] as const satisfies readonly CanvasPerfSessionType[];

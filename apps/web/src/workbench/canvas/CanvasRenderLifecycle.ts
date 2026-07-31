@@ -11,7 +11,7 @@ import {
 import type { CanvasVisibilityController } from './CanvasVisibilityController.js';
 import type {
   CanvasEditorRuntime,
-  CanvasRuntimeDragState,
+  CanvasRuntimePointerInteraction,
   CanvasRuntimeSnapshot
 } from './runtime/CanvasEditorRuntime.js';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime.js';
@@ -86,7 +86,7 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       nodesByPath: next.nodesByPath,
       culledNodePaths: next.culledNodePaths,
       selectedNodePaths: new Set(selectedNodeProjectRelativePaths(runtimeSnapshot.selection)),
-      activeNodePaths: new Set(activeNodeProjectRelativePaths(runtimeSnapshot.dragState))
+      activeNodePaths: new Set(activeNodeProjectRelativePaths(runtimeSnapshot.pointerInteraction))
     });
     if (next === snapshot) {
       return;
@@ -130,7 +130,7 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       }),
       input.runtime.subscribeSelection(() => commitCurrent(true)),
       input.runtime.subscribeSurfaceSize(() => commitCurrent(true)),
-      input.runtime.subscribeDragState(() => commitCurrent(true)),
+      input.runtime.subscribePointerInteraction(() => commitCurrent(true)),
       input.runtime.manualLayout.subscribeRejection(() => commitCurrent(true))
     ];
     detachRuntime = () => {
@@ -176,13 +176,13 @@ function renderInput(
     cameraState: snapshot.cameraState,
     surfaceSize: snapshot.surfaceSize,
     selection: snapshot.selection,
-    activeNodePaths: activeNodeProjectRelativePaths(snapshot.dragState),
+    activeNodePaths: activeNodeProjectRelativePaths(snapshot.pointerInteraction),
     layoutOverrides: runtime.manualLayout.getPresentation().layoutOverrides
   };
 }
 
-function activeNodeProjectRelativePaths(state: CanvasRuntimeDragState | undefined): string[] {
-  if (!state) {
+function activeNodeProjectRelativePaths(state: CanvasRuntimePointerInteraction | undefined): string[] {
+  if (!state || state.kind === 'selection-marquee' || state.phase !== 'active') {
     return [];
   }
   return state.kind === 'move-node'

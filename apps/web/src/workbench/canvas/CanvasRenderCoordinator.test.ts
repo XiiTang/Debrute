@@ -123,7 +123,7 @@ describe('CanvasRenderCoordinator', () => {
       camera: { x: 0, y: 0, z: 1 },
       cameraState: 'idle',
       surfaceSize: { width: 300, height: 200 },
-      selection: { kind: 'node', projectRelativePath: 'flow/selected.png' },
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.png'] },
       activeNodePaths: ['flow/active.png'],
     layoutOverrides: []
     });

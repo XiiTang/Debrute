@@ -9,13 +9,16 @@ import {
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
+import {
+  resolveProjectPathCommandTarget,
+  type WorkbenchProjectPathCommandTarget
+} from '../services/projectPathCommandTarget.js';
 
 export type WorkbenchContextMenuTargetKind = 'file' | 'directory';
 
 export type ProjectPathCommand =
   | 'send-to-photoshop'
   | 'show-details'
-  | 'reveal-in-canvas'
   | 'reset-auto-layout'
   | 'create-file'
   | 'create-directory'
@@ -30,30 +33,8 @@ export type ProjectPathCommand =
   | 'open-terminal'
   | 'copy-relative-path';
 
-export interface WorkbenchCanvasContextMenuTarget {
-  source: 'canvas';
-  kind: WorkbenchContextMenuTargetKind;
-  projectRelativePath: string;
-  sizeBytes?: number;
-}
-
-export type WorkbenchExplorerContextMenuTarget =
-  | {
-      source: 'explorer';
-      targetKind: 'root';
-      paths: [];
-      primaryPath: null;
-      targetDirectoryPath: string;
-    }
-  | {
-      source: 'explorer';
-      targetKind: 'item' | 'selection';
-      paths: ProjectPathEntry[];
-      primaryPath: string;
-      targetDirectoryPath: string;
-    };
-
-export type WorkbenchContextMenuTarget = WorkbenchCanvasContextMenuTarget | WorkbenchExplorerContextMenuTarget;
+export type WorkbenchContextMenuTarget = WorkbenchProjectPathCommandTarget;
+export type WorkbenchExplorerContextMenuTarget = WorkbenchProjectPathCommandTarget & { source: 'explorer' };
 
 export interface WorkbenchContextMenuPosition {
   x: number;
@@ -92,12 +73,14 @@ export interface PhotoshopDocumentTarget {
 export function buildWorkbenchContextMenuItems(input: {
   target: WorkbenchContextMenuTarget;
   projection: CanvasProjection | undefined;
-  canSelectCanvasNode?: boolean | undefined;
-  canRevealInCanvas: boolean;
   fileClipboard?: WorkbenchFileClipboard | undefined;
   photoshop?: PhotoshopStateView | undefined;
 }): WorkbenchContextMenuItem[] {
-  if (input.target.source === 'explorer' && input.target.targetKind === 'root') {
+  const resolved = resolveProjectPathCommandTarget(input.target);
+  const rootInvocation = input.target.source === 'explorer'
+    && resolved.invocationEntry.projectRelativePath === ''
+    && resolved.selectionEntries.length === 0;
+  if (rootInvocation) {
     return [
       action('create-file'),
       action('create-directory'),
@@ -106,80 +89,54 @@ export function buildWorkbenchContextMenuItems(input: {
     ];
   }
 
-  if (input.target.source === 'explorer' && input.target.targetKind === 'selection') {
-    return [
-      action('cut'),
-      action('copy'),
-      action('open-terminal'),
-      action('copy-path'),
-      action('copy-relative-path'),
-      action('delete')
-    ];
-  }
-
-  const targetEntry = explorerContextMenuPrimaryEntry(input.target);
-  if (!targetEntry) {
+  if (resolved.selectionEntries.length === 0) {
     return [];
   }
-  const node = projectedContextMenuNode(input.projection, targetEntry.projectRelativePath);
-  return buildSinglePathContextMenuItems({
-    ...input,
-    targetEntry,
-    node
-  });
-}
-
-function buildSinglePathContextMenuItems(input: {
-  target: WorkbenchContextMenuTarget;
-  targetEntry: ProjectPathEntry;
-  node: ProjectedCanvasNode | undefined;
-  canSelectCanvasNode?: boolean | undefined;
-  canRevealInCanvas: boolean;
-  fileClipboard?: WorkbenchFileClipboard | undefined;
-  photoshop?: PhotoshopStateView | undefined;
-}): WorkbenchContextMenuItem[] {
   const explorerItem = input.target.source === 'explorer';
-  const directory = input.targetEntry.kind === 'directory';
-  const canvasProjectRoot = input.target.source === 'canvas'
-    && directory
-    && input.targetEntry.projectRelativePath === '';
-  const canvasActions = [
+  const invocationDirectory = resolved.invocationEntry.kind === 'directory';
+  const selectionNodes = resolved.selectionEntries.flatMap((entry) => {
+    const node = projectedContextMenuNode(input.projection, entry.projectRelativePath);
+    return node ? [node] : [];
+  });
+  const canvasActions = input.target.source === 'canvas' ? [
     action('show-details', {
-      disabled: !(input.node && input.canSelectCanvasNode === true)
-    }),
-    action('reveal-in-canvas', {
-      disabled: !(input.node && input.canRevealInCanvas)
+      disabled: selectionNodes.length !== resolved.selectionEntries.length
     }),
     action('reset-auto-layout', {
-      disabled: input.node?.layoutMode !== 'manual'
+      disabled: selectionNodes.length !== resolved.selectionEntries.length
+        || !selectionNodes.some((node) => node.layoutMode === 'manual')
     })
-  ];
-  const creationActions = explorerItem && directory
+  ] : [];
+  const creationActions = explorerItem && invocationDirectory && resolved.selectionEntries.length === 1
     ? [
         action('create-file'),
         action('create-directory')
       ]
     : [];
   const fileActions = compactMenuItems([
-    canvasProjectRoot ? undefined : action('cut'),
-    canvasProjectRoot ? undefined : action('copy'),
-    directory ? action('paste', { disabled: !input.fileClipboard?.entries.length }) : undefined
+    action('cut', { disabled: !resolved.filesystemCommandsAvailable }),
+    action('copy', { disabled: !resolved.filesystemCommandsAvailable }),
+    invocationDirectory ? action('paste', { disabled: !input.fileClipboard?.entries.length }) : undefined
   ]);
+  const singleSelection = resolved.selectionEntries.length === 1
+    ? resolved.selectionEntries[0]
+    : undefined;
   const pathActions = compactMenuItems([
     action('open-terminal'),
     action('copy-path'),
-    canvasProjectRoot ? undefined : action('copy-relative-path'),
-    isPhotoshopTransferEligible(input.targetEntry)
+    action('copy-relative-path'),
+    singleSelection && isPhotoshopTransferEligible(singleSelection)
       ? photoshopSubmenu(
           input.photoshop,
-          photoshopPlacementFormatForPath(input.targetEntry.projectRelativePath)!
+          photoshopPlacementFormatForPath(singleSelection.projectRelativePath)!
         )
       : undefined,
     action('reveal-in-system-file-manager')
   ]);
   const modifyActions = compactMenuItems([
-    explorerItem ? action('rename') : undefined,
-    canvasProjectRoot ? undefined : action('delete')
+    explorerItem && resolved.selectionEntries.length === 1 ? action('rename') : undefined,
+    action('delete', { disabled: !resolved.filesystemCommandsAvailable }),
+    action('delete-permanently', { disabled: !resolved.filesystemCommandsAvailable })
   ]);
   return groupedMenuItems([
     { id: 'canvas-actions', items: canvasActions },
@@ -198,11 +155,7 @@ function groupedMenuItems(groups: Array<{ id: string; items: WorkbenchContextMen
 }
 
 export function explorerContextMenuEntries(target: WorkbenchContextMenuTarget): ProjectPathEntry[] {
-  return target.source === 'explorer' ? target.paths : [{
-    projectRelativePath: target.projectRelativePath,
-    kind: target.kind,
-    ...(target.sizeBytes === undefined ? {} : { sizeBytes: target.sizeBytes })
-  }];
+  return [...resolveProjectPathCommandTarget(target).selectionEntries];
 }
 
 export function isPhotoshopTransferEligible(entry: ProjectPathEntry): boolean {
@@ -217,11 +170,11 @@ export function isPhotoshopTransferEligible(entry: ProjectPathEntry): boolean {
 }
 
 export function explorerContextMenuPrimaryEntry(target: WorkbenchContextMenuTarget): ProjectPathEntry | undefined {
-  return explorerContextMenuEntries(target)[0];
+  return resolveProjectPathCommandTarget(target).invocationEntry;
 }
 
 export function explorerContextMenuProjectRelativePaths(target: WorkbenchContextMenuTarget): string[] {
-  return explorerContextMenuEntries(target).map((entry) => entry.projectRelativePath);
+  return resolveProjectPathCommandTarget(target).explicitSortedEntries.map((entry) => entry.projectRelativePath);
 }
 
 export function projectedContextMenuNode(

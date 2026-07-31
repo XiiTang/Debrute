@@ -1,6 +1,6 @@
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { describe, expect, it } from 'vitest';
-import type { WorkbenchFileClipboard } from '../shell/contextMenu';
+import type { WorkbenchFileClipboard } from '../shell/contextMenu.js';
 import {
   batchResultSelectionPaths,
   clearClipboardAfterDeletedPath,
@@ -11,8 +11,9 @@ import {
   permanentDeleteConfirmationMessage,
   notificationMessageForFileCommandError,
   projectTreeSelectionFromPaths,
+  reconcileCutClipboardWithProjectEntries,
   singleFileBatchResultPath
-} from './workbenchFileCommands';
+} from './workbenchFileCommands.js';
 
 describe('workbench file command helpers', () => {
   it('creates a stable tree selection from ordered paths', () => {
@@ -56,19 +57,13 @@ describe('workbench file command helpers', () => {
   });
 
   it('clears Canvas node selections for deleted project paths', () => {
-    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'node', projectRelativePath: 'assets/pages/page.png' }, 'assets')).toBeUndefined();
-    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'node', projectRelativePath: 'assets/pages/page.png' }, 'assets/pages/page.png')).toBeUndefined();
-    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'node', projectRelativePath: 'briefs/concept.md' }, 'assets')).toEqual({
-      kind: 'node',
-      projectRelativePath: 'briefs/concept.md'
-    });
+    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'nodes', projectRelativePaths: ['assets/pages/page.png'] }, 'assets')).toBeUndefined();
+    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'nodes', projectRelativePaths: ['assets/pages/page.png'] }, 'assets/pages/page.png')).toBeUndefined();
+    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'nodes', projectRelativePaths: ['briefs/concept.md'] }, 'assets')).toEqual({ kind: 'nodes', projectRelativePaths: ['briefs/concept.md'] });
     expect(clearCanvasSelectionAfterDeletedPath({
-      kind: 'multi',
-      items: [
-        { kind: 'node', projectRelativePath: 'assets/cover.png' },
-        { kind: 'node', projectRelativePath: 'briefs/concept.md' }
-      ]
-    }, 'assets')).toEqual({ kind: 'node', projectRelativePath: 'briefs/concept.md' });
+      kind: 'nodes',
+      projectRelativePaths: ['assets/cover.png', 'briefs/concept.md']
+    }, 'assets')).toEqual({ kind: 'nodes', projectRelativePaths: ['briefs/concept.md'] });
   });
 
   it('clears clipboard sources affected by deleted paths', () => {
@@ -93,6 +88,26 @@ describe('workbench file command helpers', () => {
       ]
     });
     expect(clearClipboardAfterDeletedPath(source, 'rules')).toBe(source);
+  });
+
+  it('reconciles only Cut roots with current Project entry identity', () => {
+    const cut: WorkbenchFileClipboard = {
+      operation: 'cut',
+      entries: [
+        { projectRelativePath: 'assets', kind: 'directory' },
+        { projectRelativePath: 'brief.md', kind: 'file' }
+      ]
+    };
+    const copy: WorkbenchFileClipboard = { ...cut, operation: 'copy' };
+
+    expect(reconcileCutClipboardWithProjectEntries(cut, [
+      { projectRelativePath: 'assets', kind: 'file' },
+      { projectRelativePath: 'brief.md', kind: 'file' }
+    ])).toEqual({
+      operation: 'cut',
+      entries: [{ projectRelativePath: 'brief.md', kind: 'file' }]
+    });
+    expect(reconcileCutClipboardWithProjectEntries(copy, [])).toBe(copy);
   });
 
   it('keeps successful and skipped batch result paths selected', () => {

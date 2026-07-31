@@ -187,10 +187,8 @@ describe('ProjectTree', () => {
       command: 'delete',
       target: {
         source: 'explorer',
-        targetKind: 'item',
-        paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
-        primaryPath: 'assets/cover.png',
-        targetDirectoryPath: 'assets'
+        invocationEntry: { projectRelativePath: 'assets/cover.png', kind: 'file' },
+        selectedEntries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }]
       }
     }]);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
@@ -221,13 +219,11 @@ describe('ProjectTree', () => {
       command: 'paste',
       target: {
         source: 'explorer',
-        targetKind: 'selection',
-        paths: [
+        invocationEntry: { projectRelativePath: 'briefs/concept.md', kind: 'file' },
+        selectedEntries: [
           { projectRelativePath: 'assets', kind: 'directory' },
           { projectRelativePath: 'briefs/concept.md', kind: 'file' }
-        ],
-        primaryPath: 'assets',
-        targetDirectoryPath: 'briefs'
+        ]
       }
     }]);
   });
@@ -266,10 +262,8 @@ describe('ProjectTree', () => {
     expect(selections).toEqual([selection([])]);
     expect(onOpenContextMenu).toHaveBeenCalledWith({
       source: 'explorer',
-      targetKind: 'root',
-      paths: [],
-      primaryPath: null,
-      targetDirectoryPath: ''
+      invocationEntry: { projectRelativePath: '', kind: 'directory' },
+      selectedEntries: []
     }, {
       x: 12,
       y: 34
@@ -315,10 +309,8 @@ describe('ProjectTree', () => {
       command: 'paste',
       target: {
         source: 'explorer',
-        targetKind: 'root',
-        paths: [],
-        primaryPath: null,
-        targetDirectoryPath: ''
+        invocationEntry: { projectRelativePath: '', kind: 'directory' },
+        selectedEntries: []
       }
     }]);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);

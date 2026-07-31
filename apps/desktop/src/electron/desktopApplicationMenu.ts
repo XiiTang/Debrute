@@ -1,4 +1,4 @@
-import type { DebruteProductPlatform } from '@debrute/app-protocol';
+import type { DebruteProductPlatform, NativeEditCommandId } from '@debrute/app-protocol';
 
 export interface DesktopApplicationMenuInput {
   platform: DebruteProductPlatform;
@@ -6,6 +6,7 @@ export interface DesktopApplicationMenuInput {
   newWindow(): void;
   openProject(window: Electron.BaseWindow | undefined): void;
   reloadWorkbench(window: Electron.BaseWindow | undefined): void;
+  dispatchEditCommand(window: Electron.BaseWindow | undefined, command: NativeEditCommandId): void;
   quitProduct(): void;
 }
 
@@ -59,9 +60,12 @@ export function buildDesktopApplicationMenu(
       label: 'Edit',
       submenu: [
         { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+        editCommandItem('Cut', 'CmdOrCtrl+X', 'edit.cut', input),
+        editCommandItem('Copy', 'CmdOrCtrl+C', 'edit.copy', input),
+        editCommandItem('Paste', 'CmdOrCtrl+V', 'edit.paste', input),
         ...(input.platform === 'darwin' ? [{ role: 'pasteAndMatchStyle' as const }] : []),
-        { role: 'delete' }, { role: 'selectAll' },
+        editCommandItem('Delete', input.platform === 'darwin' ? 'Command+Backspace' : 'Delete', 'edit.delete', input),
+        editCommandItem('Select All', 'CmdOrCtrl+A', 'edit.select-all', input),
         ...(input.platform === 'darwin' ? [
           { type: 'separator' as const },
           {
@@ -88,4 +92,17 @@ export function buildDesktopApplicationMenu(
     },
     { role: 'windowMenu' }
   ];
+}
+
+function editCommandItem(
+  label: string,
+  accelerator: string,
+  command: NativeEditCommandId,
+  input: DesktopApplicationMenuInput
+): Electron.MenuItemConstructorOptions {
+  return {
+    label,
+    accelerator,
+    click: (_item, window) => input.dispatchEditCommand(window, command)
+  };
 }

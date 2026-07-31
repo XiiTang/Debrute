@@ -19,11 +19,8 @@ describe('canvas interaction', () => {
 
   it('extracts selected node paths', () => {
     expect(selectedNodeProjectRelativePaths({
-      kind: 'multi',
-      items: [
-        { kind: 'node', projectRelativePath: 'flow/cover.png' },
-        { kind: 'node', projectRelativePath: 'flow/reel.mp4' }
-      ]
+      kind: 'nodes',
+      projectRelativePaths: ['flow/cover.png', 'flow/reel.mp4']
     })).toEqual(['flow/cover.png', 'flow/reel.mp4']);
   });
 

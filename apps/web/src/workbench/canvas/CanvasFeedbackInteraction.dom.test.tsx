@@ -16,19 +16,23 @@ import {
 } from './CanvasFeedbackInteraction';
 import { CanvasMediaFeedbackLayer } from './CanvasMediaFeedbackLayer';
 import { I18nProvider } from '../i18n';
+import type {
+  CanvasFeedbackNodeBarTarget,
+  CanvasFeedbackSelectionBarTarget
+} from '../shell/floatingBars';
 
 describe('CanvasFeedbackInteraction', () => {
   it('keeps Feedback Item values independent and saves only the capsule that loses focus', async () => {
     const putFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['putFeedbackWorkingCopy']>(async (_projectId, value) => value);
     const clearFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['clearFeedbackWorkingCopy']>(async () => undefined);
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>(async (input) => {
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(async (input) => {
       const itemId = input.operation === 'update-item' ? input.itemId : 'unexpected';
       return mutationResult(feedbackFixture(itemId === 'feedback-a' ? 'Updated A' : 'Original A'));
     });
     const probe = await renderInteraction(apiFixture({
       putFeedbackWorkingCopy,
       clearFeedbackWorkingCopy,
-      updateCanvasFeedbackEntry
+      updateCanvasFeedback
     }));
 
     await act(async () => {
@@ -50,7 +54,7 @@ describe('CanvasFeedbackInteraction', () => {
       await probe.current.blurCapsule('feedback-a');
     });
 
-    expect(updateCanvasFeedbackEntry).toHaveBeenCalledWith({
+    expect(updateCanvasFeedback).toHaveBeenCalledWith({
       operation: 'update-item',
       projectRelativePath: 'image.png',
       itemId: 'feedback-a',
@@ -73,17 +77,36 @@ describe('CanvasFeedbackInteraction', () => {
       probe.current.focusCapsule('feedback-a');
       probe.current.handleTargetChange(second);
     });
-    expect(probe.current.currentTarget?.projectRelativePath).toBe('first.png');
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('first.png');
 
     await act(async () => {
       await probe.current.blurCapsule('feedback-a');
       probe.current.handleTargetChange(second);
     });
-    expect(probe.current.currentTarget?.projectRelativePath).toBe('second.png');
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('second.png');
     await probe.unmount();
   });
 
-  it('forces a focused Feedback Bar target closed when its Project file disappears', async () => {
+  it('lets a multi-selection replace a focused single-node Bar immediately', async () => {
+    const probe = await renderPointInteraction(apiFixture());
+
+    await act(async () => {
+      await probe.current.load();
+      probe.current.handleTargetChange(feedbackTarget('image.png'));
+      probe.current.focusCapsule('feedback-a');
+      probe.current.handleTargetChange(feedbackSelectionTarget(['image.png', 'second.png']));
+    });
+
+    expect(probe.current.currentTarget).toMatchObject({
+      kind: 'selection',
+      projectRelativePaths: ['image.png', 'second.png']
+    });
+    expect(probe.container.querySelector('.canvas-feedback-bar--marks-only')).not.toBeNull();
+    expect(probe.container.querySelector('.canvas-feedback-comment-row')).toBeNull();
+    await probe.unmount();
+  });
+
+  it('forces a focused Feedback Bar target closed when its Project Node disappears', async () => {
     const probe = await renderInteraction(apiFixture());
 
     await act(async () => {
@@ -122,9 +145,9 @@ describe('CanvasFeedbackInteraction', () => {
     }
   });
 
-  it('shows only the newly hovered file feedback after the previous file capsule loses focus', async () => {
+  it('shows only the newly hovered Node feedback after the previous Node capsule loses focus', async () => {
     const probe = await renderInteraction(apiFixture({
-      readCanvasFeedback: vi.fn(async () => multiFileFeedbackFixture())
+      readCanvasFeedback: vi.fn(async () => multiNodeFeedbackFixture())
     }));
     const first = feedbackTarget('image.png');
     const second = feedbackTarget('second.png');
@@ -135,13 +158,13 @@ describe('CanvasFeedbackInteraction', () => {
       probe.current.focusCapsule('feedback-a');
       probe.current.handleTargetChange(second);
     });
-    expect(probe.current.currentTarget?.projectRelativePath).toBe('image.png');
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
 
     await act(async () => {
       await probe.current.blurCapsule('feedback-a');
     });
 
-    expect(probe.current.currentTarget?.projectRelativePath).toBe('second.png');
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('second.png');
     expect(probe.current.capsulesForPath('second.png').map((capsule) => capsule.comment)).toEqual([
       'Only on second'
     ]);
@@ -152,7 +175,7 @@ describe('CanvasFeedbackInteraction', () => {
     await probe.unmount();
   });
 
-  it('keeps the current file feedback when focus moves from its Capsule to a tool in the same Bar', async () => {
+  it('keeps the current Node feedback when focus moves from its Capsule to a tool in the same Bar', async () => {
     const probe = await renderInteraction(apiFixture());
     const target = feedbackTarget('image.png');
 
@@ -165,7 +188,7 @@ describe('CanvasFeedbackInteraction', () => {
       await probe.current.blurCapsule('feedback-a');
     });
 
-    expect(probe.current.currentTarget?.projectRelativePath).toBe('image.png');
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
     expect(probe.current.capsulesForPath('image.png').map((capsule) => capsule.comment)).toEqual([
       'Original A',
       'Original B'
@@ -182,16 +205,16 @@ describe('CanvasFeedbackInteraction', () => {
         probe.current.handlePointerEnter();
         probe.current.handlePointerLeave();
       });
-      expect(probe.current.currentTarget?.projectRelativePath).toBe('image.png');
+      expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
 
       await act(async () => vi.advanceTimersByTime(60));
       await act(async () => probe.current.handlePointerEnter());
       await act(async () => vi.advanceTimersByTime(120));
-      expect(probe.current.currentTarget?.projectRelativePath).toBe('image.png');
+      expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
 
       await act(async () => probe.current.handlePointerLeave());
       await act(async () => vi.advanceTimersByTime(119));
-      expect(probe.current.currentTarget?.projectRelativePath).toBe('image.png');
+      expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
 
       await act(async () => vi.advanceTimersByTime(1));
       expect(probe.current.currentTarget).toBeUndefined();
@@ -215,7 +238,7 @@ describe('CanvasFeedbackInteraction', () => {
       await act(async () => probe.current.blurCapsule('feedback-a'));
       await act(async () => vi.advanceTimersByTime(59));
 
-      expect(probe.current.currentTarget?.projectRelativePath).toBe('image.png');
+      expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
 
       await act(async () => vi.advanceTimersByTime(1));
       expect(probe.current.currentTarget).toBeUndefined();
@@ -226,35 +249,35 @@ describe('CanvasFeedbackInteraction', () => {
   });
 
   it('discards a never-written empty capsule locally on blur', async () => {
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>();
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>();
     const putFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['putFeedbackWorkingCopy']>();
     const clearFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['clearFeedbackWorkingCopy']>(async () => undefined);
     const probe = await renderInteraction(apiFixture({
-      updateCanvasFeedbackEntry,
+      updateCanvasFeedback,
       putFeedbackWorkingCopy,
       clearFeedbackWorkingCopy
     }));
 
     let itemId = '';
     await act(async () => {
-      itemId = probe.current.createFileCapsule('image.png');
+      itemId = probe.current.createNodeCapsule('image.png');
       await probe.current.blurCapsule(itemId);
     });
 
     expect(probe.current.capsulesForPath('image.png')).toEqual([]);
-    expect(updateCanvasFeedbackEntry).not.toHaveBeenCalled();
+    expect(updateCanvasFeedback).not.toHaveBeenCalled();
     expect(putFeedbackWorkingCopy).not.toHaveBeenCalled();
     expect(clearFeedbackWorkingCopy).not.toHaveBeenCalled();
     await probe.unmount();
   });
 
   it('keeps an accepted Capsule unchanged when close deletion fails', async () => {
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>(async () => {
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(async () => {
       throw new Error('delete failed');
     });
     const clearFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['clearFeedbackWorkingCopy']>(async () => undefined);
     const probe = await renderInteraction(apiFixture({
-      updateCanvasFeedbackEntry,
+      updateCanvasFeedback,
       clearFeedbackWorkingCopy
     }));
 
@@ -272,13 +295,13 @@ describe('CanvasFeedbackInteraction', () => {
   });
 
   it('keeps an empty accepted Capsule while failed blur deletion suppresses only its geometry', async () => {
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>(async () => {
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(async () => {
       throw new Error('delete failed');
     });
     const clearFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['clearFeedbackWorkingCopy']>(async () => undefined);
     const probe = await renderInteraction(apiFixture({
       readCanvasFeedback: vi.fn(async () => spatialFeedbackFixture()),
-      updateCanvasFeedbackEntry,
+      updateCanvasFeedback,
       clearFeedbackWorkingCopy
     }));
 
@@ -300,8 +323,8 @@ describe('CanvasFeedbackInteraction', () => {
 
   it('allows only one accepted-item deletion request at a time', async () => {
     const pendingMutation = deferred<WorkbenchCanvasFeedbackMutationResult>();
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>(() => pendingMutation.promise);
-    const probe = await renderInteraction(apiFixture({ updateCanvasFeedbackEntry }));
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(() => pendingMutation.promise);
+    const probe = await renderInteraction(apiFixture({ updateCanvasFeedback }));
     await act(async () => probe.current.load());
 
     let first!: Promise<void>;
@@ -311,7 +334,7 @@ describe('CanvasFeedbackInteraction', () => {
       second = probe.current.deleteCapsule('feedback-a');
       await Promise.resolve();
     });
-    expect(updateCanvasFeedbackEntry).toHaveBeenCalledTimes(1);
+    expect(updateCanvasFeedback).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       probe.current.applyEvent({
@@ -330,13 +353,13 @@ describe('CanvasFeedbackInteraction', () => {
   it('does not let an older mutation response overwrite a newer Runtime event', async () => {
     const pendingMutation = deferred<WorkbenchCanvasFeedbackMutationResult>();
     const probe = await renderInteraction(apiFixture({
-      updateCanvasFeedbackEntry: vi.fn(() => pendingMutation.promise)
+      updateCanvasFeedback: vi.fn(() => pendingMutation.promise)
     }));
     await act(async () => probe.current.load());
 
     let mutation!: Promise<void>;
     await act(async () => {
-      mutation = probe.current.setMarks('image.png', ['important']);
+      mutation = probe.current.setMark(['image.png'], 'important', true);
       probe.current.applyEvent({
         type: 'canvas.feedback.changed',
         projectId: 'project-1',
@@ -354,31 +377,73 @@ describe('CanvasFeedbackInteraction', () => {
     await probe.unmount();
   });
 
-  it('allows only one Marks mutation per file at a time', async () => {
+  it('aggregates Marks across paths and allows only one Project Marks mutation at a time', async () => {
     const pendingMutation = deferred<WorkbenchCanvasFeedbackMutationResult>();
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>(() => pendingMutation.promise);
-    const probe = await renderInteraction(apiFixture({ updateCanvasFeedbackEntry }));
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(() => pendingMutation.promise);
+    const accepted = feedbackFixture();
+    accepted.entries['image.png']!.marks = ['like'];
+    accepted.entries['second.png'] = {
+      projectRelativePath: 'second.png',
+      marks: [],
+      nextMomentLabel: 1,
+      nextSpatialLabel: 1,
+      items: [],
+      updatedAt: accepted.updatedAt
+    };
+    const probe = await renderInteraction(apiFixture({
+      readCanvasFeedback: vi.fn(async () => accepted),
+      updateCanvasFeedback
+    }));
     await act(async () => probe.current.load());
+
+    expect(probe.current.marksForPaths(['image.png'])).toEqual(['like']);
+    expect(probe.current.marksForPaths(['image.png', 'second.png'])).toEqual([]);
 
     let first!: Promise<void>;
     let second!: Promise<void>;
+    const selectedPaths = ['image.png', 'second.png'];
     await act(async () => {
-      first = probe.current.setMarks('image.png', ['important']);
-      second = probe.current.setMarks('image.png', ['like']);
+      first = probe.current.setMark(selectedPaths, 'like', true);
+      selectedPaths.push('later.png');
+      second = probe.current.setMark(['second.png'], 'important', true);
       await Promise.resolve();
     });
 
-    expect(updateCanvasFeedbackEntry).toHaveBeenCalledTimes(1);
-    expect(updateCanvasFeedbackEntry).toHaveBeenCalledWith({
-      operation: 'set-marks',
-      projectRelativePath: 'image.png',
-      marks: ['important']
+    expect(probe.current.marksMutationPending).toBe(true);
+    expect(updateCanvasFeedback).toHaveBeenCalledTimes(1);
+    expect(updateCanvasFeedback).toHaveBeenCalledWith({
+      operation: 'set-mark',
+      projectRelativePaths: ['image.png', 'second.png'],
+      mark: 'like',
+      selected: true
     });
 
     await act(async () => {
       pendingMutation.resolve(mutationResult(feedbackFixture()));
       await Promise.all([first, second]);
     });
+    expect(probe.current.marksMutationPending).toBe(false);
+    await probe.unmount();
+  });
+
+  it('keeps accepted Marks and reports one global failure when the atomic mutation fails', async () => {
+    const notifySaveFailed = vi.fn();
+    const accepted = feedbackFixture();
+    accepted.entries['image.png']!.marks = ['like'];
+    const probe = await renderInteraction(apiFixture({
+      readCanvasFeedback: vi.fn(async () => accepted),
+      updateCanvasFeedback: vi.fn(async () => {
+        throw new Error('save failed');
+      })
+    }), { notifySaveFailed });
+    await act(async () => probe.current.load());
+
+    await act(async () => probe.current.setMark(['image.png'], 'like', false));
+
+    expect(probe.current.marksForPaths(['image.png'])).toEqual(['like']);
+    expect(probe.current.marksMutationPending).toBe(false);
+    expect(notifySaveFailed).toHaveBeenCalledTimes(1);
+    expect(notifySaveFailed).toHaveBeenCalledWith('save failed');
     await probe.unmount();
   });
 
@@ -392,7 +457,7 @@ describe('CanvasFeedbackInteraction', () => {
           createdAt: '2026-07-22T23:59:59.000Z',
           projectRelativePath: 'image.png',
           kind: 'comment',
-          scope: 'file',
+          scope: 'node',
           comment: 'Local first'
         }
       });
@@ -412,7 +477,7 @@ describe('CanvasFeedbackInteraction', () => {
     let itemId = '';
 
     await act(async () => {
-      itemId = probe.current.createFileCapsule('image.png');
+      itemId = probe.current.createNodeCapsule('image.png');
       probe.current.changeCapsule(itemId, 'Temporary');
       probe.current.changeCapsule(itemId, '');
       await probe.current.blurCapsule(itemId);
@@ -425,8 +490,8 @@ describe('CanvasFeedbackInteraction', () => {
 
   it('does not let an older blur completion clear a newer tool composition', async () => {
     const mutation = deferred<WorkbenchCanvasFeedbackMutationResult>();
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>(() => mutation.promise);
-    const probe = await renderInteraction(apiFixture({ updateCanvasFeedbackEntry }));
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(() => mutation.promise);
+    const probe = await renderInteraction(apiFixture({ updateCanvasFeedback }));
     const firstTarget = feedbackTarget('first.png');
     const secondTarget = feedbackTarget('second.mp4');
     let firstItemId = '';
@@ -436,7 +501,7 @@ describe('CanvasFeedbackInteraction', () => {
       probe.current.handleDraft({
         projectRelativePath: 'first.png',
         kind: 'pin',
-        scope: 'file',
+        scope: 'node',
         geometry: { type: 'point', x: 0.25, y: 0.5 },
         feedbackBarTarget: firstTarget
       });
@@ -447,7 +512,7 @@ describe('CanvasFeedbackInteraction', () => {
       firstBlur = probe.current.blurCapsule(firstItemId);
       await Promise.resolve();
     });
-    expect(updateCanvasFeedbackEntry).toHaveBeenCalledTimes(1);
+    expect(updateCanvasFeedback).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       probe.current.handleDraft({
@@ -526,7 +591,7 @@ describe('CanvasFeedbackInteraction', () => {
       probe.current.handleTargetChange(feedbackTarget('image.png'));
     });
 
-    expect(probe.current.currentTarget?.projectRelativePath).toBe('image.png');
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
     expect(probe.container.querySelector('[data-canvas-feedback-bar="true"]')).not.toBeNull();
     const addPin = probe.container.querySelector('[aria-label="Add feedback pin"]') as HTMLButtonElement;
     await act(async () => addPin.click());
@@ -595,7 +660,7 @@ describe('CanvasFeedbackInteraction', () => {
       probe.current.handleDraft({
         projectRelativePath: 'image.png',
         kind: 'region',
-        scope: 'file',
+        scope: 'node',
         geometry: { type: 'rect', x: 0.2, y: 0.3, width: 0.4, height: 0.25 },
         feedbackBarTarget: feedbackTarget('image.png')
       });
@@ -616,7 +681,7 @@ describe('CanvasFeedbackInteraction', () => {
           createdAt: '2026-07-23T00:00:00.000Z',
           projectRelativePath: 'a.png',
           kind: 'pin',
-          scope: 'file',
+          scope: 'node',
           geometry: { type: 'point', x: 0.2, y: 0.3 },
           comment: 'A'
         },
@@ -625,7 +690,7 @@ describe('CanvasFeedbackInteraction', () => {
           createdAt: '2026-07-23T00:00:01.000Z',
           projectRelativePath: 'b.png',
           kind: 'region',
-          scope: 'file',
+          scope: 'node',
           geometry: { type: 'rect', x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
           comment: 'B'
         }
@@ -640,19 +705,19 @@ describe('CanvasFeedbackInteraction', () => {
   });
 
   it('sends the exact non-empty textarea value and releases the creation affordance after blur', async () => {
-    const updateCanvasFeedbackEntry = vi.fn<WorkbenchApiClient['updateCanvasFeedbackEntry']>(async () => {
+    const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(async () => {
       throw new Error('save failed');
     });
-    const probe = await renderInteraction(apiFixture({ updateCanvasFeedbackEntry }));
+    const probe = await renderInteraction(apiFixture({ updateCanvasFeedback }));
     let itemId = '';
 
     await act(async () => {
-      itemId = probe.current.createFileCapsule('image.png');
+      itemId = probe.current.createNodeCapsule('image.png');
       probe.current.changeCapsule(itemId, '  First line\nSecond line  ');
       await probe.current.blurCapsule(itemId);
     });
 
-    expect(updateCanvasFeedbackEntry).toHaveBeenCalledWith(expect.objectContaining({
+    expect(updateCanvasFeedback).toHaveBeenCalledWith(expect.objectContaining({
       operation: 'add-item',
       item: expect.objectContaining({ comment: '  First line\nSecond line  ' })
     }));
@@ -666,23 +731,28 @@ describe('CanvasFeedbackInteraction', () => {
 function InteractionProbe({
   api,
   overlayRuntime,
-  onValue
+  onValue,
+  notifySaveFailed
 }: {
   api: WorkbenchApiClient;
   overlayRuntime: ReturnType<typeof createCanvasOverlayRuntime>;
   onValue(value: CanvasFeedbackInteraction): void;
+  notifySaveFailed?: ((message: string) => void) | undefined;
 }): null {
   const interaction = useCanvasFeedbackInteraction({
     api,
     projectId: 'project-1',
     overlayRuntime,
-    notifyUnavailable: vi.fn()
+    notifyUnavailable: vi.fn(),
+    notifySaveFailed: notifySaveFailed ?? vi.fn()
   });
   useEffect(() => onValue(interaction), [interaction, onValue]);
   return null;
 }
 
-async function renderInteraction(api: WorkbenchApiClient): Promise<{
+async function renderInteraction(api: WorkbenchApiClient, options: {
+  notifySaveFailed?: ((message: string) => void) | undefined;
+} = {}): Promise<{
   readonly current: CanvasFeedbackInteraction;
   unmount(): Promise<void>;
 }> {
@@ -696,6 +766,7 @@ async function renderInteraction(api: WorkbenchApiClient): Promise<{
       <InteractionProbe
         api={api}
         overlayRuntime={overlayRuntime}
+        notifySaveFailed={options.notifySaveFailed}
         onValue={(value) => { current = value; }}
       />
     );
@@ -723,7 +794,8 @@ function PointInteractionProbe({
     api,
     projectId: 'project-1',
     overlayRuntime,
-    notifyUnavailable: vi.fn()
+    notifyUnavailable: vi.fn(),
+    notifySaveFailed: vi.fn()
   });
   useEffect(() => onValue(interaction), [interaction, onValue]);
   const draftRegions = interaction.canvas.localSpatialItems
@@ -742,7 +814,7 @@ function PointInteractionProbe({
         onRegionDraft={(geometry) => interaction.handleDraft({
           projectRelativePath: 'image.png',
           kind: 'pin',
-          scope: 'file',
+          scope: 'node',
           geometry,
           feedbackBarTarget: feedbackTarget('image.png')
         })}
@@ -784,7 +856,7 @@ async function renderPointInteraction(api: WorkbenchApiClient): Promise<{
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
   return {
     readCanvasFeedback: vi.fn(async () => feedbackFixture()),
-    updateCanvasFeedbackEntry: vi.fn(async () => mutationResult(feedbackFixture())),
+    updateCanvasFeedback: vi.fn(async () => mutationResult(feedbackFixture())),
     putFeedbackWorkingCopy: vi.fn(async (_projectId, value) => value),
     clearFeedbackWorkingCopy: vi.fn(async () => undefined),
     ...overrides
@@ -804,7 +876,7 @@ function feedbackFixture(firstComment = 'Original A'): CanvasFeedbackDocument {
           {
             id: 'feedback-a',
             kind: 'comment',
-            scope: 'file',
+            scope: 'node',
             comment: firstComment,
             createdAt: '2026-07-23T00:00:00.000Z',
             updatedAt: '2026-07-23T00:00:00.000Z'
@@ -812,7 +884,7 @@ function feedbackFixture(firstComment = 'Original A'): CanvasFeedbackDocument {
           {
             id: 'feedback-b',
             kind: 'comment',
-            scope: 'file',
+            scope: 'node',
             comment: 'Original B',
             createdAt: '2026-07-23T00:00:01.000Z',
             updatedAt: '2026-07-23T00:00:01.000Z'
@@ -824,7 +896,7 @@ function feedbackFixture(firstComment = 'Original A'): CanvasFeedbackDocument {
   };
 }
 
-function multiFileFeedbackFixture(): CanvasFeedbackDocument {
+function multiNodeFeedbackFixture(): CanvasFeedbackDocument {
   const first = feedbackFixture();
   return {
     ...first,
@@ -838,7 +910,7 @@ function multiFileFeedbackFixture(): CanvasFeedbackDocument {
         items: [{
           id: 'feedback-second',
           kind: 'comment',
-          scope: 'file',
+          scope: 'node',
           comment: 'Only on second',
           createdAt: '2026-07-23T00:00:02.000Z',
           updatedAt: '2026-07-23T00:00:02.000Z'
@@ -862,7 +934,7 @@ function spatialFeedbackFixture(): CanvasFeedbackDocument {
           id: 'feedback-spatial',
           label: 1,
           kind: 'pin',
-          scope: 'file',
+          scope: 'node',
           geometry: { type: 'point', x: 0.25, y: 0.5 },
           comment: 'Pin note',
           createdAt: '2026-07-23T00:00:00.000Z',
@@ -896,15 +968,29 @@ function mutationResult(_feedback: CanvasFeedbackDocument): WorkbenchCanvasFeedb
   };
 }
 
-function feedbackTarget(projectRelativePath: string) {
+function currentNodeTarget(interaction: CanvasFeedbackInteraction): CanvasFeedbackNodeBarTarget | undefined {
+  return interaction.currentTarget?.kind === 'node' ? interaction.currentTarget : undefined;
+}
+
+function feedbackTarget(projectRelativePath: string): CanvasFeedbackNodeBarTarget {
   return {
+    kind: 'node',
     projectRelativePath,
-    nodeRect: { x: 10, y: 20, width: 300, height: 180 },
+    anchorRect: { x: 10, y: 20, width: 300, height: 180 },
     surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
     camera: { x: 12, y: 24, z: 1 },
     localToolset: 'image' as const,
-    canStartVideoMomentFeedback: false,
-    entry: undefined
+    canStartVideoMomentFeedback: false
+  };
+}
+
+function feedbackSelectionTarget(projectRelativePaths: string[]): CanvasFeedbackSelectionBarTarget {
+  return {
+    kind: 'selection',
+    projectRelativePaths,
+    anchorRect: { x: 10, y: 20, width: 520, height: 180 },
+    surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
+    camera: { x: 12, y: 24, z: 1 }
   };
 }
 

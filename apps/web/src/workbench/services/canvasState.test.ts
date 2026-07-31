@@ -1,68 +1,75 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasDocument } from '@debrute/canvas-core';
-import { selectedCanvasNodeNeedsStackOrderUpdate } from './canvasState';
+import type { ProjectDiagnostic, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { WorkbenchState } from '../../types.js';
+import { getSelectionContext } from './canvasState.js';
 
-describe('canvas state stack-order helpers', () => {
-  it('requests a stack-order update only for a selected node that is not already top', () => {
-    const canvas = canvasFixture([
-      node('flow/a.png', 0),
-      node('flow/b.png', 1)
-    ]);
+describe('Canvas selection context', () => {
+  const diagnostic = {
+    id: 'diagnostic-1',
+    severity: 'warning',
+    code: 'missing_asset',
+    message: 'Missing asset'
+  } satisfies ProjectDiagnostic;
+  const first = node('flow/a.png');
+  const second = node('flow/b.png');
+  const state = {
+    snapshot: {
+      projections: [{
+        canvasId: 'canvas-1',
+        nodes: [first, second],
+        edges: [],
+        diagnostics: []
+      }],
+      diagnostics: [diagnostic]
+    }
+  } as unknown as WorkbenchState;
 
-    expect(selectedCanvasNodeNeedsStackOrderUpdate(canvas, {
+  it('distinguishes empty, one-node, many-node, and diagnostic selection', () => {
+    expect(getSelectionContext(state, undefined, 'canvas-1')).toEqual({
+      kind: 'empty',
+      diagnostics: []
+    });
+    expect(getSelectionContext(state, {
+      kind: 'nodes',
+      projectRelativePaths: ['flow/a.png']
+    }, 'canvas-1')).toEqual({
       kind: 'node',
-      projectRelativePath: 'flow/a.png'
-    })).toBe(true);
-    expect(selectedCanvasNodeNeedsStackOrderUpdate(canvas, {
-      kind: 'node',
-      projectRelativePath: 'flow/b.png'
-    })).toBe(false);
+      canvasId: 'canvas-1',
+      node: first,
+      diagnostics: []
+    });
+    expect(getSelectionContext(state, {
+      kind: 'nodes',
+      projectRelativePaths: ['flow/a.png', 'flow/b.png']
+    }, 'canvas-1')).toEqual({
+      kind: 'nodes',
+      canvasId: 'canvas-1',
+      nodes: [first, second],
+      diagnostics: []
+    });
+    expect(getSelectionContext(state, {
+      kind: 'diagnostic',
+      id: diagnostic.id
+    }, 'canvas-1')).toEqual({
+      kind: 'diagnostic',
+      diagnostic,
+      diagnostics: [diagnostic]
+    });
   });
 
-  it('does not request stack-order updates for missing Canvas state or non-single-node selections', () => {
-    const canvas = canvasFixture([
-      node('flow/a.png', 0),
-      node('flow/b.png', 1)
-    ]);
-
-    expect(selectedCanvasNodeNeedsStackOrderUpdate(undefined, {
-      kind: 'node',
-      projectRelativePath: 'flow/a.png'
-    })).toBe(false);
-    expect(selectedCanvasNodeNeedsStackOrderUpdate(canvas, undefined)).toBe(false);
-    expect(selectedCanvasNodeNeedsStackOrderUpdate(canvas, {
-      kind: 'multi',
-      items: [
-        { kind: 'node', projectRelativePath: 'flow/a.png' },
-        { kind: 'node', projectRelativePath: 'flow/b.png' }
-      ]
-    })).toBe(false);
-    expect(selectedCanvasNodeNeedsStackOrderUpdate(canvas, {
-      kind: 'diagnostic',
-      id: 'diagnostic-1'
-    })).toBe(false);
-    expect(selectedCanvasNodeNeedsStackOrderUpdate(canvas, {
-      kind: 'node',
-      projectRelativePath: 'flow/missing.png'
-    })).toBe(false);
+  it('does not expose stale or wrong-canvas node selections', () => {
+    expect(getSelectionContext(state, {
+      kind: 'nodes',
+      projectRelativePaths: ['flow/missing.png']
+    }, 'canvas-1').kind).toBe('empty');
+    expect(getSelectionContext(state, {
+      kind: 'nodes',
+      projectRelativePaths: ['flow/a.png']
+    }, 'canvas-2').kind).toBe('empty');
   });
 });
 
-type CanvasNodeElement = CanvasDocument['nodeElements'][number];
-
-function canvasFixture(nodeElements: CanvasNodeElement[]): CanvasDocument {
-  return {
-    id: 'canvas-1',
-    name: 'Canvas 1',
-    nodeElements,
-    annotations: [],
-    preferences: {
-      showDiagnostics: true
-    }
-  };
-}
-
-function node(projectRelativePath: string, z: number): CanvasNodeElement {
+function node(projectRelativePath: string): ProjectedCanvasNode {
   return {
     projectRelativePath,
     nodeKind: 'file',
@@ -71,6 +78,13 @@ function node(projectRelativePath: string, z: number): CanvasNodeElement {
     y: 0,
     width: 100,
     height: 100,
-    z
+    z: 0,
+    availability: {
+      state: 'available',
+      size: 10,
+      mimeType: 'image/png',
+      fileUrl: `/files/${projectRelativePath}`,
+      revision: 'rev'
+    }
   };
 }

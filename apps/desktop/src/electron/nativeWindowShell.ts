@@ -1,6 +1,7 @@
 import type {
   DebruteProductPlatform,
   DebruteShellApi,
+  NativeEditCommandId,
   NativeMenuCommand,
   NativeWindowState
 } from '@debrute/app-protocol';
@@ -12,6 +13,7 @@ export const nativeWindowIpcChannels = {
   close: 'debrute-shell:closeNativeWindow',
   executeMenuCommand: 'debrute-shell:executeNativeMenuCommand',
   stateChanged: 'debrute-shell:nativeWindowStateChanged',
+  editCommand: 'debrute-shell:nativeEditCommand',
   takeDesktopLaunchTicket: 'debrute-shell:takeDesktopLaunchTicket'
 } as const;
 
@@ -24,6 +26,7 @@ export type NativeWindowPreloadApi = Pick<
   | 'executeNativeMenuCommand'
   | 'takeDesktopLaunchTicket'
   | 'onNativeWindowStateChanged'
+  | 'onNativeEditCommand'
 >;
 
 interface NativeWindowIpcInvoker {
@@ -31,8 +34,8 @@ interface NativeWindowIpcInvoker {
 }
 
 interface NativeWindowIpcRenderer<Event> extends NativeWindowIpcInvoker {
-  on(channel: string, listener: (event: Event, state: NativeWindowState) => void): unknown;
-  removeListener(channel: string, listener: (event: Event, state: NativeWindowState) => void): unknown;
+  on(channel: string, listener: (event: Event, payload: unknown) => void): unknown;
+  removeListener(channel: string, listener: (event: Event, payload: unknown) => void): unknown;
 }
 
 interface NativeWindow {
@@ -72,10 +75,17 @@ export function createNativeWindowPreloadApi<Event>(
     executeNativeMenuCommand: (input) => invoke<{ ok: true }>(ipcRenderer, nativeWindowIpcChannels.executeMenuCommand, input),
     takeDesktopLaunchTicket: () => invoke<string | undefined>(ipcRenderer, nativeWindowIpcChannels.takeDesktopLaunchTicket),
     onNativeWindowStateChanged: (listener) => {
-      const wrapped = (_event: Event, state: NativeWindowState) => listener(state);
+      const wrapped = (_event: Event, state: unknown) => listener(state as NativeWindowState);
       ipcRenderer.on(nativeWindowIpcChannels.stateChanged, wrapped);
       return () => {
         ipcRenderer.removeListener(nativeWindowIpcChannels.stateChanged, wrapped);
+      };
+    },
+    onNativeEditCommand: (listener) => {
+      const wrapped = (_event: Event, command: unknown) => listener(command as NativeEditCommandId);
+      ipcRenderer.on(nativeWindowIpcChannels.editCommand, wrapped);
+      return () => {
+        ipcRenderer.removeListener(nativeWindowIpcChannels.editCommand, wrapped);
       };
     }
   };

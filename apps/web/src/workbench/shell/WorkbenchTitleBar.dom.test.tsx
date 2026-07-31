@@ -178,6 +178,53 @@ describe('WorkbenchTitleBar', () => {
     }
   });
 
+  it('keeps the original content behavior owner while switching into the Edit menu', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onCommand = vi.fn();
+    const onCaptureBehaviorOwner = vi.fn(() => 'canvas' as const);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <WorkbenchTitleBar
+              state={buildWorkbenchTitleBarState({
+                platform: 'win32',
+                host: 'web',
+                locale: 'en',
+                recentProjects: []
+              })}
+              nativeWindowState={undefined}
+              onCommand={onCommand}
+              onCaptureBehaviorOwner={onCaptureBehaviorOwner}
+              onWindowCommand={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const fileButton = requireButton(container, 'File');
+      const editButton = requireButton(container, 'Edit');
+      await act(async () => {
+        fileButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        fileButton.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      });
+      await act(async () => {
+        editButton.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      });
+      await act(async () => {
+        requireButton(container, 'Copy').click();
+      });
+
+      expect(onCaptureBehaviorOwner).toHaveBeenCalledOnce();
+      expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ commandId: 'edit.copy' }), 'canvas');
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
   it('installs an available Product update directly from the title bar', async () => {
     const container = document.createElement('div');
     document.body.append(container);

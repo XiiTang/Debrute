@@ -1,17 +1,16 @@
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import {
-  canvasNodeStackOrderTopFirst,
   type CanvasDocument,
   type ProjectDiagnostic,
   type ProjectedCanvasNode
 } from '@debrute/canvas-core';
 import type { WorkbenchState } from '../../types';
-import type { CanvasSelection, CanvasSelectionItem } from '../canvas/runtime/canvasSelection';
+import type { CanvasSelection } from '../canvas/runtime/canvasSelection.js';
 
 export type SelectionContext =
   | { kind: 'empty'; diagnostics: ProjectDiagnostic[] }
   | { kind: 'node'; canvasId: string; node: ProjectedCanvasNode; diagnostics: ProjectDiagnostic[] }
-  | { kind: 'multi'; items: CanvasSelectionItem[]; diagnostics: ProjectDiagnostic[] }
+  | { kind: 'nodes'; canvasId: string; nodes: ProjectedCanvasNode[]; diagnostics: ProjectDiagnostic[] }
   | { kind: 'diagnostic'; diagnostic: ProjectDiagnostic; diagnostics: ProjectDiagnostic[] };
 
 export function getSelectionContext(
@@ -23,17 +22,15 @@ export function getSelectionContext(
   if (!snapshot || !selection) {
     return { kind: 'empty', diagnostics: [] };
   }
-  if (selection.kind === 'multi') {
-    return { kind: 'multi', items: selection.items, diagnostics: [] };
-  }
-  if (selection.kind === 'node') {
-    const projection = [
-      ...snapshot.projections.filter((item) => item.canvasId === activeCanvasId),
-      ...snapshot.projections.filter((item) => item.canvasId !== activeCanvasId)
-    ].find((item) => item.nodes.some((node) => node.projectRelativePath === selection.projectRelativePath));
-    const node = projection?.nodes.find((item) => item.projectRelativePath === selection.projectRelativePath);
-    if (projection && node) {
-      return { kind: 'node', canvasId: projection.canvasId, node, diagnostics: [] };
+  if (selection.kind === 'nodes') {
+    const projection = snapshot.projections.find((item) => item.canvasId === activeCanvasId);
+    const selectedPaths = new Set(selection.projectRelativePaths);
+    const nodes = projection?.nodes.filter((node) => selectedPaths.has(node.projectRelativePath)) ?? [];
+    if (projection && nodes.length === 1) {
+      return { kind: 'node', canvasId: projection.canvasId, node: nodes[0]!, diagnostics: [] };
+    }
+    if (projection && nodes.length > 1) {
+      return { kind: 'nodes', canvasId: projection.canvasId, nodes, diagnostics: [] };
     }
   }
   if (selection.kind === 'diagnostic') {
@@ -47,18 +44,6 @@ export function getSelectionContext(
 
 export function getCanvasById(snapshot: WorkbenchProjectSessionSnapshot | undefined, canvasId: string | undefined): CanvasDocument | undefined {
   return canvasId ? snapshot?.canvases.find((canvas) => canvas.id === canvasId) : undefined;
-}
-
-export function selectedCanvasNodeNeedsStackOrderUpdate(
-  canvas: CanvasDocument | undefined,
-  selection: CanvasSelection | undefined
-): boolean {
-  return Boolean(
-    canvas
-    && selection?.kind === 'node'
-    && canvas.nodeElements.some((node) => node.projectRelativePath === selection.projectRelativePath)
-    && canvasNodeStackOrderTopFirst(canvas)[0] !== selection.projectRelativePath
-  );
 }
 
 export function nodeStatusLabel(node: ProjectedCanvasNode): string {

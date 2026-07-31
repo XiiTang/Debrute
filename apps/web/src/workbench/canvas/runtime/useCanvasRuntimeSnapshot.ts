@@ -1,10 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import type { CanvasEditorRuntime } from './CanvasEditorRuntime';
-import type { CanvasSize } from './canvasGeometry';
-import type { CanvasSelection } from './canvasSelection';
-
-const subscribeToNothing = (): (() => void) => () => undefined;
-const readFalse = (): boolean => false;
+import type { CanvasEditorRuntime, CanvasRuntimePointerInteraction } from './CanvasEditorRuntime.js';
+import type { CanvasSize } from './canvasGeometry.js';
+import type { CanvasSelection } from './canvasSelection.js';
 
 export function useCanvasSelection(runtime: CanvasEditorRuntime): CanvasSelection | undefined {
   return useSyncExternalStore(
@@ -22,10 +19,10 @@ export function useCanvasSurfaceSize(runtime: CanvasEditorRuntime): CanvasSize |
   );
 }
 
-export function useCanvasSurfaceReady(runtime: CanvasEditorRuntime | undefined): boolean {
+export function useCanvasPointerInteraction(runtime: CanvasEditorRuntime): CanvasRuntimePointerInteraction | undefined {
   return useSyncExternalStore(
-    runtime?.subscribeSurfaceSize ?? subscribeToNothing,
-    runtime ? () => runtime.getSnapshot().surfaceSize !== undefined : readFalse,
-    readFalse
+    runtime.subscribePointerInteraction,
+    () => runtime.getSnapshot().pointerInteraction,
+    () => runtime.getSnapshot().pointerInteraction
   );
 }

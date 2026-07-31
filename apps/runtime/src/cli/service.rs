@@ -5,7 +5,7 @@
 )]
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -23,10 +23,10 @@ use crate::{
         SubmitModelOperation, parse_model_requests,
     },
     project::{
-        CanvasMapPathRuleSet, GeneratedAssetMetadataLookup, GeneratedAssetMetadataService,
-        PROJECT_FILE, ProjectCommand, ProjectCommandResult, ProjectDiagnostic,
-        ProjectDiagnosticSeverity, ProjectError, ProjectSessionRegistry, ProjectSnapshot,
-        ProjectUseKind, open_no_symlink_existing_project_file,
+        GeneratedAssetMetadataLookup, GeneratedAssetMetadataService, PROJECT_FILE, ProjectCommand,
+        ProjectCommandResult, ProjectDiagnostic, ProjectDiagnosticSeverity, ProjectError,
+        ProjectSessionRegistry, ProjectSnapshot, ProjectUseKind,
+        open_no_symlink_existing_project_file,
     },
     workbench::{RuntimeCliHttpService, RuntimeCliRecordStream, RuntimeHttpServiceError},
 };
@@ -771,16 +771,23 @@ fn project_mutation(request: &CliCommandRequest) -> Result<ProjectCommand, CliFa
                 .get("all")
                 .is_some_and(|value| value == "true");
             let paths = string_array_option(request, "path")?;
-            let globs = string_array_option(request, "glob")?;
-            if all == (!paths.is_empty() || !globs.is_empty()) {
+            if all != paths.is_empty() {
                 return Err(CliFailure::new(
                     "invalid_input",
-                    "canvas.reset-layout requires --all or at least one --path/--glob.",
+                    "canvas.reset-layout requires --all or at least one --path.",
+                ));
+            }
+            let path_count = paths.len();
+            let node_paths = paths.into_iter().collect::<BTreeSet<_>>();
+            if node_paths.len() != path_count {
+                return Err(CliFailure::new(
+                    "invalid_input",
+                    "canvas.reset-layout node paths must be unique.",
                 ));
             }
             Ok(ProjectCommand::ResetCanvasLayout {
                 canvas_id: positional(request, 1)?,
-                rules: (!all).then_some(CanvasMapPathRuleSet { paths, globs }),
+                node_paths: (!all).then_some(node_paths),
             })
         }
         _ => Err(CliFailure::new(

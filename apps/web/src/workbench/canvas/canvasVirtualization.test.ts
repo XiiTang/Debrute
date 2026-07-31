@@ -108,7 +108,7 @@ describe('canvas virtualization geometry', () => {
     }).render({
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: undefined,
-      selection: { kind: 'node', projectRelativePath: 'flow/selected-offscreen.png' },
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/selected-offscreen.png'] },
       activeNodeProjectRelativePaths: ['flow/active-offscreen.png']
     });
 
@@ -138,11 +138,8 @@ describe('canvas virtualization geometry', () => {
       camera: { x: 0, y: 0, z: 1 },
       surfaceSize: { width: 400, height: 300 },
       selection: {
-        kind: 'multi',
-        items: [
-          { kind: 'node', projectRelativePath: 'flow/selected-offscreen.png' },
-          { kind: 'node', projectRelativePath: 'flow/selected-and-active.png' }
-        ]
+        kind: 'nodes',
+        projectRelativePaths: ['flow/selected-offscreen.png', 'flow/selected-and-active.png']
       },
       activeNodeProjectRelativePaths: ['flow/active-offscreen.png', 'flow/selected-and-active.png']
     });

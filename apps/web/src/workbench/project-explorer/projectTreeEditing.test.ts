@@ -34,24 +34,18 @@ describe('project tree editing helpers', () => {
   it('resolves paste target directories from file and directory targets', () => {
     expect(projectTreePasteTargetDirectory({
       source: 'explorer',
-      targetKind: 'item',
-      paths: [{ projectRelativePath: 'assets', kind: 'directory' }],
-      primaryPath: 'assets',
-      targetDirectoryPath: 'assets'
+      invocationEntry: { projectRelativePath: 'assets', kind: 'directory' },
+      selectedEntries: [{ projectRelativePath: 'assets', kind: 'directory' }]
     })).toBe('assets');
     expect(projectTreePasteTargetDirectory({
       source: 'explorer',
-      targetKind: 'item',
-      paths: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }],
-      primaryPath: 'assets/cover.png',
-      targetDirectoryPath: 'assets'
+      invocationEntry: { projectRelativePath: 'assets/cover.png', kind: 'file' },
+      selectedEntries: [{ projectRelativePath: 'assets/cover.png', kind: 'file' }]
     })).toBe('assets');
     expect(projectTreePasteTargetDirectory({
       source: 'explorer',
-      targetKind: 'root',
-      paths: [],
-      primaryPath: null,
-      targetDirectoryPath: ''
+      invocationEntry: { projectRelativePath: '', kind: 'directory' },
+      selectedEntries: []
     })).toBe('');
   });
 });

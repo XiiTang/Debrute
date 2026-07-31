@@ -225,11 +225,11 @@ fn validate(
     }
     if spec.command == "canvas.reset-layout" {
         let all = options.get("all").is_some_and(|value| value == "true");
-        let has_rules = options.contains_key("path") || options.contains_key("glob");
-        if all == has_rules {
+        let has_paths = options.contains_key("path");
+        if all == has_paths {
             return Err(CliParseError::new(
                 "invalid_input",
-                "canvas.reset-layout requires --all or at least one --path/--glob.",
+                "canvas.reset-layout requires --all or at least one --path.",
                 spec.command,
             ));
         }

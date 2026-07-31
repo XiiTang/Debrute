@@ -14,7 +14,7 @@ import type {
 
 type ProjectPathCommandMenuContext = Omit<
   Parameters<typeof buildWorkbenchContextMenuItems>[0],
-  'target' | 'canRevealInCanvas'
+  'target'
 >;
 
 type ProjectPathCommandContext = Omit<
@@ -28,10 +28,7 @@ type ProjectPathCommandContext = Omit<
 >;
 
 export interface ProjectPathCommandRouter {
-  contextMenuItems(
-    target: WorkbenchContextMenuTarget,
-    canRevealInCanvas: boolean
-  ): WorkbenchContextMenuItem[];
+  contextMenuItems(target: WorkbenchContextMenuTarget): WorkbenchContextMenuItem[];
   run(
     command: ProjectPathCommand,
     contextMenu: Parameters<typeof runProjectPathCommand>[0]['contextMenu'],
@@ -53,10 +50,9 @@ export function createProjectPathCommandRouter(input: {
   commandContext: ProjectPathCommandContext;
 }): ProjectPathCommandRouter {
   return {
-    contextMenuItems: (target, canRevealInCanvas) => {
+    contextMenuItems: (target) => {
       const items = buildWorkbenchContextMenuItems({
         ...input.menuContext,
-        canRevealInCanvas,
         target
       });
       return input.commandIntake.canAccept() ? items : disableActions(items);

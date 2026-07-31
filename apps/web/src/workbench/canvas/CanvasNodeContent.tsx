@@ -61,8 +61,8 @@ export interface CanvasNodeContentProps {
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
-  onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
-  onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
+  onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
+  onTitlePointerUp?: ((event: React.PointerEvent<Element>) => void) | undefined;
 }
 
 export function CanvasNodeContent({
@@ -263,7 +263,7 @@ export function CanvasNodeContent({
 
 function imageSpatialFeedbackItems(entry: CanvasFeedbackEntry | undefined): CanvasFeedbackSpatialItem[] {
   return entry?.items.filter((item): item is CanvasFeedbackSpatialItem => (
-    (item.kind === 'pin' || item.kind === 'region') && item.scope === 'file'
+    (item.kind === 'pin' || item.kind === 'region') && item.scope === 'node'
   )) ?? [];
 }
 
@@ -461,8 +461,8 @@ function CanvasTextNodeContent({
   textPreviewError?: string | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
-  onTitlePointerMove: (event: React.PointerEvent<Element>) => void;
-  onTitlePointerUp: (event: React.PointerEvent<Element>) => void;
+  onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
+  onTitlePointerUp?: ((event: React.PointerEvent<Element>) => void) | undefined;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {

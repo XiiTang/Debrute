@@ -5,15 +5,15 @@ import {
   CANVAS_MINIMAP_PANEL_SIZE,
   canvasCardBarRect,
   canvasFeedbackBarSizeForTarget,
-  canvasFeedbackBarTargetWithCurrentEntry,
+  canvasAnchorToViewportRect,
   canvasMinimapButtonRect,
-  canvasNodeToViewportRect,
   feedbackBarPlacementForCanvasTarget,
   canvasResetLayoutButtonRect,
   placeCanvasFeedbackBar,
   placeCanvasMinimapPanel,
   sameCanvasFeedbackBarTarget,
   type CanvasFeedbackBarTarget,
+  type CanvasFeedbackNodeBarTarget,
   type CanvasLocalFeedbackDraft
 } from './floatingBars';
 import {
@@ -24,7 +24,7 @@ import {
 
 describe('feedback bar target equality', () => {
   it('requires local feedback drafts to carry the confirming image feedback target', () => {
-    expectTypeOf<CanvasLocalFeedbackDraft['feedbackBarTarget']>().toEqualTypeOf<CanvasFeedbackBarTarget>();
+    expectTypeOf<CanvasLocalFeedbackDraft['feedbackBarTarget']>().toEqualTypeOf<CanvasFeedbackNodeBarTarget>();
   });
 
   it('treats equal feedback bar targets as unchanged', () => {
@@ -32,14 +32,9 @@ describe('feedback bar target equality', () => {
 
     expect(sameCanvasFeedbackBarTarget(target, {
       ...target,
-      nodeRect: { ...target.nodeRect },
+      anchorRect: { ...target.anchorRect },
       surfaceRect: { ...target.surfaceRect },
-      camera: { ...target.camera },
-      entry: target.entry ? {
-        ...target.entry,
-        marks: [...target.entry.marks],
-        items: [...target.entry.items]
-      } : undefined
+      camera: { ...target.camera }
     })).toBe(true);
   });
 
@@ -60,13 +55,32 @@ describe('feedback bar target equality', () => {
       localToolset: 'none'
     })).toBe(false);
   });
+
+  it('compares selection paths in stable selection order', () => {
+    const target: CanvasFeedbackBarTarget = {
+      kind: 'selection',
+      projectRelativePaths: ['flow/a.png', 'flow/b.png'],
+      anchorRect: { x: 10, y: 20, width: 300, height: 180 },
+      surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
+      camera: { x: 12, y: 24, z: 1 }
+    };
+
+    expect(sameCanvasFeedbackBarTarget(target, {
+      ...target,
+      projectRelativePaths: [...target.projectRelativePaths]
+    })).toBe(true);
+    expect(sameCanvasFeedbackBarTarget(target, {
+      ...target,
+      projectRelativePaths: [...target.projectRelativePaths].reverse()
+    })).toBe(false);
+  });
 });
 
 describe('floating bar placement', () => {
   it('places feedback below a node by default', () => {
     const barSize = canvasFeedbackBarSizeForTarget({ localToolset: 'image' });
     const placement = placeCanvasFeedbackBar({
-      nodeViewportRect: { x: 300, y: 200, width: 200, height: 120 },
+      anchorViewportRect: { x: 300, y: 200, width: 200, height: 120 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
       barSize
@@ -82,21 +96,21 @@ describe('floating bar placement', () => {
   });
 
   it('keeps feedback close to the hovered node to avoid hover target handoff', () => {
-    const nodeViewportRect = { x: 300, y: 200, width: 200, height: 120 };
+    const anchorViewportRect = { x: 300, y: 200, width: 200, height: 120 };
     const placement = placeCanvasFeedbackBar({
-      nodeViewportRect,
+      anchorViewportRect,
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
       barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
     });
 
     expect(placement?.placement).toBe('below');
-    expect(placement?.y).toBe(nodeViewportRect.y + nodeViewportRect.height + 3);
+    expect(placement?.y).toBe(anchorViewportRect.y + anchorViewportRect.height + 3);
   });
 
   it('flips feedback above when below does not fit', () => {
     const placement = placeCanvasFeedbackBar({
-      nodeViewportRect: { x: 300, y: 650, width: 200, height: 40 },
+      anchorViewportRect: { x: 300, y: 650, width: 200, height: 40 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
       barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
@@ -108,7 +122,7 @@ describe('floating bar placement', () => {
 
   it('clamps feedback horizontally inside the viewport', () => {
     const placement = placeCanvasFeedbackBar({
-      nodeViewportRect: { x: 8, y: 200, width: 80, height: 80 },
+      anchorViewportRect: { x: 8, y: 200, width: 80, height: 80 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
       barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
@@ -119,7 +133,7 @@ describe('floating bar placement', () => {
 
   it('uses the non-colliding candidate when a fixed bar reserves the preferred area', () => {
     const placement = placeCanvasFeedbackBar({
-      nodeViewportRect: { x: 300, y: 200, width: 200, height: 120 },
+      anchorViewportRect: { x: 300, y: 200, width: 200, height: 120 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [{ x: 190, y: 320, width: 420, height: 48 }],
       barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
@@ -129,8 +143,8 @@ describe('floating bar placement', () => {
   });
 
   it('projects Canvas node bounds to viewport coordinates', () => {
-    expect(canvasNodeToViewportRect({
-      nodeRect: { x: 100, y: 50, width: 200, height: 100 },
+    expect(canvasAnchorToViewportRect({
+      anchorRect: { x: 100, y: 50, width: 200, height: 100 },
       surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
       camera: { x: 30, y: 40, z: 2 }
     })).toEqual({
@@ -144,9 +158,13 @@ describe('floating bar placement', () => {
   it('places retained feedback targets from the live Canvas camera', () => {
     expect(feedbackBarPlacementForCanvasTarget({
       target: {
-        nodeRect: { x: 100, y: 50, width: 200, height: 100 },
+        kind: 'node',
+        projectRelativePath: 'flow/cover.png',
+        anchorRect: { x: 100, y: 50, width: 200, height: 100 },
         surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
-        localToolset: 'image'
+        camera: { x: 30, y: 40, z: 2 },
+        localToolset: 'image',
+        canStartVideoMomentFeedback: false
       },
       camera: { x: 30, y: 40, z: 2 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
@@ -170,6 +188,10 @@ describe('floating bar placement', () => {
     expect(canvasFeedbackBarSizeForTarget({
       localToolset: 'video'
     })).toEqual({ width: 329, height: 124 });
+    expect(canvasFeedbackBarSizeForTarget({
+      localToolset: 'none',
+      marksOnly: true
+    })).toEqual({ width: 228, height: 38 });
   });
 
   it('adds width for extra visible feedback actions without media width buckets', () => {
@@ -187,12 +209,15 @@ describe('floating bar placement', () => {
 
   it('places the always-present editable comment row for each toolset', () => {
     const baseTarget = {
-      nodeRect: { x: 100, y: 50, width: 200, height: 100 },
+      kind: 'node' as const,
+      projectRelativePath: 'flow/cover.png',
+      anchorRect: { x: 100, y: 50, width: 200, height: 100 },
       surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
-      camera: { x: 30, y: 40, z: 2 }
+      camera: { x: 30, y: 40, z: 2 },
+      canStartVideoMomentFeedback: false
     };
 
-    const fileOnlyPlacement = feedbackBarPlacementForCanvasTarget({
+    const nodeOnlyPlacement = feedbackBarPlacementForCanvasTarget({
       target: {
         ...baseTarget,
         localToolset: 'none'
@@ -211,50 +236,10 @@ describe('floating bar placement', () => {
       reservedRects: []
     });
 
-    expect(fileOnlyPlacement?.width).toBe(228);
+    expect(nodeOnlyPlacement?.width).toBe(228);
     expect(imagePlacement?.width).toBe(299);
-    expect(fileOnlyPlacement?.height).toBe(CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight);
+    expect(nodeOnlyPlacement?.height).toBe(CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight);
     expect(imagePlacement?.height).toBe(CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight);
-  });
-
-  it('refreshes retained feedback targets from the current feedback document before placement', () => {
-    const target = {
-      projectRelativePath: 'flow/cover.png',
-      nodeRect: { x: 100, y: 50, width: 200, height: 100 },
-      surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
-      camera: { x: 30, y: 40, z: 2 },
-      entry: undefined,
-      localToolset: 'image' as const,
-      canStartVideoMomentFeedback: false
-    };
-    const currentTarget = canvasFeedbackBarTargetWithCurrentEntry(target, {
-      updatedAt: '2026-06-22T12:00:00.000Z',
-      entries: {
-        'flow/cover.png': {
-          projectRelativePath: 'flow/cover.png',
-          marks: [],
-          nextMomentLabel: 1,
-          nextSpatialLabel: 1,
-          items: [{
-            id: 'comment-1',
-            kind: 'comment',
-            scope: 'file',
-            comment: 'overall direction',
-            createdAt: '2026-06-22T12:00:00.000Z',
-            updatedAt: '2026-06-22T12:00:00.000Z'
-          }],
-          updatedAt: '2026-06-22T12:00:00.000Z'
-        }
-      }
-    });
-
-    expect(currentTarget.entry?.items.map((item) => item.comment)).toEqual(['overall direction']);
-    expect(feedbackBarPlacementForCanvasTarget({
-      target: currentTarget,
-      camera: target.camera,
-      viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
-      reservedRects: []
-    })?.height).toBe(CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight);
   });
 
   it('keeps the lower-left minimap button close to the bottom edge while matching the top-left dock x inset', () => {
@@ -324,28 +309,14 @@ describe('floating bar placement', () => {
   });
 });
 
-function feedbackTarget(projectRelativePath = 'flow/a.png'): CanvasFeedbackBarTarget {
+function feedbackTarget(projectRelativePath = 'flow/a.png'): CanvasFeedbackNodeBarTarget {
   return {
+    kind: 'node',
     projectRelativePath,
-    nodeRect: { x: 10, y: 20, width: 300, height: 180 },
+    anchorRect: { x: 10, y: 20, width: 300, height: 180 },
     surfaceRect: { x: 0, y: 0, width: 1280, height: 720 },
     camera: { x: 12, y: 24, z: 1 },
     localToolset: 'image',
-    canStartVideoMomentFeedback: false,
-    entry: {
-      projectRelativePath,
-      marks: ['needs_revision'],
-      nextMomentLabel: 1,
-      nextSpatialLabel: 1,
-      items: [{
-        id: 'comment-1',
-        kind: 'comment',
-        scope: 'file',
-        comment: 'Needs revision',
-        createdAt: '2026-06-08T00:00:00.000Z',
-        updatedAt: '2026-06-08T00:00:00.000Z'
-      }],
-      updatedAt: '2026-06-08T00:00:00.000Z'
-    }
+    canStartVideoMomentFeedback: false
   };
 }

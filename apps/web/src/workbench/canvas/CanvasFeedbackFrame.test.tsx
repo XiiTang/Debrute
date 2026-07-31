@@ -28,7 +28,7 @@ describe('CanvasFeedbackFrame', () => {
       items: [{
         id: 'comment-1',
         kind: 'comment',
-        scope: 'file',
+        scope: 'node',
         comment: 'overall direction',
         createdAt: NOW,
         updatedAt: NOW
@@ -36,7 +36,7 @@ describe('CanvasFeedbackFrame', () => {
         id: 'region-1',
         label: 1,
         kind: 'pin',
-        scope: 'file',
+        scope: 'node',
         geometry: { type: 'point', x: 0.2, y: 0.3 },
         comment: 'face detail',
         createdAt: NOW,
@@ -72,14 +72,14 @@ describe('CanvasFeedbackFrame', () => {
       items: [{
         id: 'comment-1',
         kind: 'comment',
-        scope: 'file',
+        scope: 'node',
         comment: 'overall direction',
         createdAt: NOW,
         updatedAt: NOW
       }, {
         id: 'comment-2',
         kind: 'comment',
-        scope: 'file',
+        scope: 'node',
         comment: 'second pass',
         createdAt: NOW,
         updatedAt: NOW
@@ -87,7 +87,7 @@ describe('CanvasFeedbackFrame', () => {
         id: 'region-1',
         label: 1,
         kind: 'pin',
-        scope: 'file',
+        scope: 'node',
         geometry: { type: 'point', x: 0.2, y: 0.3 },
         comment: 'face detail',
         createdAt: NOW,

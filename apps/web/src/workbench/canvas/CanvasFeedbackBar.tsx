@@ -23,14 +23,15 @@ export interface CanvasFeedbackBarProps {
   focusedCapsuleId?: string | undefined;
   authoringItemId?: string | undefined;
   marks: readonly CanvasFeedbackMark[];
-  onSetMarks(marks: CanvasFeedbackMark[]): void;
+  marksMutationPending: boolean;
+  onSetMark(mark: CanvasFeedbackMark, selected: boolean): void;
   overlayRuntime: CanvasOverlayRuntime;
   localToolset?: CanvasFeedbackLocalToolset | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
   onLocalFeedbackModeChange?: ((mode: CanvasMediaFeedbackMode) => void) | undefined;
   canStartVideoMomentFeedback?: boolean | undefined;
   onStartVideoMomentFeedback?: ((mode: 'comment' | 'pin' | 'rect') => void) | undefined;
-  onCreateFileCapsule(): string;
+  onCreateNodeCapsule(): string;
   onCapsuleChange(itemId: string, value: string): void;
   onCapsuleFocus(itemId: string): void;
   onCapsuleBlur(itemId: string): Promise<void>;
@@ -45,14 +46,15 @@ export function CanvasFeedbackBar({
   focusedCapsuleId,
   authoringItemId,
   marks,
-  onSetMarks,
+  marksMutationPending,
+  onSetMark,
   overlayRuntime,
   localToolset = 'none',
   localFeedbackMode,
   onLocalFeedbackModeChange,
   canStartVideoMomentFeedback = false,
   onStartVideoMomentFeedback,
-  onCreateFileCapsule,
+  onCreateNodeCapsule,
   onCapsuleChange,
   onCapsuleFocus,
   onCapsuleBlur,
@@ -61,18 +63,11 @@ export function CanvasFeedbackBar({
   onPointerLeave
 }: CanvasFeedbackBarProps): React.ReactElement {
   const i18n = useI18n();
-  const elementRef = useRef<HTMLDivElement | null>(null);
+  const nodeLabel = projectRelativePath || i18n.t('canvas.node.projectRoot');
   const textareaRefs = useRef(new Map<string, HTMLTextAreaElement>());
   const hideAddComment = Boolean(
     authoringItemId && capsules.some((capsule) => capsule.itemId === authoringItemId)
   );
-
-  useLayoutEffect(() => {
-    if (!elementRef.current) {
-      return;
-    }
-    return overlayRuntime.bindFeedbackBar(elementRef.current);
-  }, [overlayRuntime]);
 
   useLayoutEffect(() => {
     if (!focusedCapsuleId) {
@@ -87,46 +82,20 @@ export function CanvasFeedbackBar({
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }, [capsules, focusedCapsuleId]);
 
-  const toggleMark = (mark: CanvasFeedbackMark) => {
-    const nextMarks = marks.includes(mark)
-      ? marks.filter((item) => item !== mark)
-      : CANVAS_FEEDBACK_MARKS.filter((item) => item === mark || marks.includes(item));
-    onSetMarks(nextMarks);
-  };
-
   return (
-    <div
-      ref={elementRef}
-      className="db-floating-bar canvas-feedback-bar canvas-feedback-bar--has-comment-row"
-      data-canvas-feedback-bar="true"
-      onPointerDown={stopCanvasFeedbackBarEvent}
-      onPointerMove={stopCanvasFeedbackBarEvent}
-      onPointerUp={stopCanvasFeedbackBarEvent}
+    <CanvasFeedbackBarSurface
+      className="canvas-feedback-bar--has-comment-row"
+      overlayRuntime={overlayRuntime}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
-      onClick={stopCanvasFeedbackBarEvent}
-      onDoubleClick={stopCanvasFeedbackBarEvent}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        stopCanvasFeedbackBarEvent(event);
-      }}
-      onKeyDown={stopCanvasFeedbackBarEvent}
     >
       <div className="canvas-feedback-primary-row">
-        <div className="canvas-feedback-actions" role="group" aria-label={i18n.t('canvas.feedback.actions')}>
-          {CANVAS_FEEDBACK_MARKS.map((mark) => {
-            const { labelKey, Icon } = CANVAS_FEEDBACK_MARK_PRESENTATION[mark];
-            return (
-              <IconButton
-                key={mark}
-                className="canvas-feedback-mark"
-                label={i18n.t(labelKey)}
-                pressed={marks.includes(mark)}
-                icon={<Icon />}
-                onClick={() => toggleMark(mark)}
-              />
-            );
-          })}
+        <div className="canvas-feedback-actions">
+          <CanvasFeedbackMarkActions
+            marks={marks}
+            pending={marksMutationPending}
+            onSetMark={onSetMark}
+          />
           {localToolset === 'image' ? (
             <div className="canvas-feedback-local-mode" role="group" aria-label={i18n.t('canvas.feedback.imageRegionTools')}>
               <IconButton
@@ -176,7 +145,7 @@ export function CanvasFeedbackBar({
       </div>
 
       <div className="canvas-feedback-comment-row">
-        <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForFile', { path: projectRelativePath })}>
+        <div className="canvas-feedback-comment-strip" aria-label={i18n.t('canvas.feedback.commentsForNode', { path: nodeLabel })}>
           {capsules.map((capsule) => (
             <FeedbackCapsule
               key={capsule.itemId}
@@ -201,14 +170,115 @@ export function CanvasFeedbackBar({
             type="button"
             className="canvas-feedback-add-comment"
             data-canvas-feedback-add-comment="true"
-            aria-label={i18n.t('canvas.feedback.newFileCommentForFile', { path: projectRelativePath })}
-            title={i18n.t('canvas.feedback.newFileComment')}
-            onClick={() => onCreateFileCapsule()}
+            aria-label={i18n.t('canvas.feedback.newNodeCommentForNode', { path: nodeLabel })}
+            title={i18n.t('canvas.feedback.newNodeComment')}
+            onClick={() => onCreateNodeCapsule()}
           >
             {i18n.t('canvas.feedback.commentPlaceholder')}
           </button>
         ) : null}
       </div>
+    </CanvasFeedbackBarSurface>
+  );
+}
+
+export function CanvasFeedbackSelectionBar({
+  marks,
+  marksMutationPending,
+  onSetMark,
+  overlayRuntime
+}: {
+  marks: readonly CanvasFeedbackMark[];
+  marksMutationPending: boolean;
+  onSetMark(mark: CanvasFeedbackMark, selected: boolean): void;
+  overlayRuntime: CanvasOverlayRuntime;
+}): React.ReactElement {
+  return (
+    <CanvasFeedbackBarSurface
+      className="canvas-feedback-bar--marks-only"
+      overlayRuntime={overlayRuntime}
+    >
+      <div className="canvas-feedback-primary-row">
+        <CanvasFeedbackMarkActions
+          marks={marks}
+          pending={marksMutationPending}
+          onSetMark={onSetMark}
+        />
+      </div>
+    </CanvasFeedbackBarSurface>
+  );
+}
+
+export function CanvasFeedbackMarkActions({
+  marks,
+  pending,
+  onSetMark
+}: {
+  marks: readonly CanvasFeedbackMark[];
+  pending: boolean;
+  onSetMark(mark: CanvasFeedbackMark, selected: boolean): void;
+}): React.ReactElement {
+  const i18n = useI18n();
+  return (
+    <div className="canvas-feedback-mark-actions" role="group" aria-label={i18n.t('canvas.feedback.actions')}>
+      {CANVAS_FEEDBACK_MARKS.map((mark) => {
+        const { labelKey, Icon } = CANVAS_FEEDBACK_MARK_PRESENTATION[mark];
+        const selected = marks.includes(mark);
+        return (
+          <IconButton
+            key={mark}
+            className="canvas-feedback-mark"
+            label={i18n.t(labelKey)}
+            pressed={selected}
+            disabled={pending}
+            icon={<Icon />}
+            onClick={() => onSetMark(mark, !selected)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function CanvasFeedbackBarSurface({
+  className,
+  overlayRuntime,
+  onPointerEnter,
+  onPointerLeave,
+  children
+}: {
+  className: string;
+  overlayRuntime: CanvasOverlayRuntime;
+  onPointerEnter?: (() => void) | undefined;
+  onPointerLeave?: (() => void) | undefined;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!elementRef.current) {
+      return;
+    }
+    return overlayRuntime.bindFeedbackBar(elementRef.current);
+  }, [overlayRuntime]);
+  return (
+    <div
+      ref={elementRef}
+      className={`db-floating-bar canvas-feedback-bar ${className}`}
+      data-canvas-feedback-bar="true"
+      onPointerDown={stopCanvasFeedbackBarEvent}
+      onPointerMove={stopCanvasFeedbackBarEvent}
+      onPointerUp={stopCanvasFeedbackBarEvent}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      onClick={stopCanvasFeedbackBarEvent}
+      onDoubleClick={stopCanvasFeedbackBarEvent}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        stopCanvasFeedbackBarEvent(event);
+      }}
+      onKeyDown={stopCanvasFeedbackBarEvent}
+    >
+      {children}
     </div>
   );
 }
@@ -235,7 +305,7 @@ function FeedbackCapsule({
   const spatial = capsule.kind === 'pin' || capsule.kind === 'region';
   const className = [
     'canvas-feedback-comment-pill',
-    capsule.scope === 'file' ? 'canvas-feedback-comment-pill--file' : 'canvas-feedback-comment-pill--moment',
+    capsule.scope === 'node' ? 'canvas-feedback-comment-pill--node' : 'canvas-feedback-comment-pill--moment',
     spatial ? 'canvas-feedback-comment-pill--spatial' : undefined,
     authoring ? 'canvas-feedback-comment-pill--authoring' : undefined,
     capsule.unsynchronized ? 'canvas-feedback-comment-pill--active-surface' : undefined
@@ -323,7 +393,7 @@ function capsuleAriaLabel(
   if ((capsule.kind === 'pin' || capsule.kind === 'region') && capsule.label !== undefined) {
     return i18n.t('canvas.feedback.region', { index: capsule.label });
   }
-  return i18n.t('canvas.feedback.fileLevelComment', { path: capsule.projectRelativePath });
+  return i18n.t('canvas.feedback.nodeLevelComment', { path: capsule.projectRelativePath });
 }
 
 function momentColor(label: string): string {

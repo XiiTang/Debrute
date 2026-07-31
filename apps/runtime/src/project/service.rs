@@ -13,28 +13,29 @@ use uuid::Uuid;
 
 use super::{
     CANVAS_INDEX_FILE, CanvasDesiredLayoutRow, CanvasDesiredNode, CanvasDocument,
-    CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasLayoutSize, CanvasMapPathRuleSet,
-    CanvasMediaKind, CanvasNodeAvailability, CanvasNodeElement, CanvasNodeKind,
+    CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasLayoutInteraction,
+    CanvasLayoutSize, CanvasMediaKind, CanvasNodeAvailability, CanvasNodeElement, CanvasNodeKind,
     CanvasNodeLayoutUpdate, CanvasProjection, CanvasRegistryDocument, CanvasRegistryState,
     CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, CanvasVideoPresentation,
     DebruteProjectIdentity, DebruteProjectMetadata, DebruteProjectPaths, ExpandedCanvasMap,
     ProjectCapabilityFs, ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity,
     ProjectDocumentDelete, ProjectDocumentRead, ProjectDocumentTransaction, ProjectDocumentWrite,
     ProjectError, ProjectHealthSummary, ProjectPathEntry, ProjectSnapshot,
-    UpdateCanvasFeedbackEntryInput, bring_canvas_node_to_front, canvas_map_path,
-    canvas_media_kind_from_path, clear_canvas_manual_layouts, commit_project_document_transaction,
-    create_canvas_document, debrute_project_paths, expand_canvas_map, expand_canvas_map_path_rules,
-    is_project_indexed_path, is_valid_stable_project_id, list_explicit_project_path,
-    list_project_directory, list_project_files, list_project_subtree_files, normalize_canvas_name,
+    UpdateCanvasFeedbackInput, canvas_map_path, canvas_media_kind_from_path,
+    clear_canvas_manual_layouts, commit_project_document_transaction, create_canvas_document,
+    debrute_project_paths, expand_canvas_map, is_project_indexed_path, is_valid_stable_project_id,
+    list_explicit_project_path, list_project_directory, list_project_files,
+    list_project_subtree_files, normalize_canvas_name, normalize_feedback_path,
     open_no_symlink_existing_project_file, parse_canvas_map, project_canvas,
     project_canvas_with_known_projection, project_content_hash, project_document_directory_hash,
     project_document_file_hash, project_file_metadata_revision, project_media_revision,
     project_text_file_type_for_path, read_canvas_feedback_state, reconcile_canvas_nodes,
-    replace_file, resolve_existing_project_path, resolve_no_symlink_project_path_for_write,
-    resolve_project_path, serialize_canvas_map_with_rule, update_canvas_feedback_document,
-    update_canvas_node_layouts, update_canvas_text_viewports, update_canvas_video_playback,
-    validate_canvas_document, validate_canvas_feedback_document, validate_canvas_id,
-    validate_feedback_media_targets, write_canvas_feedback_document,
+    replace_file, resolve_existing_project_path, resolve_no_symlink_existing_project_path,
+    resolve_no_symlink_project_path_for_write, resolve_project_path,
+    serialize_canvas_map_with_rule, update_canvas_feedback_document, update_canvas_node_layouts,
+    update_canvas_text_viewports, update_canvas_video_playback, validate_canvas_document,
+    validate_canvas_feedback_document, validate_canvas_id, validate_feedback_media_targets,
+    write_canvas_feedback_document,
 };
 
 const EMPTY_CANVAS_MAP: &str = "paths: []\n";
@@ -116,6 +117,11 @@ pub trait ProjectNodeAdapter: Send + Sync {
 }
 
 pub struct DefaultProjectNodeAdapter;
+
+pub(crate) struct CanvasFeedbackUpdate {
+    pub feedback: CanvasFeedbackDocument,
+    pub changed: bool,
+}
 
 impl ProjectNodeAdapter for DefaultProjectNodeAdapter {
     fn layout_size(
@@ -515,14 +521,43 @@ impl ProjectService {
     /// Returns an error for invalid feedback, unsupported media targets, or write conflicts.
     pub fn update_canvas_feedback(
         &mut self,
-        input: &UpdateCanvasFeedbackEntryInput,
-    ) -> Result<CanvasFeedbackDocument, ProjectError> {
+        input: &UpdateCanvasFeedbackInput,
+    ) -> Result<CanvasFeedbackUpdate, ProjectError> {
+        for path in input.target_project_relative_paths() {
+            let normalized = normalize_feedback_path(path)?;
+            let target = resolve_no_symlink_existing_project_path(&self.root, &normalized)
+                .map_err(|_| {
+                    ProjectError::Validation(format!(
+                        "Canvas feedback target is not a current Project Node: {normalized}"
+                    ))
+                })?;
+            let metadata = target.metadata()?;
+            if !metadata.is_file() && !metadata.is_dir() {
+                return Err(ProjectError::Validation(format!(
+                    "Canvas feedback target is not a file or directory Project Node: {normalized}"
+                )));
+            }
+            if input.requires_file_target() && !metadata.is_file() {
+                return Err(ProjectError::Validation(format!(
+                    "Canvas feedback spatial and moment items require a file Project Node: {normalized}"
+                )));
+            }
+        }
         let current = self.canvas_feedback()?.clone();
         let next = update_canvas_feedback_document(&current, input, crate::now_rfc3339())?;
+        if next == current {
+            return Ok(CanvasFeedbackUpdate {
+                feedback: current,
+                changed: false,
+            });
+        }
         validate_feedback_media_targets(&next)?;
         write_canvas_feedback_document(&self.root, &next, self.feedback_hash.as_deref())?;
         self.finish_committed_change(super::CANVAS_FEEDBACK_PROJECT_PATH)?;
-        Ok(self.canvas_feedback()?.clone())
+        Ok(CanvasFeedbackUpdate {
+            feedback: self.canvas_feedback()?.clone(),
+            changed: true,
+        })
     }
 
     /// Records a watched refresh failure without discarding the last good snapshot.
@@ -889,23 +924,12 @@ impl ProjectService {
     pub fn update_canvas_layouts(
         &mut self,
         canvas_id: &str,
+        interaction: CanvasLayoutInteraction,
         updates: &[CanvasNodeLayoutUpdate],
     ) -> Result<(CanvasDocument, CanvasProjection, bool), ProjectError> {
         self.update_visual_canvas(canvas_id, |canvas| {
-            update_canvas_node_layouts(canvas, updates)
+            update_canvas_node_layouts(canvas, interaction, updates)
         })
-    }
-
-    /// Raises one Canvas node to the front of its stack.
-    ///
-    /// # Errors
-    /// Returns an error for missing nodes, projection failure, conflicts, or commit failure.
-    pub fn bring_canvas_node_to_front(
-        &mut self,
-        canvas_id: &str,
-        path: &str,
-    ) -> Result<(CanvasDocument, CanvasProjection, bool), ProjectError> {
-        self.update_visual_canvas(canvas_id, |canvas| bring_canvas_node_to_front(canvas, path))
     }
 
     /// Persists video playback updates for one Canvas.
@@ -1047,40 +1071,35 @@ impl ProjectService {
         Ok((canvas, projection, relative))
     }
 
-    /// Clears manual layout for all nodes or a selected path-rule expansion.
+    /// Clears manual layout for all nodes or an exact set of Canvas node paths.
     ///
     /// # Errors
-    /// Returns an error for invalid rules, missing state, conflicts, or commit failure.
+    /// Returns an error for invalid or missing node targets, conflicts, or commit failure.
     pub fn reset_canvas_layout(
         &mut self,
         canvas_id: &str,
-        rules: Option<&CanvasMapPathRuleSet>,
+        node_paths: Option<&BTreeSet<String>>,
     ) -> Result<(CanvasDocument, CanvasProjection, usize), ProjectError> {
         let current = self.required_canvas(canvas_id)?.clone();
-        let mut files = list_project_files(&self.root)?;
-        if let Some(rules) = rules {
-            for path in &rules.paths {
-                files.extend(list_explicit_project_path(
-                    &self.root,
-                    path.trim_end_matches('/'),
-                )?);
+        let files = list_project_files(&self.root)?;
+        if let Some(paths) = node_paths {
+            if paths.is_empty() {
+                return Err(ProjectError::Validation(
+                    "Selective reset layout requires at least one node path.".to_owned(),
+                ));
             }
-            files.sort_by(|left, right| {
-                left.project_relative_path.cmp(&right.project_relative_path)
-            });
-            files.dedup_by(|left, right| left.project_relative_path == right.project_relative_path);
+            if let Some(missing) = paths.iter().find(|path| {
+                !current
+                    .node_elements
+                    .iter()
+                    .any(|node| node.project_relative_path.as_str() == path.as_str())
+            }) {
+                return Err(ProjectError::Validation(format!(
+                    "Canvas node not found: {missing}"
+                )));
+            }
         }
-        let reset_paths = rules
-            .map(|rules| {
-                expand_canvas_map_path_rules(rules, &files).map(|nodes| {
-                    nodes
-                        .into_iter()
-                        .map(|node| node.project_relative_path)
-                        .collect::<BTreeSet<_>>()
-                })
-            })
-            .transpose()?;
-        let (cleared, count) = clear_canvas_manual_layouts(&current, reset_paths.as_ref());
+        let (cleared, count) = clear_canvas_manual_layouts(&current, node_paths);
         let (source_path, content) = self.read_canvas_map(canvas_id)?;
         self.explicit_canvas_indexes.remove(canvas_id);
         let next = self.prepare_canvas_map(&cleared, &content, &files)?;

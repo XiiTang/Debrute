@@ -8,7 +8,7 @@
 )]
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs::File,
     io::{Read as _, Seek as _, SeekFrom},
     pin::Pin,
@@ -35,12 +35,12 @@ use tokio::sync::mpsc;
 
 use crate::{
     project::{
-        CanvasMapPathRuleSet, CanvasNodeLayoutUpdate, CanvasTextPreviewSourceStatus,
+        CanvasLayoutInteraction, CanvasNodeLayoutUpdate, CanvasTextPreviewSourceStatus,
         CanvasTextPreviewSourceTarget, CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate,
         CanvasVideoPreviewSourceKind, CanvasVideoPreviewSourceStatus, CanvasVideoPreviewTarget,
         PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathEntry,
         ProjectPathKind, ProjectRevisionResult, ProjectSession, ProjectUploadEntry,
-        RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackEntryInput,
+        RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
         open_revisioned_project_file, read_project_text_file,
     },
     terminal::{
@@ -516,7 +516,7 @@ pub(super) async fn feedback_patch(
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
 ) -> Response {
-    let feedback: UpdateCanvasFeedbackEntryInput = match json_body(request).await {
+    let feedback: UpdateCanvasFeedbackInput = match json_body(request).await {
         Ok(input) => input,
         Err(response) => return response,
     };
@@ -647,40 +647,48 @@ pub(super) async fn canvas_reset(
 ) -> Response {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct RuleSet {
-        paths: Vec<String>,
-        globs: Vec<String>,
+    struct AllInput {
+        all: bool,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        #[serde(default)]
-        all: bool,
-        path_rules: Option<RuleSet>,
+    struct NodePathsInput {
+        node_paths: Vec<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Input {
+        All(AllInput),
+        NodePaths(NodePathsInput),
     }
     let input: Input = match json_body(request).await {
         Ok(input) => input,
         Err(response) => return response,
     };
-    if input.all == input.path_rules.is_some() {
-        return invalid_input("reset layout requires exactly one of all or pathRules.");
-    }
-    let rules = match input.path_rules {
-        Some(rules) => {
-            if rules.paths.is_empty() && rules.globs.is_empty() {
-                return invalid_input("selective reset layout requires at least one path or glob.");
-            }
-            Some(CanvasMapPathRuleSet {
-                paths: rules.paths,
-                globs: rules.globs,
-            })
+    let node_paths = match input {
+        Input::All(AllInput { all: true }) => None,
+        Input::All(AllInput { all: false }) => {
+            return invalid_input("reset layout requires all to be true.");
         }
-        None => None,
+        Input::NodePaths(NodePathsInput { node_paths: paths }) => {
+            if paths.is_empty() {
+                return invalid_input("selective reset layout requires at least one node path.");
+            }
+            let path_count = paths.len();
+            let unique = paths.into_iter().collect::<BTreeSet<_>>();
+            if unique.len() != path_count {
+                return invalid_input("selective reset layout node paths must be unique.");
+            }
+            Some(unique)
+        }
     };
     command_for_scope(
         &state,
         &scope,
-        ProjectCommand::ResetCanvasLayout { canvas_id, rules },
+        ProjectCommand::ResetCanvasLayout {
+            canvas_id,
+            node_paths,
+        },
     )
 }
 
@@ -696,12 +704,19 @@ pub(super) async fn canvas_layouts(
         project_relative_path: String,
         x: f64,
         y: f64,
-        width: Option<f64>,
-        height: Option<f64>,
+        width: f64,
+        height: f64,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    enum Interaction {
+        Move,
+        Resize,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
+        interaction: Interaction,
         node_layouts: Vec<Update>,
     }
     let input: Input = match json_body(request).await {
@@ -716,6 +731,10 @@ pub(super) async fn canvas_layouts(
         &scope,
         ProjectCommand::UpdateCanvasLayouts {
             canvas_id,
+            interaction: match input.interaction {
+                Interaction::Move => CanvasLayoutInteraction::Move,
+                Interaction::Resize => CanvasLayoutInteraction::Resize,
+            },
             updates: input
                 .node_layouts
                 .into_iter()
@@ -727,31 +746,6 @@ pub(super) async fn canvas_layouts(
                     height: update.height,
                 })
                 .collect(),
-        },
-    )
-}
-
-pub(super) async fn canvas_bring_front(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, canvas_id)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        project_relative_path: String,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
-    };
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::BringCanvasNodeToFront {
-            canvas_id,
-            project_relative_path: input.project_relative_path,
         },
     )
 }

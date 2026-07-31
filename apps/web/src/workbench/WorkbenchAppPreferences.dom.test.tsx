@@ -11,10 +11,6 @@ import {
   type WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
 import {
-  createCanvasEditorRuntime,
-  type CanvasEditorRuntime
-} from './canvas/runtime/CanvasEditorRuntime';
-import {
   createWorkbenchGlobalProjection,
   type WorkbenchGlobalProjectionWriter
 } from './services/WorkbenchGlobalProjection.js';
@@ -22,7 +18,6 @@ import {
   createWorkbenchProjectProjection,
   type WorkbenchProjectProjection
 } from './services/WorkbenchProjectProjection.js';
-import type { WorkbenchActions } from '../types.js';
 
 vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
   const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/CanvasTextRenderProfile.test-support.js');
@@ -81,12 +76,7 @@ const apiState = vi.hoisted(() => {
   });
   return Object.assign(state, { client });
 });
-const canvasRuntimeState = vi.hoisted(() => ({
-  runtime: undefined as CanvasEditorRuntime | undefined,
-  actions: undefined as WorkbenchActions | undefined
-}));
 let WorkbenchApp: WorkbenchAppComponent;
-let WorkbenchAppWithMockedCanvas: WorkbenchAppComponent;
 
 describe('WorkbenchApp preferences and project behavior', () => {
   const canvasGetContextDescriptor = Object.getOwnPropertyDescriptor(
@@ -102,31 +92,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     apiState.api = apiFixture();
     vi.resetModules();
     ({ WorkbenchApp } = await import('./WorkbenchApp'));
-    vi.resetModules();
-    vi.doMock('./canvas/CanvasEditor', async () => {
-      const { useEffect } = await import('react');
-      return {
-        CanvasEditor: ({
-          actions,
-          onRuntimeChange
-        }: {
-          actions: WorkbenchActions;
-          onRuntimeChange(runtime: CanvasEditorRuntime | undefined): void;
-        }) => {
-          useEffect(() => {
-            canvasRuntimeState.actions = actions;
-            onRuntimeChange(canvasRuntimeState.runtime);
-            return () => {
-              canvasRuntimeState.actions = undefined;
-              onRuntimeChange(undefined);
-            };
-          }, [actions, onRuntimeChange]);
-          return null;
-        }
-      };
-    });
-    ({ WorkbenchApp: WorkbenchAppWithMockedCanvas } = await import('./WorkbenchApp'));
-    vi.doUnmock('./canvas/CanvasEditor');
   }, 30_000);
 
   afterAll(() => {
@@ -177,9 +142,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     apiState.api = undefined;
     apiState.globalProjection = undefined;
     apiState.projectProjection = undefined;
-    canvasRuntimeState.runtime?.dispose();
-    canvasRuntimeState.runtime = undefined;
-    canvasRuntimeState.actions = undefined;
     document.documentElement.removeAttribute('data-theme');
     document.documentElement.style.removeProperty('--db-text');
     document.documentElement.style.removeProperty('--db-text-muted');
@@ -634,41 +596,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('notifies when selection-driven stack-order synchronization fails', async () => {
-    const failure = new Error('stack-order write failed');
-    const bringCanvasNodeToFront = vi.fn().mockRejectedValue(failure);
-    const projectSnapshot = stackOrderSnapshotFixture();
-    const projection = projectSnapshot.projections[0]!;
-    canvasRuntimeState.runtime = createCanvasEditorRuntime({
-      canvasId: projection.canvasId,
-      initialProjection: projection,
-      submitManualLayout: async () => undefined
-    });
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
-      openProject: vi.fn(async () => ({
-        projectId: 'project-1',
-        projectRevision: 1,
-        snapshot: projectSnapshot,
-        workingCopies: emptyWorkingCopies()
-      })),
-      bringCanvasNodeToFront
-    } as Partial<WorkbenchApiClient>, WorkbenchAppWithMockedCanvas);
-
-    await act(async () => {
-      canvasRuntimeState.runtime!.setSelection({ kind: 'node', projectRelativePath: 'flow/a.png' });
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(bringCanvasNodeToFront).toHaveBeenCalledWith({
-      canvasId: 'canvas-1',
-      projectRelativePath: 'flow/a.png'
-    });
-    expect(container.textContent).toContain('Bring node to front failed: stack-order write failed');
-
-    await unmount(root, container);
-  });
-
   describe('global settings save races', { tags: ['settings'] }, () => {
     it('keeps an acknowledged Canvas Text Appearance while Settings is closed and reopened before confirmation', async () => {
       const globalSettingsSave = vi.fn(async () => ({ ok: true as const }));
@@ -1087,6 +1014,7 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     executeNativeMenuCommand: async () => ({ ok: true }),
     takeDesktopLaunchTicket: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
+    onNativeEditCommand: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
   };

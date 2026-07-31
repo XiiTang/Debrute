@@ -46,8 +46,14 @@ pub struct CanvasNodeLayoutUpdate {
     pub project_relative_path: String,
     pub x: f64,
     pub y: f64,
-    pub width: Option<f64>,
-    pub height: Option<f64>,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanvasLayoutInteraction {
+    Move,
+    Resize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -269,6 +275,7 @@ pub fn project_canvas_with_known_projection(
 /// or invalid geometry.
 pub fn update_canvas_node_layouts(
     canvas: &CanvasDocument,
+    interaction: CanvasLayoutInteraction,
     updates: &[CanvasNodeLayoutUpdate],
 ) -> Result<CanvasDocument, ProjectError> {
     if updates.is_empty() {
@@ -276,16 +283,19 @@ pub fn update_canvas_node_layouts(
             "Canvas layout update requires at least one node.".to_owned(),
         ));
     }
+    if interaction == CanvasLayoutInteraction::Resize && updates.len() != 1 {
+        return Err(ProjectError::Validation(
+            "Canvas resize requires exactly one node.".to_owned(),
+        ));
+    }
     let mut by_path = HashMap::new();
     for update in updates {
         if !update.x.is_finite()
             || !update.y.is_finite()
-            || update
-                .width
-                .is_some_and(|width| !width.is_finite() || width <= 0.0)
-            || update
-                .height
-                .is_some_and(|height| !height.is_finite() || height <= 0.0)
+            || !update.width.is_finite()
+            || update.width <= 0.0
+            || !update.height.is_finite()
+            || update.height <= 0.0
         {
             return Err(ProjectError::Validation(
                 "Canvas layout geometry must contain finite positions and positive finite sizes."
@@ -317,12 +327,43 @@ pub fn update_canvas_node_layouts(
         if let Some(update) = by_path.get(node.project_relative_path.as_str()) {
             node.x = update.x;
             node.y = update.y;
-            node.width = update.width.unwrap_or(node.width);
-            node.height = update.height.unwrap_or(node.height);
+            node.width = update.width;
+            node.height = update.height;
             node.layout_mode = Some("manual".to_owned());
         }
     }
+    if interaction == CanvasLayoutInteraction::Move {
+        raise_canvas_node_group(&mut result, by_path.keys().copied());
+    }
     Ok(result)
+}
+
+fn raise_canvas_node_group<'a>(
+    canvas: &mut CanvasDocument,
+    selected_paths: impl IntoIterator<Item = &'a str>,
+) {
+    let selected = selected_paths.into_iter().collect::<HashSet<_>>();
+    let mut ordered = canvas.node_elements.iter().collect::<Vec<_>>();
+    ordered.sort_by(|left, right| compare_node_z(left, right));
+    let ordered = ordered
+        .iter()
+        .filter(|node| !selected.contains(node.project_relative_path.as_str()))
+        .chain(
+            ordered
+                .iter()
+                .filter(|node| selected.contains(node.project_relative_path.as_str())),
+        )
+        .enumerate()
+        .map(|(index, node)| {
+            (
+                node.project_relative_path.clone(),
+                i64::try_from(index).unwrap_or(i64::MAX),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for node in &mut canvas.node_elements {
+        node.z = ordered[&node.project_relative_path];
+    }
 }
 
 #[must_use]
@@ -468,46 +509,6 @@ pub fn update_canvas_text_viewports(
                 scroll_left: update.scroll_left,
             },
         );
-    }
-    Ok(result)
-}
-
-/// Moves one existing Canvas node to the highest stack position.
-///
-/// # Errors
-/// Returns a validation error when the target node does not exist.
-pub fn bring_canvas_node_to_front(
-    canvas: &CanvasDocument,
-    project_relative_path: &str,
-) -> Result<CanvasDocument, ProjectError> {
-    let mut ordered = canvas.node_elements.clone();
-    ordered.sort_by(compare_node_z);
-    let Some(index) = ordered
-        .iter()
-        .position(|node| node.project_relative_path == project_relative_path)
-    else {
-        return Err(ProjectError::Validation(format!(
-            "Canvas node not found: {project_relative_path}"
-        )));
-    };
-    if index == ordered.len() - 1 {
-        return Ok(canvas.clone());
-    }
-    let target = ordered.remove(index);
-    ordered.push(target);
-    let z_by_path: HashMap<_, _> = ordered
-        .iter()
-        .enumerate()
-        .map(|(index, node)| {
-            (
-                node.project_relative_path.as_str(),
-                i64::try_from(index).unwrap_or(i64::MAX),
-            )
-        })
-        .collect();
-    let mut result = canvas.clone();
-    for node in &mut result.node_elements {
-        node.z = z_by_path[&node.project_relative_path.as_str()];
     }
     Ok(result)
 }

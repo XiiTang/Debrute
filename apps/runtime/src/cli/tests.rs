@@ -260,6 +260,29 @@ fn parser_enforces_registered_syntax_shapes() {
         repeated.options.get("path").unwrap(),
         r#"["first","second"]"#
     );
+
+    let mixed_reset = parse_cli_args(&[
+        "canvas".into(),
+        "reset-layout".into(),
+        "project".into(),
+        "canvas-1".into(),
+        "--all".into(),
+        "--path".into(),
+        "first".into(),
+    ])
+    .unwrap_err();
+    assert_eq!(mixed_reset.code(), "invalid_input");
+
+    let obsolete_glob = parse_cli_args(&[
+        "canvas".into(),
+        "reset-layout".into(),
+        "project".into(),
+        "canvas-1".into(),
+        "--glob".into(),
+        "assets/**".into(),
+    ])
+    .unwrap_err();
+    assert_eq!(obsolete_glob.code(), "invalid_argument");
 }
 
 #[test]

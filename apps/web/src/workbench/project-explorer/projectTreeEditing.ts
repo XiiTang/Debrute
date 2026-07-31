@@ -46,10 +46,9 @@ export function validateInlineProjectName(value: string): { ok: true; name: stri
 }
 
 export function projectTreePasteTargetDirectory(target: WorkbenchContextMenuTarget): string {
-  if (target.source === 'canvas') {
-    return target.kind === 'directory' ? target.projectRelativePath : parentProjectPath(target.projectRelativePath);
-  }
-  return target.targetDirectoryPath;
+  return target.invocationEntry.kind === 'directory'
+    ? target.invocationEntry.projectRelativePath
+    : parentProjectPath(target.invocationEntry.projectRelativePath);
 }
 
 export function parentProjectPath(projectRelativePath: string): string {

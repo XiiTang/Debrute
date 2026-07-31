@@ -86,12 +86,10 @@ export interface WorkbenchActions {
   openTextEditorWindow: (projectRelativePath: string) => void;
   toggleTextFileWordWrap: (projectRelativePath: string) => void;
   updateCanvasNodeLayouts: (canvasId: string, input: {
-    nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
+    interaction: 'move' | 'resize';
+    nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width: number; height: number }>;
   }) => Promise<void>;
-  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { pathRules: { paths: string[]; globs: string[] } }) => Promise<WorkbenchCanvasResetLayoutResult>;
-  bringCanvasNodeToFront: (canvasId: string, input: {
-    projectRelativePath: string;
-  }) => Promise<void>;
+  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { nodePaths: string[] }) => Promise<WorkbenchCanvasResetLayoutResult>;
   updateCanvasVideoPlaybackState: (canvasId: string, input: Omit<UpdateCanvasVideoPlaybackStateInput, 'canvasId'>) => Promise<void>;
   updateCanvasTextViewportState: (canvasId: string, input: Omit<UpdateCanvasTextViewportStateInput, 'canvasId'>) => Promise<void>;
   addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => Promise<void>;

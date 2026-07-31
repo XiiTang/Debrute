@@ -19,9 +19,8 @@ import {
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
-import { useCanvasSurfaceReady } from './canvas/runtime/useCanvasRuntimeSnapshot.js';
+import { canvasNodeSelection } from './canvas/runtime/canvasSelection.js';
 import { getCanvasById } from './services/canvasState';
-import { createCanvasSelectionStackOrderSync } from './services/canvasStackOrderSelection';
 import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import {
   currentDebruteWorkbenchRoute,
@@ -49,6 +48,13 @@ import {
   type ProjectPathCommandRouter
 } from './services/projectPathCommandRouter.js';
 import {
+  createWorkbenchFocusCommandRouter,
+  workbenchFocusCommandFromKeyboardEvent,
+  workbenchFocusCommandFromMenuCommandId,
+  type WorkbenchBehaviorOwner,
+  type WorkbenchFocusCommandRouter
+} from './services/workbenchFocusCommandRouter.js';
+import {
   createProjectPathCommandEffects,
   type ProjectPathCommandEffects,
   type ProjectPathEffectApiName
@@ -62,7 +68,7 @@ import {
   WorkbenchContextMenu
 } from './shell/WorkbenchContextMenu.js';
 import { WorkbenchTitleBar } from './shell/WorkbenchTitleBar';
-import { executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands';
+import { executeDocumentEditCommand, executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands.js';
 import {
   buildWorkbenchTitleBarState,
   type WorkbenchMenuItem
@@ -78,7 +84,7 @@ import {
 } from './services/canvasSnapshotUpdates';
 import type { WorkbenchProjectProjectionState } from './services/WorkbenchProjectProjection.js';
 import {
-  permanentDeleteConfirmationMessageForEntries,
+  projectPathDeletionConfirmationMessageForEntries,
   projectTreeSelectionFromPaths
 } from './project-explorer/workbenchFileCommands';
 import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController.js';
@@ -502,6 +508,7 @@ function WorkbenchProjectGenerationApp({
     initialProjectPresentation.activeCanvasId
   );
   const [activeCanvasRuntime, setActiveCanvasRuntime] = useState<CanvasEditorRuntime>();
+  const focusCommandRouterRef = useRef<WorkbenchFocusCommandRouter | undefined>(undefined);
   const [activeCanvasCurrentNodes, setActiveCanvasCurrentNodes] = useState<{
     canvasId: string;
     nodes: ProjectedCanvasNode[];
@@ -558,7 +565,7 @@ function WorkbenchProjectGenerationApp({
     if (!node || !activeCanvasRuntime || !runtimeSnapshot?.surfaceSize) {
       return;
     }
-    activeCanvasRuntime.setSelection({ kind: 'node', projectRelativePath });
+    activeCanvasRuntime.setSelection(canvasNodeSelection([projectRelativePath]));
     activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
       node,
       surfaceSize: runtimeSnapshot.surfaceSize,
@@ -595,11 +602,16 @@ function WorkbenchProjectGenerationApp({
     const currentI18n = presentationController.getCurrentI18n();
     notify(currentI18n.t('canvas.feedback.unavailable', { message }));
   }, [notify, presentationController.getCurrentI18n]);
+  const notifyCanvasFeedbackSaveFailed = useCallback((message: string) => {
+    const currentI18n = presentationController.getCurrentI18n();
+    notify(currentI18n.t('canvas.feedback.saveFailed', { message }));
+  }, [notify, presentationController.getCurrentI18n]);
   const feedbackInteraction = useCanvasFeedbackInteraction({
     api,
     projectId: runtimeProjectId,
     overlayRuntime: canvasOverlayRuntime,
-    notifyUnavailable: notifyCanvasFeedbackUnavailable
+    notifyUnavailable: notifyCanvasFeedbackUnavailable,
+    notifySaveFailed: notifyCanvasFeedbackSaveFailed
   });
 
   useEffect(() => {
@@ -801,13 +813,6 @@ function WorkbenchProjectGenerationApp({
     }
     return request;
   }, [projectPathCommandEffects, projectPathCommandIntake]);
-
-  const bringCanvasNodeToFront = useCallback<WorkbenchActions['bringCanvasNodeToFront']>(async (canvasId, input) => {
-    await api.bringCanvasNodeToFront({
-      canvasId,
-      ...input
-    });
-  }, []);
 
   const updateCanvasVideoPlaybackState = useCallback<WorkbenchActions['updateCanvasVideoPlaybackState']>(async (canvasId, input) => {
     try {
@@ -1062,7 +1067,6 @@ function WorkbenchProjectGenerationApp({
     toggleTextFileWordWrap,
     updateCanvasNodeLayouts,
     resetCanvasNodeLayouts,
-    bringCanvasNodeToFront,
     updateCanvasVideoPlaybackState,
     updateCanvasTextViewportState,
     addProjectPathToCanvasMap,
@@ -1082,7 +1086,6 @@ function WorkbenchProjectGenerationApp({
     toggleTextFileWordWrap,
     updateCanvasNodeLayouts,
     resetCanvasNodeLayouts,
-    bringCanvasNodeToFront,
     updateCanvasVideoPlaybackState,
     updateCanvasTextViewportState,
     addProjectPathToCanvasMap,
@@ -1093,28 +1096,6 @@ function WorkbenchProjectGenerationApp({
     repairCanvasIndex,
     openProject
   ]);
-
-  useEffect(() => {
-    if (!activeCanvasRuntime || !activeCanvasId) {
-      return;
-    }
-    const stackOrderSync = createCanvasSelectionStackOrderSync({
-      getSnapshot: () => {
-        const accepted = api.projectProjection.getState();
-        return accepted.status === 'unbound' ? undefined : accepted.presentedSnapshot;
-      },
-      getActiveCanvasId: () => activeCanvasId,
-      getSelection: () => activeCanvasRuntime.getSnapshot().selection,
-      bringCanvasNodeToFront
-    });
-    return activeCanvasRuntime.subscribeSelection(() => {
-      void stackOrderSync.syncSelectedNode().catch((error) => {
-        notify(i18n.t('shell.notifications.bringCanvasNodeToFrontFailed', {
-          message: errorMessage(error)
-        }));
-      });
-    });
-  }, [activeCanvasId, activeCanvasRuntime, bringCanvasNodeToFront, i18n, notify]);
 
   const openWorkbenchWindows = useMemo<WorkbenchWindowIdentity[]>(() => [
     ...FLOATING_PANEL_IDS
@@ -1129,7 +1110,14 @@ function WorkbenchProjectGenerationApp({
     () => syncOpenWorkbenchWindows(windowOrder, openWorkbenchWindows),
     [openWorkbenchWindows, windowOrder]
   );
-  const handleTitleBarCommand = useCallback((item: Extract<WorkbenchMenuItem, { kind: 'command' }>) => {
+  const handleTitleBarCommand = useCallback((
+    item: Extract<WorkbenchMenuItem, { kind: 'command' }>,
+    owner?: WorkbenchBehaviorOwner
+  ) => {
+    const focusCommand = workbenchFocusCommandFromMenuCommandId(item.commandId);
+    if (focusCommand && focusCommandRouterRef.current?.dispatch(focusCommand, owner)) {
+      return;
+    }
     void executeTitleBarMenuCommand(item, {
       api,
       shell: getDebruteShellApi(),
@@ -1236,8 +1224,16 @@ function WorkbenchProjectGenerationApp({
     selectedItems: (count: number) => i18n.t('shell.confirm.permanentDeleteSelected', { count })
   }), [i18n]);
   const confirmPermanentDelete = useCallback((input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }> }) => (
-    window.confirm(permanentDeleteConfirmationMessageForEntries(input, permanentDeleteConfirmationLabels))
+    window.confirm(projectPathDeletionConfirmationMessageForEntries(input, permanentDeleteConfirmationLabels))
   ), [permanentDeleteConfirmationLabels]);
+  const trashConfirmationLabels = useMemo(() => ({
+    directory: (path: string) => i18n.t('shell.confirm.trashDirectory', { path }),
+    file: (path: string) => i18n.t('shell.confirm.trashFile', { path }),
+    selectedItems: (count: number) => i18n.t('shell.confirm.trashSelected', { count })
+  }), [i18n]);
+  const confirmTrash = useCallback((input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }> }) => (
+    window.confirm(projectPathDeletionConfirmationMessageForEntries(input, trashConfirmationLabels))
+  ), [trashConfirmationLabels]);
   const confirmMoveOverwrite = useCallback((input: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
@@ -1257,7 +1253,6 @@ function WorkbenchProjectGenerationApp({
     openTerminalPanel: openProjectPathTerminalPanel,
     menuContext: {
       projection: activeProjection,
-      canSelectCanvasNode: Boolean(activeCanvasRuntime),
       fileClipboard,
       photoshop: readyPhotoshop
     },
@@ -1283,6 +1278,7 @@ function WorkbenchProjectGenerationApp({
       closeContextMenu: closeWorkbenchContextMenu,
       openInspectorPanel,
       confirmPermanentDelete,
+      confirmTrash,
       getProjectSnapshot: getAcceptedProjectSnapshot,
       confirmMoveOverwrite,
       errorLabels: contextMenuCommandErrorLabels
@@ -1293,6 +1289,7 @@ function WorkbenchProjectGenerationApp({
     activeProjection,
     closeWorkbenchContextMenu,
     confirmMoveOverwrite,
+    confirmTrash,
     contextMenuCommandErrorLabels,
     copyProjectRelativePath,
     confirmPermanentDelete,
@@ -1308,6 +1305,39 @@ function WorkbenchProjectGenerationApp({
     projectPathCommandEffects,
     projectPathCommandIntake
   ]);
+  const focusCommandRouter = useMemo(() => createWorkbenchFocusCommandRouter({
+    getRuntime: () => activeCanvasRuntime,
+    getProjection: () => activeProjection,
+    getCanvasRoot: () => document.querySelector<HTMLElement>('[data-testid="canvas-surface"]'),
+    getProjectPathRouter: () => projectPathCommandRouter,
+    getExplorerController: () => explorerController
+  }), [activeCanvasRuntime, activeProjection, explorerController, projectPathCommandRouter]);
+  focusCommandRouterRef.current = focusCommandRouter;
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) {
+        return;
+      }
+      const command = workbenchFocusCommandFromKeyboardEvent(event, productPlatform);
+      if (!command || !focusCommandRouter.dispatch(command)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [focusCommandRouter, productPlatform]);
+  useEffect(() => {
+    const shell = getDebruteShellApi();
+    return shell?.onNativeEditCommand((commandId) => {
+      const command = workbenchFocusCommandFromMenuCommandId(commandId);
+      if (command && focusCommandRouter.dispatch(command)) {
+        return;
+      }
+      executeDocumentEditCommand(commandId);
+    });
+  }, [focusCommandRouter]);
   const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
     projectPathCommandRouter?.run(command, {
       target,
@@ -1327,6 +1357,7 @@ function WorkbenchProjectGenerationApp({
                 onInstallProductUpdate: installProductUpdateFromTitleBar
               } : {})}
               onCommand={handleTitleBarCommand}
+              onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
               onWindowCommand={handleTitleBarWindowCommand}
             />
             <div className="boot-screen boot-screen--with-titlebar" role="alert" data-testid="workbench-connection-ended">
@@ -1353,6 +1384,7 @@ function WorkbenchProjectGenerationApp({
                 onInstallProductUpdate: installProductUpdateFromTitleBar
               } : {})}
               onCommand={handleTitleBarCommand}
+              onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
               onWindowCommand={handleTitleBarWindowCommand}
             />
             <div className="boot-screen boot-screen--with-titlebar">
@@ -1377,6 +1409,7 @@ function WorkbenchProjectGenerationApp({
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
               onCommand={handleTitleBarCommand}
+              onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
               onWindowCommand={handleTitleBarWindowCommand}
             />
             <div className="boot-screen boot-screen--with-titlebar" role="status" aria-live="polite" data-testid="workbench-product-update-blocking">
@@ -1397,6 +1430,10 @@ function WorkbenchProjectGenerationApp({
       actions={actions}
       runtimeScopeKey={canvasRuntimeScopeKey}
       minimapOpen={canvasMinimapOpen}
+      productPlatform={productPlatform}
+      cutPaths={fileClipboard?.operation === 'cut'
+        ? fileClipboard.entries.map((entry) => entry.projectRelativePath)
+        : []}
       onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
       feedbackInteraction={feedbackInteraction.canvas}
       onRuntimeChange={setActiveCanvasRuntime}
@@ -1449,6 +1486,7 @@ function WorkbenchProjectGenerationApp({
               onInstallProductUpdate: installProductUpdateFromTitleBar
             } : {})}
             onCommand={handleTitleBarCommand}
+            onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
             onWindowCommand={handleTitleBarWindowCommand}
           />
           {isProjectOpening && acceptedProject ? (
@@ -1686,7 +1724,6 @@ function WorkbenchProjectGenerationApp({
             <ProjectPathContextMenuHost
               contextMenu={contextMenu}
               router={projectPathCommandRouter}
-              runtime={activeCanvasRuntime}
               productPlatform={productPlatform}
               onClose={closeWorkbenchContextMenu}
             />
@@ -1701,7 +1738,6 @@ function WorkbenchProjectGenerationApp({
 export function ProjectPathContextMenuHost({
   contextMenu,
   router,
-  runtime,
   productPlatform,
   onClose
 }: {
@@ -1710,14 +1746,12 @@ export function ProjectPathContextMenuHost({
     position: WorkbenchContextMenuPosition;
   };
   router: ProjectPathCommandRouter | undefined;
-  runtime: CanvasEditorRuntime | undefined;
   productPlatform: DebruteProductPlatform;
   onClose(): void;
 }): React.ReactElement {
-  const canRevealInCanvas = useCanvasSurfaceReady(runtime);
   const items = useMemo(
-    () => router?.contextMenuItems(contextMenu.target, canRevealInCanvas) ?? [],
-    [canRevealInCanvas, contextMenu.target, router]
+    () => router?.contextMenuItems(contextMenu.target) ?? [],
+    [contextMenu.target, router]
   );
   if (!router) {
     return <PendingWorkbenchContextMenuDismissal onClose={onClose} />;
@@ -1727,6 +1761,7 @@ export function ProjectPathContextMenuHost({
       items={items}
       position={contextMenu.position}
       productPlatform={productPlatform}
+      selectionCount={contextMenu.target.selectedEntries.length}
       onCommand={(command, photoshopTarget) => router.run(command, contextMenu, photoshopTarget)}
       onClose={onClose}
     />

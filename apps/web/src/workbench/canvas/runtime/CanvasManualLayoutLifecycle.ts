@@ -1,11 +1,11 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
-  canvasManualLayoutDraftFromDragState,
+  canvasManualLayoutDraftFromInteraction,
   canvasNodesWithLayoutOverrides,
   type CanvasLayoutOverride,
   type CanvasManualLayoutDraft
 } from '../canvasManualLayoutDraft';
-import type { CanvasRuntimeDragState } from './CanvasEditorRuntime';
+import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime.js';
 
 export interface CanvasManualLayoutPresentation {
   layoutOverrides: readonly CanvasLayoutOverride[];
@@ -14,8 +14,8 @@ export interface CanvasManualLayoutPresentation {
 export interface CanvasManualLayoutLifecycle {
   getPresentation(): CanvasManualLayoutPresentation;
   getPresentedNodes(): ProjectedCanvasNode[];
-  setActiveDrag(dragState: CanvasRuntimeDragState | undefined): void;
-  submitFinishedDrag(dragState: CanvasRuntimeDragState): Promise<void>;
+  setActiveInteraction(interaction: CanvasRuntimeLayoutInteraction | undefined): void;
+  submitFinishedInteraction(interaction: CanvasRuntimeLayoutInteraction): Promise<void>;
   acceptProjection(projection: CanvasProjection): void;
   dispose(): void;
 }
@@ -28,7 +28,7 @@ interface SubmittedManualLayoutDraft {
 export function createCanvasManualLayoutLifecycle(input: {
   canvasId: string;
   initialProjection: CanvasProjection;
-  submitManualLayout(nodeLayouts: CanvasLayoutOverride[]): Promise<void>;
+  submitManualLayout(mutation: Pick<CanvasManualLayoutDraft, 'interaction' | 'nodeLayouts'>): Promise<void>;
 }): CanvasManualLayoutLifecycle {
   if (input.initialProjection.canvasId !== input.canvasId) {
     throw new Error(`Manual Layout lifecycle for ${input.canvasId} cannot start from Projection ${input.initialProjection.canvasId}.`);
@@ -39,11 +39,11 @@ export function createCanvasManualLayoutLifecycle(input: {
   let nextSubmissionId = 1;
   let disposed = false;
 
-  const draftFromDragState = (dragState: CanvasRuntimeDragState): CanvasManualLayoutDraft => (
-    canvasManualLayoutDraftFromDragState({
+  const draftFromInteraction = (interaction: CanvasRuntimeLayoutInteraction): CanvasManualLayoutDraft => (
+    canvasManualLayoutDraftFromInteraction({
       canvasId: input.canvasId,
-      dragState,
-      point: dragState.current ?? dragState.start
+      interaction,
+      point: interaction.current ?? interaction.start
     })
   );
 
@@ -68,29 +68,33 @@ export function createCanvasManualLayoutLifecycle(input: {
         layoutOverrides: presentation().layoutOverrides
       });
     },
-    setActiveDrag(dragState) {
+    setActiveInteraction(interaction) {
       if (disposed) {
         return;
       }
-      active = dragState ? draftFromDragState(dragState) : undefined;
+      active = interaction ? draftFromInteraction(interaction) : undefined;
     },
-    async submitFinishedDrag(dragState) {
+    async submitFinishedInteraction(interaction) {
       if (disposed) {
         throw new Error(`Manual Layout lifecycle for ${input.canvasId} is disposed.`);
       }
-      const draft = draftFromDragState(dragState);
+      const draft = draftFromInteraction(interaction);
       active = undefined;
       const currentNodePaths = new Set(projection.nodes.map((node) => node.projectRelativePath));
       if (
         draft.nodeLayouts.length === 0
         || draft.nodeLayouts.some((layout) => !currentNodePaths.has(layout.projectRelativePath))
+        || (draft.interaction === 'move' && interactionHasNoLayoutDelta(interaction))
       ) {
         return;
       }
       const submission = { id: nextSubmissionId++, draft };
       submitted.push(submission);
       try {
-        await input.submitManualLayout([...draft.nodeLayouts]);
+        await input.submitManualLayout({
+          interaction: draft.interaction,
+          nodeLayouts: [...draft.nodeLayouts]
+        });
       } catch (error) {
         submitted = submitted.filter((candidate) => candidate.id !== submission.id);
         throw error;
@@ -140,6 +144,14 @@ export function createCanvasManualLayoutLifecycle(input: {
       submitted = [];
     }
   };
+}
+
+function interactionHasNoLayoutDelta(interaction: CanvasRuntimeLayoutInteraction): boolean {
+  if (interaction.kind !== 'move-node') {
+    return false;
+  }
+  const current = interaction.current ?? interaction.start;
+  return current.x === interaction.start.x && current.y === interaction.start.y;
 }
 
 function sameLayout(

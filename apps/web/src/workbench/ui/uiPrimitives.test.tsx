@@ -182,7 +182,7 @@ describe('Workbench UI primitives', () => {
   it('maps reusable comment pill sizing props to accessible input styles', () => {
     const html = renderToStaticMarkup(
       <CommentPillInput
-        aria-label="File feedback comment"
+        aria-label="Node feedback comment"
         value="File comment"
         readOnly
         sizing={{ minWidthPx: 112, maxWidthPx: 260 }}
@@ -190,7 +190,7 @@ describe('Workbench UI primitives', () => {
     );
 
     expect(html).toContain('db-comment-pill-input');
-    expect(html).toContain('aria-label="File feedback comment"');
+    expect(html).toContain('aria-label="Node feedback comment"');
     expect(html).toContain('--db-comment-pill-min-width:112px');
     expect(html).toContain('--db-comment-pill-max-width:260px');
     expect(html).toContain('--db-comment-pill-input-ch:');

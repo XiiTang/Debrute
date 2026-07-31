@@ -4,7 +4,7 @@ import type {
   CanvasFeedbackGeometry,
   CanvasProjection,
   ProjectDiagnostic,
-  UpdateCanvasFeedbackEntryInput
+  UpdateCanvasFeedbackInput
 } from '@debrute/canvas-core';
 import type {
   DebruteProjectMetadata,
@@ -31,7 +31,7 @@ export type {
   WriteProjectTextFileInput
 } from './project.js';
 
-export type { NativeMenuCommand, NativeMenuCommandId } from './workbenchChrome.js';
+export type { NativeEditCommandId, NativeMenuCommand, NativeMenuCommandId } from './workbenchChrome.js';
 
 interface ProjectHealthSummary {
   projectName: string;
@@ -237,11 +237,11 @@ interface WorkbenchFeedbackWorkingCopyBase {
 }
 
 export type WorkbenchFeedbackWorkingCopy = WorkbenchFeedbackWorkingCopyBase & (
-  | { kind: 'comment'; scope: 'file'; momentTimeSeconds?: never; geometry?: never }
+  | { kind: 'comment'; scope: 'node'; momentTimeSeconds?: never; geometry?: never }
   | { kind: 'comment'; scope: 'moment'; momentTimeSeconds: number; geometry?: never }
   | {
       kind: 'pin';
-      scope: 'file';
+      scope: 'node';
       momentTimeSeconds?: never;
       geometry: Extract<CanvasFeedbackGeometry, { type: 'point' }>;
     }
@@ -253,7 +253,7 @@ export type WorkbenchFeedbackWorkingCopy = WorkbenchFeedbackWorkingCopyBase & (
     }
   | {
       kind: 'region';
-      scope: 'file';
+      scope: 'node';
       momentTimeSeconds?: never;
       geometry: Extract<CanvasFeedbackGeometry, { type: 'rect' }>;
     }
@@ -740,7 +740,7 @@ type ResetCanvasNodeLayoutsInput = {
   canvasId: string;
 } & (
   | { all: true }
-  | { pathRules: { paths: string[]; globs: string[] } }
+  | { nodePaths: string[] }
 );
 
 export interface WorkbenchAddProjectPathToCanvasMapResult extends RevisionedProjectResult {}
@@ -1181,7 +1181,7 @@ function isCanvasFeedbackItem(value: unknown): boolean {
     return value.label === undefined
       && value.geometry === undefined
       && (
-        (value.scope === 'file' && value.moment === undefined)
+        (value.scope === 'node' && value.moment === undefined)
         || (value.scope === 'moment' && isCanvasFeedbackMoment(value.moment))
       );
   }
@@ -1189,7 +1189,7 @@ function isCanvasFeedbackItem(value: unknown): boolean {
     return false;
   }
   return (
-    (value.scope === 'file' && value.moment === undefined)
+    (value.scope === 'node' && value.moment === undefined)
     || (value.scope === 'moment' && isCanvasFeedbackMoment(value.moment))
   )
     && isNonNegativeInteger(value.label)
@@ -1250,7 +1250,7 @@ function isFeedbackWorkingCopy(value: unknown): boolean {
     || typeof value.projectRelativePath !== 'string'
     || typeof value.comment !== 'string'
     || (value.kind !== 'comment' && value.kind !== 'pin' && value.kind !== 'region')
-    || (value.scope !== 'file' && value.scope !== 'moment')
+    || (value.scope !== 'node' && value.scope !== 'moment')
   ) {
     return false;
   }
@@ -1345,7 +1345,7 @@ export interface WorkbenchApiClient {
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
   lookupGeneratedAssetMetadata(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
   readCanvasFeedback(): Promise<CanvasFeedbackDocument>;
-  updateCanvasFeedbackEntry(input: UpdateCanvasFeedbackEntryInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
+  updateCanvasFeedback(input: UpdateCanvasFeedbackInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
   createCanvas(): Promise<WorkbenchCanvasManagementResult>;
   renameCanvas(input: { canvasId: string; name: string }): Promise<WorkbenchCanvasManagementResult>;
   deleteCanvas(input: { canvasId: string }): Promise<WorkbenchCanvasManagementResult>;
@@ -1354,15 +1354,12 @@ export interface WorkbenchApiClient {
   addProjectPathToCanvasMap(input: AddProjectPathToCanvasMapInput): Promise<WorkbenchAddProjectPathToCanvasMapResult>;
   updateCanvasNodeLayouts(input: {
     canvasId: string;
-    nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width?: number; height?: number }>;
+    interaction: 'move' | 'resize';
+    nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width: number; height: number }>;
   }): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
   updateCanvasTextViewportState(input: UpdateCanvasTextViewportStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
   resetCanvasNodeLayouts(input: ResetCanvasNodeLayoutsInput): Promise<WorkbenchCanvasResetLayoutResult>;
-  bringCanvasNodeToFront(input: {
-    canvasId: string;
-    projectRelativePath: string;
-  }): Promise<WorkbenchCanvasDocumentMutationResult>;
   integrationsRescan(): Promise<{ ok: true }>;
   integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
   onEvent(listener: (event: WorkbenchEvent) => void): () => void;

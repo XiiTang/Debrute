@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
-import { createCanvasManualLayoutLifecycle } from './CanvasManualLayoutLifecycle';
-import type { CanvasRuntimeDragState } from './CanvasEditorRuntime';
+import { createCanvasManualLayoutLifecycle } from './CanvasManualLayoutLifecycle.js';
+import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime.js';
 
 describe('Canvas Manual Layout lifecycle', () => {
   it('keeps a submitted draft visible until the Canvas Projection confirms it', async () => {
@@ -15,15 +15,18 @@ describe('Canvas Manual Layout lifecycle', () => {
     });
     const finished = moveState('flow/a.png', 0, 20);
 
-    lifecycle.setActiveDrag(finished);
+    lifecycle.setActiveInteraction(finished);
     expect(lifecycle.getPresentation().layoutOverrides).toEqual([
       { projectRelativePath: 'flow/a.png', x: 20, y: 0, width: 200, height: 120 }
     ]);
 
-    await lifecycle.submitFinishedDrag(finished);
-    expect(submitted).toEqual([[
-      { projectRelativePath: 'flow/a.png', x: 20, y: 0, width: 200, height: 120 }
-    ]]);
+    await lifecycle.submitFinishedInteraction(finished);
+    expect(submitted).toEqual([{
+      interaction: 'move',
+      nodeLayouts: [
+        { projectRelativePath: 'flow/a.png', x: 20, y: 0, width: 200, height: 120 }
+      ]
+    }]);
     expect(lifecycle.getPresentation().layoutOverrides).toEqual([
       { projectRelativePath: 'flow/a.png', x: 20, y: 0, width: 200, height: 120 }
     ]);
@@ -39,8 +42,8 @@ describe('Canvas Manual Layout lifecycle', () => {
       submitManualLayout: async () => undefined
     });
 
-    await lifecycle.submitFinishedDrag(moveState('flow/a.png', 0, 20));
-    await lifecycle.submitFinishedDrag(moveState('flow/a.png', 20, 50));
+    await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 20));
+    await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 20, 50));
     lifecycle.acceptProjection(projection(node('flow/a.png', 50)));
 
     expect(lifecycle.getPresentation().layoutOverrides).toEqual([]);
@@ -56,8 +59,8 @@ describe('Canvas Manual Layout lifecycle', () => {
       submitManualLayout
     });
 
-    const firstSubmission = lifecycle.submitFinishedDrag(moveState('flow/a.png', 0, 20));
-    const secondSubmission = lifecycle.submitFinishedDrag(moveState('flow/b.png', 0, 30));
+    const firstSubmission = lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 20));
+    const secondSubmission = lifecycle.submitFinishedInteraction(moveState('flow/b.png', 0, 30));
 
     expect(submitManualLayout).toHaveBeenCalledTimes(2);
     expect(lifecycle.getPresentation().layoutOverrides).toEqual([
@@ -80,8 +83,8 @@ describe('Canvas Manual Layout lifecycle', () => {
       submitManualLayout: submissionSequence(first.promise, second.promise)
     });
 
-    const firstSubmission = lifecycle.submitFinishedDrag(moveState('flow/a.png', 0, 20));
-    const secondSubmission = lifecycle.submitFinishedDrag(moveState('flow/b.png', 0, 30));
+    const firstSubmission = lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 20));
+    const secondSubmission = lifecycle.submitFinishedInteraction(moveState('flow/b.png', 0, 30));
     first.reject(new Error('first write failed'));
 
     await expect(firstSubmission).rejects.toThrow('first write failed');
@@ -101,7 +104,7 @@ describe('Canvas Manual Layout lifecycle', () => {
       submitManualLayout: () => request.promise
     });
 
-    const submission = lifecycle.submitFinishedDrag(moveState('flow/a.png', 0, 20));
+    const submission = lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 20));
     lifecycle.acceptProjection(projection(node('flow/a.png', 5)));
     request.reject(new Error('layout write failed'));
 
@@ -116,8 +119,8 @@ describe('Canvas Manual Layout lifecycle', () => {
       submitManualLayout: async () => undefined
     });
 
-    await lifecycle.submitFinishedDrag(moveState('flow/a.png', 0, 20));
-    await lifecycle.submitFinishedDrag(moveState('flow/a.png', 20, 50));
+    await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 20));
+    await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 20, 50));
     lifecycle.acceptProjection(projection(node('flow/a.png', 20)));
 
     expect(lifecycle.getPresentation().layoutOverrides).toEqual([
@@ -132,9 +135,28 @@ describe('Canvas Manual Layout lifecycle', () => {
       submitManualLayout: async () => undefined
     });
 
-    await lifecycle.submitFinishedDrag(moveState('flow/a.png', 0, 20));
+    await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 20));
     lifecycle.acceptProjection(projection());
 
+    expect(lifecycle.getPresentation().layoutOverrides).toEqual([]);
+  });
+
+  it('does not submit a zero-delta move or a batch whose target disappeared before submission', async () => {
+    const submitManualLayout = vi.fn(async () => undefined);
+    const lifecycle = createCanvasManualLayoutLifecycle({
+      canvasId: 'canvas-1',
+      initialProjection: projection(node('flow/a.png', 0), node('flow/b.png', 20)),
+      submitManualLayout
+    });
+
+    await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 0));
+    expect(submitManualLayout).not.toHaveBeenCalled();
+
+    const batch = moveState('flow/a.png', 0, 10);
+    batch.origins.push({ projectRelativePath: 'flow/b.png', x: 20, y: 0, width: 200, height: 120 });
+    lifecycle.acceptProjection(projection(node('flow/a.png', 0)));
+    await lifecycle.submitFinishedInteraction(batch);
+    expect(submitManualLayout).not.toHaveBeenCalled();
     expect(lifecycle.getPresentation().layoutOverrides).toEqual([]);
   });
 
@@ -146,7 +168,7 @@ describe('Canvas Manual Layout lifecycle', () => {
       submitManualLayout: () => request.promise
     });
 
-    const submission = lifecycle.submitFinishedDrag(moveState('flow/a.png', 0, 20));
+    const submission = lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 20));
     lifecycle.dispose();
     request.reject(new Error('late failure'));
 
@@ -170,12 +192,18 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function moveState(path: string, originX: number, currentX: number): Extract<CanvasRuntimeDragState, { kind: 'move-node' }> {
+function moveState(path: string, originX: number, currentX: number): Extract<CanvasRuntimeLayoutInteraction, { kind: 'move-node' }> {
   return {
     kind: 'move-node',
     pointerId: 1,
+    phase: 'active',
+    startScreen: { x: 0, y: 0 },
+    currentScreen: { x: currentX - originX, y: 0 },
     start: { x: 0, y: 0 },
     current: { x: currentX - originX, y: 0 },
+    initialSelection: undefined,
+    pressedProjectRelativePath: path,
+    additive: false,
     origins: [{ projectRelativePath: path, x: originX, y: 0, width: 200, height: 120 }]
   };
 }

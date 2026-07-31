@@ -3,7 +3,7 @@ import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPoint, CanvasRect } from './runtime/canvasGeometry';
 import { finiteNumber, pointInRect, rectCenter } from './runtime/canvasGeometry';
 import type { CanvasSelection } from './runtime/canvasSelection';
-import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection';
+import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection.js';
 import { canvasVisibleRect } from './canvasVirtualization';
 
 export interface CanvasSize {

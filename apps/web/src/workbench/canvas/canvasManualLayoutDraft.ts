@@ -1,7 +1,7 @@
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { buildResizeGeometry } from '../services/canvasInteraction';
-import type { CanvasRuntimeDragState } from './runtime/CanvasEditorRuntime';
-import type { CanvasPoint } from './runtime/canvasGeometry';
+import { buildResizeGeometry } from '../services/canvasInteraction.js';
+import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime.js';
+import type { CanvasPoint } from './runtime/canvasGeometry.js';
 
 export interface CanvasLayoutOverride {
   projectRelativePath: string;
@@ -13,21 +13,23 @@ export interface CanvasLayoutOverride {
 
 export interface CanvasManualLayoutDraft {
   canvasId: string;
+  interaction: 'move' | 'resize';
   nodeLayouts: CanvasLayoutOverride[];
 }
 
-export function canvasManualLayoutDraftFromMoveState(input: {
+export function canvasManualLayoutDraftFromMoveInteraction(input: {
   canvasId: string;
-  dragState: Extract<CanvasRuntimeDragState, { kind: 'move-node' }>;
+  interaction: Extract<CanvasRuntimeLayoutInteraction, { kind: 'move-node' }>;
   point: CanvasPoint;
 }): CanvasManualLayoutDraft {
   const delta = {
-    x: input.point.x - input.dragState.start.x,
-    y: input.point.y - input.dragState.start.y
+    x: input.point.x - input.interaction.start.x,
+    y: input.point.y - input.interaction.start.y
   };
   return {
     canvasId: input.canvasId,
-    nodeLayouts: input.dragState.origins.map((origin) => ({
+    interaction: 'move',
+    nodeLayouts: input.interaction.origins.map((origin) => ({
       projectRelativePath: origin.projectRelativePath,
       x: origin.x + delta.x,
       y: origin.y + delta.y,
@@ -37,25 +39,26 @@ export function canvasManualLayoutDraftFromMoveState(input: {
   };
 }
 
-export function canvasManualLayoutDraftFromResizeState(input: {
+export function canvasManualLayoutDraftFromResizeInteraction(input: {
   canvasId: string;
-  dragState: Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>;
+  interaction: Extract<CanvasRuntimeLayoutInteraction, { kind: 'resize-node' }>;
   point: CanvasPoint;
 }): CanvasManualLayoutDraft {
   const delta = {
-    x: input.point.x - input.dragState.start.x,
-    y: input.point.y - input.dragState.start.y
+    x: input.point.x - input.interaction.start.x,
+    y: input.point.y - input.interaction.start.y
   };
   const next = buildResizeGeometry(
-    input.dragState.handle,
-    input.dragState.origin,
+    input.interaction.handle,
+    input.interaction.origin,
     delta,
-    input.dragState.preserveAspect
+    input.interaction.preserveAspect
   );
   return {
     canvasId: input.canvasId,
+    interaction: 'resize',
     nodeLayouts: [{
-      projectRelativePath: input.dragState.node.projectRelativePath,
+      projectRelativePath: input.interaction.node.projectRelativePath,
       x: next.x,
       y: next.y,
       width: next.width,
@@ -64,20 +67,20 @@ export function canvasManualLayoutDraftFromResizeState(input: {
   };
 }
 
-export function canvasManualLayoutDraftFromDragState(input: {
+export function canvasManualLayoutDraftFromInteraction(input: {
   canvasId: string;
-  dragState: CanvasRuntimeDragState;
+  interaction: CanvasRuntimeLayoutInteraction;
   point: CanvasPoint;
 }): CanvasManualLayoutDraft {
-  return input.dragState.kind === 'move-node'
-    ? canvasManualLayoutDraftFromMoveState({
+  return input.interaction.kind === 'move-node'
+    ? canvasManualLayoutDraftFromMoveInteraction({
         canvasId: input.canvasId,
-        dragState: input.dragState,
+        interaction: input.interaction,
         point: input.point
       })
-    : canvasManualLayoutDraftFromResizeState({
+    : canvasManualLayoutDraftFromResizeInteraction({
         canvasId: input.canvasId,
-        dragState: input.dragState,
+        interaction: input.interaction,
         point: input.point
       });
 }

@@ -22,15 +22,12 @@ import {
   type WorkbenchContextMenuTarget,
   type WorkbenchFileClipboard
 } from '../shell/contextMenu.js';
+import { resolveProjectPathCommandTarget } from './projectPathCommandTarget.js';
 
 export interface ProjectPathCommandErrorLabels {
   copyPathFailed: string;
   resetAutoLayoutFailed: string;
 }
-
-type CanvasLayoutResetInput =
-  | { all: true }
-  | { pathRules: { paths: string[]; globs: string[] } };
 
 type ExplorerContextCommands = Pick<ProjectExplorerController,
   | 'beginCreateFile'
@@ -72,6 +69,7 @@ export function runProjectPathCommand(input: {
   closeContextMenu: () => void;
   openInspectorPanel: () => void;
   confirmPermanentDelete: (input: { entries: ProjectPathEntry[] }) => boolean;
+  confirmTrash: (input: { entries: ProjectPathEntry[] }) => boolean;
   getProjectSnapshot(): WorkbenchProjectSessionSnapshot | undefined;
   confirmMoveOverwrite: (input: {
     entries: ProjectPathEntry[];
@@ -88,18 +86,13 @@ export function runProjectPathCommand(input: {
     if (runExplorerSpecificCommand(input, target)) {
       return;
     }
-    if (target.targetKind === 'root') {
+    if (target.selectedEntries.length === 0) {
       input.closeContextMenu();
       return;
     }
   }
 
   if (runSinglePathFileCommand(input, target)) {
-    return;
-  }
-
-  if (target.source === 'explorer' && target.targetKind !== 'item') {
-    input.closeContextMenu();
     return;
   }
 
@@ -116,36 +109,31 @@ export function runProjectPathCommand(input: {
     return;
   }
 
-  input.activeCanvasRuntime?.setSelection({ kind: 'node', projectRelativePath });
   if (input.command === 'show-details') {
-    if (input.activeCanvasRuntime) {
-      input.openInspectorPanel();
-    }
+    input.openInspectorPanel();
     input.closeContextMenu();
     return;
   }
 
-  const liveRuntimeSnapshot = input.activeCanvasRuntime?.getSnapshot();
-  if (input.command === 'reveal-in-canvas' && input.activeCanvasRuntime && liveRuntimeSnapshot?.surfaceSize) {
-    input.activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
-      node,
-      surfaceSize: liveRuntimeSnapshot.surfaceSize,
-      camera: liveRuntimeSnapshot.camera
-    }));
-  }
   if (input.command === 'reset-auto-layout') {
-    if (node.layoutMode !== 'manual') {
+    const selectionEntries = resolveProjectPathCommandTarget(target).selectionEntries;
+    const selectedNodes = selectionEntries.flatMap((entry) => {
+      const selectedNode = projectedContextMenuNode(input.activeProjection, entry.projectRelativePath);
+      return selectedNode ? [selectedNode] : [];
+    });
+    if (
+      selectedNodes.length !== selectionEntries.length
+      || !selectedNodes.some((selectedNode) => selectedNode.layoutMode === 'manual')
+    ) {
       input.closeContextMenu();
       return;
     }
     const canvasId = input.activeProjection?.canvasId;
     if (canvasId) {
-      const resetInput = canvasLayoutResetInputForTarget(primaryEntry);
-      const request = input.resetCanvasNodeLayouts(
-        'all' in resetInput
-          ? { canvasId, all: true }
-          : { canvasId, pathRules: resetInput.pathRules }
-      );
+      const request = input.resetCanvasNodeLayouts({
+        canvasId,
+        nodePaths: selectedNodes.map((selectedNode) => selectedNode.projectRelativePath)
+      });
       void request?.then(() => {
         const acceptedProjection = input.getProjectSnapshot()
           ?.projections.find((projection) => projection.canvasId === canvasId);
@@ -167,20 +155,6 @@ export function runProjectPathCommand(input: {
   input.closeContextMenu();
 }
 
-function canvasLayoutResetInputForTarget(
-  target: ProjectPathEntry
-): CanvasLayoutResetInput {
-  if (target.kind === 'directory' && target.projectRelativePath === '') {
-    return { all: true };
-  }
-  return {
-    pathRules: {
-      paths: [target.kind === 'directory' ? `${target.projectRelativePath}/` : target.projectRelativePath],
-      globs: []
-    }
-  };
-}
-
 function runSinglePathFileCommand(
   input: Parameters<typeof runProjectPathCommand>[0],
   target: WorkbenchContextMenuTarget
@@ -189,10 +163,10 @@ function runSinglePathFileCommand(
   if (!primaryEntry) {
     return false;
   }
-  const entries = explorerContextMenuEntries(target);
-  const canvasProjectRoot = isCanvasProjectRootTarget(target, primaryEntry);
+  const resolved = resolveProjectPathCommandTarget(target);
+  const entries = [...resolved.effectiveFilesystemEntries];
   if (input.command === 'cut') {
-    if (canvasProjectRoot) {
+    if (!resolved.filesystemCommandsAvailable) {
       input.closeContextMenu();
       return true;
     }
@@ -201,7 +175,7 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'copy') {
-    if (canvasProjectRoot) {
+    if (!resolved.filesystemCommandsAvailable) {
       input.closeContextMenu();
       return true;
     }
@@ -219,17 +193,13 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'copy-path') {
-    void input.explorerCommands.copyAbsolutePaths(input.scope, entries)
+    void input.explorerCommands.copyAbsolutePaths(input.scope, [...resolved.explicitSortedEntries])
       .then((paths) => paths ? input.copyText(paths.join('\n')) : undefined)
       .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'copy-relative-path') {
-    if (canvasProjectRoot) {
-      input.closeContextMenu();
-      return true;
-    }
     void Promise.resolve(input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n')))
       .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
     input.closeContextMenu();
@@ -241,16 +211,17 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'send-to-photoshop') {
-    if (primaryEntry.kind === 'file' && input.photoshopTarget) {
+    const singleEntry = resolved.selectionEntries.length === 1 ? resolved.selectionEntries[0] : undefined;
+    if (singleEntry?.kind === 'file' && input.photoshopTarget) {
       const destination = input.photoshopTarget;
       const request = input.sendProjectFileToPhotoshop({
-        projectRelativePath: primaryEntry.projectRelativePath,
+        projectRelativePath: singleEntry.projectRelativePath,
         pluginSessionId: destination.pluginSessionId,
         documentId: destination.documentId
       });
       if (request) {
         const updateNotification = input.startNotification(input.photoshopLabels.sending(
-          primaryEntry.projectRelativePath,
+          singleEntry.projectRelativePath,
           destination.title
         ));
         void request.then((result) => {
@@ -272,11 +243,23 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'delete') {
-    if (canvasProjectRoot) {
+    if (!resolved.filesystemCommandsAvailable || !input.confirmTrash({ entries })) {
       input.closeContextMenu();
       return true;
     }
     input.explorerCommands.trashEntries(input.scope, entries);
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'delete-permanently') {
+    if (
+      !resolved.filesystemCommandsAvailable
+      || !input.confirmPermanentDelete({ entries })
+    ) {
+      input.closeContextMenu();
+      return true;
+    }
+    input.explorerCommands.deleteEntriesPermanently(input.scope, entries);
     input.closeContextMenu();
     return true;
   }
@@ -293,7 +276,7 @@ function runExplorerSpecificCommand(
 ): boolean {
   const entries = explorerContextMenuEntries(target);
   const primaryEntry = explorerContextMenuPrimaryEntry(target);
-  if (target.targetKind === 'root') {
+  if (target.selectedEntries.length === 0) {
     if (input.command === 'create-file') {
       input.explorerCommands.beginCreateFile(input.scope, projectTreePasteTargetDirectory(target));
       input.closeContextMenu();
@@ -317,7 +300,7 @@ function runExplorerSpecificCommand(
     return false;
   }
   if (input.command === 'create-file') {
-    if (target.targetKind !== 'item' || primaryEntry?.kind !== 'directory') {
+    if (entries.length !== 1 || primaryEntry?.kind !== 'directory') {
       input.closeContextMenu();
       return true;
     }
@@ -326,7 +309,7 @@ function runExplorerSpecificCommand(
     return true;
   }
   if (input.command === 'create-directory') {
-    if (target.targetKind !== 'item' || primaryEntry?.kind !== 'directory') {
+    if (entries.length !== 1 || primaryEntry?.kind !== 'directory') {
       input.closeContextMenu();
       return true;
     }
@@ -341,15 +324,6 @@ function runExplorerSpecificCommand(
     input.closeContextMenu();
     return true;
   }
-  if (input.command === 'delete-permanently') {
-    if (!input.confirmPermanentDelete({ entries })) {
-      input.closeContextMenu();
-      return true;
-    }
-    input.explorerCommands.deleteEntriesPermanently(input.scope, entries);
-    input.closeContextMenu();
-    return true;
-  }
   return false;
 }
 
@@ -359,15 +333,6 @@ function terminalCwdForEntry(entry: ProjectPathEntry): string {
   }
   const slashIndex = entry.projectRelativePath.lastIndexOf('/');
   return slashIndex < 0 ? '' : entry.projectRelativePath.slice(0, slashIndex);
-}
-
-function isCanvasProjectRootTarget(
-  target: WorkbenchContextMenuTarget,
-  entry: ProjectPathEntry
-): boolean {
-  return target.source === 'canvas'
-    && entry.kind === 'directory'
-    && entry.projectRelativePath === '';
 }
 
 function runPasteCommand(

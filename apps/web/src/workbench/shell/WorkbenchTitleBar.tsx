@@ -10,6 +10,7 @@ import {
   type OpenTitleBarMenu
 } from './workbenchTitleBarInteraction';
 import { useI18n, type WorkbenchI18n } from '../i18n';
+import type { WorkbenchBehaviorOwner } from '../services/workbenchFocusCommandRouter.js';
 
 type WorkbenchMenuCommandItem = Extract<WorkbenchMenuItem, { kind: 'command' }>;
 
@@ -17,7 +18,8 @@ export interface WorkbenchTitleBarProps {
   state: WorkbenchTitleBarState;
   nativeWindowState: { maximized: boolean } | undefined;
   updateVersion?: string;
-  onCommand(item: WorkbenchMenuCommandItem): void;
+  onCommand(item: WorkbenchMenuCommandItem, owner?: WorkbenchBehaviorOwner): void;
+  onCaptureBehaviorOwner?(): WorkbenchBehaviorOwner;
   onInstallProductUpdate?(): void;
   onWindowCommand(command: 'minimize' | 'toggle-maximize' | 'close'): void;
 }
@@ -27,6 +29,7 @@ export function WorkbenchTitleBar({
   nativeWindowState,
   updateVersion,
   onCommand,
+  onCaptureBehaviorOwner,
   onInstallProductUpdate,
   onWindowCommand
 }: WorkbenchTitleBarProps): React.ReactElement {
@@ -36,6 +39,7 @@ export function WorkbenchTitleBar({
   const rootRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRefs = useRef(new Map<WorkbenchMenuId, HTMLButtonElement>());
+  const capturedBehaviorOwnerRef = useRef<WorkbenchBehaviorOwner | undefined>(undefined);
   const currentMenu = state.menus.find((menu) => menu.id === openMenu);
 
   useEffect(() => {
@@ -46,6 +50,7 @@ export function WorkbenchTitleBar({
       if (rootRef.current?.contains(event.target as Node)) {
         return;
       }
+      capturedBehaviorOwnerRef.current = undefined;
       setOpenMenu((current) => closeTitleBarMenu(current));
       setOpenSubmenu(undefined);
     };
@@ -63,6 +68,7 @@ export function WorkbenchTitleBar({
 
   const closeCurrentMenu = (restoreFocus: boolean) => {
     const menuToRestore = openMenu;
+    capturedBehaviorOwnerRef.current = undefined;
     setOpenMenu(closeTitleBarMenu(openMenu));
     setOpenSubmenu(undefined);
     if (restoreFocus) {
@@ -102,8 +108,20 @@ export function WorkbenchTitleBar({
                 aria-haspopup="menu"
                 aria-expanded={openMenu === menu.id}
                 aria-controls={`workbench-titlebar-menu-${menu.id}`}
-                onClick={() => {
-                  setOpenMenu(openTitleBarMenu(openMenu, menu.id));
+                onPointerDown={() => {
+                  if (!openMenu) {
+                    capturedBehaviorOwnerRef.current = onCaptureBehaviorOwner?.();
+                  }
+                }}
+                onClick={(event) => {
+                  if (event.detail === 0 && !openMenu) {
+                    capturedBehaviorOwnerRef.current = onCaptureBehaviorOwner?.();
+                  }
+                  const nextMenu = openTitleBarMenu(openMenu, menu.id);
+                  if (!nextMenu) {
+                    capturedBehaviorOwnerRef.current = undefined;
+                  }
+                  setOpenMenu(nextMenu);
                   setOpenSubmenu(undefined);
                 }}
                 onMouseEnter={() => {
@@ -162,9 +180,15 @@ export function WorkbenchTitleBar({
               openSubmenu,
               setOpenSubmenu,
               onCommand: (command) => {
+                const owner = capturedBehaviorOwnerRef.current;
+                capturedBehaviorOwnerRef.current = undefined;
                 setOpenMenu(undefined);
                 setOpenSubmenu(undefined);
-                onCommand(command);
+                if (owner) {
+                  onCommand(command, owner);
+                } else {
+                  onCommand(command);
+                }
               }
             }))}
           </Menu>

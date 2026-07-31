@@ -39,12 +39,6 @@ pub struct CanvasMapDocument {
     pub layout_rows: Vec<CanvasMapRowRule>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CanvasMapPathRuleSet {
-    pub paths: Vec<String>,
-    pub globs: Vec<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanvasMapNodeProjection {
     pub project_relative_path: String,
@@ -263,103 +257,6 @@ pub fn expand_canvas_map(
         nodes,
         layout_rows: expand_layout_rows(&map.layout_rows, &matched)?,
     })
-}
-
-/// Expands an explicit path-rule set used by selective layout reset.
-///
-/// # Errors
-/// Returns a typed error for invalid paths, targets, or globs.
-pub fn expand_canvas_map_path_rules(
-    rules: &CanvasMapPathRuleSet,
-    entries: &[ProjectPathEntry],
-) -> Result<Vec<CanvasMapNodeProjection>, ProjectError> {
-    let normalized = rules
-        .paths
-        .iter()
-        .map(|path| normalize_literal_rule(path))
-        .chain(rules.globs.iter().map(|glob| normalize_glob_rule(glob)))
-        .collect::<Result<Vec<_>, _>>()?;
-    let entry_by_path: HashMap<_, _> = entries
-        .iter()
-        .map(|entry| (entry.project_relative_path.as_str(), entry.kind))
-        .collect();
-    let files: Vec<_> = entries
-        .iter()
-        .filter(|entry| entry.kind == ProjectPathKind::File)
-        .map(|entry| entry.project_relative_path.as_str())
-        .collect();
-    let mut selected = BTreeMap::new();
-    for rule in normalized {
-        match rule.kind {
-            CanvasMapRuleKind::ExactFile => match entry_by_path.get(rule.pattern.as_str()) {
-                Some(ProjectPathKind::Directory) => {
-                    return Err(canvas_map_error(
-                        "canvas_map_invalid_path",
-                        format!(
-                            "Canvas Map file rule currently resolves to a directory. Use a trailing slash for recursive folders: {}/",
-                            rule.pattern
-                        ),
-                    ));
-                }
-                Some(ProjectPathKind::File) => {
-                    selected.insert(
-                        rule.pattern.clone(),
-                        CanvasMapNodeProjection {
-                            project_relative_path: rule.pattern,
-                            node_kind: CanvasNodeKind::File,
-                        },
-                    );
-                }
-                None => {}
-            },
-            CanvasMapRuleKind::RecursiveDirectory => {
-                if entry_by_path.get(rule.pattern.as_str()) == Some(&ProjectPathKind::File) {
-                    return Err(canvas_map_error(
-                        "canvas_map_invalid_path",
-                        format!(
-                            "Canvas Map folder rule currently resolves to a file: {}",
-                            rule.pattern
-                        ),
-                    ));
-                }
-                for entry in entries {
-                    if entry.project_relative_path == rule.pattern
-                        || entry
-                            .project_relative_path
-                            .starts_with(&format!("{}/", rule.pattern))
-                    {
-                        selected.insert(
-                            entry.project_relative_path.clone(),
-                            CanvasMapNodeProjection {
-                                project_relative_path: entry.project_relative_path.clone(),
-                                node_kind: match entry.kind {
-                                    ProjectPathKind::File => CanvasNodeKind::File,
-                                    ProjectPathKind::Directory => CanvasNodeKind::Directory,
-                                },
-                            },
-                        );
-                    }
-                }
-            }
-            CanvasMapRuleKind::FileGlob => {
-                let matcher = controlled_glob(&rule.pattern)?;
-                for file in &files {
-                    if matcher.is_match(file) {
-                        selected.insert(
-                            (*file).to_owned(),
-                            CanvasMapNodeProjection {
-                                project_relative_path: (*file).to_owned(),
-                                node_kind: CanvasNodeKind::File,
-                            },
-                        );
-                    }
-                }
-            }
-        }
-    }
-    let mut result: Vec<_> = selected.into_values().collect();
-    result.sort_by(compare_tree_nodes);
-    Ok(result)
 }
 
 /// Adds one normalized literal rule while retaining the closed YAML structure.

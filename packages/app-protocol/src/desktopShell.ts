@@ -1,4 +1,4 @@
-import type { NativeMenuCommand } from './workbenchChrome.js';
+import type { NativeEditCommandId, NativeMenuCommand } from './workbenchChrome.js';
 
 export interface NativeWindowState {
   maximized: boolean;
@@ -12,5 +12,6 @@ export interface DebruteShellApi {
   executeNativeMenuCommand(input: NativeMenuCommand): Promise<{ ok: true }>;
   takeDesktopLaunchTicket(): Promise<string | undefined>;
   onNativeWindowStateChanged(listener: (state: NativeWindowState) => void): () => void;
+  onNativeEditCommand(listener: (command: NativeEditCommandId) => void): () => void;
   getDroppedFilePath(file: File): string | undefined;
 }

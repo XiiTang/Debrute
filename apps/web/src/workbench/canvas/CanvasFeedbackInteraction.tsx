@@ -4,30 +4,31 @@ import type {
   WorkbenchEvent,
   WorkbenchFeedbackWorkingCopy
 } from '@debrute/app-protocol';
-import type {
+import {
+  CANVAS_FEEDBACK_MARKS,
   CanvasFeedbackDocument,
   CanvasFeedbackGeometry,
   CanvasFeedbackItem,
   CanvasFeedbackMark,
-  UpdateCanvasFeedbackEntryInput
+  UpdateCanvasFeedbackInput
 } from '@debrute/canvas-core';
 import {
-  canvasFeedbackBarTargetWithCurrentEntry,
   sameCanvasFeedbackBarTarget,
   type CanvasFeedbackBarTarget,
+  type CanvasFeedbackNodeBarTarget,
   type CanvasLocalFeedbackDraft
 } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackComposition } from './canvasFeedbackComposition';
-import { CanvasFeedbackBar } from './CanvasFeedbackBar';
+import { CanvasFeedbackBar, CanvasFeedbackSelectionBar } from './CanvasFeedbackBar';
 
 const FEEDBACK_BAR_DISMISS_DELAY_MS = 120;
 
 type CanvasFeedbackApi = Pick<WorkbenchApiClient,
   | 'putFeedbackWorkingCopy'
   | 'clearFeedbackWorkingCopy'
-  | 'updateCanvasFeedbackEntry'
+  | 'updateCanvasFeedback'
   | 'readCanvasFeedback'
 >;
 
@@ -36,7 +37,7 @@ export interface CanvasFeedbackCapsule {
   createdAt: string;
   projectRelativePath: string;
   kind: 'comment' | 'pin' | 'region';
-  scope: 'file' | 'moment';
+  scope: 'node' | 'moment';
   momentTimeSeconds?: number | undefined;
   momentLabel?: string | undefined;
   geometry?: CanvasFeedbackGeometry | undefined;
@@ -48,20 +49,21 @@ export interface CanvasFeedbackCapsule {
 
 export interface CanvasFeedbackInteraction {
   feedback: CanvasFeedbackDocument | undefined;
-  target: CanvasFeedbackBarTarget | undefined;
   currentTarget: CanvasFeedbackBarTarget | undefined;
   localMode: CanvasMediaFeedbackMode | undefined;
   composition: CanvasFeedbackComposition | undefined;
   authoringItemId: string | undefined;
   focusedCapsuleId: string | undefined;
+  marksMutationPending: boolean;
   capsulesForPath(projectRelativePath: string): CanvasFeedbackCapsule[];
-  createFileCapsule(projectRelativePath: string): string;
+  marksForPaths(projectRelativePaths: readonly string[]): CanvasFeedbackMark[];
+  createNodeCapsule(projectRelativePath: string): string;
   changeCapsule(itemId: string, value: string): void;
   focusCapsule(itemId: string): void;
-  activateCapsule(target: CanvasFeedbackBarTarget, itemId: string): void;
+  activateCapsule(target: CanvasFeedbackNodeBarTarget, itemId: string): void;
   blurCapsule(itemId: string): Promise<void>;
   deleteCapsule(itemId: string): Promise<void>;
-  setMarks(projectRelativePath: string, marks: CanvasFeedbackMark[]): Promise<void>;
+  setMark(projectRelativePaths: readonly string[], mark: CanvasFeedbackMark, selected: boolean): Promise<void>;
   handleTargetChange(target: CanvasFeedbackBarTarget | undefined): void;
   invalidateTarget(projectRelativePath: string): void;
   handlePointerEnter(): void;
@@ -84,7 +86,7 @@ export interface CanvasFeedbackCanvasBinding {
   handleTargetChange(target: CanvasFeedbackBarTarget | undefined): void;
   invalidateTarget(projectRelativePath: string): void;
   handleDraft(draft: CanvasLocalFeedbackDraft): void;
-  activateCapsule(target: CanvasFeedbackBarTarget, itemId: string): void;
+  activateCapsule(target: CanvasFeedbackNodeBarTarget, itemId: string): void;
 }
 
 export function useCanvasFeedbackInteraction(input: {
@@ -92,6 +94,7 @@ export function useCanvasFeedbackInteraction(input: {
   projectId: string | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   notifyUnavailable(message: string): void;
+  notifySaveFailed(message: string): void;
 }): CanvasFeedbackInteraction {
   const [feedback, setFeedback] = useState<CanvasFeedbackDocument | undefined>(undefined);
   const feedbackRef = useRef<CanvasFeedbackDocument | undefined>(undefined);
@@ -99,7 +102,8 @@ export function useCanvasFeedbackInteraction(input: {
   const localValuesRef = useRef<Record<string, WorkbenchFeedbackWorkingCopy>>({});
   const versionsRef = useRef(new Map<string, number>());
   const deletingItemKeysRef = useRef(new Set<string>());
-  const mutatingMarksKeysRef = useRef(new Set<string>());
+  const marksMutationPendingRef = useRef(false);
+  const [marksMutationPending, setMarksMutationPending] = useState(false);
   const [target, setTarget] = useState<CanvasFeedbackBarTarget | undefined>(undefined);
   const targetRef = useRef<CanvasFeedbackBarTarget | undefined>(undefined);
   const [localMode, setLocalMode] = useState<CanvasMediaFeedbackMode>(undefined);
@@ -203,9 +207,9 @@ export function useCanvasFeedbackInteraction(input: {
     setFeedback(next);
   }, []);
 
-  const updateEntry = useCallback(async (updateInput: UpdateCanvasFeedbackEntryInput) => {
+  const updateFeedback = useCallback(async (updateInput: UpdateCanvasFeedbackInput) => {
     try {
-      await input.api.updateCanvasFeedbackEntry(updateInput);
+      await input.api.updateCanvasFeedback(updateInput);
       return true;
     } catch {
       return false;
@@ -223,7 +227,7 @@ export function useCanvasFeedbackInteraction(input: {
     }
     deletingItemKeysRef.current.add(key);
     try {
-      return await updateEntry({
+      return await updateFeedback({
         operation: 'delete-item',
         projectRelativePath,
         itemId
@@ -231,28 +235,43 @@ export function useCanvasFeedbackInteraction(input: {
     } finally {
       deletingItemKeysRef.current.delete(key);
     }
-  }, [updateEntry]);
+  }, [updateFeedback]);
 
-  const setMarks = useCallback(async (projectRelativePath: string, marks: CanvasFeedbackMark[]) => {
+  const setMark = useCallback(async (
+    projectRelativePaths: readonly string[],
+    mark: CanvasFeedbackMark,
+    selected: boolean
+  ) => {
     const projectId = projectIdRef.current;
-    if (!projectId) {
+    if (!projectId || marksMutationPendingRef.current) {
       return;
     }
-    const key = `${projectId}\u0000${projectRelativePath}`;
-    if (mutatingMarksKeysRef.current.has(key)) {
-      return;
-    }
-    mutatingMarksKeysRef.current.add(key);
+    const frozenPaths = [...projectRelativePaths];
+    marksMutationPendingRef.current = true;
+    setMarksMutationPending(true);
     try {
-      await updateEntry({
-        operation: 'set-marks',
-        projectRelativePath,
-        marks
+      await input.api.updateCanvasFeedback({
+        operation: 'set-mark',
+        projectRelativePaths: frozenPaths,
+        mark,
+        selected
       });
+    } catch (error) {
+      input.notifySaveFailed(errorMessage(error));
     } finally {
-      mutatingMarksKeysRef.current.delete(key);
+      marksMutationPendingRef.current = false;
+      setMarksMutationPending(false);
     }
-  }, [updateEntry]);
+  }, [input.api, input.notifySaveFailed]);
+
+  const marksForPaths = useCallback((projectRelativePaths: readonly string[]): CanvasFeedbackMark[] => {
+    if (projectRelativePaths.length === 0) {
+      return [];
+    }
+    return CANVAS_FEEDBACK_MARKS.filter((mark) => projectRelativePaths.every((path) => (
+      feedbackRef.current?.entries[path]?.marks.includes(mark) ?? false
+    )));
+  }, []);
 
   const capsulesForPath = useCallback((projectRelativePath: string): CanvasFeedbackCapsule[] => {
     const entry = feedbackRef.current?.entries[projectRelativePath];
@@ -303,7 +322,9 @@ export function useCanvasFeedbackInteraction(input: {
     focusedCapsuleIdRef.current = itemId;
     setFocusedCapsuleId(itemId);
     const capsule = descriptorForItem(itemId);
-    if (capsule?.scope === 'moment' && capsule.momentTimeSeconds !== undefined) {
+    if (target?.kind === 'node'
+      && capsule?.scope === 'moment'
+      && capsule.momentTimeSeconds !== undefined) {
       target?.seekToMoment?.(capsule.momentTimeSeconds);
     }
   }, [descriptorForItem, target]);
@@ -385,7 +406,7 @@ export function useCanvasFeedbackInteraction(input: {
     if (!await persistWorkingCopy(itemId, workingCopy)) {
       return;
     }
-    const saved = await updateEntry(accepted
+    const saved = await updateFeedback(accepted
       ? {
           operation: 'update-item',
           projectRelativePath: workingCopy.projectRelativePath,
@@ -412,7 +433,7 @@ export function useCanvasFeedbackInteraction(input: {
     localValuesRef.current = next;
     setLocalValue(itemId, undefined);
     clearComposition(itemId);
-  }, [clearComposition, deleteAcceptedItem, input.overlayRuntime, persistWorkingCopy, releaseAuthoringItem, setLocalValue, updateEntry]);
+  }, [clearComposition, deleteAcceptedItem, input.overlayRuntime, persistWorkingCopy, releaseAuthoringItem, setLocalValue, updateFeedback]);
 
   const deleteCapsule = useCallback(async (itemId: string) => {
     const descriptor = descriptorForItem(itemId);
@@ -452,7 +473,7 @@ export function useCanvasFeedbackInteraction(input: {
     }
   }, [clearComposition, deleteAcceptedItem, descriptorForItem, persistWorkingCopy, releaseAuthoringItem, setLocalValue]);
 
-  const createFileCapsule = useCallback((projectRelativePath: string) => {
+  const createNodeCapsule = useCallback((projectRelativePath: string) => {
     if (
       compositionRef.current
       && (compositionRef.current.kind === 'pin' || compositionRef.current.kind === 'region')
@@ -468,7 +489,7 @@ export function useCanvasFeedbackInteraction(input: {
       createdAt: new Date().toISOString(),
       projectRelativePath,
       kind: 'comment',
-      scope: 'file',
+      scope: 'node',
       comment: ''
     };
     localValuesRef.current = { ...localValuesRef.current, [itemId]: workingCopy };
@@ -488,7 +509,7 @@ export function useCanvasFeedbackInteraction(input: {
     }
   }, []);
 
-  const activateCapsule = useCallback((nextTarget: CanvasFeedbackBarTarget, itemId: string) => {
+  const activateCapsule = useCallback((nextTarget: CanvasFeedbackNodeBarTarget, itemId: string) => {
     clearTargetTimer();
     targetEpochRef.current += 1;
     targetRef.current = nextTarget;
@@ -523,6 +544,27 @@ export function useCanvasFeedbackInteraction(input: {
 
   const handleTargetChange = useCallback((nextTarget: CanvasFeedbackBarTarget | undefined) => {
     clearTargetTimer();
+    if (nextTarget?.kind === 'selection') {
+      focusDeferredTargetRef.current = undefined;
+      targetEpochRef.current += 1;
+      targetRef.current = nextTarget;
+      setTarget((current) => (
+        sameCanvasFeedbackBarTarget(current, nextTarget) ? current : nextTarget
+      ));
+      return;
+    }
+    if (targetRef.current?.kind === 'selection') {
+      focusDeferredTargetRef.current = undefined;
+      targetEpochRef.current += 1;
+      targetRef.current = nextTarget;
+      if (nextTarget) {
+        setTarget(nextTarget);
+      } else {
+        input.overlayRuntime.clearFeedbackBarPlacement();
+        setTarget(undefined);
+      }
+      return;
+    }
     if (focusedCapsuleIdRef.current) {
       focusDeferredTargetRef.current = nextTarget ?? null;
       return;
@@ -537,10 +579,11 @@ export function useCanvasFeedbackInteraction(input: {
       return;
     }
     scheduleTargetClear();
-  }, [clearTargetTimer, scheduleTargetClear]);
+  }, [clearTargetTimer, input.overlayRuntime, scheduleTargetClear]);
 
   const invalidateTarget = useCallback((projectRelativePath: string) => {
-    if (targetRef.current?.projectRelativePath !== projectRelativePath) {
+    if (targetRef.current?.kind !== 'node'
+      || targetRef.current.projectRelativePath !== projectRelativePath) {
       return;
     }
     clearTargetTimer();
@@ -561,6 +604,9 @@ export function useCanvasFeedbackInteraction(input: {
 
   const handlePointerLeave = useCallback(() => {
     hoveredRef.current = false;
+    if (targetRef.current?.kind === 'selection') {
+      return;
+    }
     scheduleTargetClear();
   }, [scheduleTargetClear]);
 
@@ -573,7 +619,7 @@ export function useCanvasFeedbackInteraction(input: {
       setLocalMode(undefined);
       return;
     }
-    if (!target) {
+    if (target?.kind !== 'node') {
       return;
     }
     const itemId = createFeedbackItemId();
@@ -582,7 +628,7 @@ export function useCanvasFeedbackInteraction(input: {
       createdAt: new Date().toISOString(),
       projectRelativePath: target.projectRelativePath,
       kind: mode === 'pin' ? 'pin' : 'region',
-      scope: 'file'
+      scope: 'node'
     };
     compositionRef.current = nextComposition;
     setComposition(nextComposition);
@@ -674,10 +720,6 @@ export function useCanvasFeedbackInteraction(input: {
     clearTargetTimer();
   }, [clearTargetTimer]);
 
-  const currentTarget = useMemo(() => (
-    target ? canvasFeedbackBarTargetWithCurrentEntry(target, feedback) : undefined
-  ), [feedback, target]);
-
   const localSpatialItems = useMemo(() => Object.values(localValues)
     .filter((value): value is WorkbenchFeedbackWorkingCopy & { geometry: CanvasFeedbackGeometry } => (
       (value.kind === 'pin' || value.kind === 'region')
@@ -708,7 +750,9 @@ export function useCanvasFeedbackInteraction(input: {
     localSpatialItems,
     suppressedSpatialItemIds,
     focusedCapsuleId,
-    currentTargetProjectRelativePath: currentTarget?.projectRelativePath,
+    currentTargetProjectRelativePath: target?.kind === 'node'
+      ? target.projectRelativePath
+      : undefined,
     handleTargetChange,
     invalidateTarget,
     handleDraft,
@@ -721,27 +765,28 @@ export function useCanvasFeedbackInteraction(input: {
     invalidateTarget,
     localMode,
     localSpatialItems,
-    currentTarget?.projectRelativePath,
+    target,
     composition,
     suppressedSpatialItemIds
   ]);
 
   return useMemo(() => ({
     feedback,
-    target,
-    currentTarget,
+    currentTarget: target,
     localMode,
     composition,
     authoringItemId,
     focusedCapsuleId,
+    marksMutationPending,
     capsulesForPath,
-    createFileCapsule,
+    marksForPaths,
+    createNodeCapsule,
     changeCapsule,
     focusCapsule,
     activateCapsule,
     blurCapsule,
     deleteCapsule,
-    setMarks,
+    setMark,
     handleTargetChange,
     invalidateTarget,
     handlePointerEnter,
@@ -759,8 +804,7 @@ export function useCanvasFeedbackInteraction(input: {
     capsulesForPath,
     canvas,
     changeCapsule,
-    createFileCapsule,
-    currentTarget,
+    createNodeCapsule,
     deleteCapsule,
     feedback,
     focusCapsule,
@@ -773,10 +817,12 @@ export function useCanvasFeedbackInteraction(input: {
     invalidateTarget,
     load,
     localMode,
+    marksForPaths,
+    marksMutationPending,
     authoringItemId,
     composition,
     restoreWorkingCopies,
-    setMarks,
+    setMark,
     target
   ]);
 }
@@ -792,15 +838,30 @@ export function CanvasFeedbackInteractionBar({
   if (!target) {
     return null;
   }
+  if (target.kind === 'selection') {
+    const marks = interaction.marksForPaths(target.projectRelativePaths);
+    return (
+      <CanvasFeedbackSelectionBar
+        marks={marks}
+        marksMutationPending={interaction.marksMutationPending}
+        onSetMark={(mark, selected) => {
+          void interaction.setMark(target.projectRelativePaths, mark, selected);
+        }}
+        overlayRuntime={overlayRuntime}
+      />
+    );
+  }
+  const marks = interaction.marksForPaths([target.projectRelativePath]);
   return (
     <CanvasFeedbackBar
       projectRelativePath={target.projectRelativePath}
       capsules={interaction.capsulesForPath(target.projectRelativePath)}
       focusedCapsuleId={interaction.focusedCapsuleId}
       authoringItemId={interaction.authoringItemId}
-      marks={target.entry?.marks ?? []}
-      onSetMarks={(marks) => {
-        void interaction.setMarks(target.projectRelativePath, marks);
+      marks={marks}
+      marksMutationPending={interaction.marksMutationPending}
+      onSetMark={(mark, selected) => {
+        void interaction.setMark([target.projectRelativePath], mark, selected);
       }}
       overlayRuntime={overlayRuntime}
       localToolset={target.localToolset}
@@ -808,7 +869,7 @@ export function CanvasFeedbackInteractionBar({
       onLocalFeedbackModeChange={target.localToolset === 'image' ? interaction.handleModeChange : undefined}
       canStartVideoMomentFeedback={target.canStartVideoMomentFeedback}
       onStartVideoMomentFeedback={target.startVideoMomentFeedback}
-      onCreateFileCapsule={() => interaction.createFileCapsule(target.projectRelativePath)}
+      onCreateNodeCapsule={() => interaction.createNodeCapsule(target.projectRelativePath)}
       onCapsuleChange={interaction.changeCapsule}
       onCapsuleFocus={interaction.focusCapsule}
       onCapsuleBlur={interaction.blurCapsule}
@@ -878,15 +939,15 @@ function workingCopyFromComposition(
     projectRelativePath: composition.projectRelativePath,
     comment
   };
-  if (composition.scope === 'file') {
+  if (composition.scope === 'node') {
     if (composition.kind === 'comment') {
-      return { ...base, kind: 'comment', scope: 'file' };
+      return { ...base, kind: 'comment', scope: 'node' };
     }
     if (composition.kind === 'pin' && composition.geometry?.type === 'point') {
-      return { ...base, kind: 'pin', scope: 'file', geometry: composition.geometry };
+      return { ...base, kind: 'pin', scope: 'node', geometry: composition.geometry };
     }
     if (composition.kind === 'region' && composition.geometry?.type === 'rect') {
-      return { ...base, kind: 'region', scope: 'file', geometry: composition.geometry };
+      return { ...base, kind: 'region', scope: 'node', geometry: composition.geometry };
     }
     throw new Error(`Incomplete ${composition.kind} Feedback Working Copy composition.`);
   }
@@ -925,10 +986,10 @@ function workingCopyFromComposition(
 function addItemFromWorkingCopy(
   workingCopy: WorkbenchFeedbackWorkingCopy,
   comment: string
-): Extract<UpdateCanvasFeedbackEntryInput, { operation: 'add-item' }>['item'] {
-  if (workingCopy.scope === 'file') {
+): Extract<UpdateCanvasFeedbackInput, { operation: 'add-item' }>['item'] {
+  if (workingCopy.scope === 'node') {
     if (workingCopy.kind === 'comment') {
-      return { id: workingCopy.itemId, createdAt: workingCopy.createdAt, kind: 'comment', scope: 'file', comment };
+      return { id: workingCopy.itemId, createdAt: workingCopy.createdAt, kind: 'comment', scope: 'node', comment };
     }
     if (!workingCopy.geometry) {
       throw new Error('Spatial Feedback Working Copy requires geometry.');
@@ -937,7 +998,7 @@ function addItemFromWorkingCopy(
       id: workingCopy.itemId,
       createdAt: workingCopy.createdAt,
       kind: workingCopy.kind,
-      scope: 'file',
+      scope: 'node',
       geometry: workingCopy.geometry,
       comment
     };

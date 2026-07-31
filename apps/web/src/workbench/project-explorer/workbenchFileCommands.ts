@@ -2,7 +2,10 @@ import type {
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
-import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
+import {
+  canvasNodeSelection,
+  type CanvasSelection
+} from '../canvas/runtime/canvasSelection.js';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import type { ProjectTreeSelectionState } from './projectTreeInteraction';
 
@@ -61,6 +64,23 @@ export function clearClipboardAfterDeletedPath(
   return entries.length > 0 ? { ...clipboard, entries } : undefined;
 }
 
+export function reconcileCutClipboardWithProjectEntries(
+  clipboard: WorkbenchFileClipboard | undefined,
+  currentEntries: readonly { projectRelativePath: string; kind: 'file' | 'directory' }[]
+): WorkbenchFileClipboard | undefined {
+  if (clipboard?.operation !== 'cut') {
+    return clipboard;
+  }
+  const currentKindByPath = new Map(currentEntries.map((entry) => [entry.projectRelativePath, entry.kind]));
+  const entries = clipboard.entries.filter((entry) => (
+    currentKindByPath.get(entry.projectRelativePath) === entry.kind
+  ));
+  if (entries.length === clipboard.entries.length) {
+    return clipboard;
+  }
+  return entries.length > 0 ? { ...clipboard, entries } : undefined;
+}
+
 export function batchResultSelectionPaths(results: WorkbenchProjectFileBatchOperationResult['results']): string[] {
   return results
     .filter((result) => result.status === 'ok' || result.status === 'skipped')
@@ -89,14 +109,12 @@ export function clearCanvasSelectionAfterDeletedPath(
   if (!selection) {
     return undefined;
   }
-  if (selection.kind !== 'multi') {
-    return isDeletedNodeSelection(selection, deletedProjectRelativePath) ? undefined : selection;
+  if (selection.kind !== 'nodes') {
+    return selection;
   }
-  const items = selection.items.filter((item) => !isDeletedNodeSelection(item, deletedProjectRelativePath));
-  if (items.length === 0) {
-    return undefined;
-  }
-  return items.length === 1 ? items[0] : { kind: 'multi', items };
+  return canvasNodeSelection(selection.projectRelativePaths.filter((path) => (
+    !isProjectPathContainedByDeletedPath(path, deletedProjectRelativePath)
+  )));
 }
 
 export function notificationMessageForFileCommandError(prefix: string, error: unknown): string {
@@ -118,21 +136,13 @@ export function permanentDeleteConfirmationMessage(input: {
     : labels.file(input.projectRelativePath);
 }
 
-export function permanentDeleteConfirmationMessageForEntries(input: {
+export function projectPathDeletionConfirmationMessageForEntries(input: {
   entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>;
 }, labels: PermanentDeleteConfirmationLabels): string {
   if (input.entries.length === 1) {
     return permanentDeleteConfirmationMessage(input.entries[0]!, labels);
   }
   return labels.selectedItems(input.entries.length);
-}
-
-function isDeletedNodeSelection(
-  selection: CanvasSelection,
-  deletedProjectRelativePath: string
-): boolean {
-  return selection.kind === 'node'
-    && isProjectPathContainedByDeletedPath(selection.projectRelativePath, deletedProjectRelativePath);
 }
 
 function externalUploadTopLevelProjectPaths(

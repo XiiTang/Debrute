@@ -1177,7 +1177,7 @@ fn artifact_descriptors_for_entry(entry: Option<&CanvasFeedbackEntry>) -> Vec<Ar
     if entry
         .items
         .iter()
-        .any(|item| item.is_spatial() && item.scope == CanvasFeedbackScope::File)
+        .any(|item| item.is_spatial() && item.scope == CanvasFeedbackScope::Node)
     {
         descriptors.push(ArtifactDescriptor {
             artifact_project_path: canvas_feedback_rendered_project_path(
@@ -1225,7 +1225,7 @@ fn artifact_spatial_items(artifact: &CanvasFeedbackArtifact) -> Vec<&CanvasFeedb
         CanvasFeedbackArtifact::Image { entry, .. } => entry
             .items
             .iter()
-            .filter(|item| item.is_spatial() && item.scope == CanvasFeedbackScope::File)
+            .filter(|item| item.is_spatial() && item.scope == CanvasFeedbackScope::Node)
             .collect(),
         CanvasFeedbackArtifact::VideoMoment { moment, entry, .. } => entry
             .items
@@ -1485,7 +1485,7 @@ mod tests {
             items: vec![CanvasFeedbackItem {
                 id: "one".to_owned(),
                 kind: CanvasFeedbackItemKind::Pin,
-                scope: CanvasFeedbackScope::File,
+                scope: CanvasFeedbackScope::Node,
                 label: Some(1),
                 geometry: Some(CanvasFeedbackGeometry::Point { x: 0.5, y: 0.5 }),
                 moment: None,
@@ -1776,7 +1776,7 @@ mod tests {
             items: vec![CanvasFeedbackItem {
                 id: "pin-1".to_owned(),
                 kind: CanvasFeedbackItemKind::Pin,
-                scope: CanvasFeedbackScope::File,
+                scope: CanvasFeedbackScope::Node,
                 label: Some(1),
                 geometry: Some(CanvasFeedbackGeometry::Point { x: 0.5, y: 0.5 }),
                 moment: None,

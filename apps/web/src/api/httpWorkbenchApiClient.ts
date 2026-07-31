@@ -724,7 +724,7 @@ export function createHttpWorkbenchApiClient(options: {
     ),
     lookupGeneratedAssetMetadata: (input) => requestForCurrentProject<GeneratedAssetMetadataLookup>('POST', '/generated-assets/lookup', input),
     readCanvasFeedback: () => requestForCurrentProject<CanvasFeedbackDocument>('GET', '/canvas-feedback'),
-    updateCanvasFeedbackEntry: (input) => requestProjectMutation<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
+    updateCanvasFeedback: (input) => requestProjectMutation<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
     createCanvas: () => requestProjectMutation<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
     renameCanvas: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
       'PATCH',
@@ -747,16 +747,14 @@ export function createHttpWorkbenchApiClient(options: {
       { projectRelativePath: input.projectRelativePath }
     ),
     updateCanvasNodeLayouts: (input) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layouts`), {
+      interaction: input.interaction,
       nodeLayouts: input.nodeLayouts
     }),
     resetCanvasNodeLayouts: (input) => requestProjectMutation<WorkbenchCanvasResetLayoutResult>(
       'POST',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/reset-layout`),
-      'all' in input ? { all: true } : { pathRules: input.pathRules }
+      'all' in input ? { all: true } : { nodePaths: input.nodePaths }
     ),
-    bringCanvasNodeToFront: (input) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>('POST', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-stack-order/bring-to-front`), {
-      projectRelativePath: input.projectRelativePath
-    }),
     updateCanvasVideoPlaybackState: (input: UpdateCanvasVideoPlaybackStateInput) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/video-playback`),

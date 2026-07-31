@@ -9,6 +9,7 @@ import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime'
 import type { WorkbenchI18n } from '../i18n';
 import type { ProjectPathCommandEffects } from '../services/projectPathCommandEffects.js';
 import type { AcceptedProjectPathCommandScope } from '../services/projectPathCommandIntake.js';
+import { effectiveProjectPathEntries } from '../services/projectPathCommandTarget.js';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './projectTreeEditing';
 import { createProjectTreeExternalDropPlan } from './projectTreeExternalDrop';
@@ -27,8 +28,9 @@ import {
   nearestExistingParentSelection,
   notificationMessageForFileCommandError,
   projectTreeSelectionFromPaths,
+  reconcileCutClipboardWithProjectEntries,
   singleFileBatchResultPath
-} from './workbenchFileCommands';
+} from './workbenchFileCommands.js';
 
 type DirectoryLoadOutcome =
   | { ok: true }
@@ -93,6 +95,17 @@ export function useProjectExplorerController(
   const [inlineEdit, setInlineEdit] = useState<ProjectTreeInlineEditState>();
   const editIntentTokenRef = useRef(0);
   const pendingCreateParentLoadRef = useRef<PendingCreateParentLoad | undefined>(undefined);
+  const acceptedSnapshot = input.getSnapshot();
+
+  useEffect(() => {
+    if (!acceptedSnapshot) {
+      return;
+    }
+    setFileClipboard((current) => reconcileCutClipboardWithProjectEntries(
+      current,
+      acceptedSnapshot.files
+    ));
+  }, [acceptedSnapshot]);
 
   useEffect(() => {
     return () => {
@@ -180,14 +193,14 @@ export function useProjectExplorerController(
     _scope: AcceptedProjectPathCommandScope,
     entries: ProjectPathEntry[]
   ) => {
-    setFileClipboard({ operation: 'copy', entries });
+    setFileClipboard({ operation: 'copy', entries: [...effectiveProjectPathEntries(entries)] });
   }, []);
 
   const cutEntries = useCallback((
     _scope: AcceptedProjectPathCommandScope,
     entries: ProjectPathEntry[]
   ) => {
-    setFileClipboard({ operation: 'cut', entries });
+    setFileClipboard({ operation: 'cut', entries: [...effectiveProjectPathEntries(entries)] });
   }, []);
 
   const updateEditValue = useCallback((value: string) => {
