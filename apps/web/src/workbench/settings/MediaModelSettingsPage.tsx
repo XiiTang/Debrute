@@ -7,9 +7,9 @@ import type {
   SaveModelSettingInput,
   VideoModelSettingRecord
 } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../types.js';
 import { Card, CloseButton, EmptyState, Field, IconButton, Input, SecretInput } from '../ui/index.js';
 import { useI18n } from '../i18n/index.js';
+import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController.js';
 
 export interface ModelDraft {
   baseUrlOverride: string;
@@ -33,11 +33,13 @@ interface ApiKeyInputProps {
   onRevealError: (error: unknown) => void;
 }
 
-export function ImageModelSettings({ settings, actions }: { settings: ImageModelSettingRecord[]; actions: WorkbenchActions }): React.ReactElement {
+type MediaModelSettingsActions = Pick<WorkbenchSettingsActions, 'revealModelApiKey' | 'saveGlobalSettings'>;
+
+export function ImageModelSettings({ settings, actions }: { settings: ImageModelSettingRecord[]; actions: MediaModelSettingsActions }): React.ReactElement {
   return <MediaModelSettings models={settings} actions={actions} />;
 }
 
-export function VideoModelSettings({ settings, actions }: { settings: VideoModelSettingRecord[]; actions: WorkbenchActions }): React.ReactElement {
+export function VideoModelSettings({ settings, actions }: { settings: VideoModelSettingRecord[]; actions: MediaModelSettingsActions }): React.ReactElement {
   return <MediaModelSettings models={settings} actions={actions} />;
 }
 
@@ -47,7 +49,7 @@ export function AudioModelSettings({
   kind
 }: {
   settings: AudioModelSettingRecord[];
-  actions: WorkbenchActions;
+  actions: MediaModelSettingsActions;
   kind: AudioModelKind;
 }): React.ReactElement {
   return <MediaModelSettings models={settings.filter((model) => model.kind === kind)} actions={actions} />;
@@ -58,7 +60,7 @@ function MediaModelSettings({
   actions
 }: {
   models: MediaModelSettingRecord[];
-  actions: WorkbenchActions;
+  actions: MediaModelSettingsActions;
 }): React.ReactElement {
   const i18n = useI18n();
 

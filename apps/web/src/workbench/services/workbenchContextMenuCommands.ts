@@ -1,11 +1,15 @@
-import type { ProjectPathEntry, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type {
+  ProjectPathEntry,
+  WorkbenchApiClient,
+  WorkbenchProjectSessionSnapshot
+} from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
-import type { WorkbenchActions } from '../../types';
-import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
-import { projectTreePasteTargetDirectory } from '../project-explorer/projectTreeEditing';
-import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction';
-import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController';
-import { notificationMessageForFileCommandError } from '../project-explorer/workbenchFileCommands';
+import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.js';
+import { projectTreePasteTargetDirectory } from '../project-explorer/projectTreeEditing.js';
+import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction.js';
+import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController.js';
+import { notificationMessageForFileCommandError } from '../project-explorer/workbenchFileCommands.js';
+import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
 import {
   cameraCenteredOnNode,
   explorerContextMenuEntries,
@@ -17,12 +21,16 @@ import {
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget,
   type WorkbenchFileClipboard
-} from '../shell/contextMenu';
+} from '../shell/contextMenu.js';
 
 export interface ProjectPathCommandErrorLabels {
   copyPathFailed: string;
   resetAutoLayoutFailed: string;
 }
+
+type CanvasLayoutResetInput =
+  | { all: true }
+  | { pathRules: { paths: string[]; globs: string[] } };
 
 type ExplorerContextCommands = Pick<ProjectExplorerController,
   | 'beginCreateFile'
@@ -38,13 +46,20 @@ type ExplorerContextCommands = Pick<ProjectExplorerController,
 >;
 
 export function runProjectPathCommand(input: {
+  scope: AcceptedProjectPathCommandScope;
   command: ProjectPathCommand;
   photoshopTarget?: PhotoshopDocumentTarget;
   contextMenu: { target: WorkbenchContextMenuTarget; position: WorkbenchContextMenuPosition } | undefined;
   activeProjection: CanvasProjection | undefined;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
   fileClipboard: WorkbenchFileClipboard | undefined;
-  actions: WorkbenchActions;
+  resetCanvasNodeLayouts(
+    input: Parameters<WorkbenchApiClient['resetCanvasNodeLayouts']>[0]
+  ): ReturnType<WorkbenchApiClient['resetCanvasNodeLayouts']> | undefined;
+  openTerminalPanel(cwdProjectRelativePath: string): void;
+  sendProjectFileToPhotoshop(
+    input: Parameters<WorkbenchApiClient['sendProjectFileToPhotoshop']>[0]
+  ): ReturnType<WorkbenchApiClient['sendProjectFileToPhotoshop']> | undefined;
   explorerCommands: ExplorerContextCommands;
   copyText: (text: string) => void | Promise<void>;
   notify: (message: string) => void;
@@ -125,7 +140,13 @@ export function runProjectPathCommand(input: {
     }
     const canvasId = input.activeProjection?.canvasId;
     if (canvasId) {
-      void input.actions.resetCanvasNodeLayouts(canvasId, canvasLayoutResetInputForTarget(primaryEntry)).then(() => {
+      const resetInput = canvasLayoutResetInputForTarget(primaryEntry);
+      const request = input.resetCanvasNodeLayouts(
+        'all' in resetInput
+          ? { canvasId, all: true }
+          : { canvasId, pathRules: resetInput.pathRules }
+      );
+      void request?.then(() => {
         const acceptedProjection = input.getProjectSnapshot()
           ?.projections.find((projection) => projection.canvasId === canvasId);
         const updatedNode = projectedContextMenuNode(acceptedProjection, projectRelativePath);
@@ -148,7 +169,7 @@ export function runProjectPathCommand(input: {
 
 function canvasLayoutResetInputForTarget(
   target: ProjectPathEntry
-): Parameters<WorkbenchActions['resetCanvasNodeLayouts']>[1] {
+): CanvasLayoutResetInput {
   if (target.kind === 'directory' && target.projectRelativePath === '') {
     return { all: true };
   }
@@ -175,7 +196,7 @@ function runSinglePathFileCommand(
       input.closeContextMenu();
       return true;
     }
-    input.explorerCommands.cutEntries(entries);
+    input.explorerCommands.cutEntries(input.scope, entries);
     input.closeContextMenu();
     return true;
   }
@@ -184,7 +205,7 @@ function runSinglePathFileCommand(
       input.closeContextMenu();
       return true;
     }
-    input.explorerCommands.copyEntries(entries);
+    input.explorerCommands.copyEntries(input.scope, entries);
     input.closeContextMenu();
     return true;
   }
@@ -198,7 +219,7 @@ function runSinglePathFileCommand(
     return true;
   }
   if (input.command === 'copy-path') {
-    void input.explorerCommands.copyAbsolutePaths(entries)
+    void input.explorerCommands.copyAbsolutePaths(input.scope, entries)
       .then((paths) => paths ? input.copyText(paths.join('\n')) : undefined)
       .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
     input.closeContextMenu();
@@ -209,40 +230,44 @@ function runSinglePathFileCommand(
       input.closeContextMenu();
       return true;
     }
-    void input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n'));
+    void Promise.resolve(input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n')))
+      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'open-terminal') {
-    input.actions.openTerminalPanel(terminalCwdForEntry(primaryEntry));
+    input.openTerminalPanel(terminalCwdForEntry(primaryEntry));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'send-to-photoshop') {
     if (primaryEntry.kind === 'file' && input.photoshopTarget) {
       const destination = input.photoshopTarget;
-      const updateNotification = input.startNotification(input.photoshopLabels.sending(
-        primaryEntry.projectRelativePath,
-        destination.title
-      ));
-      void input.actions.sendProjectFileToPhotoshop({
+      const request = input.sendProjectFileToPhotoshop({
         projectRelativePath: primaryEntry.projectRelativePath,
         pluginSessionId: destination.pluginSessionId,
         documentId: destination.documentId
-      }).then((result) => {
-        updateNotification(input.photoshopLabels.sent(
-          primaryEntry.projectRelativePath,
-          result.documentTitle
-        ));
-      }).catch((error) => {
-        updateNotification(input.photoshopLabels.failed(errorMessage(error)));
       });
+      if (request) {
+        const updateNotification = input.startNotification(input.photoshopLabels.sending(
+          primaryEntry.projectRelativePath,
+          destination.title
+        ));
+        void request.then((result) => {
+          updateNotification(input.photoshopLabels.sent(
+            primaryEntry.projectRelativePath,
+            result.documentTitle
+          ));
+        }).catch((error) => {
+          updateNotification(input.photoshopLabels.failed(errorMessage(error)));
+        });
+      }
     }
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'reveal-in-system-file-manager') {
-    input.explorerCommands.revealEntry(primaryEntry);
+    input.explorerCommands.revealEntry(input.scope, primaryEntry);
     input.closeContextMenu();
     return true;
   }
@@ -251,7 +276,7 @@ function runSinglePathFileCommand(
       input.closeContextMenu();
       return true;
     }
-    input.explorerCommands.trashEntries(entries);
+    input.explorerCommands.trashEntries(input.scope, entries);
     input.closeContextMenu();
     return true;
   }
@@ -270,12 +295,12 @@ function runExplorerSpecificCommand(
   const primaryEntry = explorerContextMenuPrimaryEntry(target);
   if (target.targetKind === 'root') {
     if (input.command === 'create-file') {
-      input.explorerCommands.beginCreateFile(projectTreePasteTargetDirectory(target));
+      input.explorerCommands.beginCreateFile(input.scope, projectTreePasteTargetDirectory(target));
       input.closeContextMenu();
       return true;
     }
     if (input.command === 'create-directory') {
-      input.explorerCommands.beginCreateDirectory(projectTreePasteTargetDirectory(target));
+      input.explorerCommands.beginCreateDirectory(input.scope, projectTreePasteTargetDirectory(target));
       input.closeContextMenu();
       return true;
     }
@@ -285,7 +310,7 @@ function runExplorerSpecificCommand(
       return true;
     }
     if (input.command === 'open-terminal') {
-      input.actions.openTerminalPanel('');
+      input.openTerminalPanel('');
       input.closeContextMenu();
       return true;
     }
@@ -296,7 +321,7 @@ function runExplorerSpecificCommand(
       input.closeContextMenu();
       return true;
     }
-    input.explorerCommands.beginCreateFile(projectTreePasteTargetDirectory(target));
+    input.explorerCommands.beginCreateFile(input.scope, projectTreePasteTargetDirectory(target));
     input.closeContextMenu();
     return true;
   }
@@ -305,13 +330,13 @@ function runExplorerSpecificCommand(
       input.closeContextMenu();
       return true;
     }
-    input.explorerCommands.beginCreateDirectory(projectTreePasteTargetDirectory(target));
+    input.explorerCommands.beginCreateDirectory(input.scope, projectTreePasteTargetDirectory(target));
     input.closeContextMenu();
     return true;
   }
   if (input.command === 'rename') {
     if (primaryEntry && entries.length === 1) {
-      input.explorerCommands.beginRename(primaryEntry);
+      input.explorerCommands.beginRename(input.scope, primaryEntry);
     }
     input.closeContextMenu();
     return true;
@@ -321,7 +346,7 @@ function runExplorerSpecificCommand(
       input.closeContextMenu();
       return true;
     }
-    input.explorerCommands.deleteEntriesPermanently(entries);
+    input.explorerCommands.deleteEntriesPermanently(input.scope, entries);
     input.closeContextMenu();
     return true;
   }
@@ -367,14 +392,14 @@ function runPasteCommand(
     })) {
       return;
     }
-    input.explorerCommands.pasteEntries({
+    input.explorerCommands.pasteEntries(input.scope, {
       clipboard: fileClipboard,
       targetDirectoryProjectRelativePath,
       ...(overwrite ? { overwrite: true } : {})
     });
     return;
   }
-  input.explorerCommands.pasteEntries({
+  input.explorerCommands.pasteEntries(input.scope, {
     clipboard: fileClipboard,
     targetDirectoryProjectRelativePath
   });

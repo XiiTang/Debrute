@@ -9,16 +9,18 @@ import type {
   IntegrationOperationKind,
   IntegrationStatus
 } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../../types.js';
 import { Button, EmptyState, StatusPill, Toolbar } from '../../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
+import type { WorkbenchSettingsActions } from '../useWorkbenchSettingsController.js';
+
+type IntegrationActions = Pick<WorkbenchSettingsActions, 'rescanIntegrations' | 'runIntegrationOperation'>;
 
 export function IntegrationsSettingsPage({
   settings,
   actions
 }: {
   settings: IntegrationSettingsView;
-  actions: WorkbenchActions;
+  actions: IntegrationActions;
 }): React.ReactElement {
   const i18n = useI18n();
   const [rescanning, setRescanning] = useState(false);

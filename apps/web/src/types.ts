@@ -1,21 +1,13 @@
 import type {
   AddProjectPathToCanvasMapInput,
-  DebruteGlobalSettingsView,
-  DebruteProductState,
   CanvasTextPreviewSourceAvailabilityRequest,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceRequest,
   CanvasVideoPreviewSourceResponse,
   GeneratedAssetMetadataLookup,
-  IntegrationSettingsView,
   PhotoshopStateView,
-  RunIntegrationOperationInput,
-  RunIntegrationOperationResult,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
-  SaveDebruteGlobalSettingsInput,
-  SendProjectFileToPhotoshopInput,
-  SendProjectFileToPhotoshopResult,
   UpdateCanvasTextViewportStateInput,
   UpdateCanvasVideoPlaybackStateInput,
   WorkbenchCanvasManagementResult,
@@ -42,9 +34,6 @@ export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   projectId?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
-  globalSettings: EventProjection<DebruteGlobalSettingsView>;
-  integrations: EventProjection<IntegrationSettingsView>;
-  product: EventProjection<DebruteProductState | null>;
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
   explorerSelection: ProjectTreeSelectionState;
@@ -83,13 +72,6 @@ export interface FloatingTextEditorWindowState {
 }
 
 export interface WorkbenchActions {
-  checkProductUpdate: () => Promise<void>;
-  applyProductUpdate: () => Promise<void>;
-  saveGlobalSettings: (input: SaveDebruteGlobalSettingsInput) => Promise<void>;
-  revealModelApiKey: (modelId: string) => Promise<string>;
-  rescanIntegrations: () => Promise<void>;
-  runIntegrationOperation: (input: RunIntegrationOperationInput) => Promise<RunIntegrationOperationResult>;
-  sendProjectFileToPhotoshop: (input: SendProjectFileToPhotoshopInput) => Promise<SendProjectFileToPhotoshopResult>;
   lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;
@@ -119,7 +101,6 @@ export interface WorkbenchActions {
   reorderCanvases: (input: { canvasOrder: string[] }) => Promise<WorkbenchCanvasManagementResult>;
   repairCanvasIndex: () => Promise<WorkbenchCanvasManagementResult>;
   openProject: () => Promise<void>;
-  openTerminalPanel: (cwdProjectRelativePath?: string) => void;
 }
 
 export type {

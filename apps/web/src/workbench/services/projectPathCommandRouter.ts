@@ -4,8 +4,13 @@ import {
   type PhotoshopDocumentTarget,
   type WorkbenchContextMenuItem,
   type WorkbenchContextMenuTarget
-} from '../shell/contextMenu';
-import { runProjectPathCommand } from './workbenchContextMenuCommands';
+} from '../shell/contextMenu.js';
+import { runProjectPathCommand } from './workbenchContextMenuCommands.js';
+import type { ProjectPathCommandEffects } from './projectPathCommandEffects.js';
+import type {
+  AcceptedProjectPathCommandScope,
+  ProjectPathCommandIntake
+} from './projectPathCommandIntake.js';
 
 type ProjectPathCommandMenuContext = Omit<
   Parameters<typeof buildWorkbenchContextMenuItems>[0],
@@ -14,10 +19,15 @@ type ProjectPathCommandMenuContext = Omit<
 
 type ProjectPathCommandContext = Omit<
   Parameters<typeof runProjectPathCommand>[0],
-  'command' | 'contextMenu'
+  | 'scope'
+  | 'command'
+  | 'contextMenu'
+  | 'sendProjectFileToPhotoshop'
+  | 'resetCanvasNodeLayouts'
+  | 'openTerminalPanel'
 >;
 
-export interface ProjectPathCommandCoordinator {
+export interface ProjectPathCommandRouter {
   contextMenuItems(
     target: WorkbenchContextMenuTarget,
     canRevealInCanvas: boolean
@@ -29,12 +39,19 @@ export interface ProjectPathCommandCoordinator {
   ): void;
 }
 
-export function createProjectPathCommandCoordinator(input: {
-  canStartCommand(): boolean;
-  isCurrentScope(): boolean;
+export function createProjectPathCommandRouter(input: {
+  commandIntake: ProjectPathCommandIntake;
+  commandEffects: Pick<ProjectPathCommandEffects,
+    | 'sendProjectFileToPhotoshop'
+    | 'resetCanvasNodeLayouts'
+  >;
+  openTerminalPanel(
+    scope: AcceptedProjectPathCommandScope,
+    cwdProjectRelativePath: string
+  ): void;
   menuContext: ProjectPathCommandMenuContext;
   commandContext: ProjectPathCommandContext;
-}): ProjectPathCommandCoordinator {
+}): ProjectPathCommandRouter {
   return {
     contextMenuItems: (target, canRevealInCanvas) => {
       const items = buildWorkbenchContextMenuItems({
@@ -42,26 +59,45 @@ export function createProjectPathCommandCoordinator(input: {
         canRevealInCanvas,
         target
       });
-      return input.canStartCommand() ? items : disableActions(items);
+      return input.commandIntake.canAccept() ? items : disableActions(items);
     },
     run: (command, contextMenu, photoshopTarget) => {
-      if (!input.canStartCommand()) {
+      const scope = input.commandIntake.tryAccept();
+      if (!scope) {
         input.commandContext.closeContextMenu();
         return;
       }
       runProjectPathCommand({
         ...input.commandContext,
-        copyText: (text) => input.isCurrentScope()
+        copyText: (text) => scope.isCurrent()
           ? input.commandContext.copyText(text)
           : undefined,
         notify: (message) => {
-          if (input.isCurrentScope()) {
+          if (scope.isCurrent()) {
             input.commandContext.notify(message);
           }
         },
-        getProjectSnapshot: () => input.isCurrentScope()
+        startNotification: (message) => {
+          const update = input.commandContext.startNotification(message);
+          return (nextMessage) => {
+            if (scope.isCurrent()) {
+              update(nextMessage);
+            }
+          };
+        },
+        getProjectSnapshot: () => scope.isCurrent()
           ? input.commandContext.getProjectSnapshot()
           : undefined,
+        sendProjectFileToPhotoshop: (sendInput) => (
+          input.commandEffects.sendProjectFileToPhotoshop(scope, sendInput)
+        ),
+        resetCanvasNodeLayouts: (resetInput) => (
+          input.commandEffects.resetCanvasNodeLayouts(scope, resetInput)
+        ),
+        openTerminalPanel: (cwdProjectRelativePath) => {
+          input.openTerminalPanel(scope, cwdProjectRelativePath);
+        },
+        scope,
         command,
         contextMenu,
         ...(photoshopTarget === undefined ? {} : { photoshopTarget })

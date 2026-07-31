@@ -24,6 +24,13 @@ import { CanvasFeedbackBar } from './CanvasFeedbackBar';
 
 const FEEDBACK_BAR_DISMISS_DELAY_MS = 120;
 
+type CanvasFeedbackApi = Pick<WorkbenchApiClient,
+  | 'putFeedbackWorkingCopy'
+  | 'clearFeedbackWorkingCopy'
+  | 'updateCanvasFeedbackEntry'
+  | 'readCanvasFeedback'
+>;
+
 export interface CanvasFeedbackCapsule {
   itemId: string;
   createdAt: string;
@@ -81,7 +88,7 @@ export interface CanvasFeedbackCanvasBinding {
 }
 
 export function useCanvasFeedbackInteraction(input: {
-  api: WorkbenchApiClient;
+  api: CanvasFeedbackApi;
   projectId: string | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   notifyUnavailable(message: string): void;

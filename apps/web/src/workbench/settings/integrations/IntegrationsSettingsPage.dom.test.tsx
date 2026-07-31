@@ -4,11 +4,13 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { DebruteGlobalSettingsView, IntegrationSettingsView } from '@debrute/app-protocol';
-import { SettingsPanel } from '../SettingsPanel.js';
+import {
+  SettingsPanel,
+  type SettingsPanelState
+} from '../SettingsPanel.js';
 import { IntegrationsSettingsPage } from './IntegrationsSettingsPage.js';
 import { I18nProvider } from '../../i18n/index.js';
-import type { WorkbenchActions, WorkbenchState } from '../../../types.js';
-import { buildWorkbenchTitleBarState } from '../../shell/workbenchTitleBarState.js';
+import type { WorkbenchSettingsActions } from '../useWorkbenchSettingsController.js';
 
 describe('web Integrations settings page', { tags: ['settings'] }, () => {
   it('adds Integrations to the Settings directory', () => {
@@ -320,35 +322,30 @@ function withI18n(element: React.ReactElement): React.ReactElement {
   return React.createElement(I18nProvider, { locale: 'en', children: element });
 }
 
-function createState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
+function createState(overrides: Partial<SettingsPanelState> = {}): SettingsPanelState {
   return {
-    snapshot: undefined,
-    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjects: [] }),
-    explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
     integrations: { status: 'ready', value: integrationSettingsFixture() },
     product: { status: 'ready', value: null },
     resolvedTheme: 'dark',
-    projectOpen: { opening: false },
-    photoshop: { status: 'ready', value: { sessions: [] } },
-    canvasFeedback: undefined,
-    textFileBuffers: {},
-    textEditorWindows: {},
-    notifications: [],
     ...overrides
   };
 }
 
-function createActions(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {
+function createActions(overrides: Partial<WorkbenchSettingsActions> = {}): WorkbenchSettingsActions {
   return {
+    checkProductUpdate: async () => undefined,
+    applyProductUpdate: async () => undefined,
+    saveGlobalSettings: async () => undefined,
+    revealModelApiKey: async () => '',
     rescanIntegrations: async () => undefined,
-    runIntegrationOperation: async (input: Parameters<WorkbenchActions['runIntegrationOperation']>[0]) => ({
+    runIntegrationOperation: async (input: Parameters<WorkbenchSettingsActions['runIntegrationOperation']>[0]) => ({
       ok: true,
       integrationId: input.integrationId,
       operation: input.operation
     }),
     ...overrides
-  } as unknown as WorkbenchActions;
+  };
 }
 
 function installedImageMagickSettings(): IntegrationSettingsView {

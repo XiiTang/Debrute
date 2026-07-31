@@ -7,8 +7,14 @@ import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
 import { createTerminalEventRenderer } from './terminalEventRendering';
 import { terminalThemeForWorkbenchTheme } from './terminalTheme';
 
+type XtermTerminalApi = Pick<WorkbenchApiClient,
+  | 'resizeTerminal'
+  | 'writeTerminalInput'
+  | 'subscribeTerminalEvents'
+>;
+
 export interface UseXtermTerminalInput {
-  api: WorkbenchApiClient;
+  api: XtermTerminalApi;
   resolvedTheme: WorkbenchResolvedTheme;
   session: TerminalSessionView | null;
   containerRef: RefObject<HTMLDivElement | null>;

@@ -1,7 +1,6 @@
 import { useLayoutEffect } from 'react';
 import '../styles/settings.css';
 import '../styles/integrations.css';
-import type { WorkbenchActions } from '../../types.js';
 import type { HttpWorkbenchApiClient } from '../../api/httpWorkbenchApiClient.js';
 import type { WorkbenchResolvedTheme } from '../services/workbenchTheme.js';
 import type { WorkbenchLocale } from '@debrute/app-protocol';
@@ -39,13 +38,11 @@ export function WorkbenchSettingsFeatureHost({
 export function WorkbenchSettingsPanelFeature({
   controller,
   locale,
-  resolvedTheme,
-  actions
+  resolvedTheme
 }: {
   controller: WorkbenchSettingsController;
   locale: WorkbenchLocale;
   resolvedTheme: WorkbenchResolvedTheme;
-  actions: WorkbenchActions;
 }): React.ReactElement {
   const state = {
     globalSettings: controller.globalSettings,
@@ -55,7 +52,7 @@ export function WorkbenchSettingsPanelFeature({
   };
   return (
     <I18nProvider locale={locale}>
-      <SettingsPanel state={state} actions={actions} />
+      <SettingsPanel state={state} actions={controller.actions} />
     </I18nProvider>
   );
 }

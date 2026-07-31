@@ -36,7 +36,7 @@ export interface ProjectBindingLifecycle {
   getState(): ProjectBindingLifecycleState;
   subscribe(listener: () => void): () => void;
   open(target: WorkbenchProjectTarget): Promise<ProjectBindingLifecycleOutcome>;
-  canStartProjectPathCommand(generation: number): boolean;
+  canAcceptProjectPathCommand(generation: number): boolean;
 }
 
 export function createProjectBindingLifecycle(input: {
@@ -103,7 +103,7 @@ export function createProjectBindingLifecycle(input: {
         transition(false);
       }
     },
-    canStartProjectPathCommand(generation) {
+    canAcceptProjectPathCommand(generation) {
       const current = input.projectProjection.getState();
       return !state.opening
         && current.status === 'bound'

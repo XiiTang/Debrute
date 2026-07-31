@@ -3,6 +3,7 @@ import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import type { ProjectPathCommand } from '../shell/contextMenu';
+import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
 import { runProjectPathCommand } from './workbenchContextMenuCommands';
 
 describe('workbench context menu commands', () => {
@@ -10,7 +11,6 @@ describe('workbench context menu commands', () => {
     const deleteEntriesPermanently = vi.fn();
     runProjectPathCommand(commandInput({
       command: 'delete-permanently',
-      actions: {},
       explorerCommands: { deleteEntriesPermanently },
       confirmPermanentDelete: () => false
     }));
@@ -22,11 +22,10 @@ describe('workbench context menu commands', () => {
     const trashEntries = vi.fn();
     runProjectPathCommand(commandInput({
       command: 'delete',
-      actions: {},
       explorerCommands: { trashEntries }
     }));
 
-    expect(trashEntries).toHaveBeenCalledWith([
+    expect(trashEntries).toHaveBeenCalledWith(expect.anything(), [
       { projectRelativePath: 'briefs/concept.md', kind: 'file' }
     ]);
   });
@@ -38,13 +37,11 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'copy',
       target: rootTarget(),
-      actions: {},
       explorerCommands: { copyEntries, trashEntries }
     }));
     runProjectPathCommand(commandInput({
       command: 'delete',
       target: rootTarget(),
-      actions: {},
       explorerCommands: { copyEntries, trashEntries }
     }));
 
@@ -61,7 +58,6 @@ describe('workbench context menu commands', () => {
 
     runProjectPathCommand(commandInput({
       command: 'copy-path',
-      actions: {},
       explorerCommands: { copyAbsolutePaths },
       target: {
         source: 'explorer',
@@ -80,7 +76,7 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(copyAbsolutePaths).toHaveBeenCalledWith([
+    expect(copyAbsolutePaths).toHaveBeenCalledWith(expect.anything(), [
       { projectRelativePath: 'briefs/concept.md', kind: 'file' },
       { projectRelativePath: 'assets', kind: 'directory' }
     ]);
@@ -92,9 +88,7 @@ describe('workbench context menu commands', () => {
 
     runProjectPathCommand(commandInput({
       command: 'open-terminal',
-      actions: {
-        openTerminalPanel
-      },
+      openTerminalPanel,
       target: {
         source: 'explorer',
         targetKind: 'item',
@@ -112,9 +106,7 @@ describe('workbench context menu commands', () => {
 
     runProjectPathCommand(commandInput({
       command: 'open-terminal',
-      actions: {
-        openTerminalPanel
-      },
+      openTerminalPanel,
       target: {
         source: 'explorer',
         targetKind: 'item',
@@ -132,9 +124,7 @@ describe('workbench context menu commands', () => {
 
     runProjectPathCommand(commandInput({
       command: 'open-terminal',
-      actions: {
-        openTerminalPanel
-      },
+      openTerminalPanel,
       target: rootTarget()
     }));
 
@@ -146,7 +136,6 @@ describe('workbench context menu commands', () => {
 
     runProjectPathCommand(commandInput({
       command: 'paste',
-      actions: {},
       explorerCommands: { pasteEntries },
       fileClipboard: {
         operation: 'copy',
@@ -166,7 +155,6 @@ describe('workbench context menu commands', () => {
 
     runProjectPathCommand(commandInput({
       command: 'paste',
-      actions: {},
       explorerCommands: { pasteEntries },
       fileClipboard: {
         operation: 'cut',
@@ -196,7 +184,7 @@ describe('workbench context menu commands', () => {
       entries: [{ projectRelativePath: 'cover.png', kind: 'file' }],
       targetDirectoryProjectRelativePath: 'assets'
     });
-    expect(pasteEntries).toHaveBeenCalledWith({
+    expect(pasteEntries).toHaveBeenCalledWith(expect.anything(), {
       clipboard: {
         operation: 'cut',
         entries: [{ projectRelativePath: 'cover.png', kind: 'file' }]
@@ -219,11 +207,10 @@ describe('workbench context menu commands', () => {
         width: 100,
         height: 50
       }),
-      actions: {},
       explorerCommands: { cutEntries }
     }));
 
-    expect(cutEntries).toHaveBeenCalledWith([
+    expect(cutEntries).toHaveBeenCalledWith(expect.anything(), [
       { projectRelativePath: 'flow/cover.png', kind: 'file' }
     ]);
   });
@@ -235,7 +222,6 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'copy-path',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {},
       explorerCommands: { copyAbsolutePaths },
       copyText: (text) => {
         copiedText.push(text);
@@ -244,7 +230,7 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(copyAbsolutePaths).toHaveBeenCalledWith([
+    expect(copyAbsolutePaths).toHaveBeenCalledWith(expect.anything(), [
       { projectRelativePath: 'flow/cover.png', kind: 'file' }
     ]);
     expect(copiedText).toEqual(['/tmp/debrute-project/flow/cover.png']);
@@ -256,9 +242,7 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'open-terminal',
       target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
-      actions: {
-        openTerminalPanel
-      }
+      openTerminalPanel
     }));
 
     expect(openTerminalPanel).toHaveBeenCalledWith('assets');
@@ -270,9 +254,7 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'open-terminal',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {
-        openTerminalPanel
-      }
+      openTerminalPanel
     }));
 
     expect(openTerminalPanel).toHaveBeenCalledWith('flow');
@@ -288,14 +270,13 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'paste',
       target: { source: 'canvas', kind: 'directory', projectRelativePath: 'assets' },
-      actions: {},
       explorerCommands: { pasteEntries },
       fileClipboard: clipboard,
     }));
 
     await Promise.resolve();
 
-    expect(pasteEntries).toHaveBeenCalledWith({
+    expect(pasteEntries).toHaveBeenCalledWith(expect.anything(), {
       clipboard,
       targetDirectoryProjectRelativePath: 'assets'
     });
@@ -307,7 +288,6 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'paste',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {},
       explorerCommands: { pasteEntries },
       fileClipboard: {
         operation: 'copy',
@@ -326,13 +306,12 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'reveal-in-system-file-manager',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {},
       explorerCommands: { revealEntry }
     }));
 
     await Promise.resolve();
 
-    expect(revealEntry).toHaveBeenCalledWith({
+    expect(revealEntry).toHaveBeenCalledWith(expect.anything(), {
       projectRelativePath: 'flow/cover.png',
       kind: 'file'
     });
@@ -344,13 +323,12 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'delete',
       target: { source: 'canvas', kind: 'file', projectRelativePath: 'flow/cover.png' },
-      actions: {},
       explorerCommands: { trashEntries }
     }));
 
     await Promise.resolve();
 
-    expect(trashEntries).toHaveBeenCalledWith([
+    expect(trashEntries).toHaveBeenCalledWith(expect.anything(), [
       { projectRelativePath: 'flow/cover.png', kind: 'file' }
     ]);
   });
@@ -377,7 +355,6 @@ describe('workbench context menu commands', () => {
         target: rootTarget,
         activeProjection: rootProjection,
         activeCanvasRuntime: canvasRuntimeFixture(),
-        actions: {},
         explorerCommands: { copyEntries, cutEntries, trashEntries },
         copyText
       }));
@@ -412,7 +389,6 @@ describe('workbench context menu commands', () => {
         height: 50
       }),
       activeCanvasRuntime: canvasRuntimeFixture({ setSelection }),
-      actions: {},
       openInspectorPanel
     }));
 
@@ -460,9 +436,7 @@ describe('workbench context menu commands', () => {
         height: 50
       }),
       activeCanvasRuntime: canvasRuntimeFixture(),
-      actions: {
-        resetCanvasNodeLayouts
-      }
+      resetCanvasNodeLayouts
     }));
 
     await Promise.resolve();
@@ -491,9 +465,7 @@ describe('workbench context menu commands', () => {
         layoutMode: 'manual'
       }),
       activeCanvasRuntime: canvasRuntimeFixture({ setSelection, setCamera }),
-      actions: {
-        resetCanvasNodeLayouts
-      },
+      resetCanvasNodeLayouts,
       getProjectSnapshot: () => snapshotFixture({
         projections: [canvasProjectionFixture('canvas-1', {
           projectRelativePath: 'flow/cover.png',
@@ -507,7 +479,8 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith({
+      canvasId: 'canvas-1',
       pathRules: { paths: ['flow/cover.png'], globs: [] }
     });
     expect(setSelection).toHaveBeenCalledWith({ kind: 'node', projectRelativePath: 'flow/cover.png' });
@@ -527,16 +500,14 @@ describe('workbench context menu commands', () => {
     runProjectPathCommand(commandInput({
       command: 'reveal-in-canvas',
       activeProjection,
-      activeCanvasRuntime: canvasRuntimeFixture({ setCamera, surfaceReady: false }),
-      actions: {}
+      activeCanvasRuntime: canvasRuntimeFixture({ setCamera, surfaceReady: false })
     }));
     expect(setCamera).not.toHaveBeenCalled();
 
     runProjectPathCommand(commandInput({
       command: 'reveal-in-canvas',
       activeProjection,
-      activeCanvasRuntime: canvasRuntimeFixture({ setCamera, surfaceReady: true }),
-      actions: {}
+      activeCanvasRuntime: canvasRuntimeFixture({ setCamera, surfaceReady: true })
     }));
     expect(setCamera).toHaveBeenCalledOnce();
   });
@@ -562,9 +533,7 @@ describe('workbench context menu commands', () => {
         layoutMode: 'manual'
       }),
       activeCanvasRuntime: canvasRuntimeFixture({ setCamera }),
-      actions: {
-        resetCanvasNodeLayouts
-      },
+      resetCanvasNodeLayouts,
       getProjectSnapshot: () => snapshotFixture({
         projections: [canvasProjectionFixture('canvas-1', {
           projectRelativePath: 'flow',
@@ -579,7 +548,8 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith({
+      canvasId: 'canvas-1',
       pathRules: { paths: ['flow/'], globs: [] }
     });
     expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
@@ -606,9 +576,7 @@ describe('workbench context menu commands', () => {
         layoutMode: 'manual'
       }),
       activeCanvasRuntime: canvasRuntimeFixture({ setCamera }),
-      actions: {
-        resetCanvasNodeLayouts
-      },
+      resetCanvasNodeLayouts,
       getProjectSnapshot: () => snapshotFixture({
         projections: [canvasProjectionFixture('canvas-1', {
           projectRelativePath: '',
@@ -623,7 +591,8 @@ describe('workbench context menu commands', () => {
 
     await Promise.resolve();
 
-    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', {
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith({
+      canvasId: 'canvas-1',
       all: true
     });
     expect(setCamera).toHaveBeenCalledWith({ x: 240, y: 160, z: 1 });
@@ -652,7 +621,7 @@ describe('workbench context menu commands', () => {
         documentId: 42,
         title: 'Poster.psd'
       },
-      actions: { sendProjectFileToPhotoshop },
+      sendProjectFileToPhotoshop,
       startNotification
     }));
 
@@ -671,7 +640,8 @@ describe('workbench context menu commands', () => {
 function commandInput(overrides: {
   command: ProjectPathCommand;
   photoshopTarget?: Parameters<typeof runProjectPathCommand>[0]['photoshopTarget'];
-  actions?: Partial<Parameters<typeof runProjectPathCommand>[0]['actions']>;
+  resetCanvasNodeLayouts?: Parameters<typeof runProjectPathCommand>[0]['resetCanvasNodeLayouts'];
+  openTerminalPanel?: Parameters<typeof runProjectPathCommand>[0]['openTerminalPanel'];
   explorerCommands?: Partial<Parameters<typeof runProjectPathCommand>[0]['explorerCommands']>;
   target?: Parameters<typeof runProjectPathCommand>[0]['contextMenu'] extends infer T
     ? T extends { target: infer U }
@@ -688,8 +658,15 @@ function commandInput(overrides: {
   confirmPermanentDelete?: Parameters<typeof runProjectPathCommand>[0]['confirmPermanentDelete'];
   confirmMoveOverwrite?: (input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>; targetDirectoryProjectRelativePath: string }) => boolean;
   startNotification?: Parameters<typeof runProjectPathCommand>[0]['startNotification'];
+  sendProjectFileToPhotoshop?: Parameters<typeof runProjectPathCommand>[0]['sendProjectFileToPhotoshop'];
 }): Parameters<typeof runProjectPathCommand>[0] {
   return {
+    scope: {
+      projectId: 'project-1',
+      generation: 1,
+      canSubmit: () => true,
+      isCurrent: () => true
+    } as AcceptedProjectPathCommandScope,
     command: overrides.command,
     ...(overrides.photoshopTarget === undefined ? {} : { photoshopTarget: overrides.photoshopTarget }),
     contextMenu: {
@@ -705,10 +682,9 @@ function commandInput(overrides: {
     activeProjection: overrides.activeProjection,
     activeCanvasRuntime: overrides.activeCanvasRuntime as Parameters<typeof runProjectPathCommand>[0]['activeCanvasRuntime'],
     fileClipboard: overrides.fileClipboard,
-    actions: {
-      openTerminalPanel: () => undefined,
-      ...overrides.actions
-    } as Parameters<typeof runProjectPathCommand>[0]['actions'],
+    resetCanvasNodeLayouts: overrides.resetCanvasNodeLayouts ?? (() => undefined),
+    openTerminalPanel: overrides.openTerminalPanel ?? (() => undefined),
+    sendProjectFileToPhotoshop: overrides.sendProjectFileToPhotoshop ?? (() => undefined),
     explorerCommands: {
       beginCreateFile: () => undefined,
       beginCreateDirectory: () => undefined,

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from './i18n/index.js';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime.js';
-import type { ProjectPathCommandCoordinator } from './services/projectPathCommandCoordinator.js';
+import type { ProjectPathCommandRouter } from './services/projectPathCommandRouter.js';
 import { ProjectPathContextMenuHost } from './WorkbenchApp.js';
 
 describe('ProjectPathContextMenuHost', () => {
@@ -24,10 +24,10 @@ describe('ProjectPathContextMenuHost', () => {
       command: 'reveal-in-canvas' as const,
       disabled: !canRevealInCanvas
     }]);
-    const coordinator = {
+    const router = {
       contextMenuItems,
       run: vi.fn()
-    } satisfies ProjectPathCommandCoordinator;
+    } satisfies ProjectPathCommandRouter;
     const contextMenu = {
       target: {
         source: 'explorer' as const,
@@ -46,7 +46,7 @@ describe('ProjectPathContextMenuHost', () => {
       <I18nProvider locale="en">
         <ProjectPathContextMenuHost
           contextMenu={contextMenu}
-          coordinator={coordinator}
+        router={router}
           runtime={runtime}
           productPlatform="darwin"
           onClose={() => undefined}

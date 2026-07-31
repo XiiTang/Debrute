@@ -14,10 +14,20 @@ import {
   type TerminalPanelState
 } from './terminalPanelState';
 
+type TerminalPanelApi = Pick<WorkbenchApiClient,
+  | 'createTerminalSession'
+  | 'subscribeTerminalSessions'
+  | 'subscribeTerminalEvents'
+  | 'closeTerminalSession'
+  | 'resizeTerminal'
+  | 'writeTerminalInput'
+>;
+
 export interface TerminalPanelProps {
-  api: WorkbenchApiClient;
+  api: TerminalPanelApi;
   resolvedTheme: WorkbenchResolvedTheme;
   requestedCwdProjectRelativePath: string | null;
+  canSubmitRequestedCwd(): boolean;
   onRequestedCwdConsumed(): void;
 }
 
@@ -95,6 +105,7 @@ export function TerminalPanel({
   api,
   resolvedTheme,
   requestedCwdProjectRelativePath,
+  canSubmitRequestedCwd,
   onRequestedCwdConsumed
 }: TerminalPanelProps): React.ReactElement {
   const [state, setState] = useState<TerminalPanelState>({
@@ -106,7 +117,7 @@ export function TerminalPanel({
     closingSessionIds: []
   });
   const closingSessionIdsRef = useRef(new Set<string>());
-  const initialTopologyApiRef = useRef<WorkbenchApiClient | null>(null);
+  const initialTopologyApiRef = useRef<TerminalPanelApi | null>(null);
   const initialTopologyAcceptedRef = useRef(false);
   const skipAutomaticRootSessionRef = useRef(requestedCwdProjectRelativePath !== null);
   if (initialTopologyApiRef.current !== api) {
@@ -193,8 +204,17 @@ export function TerminalPanel({
       return;
     }
     onRequestedCwdConsumed();
+    if (!canSubmitRequestedCwd()) {
+      return;
+    }
     void createSession(requestedCwdProjectRelativePath).catch(showError);
-  }, [createSession, onRequestedCwdConsumed, requestedCwdProjectRelativePath, showError]);
+  }, [
+    canSubmitRequestedCwd,
+    createSession,
+    onRequestedCwdConsumed,
+    requestedCwdProjectRelativePath,
+    showError
+  ]);
 
   useXtermTerminal({
     api,

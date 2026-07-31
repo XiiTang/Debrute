@@ -141,8 +141,10 @@ Focused units own cohesive state:
   changes until React commits. It then unsubscribes and
   `useWorkbenchPresentationController` becomes the only document theme writer,
   deriving theme and locale from that projection.
-- `useWorkbenchSettingsController` exists only after Settings activation. It
-  owns settings commands and their local in-flight UI state, then reconciles
+- `useWorkbenchSettingsController` exists only after the first Settings
+  activation and then remains alive until that Workbench ends, independently
+  of the open Settings panel. It owns Settings commands, Integration retry
+  errors, and the Canvas Text Appearance save lifecycle while reconciling
   accepted values from `WorkbenchGlobalProjection`; it does not own theme,
   locale, or another accepted Global snapshot.
 - `useProjectExplorerController` loads only after Explorer or a file-command
@@ -165,6 +167,9 @@ floating text windows, Canvas video controls, the CodeMirror engine, and each
 CodeMirror language parser load from separate chunks when their owning surface
 first needs them. Optional features mount from the current Global and Project
 projections, so events accepted before activation are not replayed or lost.
+After first activation, the Settings lifecycle host remains mounted while its
+panel may close and reopen; other optional feature surfaces keep their owning
+lifecycle rules.
 Canvas managed fonts gate only active Canvas text surfaces and floating text
 windows; they never block the shell, Explorer, Settings, or a Project-open
 result. The production build manifest enforces gzip ceilings of 80 KiB for the
@@ -352,14 +357,21 @@ Workbench sends closed partial settings mutations. Editable model text fields
 are trimmed before submission; Runtime accepts only already-canonical values
 and does not repeat that normalization. Empty settings objects and unknown
 fields are errors, while submitting a valid value that is already current is an
-idempotent no-op.
+idempotent no-op. Settings resources and commands remain private to the
+Settings feature instead of being added to the shared Workbench state and
+action bags.
 
 Canvas Text Appearance mutations always carry the complete font ID, font size,
 line-height ratio, requested weight, letter spacing, and ligature value. Valid
 control changes update the local Canvas immediately. Each Workbench window
 serializes its own submissions and replaces only an unsent appearance with the
-newest complete value. Runtime event order remains authoritative across
-windows; a rejected submission restores the latest Runtime-confirmed value.
+newest complete value. A successful mutation response is not confirmation: the
+local value remains presented until an ordered `globalSettings.changed` event
+contains the same complete Canvas Text Appearance. Earlier mismatching events
+do not clear it, and a newer local submission retires any older value still
+awaiting confirmation. After a match, later Runtime events win. Runtime event
+order remains authoritative across windows, and a rejected submission cancels
+its unsent coalesced work and restores the latest Runtime-confirmed value.
 
 The runtime persists `system`, `dark`, or `light` as the Workbench theme
 preference. `system` follows `prefers-color-scheme`; the resolved value is
@@ -429,16 +441,30 @@ dropped directories. Whole batches are validated before the operation begins.
 One Project Path Command model describes operations on the Project root and on
 single or multiple Project Path targets. Explorer pointer interaction, Project
 Tree keyboard shortcuts, and Canvas context menus only supply command intent;
-they do not define different command meanings. One Project-scoped coordinator
-owns availability, target interpretation, confirmation, and accepted follow-up
-selection, clipboard, and Canvas state. It applies the narrow current-generation
-check needed before a completion writes to shared UI state.
+they do not define different command meanings. One Project-scoped intake
+authority owns admission and atomically captures the accepted Project id and
+binding generation in an opaque command scope. Every context-menu, keyboard,
+inline-edit, drag-and-drop, and Canvas Project Path entry point must obtain that
+scope. A command effect cannot be submitted without it.
 
-The coordinator delegates effects rather than absorbing their implementations:
-filesystem mutation and native path access cross Runtime's validated native-file
-boundary, Canvas navigation remains Canvas-owned, Terminal opening remains
-Terminal-owned, and Photoshop transfer remains integration-owned. Project Paths
-remain the browser's normal file identity across all invocation surfaces.
+The intake authority does not own interaction state or command implementations.
+Explorer retains selection, clipboard, and inline-edit presentation; drag and
+drop retains `DataTransfer` and modifier interpretation; Canvas retains
+selection and camera behavior. Shared target and conflict rules remain pure
+policies. A menu and keyboard router only translates those surfaces into the
+same commands and is not an admission authority.
+
+One scoped effect boundary is the only Workbench module that invokes Runtime
+Project Path adapters. It verifies that the captured scope is still admitted at
+the instant an effect is submitted. The Workbench composition root constructs
+that boundary from the full API; the generation subtree's API type omits the raw
+Project Path adapter methods, so feature modules cannot bypass the boundary.
+Filesystem mutation and native path access then cross Runtime's validated
+native-file boundary, Canvas navigation remains Canvas-owned, and Photoshop
+transfer remains integration-owned. A context-menu Terminal request carries the
+same accepted scope through lazy feature loading and rechecks it immediately
+before Terminal creates the requested session. Project Paths remain the
+browser's normal file identity across all invocation surfaces.
 
 For one Project-backed PNG, JPEG, WebP, or PSD file whose snapshot `sizeBytes`
 is at most 256 MiB, the shared Explorer/Canvas context menu adds **Send to
@@ -472,8 +498,11 @@ Runtime cancellation. Project-local Explorer, selection, inline-edit, and Canvas
 presentation state lives beneath the generation-keyed subtree and retires with
 the old generation. Only a completion that can escape into shared clipboard,
 Canvas navigation, or global-notification state performs a narrow current-scope
-check. The Project binding lifecycle issues no per-command token and does not own
-command completion.
+check through its accepted command scope. This Web capability is in-memory,
+unforgeable by ordinary callers, and contains only Project identity and binding
+generation checks; it is not a queue, Runtime lease, cancellation token, retry,
+or rollback mechanism. The Project binding lifecycle owns admission state and
+does not own command completion.
 
 Product Quit has a narrower completion boundary. Runtime first stops accepting
 new work and signals every Workbench connection and Project request lifetime.

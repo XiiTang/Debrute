@@ -2213,30 +2213,6 @@ function workbenchStateFixture(
       opening: false
     },
     explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
-    globalSettings: {
-      status: 'ready',
-      value: {
-        workbench: { locale: 'en', themePreference: 'system' },
-        canvas: {
-          textAppearance: {
-            fontId: 'noto-sans-mono-cjk-sc',
-            fontSizePx: 12,
-            lineHeightRatio: 1.4,
-            fontWeight: 400,
-            letterSpacingPx: 0,
-            ligatures: true
-          }
-        },
-        chrome: { recentProjects: [] },
-        models: {
-          image: [],
-          video: [],
-          audio: []
-        }
-      }
-    },
-    integrations: { status: 'ready', value: { integrations: [], backends: [] } },
-    product: { status: 'ready', value: productState() },
     photoshop: { status: 'ready', value: { sessions: [] } },
     resolvedTheme: 'dark',
     canvasFeedback: undefined,
@@ -2247,21 +2223,6 @@ function workbenchStateFixture(
 }
 
 const actions: WorkbenchActions = {
-  checkProductUpdate: async () => undefined,
-  applyProductUpdate: async () => undefined,
-  saveGlobalSettings: async () => undefined,
-  revealModelApiKey: async () => {
-    throw new Error('not used');
-  },
-  rescanIntegrations: async () => undefined,
-  runIntegrationOperation: async (input) => ({
-    ok: true,
-    integrationId: input.integrationId,
-    operation: input.operation
-  }),
-  sendProjectFileToPhotoshop: async () => {
-    throw new Error('not used');
-  },
   lookupGeneratedAssetMetadata: async () => {
     throw new Error('not used');
   },
@@ -2306,27 +2267,8 @@ const actions: WorkbenchActions = {
   repairCanvasIndex: async () => {
     throw new Error('not used');
   },
-  openProject: async () => undefined,
-  openTerminalPanel: () => undefined
+  openProject: async () => undefined
 };
-
-function productState() {
-  return {
-    productVersion: '0.2.0',
-    platform: 'win32' as const,
-    cli: {
-      status: 'ready' as const,
-      version: '0.2.0',
-      path: '/home/me/.debrute/bin/debrute',
-      skillsVersion: '0.2.0',
-      skillsRoot: '/home/me/.agents/skills'
-    },
-    update: {
-      type: 'up_to_date' as const,
-      currentVersion: '0.2.0'
-    }
-  };
-}
 
 function projectTreeDragDataTransfer(entries: Array<{ kind: 'file' | 'directory'; projectRelativePath: string }>): Pick<DataTransfer, 'getData'> {
   return {

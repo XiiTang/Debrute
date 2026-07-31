@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  WorkbenchApiClient,
   ProjectPathEntry,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectSessionSnapshot
@@ -8,6 +7,8 @@ import type {
 import { getDebruteShellApi } from '../../api/shellApi';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import type { WorkbenchI18n } from '../i18n';
+import type { ProjectPathCommandEffects } from '../services/projectPathCommandEffects.js';
+import type { AcceptedProjectPathCommandScope } from '../services/projectPathCommandIntake.js';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './projectTreeEditing';
 import { createProjectTreeExternalDropPlan } from './projectTreeExternalDrop';
@@ -29,11 +30,6 @@ import {
   singleFileBatchResultPath
 } from './workbenchFileCommands';
 
-interface ProjectCommandScope {
-  projectId: string | undefined;
-  generation: number;
-}
-
 type DirectoryLoadOutcome =
   | { ok: true }
   | { ok: false; error: unknown };
@@ -49,80 +45,59 @@ export interface ProjectExplorerController {
   fileClipboard: WorkbenchFileClipboard | undefined;
   inlineEdit: ProjectTreeInlineEditState | undefined;
   setSelection(selection: ProjectTreeSelectionState): void;
-  beginCreateFile(parentProjectRelativePath: string): void;
-  beginCreateDirectory(parentProjectRelativePath: string): void;
-  beginRename(entry: ProjectPathEntry): void;
-  copyEntries(entries: ProjectPathEntry[]): void;
-  cutEntries(entries: ProjectPathEntry[]): void;
-  pasteEntries(input: {
+  beginCreateFile(scope: AcceptedProjectPathCommandScope, parentProjectRelativePath: string): void;
+  beginCreateDirectory(scope: AcceptedProjectPathCommandScope, parentProjectRelativePath: string): void;
+  beginRename(scope: AcceptedProjectPathCommandScope, entry: ProjectPathEntry): void;
+  copyEntries(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): void;
+  cutEntries(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): void;
+  pasteEntries(scope: AcceptedProjectPathCommandScope, input: {
     clipboard: WorkbenchFileClipboard;
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
   }): void;
-  copyAbsolutePaths(entries: ProjectPathEntry[]): Promise<string[] | undefined>;
-  revealEntry(entry: ProjectPathEntry): void;
-  trashEntries(entries: ProjectPathEntry[]): void;
-  deleteEntriesPermanently(entries: ProjectPathEntry[]): void;
+  copyAbsolutePaths(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): Promise<string[] | undefined>;
+  revealEntry(scope: AcceptedProjectPathCommandScope, entry: ProjectPathEntry): void;
+  trashEntries(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): void;
+  deleteEntriesPermanently(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): void;
   updateEditValue(value: string): void;
-  submitEdit(): Promise<void>;
+  submitEdit(scope: AcceptedProjectPathCommandScope): Promise<void>;
   cancelEdit(): void;
   clearCut(): void;
-  loadDirectory(projectRelativeDirectory: string): void;
-  handleInternalDrop(input: {
+  loadDirectory(scope: AcceptedProjectPathCommandScope, projectRelativeDirectory: string): void;
+  handleInternalDrop(scope: AcceptedProjectPathCommandScope, input: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     operation: 'copy' | 'move';
   }): void;
-  handleExternalDrop(input: {
+  handleExternalDrop(scope: AcceptedProjectPathCommandScope, input: {
     dataTransfer: DataTransfer;
     targetDirectoryProjectRelativePath: string;
   }): void;
 }
 
 export interface ProjectExplorerControllerInput {
-  api: WorkbenchApiClient;
-  projectId: string | undefined;
-  projectGeneration: number;
+  commandEffects: ProjectPathCommandEffects;
   getSnapshot(): WorkbenchProjectSessionSnapshot | undefined;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
-  locateProjectFileInCanvas(projectRelativePath: string): void;
+  centerProjectFileInCanvas(projectRelativePath: string): void;
   notify(message: string): void;
   i18n: WorkbenchI18n;
-  canStartProjectPathCommand(): boolean;
-  isCurrentProjectPathCommandScope(): boolean;
 }
 
 export function useProjectExplorerController(
   input: ProjectExplorerControllerInput
 ): ProjectExplorerController {
-  const { canStartProjectPathCommand, isCurrentProjectPathCommandScope } = input;
+  const { commandEffects } = input;
   const [selection, setSelectionState] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
   const [fileClipboard, setFileClipboard] = useState<WorkbenchFileClipboard>();
   const [inlineEdit, setInlineEdit] = useState<ProjectTreeInlineEditState>();
-  const projectScopeRef = useRef<ProjectCommandScope>({
-    projectId: input.projectId,
-    generation: input.projectGeneration
-  });
   const editIntentTokenRef = useRef(0);
   const pendingCreateParentLoadRef = useRef<PendingCreateParentLoad | undefined>(undefined);
-
-  const captureProjectScope = useCallback((): ProjectCommandScope => ({ ...projectScopeRef.current }), []);
-  const isCurrentProjectScope = useCallback((scope: ProjectCommandScope, resultProjectId?: string): boolean => {
-    const current = projectScopeRef.current;
-    return scope.generation === current.generation
-      && scope.projectId === current.projectId
-      && isCurrentProjectPathCommandScope()
-      && (resultProjectId === undefined || resultProjectId === scope.projectId);
-  }, [isCurrentProjectPathCommandScope]);
 
   useEffect(() => {
     return () => {
       editIntentTokenRef.current += 1;
       pendingCreateParentLoadRef.current = undefined;
-      projectScopeRef.current = {
-        projectId: undefined,
-        generation: projectScopeRef.current.generation + 1
-      };
     };
   }, []);
 
@@ -130,18 +105,21 @@ export function useProjectExplorerController(
     setSelectionState(nextSelection);
   }, []);
 
-  const requestDirectory = useCallback(async (projectRelativeDirectory: string): Promise<void> => {
-    if (!canStartProjectPathCommand()) {
+  const requestDirectory = useCallback(async (
+    projectRelativeDirectory: string,
+    scope: AcceptedProjectPathCommandScope
+  ): Promise<void> => {
+    const request = commandEffects.loadProjectDirectory(scope, projectRelativeDirectory);
+    if (!request) {
       throw new Error('Project path commands are unavailable.');
     }
-    const scope = captureProjectScope();
     try {
-      const result = await input.api.loadProjectDirectory(projectRelativeDirectory);
-      if (!isCurrentProjectScope(scope, result.projectId)) {
+      const result = await request;
+      if (!scope.isCurrent(result.projectId)) {
         throw new Error('Project changed while its directory was loading.');
       }
     } catch (error) {
-      if (isCurrentProjectScope(scope)) {
+      if (scope.isCurrent()) {
         input.notify(notificationMessageForFileCommandError(
           input.i18n.t('shell.notifications.loadProjectDirectoryFailed'),
           error
@@ -149,70 +127,74 @@ export function useProjectExplorerController(
       }
       throw error;
     }
-  }, [canStartProjectPathCommand, captureProjectScope, input.api, input.i18n, input.notify, isCurrentProjectScope]);
+  }, [commandEffects, input.i18n, input.notify]);
 
-  const loadDirectory = useCallback((projectRelativeDirectory: string) => {
-    void requestDirectory(projectRelativeDirectory).catch(() => undefined);
+  const loadDirectory = useCallback((
+    scope: AcceptedProjectPathCommandScope,
+    projectRelativeDirectory: string
+  ) => {
+    void requestDirectory(projectRelativeDirectory, scope).catch(() => undefined);
   }, [requestDirectory]);
 
   const beginCreate = useCallback((
+    scope: AcceptedProjectPathCommandScope,
     kind: 'creating-file' | 'creating-directory',
     parentProjectRelativePath: string
   ) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
     const token = editIntentTokenRef.current + 1;
     editIntentTokenRef.current = token;
     pendingCreateParentLoadRef.current = parentProjectRelativePath
       ? {
           token,
           parentProjectRelativePath,
-          outcome: directoryLoadOutcome(requestDirectory(parentProjectRelativePath))
+          outcome: directoryLoadOutcome(requestDirectory(parentProjectRelativePath, scope))
         }
       : undefined;
     setInlineEdit(createInlineEditState(kind, parentProjectRelativePath));
-  }, [canStartProjectPathCommand, requestDirectory]);
+  }, [requestDirectory]);
 
-  const beginCreateFile = useCallback((parentProjectRelativePath: string) => {
-    beginCreate('creating-file', parentProjectRelativePath);
+  const beginCreateFile = useCallback((
+    scope: AcceptedProjectPathCommandScope,
+    parentProjectRelativePath: string
+  ) => {
+    beginCreate(scope, 'creating-file', parentProjectRelativePath);
   }, [beginCreate]);
 
-  const beginCreateDirectory = useCallback((parentProjectRelativePath: string) => {
-    beginCreate('creating-directory', parentProjectRelativePath);
+  const beginCreateDirectory = useCallback((
+    scope: AcceptedProjectPathCommandScope,
+    parentProjectRelativePath: string
+  ) => {
+    beginCreate(scope, 'creating-directory', parentProjectRelativePath);
   }, [beginCreate]);
 
-  const beginRename = useCallback((entry: ProjectPathEntry) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
+  const beginRename = useCallback((
+    _scope: AcceptedProjectPathCommandScope,
+    entry: ProjectPathEntry
+  ) => {
     editIntentTokenRef.current += 1;
     pendingCreateParentLoadRef.current = undefined;
     setInlineEdit(createInlineEditState('renaming', entry.projectRelativePath));
-  }, [canStartProjectPathCommand]);
+  }, []);
 
-  const copyEntries = useCallback((entries: ProjectPathEntry[]) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
+  const copyEntries = useCallback((
+    _scope: AcceptedProjectPathCommandScope,
+    entries: ProjectPathEntry[]
+  ) => {
     setFileClipboard({ operation: 'copy', entries });
-  }, [canStartProjectPathCommand]);
+  }, []);
 
-  const cutEntries = useCallback((entries: ProjectPathEntry[]) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
+  const cutEntries = useCallback((
+    _scope: AcceptedProjectPathCommandScope,
+    entries: ProjectPathEntry[]
+  ) => {
     setFileClipboard({ operation: 'cut', entries });
-  }, [canStartProjectPathCommand]);
+  }, []);
 
   const updateEditValue = useCallback((value: string) => {
     setInlineEdit((current) => current ? { ...current, value } : current);
   }, []);
 
-  const submitEdit = useCallback(async () => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
+  const submitEdit = useCallback(async (scope: AcceptedProjectPathCommandScope) => {
     const current = inlineEdit;
     if (!current || current.submitting) {
       return;
@@ -226,7 +208,6 @@ export function useProjectExplorerController(
       return;
     }
     const { error: _error, ...submittingEdit } = current;
-    const scope = captureProjectScope();
     const intentToken = editIntentTokenRef.current;
     setInlineEdit({ ...submittingEdit, submitting: true });
     try {
@@ -242,14 +223,14 @@ export function useProjectExplorerController(
             pending = {
               token: intentToken,
               parentProjectRelativePath: parent,
-              outcome: directoryLoadOutcome(requestDirectory(parent))
+              outcome: directoryLoadOutcome(requestDirectory(parent, scope))
             };
             pendingCreateParentLoadRef.current = pending;
           }
           const outcome = await pending.outcome;
           if (
             editIntentTokenRef.current !== intentToken
-            || !isCurrentProjectScope(scope)
+            || !scope.isCurrent()
           ) {
             return;
           }
@@ -260,32 +241,36 @@ export function useProjectExplorerController(
           }
         }
       }
-      const result = current.kind === 'renaming'
-        ? await input.api.renameProjectPath({
+      const request = current.kind === 'renaming'
+        ? commandEffects.renameProjectPath(scope, {
             projectRelativePath: current.projectRelativePath,
             name: validation.name
           })
         : current.kind === 'creating-file'
-          ? await input.api.createProjectFile({
+          ? commandEffects.createProjectFile(scope, {
               parentProjectRelativePath: current.parentProjectRelativePath,
               name: validation.name
             })
-          : await input.api.createProjectDirectory({
+          : commandEffects.createProjectDirectory(scope, {
               parentProjectRelativePath: current.parentProjectRelativePath,
               name: validation.name
             });
-      if (!isCurrentProjectScope(scope, result.projectId)) {
+      if (!request) {
+        return;
+      }
+      const result = await request;
+      if (!scope.isCurrent(result.projectId)) {
         return;
       }
       setSelectionState(projectTreeSelectionFromPaths([result.projectRelativePath]));
       pendingCreateParentLoadRef.current = undefined;
       setInlineEdit(undefined);
     } catch (error) {
-      if (isCurrentProjectScope(scope)) {
+      if (scope.isCurrent()) {
         setInlineEdit({ ...current, submitting: false, error: errorMessage(error) });
       }
     }
-  }, [canStartProjectPathCommand, captureProjectScope, inlineEdit, input.api, input.i18n, isCurrentProjectScope, requestDirectory]);
+  }, [commandEffects, inlineEdit, input.i18n, requestDirectory]);
 
   const cancelEdit = useCallback(() => {
     editIntentTokenRef.current += 1;
@@ -299,45 +284,49 @@ export function useProjectExplorerController(
 
   const applyBatchResult = useCallback((
     result: WorkbenchProjectFileBatchOperationResult,
-    scope: ProjectCommandScope
+    scope: AcceptedProjectPathCommandScope
   ): boolean => {
-    if (!isCurrentProjectScope(scope, result.projectId)) {
+    if (!scope.isCurrent(result.projectId)) {
       return false;
     }
     setSelectionState(projectTreeSelectionFromPaths(batchResultSelectionPaths(result.results)));
     const locatedPath = singleFileBatchResultPath(result.results);
     if (locatedPath) {
-      input.locateProjectFileInCanvas(locatedPath);
+      input.centerProjectFileInCanvas(locatedPath);
     }
     return true;
-  }, [input.locateProjectFileInCanvas, isCurrentProjectScope]);
+  }, [input.centerProjectFileInCanvas]);
 
   const copyPaths = useCallback(async (copyInput: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
-  }, scope: ProjectCommandScope): Promise<boolean> => {
-    const result = await input.api.copyProjectPaths(copyInput);
+  }, scope: AcceptedProjectPathCommandScope): Promise<boolean> => {
+    const request = commandEffects.copyProjectPaths(scope, copyInput);
+    if (!request) {
+      return false;
+    }
+    const result = await request;
     return applyBatchResult(result, scope);
-  }, [applyBatchResult, input.api]);
+  }, [applyBatchResult, commandEffects]);
 
   const movePaths = useCallback(async (moveInput: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
-  }, scope: ProjectCommandScope): Promise<boolean> => {
-    const result = await input.api.moveProjectPaths(moveInput);
+  }, scope: AcceptedProjectPathCommandScope): Promise<boolean> => {
+    const request = commandEffects.moveProjectPaths(scope, moveInput);
+    if (!request) {
+      return false;
+    }
+    const result = await request;
     return applyBatchResult(result, scope);
-  }, [applyBatchResult, input.api]);
+  }, [applyBatchResult, commandEffects]);
 
-  const pasteEntries = useCallback((pasteInput: {
+  const pasteEntries = useCallback((scope: AcceptedProjectPathCommandScope, pasteInput: {
     clipboard: WorkbenchFileClipboard;
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
   }) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
-    const scope = captureProjectScope();
     const request = pasteInput.clipboard.operation === 'cut'
       ? movePaths({
           entries: pasteInput.clipboard.entries,
@@ -355,39 +344,39 @@ export function useProjectExplorerController(
           : current);
       }
     }).catch((error) => {
-      if (isCurrentProjectScope(scope)) {
+      if (scope.isCurrent()) {
         input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.pasteFailed'), error));
       }
     });
-  }, [canStartProjectPathCommand, captureProjectScope, copyPaths, input.i18n, input.notify, isCurrentProjectScope, movePaths]);
+  }, [copyPaths, input.i18n, input.notify, movePaths]);
 
-  const copyAbsolutePaths = useCallback(async (entries: ProjectPathEntry[]): Promise<string[] | undefined> => {
-    if (!canStartProjectPathCommand()) {
-      return undefined;
-    }
-    const scope = captureProjectScope();
+  const copyAbsolutePaths = useCallback(async (
+    scope: AcceptedProjectPathCommandScope,
+    entries: ProjectPathEntry[]
+  ): Promise<string[] | undefined> => {
     try {
-      const result = await input.api.copyProjectAbsolutePaths({ entries });
-      return isCurrentProjectScope(scope) ? result.paths : undefined;
+      const request = commandEffects.copyProjectAbsolutePaths(scope, { entries });
+      if (!request) {
+        return undefined;
+      }
+      const result = await request;
+      return scope.isCurrent() ? result.paths : undefined;
     } catch (error) {
-      if (isCurrentProjectScope(scope)) {
+      if (scope.isCurrent()) {
         input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.copyPathFailed'), error));
       }
       return undefined;
     }
-  }, [canStartProjectPathCommand, captureProjectScope, input.api, input.i18n, input.notify, isCurrentProjectScope]);
+  }, [commandEffects, input.i18n, input.notify]);
 
-  const revealEntry = useCallback((entry: ProjectPathEntry) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
-    const scope = captureProjectScope();
-    void input.api.revealProjectPathInSystemFileManager(entry).catch((error) => {
-      if (isCurrentProjectScope(scope)) {
+  const revealEntry = useCallback((scope: AcceptedProjectPathCommandScope, entry: ProjectPathEntry) => {
+    const request = commandEffects.revealProjectPathInSystemFileManager(scope, entry);
+    void request?.catch((error) => {
+      if (scope.isCurrent()) {
         input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.revealFailed'), error));
       }
     });
-  }, [canStartProjectPathCommand, captureProjectScope, input.api, input.i18n, input.notify, isCurrentProjectScope]);
+  }, [commandEffects, input.i18n, input.notify]);
 
   const applyDeletedEntries = useCallback((
     entries: ProjectPathEntry[],
@@ -417,16 +406,19 @@ export function useProjectExplorerController(
     ));
   }, [input.activeCanvasRuntime]);
 
-  const deleteEntries = useCallback((entries: ProjectPathEntry[], permanent: boolean) => {
-    if (!canStartProjectPathCommand()) {
+  const deleteEntries = useCallback((
+    scope: AcceptedProjectPathCommandScope,
+    entries: ProjectPathEntry[],
+    permanent: boolean
+  ) => {
+    const request = permanent
+      ? commandEffects.deleteProjectPathsPermanently(scope, { entries })
+      : commandEffects.trashProjectPaths(scope, { entries });
+    if (!request) {
       return;
     }
-    const scope = captureProjectScope();
-    const request = permanent
-      ? input.api.deleteProjectPathsPermanently({ entries })
-      : input.api.trashProjectPaths({ entries });
     void request.then((result) => {
-      if (!isCurrentProjectScope(scope, result.projectId)) {
+      if (!scope.isCurrent(result.projectId)) {
         return;
       }
       const acceptedSnapshot = input.getSnapshot();
@@ -435,35 +427,31 @@ export function useProjectExplorerController(
       }
       applyDeletedEntries(entries, acceptedSnapshot);
     }).catch((error) => {
-      if (isCurrentProjectScope(scope)) {
+      if (scope.isCurrent()) {
         input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.deleteFailed'), error));
       }
     });
-  }, [applyDeletedEntries, canStartProjectPathCommand, captureProjectScope, input.api, input.getSnapshot, input.i18n, input.notify, isCurrentProjectScope]);
+  }, [applyDeletedEntries, commandEffects, input.getSnapshot, input.i18n, input.notify]);
 
-  const trashEntries = useCallback((entries: ProjectPathEntry[]) => {
-    deleteEntries(entries, false);
+  const trashEntries = useCallback((scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]) => {
+    deleteEntries(scope, entries, false);
   }, [deleteEntries]);
 
-  const deleteEntriesPermanently = useCallback((entries: ProjectPathEntry[]) => {
-    deleteEntries(entries, true);
+  const deleteEntriesPermanently = useCallback((scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]) => {
+    deleteEntries(scope, entries, true);
   }, [deleteEntries]);
 
-  const handleInternalDrop = useCallback((dropInput: {
+  const handleInternalDrop = useCallback((scope: AcceptedProjectPathCommandScope, dropInput: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
     operation: 'copy' | 'move';
   }) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
-    const scope = captureProjectScope();
     if (dropInput.operation === 'copy') {
       void copyPaths({
         entries: dropInput.entries,
         targetDirectoryProjectRelativePath: dropInput.targetDirectoryProjectRelativePath
       }, scope).catch((error) => {
-        if (isCurrentProjectScope(scope)) {
+        if (scope.isCurrent()) {
           input.notify(input.i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) }));
         }
       });
@@ -488,26 +476,22 @@ export function useProjectExplorerController(
       targetDirectoryProjectRelativePath: dropInput.targetDirectoryProjectRelativePath,
       ...(overwrite ? { overwrite: true } : {})
     }, scope).catch((error) => {
-      if (isCurrentProjectScope(scope)) {
+      if (scope.isCurrent()) {
         input.notify(input.i18n.t('shell.notifications.moveFailed', { message: errorMessage(error) }));
       }
     });
-  }, [canStartProjectPathCommand, captureProjectScope, copyPaths, input.getSnapshot, input.i18n, input.notify, isCurrentProjectScope, movePaths]);
+  }, [copyPaths, input.getSnapshot, input.i18n, input.notify, movePaths]);
 
-  const handleExternalDrop = useCallback((dropInput: {
+  const handleExternalDrop = useCallback((scope: AcceptedProjectPathCommandScope, dropInput: {
     dataTransfer: DataTransfer;
     targetDirectoryProjectRelativePath: string;
   }) => {
-    if (!canStartProjectPathCommand()) {
-      return;
-    }
-    const scope = captureProjectScope();
     void createProjectTreeExternalDropPlan({
       dataTransfer: dropInput.dataTransfer,
       shell: getDebruteShellApi(),
       targetDirectoryProjectRelativePath: dropInput.targetDirectoryProjectRelativePath
     }).then(async (plan) => {
-      if (!canStartProjectPathCommand() || !isCurrentProjectScope(scope)) {
+      if (!scope.canSubmit()) {
         return;
       }
       const overwrite = externalDropPlanHasConflict({
@@ -521,13 +505,13 @@ export function useProjectExplorerController(
       }))) {
         return;
       }
-      const result = plan.localPaths.length > 0
-        ? await input.api.importExternalLocalProjectPaths({
+      const request = plan.localPaths.length > 0
+        ? commandEffects.importExternalLocalProjectPaths(scope, {
             sources: plan.localPaths,
             targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
             ...(overwrite ? { overwrite: true } : {})
           })
-        : await input.api.importExternalProjectUploads({
+        : commandEffects.importExternalProjectUploads(scope, {
             entries: plan.uploads.map((upload) => (
               upload.kind === 'file'
                 ? { kind: 'file', projectRelativePath: upload.projectRelativePath, file: upload.file }
@@ -536,13 +520,17 @@ export function useProjectExplorerController(
             targetDirectoryProjectRelativePath: plan.targetDirectoryProjectRelativePath,
             ...(overwrite ? { overwrite: true } : {})
           });
+      if (!request) {
+        return;
+      }
+      const result = await request;
       applyBatchResult(result, scope);
     }).catch((error) => {
-      if (isCurrentProjectScope(scope)) {
+      if (scope.isCurrent()) {
         input.notify(input.i18n.t('shell.notifications.importFailed', { message: errorMessage(error) }));
       }
     });
-  }, [applyBatchResult, canStartProjectPathCommand, captureProjectScope, input.api, input.getSnapshot, input.i18n, input.notify, isCurrentProjectScope]);
+  }, [applyBatchResult, commandEffects, input.getSnapshot, input.i18n, input.notify]);
 
   return useMemo(() => ({
     selection,

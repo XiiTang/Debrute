@@ -2,29 +2,34 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type {
   CanvasTextAppearance,
   DebruteGlobalSettingsView,
+  DebruteProductState,
   IntegrationSettingsView,
+  RunIntegrationOperationInput,
+  RunIntegrationOperationResult,
+  SaveDebruteGlobalSettingsInput,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
-import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../../types.js';
+import type { EventProjection, SettingsResource } from '../../types.js';
 import type { WorkbenchI18n } from '../i18n/index.js';
 import type {
   WorkbenchGlobalProjection,
   WorkbenchGlobalProjectionState
 } from '../services/WorkbenchGlobalProjection.js';
 
-export type WorkbenchSettingsActions = Pick<WorkbenchActions,
-  | 'checkProductUpdate'
-  | 'applyProductUpdate'
-  | 'saveGlobalSettings'
-  | 'revealModelApiKey'
-  | 'rescanIntegrations'
-  | 'runIntegrationOperation'
->;
+export interface WorkbenchSettingsActions {
+  checkProductUpdate(): Promise<void>;
+  applyProductUpdate(): Promise<void>;
+  saveGlobalSettings(input: SaveDebruteGlobalSettingsInput): Promise<void>;
+  revealModelApiKey(modelId: string): Promise<string>;
+  rescanIntegrations(): Promise<void>;
+  runIntegrationOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
+}
 
 export interface WorkbenchSettingsController {
-  globalSettings: WorkbenchState['globalSettings'];
+  globalSettings: EventProjection<DebruteGlobalSettingsView>;
   integrations: SettingsResource<IntegrationSettingsView>;
-  product: WorkbenchState['product'];
+  product: EventProjection<DebruteProductState | null>;
+  canvasTextAppearance: CanvasTextAppearance;
   actions: WorkbenchSettingsActions;
 }
 
@@ -64,11 +69,18 @@ export function useWorkbenchSettingsController(
   const [canvasTextAppearanceOverlay, setCanvasTextAppearanceOverlay] = useState<CanvasTextAppearance>();
   const [integrationsLoadError, setIntegrationsLoadError] = useState<string>();
   const queueRef = useRef<CanvasTextAppearanceSaveQueue>({ running: false });
+  const acceptedCanvasTextAppearanceRef = useRef(projection.settings.canvas.textAppearance);
+  acceptedCanvasTextAppearanceRef.current = projection.settings.canvas.textAppearance;
   const optionalResourcesRequestedRef = useRef(false);
 
   useEffect(() => {
     const queue = queueRef.current;
-    delete queue.awaitingEvent;
+    if (
+      queue.awaitingEvent
+      && sameCanvasTextAppearance(queue.awaitingEvent, projection.settings.canvas.textAppearance)
+    ) {
+      delete queue.awaitingEvent;
+    }
     if (queue.inFlight && sameCanvasTextAppearance(queue.inFlight.appearance, projection.settings.canvas.textAppearance)) {
       queue.inFlight.confirmed = true;
     }
@@ -81,6 +93,16 @@ export function useWorkbenchSettingsController(
 
   const saveCanvasTextAppearance = useCallback((appearance: CanvasTextAppearance): Promise<void> => {
     const queue = queueRef.current;
+    if (
+      !queue.running
+      && !queue.inFlight
+      && !queue.queued
+      && !queue.awaitingEvent
+      && sameCanvasTextAppearance(appearance, acceptedCanvasTextAppearanceRef.current)
+    ) {
+      return Promise.resolve();
+    }
+    delete queue.awaitingEvent;
     setCanvasTextAppearanceOverlay(appearance);
     const pending = new Promise<void>((resolve, reject) => {
       const waiter = { resolve, reject };
@@ -172,12 +194,14 @@ export function useWorkbenchSettingsController(
     saveCanvasTextAppearance
   ]);
 
-  const globalSettings = useMemo<WorkbenchState['globalSettings']>(() => ({
+  const canvasTextAppearance = canvasTextAppearanceOverlay
+    ?? projection.settings.canvas.textAppearance;
+  const globalSettings = useMemo<EventProjection<DebruteGlobalSettingsView>>(() => ({
     status: 'ready',
     value: canvasTextAppearanceOverlay
-      ? globalSettingsWithCanvasTextAppearance(projection.settings, canvasTextAppearanceOverlay)
+      ? globalSettingsWithCanvasTextAppearance(projection.settings, canvasTextAppearance)
       : projection.settings
-  }), [canvasTextAppearanceOverlay, projection.settings]);
+  }), [canvasTextAppearance, canvasTextAppearanceOverlay, projection.settings]);
   const integrations = integrationsLoadError
     ? { status: 'error' as const, message: integrationsLoadError }
     : projection.integrations;
@@ -185,8 +209,9 @@ export function useWorkbenchSettingsController(
     globalSettings,
     integrations,
     product: projection.product,
+    canvasTextAppearance,
     actions
-  }), [actions, globalSettings, integrations, projection.product]);
+  }), [actions, canvasTextAppearance, globalSettings, integrations, projection.product]);
 }
 
 function takeQueuedCanvasAppearanceTask(

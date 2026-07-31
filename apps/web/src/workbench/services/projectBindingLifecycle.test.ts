@@ -18,7 +18,7 @@ describe('Project binding lifecycle', () => {
     let lifecycle!: ProjectBindingLifecycle;
     const openProject = vi.fn<WorkbenchApiClient['openProject']>(() => {
       expect(lifecycle.getState()).toEqual({ opening: true });
-      expect(lifecycle.canStartProjectPathCommand(1)).toBe(false);
+      expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(false);
       return pending.promise;
     });
     const commitProjectRoute = vi.fn();
@@ -48,8 +48,8 @@ describe('Project binding lifecycle', () => {
     });
     expect(commitProjectRoute).toHaveBeenCalledWith('project-b');
     expect(lifecycle.getState()).toEqual({ opening: false });
-    expect(lifecycle.canStartProjectPathCommand(1)).toBe(false);
-    expect(lifecycle.canStartProjectPathCommand(2)).toBe(true);
+    expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(false);
+    expect(lifecycle.canAcceptProjectPathCommand(2)).toBe(true);
   });
 
   it('restores the unchanged binding after a failed attempt', async () => {
@@ -75,7 +75,7 @@ describe('Project binding lifecycle', () => {
       generation: 1
     });
     expect(lifecycle.getState()).toEqual({ opening: false });
-    expect(lifecycle.canStartProjectPathCommand(1)).toBe(true);
+    expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(true);
     expect(commitProjectRoute).not.toHaveBeenCalled();
   });
 
@@ -101,7 +101,7 @@ describe('Project binding lifecycle', () => {
       projectId: 'project-a',
       generation: 1
     });
-    expect(lifecycle.canStartProjectPathCommand(1)).toBe(true);
+    expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(true);
     expect(commitProjectRoute).not.toHaveBeenCalled();
   });
 
@@ -126,7 +126,7 @@ describe('Project binding lifecycle', () => {
       projectId: 'project-c',
       generation: 2
     });
-    expect(lifecycle.canStartProjectPathCommand(2)).toBe(true);
+    expect(lifecycle.canAcceptProjectPathCommand(2)).toBe(true);
     expect(commitProjectRoute).not.toHaveBeenCalled();
   });
 });

@@ -33,6 +33,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
         api={{} as WorkbenchApiClient}
         resolvedTheme="light"
         requestedCwdProjectRelativePath={null}
+        canSubmitRequestedCwd={() => true}
         onRequestedCwdConsumed={() => undefined}
       />
     );
@@ -102,6 +103,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
               api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
+              canSubmitRequestedCwd={() => true}
               onRequestedCwdConsumed={() => undefined}
             />
           </I18nProvider>
@@ -117,6 +119,69 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
 
       await act(async () => harness.emitSessions([created]));
       expect(container.textContent).toContain('one');
+    } finally {
+      await unmount(root, container);
+      terminalHookState.activeInput = null;
+    }
+  });
+
+  it('refuses a queued Project-path Terminal request whose accepted scope closed before the lazy panel submitted it', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onRequestedCwdConsumed = vi.fn();
+    const harness = createTerminalApiHarness();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <TerminalPanel
+              api={harness.api}
+              resolvedTheme="light"
+              requestedCwdProjectRelativePath="assets"
+              canSubmitRequestedCwd={() => false}
+              onRequestedCwdConsumed={onRequestedCwdConsumed}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(onRequestedCwdConsumed).toHaveBeenCalledOnce();
+      expect(harness.api.createTerminalSession).not.toHaveBeenCalled();
+    } finally {
+      await unmount(root, container);
+      terminalHookState.activeInput = null;
+    }
+  });
+
+  it('submits a queued Project-path Terminal request through its still-current accepted scope', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onRequestedCwdConsumed = vi.fn();
+    const harness = createTerminalApiHarness();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <TerminalPanel
+              api={harness.api}
+              resolvedTheme="light"
+              requestedCwdProjectRelativePath="assets"
+              canSubmitRequestedCwd={() => true}
+              onRequestedCwdConsumed={onRequestedCwdConsumed}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(onRequestedCwdConsumed).toHaveBeenCalledOnce();
+      expect(harness.api.createTerminalSession).toHaveBeenCalledOnce();
+      expect(harness.api.createTerminalSession).toHaveBeenCalledWith({
+        cwdProjectRelativePath: 'assets'
+      });
     } finally {
       await unmount(root, container);
       terminalHookState.activeInput = null;
@@ -141,6 +206,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
               api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
+              canSubmitRequestedCwd={() => true}
               onRequestedCwdConsumed={() => undefined}
             />
           </I18nProvider>
@@ -186,6 +252,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
               api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
+              canSubmitRequestedCwd={() => true}
               onRequestedCwdConsumed={() => undefined}
             />
           </I18nProvider>
@@ -227,6 +294,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
               api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
+              canSubmitRequestedCwd={() => true}
               onRequestedCwdConsumed={() => undefined}
             />
           </I18nProvider>
@@ -280,6 +348,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
               api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
+              canSubmitRequestedCwd={() => true}
               onRequestedCwdConsumed={() => undefined}
             />
           </I18nProvider>
@@ -315,6 +384,7 @@ describe('TerminalPanel rendering', { tags: ['terminal'] }, () => {
               api={harness.api}
               resolvedTheme="light"
               requestedCwdProjectRelativePath={null}
+              canSubmitRequestedCwd={() => true}
               onRequestedCwdConsumed={() => undefined}
             />
           </I18nProvider>

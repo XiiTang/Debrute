@@ -670,6 +670,46 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   describe('global settings save races', { tags: ['settings'] }, () => {
+    it('keeps an acknowledged Canvas Text Appearance while Settings is closed and reopened before confirmation', async () => {
+      const globalSettingsSave = vi.fn(async () => ({ ok: true as const }));
+      const { container, root } = await renderWorkbenchApp('/', { globalSettingsSave });
+
+      await act(async () => {
+        requireButton(container, 'Settings').click();
+        await Promise.resolve();
+      });
+      await waitForButton(container, 'Appearance');
+      await act(async () => {
+        requireButton(container, 'Appearance').click();
+      });
+
+      const fontSize = requireInputForLabel(container, 'Font size');
+      await act(async () => {
+        setInputValue(fontSize, '13');
+        fontSize.dispatchEvent(new Event('input', { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(globalSettingsSave).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        requireButton(container, 'Close Settings').click();
+      });
+      expect(container.querySelector('[data-testid="floating-panel-settings"]')).toBeNull();
+
+      await act(async () => {
+        requireButton(container, 'Settings').click();
+        await Promise.resolve();
+      });
+      await waitForButton(container, 'Appearance');
+      await act(async () => {
+        requireButton(container, 'Appearance').click();
+      });
+
+      expect(requireInputForLabel(container, 'Font size').value).toBe('13');
+      await unmount(root, container);
+    });
+
     it('does not roll a newer settings event back when an older save fails', async () => {
       const { save, container, root } = await startPendingLocaleSave();
 
@@ -993,6 +1033,25 @@ function setSelectValue(select: HTMLSelectElement, value: string): void {
     throw new Error('Expected HTMLSelectElement value setter.');
   }
   setter.call(select, value);
+}
+
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (!setter) {
+    throw new Error('Expected HTMLInputElement value setter.');
+  }
+  setter.call(input, value);
+}
+
+function requireInputForLabel(container: HTMLElement, label: string): HTMLInputElement {
+  const field = Array.from(container.querySelectorAll<HTMLElement>('.db-field')).find((candidate) => (
+    candidate.querySelector('.db-field__label')?.textContent === label
+  ));
+  const input = field?.querySelector('input');
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error(`Expected input for ${label}.`);
+  }
+  return input;
 }
 
 function snapshotFixture(): WorkbenchProjectSessionSnapshot {

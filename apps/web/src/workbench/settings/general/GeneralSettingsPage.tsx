@@ -8,9 +8,10 @@ import type {
   SaveDebruteGlobalSettingsInput,
   WorkbenchLocale
 } from '@debrute/app-protocol';
-import type { EventProjection, WorkbenchActions } from '../../../types.js';
+import type { EventProjection } from '../../../types.js';
 import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
 import { Button, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index.js';
+import type { WorkbenchSettingsActions } from '../useWorkbenchSettingsController.js';
 
 type OperationState =
   | { status: 'idle' }
@@ -19,7 +20,7 @@ type OperationState =
 
 type ProductUpdateAction = 'none' | 'check' | 'apply';
 
-type ProductActions = Pick<WorkbenchActions, 'checkProductUpdate' | 'applyProductUpdate'>;
+type ProductActions = Pick<WorkbenchSettingsActions, 'checkProductUpdate' | 'applyProductUpdate'>;
 
 export function GeneralSettingsPage({
   actions,

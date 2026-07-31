@@ -1,13 +1,19 @@
 import React, { useState } from 'react';
 import { AudioLines, Eye, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
-import type { DebruteGlobalSettingsView, IntegrationSettingsView } from '@debrute/app-protocol';
-import type { EventProjection, SettingsResource, WorkbenchActions, WorkbenchState } from '../../types.js';
+import type {
+  DebruteGlobalSettingsView,
+  DebruteProductState,
+  IntegrationSettingsView
+} from '@debrute/app-protocol';
+import type { EventProjection, SettingsResource } from '../../types.js';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage.js';
 import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage.js';
 import { SettingsResourcePanel } from './SettingsResourcePanel.js';
 import { useI18n } from '../i18n/index.js';
+import type { WorkbenchResolvedTheme } from '../services/workbenchTheme.js';
+import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController.js';
 
 const SETTINGS_NAV_GROUPS = [
   {
@@ -37,11 +43,11 @@ const SETTINGS_NAV_GROUPS = [
 
 type SettingsPageId = typeof SETTINGS_NAV_GROUPS[number]['items'][number]['id'];
 
-interface SettingsPanelState {
-  globalSettings: WorkbenchState['globalSettings'];
+export interface SettingsPanelState {
+  globalSettings: EventProjection<DebruteGlobalSettingsView>;
   integrations: SettingsResource<IntegrationSettingsView>;
-  product: WorkbenchState['product'];
-  resolvedTheme: WorkbenchState['resolvedTheme'];
+  product: EventProjection<DebruteProductState | null>;
+  resolvedTheme: WorkbenchResolvedTheme;
 }
 
 export function SettingsPanel({
@@ -49,7 +55,7 @@ export function SettingsPanel({
   actions
 }: {
   state: SettingsPanelState;
-  actions: WorkbenchActions;
+  actions: WorkbenchSettingsActions;
 }): React.ReactElement {
   const i18n = useI18n();
   const [activePage, setActivePage] = useState<SettingsPageId>('general');

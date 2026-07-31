@@ -4,6 +4,13 @@ import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types'
 import { textBufferFromFile } from './textFileBuffers';
 import { clearTextBufferError } from './textEditorWindows';
 
+type TextFileBufferApi = Pick<WorkbenchApiClient,
+  | 'putTextWorkingCopy'
+  | 'clearTextWorkingCopy'
+  | 'readProjectTextFile'
+  | 'writeProjectTextFile'
+>;
+
 export interface TextFileBufferActions {
   ensureTextFileBuffer(projectRelativePath: string): Promise<void>;
   updateTextFileBuffer(projectRelativePath: string, content: string): void;
@@ -31,7 +38,7 @@ interface TextWorkingCopyCoordinator {
 }
 
 export function useTextFileBufferActions(input: {
-  api: WorkbenchApiClient;
+  api: TextFileBufferApi;
   projectId: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   setTextFileBuffers: Dispatch<SetStateAction<Record<string, TextFileBuffer>>>;

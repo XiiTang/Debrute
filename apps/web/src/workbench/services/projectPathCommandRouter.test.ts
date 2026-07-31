@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createProjectPathCommandCoordinator } from './projectPathCommandCoordinator';
+import { createProjectPathCommandRouter } from './projectPathCommandRouter.js';
+import type {
+  AcceptedProjectPathCommandScope,
+  ProjectPathCommandIntake
+} from './projectPathCommandIntake.js';
 
-describe('Project Path Command coordinator', () => {
+describe('Project Path Command router', () => {
   it('derives Reveal in Canvas availability from the menu host live readiness', () => {
-    const coordinator = createProjectPathCommandCoordinator({
-      canStartCommand: () => true,
-      isCurrentScope: () => true,
+    const router = createProjectPathCommandRouter({
+      commandIntake: commandIntake(() => true, () => true),
+      commandEffects: commandEffectsFixture(),
+      openTerminalPanel: vi.fn(),
       menuContext: {
         projection: {
           canvasId: 'canvas-1',
@@ -37,17 +42,18 @@ describe('Project Path Command coordinator', () => {
     });
     const target = projectFileTarget();
 
-    expect(revealItem(coordinator.contextMenuItems(target, false))?.disabled).toBe(true);
-    expect(revealItem(coordinator.contextMenuItems(target, true))?.disabled).toBe(false);
+    expect(revealItem(router.contextMenuItems(target, false))?.disabled).toBe(true);
+    expect(revealItem(router.contextMenuItems(target, true))?.disabled).toBe(false);
   });
 
   it('disables and refuses commands once Project switching begins', () => {
     const closeContextMenu = vi.fn();
     const confirmPermanentDelete = vi.fn(() => true);
     const deleteEntriesPermanently = vi.fn();
-    const coordinator = createProjectPathCommandCoordinator({
-      canStartCommand: () => false,
-      isCurrentScope: () => true,
+    const router = createProjectPathCommandRouter({
+      commandIntake: commandIntake(() => false, () => true),
+      commandEffects: commandEffectsFixture(),
+      openTerminalPanel: vi.fn(),
       menuContext: {
         projection: undefined,
         canSelectCanvasNode: false,
@@ -58,7 +64,6 @@ describe('Project Path Command coordinator', () => {
         activeProjection: undefined,
         activeCanvasRuntime: undefined,
         fileClipboard: undefined,
-        actions: {} as never,
         explorerCommands: {
           beginCreateFile: vi.fn(),
           beginCreateDirectory: vi.fn(),
@@ -94,11 +99,11 @@ describe('Project Path Command coordinator', () => {
       targetDirectoryPath: ''
     };
 
-    expect(coordinator.contextMenuItems(target, false).every((item) => (
+    expect(router.contextMenuItems(target, false).every((item) => (
       item.kind === 'separator'
         || (item.kind === 'action' ? item.disabled === true : item.targets.length === 0)
     ))).toBe(true);
-    coordinator.run('delete-permanently', {
+    router.run('delete-permanently', {
       target,
       position: { x: 0, y: 0 }
     });
@@ -115,9 +120,10 @@ describe('Project Path Command coordinator', () => {
     let requestCount = 0;
     const copyText = vi.fn();
     const notify = vi.fn();
-    const coordinator = createProjectPathCommandCoordinator({
-      canStartCommand: () => true,
-      isCurrentScope: () => currentScope,
+    const router = createProjectPathCommandRouter({
+      commandIntake: commandIntake(() => true, () => currentScope),
+      commandEffects: commandEffectsFixture(),
+      openTerminalPanel: vi.fn(),
       menuContext: {
         projection: undefined,
         canSelectCanvasNode: false,
@@ -128,7 +134,6 @@ describe('Project Path Command coordinator', () => {
         activeProjection: undefined,
         activeCanvasRuntime: undefined,
         fileClipboard: undefined,
-        actions: {} as never,
         explorerCommands: {
           beginCreateFile: vi.fn(),
           beginCreateDirectory: vi.fn(),
@@ -159,7 +164,7 @@ describe('Project Path Command coordinator', () => {
       }
     });
 
-    coordinator.run('copy-path', {
+    router.run('copy-path', {
       target: {
         source: 'explorer',
         targetKind: 'item',
@@ -177,7 +182,7 @@ describe('Project Path Command coordinator', () => {
     expect(copyText).not.toHaveBeenCalled();
 
     currentScope = true;
-    coordinator.run('copy-path', {
+    router.run('copy-path', {
       target: {
         source: 'explorer',
         targetKind: 'item',
@@ -194,6 +199,97 @@ describe('Project Path Command coordinator', () => {
 
     expect(notify).not.toHaveBeenCalled();
   });
+
+  it('does not update a Photoshop command notification after its Project scope is replaced', async () => {
+    let currentScope = true;
+    let resolveSend!: (result: {
+      commandId: string;
+      documentTitle: string;
+      fileName: string;
+    }) => void;
+    const updateNotification = vi.fn();
+    const startNotification = vi.fn(() => updateNotification);
+    const router = createProjectPathCommandRouter({
+      commandIntake: commandIntake(() => true, () => currentScope),
+      commandEffects: {
+        ...commandEffectsFixture(),
+        sendProjectFileToPhotoshop: () => new Promise((resolve) => {
+          resolveSend = resolve;
+        })
+      },
+      openTerminalPanel: vi.fn(),
+      menuContext: {
+        projection: undefined,
+        canSelectCanvasNode: false,
+        fileClipboard: undefined,
+        photoshop: undefined
+      },
+      commandContext: {
+        ...commandContextFixture(),
+        startNotification
+      }
+    });
+
+    router.run('send-to-photoshop', {
+      target: projectFileTarget(),
+      position: { x: 0, y: 0 }
+    }, {
+      pluginSessionId: 'session-1',
+      documentId: 42,
+      title: 'Poster.psd'
+    });
+
+    expect(startNotification).toHaveBeenCalledWith('Sending brief.md to Poster.psd');
+    currentScope = false;
+    resolveSend({
+      commandId: 'command-1',
+      documentTitle: 'Poster.psd',
+      fileName: 'brief.md'
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(updateNotification).not.toHaveBeenCalled();
+  });
+
+  it('passes the one Router-accepted scope unchanged to Explorer commands', () => {
+    const acceptedScope = {
+      projectId: 'project-1',
+      generation: 1,
+      canSubmit: () => true,
+      isCurrent: () => true
+    } as AcceptedProjectPathCommandScope;
+    const copyEntries = vi.fn();
+    const router = createProjectPathCommandRouter({
+      commandIntake: {
+        canAccept: () => true,
+        tryAccept: () => acceptedScope
+      },
+      commandEffects: commandEffectsFixture(),
+      openTerminalPanel: vi.fn(),
+      menuContext: {
+        projection: undefined,
+        canSelectCanvasNode: false,
+        fileClipboard: undefined,
+        photoshop: undefined
+      },
+      commandContext: {
+        ...commandContextFixture(),
+        explorerCommands: {
+          ...commandContextFixture().explorerCommands,
+          copyEntries
+        }
+      }
+    });
+
+    router.run('copy', {
+      target: projectFileTarget(),
+      position: { x: 0, y: 0 }
+    });
+
+    expect(copyEntries).toHaveBeenCalledOnce();
+    expect(copyEntries.mock.calls[0]?.[0]).toBe(acceptedScope);
+  });
 });
 
 function commandContextFixture() {
@@ -201,7 +297,6 @@ function commandContextFixture() {
     activeProjection: undefined,
     activeCanvasRuntime: undefined,
     fileClipboard: undefined,
-    actions: {} as never,
     explorerCommands: {
       beginCreateFile: vi.fn(),
       beginCreateDirectory: vi.fn(),
@@ -248,8 +343,32 @@ function projectFileTarget() {
   };
 }
 
-function revealItem(items: ReturnType<ReturnType<typeof createProjectPathCommandCoordinator>['contextMenuItems']>) {
+function revealItem(items: ReturnType<ReturnType<typeof createProjectPathCommandRouter>['contextMenuItems']>) {
   return items.find((item): item is Extract<(typeof items)[number], { kind: 'action' }> => (
     item.kind === 'action' && item.command === 'reveal-in-canvas'
   ));
+}
+
+function commandIntake(
+  canAccept: () => boolean,
+  isCurrent: () => boolean
+): ProjectPathCommandIntake {
+  return {
+    canAccept,
+    tryAccept: () => canAccept()
+      ? ({
+          projectId: 'project-1',
+          generation: 1,
+          canSubmit: canAccept,
+          isCurrent
+        } as AcceptedProjectPathCommandScope)
+      : undefined
+  };
+}
+
+function commandEffectsFixture() {
+  return {
+    sendProjectFileToPhotoshop: vi.fn(() => undefined),
+    resetCanvasNodeLayouts: vi.fn(() => undefined)
+  };
 }

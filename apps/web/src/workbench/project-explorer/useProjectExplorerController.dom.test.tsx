@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { createI18n } from '../i18n';
+import { createProjectPathCommandEffects } from '../services/projectPathCommandEffects.js';
+import type {
+  AcceptedProjectPathCommandScope
+} from '../services/projectPathCommandIntake.js';
 import { projectTreeSelectionFromPaths } from './workbenchFileCommands';
 import {
   useProjectExplorerController,
@@ -15,7 +19,7 @@ describe('useProjectExplorerController', () => {
 
     await act(async () => {
       first.current.setSelection(projectTreeSelectionFromPaths(['brief.md']));
-      first.current.beginCreateFile('');
+      first.current.beginCreateFile(first.scope, '');
     });
     await first.unmount();
     const second = await renderController();
@@ -30,8 +34,8 @@ describe('useProjectExplorerController', () => {
     const probe = await renderController();
 
     await act(async () => {
-      probe.current.copyEntries([{ projectRelativePath: 'brief.md', kind: 'file' }]);
-      probe.current.beginRename({ projectRelativePath: 'brief.md', kind: 'file' });
+      probe.current.copyEntries(probe.scope, [{ projectRelativePath: 'brief.md', kind: 'file' }]);
+      probe.current.beginRename(probe.scope, { projectRelativePath: 'brief.md', kind: 'file' });
     });
 
     expect(probe.current.fileClipboard).toEqual({
@@ -54,7 +58,7 @@ describe('useProjectExplorerController', () => {
     const probe = await renderController({ loadProjectDirectory });
 
     await act(async () => {
-      probe.current.beginCreateFile('assets');
+      probe.current.beginCreateFile(probe.scope, 'assets');
       await Promise.resolve();
     });
 
@@ -80,7 +84,7 @@ describe('useProjectExplorerController', () => {
       createProjectFile
     });
     await act(async () => {
-      probe.current.beginCreateFile('assets');
+      probe.current.beginCreateFile(probe.scope, 'assets');
     });
     await act(async () => {
       probe.current.updateEditValue('new.txt');
@@ -88,7 +92,7 @@ describe('useProjectExplorerController', () => {
 
     let submission!: Promise<void>;
     await act(async () => {
-      submission = probe.current.submitEdit();
+      submission = probe.current.submitEdit(probe.scope);
       await Promise.resolve();
     });
     expect(createProjectFile).not.toHaveBeenCalled();
@@ -114,13 +118,13 @@ describe('useProjectExplorerController', () => {
     }));
     const probe = await renderController({ loadProjectDirectory, createProjectFile });
     await act(async () => {
-      probe.current.beginCreateFile('assets');
+      probe.current.beginCreateFile(probe.scope, 'assets');
     });
     await act(async () => {
       probe.current.updateEditValue('new.txt');
     });
     await act(async () => {
-      const submission = probe.current.submitEdit();
+      const submission = probe.current.submitEdit(probe.scope);
       failedDirectory.reject(new Error('directory unavailable'));
       await submission;
     });
@@ -133,7 +137,7 @@ describe('useProjectExplorerController', () => {
     });
 
     await act(async () => {
-      await probe.current.submitEdit();
+      await probe.current.submitEdit(probe.scope);
     });
     expect(loadProjectDirectory).toHaveBeenCalledTimes(2);
     expect(createProjectFile).toHaveBeenCalledOnce();
@@ -157,7 +161,7 @@ describe('useProjectExplorerController', () => {
 
     await act(async () => {
       probe.current.setSelection(projectTreeSelectionFromPaths(['folder/brief.md']));
-      probe.current.trashEntries([{ projectRelativePath: 'folder/brief.md', kind: 'file' }]);
+      probe.current.trashEntries(probe.scope, [{ projectRelativePath: 'folder/brief.md', kind: 'file' }]);
       await Promise.resolve();
     });
 
@@ -166,88 +170,43 @@ describe('useProjectExplorerController', () => {
     await probe.unmount();
   });
 
-  it('does not submit a Project Path Command after Project switching begins', async () => {
-    const trashProjectPaths = vi.fn();
-    const probe = await renderController(
-      { trashProjectPaths },
-      () => snapshotWithFiles(['brief.md']),
-      () => false
-    );
-
-    await act(async () => {
-      probe.current.trashEntries([{ projectRelativePath: 'brief.md', kind: 'file' }]);
-    });
-
-    expect(trashProjectPaths).not.toHaveBeenCalled();
-    await probe.unmount();
-  });
-
-  it('does not create new Project Path edit or clipboard intent while switching', async () => {
-    const probe = await renderController({}, undefined, () => false);
-
-    await act(async () => {
-      probe.current.beginCreateFile('briefs');
-      probe.current.beginCreateDirectory('briefs');
-      probe.current.beginRename({ projectRelativePath: 'brief.md', kind: 'file' });
-      probe.current.copyEntries([{ projectRelativePath: 'brief.md', kind: 'file' }]);
-      probe.current.cutEntries([{ projectRelativePath: 'brief.md', kind: 'file' }]);
-    });
-
-    expect(probe.current.inlineEdit).toBeUndefined();
-    expect(probe.current.fileClipboard).toBeUndefined();
-    await probe.unmount();
-  });
-
-  it('does not submit an existing inline edit after Project switching begins', async () => {
+  it('does not submit an external import when admission closes during asynchronous drop planning', async () => {
     let acceptingCommands = true;
-    const renameProjectPath = vi.fn();
+    let releaseDroppedFile!: () => void;
+    const importExternalProjectUploads = vi.fn();
+    const droppedFile = new File(['brief'], 'brief.md', { type: 'text/markdown' });
+    const dataTransfer = {
+      files: [droppedFile],
+      items: [{
+        kind: 'file',
+        webkitGetAsEntry: () => ({
+          name: 'brief.md',
+          isFile: true,
+          isDirectory: false,
+          file: (accept: (file: File) => void) => {
+            releaseDroppedFile = () => accept(droppedFile);
+          }
+        })
+      }]
+    } as unknown as DataTransfer;
     const probe = await renderController(
-      { renameProjectPath },
+      { importExternalProjectUploads },
       undefined,
       () => acceptingCommands
     );
 
     await act(async () => {
-      probe.current.beginRename({ projectRelativePath: 'brief.md', kind: 'file' });
-      probe.current.updateEditValue('renamed.md');
-    });
-    acceptingCommands = false;
-    await act(async () => {
-      await probe.current.submitEdit();
-    });
-
-    expect(renameProjectPath).not.toHaveBeenCalled();
-    await probe.unmount();
-  });
-
-  it('does not call Project adapters from paste, native path, or drop commands while switching', async () => {
-    const copyProjectPaths = vi.fn();
-    const copyProjectAbsolutePaths = vi.fn();
-    const revealProjectPathInSystemFileManager = vi.fn();
-    const probe = await renderController({
-      copyProjectPaths,
-      copyProjectAbsolutePaths,
-      revealProjectPathInSystemFileManager
-    }, undefined, () => false);
-    const entry = { projectRelativePath: 'brief.md', kind: 'file' as const };
-
-    await act(async () => {
-      probe.current.pasteEntries({
-        clipboard: { operation: 'copy', entries: [entry] },
-        targetDirectoryProjectRelativePath: 'copies'
+      probe.current.handleExternalDrop(probe.scope, {
+        dataTransfer,
+        targetDirectoryProjectRelativePath: 'assets'
       });
-      await probe.current.copyAbsolutePaths([entry]);
-      probe.current.revealEntry(entry);
-      probe.current.handleInternalDrop({
-        entries: [entry],
-        targetDirectoryProjectRelativePath: 'copies',
-        operation: 'copy'
-      });
+      acceptingCommands = false;
+      releaseDroppedFile();
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
-    expect(copyProjectPaths).not.toHaveBeenCalled();
-    expect(copyProjectAbsolutePaths).not.toHaveBeenCalled();
-    expect(revealProjectPathInSystemFileManager).not.toHaveBeenCalled();
+    expect(importExternalProjectUploads).not.toHaveBeenCalled();
     await probe.unmount();
   });
 
@@ -263,7 +222,7 @@ describe('useProjectExplorerController', () => {
 
     await act(async () => {
       probe.current.setSelection(projectTreeSelectionFromPaths(['folder/brief.md']));
-      probe.current.trashEntries([{ projectRelativePath: 'folder/brief.md', kind: 'file' }]);
+      probe.current.trashEntries(probe.scope, [{ projectRelativePath: 'folder/brief.md', kind: 'file' }]);
     });
     currentScope = false;
     await act(async () => {
@@ -298,7 +257,7 @@ describe('useProjectExplorerController', () => {
     );
 
     await act(async () => {
-      probe.current.trashEntries([{ projectRelativePath: 'brief.md', kind: 'file' }]);
+      probe.current.trashEntries(probe.scope, [{ projectRelativePath: 'brief.md', kind: 'file' }]);
     });
     currentScope = false;
     await act(async () => {
@@ -315,54 +274,65 @@ describe('useProjectExplorerController', () => {
 function ControllerProbe({
   api,
   getSnapshot,
-  canStartProjectPathCommand,
+  canSubmitAcceptedScope,
   isCurrentProjectPathCommandScope,
   notify,
   onValue
 }: {
   api: Partial<WorkbenchApiClient>;
   getSnapshot: () => WorkbenchProjectSessionSnapshot | undefined;
-  canStartProjectPathCommand: () => boolean;
+  canSubmitAcceptedScope: () => boolean;
   isCurrentProjectPathCommandScope: () => boolean;
   notify: (message: string) => void;
-  onValue(value: ProjectExplorerController): void;
+  onValue(value: ProjectExplorerController, scope: AcceptedProjectPathCommandScope): void;
 }): null {
-  const controller = useProjectExplorerController({
-    api: api as WorkbenchApiClient,
+  const scope = {
     projectId: 'project-1',
-    projectGeneration: 1,
+    generation: 1,
+    canSubmit: () => canSubmitAcceptedScope() && isCurrentProjectPathCommandScope(),
+    isCurrent: (resultProjectId?: string) => isCurrentProjectPathCommandScope()
+      && (resultProjectId === undefined || resultProjectId === 'project-1')
+  } as AcceptedProjectPathCommandScope;
+  const controller = useProjectExplorerController({
+    commandEffects: createProjectPathCommandEffects(api as WorkbenchApiClient),
     getSnapshot,
     activeCanvasRuntime: undefined,
-    locateProjectFileInCanvas: vi.fn(),
+    centerProjectFileInCanvas: vi.fn(),
     notify,
-    i18n: createI18n('en'),
-    canStartProjectPathCommand,
-    isCurrentProjectPathCommandScope
+    i18n: createI18n('en')
   });
-  useEffect(() => onValue(controller), [controller, onValue]);
+  useEffect(() => onValue(controller, scope), [controller, onValue, scope]);
   return null;
 }
 
 async function renderController(
   api: Partial<WorkbenchApiClient> = {},
   getSnapshot: () => WorkbenchProjectSessionSnapshot | undefined = () => snapshotWithFiles([]),
-  canStartProjectPathCommand: () => boolean = () => true,
+  canSubmitAcceptedScope: () => boolean = () => true,
   isCurrentProjectPathCommandScope: () => boolean = () => true,
   notify: (message: string) => void = vi.fn()
 ): Promise<{
   readonly current: ProjectExplorerController;
+  readonly scope: AcceptedProjectPathCommandScope;
   unmount(): Promise<void>;
 }> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   let current!: ProjectExplorerController;
-  const onValue = (value: ProjectExplorerController) => { current = value; };
+  let scope!: AcceptedProjectPathCommandScope;
+  const onValue = (
+    value: ProjectExplorerController,
+    acceptedScope: AcceptedProjectPathCommandScope
+  ) => {
+    current = value;
+    scope = acceptedScope;
+  };
   await act(async () => root.render(
     <ControllerProbe
       api={api}
       getSnapshot={getSnapshot}
-      canStartProjectPathCommand={canStartProjectPathCommand}
+      canSubmitAcceptedScope={canSubmitAcceptedScope}
       isCurrentProjectPathCommandScope={isCurrentProjectPathCommandScope}
       notify={notify}
       onValue={onValue}
@@ -370,6 +340,7 @@ async function renderController(
   ));
   return {
     get current() { return current; },
+    get scope() { return scope; },
     async unmount() {
       await act(async () => root.unmount());
       container.remove();

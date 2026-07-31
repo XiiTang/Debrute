@@ -3,14 +3,16 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { DebruteGlobalSettingsView, DebruteProductState } from '@debrute/app-protocol';
-import type { SettingsResource, WorkbenchActions, WorkbenchState } from '../../types.js';
+import type { SettingsResource } from '../../types.js';
 import { I18nProvider } from '../i18n/index.js';
-import { createEmptyProjectTreeSelection } from '../project-explorer/projectTreeInteraction.js';
-import { SettingsPanel } from './SettingsPanel.js';
+import {
+  SettingsPanel,
+  type SettingsPanelState
+} from './SettingsPanel.js';
 import { AudioModelSettings, ImageModelSettings } from './MediaModelSettingsPage.js';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
-import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState.js';
+import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController.js';
 
 describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
   it('groups Settings navigation into General, Models, and Integrations', () => {
@@ -93,7 +95,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings } as WorkbenchActions}
+              actions={{ ...actions(), saveGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -138,7 +140,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings } as WorkbenchActions}
+              actions={{ ...actions(), saveGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -178,7 +180,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), revealModelApiKey, saveGlobalSettings } as WorkbenchActions}
+              actions={{ ...actions(), revealModelApiKey, saveGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -224,7 +226,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings } as WorkbenchActions}
+              actions={{ ...actions(), saveGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -269,7 +271,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), revealModelApiKey } as WorkbenchActions}
+              actions={{ ...actions(), revealModelApiKey }}
             />
           </I18nProvider>
         );
@@ -319,7 +321,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={configured}
-              actions={{ ...actions(), revealModelApiKey } as WorkbenchActions}
+              actions={{ ...actions(), revealModelApiKey }}
             />
           </I18nProvider>
         );
@@ -333,7 +335,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={configured.map((model) => ({ ...model, apiKeySet: false }))}
-              actions={{ ...actions(), revealModelApiKey } as WorkbenchActions}
+              actions={{ ...actions(), revealModelApiKey }}
             />
           </I18nProvider>
         );
@@ -365,7 +367,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         <I18nProvider locale="en">
           <ImageModelSettings
             settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-            actions={{ ...actions(), revealModelApiKey, saveGlobalSettings } as WorkbenchActions}
+            actions={{ ...actions(), revealModelApiKey, saveGlobalSettings }}
           />
         </I18nProvider>
       );
@@ -396,7 +398,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings } as WorkbenchActions}
+              actions={{ ...actions(), saveGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -423,7 +425,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
                   })
                 }
               }).globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings } as WorkbenchActions}
+              actions={{ ...actions(), saveGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -853,21 +855,12 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
 
 });
 
-function stateWithSettings(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
+function stateWithSettings(overrides: Partial<SettingsPanelState> = {}): SettingsPanelState {
   return {
-    snapshot: undefined,
-    titleBarState: buildWorkbenchTitleBarState({ platform: 'darwin', host: 'web', locale: 'en', recentProjects: [] }),
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
     integrations: { status: 'ready', value: { integrations: [], backends: [] } },
     product: { status: 'ready', value: productState() },
     resolvedTheme: 'dark',
-    projectOpen: { opening: false },
-    explorerSelection: createEmptyProjectTreeSelection(),
-    photoshop: { status: 'ready', value: { sessions: [] } },
-    canvasFeedback: undefined,
-    textFileBuffers: {},
-    textEditorWindows: {},
-    notifications: [],
     ...overrides
   };
 }
@@ -945,17 +938,19 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
   };
 }
 
-function actions(): WorkbenchActions {
+function actions(): WorkbenchSettingsActions {
   return {
     checkProductUpdate: vi.fn(async () => undefined),
     applyProductUpdate: vi.fn(async () => undefined),
     saveGlobalSettings: vi.fn(async () => undefined),
+    revealModelApiKey: vi.fn(async () => ''),
+    rescanIntegrations: vi.fn(async () => undefined),
     runIntegrationOperation: vi.fn(async (input) => ({
       ok: true,
       integrationId: input.integrationId,
       operation: input.operation
     }))
-  } as unknown as WorkbenchActions;
+  };
 }
 
 function readyResourceValue<T>(resource: SettingsResource<T>): T {
