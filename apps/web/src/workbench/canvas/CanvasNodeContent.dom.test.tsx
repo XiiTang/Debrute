@@ -47,8 +47,7 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
         nodes={[]}
         textFileBuffers={{}}
         actions={actionsFixture()}
-        cameraState="idle"
-        dragState={undefined}
+        interactionActive={false}
         resourceZoom={1}
         devicePixelRatio={1}
         culledNodePaths={new Set()}

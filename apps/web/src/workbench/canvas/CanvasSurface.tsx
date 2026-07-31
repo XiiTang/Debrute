@@ -70,7 +70,7 @@ import {
   selectedSingleVideoPath,
   syncCanvasPerfDragSessionState,
   syncCanvasPerfSessionState,
-  syncCanvasPreviewResourceSchedulerForInteraction,
+  canvasPreviewResourceInteractionState,
   type CanvasPerfDebugSnapshotContext,
   type CanvasPerfRuntimeSession
 } from './canvasSurfaceSupport';
@@ -176,9 +176,9 @@ function CanvasSurfaceRuntime({
   const selection = useCanvasSelection(runtime);
   const surfaceSize = useCanvasSurfaceSize(runtime);
   const initialRuntimeSnapshot = runtime.getSnapshot();
-  const initialDragState = initialRuntimeSnapshot.dragState;
   const [cameraState, setCameraState] = useState(initialRuntimeSnapshot.cameraState);
-  const [dragState, setDragState] = useState(initialDragState);
+  const [dragActive, setDragActive] = useState(initialRuntimeSnapshot.dragState !== undefined);
+  const interactionActive = cameraState !== 'idle' || dragActive;
   const [resourceZoomState, setResourceZoomState] = useState(() => (
     initialCanvasResourceZoomState(initialRuntimeSnapshot.camera.z)
   ));
@@ -357,12 +357,11 @@ function CanvasSurfaceRuntime({
   useEffect(() => () => previewResourceScheduler.dispose(), [previewResourceScheduler]);
 
   useEffect(() => {
-    syncCanvasPreviewResourceSchedulerForInteraction({
-      scheduler: previewResourceScheduler,
+    previewResourceScheduler.setInteractionState({
       cameraState,
-      dragState
+      dragActive
     });
-  }, [cameraState, dragState, previewResourceScheduler]);
+  }, [cameraState, dragActive, previewResourceScheduler]);
 
   const syncResourceZoomForSnapshot = useCallback((input: {
     cameraState: CanvasRuntimeSnapshot['cameraState'];
@@ -441,11 +440,7 @@ function CanvasSurfaceRuntime({
 
   useLayoutEffect(() => runtime.subscribeCamera((liveCamera) => {
     const snapshot = runtime.getSnapshot();
-    syncCanvasPreviewResourceSchedulerForInteraction({
-      scheduler: previewResourceScheduler,
-      cameraState: snapshot.cameraState,
-      dragState: snapshot.dragState
-    });
+    previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState(snapshot));
     syncResourceZoomForSnapshot({
       cameraState: snapshot.cameraState,
       cameraZoom: liveCamera.z
@@ -468,11 +463,10 @@ function CanvasSurfaceRuntime({
   useEffect(() => {
     return runtime.subscribeCameraState((cameraState) => {
       const snapshot = runtime.getSnapshot();
-      syncCanvasPreviewResourceSchedulerForInteraction({
-        scheduler: previewResourceScheduler,
+      previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState({
         cameraState,
         dragState: snapshot.dragState
-      });
+      }));
       setCameraState(cameraState);
       syncResourceZoomForSnapshot({
         cameraState,
@@ -521,12 +515,11 @@ function CanvasSurfaceRuntime({
     }
     return runtime.subscribeDragState((nextDragState) => {
       const snapshot = runtime.getSnapshot();
-      syncCanvasPreviewResourceSchedulerForInteraction({
-        scheduler: previewResourceScheduler,
+      previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState({
         cameraState: snapshot.cameraState,
         dragState: nextDragState
-      });
-      setDragState(nextDragState);
+      }));
+      setDragActive(nextDragState !== undefined);
       syncCanvasPerfDragSessionState({
         perfMonitor,
         sessionRef: canvasPerfDragSessionRef,
@@ -973,8 +966,7 @@ function CanvasSurfaceRuntime({
           nodes={projectedNodes}
           activeVideoPaths={activeVideoPaths}
           actions={actions}
-          cameraState={cameraState}
-          dragState={dragState}
+          interactionActive={interactionActive}
           resourceZoom={resourceZoom}
           devicePixelRatio={devicePixelRatio}
           culledNodePaths={renderSnapshot.culledNodePaths}
@@ -986,8 +978,7 @@ function CanvasSurfaceRuntime({
             activeInlineTextPath={activeInlineTextPath}
             textFileBuffers={textFileBuffers}
             actions={actions}
-            cameraState={cameraState}
-            dragState={dragState}
+            interactionActive={interactionActive}
             resourceZoom={resourceZoom}
             devicePixelRatio={devicePixelRatio}
             culledNodePaths={renderSnapshot.culledNodePaths}

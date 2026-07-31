@@ -1199,8 +1199,7 @@ async function renderProvider(input: {
         activeInlineTextPath={input.activeInlineTextPath}
         textFileBuffers={buffers}
         actions={input.actions}
-        cameraState={input.cameraState}
-        dragState={undefined}
+        interactionActive={input.cameraState !== 'idle'}
         resourceZoom={input.resourceZoom ?? 0.1}
         devicePixelRatio={2}
         culledNodePaths={input.culledNodePaths ?? new Set()}

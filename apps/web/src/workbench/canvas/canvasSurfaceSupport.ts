@@ -24,10 +24,10 @@ import {
   type CanvasPerfMonitor,
   type CanvasPerfSessionId
 } from './CanvasPerfMonitor';
-import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import type { CanvasRenderCoordinatorSnapshot } from './CanvasRenderCoordinator';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import type { CanvasCamera } from './runtime/canvasCamera';
+import type { CanvasPreviewResourceInteractionState } from './CanvasPreviewResourceScheduler';
 
 export function canvasMapProjectTreeDropEntry(
   dataTransfer: Pick<DataTransfer, 'getData'>
@@ -316,15 +316,13 @@ function canvasPerfTimestamp(): number {
   return performance.now();
 }
 
-export function syncCanvasPreviewResourceSchedulerForInteraction(input: {
-  scheduler: Pick<CanvasPreviewResourceScheduler, 'setInteractionState'>;
-  cameraState: CanvasRuntimeSnapshot['cameraState'];
-  dragState: CanvasRuntimeSnapshot['dragState'];
-}): void {
-  input.scheduler.setInteractionState({
-    cameraState: input.cameraState,
-    dragActive: input.dragState !== undefined
-  });
+export function canvasPreviewResourceInteractionState(
+  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'dragState'>
+): CanvasPreviewResourceInteractionState {
+  return {
+    cameraState: snapshot.cameraState,
+    dragActive: snapshot.dragState !== undefined
+  };
 }
 
 export function domRectToFloatingBarRect(rect: DOMRect): FloatingBarRect {

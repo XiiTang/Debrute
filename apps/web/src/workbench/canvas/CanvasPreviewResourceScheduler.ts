@@ -7,6 +7,11 @@ import type { CanvasCameraState } from './runtime/canvasCamera';
 
 export type CanvasPreviewResourceKind = 'image' | 'text' | 'text-source' | 'video';
 
+export interface CanvasPreviewResourceInteractionState {
+  cameraState: CanvasCameraState;
+  dragActive: boolean;
+}
+
 export interface CanvasPreviewResourceRequest {
   kind: CanvasPreviewResourceKind;
   nodeId: string;
@@ -21,8 +26,8 @@ export interface CanvasPreviewResourceScheduler {
   enqueue(request: CanvasPreviewResourceRequest): void;
   enqueuePublication(request: CanvasPreviewResourceRequest): void;
   cancel(kind: CanvasPreviewResourceKind, nodeId: string): void;
-  setInteractionState(input: { cameraState: CanvasCameraState; dragActive: boolean }): void;
-  getInteractionState(): { cameraState: CanvasCameraState; dragActive: boolean };
+  setInteractionState(input: CanvasPreviewResourceInteractionState): void;
+  getInteractionState(): CanvasPreviewResourceInteractionState;
   notifyVisibilityChanged(): void;
   dispose(): void;
 }
@@ -162,6 +167,9 @@ export function createCanvasPreviewResourceScheduler(input: {
     },
     cancel,
     setInteractionState(inputState) {
+      if (cameraState === inputState.cameraState && dragActive === inputState.dragActive) {
+        return;
+      }
       cameraState = inputState.cameraState;
       dragActive = inputState.dragActive;
       if (interactionActive()) {

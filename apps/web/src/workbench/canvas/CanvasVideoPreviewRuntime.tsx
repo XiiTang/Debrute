@@ -3,7 +3,6 @@ import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { CanvasVideoPreviewSourceView } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../types';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
-import type { CanvasCameraState } from './runtime/canvasCamera';
 import {
   canvasVideoPreviewSource,
   type CanvasVideoPreviewSource
@@ -47,8 +46,7 @@ export function CanvasVideoPreviewProvider({
   nodes,
   activeVideoPaths,
   actions,
-  cameraState,
-  dragState,
+  interactionActive,
   resourceZoom,
   devicePixelRatio,
   culledNodePaths,
@@ -59,8 +57,7 @@ export function CanvasVideoPreviewProvider({
   nodes: ProjectedCanvasNode[];
   activeVideoPaths: ReadonlySet<string>;
   actions: WorkbenchActions;
-  cameraState: CanvasCameraState;
-  dragState: { kind: string } | undefined;
+  interactionActive: boolean;
   resourceZoom: number;
   devicePixelRatio: number;
   culledNodePaths: ReadonlySet<string>;
@@ -77,7 +74,6 @@ export function CanvasVideoPreviewProvider({
   const currentTargetKeysRef = useRef(new Map<string, string>());
   const currentResourceKeysRef = useRef(new Map<string, string>());
   const currentCulledPathsRef = useRef<ReadonlySet<string>>(culledNodePaths);
-  const interactionActive = cameraState !== 'idle' || dragState !== undefined;
   const interactionActiveRef = useRef(interactionActive);
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
 
@@ -90,8 +86,7 @@ export function CanvasVideoPreviewProvider({
     const targets = canvasVideoPreviewTargetsForNodes({
       canvasId,
       nodes,
-      activeVideoPaths,
-      culledNodePaths
+      activeVideoPaths
     });
     if (targets.length === 0) {
       setCurrentTargets((current) => Object.keys(current).length === 0 ? current : {});
@@ -113,11 +108,14 @@ export function CanvasVideoPreviewProvider({
     setSourceViews((current) => canvasVideoPreviewCurrentSourceViews({ targets, sourceViews: current }));
     setPreviewSources((current) => canvasVideoPreviewCurrentSources({ targets, sources: current }));
     setPreviewErrors((current) => clearStaleCanvasVideoPreviewErrors(current, targets));
-  }, [activeVideoPaths, canvasId, culledNodePaths, nodes]);
+  }, [activeVideoPaths, canvasId, nodes]);
 
   useEffect(() => {
-    const targets = Object.values(currentTargets).filter((target) => !checkedTargetKeysRef.current.has(canvasVideoPreviewTargetKey(target)));
-    if (!shouldStartCanvasVideoPreviewSourceWork({ cameraState, dragState, pendingSourceCount: targets.length })) {
+    const targets = Object.values(currentTargets).filter((target) => (
+      !culledNodePaths.has(target.projectRelativePath)
+      && !checkedTargetKeysRef.current.has(canvasVideoPreviewTargetKey(target))
+    ));
+    if (!shouldStartCanvasVideoPreviewSourceWork({ interactionActive, pendingSourceCount: targets.length })) {
       return undefined;
     }
     let cancelled = false;
@@ -171,11 +169,11 @@ export function CanvasVideoPreviewProvider({
     return () => {
       cancelled = true;
     };
-  }, [actions, cameraState, canvasId, currentTargets, dragState]);
+  }, [actions, canvasId, culledNodePaths, currentTargets, interactionActive]);
 
   useEffect(() => {
     const targets = Object.values(currentTargets);
-    if (!shouldStartCanvasVideoPreviewSourceWork({ cameraState, dragState, pendingSourceCount: targets.length })) {
+    if (!shouldStartCanvasVideoPreviewSourceWork({ interactionActive, pendingSourceCount: targets.length })) {
       return;
     }
     for (const target of targets) {
@@ -242,11 +240,10 @@ export function CanvasVideoPreviewProvider({
       });
     }
   }, [
-    cameraState,
     canvasId,
     currentTargets,
     devicePixelRatio,
-    dragState,
+    interactionActive,
     nodesByPath,
     previewResourceScheduler,
     previewSources,
@@ -309,15 +306,13 @@ export function canvasVideoPreviewTargetsForNodes(input: {
   canvasId: string;
   nodes: ProjectedCanvasNode[];
   activeVideoPaths: ReadonlySet<string>;
-  culledNodePaths: ReadonlySet<string>;
 }): CanvasVideoPreviewTarget[] {
   const targets: CanvasVideoPreviewTarget[] = [];
   for (const node of input.nodes) {
     if (node.nodeKind !== 'file'
       || node.mediaKind !== 'video'
       || node.availability.state !== 'available'
-      || input.activeVideoPaths.has(node.projectRelativePath)
-      || input.culledNodePaths.has(node.projectRelativePath)) {
+      || input.activeVideoPaths.has(node.projectRelativePath)) {
       continue;
     }
     targets.push({
@@ -331,13 +326,11 @@ export function canvasVideoPreviewTargetsForNodes(input: {
 }
 
 export function shouldStartCanvasVideoPreviewSourceWork(input: {
-  cameraState: CanvasCameraState;
-  dragState: { kind: string } | undefined;
+  interactionActive: boolean;
   pendingSourceCount: number;
 }): boolean {
   return input.pendingSourceCount > 0
-    && input.cameraState === 'idle'
-    && input.dragState === undefined;
+    && !input.interactionActive;
 }
 
 function canvasVideoPreviewTargetKey(target: CanvasVideoPreviewTarget): string {

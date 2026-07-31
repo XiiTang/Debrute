@@ -10,6 +10,7 @@ import type { CanvasPreviewResourceRequest, CanvasPreviewResourceScheduler } fro
 import {
   CanvasVideoPreviewProvider,
   canvasVideoPreviewTargetsForNodes,
+  shouldStartCanvasVideoPreviewSourceWork,
   useCanvasVideoPreviewRuntime
 } from './CanvasVideoPreviewRuntime';
 
@@ -38,14 +39,61 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
         videoNode('media/b.mp4', 'rev-b'),
         { ...videoNode('media/c.mp4', 'rev-c'), availability: { state: 'missing', message: 'missing' } }
       ],
-      activeVideoPaths: new Set(['media/b.mp4']),
-      culledNodePaths: new Set()
+      activeVideoPaths: new Set(['media/b.mp4'])
     })).toEqual([{
       canvasId: 'canvas-1',
       projectRelativePath: 'media/a.mp4',
       videoRevision: 'rev-a',
       currentTimeSeconds: 0
     }]);
+  });
+
+  it('starts source work only when preview interaction is inactive', () => {
+    expect(shouldStartCanvasVideoPreviewSourceWork({
+      interactionActive: false,
+      pendingSourceCount: 1
+    })).toBe(true);
+    expect(shouldStartCanvasVideoPreviewSourceWork({
+      interactionActive: true,
+      pendingSourceCount: 1
+    })).toBe(false);
+    expect(shouldStartCanvasVideoPreviewSourceWork({
+      interactionActive: false,
+      pendingSourceCount: 0
+    })).toBe(false);
+  });
+
+  it('keeps pending video preview work paused during interaction and resumes it afterward', async () => {
+    const node = videoNode('media/a.mp4', 'rev-a');
+    const readCanvasVideoPreviewSources = vi.fn(async () => ({ sources: {} }));
+    const renderResult = await renderVideoPreviewProvider({
+      nodes: [node],
+      actions: { readCanvasVideoPreviewSources } as unknown as WorkbenchActions,
+      interactionActive: true,
+      children: <PreviewProbe node={node} />
+    });
+
+    await act(async () => undefined);
+    expect(readCanvasVideoPreviewSources).not.toHaveBeenCalled();
+
+    await renderResult.rerender([node], false);
+    await act(async () => undefined);
+    expect(readCanvasVideoPreviewSources).toHaveBeenCalled();
+  });
+
+  it('does not restart in-flight source work when the interaction flag is unchanged', async () => {
+    const node = videoNode('media/a.mp4', 'rev-a');
+    const nodes = [node];
+    const readCanvasVideoPreviewSources = vi.fn(() => new Promise<never>(() => undefined));
+    const renderResult = await renderVideoPreviewProvider({
+      nodes,
+      actions: { readCanvasVideoPreviewSources } as unknown as WorkbenchActions,
+      children: <PreviewProbe node={node} />
+    });
+
+    expect(readCanvasVideoPreviewSources).toHaveBeenCalledTimes(1);
+    await renderResult.rerender(nodes, false);
+    expect(readCanvasVideoPreviewSources).toHaveBeenCalledTimes(1);
   });
 
   it('publishes the first ready source immediately for inactive videos', async () => {
@@ -74,6 +122,38 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toBe(
       '/api/projects/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&videoRevision=rev-a&t=0&sourceKey=v1--explicit--poster&w=300'
     );
+  });
+
+  it('retains a published video preview while interaction culls and reveals the node', async () => {
+    const node = videoNode('media/a.mp4', 'rev-a');
+    const nodes = [node];
+    const readCanvasVideoPreviewSources = vi.fn(async (input: CanvasVideoPreviewSourceRequest) => ({
+      sources: Object.fromEntries(input.targets.map((target) => [
+        target.projectRelativePath,
+        {
+          ...target,
+          status: 'available' as const,
+          sourceKind: 'initial-poster' as const,
+          sourceKey: 'v1--explicit--poster',
+          sourceWidth: 1200
+        }
+      ]))
+    }));
+    const renderResult = await renderVideoPreviewProvider({
+      nodes,
+      actions: { readCanvasVideoPreviewSources } as unknown as WorkbenchActions,
+      children: <PreviewProbe node={node} />
+    });
+    await act(async () => undefined);
+    const previewSrc = container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src');
+    expect(previewSrc).toBeTruthy();
+
+    await renderResult.rerender(nodes, true, new Set([node.projectRelativePath]));
+    expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toBe(previewSrc);
+
+    await renderResult.rerender(nodes, true, new Set());
+    expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toBe(previewSrc);
+    expect(readCanvasVideoPreviewSources).toHaveBeenCalledTimes(1);
   });
 
   it('exposes source errors for the current video target', async () => {
@@ -194,23 +274,36 @@ async function renderVideoPreviewProvider(input: {
   nodes: ProjectedCanvasNode[];
   actions: WorkbenchActions;
   children: React.ReactNode;
-}): Promise<{ rerender(nodes: ProjectedCanvasNode[]): Promise<void> }> {
+  interactionActive?: boolean | undefined;
+}): Promise<{
+  rerender(
+    nodes: ProjectedCanvasNode[],
+    interactionActive?: boolean,
+    culledNodePaths?: ReadonlySet<string>
+  ): Promise<void>;
+}> {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  const render = (nodes: ProjectedCanvasNode[]) => {
+  const activeVideoPaths = new Set<string>();
+  const defaultCulledNodePaths = new Set<string>();
+  const previewResourceScheduler = createImmediateScheduler();
+  const render = (
+    nodes: ProjectedCanvasNode[],
+    interactionActive = input.interactionActive ?? false,
+    culledNodePaths: ReadonlySet<string> = defaultCulledNodePaths
+  ) => {
     root?.render(
       <CanvasVideoPreviewProvider
         canvasId="canvas-1"
         nodes={nodes}
-        activeVideoPaths={new Set()}
+        activeVideoPaths={activeVideoPaths}
         actions={input.actions}
-        cameraState="idle"
-        dragState={undefined}
+        interactionActive={interactionActive}
         resourceZoom={0.1}
         devicePixelRatio={2}
-        culledNodePaths={new Set()}
-        previewResourceScheduler={createImmediateScheduler()}
+        culledNodePaths={culledNodePaths}
+        previewResourceScheduler={previewResourceScheduler}
       >
         {input.children}
       </CanvasVideoPreviewProvider>
@@ -220,9 +313,9 @@ async function renderVideoPreviewProvider(input: {
     render(input.nodes);
   });
   return {
-    rerender: async (nodes) => {
+    rerender: async (nodes, interactionActive, culledNodePaths) => {
       await act(async () => {
-        render(nodes);
+        render(nodes, interactionActive, culledNodePaths);
       });
     }
   };

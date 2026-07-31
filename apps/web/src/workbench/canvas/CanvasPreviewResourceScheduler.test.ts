@@ -96,6 +96,36 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(published).toEqual(['notes.md']);
   });
 
+  it('does not treat a repeated identical interaction state as a new scheduling event', () => {
+    const frames: FrameRequestCallback[] = [];
+    let culled = true;
+    const scheduler = createCanvasPreviewResourceScheduler({
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: vi.fn()
+    });
+
+    scheduler.enqueue({
+      kind: 'image',
+      nodeId: 'cover.png',
+      sourceKey: 'source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      isCulled: () => culled,
+      run: vi.fn()
+    });
+    expect(frames).toEqual([]);
+
+    culled = false;
+    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    expect(frames).toEqual([]);
+
+    scheduler.notifyVisibilityChanged();
+    expect(frames).toHaveLength(1);
+  });
+
   it('retains a current culled start until a later visibility check makes it eligible', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];

@@ -25,7 +25,6 @@ import type {
   CanvasTextPreviewImageFailureKind,
   CanvasTextPreviewPresentation
 } from './CanvasTextPreviewImageHandoff';
-import type { CanvasCameraState } from './runtime/canvasCamera';
 import {
   canvasTextPreviewStyleKey,
   canvasTextPreviewStyleSnapshotForDocument
@@ -145,8 +144,7 @@ export function CanvasTextPreviewProvider({
   activeInlineTextPath,
   textFileBuffers,
   actions,
-  cameraState,
-  dragState,
+  interactionActive,
   resourceZoom,
   devicePixelRatio,
   culledNodePaths,
@@ -160,8 +158,7 @@ export function CanvasTextPreviewProvider({
   activeInlineTextPath?: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   actions: WorkbenchActions;
-  cameraState: CanvasCameraState;
-  dragState: { kind: string } | undefined;
+  interactionActive: boolean;
   resourceZoom: number;
   devicePixelRatio: number;
   culledNodePaths: ReadonlySet<string>;
@@ -188,7 +185,6 @@ export function CanvasTextPreviewProvider({
   const previewPresentationsRef = useRef<Record<string, CanvasTextPreviewPresentationState>>({});
   const currentResourceKeysRef = useRef(new Map<string, string>());
   const currentCanvasIdRef = useRef(canvasId);
-  const interactionActive = cameraState !== 'idle' || dragState !== undefined;
   const interactionActiveRef = useRef(interactionActive);
   const runtimeEpochRef = useRef(0);
   const mountedRef = useRef(true);

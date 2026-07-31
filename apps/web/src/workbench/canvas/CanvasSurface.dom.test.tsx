@@ -27,7 +27,7 @@ import {
   recordCanvasPerfFrame,
   syncCanvasPerfDragSessionState,
   syncCanvasPerfSessionState,
-  syncCanvasPreviewResourceSchedulerForInteraction,
+  canvasPreviewResourceInteractionState,
   type CanvasPerfRuntimeSession
 } from './canvasSurfaceSupport';
 import { createCanvasPerfMonitor } from './CanvasPerfMonitor';
@@ -1671,11 +1671,10 @@ describe('CanvasSurface', () => {
       cancelFrame: () => undefined
     });
 
-    syncCanvasPreviewResourceSchedulerForInteraction({
-      scheduler,
+    scheduler.setInteractionState(canvasPreviewResourceInteractionState({
       cameraState: 'moving',
       dragState: undefined
-    });
+    }));
     scheduler.enqueue({
       kind: 'image',
       nodeId: 'cover.png',
@@ -1687,8 +1686,7 @@ describe('CanvasSurface', () => {
     });
     expect(frames).toEqual([]);
 
-    syncCanvasPreviewResourceSchedulerForInteraction({
-      scheduler,
+    scheduler.setInteractionState(canvasPreviewResourceInteractionState({
       cameraState: 'idle',
       dragState: {
         kind: 'move-node',
@@ -1696,14 +1694,13 @@ describe('CanvasSurface', () => {
         start: { x: 0, y: 0 },
         origins: []
       }
-    });
+    }));
     expect(frames).toEqual([]);
 
-    syncCanvasPreviewResourceSchedulerForInteraction({
-      scheduler,
+    scheduler.setInteractionState(canvasPreviewResourceInteractionState({
       cameraState: 'idle',
       dragState: undefined
-    });
+    }));
     expect(frames).toHaveLength(1);
     frames[0]?.(16);
 
