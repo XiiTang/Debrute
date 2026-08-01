@@ -40,6 +40,11 @@ const fontEnvironmentMock = vi.hoisted(() => {
   };
 });
 
+const styleKeyMock = vi.hoisted(() => ({
+  snapshot: vi.fn((profile: CanvasTextRenderProfile) => ({ identity: profile.identity })),
+  key: vi.fn(async (snapshot: { identity: string }) => `sha256:${snapshot.identity}`)
+}));
+
 vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
   useCanvasTextProjectFontEnvironment: () => fontEnvironmentMock
 }));
@@ -67,8 +72,8 @@ vi.mock('./CanvasTextPreviewCaptureLane.js', async () => {
 });
 
 vi.mock('./CanvasTextPreviewStyleKey.js', () => ({
-  canvasTextPreviewStyleSnapshotForDocument: (profile: CanvasTextRenderProfile) => ({ identity: profile.identity }),
-  canvasTextPreviewStyleKey: async (snapshot: { identity: string }) => `sha256:${snapshot.identity}`
+  canvasTextPreviewStyleSnapshotForDocument: styleKeyMock.snapshot,
+  canvasTextPreviewStyleKey: styleKeyMock.key
 }));
 
 describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
@@ -77,6 +82,8 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    styleKeyMock.snapshot.mockImplementation((profile) => ({ identity: profile.identity }));
+    styleKeyMock.key.mockImplementation(async (snapshot) => `sha256:${snapshot.identity}`);
     laneMock.props = undefined;
     laneMock.history = [];
     container = document.createElement('div');
@@ -113,6 +120,251 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(readProjectTextFile).not.toHaveBeenCalled();
     expect(fontEnvironmentMock.prepareCoverage).not.toHaveBeenCalled();
     expect(laneMock.props?.target).toBeUndefined();
+  });
+
+  it('does not present a cached source resolved from different rendered geometry', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('stretched.md', 0, 0);
+    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
+
+    await renderProvider({
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set(),
+      consumerNode: renderedNode
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await flushWork();
+
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    )).toBe('false');
+  });
+
+  it('does not present a retained edit-mode source after rendered geometry changes', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('retained-resize.md', 0, 0);
+    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
+    const input = {
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set<string>()
+    };
+
+    await renderProvider({
+      ...input,
+      nodes: [stableNode],
+      consumerNode: stableNode,
+      pendingReport: { kind: 'ready', node: stableNode }
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await waitFor(() => harness.publicationQueue.length === 1);
+    await act(async () => harness.publicationQueue.shift()!.run());
+    await flushWork();
+
+    await renderProvider({
+      ...input,
+      nodes: [renderedNode],
+      consumerNode: renderedNode,
+      activeInlineTextPath: renderedNode.projectRelativePath
+    });
+    await flushWork();
+
+    expect(harness.readCanvasTextPreviewSources).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    )).toBe('false');
+  });
+
+  it('continues presenting a cached source when only rendered position changes', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('moved.md', 0, 0);
+    const renderedNode = { ...stableNode, x: 800, y: 1200 };
+
+    await renderProvider({
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set(),
+      consumerNode: renderedNode
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await flushWork();
+
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    )).toBe('true');
+  });
+
+  it('invalidates a presented source as soon as the resolved style identity changes', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('restyled.md', 0, 0);
+    const input = {
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set<string>(),
+      consumerNode: stableNode,
+      pendingReport: { kind: 'ready' as const, node: stableNode },
+      styleDependencyKey: 'original'
+    };
+
+    await renderProvider(input);
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue.shift()!.run());
+    await waitFor(() => harness.publicationQueue.length === 1);
+    await act(async () => harness.publicationQueue.shift()!.run());
+    await flushWork();
+
+    const styleKeyResolution = deferred<string>();
+    styleKeyMock.key.mockImplementationOnce(() => styleKeyResolution.promise);
+    const fingerprintDigest = deferred<ArrayBuffer>();
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(() => fingerprintDigest.promise);
+    try {
+      await renderProvider({
+        ...input,
+        styleDependencyKey: 'restyled'
+      });
+      await waitFor(() => styleKeyMock.key.mock.calls.length === 2);
+      expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+        'data-preview-presented'
+      )).toBe('true');
+
+      await act(async () => {
+        styleKeyResolution.resolve('sha256:restyled');
+        await Promise.resolve();
+      });
+      await waitFor(() => digest.mock.calls.length === 1);
+
+      expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+        'data-preview-presented'
+      )).toBe('false');
+    } finally {
+      await act(async () => {
+        styleKeyResolution.resolve('sha256:restyled');
+        fingerprintDigest.resolve(new Uint8Array(32).buffer);
+        await Promise.resolve();
+      });
+      digest.mockRestore();
+    }
+  });
+
+  it('does not present a variant error resolved from different rendered geometry', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('stretched-error.md', 0, 0);
+    const renderedNode = { ...stableNode, height: stableNode.height * 2 };
+
+    await renderProvider({
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set(),
+      consumerNode: renderedNode,
+      pendingReport: { kind: 'failure', node: stableNode, sourceNode: stableNode }
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await waitFor(() => container.querySelector('[data-failure-node-error]')?.getAttribute(
+      'data-failure-node-error'
+    ) !== '');
+
+    expect(container.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('');
+  });
+
+  it('ignores a pending failure reported from different rendered geometry', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('stale-event.md', 0, 0);
+    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
+
+    await renderProvider({
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set(),
+      consumerNode: stableNode,
+      pendingReport: { kind: 'failure', node: renderedNode, sourceNode: stableNode }
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await flushWork();
+    await flushWork();
+
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute('data-preview-presented')).toBe('true');
+    expect(container.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('');
+  });
+
+  it('ignores pending readiness reported from different rendered geometry', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('stale-ready.md', 0, 0);
+    const renderedNode = { ...stableNode, height: stableNode.height * 2 };
+
+    await renderProvider({
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set(),
+      consumerNode: stableNode,
+      pendingReport: { kind: 'ready', node: renderedNode, sourceNode: stableNode }
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await flushWork();
+    await flushWork();
+
+    expect(harness.publicationQueue).toEqual([]);
+  });
+
+  it('ignores a visible failure reported from different rendered geometry', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('stale-visible-error.md', 0, 0);
+    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
+
+    await renderProvider({
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set(),
+      consumerNode: stableNode,
+      pendingReport: { kind: 'ready', node: stableNode },
+      visibleReport: { kind: 'failure', node: renderedNode }
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await waitFor(() => harness.publicationQueue.length === 1);
+    await act(async () => harness.publicationQueue.shift()!.run());
+    await flushWork();
+    await flushWork();
+
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute('data-preview-presented')).toBe('true');
+    expect(container.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('');
+  });
+
+  it('ignores visible commitment reported from different rendered geometry', async () => {
+    const harness = availablePreviewHarness();
+    const stableNode = textNode('stale-visible-commit.md', 0, 0);
+    const renderedNode = { ...stableNode, height: stableNode.height * 2 };
+
+    await renderProvider({
+      nodes: [stableNode],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      culledNodePaths: new Set(),
+      consumerNode: stableNode,
+      pendingReport: { kind: 'ready', node: stableNode },
+      visibleReport: { kind: 'committed', node: renderedNode }
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue[0]!.run());
+    await waitFor(() => harness.publicationQueue.length === 1);
+    await act(async () => harness.publicationQueue.shift()!.run());
+    await flushWork();
+    await flushWork();
+
+    expect(harness.publicationQueue).toEqual([]);
   });
 
   it('admits offscreen targets and uses viewport only to order canonical work', async () => {
@@ -307,6 +559,10 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     virtualRect?: { x: number; y: number; width: number; height: number };
     culledNodePaths?: ReadonlySet<string>;
     previewResourceScheduler?: CanvasPreviewResourceScheduler;
+    consumerNode?: ProjectedCanvasNode | undefined;
+    pendingReport?: PendingPreviewReport | undefined;
+    visibleReport?: VisiblePreviewReport | undefined;
+    styleDependencyKey?: string | undefined;
   }): Promise<void> {
     const buffers = input.textFileBuffers ?? Object.fromEntries(input.nodes.map((node) => [
       node.projectRelativePath,
@@ -327,10 +583,16 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
             culledNodePaths={input.culledNodePaths ?? new Set(input.nodes.map((node) => node.projectRelativePath))}
             visibleRect={input.visibleRect ?? { x: 0, y: 0, width: 800, height: 800 }}
             virtualRect={input.virtualRect ?? { x: -800, y: -800, width: 2400, height: 2400 }}
-            styleDependencyKey="test"
+            styleDependencyKey={input.styleDependencyKey ?? 'test'}
             previewResourceScheduler={input.previewResourceScheduler ?? immediateScheduler()}
           >
-            <div />
+            {input.consumerNode ? (
+              <RuntimePresentationProbe
+                node={input.consumerNode}
+                pendingReport={input.pendingReport}
+                visibleReport={input.visibleReport}
+              />
+            ) : <div />}
           </CanvasTextPreviewProvider>
         </CanvasTextRenderProfileGate>
       );
@@ -341,6 +603,58 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
 function RuntimeConsumer(): React.ReactElement {
   useCanvasTextPreviewRuntime();
   return <div />;
+}
+
+type PendingPreviewReport = {
+  kind: 'failure' | 'ready';
+  node: ProjectedCanvasNode;
+  sourceNode?: ProjectedCanvasNode | undefined;
+};
+
+type VisiblePreviewReport = {
+  kind: 'committed' | 'failure';
+  node: ProjectedCanvasNode;
+};
+
+function RuntimePresentationProbe({ node, pendingReport, visibleReport }: {
+  node: ProjectedCanvasNode;
+  pendingReport?: PendingPreviewReport | undefined;
+  visibleReport?: VisiblePreviewReport | undefined;
+}): React.ReactElement {
+  const runtime = useCanvasTextPreviewRuntime();
+  const presentation = runtime.presentationForNode({ node });
+  const pendingPresentation = pendingReport
+    ? runtime.presentationForNode({ node: pendingReport.sourceNode ?? node })
+    : undefined;
+  React.useEffect(() => {
+    if (!pendingReport || !pendingPresentation?.pending) {
+      return;
+    }
+    if (pendingReport.kind === 'failure') {
+      runtime.reportPendingFailure(pendingReport.node, pendingPresentation.pending, new Error('stale variant failed'));
+    } else {
+      runtime.reportPendingReady(pendingReport.node, pendingPresentation.pending);
+    }
+  }, [pendingPresentation?.pending, pendingReport, runtime]);
+  React.useEffect(() => {
+    if (!visibleReport || !presentation.visible) {
+      return;
+    }
+    if (visibleReport.kind === 'failure') {
+      runtime.reportVisibleFailure(visibleReport.node, presentation.visible, new Error('stale visible failed'));
+    } else {
+      runtime.reportVisibleCommitted(visibleReport.node, presentation.visible);
+    }
+  }, [presentation.visible, runtime, visibleReport]);
+  return (
+    <div
+      data-preview-presented={Boolean(presentation.visible || presentation.pending)}
+      data-preview-error={runtime.previewErrorForNode({ node }) ?? ''}
+      data-failure-node-error={pendingReport?.kind === 'failure'
+        ? runtime.previewErrorForNode({ node: pendingReport.node }) ?? ''
+        : ''}
+    />
+  );
 }
 
 function textNode(path: string, x: number, y: number): ProjectedCanvasNode {
@@ -416,6 +730,27 @@ function immediateScheduler(overrides: Partial<CanvasPreviewResourceScheduler> =
     notifyVisibilityChanged: () => undefined,
     dispose: () => undefined,
     ...overrides
+  };
+}
+
+function availablePreviewHarness() {
+  const mountQueue: Array<{ run(): void | Promise<void> }> = [];
+  const publicationQueue: Array<{ run(): void | Promise<void> }> = [];
+  const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+    sources: Object.fromEntries(request.sources.map((source) => [
+      source.projectRelativePath,
+      { ...source, status: 'available' as const }
+    ]))
+  }));
+  return {
+    actions: actionsFixture({ readCanvasTextPreviewSources }),
+    mountQueue,
+    publicationQueue,
+    readCanvasTextPreviewSources,
+    scheduler: immediateScheduler({
+      enqueue: (request) => mountQueue.push(request),
+      enqueuePublication: (request) => publicationQueue.push(request)
+    })
   };
 }
 

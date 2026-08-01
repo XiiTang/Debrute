@@ -109,7 +109,7 @@ interface CanvasTextPreviewAvailabilityRequest {
   targetKeys: ReadonlySet<string>;
 }
 
-interface CanvasTextPreviewTargetSignature {
+interface CanvasTextPreviewTargetInput {
   readonly canvasId: string;
   readonly projectRelativePath: string;
   readonly contentDigest?: string | undefined;
@@ -125,7 +125,7 @@ interface CanvasTextPreviewTargetSignature {
 }
 
 interface CanvasTextPreviewTargetResolution {
-  readonly signature: CanvasTextPreviewTargetSignature;
+  readonly input: CanvasTextPreviewTargetInput;
   readonly pending: Promise<CanvasTextPreviewTarget>;
   target?: CanvasTextPreviewTarget | undefined;
 }
@@ -219,6 +219,8 @@ export function CanvasTextPreviewProvider({
   const previewPresentationsRef = useRef(previewPresentations);
   const currentResourceKeysRef = useRef(new Map<string, string>());
   const currentCanvasIdRef = useRef(canvasId);
+  const textFileBuffersRef = useRef(textFileBuffers);
+  const styleKeyRef = useRef(styleKeyState.key);
   const interactionActiveRef = useRef(interactionActive);
   const activeInlineTextPathRef = useRef(activeInlineTextPath);
   const currentCulledNodePathsRef = useRef(culledNodePaths);
@@ -244,6 +246,8 @@ export function CanvasTextPreviewProvider({
   const publishingSourceKeysRef = useRef(new Set<string>());
 
   currentCanvasIdRef.current = canvasId;
+  textFileBuffersRef.current = textFileBuffers;
+  styleKeyRef.current = styleKeyState.key;
   interactionActiveRef.current = interactionActive;
   activeInlineTextPathRef.current = activeInlineTextPath;
   currentCulledNodePathsRef.current = culledNodePaths;
@@ -439,23 +443,23 @@ export function CanvasTextPreviewProvider({
         }
         continue;
       }
-      const signature = canvasTextPreviewTargetSignature({
+      const targetInput = canvasTextPreviewTargetInput({
         canvasId,
         node,
         buffer: textFileBuffers[path],
         styleKey: styleKeyState.key
       });
-      if (!signature) {
+      if (!targetInput) {
         continue;
       }
       const existing = previous.get(path);
-      if (existing && canvasTextPreviewTargetSignaturesEqual(existing.signature, signature)) {
+      if (existing && canvasTextPreviewTargetInputsEqual(existing.input, targetInput)) {
         next.set(path, existing);
         continue;
       }
       const resolution: CanvasTextPreviewTargetResolution = {
-        signature,
-        pending: resolveCanvasTextPreviewTarget(signature).then((target) => {
+        input: targetInput,
+        pending: resolveCanvasTextPreviewTarget(targetInput).then((target) => {
           resolution.target = target;
           recordTextPreviewCounter('text-preview-target-fingerprint-computed', {
             projectRelativePath: target.projectRelativePath,
@@ -1221,8 +1225,26 @@ export function CanvasTextPreviewProvider({
     setCurrentPreviewFailure(target, failure);
   }, [setCurrentPreviewFailure]);
 
+  const currentTargetForRenderedNode = useCallback((node: ProjectedCanvasNode): CanvasTextPreviewTarget | undefined => {
+    const styleKey = styleKeyRef.current;
+    const target = currentTargetsRef.current[node.projectRelativePath];
+    const resolution = targetResolutionsRef.current.get(node.projectRelativePath);
+    if (!styleKey || !target || resolution?.target !== target) {
+      return undefined;
+    }
+    const renderedInput = canvasTextPreviewTargetInput({
+      canvasId: currentCanvasIdRef.current,
+      node,
+      buffer: textFileBuffersRef.current[node.projectRelativePath],
+      styleKey
+    });
+    return renderedInput && canvasTextPreviewTargetInputsEqual(resolution.input, renderedInput)
+      ? target
+      : undefined;
+  }, []);
+
   const reportPendingReady = useCallback((node: ProjectedCanvasNode, source: CanvasTextPreviewSource) => {
-    const target = currentTargets[node.projectRelativePath];
+    const target = currentTargetForRenderedNode(node);
     const pending = previewPresentations[node.projectRelativePath]?.pending;
     if (!target
       || !pending
@@ -1237,14 +1259,14 @@ export function CanvasTextPreviewProvider({
       fingerprint: source.fingerprint,
       previewWidth: source.previewWidth
     });
-  }, [currentTargets, enqueuePresentationWork, previewPresentations, recordTextPreviewCounter]);
+  }, [currentTargetForRenderedNode, enqueuePresentationWork, previewPresentations, recordTextPreviewCounter]);
 
   const reportPendingFailure = useCallback((
     node: ProjectedCanvasNode,
     source: CanvasTextPreviewSource,
     error: unknown
   ) => {
-    const target = currentTargets[node.projectRelativePath];
+    const target = currentTargetForRenderedNode(node);
     const pending = previewPresentations[node.projectRelativePath]?.pending;
     if (!target || pending?.sourceKey !== source.sourceKey || pending.targetKey !== canvasTextPreviewTargetKey(target)) {
       return;
@@ -1261,14 +1283,14 @@ export function CanvasTextPreviewProvider({
       failureFieldsForTarget(target),
       error
     ), source.sourceKey);
-  }, [currentTargets, previewPresentations, setCurrentPreviewFailure]);
+  }, [currentTargetForRenderedNode, previewPresentations, setCurrentPreviewFailure]);
 
   const reportVisibleFailure = useCallback((
     node: ProjectedCanvasNode,
     source: CanvasTextPreviewSource,
     error: unknown
   ) => {
-    const target = currentTargets[node.projectRelativePath];
+    const target = currentTargetForRenderedNode(node);
     const visible = previewPresentations[node.projectRelativePath]?.visible;
     if (!target || visible?.sourceKey !== source.sourceKey || visible.targetKey !== canvasTextPreviewTargetKey(target)) {
       return;
@@ -1285,19 +1307,19 @@ export function CanvasTextPreviewProvider({
       failureFieldsForTarget(target),
       error
     ), source.sourceKey);
-  }, [currentTargets, previewPresentations, setCurrentPreviewFailure]);
+  }, [currentTargetForRenderedNode, previewPresentations, setCurrentPreviewFailure]);
 
   const reportVisibleCommitted = useCallback((node: ProjectedCanvasNode, source: CanvasTextPreviewSource) => {
-    const target = currentTargets[node.projectRelativePath];
+    const target = currentTargetForRenderedNode(node);
     const visible = previewPresentations[node.projectRelativePath]?.visible;
     if (target && visible?.sourceKey === source.sourceKey && visible.targetKey === canvasTextPreviewTargetKey(target)) {
       enqueuePresentationWork('commit', { epoch: runtimeEpochRef.current, ...visible });
     }
-  }, [currentTargets, enqueuePresentationWork, previewPresentations]);
+  }, [currentTargetForRenderedNode, enqueuePresentationWork, previewPresentations]);
 
   const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
     presentationForNode: ({ node }) => {
-      const target = currentTargets[node.projectRelativePath];
+      const target = currentTargetForRenderedNode(node);
       const presentation = previewPresentations[node.projectRelativePath];
       if (!target) {
         return {};
@@ -1312,7 +1334,7 @@ export function CanvasTextPreviewProvider({
       };
     },
     previewErrorForNode: ({ node }) => {
-      const target = currentTargets[node.projectRelativePath];
+      const target = currentTargetForRenderedNode(node);
       const error = previewErrors[node.projectRelativePath];
       if (!target || error?.targetKey !== canvasTextPreviewTargetKey(target)) {
         return undefined;
@@ -1328,12 +1350,14 @@ export function CanvasTextPreviewProvider({
     reportVisibleCommitted
   }), [
     currentTargets,
+    currentTargetForRenderedNode,
     previewErrors,
     previewPresentations,
     reportPendingFailure,
     reportPendingReady,
     reportVisibleCommitted,
-    reportVisibleFailure
+    reportVisibleFailure,
+    styleKeyState.key
   ]);
 
   const captureLayer = (
@@ -1381,12 +1405,12 @@ function isStableCanvasTextNode(node: ProjectedCanvasNode): boolean {
     && node.textLanguage !== undefined;
 }
 
-function canvasTextPreviewTargetSignature(input: {
+function canvasTextPreviewTargetInput(input: {
   canvasId: string;
   node: ProjectedCanvasNode;
   buffer: TextFileBuffer | undefined;
   styleKey: string;
-}): CanvasTextPreviewTargetSignature | undefined {
+}): CanvasTextPreviewTargetInput | undefined {
   const { node, buffer } = input;
   if (!isStableCanvasTextNode(node) || node.availability.state !== 'available' || !node.textLanguage) {
     return undefined;
@@ -1410,25 +1434,25 @@ function canvasTextPreviewTargetSignature(input: {
 }
 
 async function resolveCanvasTextPreviewTarget(
-  signature: CanvasTextPreviewTargetSignature
+  targetInput: CanvasTextPreviewTargetInput
 ): Promise<CanvasTextPreviewTarget> {
-  const dirtyIdentity = signature.dirtyContent === undefined
+  const dirtyIdentity = targetInput.dirtyContent === undefined
     ? undefined
-    : await canvasTextContentIdentity(signature.dirtyContent);
-  const contentDigest = signature.contentDigest ?? dirtyIdentity!.digest;
-  const sourceSize = canvasTextPreviewSourceSize(signature);
+    : await canvasTextContentIdentity(targetInput.dirtyContent);
+  const contentDigest = targetInput.contentDigest ?? dirtyIdentity!.digest;
+  const sourceSize = canvasTextPreviewSourceSize(targetInput);
   const candidate: CanvasTextPreviewCandidate = {
-    canvasId: signature.canvasId,
-    projectRelativePath: signature.projectRelativePath,
+    canvasId: targetInput.canvasId,
+    projectRelativePath: targetInput.projectRelativePath,
     contentDigest,
-    estimatedBytes: dirtyIdentity?.bytes ?? signature.estimatedBytes,
-    language: signature.language,
-    wordWrap: signature.wordWrap,
-    contentCssWidth: signature.contentCssWidth,
-    contentCssHeight: signature.contentCssHeight,
-    scrollTop: signature.scrollTop,
-    scrollLeft: signature.scrollLeft,
-    styleKey: signature.styleKey,
+    estimatedBytes: dirtyIdentity?.bytes ?? targetInput.estimatedBytes,
+    language: targetInput.language,
+    wordWrap: targetInput.wordWrap,
+    contentCssWidth: targetInput.contentCssWidth,
+    contentCssHeight: targetInput.contentCssHeight,
+    scrollTop: targetInput.scrollTop,
+    scrollLeft: targetInput.scrollLeft,
+    styleKey: targetInput.styleKey,
     ...sourceSize
   };
   return { ...candidate, fingerprint: await canvasTextPreviewFingerprint(candidate) };
@@ -1443,9 +1467,9 @@ async function canvasTextContentIdentity(content: string): Promise<{ digest: str
   };
 }
 
-function canvasTextPreviewTargetSignaturesEqual(
-  left: CanvasTextPreviewTargetSignature,
-  right: CanvasTextPreviewTargetSignature
+function canvasTextPreviewTargetInputsEqual(
+  left: CanvasTextPreviewTargetInput,
+  right: CanvasTextPreviewTargetInput
 ): boolean {
   return left.canvasId === right.canvasId
     && left.projectRelativePath === right.projectRelativePath
@@ -1568,7 +1592,7 @@ function canvasTextPreviewBufferMatchesTarget(
   }
   return buffer.dirty
     ? resolution?.target?.fingerprint === target.fingerprint
-      && resolution.signature.dirtyContent === buffer.content
+      && resolution.input.dirtyContent === buffer.content
     : buffer.baseRevision === target.contentDigest;
 }
 
