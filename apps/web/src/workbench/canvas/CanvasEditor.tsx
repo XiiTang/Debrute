@@ -1,4 +1,5 @@
 import React from 'react';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { Boxes } from '../ui/index.js';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
@@ -16,6 +17,8 @@ export function CanvasEditor({
   actions,
   runtimeScopeKey,
   minimapOpen,
+  productPlatform,
+  cutPaths,
   onCurrentNodesChange,
   feedbackInteraction,
   onRuntimeChange,
@@ -27,6 +30,8 @@ export function CanvasEditor({
   actions: WorkbenchActions;
   runtimeScopeKey?: number;
   minimapOpen?: boolean | undefined;
+  productPlatform: DebruteProductPlatform;
+  cutPaths?: readonly string[] | undefined;
   onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
@@ -45,8 +50,9 @@ export function CanvasEditor({
     ? {
         canvasId: canvas.id,
         initialProjection: projection,
-        submitManualLayout: (nodeLayouts) => actionsRef.current.updateCanvasNodeLayouts(canvas.id, {
-          nodeLayouts: [...nodeLayouts]
+        submitManualLayout: (mutation) => actionsRef.current.updateCanvasNodeLayouts(canvas.id, {
+          interaction: mutation.interaction,
+          nodeLayouts: [...mutation.nodeLayouts]
         })
       }
     : undefined;
@@ -101,6 +107,8 @@ export function CanvasEditor({
         canvasFeedback={state.canvasFeedback}
         feedbackInteraction={feedbackInteraction}
         minimapOpen={minimapOpen}
+        productPlatform={productPlatform}
+        cutPaths={cutPaths}
         onCurrentNodesChange={onCurrentNodesChange}
         onOpenContextMenu={onOpenContextMenu}
         interactionBlocked={interactionBlocked}

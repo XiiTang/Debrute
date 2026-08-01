@@ -70,20 +70,27 @@ function InspectorDetails({
       </>
     );
   }
-  if (context.kind === 'multi') {
-    const counts = context.items.reduce<Record<string, number>>((current, item) => ({
+  if (context.kind === 'nodes') {
+    const fileCount = context.nodes.filter((node) => node.nodeKind === 'file').length;
+    const directoryCount = context.nodes.length - fileCount;
+    const manualLayoutCount = context.nodes.filter((node) => node.layoutMode === 'manual').length;
+    const availabilityCounts = context.nodes.reduce<Record<string, number>>((current, node) => ({
       ...current,
-      [item.kind]: (current[item.kind] ?? 0) + 1
+      [node.availability.state]: (current[node.availability.state] ?? 0) + 1
     }), {});
     return (
       <div className="inspector-section">
-        <h2>{i18n.t('inspector.selectedCount', { count: context.items.length })}</h2>
+        <h2>{i18n.t('inspector.selectedCount', { count: context.nodes.length })}</h2>
         <dl className="db-object-properties">
-          {Object.entries(counts).map(([kind, count]) => (
-            <React.Fragment key={kind}>
-              <dt>{kind}</dt><dd>{count}</dd>
+          <dt>{i18n.t('inspector.files')}</dt><dd>{fileCount}</dd>
+          <dt>{i18n.t('inspector.directories')}</dt><dd>{directoryCount}</dd>
+          {Object.entries(availabilityCounts).map(([state, count]) => (
+            <React.Fragment key={state}>
+              <dt>{availabilityStateLabel(state, i18n)}</dt>
+              <dd>{count}</dd>
             </React.Fragment>
           ))}
+          <dt>{i18n.t('inspector.manualLayout')}</dt><dd>{manualLayoutCount}</dd>
         </dl>
       </div>
     );
@@ -103,6 +110,15 @@ function InspectorDetails({
   return (
     <EmptyState className="inspector-empty" title={i18n.t('inspector.selectNodeOrDiagnostic')} />
   );
+}
+
+function availabilityStateLabel(state: string, i18n: WorkbenchI18n): string {
+  switch (state) {
+    case 'available': return i18n.t('inspector.available');
+    case 'missing': return i18n.t('inspector.missing');
+    case 'unreadable': return i18n.t('inspector.unreadable');
+    default: return state;
+  }
 }
 
 function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>, i18n: WorkbenchI18n): Array<[string, string]> {

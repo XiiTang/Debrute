@@ -1,64 +1,80 @@
 import { act, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './CanvasEditorRuntime.js';
-import { useCanvasSurfaceReady } from './useCanvasRuntimeSnapshot.js';
+import type {
+  CanvasEditorRuntime,
+  CanvasRuntimePointerInteraction,
+  CanvasRuntimeSnapshot
+} from './CanvasEditorRuntime.js';
+import { useCanvasPointerInteraction } from './useCanvasRuntimeSnapshot.js';
 
-describe('useCanvasSurfaceReady', () => {
-  it('rerenders only when surface readiness changes and unsubscribes on unmount', async () => {
-    let snapshot = runtimeSnapshot(undefined);
-    const surfaceListeners = new Set<() => void>();
+describe('useCanvasPointerInteraction', () => {
+  it('rerenders on pointer interaction changes and unsubscribes on unmount', async () => {
+    let pointerInteraction: CanvasRuntimePointerInteraction | undefined;
+    const listeners = new Set<(next: CanvasRuntimePointerInteraction | undefined) => void>();
     const unsubscribe = vi.fn();
     const runtime = {
-      getSnapshot: () => snapshot,
-      subscribeSurfaceSize: (listener: () => void) => {
-        surfaceListeners.add(listener);
+      getSnapshot: () => runtimeSnapshot(pointerInteraction),
+      subscribePointerInteraction: (
+        listener: (next: CanvasRuntimePointerInteraction | undefined) => void
+      ) => {
+        listeners.add(listener);
         return () => {
-          surfaceListeners.delete(listener);
+          listeners.delete(listener);
           unsubscribe();
         };
       }
     } as CanvasEditorRuntime;
-    const renders: boolean[] = [];
+    const renders: Array<CanvasRuntimePointerInteraction['kind'] | undefined> = [];
     const container = document.createElement('div');
     const root = createRoot(container);
 
     function Probe(): ReactElement {
-      const ready = useCanvasSurfaceReady(runtime);
-      renders.push(ready);
-      return <span>{String(ready)}</span>;
+      const interaction = useCanvasPointerInteraction(runtime);
+      renders.push(interaction?.kind);
+      return <span>{interaction?.kind ?? 'idle'}</span>;
     }
 
     await act(async () => root.render(<Probe />));
-    expect(renders).toEqual([false]);
+    expect(renders).toEqual([undefined]);
 
-    snapshot = runtimeSnapshot(undefined, { x: 12, y: 8, z: 1 });
-    await act(async () => surfaceListeners.forEach((listener) => listener()));
-    expect(renders).toEqual([false]);
+    pointerInteraction = selectionMarquee();
+    await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
+    expect(renders).toEqual([undefined, 'selection-marquee']);
 
-    snapshot = runtimeSnapshot({ width: 800, height: 600 });
-    await act(async () => surfaceListeners.forEach((listener) => listener()));
-    expect(renders).toEqual([false, true]);
-
-    snapshot = runtimeSnapshot({ width: 1024, height: 768 });
-    await act(async () => surfaceListeners.forEach((listener) => listener()));
-    expect(renders).toEqual([false, true]);
+    pointerInteraction = undefined;
+    await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
+    expect(renders).toEqual([undefined, 'selection-marquee', undefined]);
 
     await act(async () => root.unmount());
     expect(unsubscribe).toHaveBeenCalledOnce();
-    expect(surfaceListeners.size).toBe(0);
+    expect(listeners.size).toBe(0);
   });
 });
 
 function runtimeSnapshot(
-  surfaceSize: CanvasRuntimeSnapshot['surfaceSize'],
-  camera: CanvasRuntimeSnapshot['camera'] = { x: 0, y: 0, z: 1 }
+  pointerInteraction: CanvasRuntimePointerInteraction | undefined
 ): CanvasRuntimeSnapshot {
   return {
-    camera,
+    camera: { x: 0, y: 0, z: 1 },
     cameraState: 'idle',
     selection: undefined,
-    dragState: undefined,
-    surfaceSize
+    pointerInteraction,
+    surfaceSize: undefined
+  };
+}
+
+function selectionMarquee(): CanvasRuntimePointerInteraction {
+  return {
+    kind: 'selection-marquee',
+    pointerId: 1,
+    phase: 'pending',
+    startScreen: { x: 10, y: 20 },
+    currentScreen: { x: 10, y: 20 },
+    start: { x: 10, y: 20 },
+    current: { x: 10, y: 20 },
+    initialSelection: undefined,
+    additive: false,
+    topEdgeInset: 0
   };
 }

@@ -17,11 +17,11 @@ use uuid::Uuid;
 
 use super::{
     CanvasDocument, CanvasFeedbackArtifacts, CanvasFeedbackDiagnosticUpdate,
-    CanvasFeedbackDocument, CanvasMapPathRuleSet, CanvasNodeLayoutUpdate, CanvasProjection,
+    CanvasFeedbackDocument, CanvasLayoutInteraction, CanvasNodeLayoutUpdate, CanvasProjection,
     CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, ProjectChange, ProjectError, ProjectEvent,
     ProjectNativeShellService, ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry,
     ProjectPathKind, ProjectPathOperationStatus, ProjectService, ProjectSnapshot,
-    ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackEntryInput,
+    ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput,
     copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
     import_upload_project_entries, is_gitignore_path, list_project_files_until, move_project_paths,
     rename_project_path,
@@ -109,11 +109,8 @@ pub enum ProjectCommand {
     RepairCanvasRegistry,
     UpdateCanvasLayouts {
         canvas_id: String,
+        interaction: CanvasLayoutInteraction,
         updates: Vec<CanvasNodeLayoutUpdate>,
-    },
-    BringCanvasNodeToFront {
-        canvas_id: String,
-        project_relative_path: String,
     },
     UpdateCanvasVideoPlayback {
         canvas_id: String,
@@ -124,7 +121,7 @@ pub enum ProjectCommand {
         updates: Vec<CanvasTextViewportUpdate>,
     },
     UpdateCanvasFeedback {
-        input: UpdateCanvasFeedbackEntryInput,
+        input: UpdateCanvasFeedbackInput,
     },
     PushCanvasMap {
         canvas_id: String,
@@ -135,7 +132,7 @@ pub enum ProjectCommand {
     },
     ResetCanvasLayout {
         canvas_id: String,
-        rules: Option<CanvasMapPathRuleSet>,
+        node_paths: Option<std::collections::BTreeSet<String>>,
     },
     WriteTextFile {
         project_relative_path: String,
@@ -935,8 +932,8 @@ impl ProjectSession {
         command: ProjectCommand,
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
         let feedback_source = match &command {
-            ProjectCommand::UpdateCanvasFeedback { input } if input.affects_rendered_artifact() => {
-                Some(input.project_relative_path().to_owned())
+            ProjectCommand::UpdateCanvasFeedback { input } => {
+                input.rendered_artifact_source_path().map(str::to_owned)
             }
             _ => None,
         };
@@ -1553,23 +1550,27 @@ fn execute_project_command(
             execute_canvas_registry_command(service, command)
         }
         command @ (ProjectCommand::UpdateCanvasLayouts { .. }
-        | ProjectCommand::BringCanvasNodeToFront { .. }
         | ProjectCommand::UpdateCanvasVideoPlayback { .. }
         | ProjectCommand::UpdateCanvasTextViewports { .. }) => {
             execute_visual_canvas_command(service, command)
         }
         ProjectCommand::UpdateCanvasFeedback { input } => {
             let affects_rendered_artifact = input.affects_rendered_artifact();
-            let feedback = service.update_canvas_feedback(&input)?;
-            Ok(ProjectMutation::changed(
-                ProjectCommandResult::CanvasFeedbackUpdated {
-                    feedback: feedback.clone(),
-                },
-                ProjectChange::CanvasFeedbackChanged {
-                    feedback,
-                    affects_rendered_artifact,
-                },
-            ))
+            let update = service.update_canvas_feedback(&input)?;
+            let result = ProjectCommandResult::CanvasFeedbackUpdated {
+                feedback: update.feedback.clone(),
+            };
+            if update.changed {
+                Ok(ProjectMutation::changed(
+                    result,
+                    ProjectChange::CanvasFeedbackChanged {
+                        feedback: update.feedback,
+                        affects_rendered_artifact,
+                    },
+                ))
+            } else {
+                Ok(ProjectMutation::unchanged(result))
+            }
         }
         command @ (ProjectCommand::PushCanvasMap { .. }
         | ProjectCommand::AddProjectPathToCanvasMap { .. }
@@ -1633,13 +1634,11 @@ fn execute_visual_canvas_command(
     command: ProjectCommand,
 ) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
     let (canvas, projection, changed) = match command {
-        ProjectCommand::UpdateCanvasLayouts { canvas_id, updates } => {
-            service.update_canvas_layouts(&canvas_id, &updates)?
-        }
-        ProjectCommand::BringCanvasNodeToFront {
+        ProjectCommand::UpdateCanvasLayouts {
             canvas_id,
-            project_relative_path,
-        } => service.bring_canvas_node_to_front(&canvas_id, &project_relative_path)?,
+            interaction,
+            updates,
+        } => service.update_canvas_layouts(&canvas_id, interaction, &updates)?,
         ProjectCommand::UpdateCanvasVideoPlayback { canvas_id, updates } => {
             service.update_canvas_video_playback(&canvas_id, &updates)?
         }
@@ -1675,9 +1674,12 @@ fn execute_canvas_map_command(
                 ProjectChange::CanvasChanged { canvas, projection },
             ))
         }
-        ProjectCommand::ResetCanvasLayout { canvas_id, rules } => {
+        ProjectCommand::ResetCanvasLayout {
+            canvas_id,
+            node_paths,
+        } => {
             let (canvas, projection, reset_count) =
-                service.reset_canvas_layout(&canvas_id, rules.as_ref())?;
+                service.reset_canvas_layout(&canvas_id, node_paths.as_ref())?;
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::CanvasLayoutReset {
                     canvas: canvas.clone(),

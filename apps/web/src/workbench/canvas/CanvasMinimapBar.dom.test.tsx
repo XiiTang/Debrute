@@ -9,7 +9,7 @@ import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import type { CanvasCamera } from './runtime/canvasCamera';
-import type { CanvasSelection } from './runtime/canvasSelection';
+import type { CanvasSelection } from './runtime/canvasSelection.js';
 import { CANVAS_MINIMAP_PANEL_SIZE, canvasMinimapButtonRect, placeCanvasMinimapPanel } from '../shell/floatingBars';
 import { I18nProvider } from '../i18n';
 
@@ -114,7 +114,7 @@ describe('CanvasMinimapBar', () => {
     const durableNode = nodeFixture('flow/a.png', 0, 0);
     const runtime = createRuntime({
       camera: { x: 0, y: 0, z: 1 },
-      selection: { kind: 'node', projectRelativePath: durableNode.projectRelativePath }
+      selection: { kind: 'nodes', projectRelativePaths: [durableNode.projectRelativePath] }
     });
     runtime.bindSurface({
       surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
@@ -192,7 +192,7 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
 function runtimeFixture(): CanvasEditorRuntime {
   const runtime = createRuntime({
     camera: { x: -100, y: -50, z: 0.5 },
-    selection: { kind: 'node', projectRelativePath: 'flow/selected.png' }
+    selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.png'] }
   });
   runtime.bindSurface({
     surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
@@ -208,12 +208,15 @@ function createRuntime(input: {
     canvasId: 'minimap-canvas',
     initialProjection: {
       canvasId: 'minimap-canvas',
-      nodes: [],
+      nodes: input.selection.kind === 'nodes'
+        ? input.selection.projectRelativePaths.map((path) => nodeFixture(path, 0, 0))
+        : [],
       edges: [],
       diagnostics: []
     },
     submitManualLayout: async () => undefined,
-    ...input
+    camera: input.camera,
+    selection: input.selection
   });
 }
 

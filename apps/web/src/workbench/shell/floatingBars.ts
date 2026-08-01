@@ -1,9 +1,6 @@
 import {
   CANVAS_FEEDBACK_MARKS,
-  type CanvasFeedbackDocument,
-  type CanvasFeedbackEntry,
-  type CanvasFeedbackGeometry,
-  type CanvasFeedbackItem
+  type CanvasFeedbackGeometry
 } from '@debrute/canvas-core';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { WORKBENCH_FLOATING_DOCK_EDGE_INSET } from './workbenchLayers';
@@ -17,25 +14,35 @@ export interface FloatingBarRect {
 
 export type CanvasFeedbackLocalToolset = 'none' | 'image' | 'video';
 
-export interface CanvasFeedbackBarTarget {
-  projectRelativePath: string;
-  nodeRect: FloatingBarRect;
+interface CanvasFeedbackBarTargetBase {
+  anchorRect: FloatingBarRect;
   surfaceRect: FloatingBarRect;
   camera: CanvasCamera;
-  entry: CanvasFeedbackEntry | undefined;
+}
+
+export interface CanvasFeedbackNodeBarTarget extends CanvasFeedbackBarTargetBase {
+  kind: 'node';
+  projectRelativePath: string;
   localToolset: CanvasFeedbackLocalToolset;
   canStartVideoMomentFeedback: boolean;
   startVideoMomentFeedback?: ((mode: 'comment' | 'pin' | 'rect') => void) | undefined;
   seekToMoment?: ((seconds: number) => void) | undefined;
 }
 
+export interface CanvasFeedbackSelectionBarTarget extends CanvasFeedbackBarTargetBase {
+  kind: 'selection';
+  projectRelativePaths: string[];
+}
+
+export type CanvasFeedbackBarTarget = CanvasFeedbackNodeBarTarget | CanvasFeedbackSelectionBarTarget;
+
 export interface CanvasLocalFeedbackDraft {
   projectRelativePath: string;
   kind: 'comment' | 'pin' | 'region';
-  scope: 'file' | 'moment';
+  scope: 'node' | 'moment';
   geometry?: CanvasFeedbackGeometry | undefined;
   momentTimeSeconds?: number | undefined;
-  feedbackBarTarget: CanvasFeedbackBarTarget;
+  feedbackBarTarget: CanvasFeedbackNodeBarTarget;
 }
 
 export function sameCanvasFeedbackBarTarget(
@@ -48,15 +55,23 @@ export function sameCanvasFeedbackBarTarget(
   if (!left || !right) {
     return false;
   }
-  return left.projectRelativePath === right.projectRelativePath
-    && sameFloatingBarRect(left.nodeRect, right.nodeRect)
-    && sameFloatingBarRect(left.surfaceRect, right.surfaceRect)
-    && left.camera.x === right.camera.x
-    && left.camera.y === right.camera.y
-    && left.camera.z === right.camera.z
+  if (left.kind !== right.kind
+    || !sameFloatingBarRect(left.anchorRect, right.anchorRect)
+    || !sameFloatingBarRect(left.surfaceRect, right.surfaceRect)
+    || left.camera.x !== right.camera.x
+    || left.camera.y !== right.camera.y
+    || left.camera.z !== right.camera.z) {
+    return false;
+  }
+  if (left.kind === 'selection' && right.kind === 'selection') {
+    return left.projectRelativePaths.length === right.projectRelativePaths.length
+      && left.projectRelativePaths.every((path, index) => path === right.projectRelativePaths[index]);
+  }
+  return left.kind === 'node'
+    && right.kind === 'node'
+    && left.projectRelativePath === right.projectRelativePath
     && left.localToolset === right.localToolset
-    && left.canStartVideoMomentFeedback === right.canStartVideoMomentFeedback
-    && sameCanvasFeedbackEntry(left.entry, right.entry);
+    && left.canStartVideoMomentFeedback === right.canStartVideoMomentFeedback;
 }
 
 export interface FloatingBarPlacement extends FloatingBarRect {
@@ -113,46 +128,46 @@ export const CANVAS_MINIMAP_PANEL_SIZE = {
 const FLOATING_BAR_GAP_PX = 3;
 const VIEWPORT_PADDING_PX = 8;
 
-export function canvasNodeToViewportRect(input: {
-  nodeRect: FloatingBarRect;
+export function canvasAnchorToViewportRect(input: {
+  anchorRect: FloatingBarRect;
   surfaceRect: FloatingBarRect;
   camera: CanvasCamera;
 }): FloatingBarRect {
   return {
-    x: input.surfaceRect.x + input.camera.x + input.nodeRect.x * input.camera.z,
-    y: input.surfaceRect.y + input.camera.y + input.nodeRect.y * input.camera.z,
-    width: input.nodeRect.width * input.camera.z,
-    height: input.nodeRect.height * input.camera.z
+    x: input.surfaceRect.x + input.camera.x + input.anchorRect.x * input.camera.z,
+    y: input.surfaceRect.y + input.camera.y + input.anchorRect.y * input.camera.z,
+    width: input.anchorRect.width * input.camera.z,
+    height: input.anchorRect.height * input.camera.z
   };
 }
 
 export function feedbackBarPlacementForCanvasTarget(input: {
-  target: Pick<CanvasFeedbackBarTarget, 'nodeRect' | 'surfaceRect' | 'localToolset'>;
+  target: CanvasFeedbackBarTarget;
   camera: CanvasCamera;
   viewportRect: FloatingBarRect;
   reservedRects: readonly FloatingBarRect[];
 }): FloatingBarPlacement | undefined {
   return placeCanvasFeedbackBar({
-    nodeViewportRect: canvasNodeToViewportRect({
-      nodeRect: input.target.nodeRect,
+    anchorViewportRect: canvasAnchorToViewportRect({
+      anchorRect: input.target.anchorRect,
       surfaceRect: input.target.surfaceRect,
       camera: input.camera
     }),
     viewportRect: input.viewportRect,
     reservedRects: [...input.reservedRects],
-    barSize: canvasFeedbackBarSizeForTarget({
-      localToolset: input.target.localToolset
-    })
+    barSize: canvasFeedbackBarSizeForTarget(input.target.kind === 'selection'
+      ? { localToolset: 'none', marksOnly: true }
+      : { localToolset: input.target.localToolset })
   });
 }
 
 export function placeCanvasFeedbackBar(input: {
-  nodeViewportRect: FloatingBarRect;
+  anchorViewportRect: FloatingBarRect;
   viewportRect: FloatingBarRect;
   reservedRects: FloatingBarRect[];
   barSize: Pick<FloatingBarRect, 'width' | 'height'>;
 }): FloatingBarPlacement | undefined {
-  const centeredX = input.nodeViewportRect.x + input.nodeViewportRect.width / 2 - input.barSize.width / 2;
+  const centeredX = input.anchorViewportRect.x + input.anchorViewportRect.width / 2 - input.barSize.width / 2;
   const clampedX = clamp(
     centeredX,
     input.viewportRect.x + VIEWPORT_PADDING_PX,
@@ -160,13 +175,13 @@ export function placeCanvasFeedbackBar(input: {
   );
   const candidates: FloatingBarPlacement[] = [{
     x: Math.round(clampedX),
-    y: Math.round(input.nodeViewportRect.y + input.nodeViewportRect.height + FLOATING_BAR_GAP_PX),
+    y: Math.round(input.anchorViewportRect.y + input.anchorViewportRect.height + FLOATING_BAR_GAP_PX),
     width: input.barSize.width,
     height: input.barSize.height,
     placement: 'below'
   }, {
     x: Math.round(clampedX),
-    y: Math.round(input.nodeViewportRect.y - input.barSize.height - FLOATING_BAR_GAP_PX),
+    y: Math.round(input.anchorViewportRect.y - input.barSize.height - FLOATING_BAR_GAP_PX),
     width: input.barSize.width,
     height: input.barSize.height,
     placement: 'above'
@@ -178,17 +193,10 @@ export function placeCanvasFeedbackBar(input: {
   ));
 }
 
-export function canvasFeedbackBarTargetWithCurrentEntry(
-  target: CanvasFeedbackBarTarget,
-  canvasFeedback: CanvasFeedbackDocument | undefined
-): CanvasFeedbackBarTarget {
-  const entry = canvasFeedback?.entries[target.projectRelativePath];
-  return target.entry === entry ? target : { ...target, entry };
-}
-
 export function canvasFeedbackBarSizeForTarget(input: {
   localToolset: CanvasFeedbackLocalToolset;
   extraActionCount?: number | undefined;
+  marksOnly?: boolean | undefined;
 }): Pick<FloatingBarRect, 'width' | 'height'> {
   const baseActionCount = CANVAS_FEEDBACK_MARKS.length + Math.max(0, input.extraActionCount ?? 0);
   const localActionCount = canvasFeedbackLocalActionCount(input.localToolset);
@@ -204,7 +212,11 @@ export function canvasFeedbackBarSizeForTarget(input: {
     width: actionWidth
       + CANVAS_FEEDBACK_BAR_LAYOUT.containerPadding * 2
       + CANVAS_FEEDBACK_BAR_LAYOUT.containerBorderWidth * 2,
-    height: CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight
+    height: input.marksOnly
+      ? CANVAS_FEEDBACK_BAR_LAYOUT.primaryRowHeight
+        + CANVAS_FEEDBACK_BAR_LAYOUT.containerPadding * 2
+        + CANVAS_FEEDBACK_BAR_LAYOUT.containerBorderWidth * 2
+      : CANVAS_FEEDBACK_BAR_LAYOUT.twoRowHeight
   };
 }
 
@@ -309,64 +321,4 @@ function sameFloatingBarRect(left: FloatingBarRect, right: FloatingBarRect): boo
     && left.y === right.y
     && left.width === right.width
     && left.height === right.height;
-}
-
-function sameCanvasFeedbackEntry(
-  left: CanvasFeedbackEntry | undefined,
-  right: CanvasFeedbackEntry | undefined
-): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (!left
-    || !right
-    || left.marks.length !== right.marks.length
-    || left.items.length !== right.items.length) {
-    return false;
-  }
-  return left.projectRelativePath === right.projectRelativePath
-    && left.nextMomentLabel === right.nextMomentLabel
-    && left.nextSpatialLabel === right.nextSpatialLabel
-    && left.updatedAt === right.updatedAt
-    && left.marks.every((mark, index) => mark === right.marks[index])
-    && left.items.every((item, index) => sameCanvasFeedbackItem(item, right.items[index]));
-}
-
-function sameCanvasFeedbackItem(left: CanvasFeedbackItem, right: CanvasFeedbackItem | undefined): boolean {
-  if (!right
-    || left.id !== right.id
-    || left.kind !== right.kind
-    || left.scope !== right.scope
-    || left.comment !== right.comment
-    || left.createdAt !== right.createdAt
-    || left.updatedAt !== right.updatedAt) {
-    return false;
-  }
-  if (left.scope === 'moment') {
-    if (right.scope !== 'moment'
-      || left.moment.label !== right.moment.label
-      || left.moment.currentTimeSeconds !== right.moment.currentTimeSeconds) {
-      return false;
-    }
-  }
-  if ((left.kind === 'pin' || left.kind === 'region') && (right.kind === 'pin' || right.kind === 'region')) {
-    return left.label === right.label && sameCanvasFeedbackGeometry(left.geometry, right.geometry);
-  }
-  return left.kind === 'comment' && right.kind === 'comment';
-}
-
-function sameCanvasFeedbackGeometry(left: CanvasFeedbackGeometry, right: CanvasFeedbackGeometry): boolean {
-  if (left.type !== right.type) {
-    return false;
-  }
-  if (left.type === 'point' && right.type === 'point') {
-    return left.x === right.x && left.y === right.y;
-  }
-  if (left.type !== 'point' && right.type !== 'point') {
-    return left.x === right.x
-      && left.y === right.y
-      && left.width === right.width
-      && left.height === right.height;
-  }
-  return false;
 }

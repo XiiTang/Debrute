@@ -5,7 +5,7 @@ export interface CanvasFeedbackComposition {
   createdAt: string;
   projectRelativePath: string;
   kind: 'comment' | 'pin' | 'region';
-  scope: 'file' | 'moment';
+  scope: 'node' | 'moment';
   momentTimeSeconds?: number | undefined;
   geometry?: CanvasFeedbackGeometry | undefined;
 }

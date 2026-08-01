@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
-  canvasManualLayoutDraftFromDragState,
-  canvasManualLayoutDraftFromMoveState,
-  canvasManualLayoutDraftFromResizeState,
+  canvasManualLayoutDraftFromInteraction,
+  canvasManualLayoutDraftFromMoveInteraction,
+  canvasManualLayoutDraftFromResizeInteraction,
   canvasNodesWithLayoutOverrides
 } from './canvasManualLayoutDraft';
-import type { CanvasRuntimeDragState } from './runtime/CanvasEditorRuntime';
+import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime.js';
 
 describe('Canvas Manual Layout drafts', () => {
   it('creates move-node layout overrides from drag delta', () => {
-    const draft = canvasManualLayoutDraftFromMoveState({
+    const draft = canvasManualLayoutDraftFromMoveInteraction({
       canvasId: 'canvas-1',
-      dragState: moveState([
+      interaction: moveState([
         origin('flow/a.png', 10, 20, 200, 120),
         origin('flow/b.png', 30, 40, 100, 80)
       ], { x: 5, y: 6 }),
@@ -21,6 +21,7 @@ describe('Canvas Manual Layout drafts', () => {
 
     expect(draft).toEqual({
       canvasId: 'canvas-1',
+      interaction: 'move',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 },
         { projectRelativePath: 'flow/b.png', x: 50, y: 70, width: 100, height: 80 }
@@ -29,9 +30,9 @@ describe('Canvas Manual Layout drafts', () => {
   });
 
   it('creates resize-node layout overrides from resize geometry', () => {
-    const draft = canvasManualLayoutDraftFromResizeState({
+    const draft = canvasManualLayoutDraftFromResizeInteraction({
       canvasId: 'canvas-1',
-      dragState: resizeState({
+      interaction: resizeState({
         handle: 'se',
         start: { x: 0, y: 0 },
         current: { x: 20, y: 10 },
@@ -43,6 +44,7 @@ describe('Canvas Manual Layout drafts', () => {
 
     expect(draft).toEqual({
       canvasId: 'canvas-1',
+      interaction: 'resize',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 220, height: 130 }
       ]
@@ -50,9 +52,9 @@ describe('Canvas Manual Layout drafts', () => {
   });
 
   it('creates resize-node layout overrides with aspect ratio preserved', () => {
-    const draft = canvasManualLayoutDraftFromResizeState({
+    const draft = canvasManualLayoutDraftFromResizeInteraction({
       canvasId: 'canvas-1',
-      dragState: resizeState({
+      interaction: resizeState({
         handle: 'se',
         start: { x: 0, y: 0 },
         current: { x: 100, y: 0 },
@@ -72,9 +74,9 @@ describe('Canvas Manual Layout drafts', () => {
   });
 
   it('clamps resize-node layout overrides to the minimum size', () => {
-    const draft = canvasManualLayoutDraftFromResizeState({
+    const draft = canvasManualLayoutDraftFromResizeInteraction({
       canvasId: 'canvas-1',
-      dragState: resizeState({
+      interaction: resizeState({
         handle: 'nw',
         start: { x: 100, y: 100 },
         current: { x: 1000, y: 1000 },
@@ -93,21 +95,22 @@ describe('Canvas Manual Layout drafts', () => {
     });
   });
 
-  it('creates Manual Layout drafts for move and resize drag states', () => {
-    expect(canvasManualLayoutDraftFromDragState({
+  it('creates Manual Layout drafts for move and resize pointer interactions', () => {
+    expect(canvasManualLayoutDraftFromInteraction({
       canvasId: 'canvas-1',
-      dragState: moveState([origin('flow/a.png', 10, 20, 200, 120)], { x: 5, y: 6 }),
+      interaction: moveState([origin('flow/a.png', 10, 20, 200, 120)], { x: 5, y: 6 }),
       point: { x: 25, y: 36 }
     })).toEqual({
       canvasId: 'canvas-1',
+      interaction: 'move',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
       ]
     });
 
-    expect(canvasManualLayoutDraftFromDragState({
+    expect(canvasManualLayoutDraftFromInteraction({
       canvasId: 'canvas-1',
-      dragState: resizeState({
+      interaction: resizeState({
         handle: 'e',
         start: { x: 0, y: 0 },
         current: { x: 30, y: 40 },
@@ -117,6 +120,7 @@ describe('Canvas Manual Layout drafts', () => {
       point: { x: 30, y: 40 }
     })).toEqual({
       canvasId: 'canvas-1',
+      interaction: 'resize',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 230, height: 120 }
       ]
@@ -149,29 +153,40 @@ describe('Canvas Manual Layout drafts', () => {
 });
 
 function moveState(
-  origins: Extract<CanvasRuntimeDragState, { kind: 'move-node' }>['origins'],
+  origins: Extract<CanvasRuntimeLayoutInteraction, { kind: 'move-node' }>['origins'],
   start: { x: number; y: number }
-): Extract<CanvasRuntimeDragState, { kind: 'move-node' }> {
+): Extract<CanvasRuntimeLayoutInteraction, { kind: 'move-node' }> {
   return {
     kind: 'move-node',
     pointerId: 1,
+    phase: 'active',
+    startScreen: start,
+    currentScreen: start,
     start,
+    current: start,
+    initialSelection: undefined,
+    pressedProjectRelativePath: origins[0]?.projectRelativePath ?? '',
+    additive: false,
     origins
   };
 }
 
 function resizeState(input: {
-  handle: Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>['handle'];
+  handle: Extract<CanvasRuntimeLayoutInteraction, { kind: 'resize-node' }>['handle'];
   start: { x: number; y: number };
   current?: { x: number; y: number } | undefined;
-  origin: Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>['origin'];
+  origin: Extract<CanvasRuntimeLayoutInteraction, { kind: 'resize-node' }>['origin'];
   preserveAspect: boolean;
-}): Extract<CanvasRuntimeDragState, { kind: 'resize-node' }> {
+}): Extract<CanvasRuntimeLayoutInteraction, { kind: 'resize-node' }> {
   return {
     kind: 'resize-node',
     pointerId: 1,
+    phase: 'active',
+    startScreen: input.start,
+    currentScreen: input.current ?? input.start,
     handle: input.handle,
     start: input.start,
+    initialSelection: undefined,
     node: { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image' },
     origin: input.origin,
     preserveAspect: input.preserveAspect,
@@ -185,7 +200,7 @@ function origin(
   y: number,
   width: number,
   height: number
-): Extract<CanvasRuntimeDragState, { kind: 'move-node' }>['origins'][number] {
+): Extract<CanvasRuntimeLayoutInteraction, { kind: 'move-node' }>['origins'][number] {
   return {
     projectRelativePath,
     x,

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -841,6 +841,10 @@ fn uncertain_document_rollback_does_not_install_a_session_rejection_state() {
 fn canvas_feedback_mutation_is_revisioned_and_publishes_the_closed_change() {
     let project = TemporaryDirectory::new("feedback-command");
     let home = TemporaryDirectory::new("feedback-command-home");
+    fs::create_dir_all(project.as_ref().join("images")).expect("image directory should exist");
+    fs::create_dir_all(project.as_ref().join("folder")).expect("directory node should exist");
+    fs::write(project.as_ref().join("images/cover.png"), b"fixture")
+        .expect("file node should exist");
     let registry = project_registry(home.as_ref(), Arc::new(FixedNodeAdapter));
     let opened = registry
         .open_project(project.as_ref(), ProjectUseKind::Request)
@@ -853,21 +857,22 @@ fn canvas_feedback_mutation_is_revisioned_and_publishes_the_closed_change() {
 
     let result = opened
         .session
-        .execute(ProjectCommand::UpdateCanvasFeedback {
-            input: UpdateCanvasFeedbackEntryInput::SetMarks {
-                project_relative_path: "images/cover.png".to_owned(),
-                marks: vec![CanvasFeedbackMark::Important, CanvasFeedbackMark::Like],
-            },
-        })
+        .execute(set_canvas_feedback_mark_command(
+            &["", "folder", "images/cover.png"],
+            CanvasFeedbackMark::Important,
+        ))
         .expect("feedback should update");
     assert_eq!(result.project_revision, 2);
     let ProjectCommandResult::CanvasFeedbackUpdated { feedback } = result.value else {
         panic!("feedback command should return feedback");
     };
-    assert_eq!(
-        feedback.entries["images/cover.png"].marks,
-        vec![CanvasFeedbackMark::Like, CanvasFeedbackMark::Important]
-    );
+    assert_eq!(feedback.entries.len(), 3);
+    for path in ["", "folder", "images/cover.png"] {
+        assert_eq!(
+            feedback.entries[path].marks,
+            vec![CanvasFeedbackMark::Important]
+        );
+    }
     let ProjectStreamItem::Event(event) = subscription.recv().expect("event should arrive") else {
         panic!("feedback event should follow the snapshot");
     };
@@ -884,6 +889,43 @@ fn canvas_feedback_mutation_is_revisioned_and_publishes_the_closed_change() {
         .expect("feedback should be readable");
     assert_eq!(read.project_revision, 2);
     assert_eq!(read.value, feedback);
+
+    let no_op = opened
+        .session
+        .execute(set_canvas_feedback_mark_command(
+            &["", "folder", "images/cover.png"],
+            CanvasFeedbackMark::Important,
+        ))
+        .expect("already-selected marks should be a no-op");
+    assert_eq!(no_op.project_revision, 2);
+    let no_op_deadline = Instant::now() + Duration::from_millis(50);
+    while Instant::now() < no_op_deadline {
+        let Ok(Some(item)) = subscription.recv_timeout(Duration::from_millis(10)) else {
+            continue;
+        };
+        let ProjectStreamItem::Event(event) = item else {
+            panic!("a subscription must publish its initial snapshot only once");
+        };
+        assert!(
+            !matches!(event.change, ProjectChange::CanvasFeedbackChanged { .. }),
+            "an exact set-mark no-op must not publish another Canvas feedback event"
+        );
+    }
+
+    let error = opened
+        .session
+        .execute(set_canvas_feedback_mark_command(
+            &["images/cover.png", "missing.png"],
+            CanvasFeedbackMark::Like,
+        ))
+        .expect_err("a missing target should reject the complete batch");
+    assert_eq!(error.code(), "project_invalid");
+    let after_rejection = opened
+        .session
+        .canvas_feedback()
+        .expect("feedback should remain readable");
+    assert_eq!(after_rejection.project_revision, 2);
+    assert_eq!(after_rejection.value, feedback);
     assert!(
         project
             .as_ref()
@@ -894,6 +936,22 @@ fn canvas_feedback_mutation_is_revisioned_and_publishes_the_closed_change() {
     subscription.release();
     drop(opened.project_use);
     registry.close().expect("registry should close");
+}
+
+fn set_canvas_feedback_mark_command(
+    project_relative_paths: &[&str],
+    mark: CanvasFeedbackMark,
+) -> ProjectCommand {
+    ProjectCommand::UpdateCanvasFeedback {
+        input: UpdateCanvasFeedbackInput::SetMark {
+            project_relative_paths: project_relative_paths
+                .iter()
+                .map(|path| (*path).to_owned())
+                .collect(),
+            mark,
+            selected: true,
+        },
+    }
 }
 
 #[test]
@@ -911,13 +969,13 @@ fn canvas_feedback_mutation_drives_real_artifact_generation_and_cleanup() {
     let result = opened
         .session
         .execute(ProjectCommand::UpdateCanvasFeedback {
-            input: UpdateCanvasFeedbackEntryInput::AddItem {
+            input: UpdateCanvasFeedbackInput::AddItem {
                 project_relative_path: "images/cover.png".to_owned(),
                 item: NewCanvasFeedbackItem {
                     id: "feedback-cover-pin".to_owned(),
                     created_at: "2026-07-15T01:02:03.004Z".to_owned(),
                     kind: CanvasFeedbackItemKind::Pin,
-                    scope: CanvasFeedbackScope::File,
+                    scope: CanvasFeedbackScope::Node,
                     moment_time_seconds: None,
                     geometry: Some(CanvasFeedbackGeometry::Point { x: 0.5, y: 0.5 }),
                     comment: "Review".to_owned(),
@@ -944,7 +1002,7 @@ fn canvas_feedback_mutation_drives_real_artifact_generation_and_cleanup() {
     opened
         .session
         .execute(ProjectCommand::UpdateCanvasFeedback {
-            input: UpdateCanvasFeedbackEntryInput::DeleteItem {
+            input: UpdateCanvasFeedbackInput::DeleteItem {
                 project_relative_path: "images/cover.png".to_owned(),
                 item_id,
             },
@@ -1765,8 +1823,7 @@ fn canvas_document_validation_rejects_duplicate_and_hidden_node_paths() {
     validate_canvas_document(&canvas).expect_err("hidden Project path must fail");
 }
 
-#[test]
-fn interactive_canvas_updates_reject_inexact_batches_without_partial_changes() {
+fn canvas_with_interactive_nodes() -> CanvasDocument {
     let mut canvas = create_canvas_document("canvas-1").expect("Canvas should be valid");
     canvas.node_elements = vec![
         CanvasNodeElement {
@@ -1796,23 +1853,29 @@ fn interactive_canvas_updates_reject_inexact_batches_without_partial_changes() {
             text_viewport: None,
         },
     ];
+    canvas
+}
 
+#[test]
+fn interactive_canvas_layouts_reject_inexact_batches_without_partial_changes() {
+    let canvas = canvas_with_interactive_nodes();
     let duplicate_layout = update_canvas_node_layouts(
         &canvas,
+        CanvasLayoutInteraction::Move,
         &[
             CanvasNodeLayoutUpdate {
                 project_relative_path: "note.txt".to_owned(),
                 x: 10.0,
                 y: 20.0,
-                width: None,
-                height: None,
+                width: 320.0,
+                height: 180.0,
             },
             CanvasNodeLayoutUpdate {
                 project_relative_path: "note.txt".to_owned(),
                 x: 30.0,
                 y: 40.0,
-                width: None,
-                height: None,
+                width: 320.0,
+                height: 180.0,
             },
         ],
     )
@@ -1820,6 +1883,72 @@ fn interactive_canvas_updates_reject_inexact_batches_without_partial_changes() {
     assert!(duplicate_layout.to_string().contains("duplicate target"));
     assert!(canvas.node_elements[0].x.abs() < f64::EPSILON);
 
+    for (interaction, updates, expected) in [
+        (
+            CanvasLayoutInteraction::Resize,
+            vec![
+                CanvasNodeLayoutUpdate {
+                    project_relative_path: "note.txt".to_owned(),
+                    x: 0.0,
+                    y: 0.0,
+                    width: 320.0,
+                    height: 180.0,
+                },
+                CanvasNodeLayoutUpdate {
+                    project_relative_path: "clip.mp4".to_owned(),
+                    x: 400.0,
+                    y: 0.0,
+                    width: 320.0,
+                    height: 180.0,
+                },
+            ],
+            "exactly one",
+        ),
+        (
+            CanvasLayoutInteraction::Move,
+            vec![CanvasNodeLayoutUpdate {
+                project_relative_path: "missing.png".to_owned(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            }],
+            "not found",
+        ),
+        (
+            CanvasLayoutInteraction::Move,
+            vec![CanvasNodeLayoutUpdate {
+                project_relative_path: "note.txt".to_owned(),
+                x: f64::NAN,
+                y: 0.0,
+                width: 320.0,
+                height: 180.0,
+            }],
+            "finite positions",
+        ),
+        (
+            CanvasLayoutInteraction::Move,
+            vec![CanvasNodeLayoutUpdate {
+                project_relative_path: "note.txt".to_owned(),
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 180.0,
+            }],
+            "positive finite sizes",
+        ),
+    ] {
+        let error = update_canvas_node_layouts(&canvas, interaction, &updates)
+            .expect_err("invalid layout batch must fail atomically");
+        assert!(error.to_string().contains(expected));
+        assert!(canvas.node_elements[0].x.abs() < f64::EPSILON);
+        assert_eq!(canvas.node_elements[0].layout_mode, None);
+    }
+}
+
+#[test]
+fn interactive_canvas_media_updates_reject_inexact_batches_without_partial_changes() {
+    let canvas = canvas_with_interactive_nodes();
     let missing_video = update_canvas_video_playback(
         &canvas,
         &[
@@ -1847,6 +1976,141 @@ fn interactive_canvas_updates_reject_inexact_batches_without_partial_changes() {
     )
     .expect_err("a non-text target must fail");
     assert!(wrong_text_kind.to_string().contains("not a text node"));
+}
+
+#[test]
+fn canvas_move_atomically_raises_a_group_while_resize_preserves_stack_order() {
+    let mut canvas = create_canvas_document("canvas-1").expect("Canvas should be valid");
+    canvas.node_elements = ["a.png", "b.png", "c.png", "d.png"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, path)| CanvasNodeElement {
+            project_relative_path: path.to_owned(),
+            node_kind: CanvasNodeKind::File,
+            media_kind: Some(CanvasMediaKind::Image),
+            x: f64::from(u32::try_from(index).expect("small fixture")) * 100.0,
+            y: 0.0,
+            width: 80.0,
+            height: 60.0,
+            z: i64::try_from(index).expect("small fixture"),
+            layout_mode: None,
+            video_playback: None,
+            text_viewport: None,
+        })
+        .collect();
+
+    let moved = update_canvas_node_layouts(
+        &canvas,
+        CanvasLayoutInteraction::Move,
+        &[
+            CanvasNodeLayoutUpdate {
+                project_relative_path: "d.png".to_owned(),
+                x: 330.0,
+                y: 10.0,
+                width: 80.0,
+                height: 60.0,
+            },
+            CanvasNodeLayoutUpdate {
+                project_relative_path: "b.png".to_owned(),
+                x: 130.0,
+                y: 10.0,
+                width: 80.0,
+                height: 60.0,
+            },
+        ],
+    )
+    .expect("group move should succeed");
+    let ordered = {
+        let mut nodes = moved.node_elements.clone();
+        nodes.sort_by(|left, right| {
+            left.z
+                .cmp(&right.z)
+                .then_with(|| left.project_relative_path.cmp(&right.project_relative_path))
+        });
+        nodes
+            .into_iter()
+            .map(|node| node.project_relative_path)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ordered, ["a.png", "c.png", "b.png", "d.png"]);
+
+    let resized = update_canvas_node_layouts(
+        &moved,
+        CanvasLayoutInteraction::Resize,
+        &[CanvasNodeLayoutUpdate {
+            project_relative_path: "a.png".to_owned(),
+            x: 0.0,
+            y: 0.0,
+            width: 90.0,
+            height: 70.0,
+        }],
+    )
+    .expect("single resize should succeed");
+    assert_eq!(
+        moved
+            .node_elements
+            .iter()
+            .map(|node| node.z)
+            .collect::<Vec<_>>(),
+        resized
+            .node_elements
+            .iter()
+            .map(|node| node.z)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn selective_canvas_layout_reset_is_exact_and_does_not_expand_directories_or_root() {
+    let mut canvas = create_canvas_document("canvas-1").expect("Canvas should be valid");
+    canvas.node_elements = ["", "assets", "assets/cover.png"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let is_image = Path::new(path)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("png"));
+            CanvasNodeElement {
+                project_relative_path: path.to_owned(),
+                node_kind: if is_image {
+                    CanvasNodeKind::File
+                } else {
+                    CanvasNodeKind::Directory
+                },
+                media_kind: is_image.then_some(CanvasMediaKind::Image),
+                x: f64::from(u32::try_from(index).expect("small fixture")) * 100.0,
+                y: 0.0,
+                width: 80.0,
+                height: 60.0,
+                z: i64::try_from(index).expect("small fixture"),
+                layout_mode: Some("manual".to_owned()),
+                video_playback: None,
+                text_viewport: None,
+            }
+        })
+        .collect();
+
+    let directory = BTreeSet::from(["assets".to_owned()]);
+    let (directory_reset, count) = clear_canvas_manual_layouts(&canvas, Some(&directory));
+    assert_eq!(count, 1);
+    assert_eq!(directory_reset.node_elements[1].layout_mode, None);
+    assert_eq!(
+        directory_reset.node_elements[2].layout_mode.as_deref(),
+        Some("manual")
+    );
+
+    let root = BTreeSet::from([String::new()]);
+    let (root_reset, count) = clear_canvas_manual_layouts(&canvas, Some(&root));
+    assert_eq!(count, 1);
+    assert_eq!(root_reset.node_elements[0].layout_mode, None);
+    assert_eq!(
+        root_reset.node_elements[1].layout_mode.as_deref(),
+        Some("manual")
+    );
+    assert_eq!(
+        root_reset.node_elements[2].layout_mode.as_deref(),
+        Some("manual")
+    );
 }
 
 #[test]

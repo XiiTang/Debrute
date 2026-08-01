@@ -41,7 +41,7 @@ describe('Workbench event decoding', () => {
             createdAt: '2026-07-23T00:00:00.000Z',
             projectRelativePath: 'clips/demo.mp4',
             kind: 'pin',
-            scope: 'file',
+            scope: 'node',
             comment: ''
           }
         }
@@ -71,7 +71,7 @@ describe('Workbench event decoding', () => {
             createdAt: '2026-07-23T00:00:00.000Z',
             projectRelativePath: 'clips/demo.mp4',
             kind: 'pin',
-            scope: 'file',
+            scope: 'node',
             geometry: { type: 'point', x: 1.1, y: 0.5 },
             comment: ''
           }
@@ -283,7 +283,7 @@ describe('Workbench event decoding', () => {
             items: [{
               id: 'pin-1',
               kind: 'pin',
-              scope: 'file',
+              scope: 'node',
               comment: '',
               createdAt: '2026-07-23T00:00:00.000Z',
               updatedAt: '2026-07-23T00:00:00.000Z'

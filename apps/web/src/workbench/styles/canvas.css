@@ -265,6 +265,19 @@
   contain: strict;
 }
 
+.canvas-surface:focus {
+  outline: none;
+}
+
+.canvas-selection-marquee {
+  position: absolute;
+  z-index: 20;
+  box-sizing: border-box;
+  border: 1px solid var(--db-canvas-selection);
+  background: color-mix(in srgb, var(--db-canvas-selection) 14%, transparent);
+  pointer-events: none;
+}
+
 .canvas-world-stage {
   position: absolute;
   left: 0;
@@ -331,6 +344,10 @@
 .db-canvas-node-frame.hovered,
 .db-canvas-node-frame.selected {
   outline: calc(1px * var(--canvas-chrome-scale, 1)) solid var(--db-canvas-selection);
+}
+
+.canvas-node-element.canvas-cut-source {
+  opacity: 0.5;
 }
 
 .db-canvas-node-frame.video,
@@ -755,6 +772,11 @@
   grid-template-rows: 30px minmax(36px, auto);
 }
 
+.canvas-feedback-bar--marks-only {
+  grid-template-rows: 30px;
+  max-height: 38px;
+}
+
 .canvas-feedback-primary-row {
   min-width: 0;
   display: flex;
@@ -769,6 +791,12 @@
   align-items: center;
   gap: 4px;
   height: 28px;
+}
+
+.canvas-feedback-mark-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .canvas-feedback-mark {

@@ -400,10 +400,6 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             patch(super::project_routes::canvas_layouts),
         )
         .route(
-            "/projects/{project_id}/canvases/{canvas_id}/node-stack-order/bring-to-front",
-            post(super::project_routes::canvas_bring_front),
-        )
-        .route(
             "/projects/{project_id}/canvases/{canvas_id}/video-playback",
             patch(super::project_routes::canvas_video_playback),
         )

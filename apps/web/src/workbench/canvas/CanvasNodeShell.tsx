@@ -16,6 +16,8 @@ const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 's
 export interface CanvasNodeShellProps {
   node: ProjectedCanvasNode;
   selected: boolean;
+  cut: boolean;
+  showResizeHandles: boolean;
   textEditorActive: boolean;
   hovered: boolean;
   culled: boolean;
@@ -41,8 +43,6 @@ export interface CanvasNodeShellProps {
   }) => void) | undefined;
   onFeedbackItemActivate?: ((projectRelativePath: string, itemId: string) => void) | undefined;
   onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
-  onPointerMove: (event: React.PointerEvent<Element>) => void;
-  onPointerUp: (event: React.PointerEvent<Element>) => void;
   onPointerEnter: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onPointerLeave: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
   onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
@@ -59,6 +59,8 @@ export interface CanvasNodeShellProps {
 function CanvasNodeShellComponent({
   node,
   selected,
+  cut,
+  showResizeHandles,
   textEditorActive,
   hovered,
   culled,
@@ -81,8 +83,6 @@ function CanvasNodeShellComponent({
   onLocalFeedbackDraft,
   onFeedbackItemActivate,
   onPointerDown,
-  onPointerMove,
-  onPointerUp,
   onPointerEnter,
   onPointerLeave,
   onContextMenu,
@@ -125,6 +125,7 @@ function CanvasNodeShellComponent({
     'db-canvas-node-frame',
     node.mediaKind,
     selected ? 'selected' : '',
+    cut ? 'canvas-cut-source' : '',
     hovered ? 'hovered' : '',
     hasFeedback ? 'canvas-node-has-feedback' : '',
     node.nodeKind,
@@ -159,8 +160,6 @@ function CanvasNodeShellComponent({
       onVideoPreviewError={onVideoPreviewError}
       onSelectNode={() => onSelectNode(node)}
       onTitlePointerDown={(event) => onPointerDown(node, event)}
-      onTitlePointerMove={onPointerMove}
-      onTitlePointerUp={onPointerUp}
     />
   );
 
@@ -175,8 +174,6 @@ function CanvasNodeShellComponent({
       className={className}
       style={{ left: 0, top: 0 } as React.CSSProperties}
       onPointerDown={node.mediaKind === 'text' ? undefined : (event) => onPointerDown(node, event)}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
       onPointerEnter={(event) => onPointerEnter(node, event)}
       onPointerLeave={(event) => onPointerLeave(node, event)}
       onContextMenu={(event) => onContextMenu(node, event)}
@@ -195,7 +192,7 @@ function CanvasNodeShellComponent({
           )
         : content}
       <CanvasFeedbackFrame entry={feedbackEntry} />
-      {selected ? RESIZE_HANDLES.map((handle) => (
+      {showResizeHandles ? RESIZE_HANDLES.map((handle) => (
         <button
           key={handle}
           type="button"
@@ -203,8 +200,6 @@ function CanvasNodeShellComponent({
           aria-label={`Resize node ${handle}`}
           title={`Resize ${handle}`}
           onPointerDown={(event) => onResizePointerDown(node, handle, event)}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
         />
       )) : null}
     </div>
@@ -219,6 +214,8 @@ export function areCanvasNodeShellPropsEqual(
 ): boolean {
   return previous.node === next.node
     && previous.selected === next.selected
+    && previous.cut === next.cut
+    && previous.showResizeHandles === next.showResizeHandles
     && previous.textEditorActive === next.textEditorActive
     && previous.hovered === next.hovered
     && previous.culled === next.culled
@@ -241,8 +238,6 @@ export function areCanvasNodeShellPropsEqual(
     && previous.onLocalFeedbackDraft === next.onLocalFeedbackDraft
     && previous.onFeedbackItemActivate === next.onFeedbackItemActivate
     && previous.onPointerDown === next.onPointerDown
-    && previous.onPointerMove === next.onPointerMove
-    && previous.onPointerUp === next.onPointerUp
     && previous.onPointerEnter === next.onPointerEnter
     && previous.onPointerLeave === next.onPointerLeave
     && previous.onContextMenu === next.onContextMenu

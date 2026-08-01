@@ -25,7 +25,6 @@ import {
   normalizeProjectTreeSelection,
   isProjectTreeDropRejected,
   isProjectTreeMoveNoop,
-  projectTreeParentPath,
   projectTreeDragEntries,
   projectTreeDropOperation,
   projectTreeDropTargetDirectory,
@@ -311,7 +310,7 @@ export function handleProjectTreeKeyboardEvent(input: {
     return;
   }
   const target = explorerTargetFromSelection(input.selection, input.visibleItems);
-  if (target.targetKind === 'root' && command !== 'paste') {
+  if (target.selectedEntries.length === 0 && command !== 'paste') {
     return;
   }
   input.event.preventDefault();
@@ -498,7 +497,10 @@ function ProjectTreeRow({
       path: node.path
     });
     onSelectionChange(nextSelection);
-    onOpenContextMenu?.(explorerTargetFromSelection(nextSelection, visibleItems), {
+    onOpenContextMenu?.(explorerTargetFromSelection(nextSelection, visibleItems, {
+      projectRelativePath: node.path,
+      kind: node.kind
+    }), {
       x: event.clientX,
       y: event.clientY
     });
@@ -753,44 +755,27 @@ function isAcceptedInternalProjectTreeDrop(input: {
 
 function explorerTargetFromSelection(
   selection: ProjectTreeSelectionState,
-  visibleItems: ProjectTreeVisibleItem[]
+  visibleItems: ProjectTreeVisibleItem[],
+  invocationEntry?: ProjectPathEntry
 ): WorkbenchExplorerContextMenuTarget {
   const entries = projectTreePathEntriesFromSelection({ selection, visibleItems });
   if (entries.length === 0) {
     return rootExplorerTarget();
   }
-  if (entries.length === 1) {
-    return itemExplorerTarget(entries[0]!);
-  }
   return {
     source: 'explorer',
-    targetKind: 'selection',
-    paths: entries,
-    primaryPath: entries[0]!.projectRelativePath,
-    targetDirectoryPath: projectTreeDropTargetDirectory({
-      visibleItems,
-      path: selection.focusedPath ?? entries[0]!.projectRelativePath
-    })
-  };
-}
-
-function itemExplorerTarget(entry: ProjectPathEntry): WorkbenchExplorerContextMenuTarget {
-  return {
-    source: 'explorer',
-    targetKind: 'item',
-    paths: [entry],
-    primaryPath: entry.projectRelativePath,
-    targetDirectoryPath: entry.kind === 'directory' ? entry.projectRelativePath : projectTreeParentPath(entry.projectRelativePath)
+    invocationEntry: invocationEntry
+      ?? entries.find((entry) => entry.projectRelativePath === selection.focusedPath)
+      ?? entries[0]!,
+    selectedEntries: entries
   };
 }
 
 function rootExplorerTarget(): WorkbenchExplorerContextMenuTarget {
   return {
     source: 'explorer',
-    targetKind: 'root',
-    paths: [],
-    primaryPath: null,
-    targetDirectoryPath: ''
+    invocationEntry: { projectRelativePath: '', kind: 'directory' },
+    selectedEntries: []
   };
 }
 

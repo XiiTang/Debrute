@@ -54,7 +54,6 @@ const WORKBENCH_OPTIONS: &[CliOptionSpec] = &[option(
 const RESET_LAYOUT_OPTIONS: &[CliOptionSpec] = &[
     option("all", CliOptionKind::Flag, false, false, &[]),
     option("path", CliOptionKind::Repeatable, false, false, &[]),
-    option("glob", CliOptionKind::Repeatable, false, false, &[]),
 ];
 const GENERATED_ASSET_OPTIONS: &[CliOptionSpec] =
     &[option("path", CliOptionKind::Value, true, false, &[])];
@@ -578,7 +577,7 @@ const SPECS: &[CliCommandSpec] = &[
         "write",
         "project",
         "canvas-map",
-        "<project> <canvas-id> --all | <project> <canvas-id> [--path <literal...>] [--glob <pattern...>]",
+        "<project> <canvas-id> --all | <project> <canvas-id> --path <node-path...>",
         "Canvas layout reset record",
         2,
         2,

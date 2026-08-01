@@ -649,13 +649,19 @@ fn canvas_mutation_routes_require_exact_non_empty_collections() {
     );
     for (body, expected_code) in [
         (json!({}), "invalid_json"),
-        (json!({ "nodeLayouts": [] }), "invalid_input"),
+        (
+            json!({ "interaction": "move", "nodeLayouts": [] }),
+            "invalid_input",
+        ),
         (
             json!({
+                "interaction": "move",
                 "nodeLayouts": [{
                     "projectRelativePath": "note.txt",
                     "x": 0,
                     "y": 0,
+                    "width": 320,
+                    "height": 180,
                     "unexpectedField": true
                 }]
             }),
@@ -674,13 +680,19 @@ fn canvas_mutation_routes_require_exact_non_empty_collections() {
     }
 
     for (body, expected_code) in [
-        (json!({ "pathRules": {} }), "invalid_json"),
+        (json!({ "all": false }), "invalid_input"),
         (
-            json!({ "pathRules": { "paths": ["image.png"] } }),
+            json!({ "all": false, "nodePaths": ["image.png"] }),
             "invalid_json",
         ),
         (
-            json!({ "pathRules": { "paths": [], "globs": [] } }),
+            json!({ "all": null, "nodePaths": ["image.png"] }),
+            "invalid_json",
+        ),
+        (json!({ "all": true, "nodePaths": null }), "invalid_json"),
+        (json!({ "nodePaths": [] }), "invalid_input"),
+        (
+            json!({ "nodePaths": ["image.png", "image.png"] }),
             "invalid_input",
         ),
     ] {
@@ -796,10 +808,13 @@ fn canvas_layout_and_selective_reset_accept_exact_current_inputs() {
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
+            "interaction": "resize",
             "nodeLayouts": [{
                 "projectRelativePath": "note.txt",
                 "x": 10,
-                "y": 20
+                "y": 20,
+                "width": 320,
+                "height": 180
             }]
         }))
         .send()
@@ -812,10 +827,7 @@ fn canvas_layout_and_selective_reset_accept_exact_current_inputs() {
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
-            "pathRules": {
-                "paths": ["note.txt"],
-                "globs": []
-            }
+            "nodePaths": ["note.txt"]
         }))
         .send()
         .expect("exact selective Canvas reset request should complete");
@@ -943,7 +955,7 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
                 "createdAt": "2026-07-23T00:00:00.000Z",
                 "projectRelativePath": project_relative_path,
                 "kind": "comment",
-                "scope": "file",
+                "scope": "node",
                 "comment": comment
             }))
             .send()
@@ -963,7 +975,7 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
                 "createdAt": "2026-07-23T00:00:00.000Z",
                 "projectRelativePath": "images/a.png",
                 "kind": "comment",
-                "scope": "file",
+                "scope": "node",
                 "comment": "First local value"
             },
             "feedback-b": {
@@ -971,7 +983,7 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
                 "createdAt": "2026-07-23T00:00:00.000Z",
                 "projectRelativePath": "images/b.png",
                 "kind": "comment",
-                "scope": "file",
+                "scope": "node",
                 "comment": "Second local value"
             }
         })
@@ -1001,11 +1013,206 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
                 "createdAt": "2026-07-23T00:00:00.000Z",
                 "projectRelativePath": "images/b.png",
                 "kind": "comment",
-                "scope": "file",
+                "scope": "node",
                 "comment": "Second local value"
             }
         })
     );
+}
+
+#[test]
+fn canvas_feedback_set_mark_is_one_atomic_node_batch_contract() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("feedback-set-mark");
+    let project_root = Path::new(&project.root);
+    fs::create_dir_all(project_root.join("assets")).expect("directory node should be created");
+    fs::create_dir_all(project_root.join("fake.png"))
+        .expect("extension-shaped directory node should be created");
+    fs::write(project_root.join("cover.png"), b"image").expect("file node should be created");
+    let client = test_client();
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+    assert_eq!(
+        events.next_of_type("project.bound")["type"],
+        "project.bound"
+    );
+    let endpoint = format!(
+        "{}/api/projects/{}/canvas-feedback",
+        runtime.origin(),
+        project.id
+    );
+    let session = (&*cookie, &*credential);
+    assert_canvas_feedback_mark_batch(&client, &runtime, &endpoint, session);
+    let accepted_feedback =
+        add_canvas_feedback_node_comments(&client, &runtime, &endpoint, session);
+    assert_canvas_feedback_invalid_targets_preserve(
+        &client,
+        &runtime,
+        &endpoint,
+        session,
+        &accepted_feedback,
+    );
+}
+
+fn assert_canvas_feedback_mark_batch(
+    client: &Client,
+    runtime: &TestRuntime,
+    endpoint: &str,
+    session: (&str, &str),
+) {
+    let set_mark = json!({
+        "operation": "set-mark",
+        "projectRelativePaths": ["", "assets", "cover.png"],
+        "mark": "important",
+        "selected": true
+    });
+    let response = patch_canvas_feedback(client, runtime, endpoint, session, &set_mark);
+    let response_status = response.status().as_u16();
+    let response_body = response.text().expect("response body should be readable");
+    assert_eq!(response_status, 200, "{response_body}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&response_body).expect("response should be JSON")["projectRevision"],
+        2
+    );
+
+    let feedback = read_canvas_feedback(client, runtime, endpoint, session);
+    assert_eq!(feedback["entries"][""]["marks"], json!(["important"]));
+    assert_eq!(feedback["entries"]["assets"]["marks"], json!(["important"]));
+    assert_eq!(
+        feedback["entries"]["cover.png"]["marks"],
+        json!(["important"])
+    );
+
+    let no_op = patch_canvas_feedback(client, runtime, endpoint, session, &set_mark);
+    assert_eq!(no_op.status().as_u16(), 200);
+    assert_eq!(
+        no_op.json::<Value>().expect("response should be JSON")["projectRevision"],
+        2
+    );
+}
+
+fn add_canvas_feedback_node_comments(
+    client: &Client,
+    runtime: &TestRuntime,
+    endpoint: &str,
+    session: (&str, &str),
+) -> Value {
+    for (path, item_id, expected_revision) in
+        [("assets", "directory-comment", 3), ("", "root-comment", 4)]
+    {
+        let comment = patch_canvas_feedback(
+            client,
+            runtime,
+            endpoint,
+            session,
+            &json!({
+                "operation": "add-item",
+                "projectRelativePath": path,
+                "item": {
+                    "id": item_id,
+                    "createdAt": "2026-08-01T00:00:00.000Z",
+                    "kind": "comment",
+                    "scope": "node",
+                    "comment": "Node comment"
+                }
+            }),
+        );
+        assert_eq!(comment.status().as_u16(), 200);
+        assert_eq!(
+            comment.json::<Value>().expect("response should be JSON")["projectRevision"],
+            expected_revision
+        );
+    }
+
+    let accepted_feedback = read_canvas_feedback(client, runtime, endpoint, session);
+    assert_eq!(
+        accepted_feedback["entries"]["assets"]["items"][0]["scope"],
+        "node"
+    );
+    assert_eq!(
+        accepted_feedback["entries"][""]["items"][0]["scope"],
+        "node"
+    );
+    accepted_feedback
+}
+
+fn assert_canvas_feedback_invalid_targets_preserve(
+    client: &Client,
+    runtime: &TestRuntime,
+    endpoint: &str,
+    session: (&str, &str),
+    accepted_feedback: &Value,
+) {
+    let missing_target = patch_canvas_feedback(
+        client,
+        runtime,
+        endpoint,
+        session,
+        &json!({
+            "operation": "set-mark",
+            "projectRelativePaths": ["cover.png", "missing.png"],
+            "mark": "like",
+            "selected": true
+        }),
+    );
+    assert_eq!(missing_target.status().as_u16(), 400);
+
+    let spatial_directory = patch_canvas_feedback(
+        client,
+        runtime,
+        endpoint,
+        session,
+        &json!({
+            "operation": "add-item",
+            "projectRelativePath": "fake.png",
+            "item": {
+                "id": "directory-pin",
+                "createdAt": "2026-08-01T00:00:00.000Z",
+                "kind": "pin",
+                "scope": "node",
+                "geometry": { "type": "point", "x": 0.5, "y": 0.5 },
+                "comment": "invalid"
+            }
+        }),
+    );
+    assert_eq!(spatial_directory.status().as_u16(), 400);
+
+    let after_rejections = read_canvas_feedback(client, runtime, endpoint, session);
+    assert_eq!(&after_rejections, accepted_feedback);
+}
+
+fn patch_canvas_feedback(
+    client: &Client,
+    runtime: &TestRuntime,
+    endpoint: &str,
+    session: (&str, &str),
+    body: &Value,
+) -> Response {
+    client
+        .patch(endpoint)
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, session.0)
+        .header(WORKBENCH_CONNECTION_HEADER, session.1)
+        .json(body)
+        .send()
+        .expect("Canvas feedback mutation should complete")
+}
+
+fn read_canvas_feedback(
+    client: &Client,
+    runtime: &TestRuntime,
+    endpoint: &str,
+    session: (&str, &str),
+) -> Value {
+    client
+        .get(endpoint)
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, session.0)
+        .header(WORKBENCH_CONNECTION_HEADER, session.1)
+        .send()
+        .expect("Canvas feedback read should complete")
+        .json::<Value>()
+        .expect("Canvas feedback should be JSON")
 }
 
 #[test]

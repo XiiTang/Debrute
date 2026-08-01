@@ -9,7 +9,6 @@ import {
   FolderOpen,
   FolderPlus,
   Info,
-  LocateFixed,
   RotateCcw,
   Send,
   Scissors,
@@ -64,13 +63,15 @@ export function WorkbenchContextMenu({
   position,
   onCommand,
   onClose,
-  productPlatform
+  productPlatform,
+  selectionCount = 1
 }: {
   items: WorkbenchContextMenuItem[];
   position: WorkbenchContextMenuPosition;
   onCommand: (command: ProjectPathCommand, target?: PhotoshopDocumentTarget) => void;
   onClose: () => void;
   productPlatform: DebruteProductPlatform;
+  selectionCount?: number;
 }): React.ReactElement | null {
   const i18n = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -159,7 +160,7 @@ export function WorkbenchContextMenu({
           >
             {item.command === 'reveal-in-system-file-manager'
               ? projectSystemFileManagerLabelForLocale(productPlatform, i18n)
-              : workbenchContextMenuCommandLabel(item.command, i18n)}
+              : workbenchContextMenuCommandLabel(item.command, i18n, selectionCount)}
           </Menu.Item>
         )
       ))}
@@ -243,9 +244,6 @@ function PhotoshopSubmenu({
 function contextMenuIcon(command: ProjectPathCommand): React.ReactElement {
   if (command === 'show-details') {
     return <Info size={14} />;
-  }
-  if (command === 'reveal-in-canvas') {
-    return <LocateFixed size={14} />;
   }
   if (command === 'reset-auto-layout') {
     return <RotateCcw size={14} />;

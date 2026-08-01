@@ -3,11 +3,13 @@ import type { CanvasMediaKind, CanvasNodeKind } from '@debrute/canvas-core';
 import type { CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
 
 export type { CanvasPoint, CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
-export type { CanvasSelection, CanvasSelectionItem } from '../canvas/runtime/canvasSelection';
+export type { CanvasSelection } from '../canvas/runtime/canvasSelection.js';
 export {
-  isCanvasItemSelected,
+  canvasNodeSelection,
+  isCanvasNodeSelected,
   selectedNodeProjectRelativePaths,
-  selectionItems
+  toggleCanvasNodeSelection,
+  unionCanvasNodeSelection
 } from '../canvas/runtime/canvasSelection';
 export { rectsIntersect } from '../canvas/runtime/canvasGeometry';
 
@@ -134,8 +136,12 @@ export function buildResizeGeometry(
   };
 }
 
-export function isAdditiveCanvasSelectionModifier(input: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): boolean {
-  return input.shiftKey || input.metaKey || input.ctrlKey;
+export function isAdditiveCanvasSelectionModifier(input: {
+  shiftKey: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+}): boolean {
+  return Boolean(input.shiftKey || input.metaKey || input.ctrlKey);
 }
 
 function resizeAnchor(handle: ResizeHandle): {

@@ -1,54 +1,101 @@
-export type CanvasSelectionItem =
-  | { kind: 'diagnostic'; id: string }
-  | { kind: 'node'; projectRelativePath: string };
-
 export type CanvasSelection =
-  | CanvasSelectionItem
   | {
-      kind: 'multi';
-      items: CanvasSelectionItem[];
+      kind: 'nodes';
+      projectRelativePaths: readonly string[];
+    }
+  | {
+      kind: 'diagnostic';
+      id: string;
     };
 
-export function selectionItems(selection: CanvasSelection | undefined): CanvasSelectionItem[] {
-  if (!selection) {
-    return [];
-  }
-  return selection.kind === 'multi' ? selection.items : [selection];
-}
-
-export function selectedNodeProjectRelativePaths(selection: CanvasSelection | undefined): string[] {
-  return selectionItems(selection)
-    .filter((item) => item.kind === 'node')
-    .map((item) => item.projectRelativePath);
-}
-
-export function isCanvasItemSelected(selection: CanvasSelection | undefined, item: CanvasSelectionItem): boolean {
-  return selectionItems(selection).some((selected) => sameSelectionItem(selected, item));
-}
-
-export function toggleCanvasSelectionItem(
-  selection: CanvasSelection | undefined,
-  item: CanvasSelectionItem
+export function canvasNodeSelection(
+  projectRelativePaths: Iterable<string>
 ): CanvasSelection | undefined {
-  if (!selection) {
-    return item;
-  }
-  const items = selectionItems(selection);
-  const exists = items.some((selected) => sameSelectionItem(selected, item));
-  const next = exists
-    ? items.filter((selected) => !sameSelectionItem(selected, item))
-    : [...items, item];
-  if (next.length === 0) {
-    return undefined;
-  }
-  return next.length === 1 ? next[0] : { kind: 'multi', items: next };
+  const normalized = [...new Set(projectRelativePaths)].sort(compareProjectRelativePaths);
+  return normalized.length > 0
+    ? { kind: 'nodes', projectRelativePaths: normalized }
+    : undefined;
 }
 
-export function sameSelectionItem(left: CanvasSelectionItem, right: CanvasSelectionItem): boolean {
-  if (left.kind !== right.kind) {
+export function normalizeCanvasSelection(
+  selection: CanvasSelection | undefined
+): CanvasSelection | undefined {
+  return selection?.kind === 'nodes'
+    ? canvasNodeSelection(selection.projectRelativePaths)
+    : selection;
+}
+
+export function selectedNodeProjectRelativePaths(
+  selection: CanvasSelection | undefined
+): string[] {
+  return selection?.kind === 'nodes' ? [...selection.projectRelativePaths] : [];
+}
+
+export function isCanvasNodeSelected(
+  selection: CanvasSelection | undefined,
+  projectRelativePath: string
+): boolean {
+  return selection?.kind === 'nodes'
+    && selection.projectRelativePaths.includes(projectRelativePath);
+}
+
+export function toggleCanvasNodeSelection(
+  selection: CanvasSelection | undefined,
+  projectRelativePath: string
+): CanvasSelection | undefined {
+  const paths = selection?.kind === 'nodes'
+    ? new Set(selection.projectRelativePaths)
+    : new Set<string>();
+  if (paths.has(projectRelativePath)) {
+    paths.delete(projectRelativePath);
+  } else {
+    paths.add(projectRelativePath);
+  }
+  return canvasNodeSelection(paths);
+}
+
+export function unionCanvasNodeSelection(
+  selection: CanvasSelection | undefined,
+  projectRelativePaths: Iterable<string>
+): CanvasSelection | undefined {
+  return canvasNodeSelection([
+    ...selectedNodeProjectRelativePaths(selection),
+    ...projectRelativePaths
+  ]);
+}
+
+export function pruneCanvasSelection(
+  selection: CanvasSelection | undefined,
+  currentNodePaths: ReadonlySet<string>
+): CanvasSelection | undefined {
+  if (selection?.kind !== 'nodes') {
+    return selection;
+  }
+  return canvasNodeSelection(
+    selection.projectRelativePaths.filter((path) => currentNodePaths.has(path))
+  );
+}
+
+export function sameCanvasSelection(
+  left: CanvasSelection | undefined,
+  right: CanvasSelection | undefined
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.kind !== right.kind) {
     return false;
   }
-  return left.kind === 'node' && right.kind === 'node'
-    ? left.projectRelativePath === right.projectRelativePath
-    : left.kind === 'diagnostic' && right.kind === 'diagnostic' && left.id === right.id;
+  if (left.kind === 'diagnostic' && right.kind === 'diagnostic') {
+    return left.id === right.id;
+  }
+  if (left.kind !== 'nodes' || right.kind !== 'nodes') {
+    return false;
+  }
+  return left.projectRelativePaths.length === right.projectRelativePaths.length
+    && left.projectRelativePaths.every((path, index) => path === right.projectRelativePaths[index]);
+}
+
+function compareProjectRelativePaths(left: string, right: string): number {
+  return left.localeCompare(right);
 }

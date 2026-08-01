@@ -250,12 +250,13 @@ the diagnostic chain.
    and ready text/image publications must advance in bounded groups of at most
    three operations per animation frame until every current visible result is
    mounted.
-6. While a Project Path context menu is open, verify that surface readiness can
-   enable or disable Reveal in Canvas. Camera, selection, drag, and same-ready
+6. While a Canvas Project Path context menu is open, verify that right-clicking
+   a selected node preserves the full selection while the clicked node remains
+   the invocation target. Camera, selection, pointer-interaction, and same-ready
    resize changes must not rerender the Workbench composition root or restart
-   image resource effects; closing the menu removes its surface subscription.
-   Capture `window.__debruteCanvasPerf` around zoom and drag interactions and
-   compare resource and render counters before and after the interaction.
+   image resource effects. Capture `window.__debruteCanvasPerf` around zoom,
+   marquee, and group-move interactions and compare resource and render
+   counters before and after the interaction.
 7. Require a clean browser error/warning log and no React maximum-update-depth,
    failed media request, or silent placeholder state.
 

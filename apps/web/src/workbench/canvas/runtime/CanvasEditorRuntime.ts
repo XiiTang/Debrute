@@ -1,10 +1,11 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
   getCanvasResizePreserveAspect,
+  isAdditiveCanvasSelectionModifier,
   normalizeCanvasWheelDelta,
   shouldCanvasHandleGlobalWheelTarget,
   type NormalizedCanvasWheelDelta
-} from '../../services/canvasInteraction';
+} from '../../services/canvasInteraction.js';
 import {
   CANVAS_CAMERA_IDLE_MS,
   assertCanvasCamera,
@@ -15,22 +16,37 @@ import {
   canvasCameraReset,
   type CanvasCamera,
   type CanvasCameraState
-} from './canvasCamera';
+} from './canvasCamera.js';
 import {
   canvasRectToScreenRect,
   canvasToScreenPoint,
   normalizedSurfaceSize,
   screenToCanvasPoint,
   visibleCanvasRectForCamera
-} from './canvasCoordinateSystem';
-import type { CanvasPoint, CanvasRect, CanvasSize, ResizeHandle } from './canvasGeometry';
-import type { CanvasSelection } from './canvasSelection';
-import { selectedNodeProjectRelativePaths } from './canvasSelection';
+} from './canvasCoordinateSystem.js';
+import {
+  rectsIntersect,
+  type CanvasPoint,
+  type CanvasRect,
+  type CanvasSize,
+  type ResizeHandle
+} from './canvasGeometry.js';
+import type { CanvasSelection } from './canvasSelection.js';
+import {
+  canvasNodeSelection,
+  isCanvasNodeSelected,
+  normalizeCanvasSelection,
+  pruneCanvasSelection,
+  sameCanvasSelection,
+  selectedNodeProjectRelativePaths,
+  toggleCanvasNodeSelection,
+  unionCanvasNodeSelection
+} from './canvasSelection.js';
 import {
   createCanvasManualLayoutLifecycle,
   type CanvasManualLayoutPresentation
-} from './CanvasManualLayoutLifecycle';
-import type { CanvasLayoutOverride } from '../canvasManualLayoutDraft';
+} from './CanvasManualLayoutLifecycle.js';
+import type { CanvasLayoutOverride } from '../canvasManualLayoutDraft.js';
 
 export interface CanvasSurfaceElements {
   surface: HTMLElement;
@@ -40,7 +56,7 @@ export interface CanvasRuntimeSnapshot {
   camera: CanvasCamera;
   cameraState: CanvasCameraState;
   selection: CanvasSelection | undefined;
-  dragState: CanvasRuntimeDragState | undefined;
+  pointerInteraction: CanvasRuntimePointerInteraction | undefined;
   surfaceSize: CanvasSize | undefined;
 }
 
@@ -64,22 +80,36 @@ export interface CanvasCoordinateSystem {
 
 export interface CanvasInputController {
   screenToCanvasPoint(point: CanvasPoint): CanvasPoint;
+  beginSelectionMarquee(input: {
+    pointerId: number;
+    screenPoint: CanvasPoint;
+    modifiers: CanvasRuntimePointerModifiers;
+    topEdgeInset?: number;
+  }): void;
   beginNodeMove(input: {
     pointerId: number;
     projectRelativePath: string;
-    start: CanvasPoint;
-    selection: CanvasSelection;
+    screenPoint: CanvasPoint;
+    modifiers?: CanvasRuntimePointerModifiers;
   }): void;
   beginNodeResize(input: {
     pointerId: number;
     handle: ResizeHandle;
     projectRelativePath: string;
-    start: CanvasPoint;
+    screenPoint: CanvasPoint;
     modifiers: CanvasRuntimePointerModifiers;
   }): void;
-  updatePointer(input: { pointerId: number; point: CanvasPoint; modifiers?: CanvasRuntimePointerModifiers }): boolean;
-  finishPointer(input: { pointerId: number; point?: CanvasPoint; modifiers?: CanvasRuntimePointerModifiers }): Promise<CanvasRuntimeDragState | undefined>;
-  cancelPointer(pointerId: number): void;
+  updatePointerInteraction(input: {
+    pointerId: number;
+    screenPoint: CanvasPoint;
+    modifiers?: CanvasRuntimePointerModifiers;
+  }): boolean;
+  finishPointerInteraction(input: {
+    pointerId: number;
+    screenPoint?: CanvasPoint;
+    modifiers?: CanvasRuntimePointerModifiers;
+  }): Promise<CanvasRuntimePointerInteraction | undefined>;
+  cancelPointerInteraction(pointerId: number): void;
 }
 
 export interface CanvasManualLayoutController {
@@ -98,7 +128,7 @@ export interface CanvasEditorRuntime {
   subscribeCameraState(listener: (state: CanvasCameraState) => void): () => void;
   subscribeSelection(listener: (selection: CanvasSelection | undefined) => void): () => void;
   subscribeSurfaceSize(listener: (size: CanvasSize | undefined) => void): () => void;
-  subscribeDragState(listener: (state: CanvasRuntimeDragState | undefined) => void): () => void;
+  subscribePointerInteraction(listener: (state: CanvasRuntimePointerInteraction | undefined) => void): () => void;
   getSnapshot(): CanvasRuntimeSnapshot;
   bindSurface(elements: CanvasSurfaceElements): () => void;
   setSelection(selection: CanvasSelection | undefined): void;
@@ -109,26 +139,56 @@ export type CanvasRuntimeMoveOrigin = Pick<ProjectedCanvasNode, 'projectRelative
 export type CanvasRuntimeResizeNode = Pick<ProjectedCanvasNode, 'projectRelativePath' | 'nodeKind' | 'mediaKind'>;
 export interface CanvasRuntimePointerModifiers {
   shiftKey: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
 }
 
-export type CanvasRuntimeDragState =
+export type CanvasRuntimePointerInteraction =
+  | {
+      kind: 'selection-marquee';
+      pointerId: number;
+      phase: 'pending' | 'active';
+      startScreen: CanvasPoint;
+      currentScreen: CanvasPoint;
+      start: CanvasPoint;
+      current: CanvasPoint;
+      rect?: CanvasRect;
+      initialSelection: CanvasSelection | undefined;
+      additive: boolean;
+      topEdgeInset: number;
+    }
   | {
       kind: 'move-node';
       pointerId: number;
+      phase: 'pending' | 'active';
+      startScreen: CanvasPoint;
+      currentScreen: CanvasPoint;
       start: CanvasPoint;
       current?: CanvasPoint;
+      initialSelection: CanvasSelection | undefined;
+      pressedProjectRelativePath: string;
+      additive: boolean;
       origins: CanvasRuntimeMoveOrigin[];
     }
   | {
       kind: 'resize-node';
       pointerId: number;
+      phase: 'active';
+      startScreen: CanvasPoint;
+      currentScreen: CanvasPoint;
       handle: ResizeHandle;
       start: CanvasPoint;
       current?: CanvasPoint;
+      initialSelection: CanvasSelection | undefined;
       node: CanvasRuntimeResizeNode;
       origin: CanvasRect;
       preserveAspect: boolean;
     };
+
+export type CanvasRuntimeLayoutInteraction = Exclude<
+  CanvasRuntimePointerInteraction,
+  { kind: 'selection-marquee' }
+>;
 
 type CanvasGestureEvent = Event & {
   clientX: number;
@@ -140,7 +200,7 @@ interface RuntimeState {
   camera: CanvasCamera;
   cameraState: CanvasCameraState;
   selection: CanvasSelection | undefined;
-  dragState: CanvasRuntimeDragState | undefined;
+  pointerInteraction: CanvasRuntimePointerInteraction | undefined;
   surfaceSize: CanvasSize | undefined;
 }
 
@@ -153,7 +213,10 @@ interface GestureState {
 export function createCanvasEditorRuntime(initial: {
   canvasId: string;
   initialProjection: CanvasProjection;
-  submitManualLayout(nodeLayouts: CanvasLayoutOverride[]): Promise<void>;
+  submitManualLayout(mutation: {
+    interaction: 'move' | 'resize';
+    nodeLayouts: CanvasLayoutOverride[];
+  }): Promise<void>;
   camera?: CanvasCamera;
   selection?: CanvasSelection | undefined;
 }): CanvasEditorRuntime {
@@ -162,7 +225,7 @@ export function createCanvasEditorRuntime(initial: {
   const cameraStateListeners = new Set<(state: CanvasCameraState) => void>();
   const selectionListeners = new Set<(selection: CanvasSelection | undefined) => void>();
   const surfaceSizeListeners = new Set<(size: CanvasSize | undefined) => void>();
-  const dragStateListeners = new Set<(state: CanvasRuntimeDragState | undefined) => void>();
+  const pointerInteractionListeners = new Set<(state: CanvasRuntimePointerInteraction | undefined) => void>();
   const manualLayoutListeners = new Set<() => void>();
   const manualLayoutLifecycle = createCanvasManualLayoutLifecycle({
     canvasId: initial.canvasId,
@@ -172,8 +235,11 @@ export function createCanvasEditorRuntime(initial: {
   const state: RuntimeState = {
     camera: initial.camera ?? canvasCameraReset(),
     cameraState: 'idle',
-    selection: initial.selection,
-    dragState: undefined,
+    selection: pruneCanvasSelection(
+      normalizeCanvasSelection(initial.selection),
+      new Set(initial.initialProjection.nodes.map((node) => node.projectRelativePath))
+    ),
+    pointerInteraction: undefined,
     surfaceSize: undefined
   };
   assertCanvasCamera(state.camera);
@@ -183,6 +249,9 @@ export function createCanvasEditorRuntime(initial: {
   let idleTimer: number | undefined;
   let gestureState: GestureState | undefined;
   let cachedSnapshot: CanvasRuntimeSnapshot | undefined;
+  let marqueeEdgeScrollFrame: number | undefined;
+  let marqueeEdgeEnteredAt: number | undefined;
+  let marqueeEdgeLastFrameAt: number | undefined;
   let disposed = false;
 
   const invalidateSnapshot = () => {
@@ -194,7 +263,7 @@ export function createCanvasEditorRuntime(initial: {
       camera: state.camera,
       cameraState: state.cameraState,
       selection: state.selection,
-      dragState: state.dragState,
+      pointerInteraction: state.pointerInteraction,
       surfaceSize: state.surfaceSize
     };
     return cachedSnapshot;
@@ -333,27 +402,32 @@ export function createCanvasEditorRuntime(initial: {
     })
   };
 
-  const flushDragStateListeners = (dragState: CanvasRuntimeDragState | undefined) => {
-    for (const listener of dragStateListeners) {
-      listener(dragState);
+  const flushPointerInteractionListeners = (pointerInteraction: CanvasRuntimePointerInteraction | undefined) => {
+    for (const listener of pointerInteractionListeners) {
+      listener(pointerInteraction);
     }
   };
 
-  const setDragState = (
-    dragState: CanvasRuntimeDragState | undefined,
+  const setPointerInteraction = (
+    pointerInteraction: CanvasRuntimePointerInteraction | undefined,
     options: { notifySnapshot: boolean }
   ) => {
-    state.dragState = dragState;
-    manualLayoutLifecycle.setActiveDrag(dragState);
+    state.pointerInteraction = pointerInteraction;
+    manualLayoutLifecycle.setActiveInteraction(
+      pointerInteraction?.kind !== 'selection-marquee' && pointerInteraction?.phase === 'active'
+        ? pointerInteraction
+        : undefined
+    );
     invalidateSnapshot();
-    flushDragStateListeners(dragState);
+    flushPointerInteractionListeners(pointerInteraction);
+    syncMarqueeEdgeScroll(pointerInteraction);
     if (options.notifySnapshot) {
       notify();
     }
   };
 
   const resizePreserveAspect = (
-    state: Pick<Extract<CanvasRuntimeDragState, { kind: 'resize-node' }>, 'handle' | 'node'>,
+    state: Pick<Extract<CanvasRuntimePointerInteraction, { kind: 'resize-node' }>, 'handle' | 'node'>,
     modifiers: CanvasRuntimePointerModifiers
   ): boolean => getCanvasResizePreserveAspect(state.handle, modifiers, state.node);
 
@@ -373,19 +447,145 @@ export function createCanvasEditorRuntime(initial: {
     }
   };
 
-  const dragStateWithPointer = (
-    active: CanvasRuntimeDragState,
-    point: CanvasPoint | undefined,
+  const commitSelection = (selection: CanvasSelection | undefined) => {
+    const normalized = normalizeCanvasSelection(selection);
+    if (sameCanvasSelection(state.selection, normalized)) {
+      return;
+    }
+    state.selection = normalized;
+    invalidateSnapshot();
+    flushSelectionListeners(normalized);
+    notify();
+  };
+
+  const pointerInteractionWithPointer = (
+    active: CanvasRuntimePointerInteraction,
+    screenPoint: CanvasPoint | undefined,
     modifiers: CanvasRuntimePointerModifiers | undefined
-  ): CanvasRuntimeDragState => {
-    const next = point ? { ...active, current: point } : active;
-    if (next.kind !== 'resize-node' || !modifiers) {
+  ): CanvasRuntimePointerInteraction => {
+    const nextScreen = screenPoint ?? active.currentScreen;
+    const nextCanvas = screenToCanvas(nextScreen);
+    if (active.kind === 'selection-marquee') {
+      const phase = active.phase === 'active' || screenDistance(active.startScreen, nextScreen) > POINTER_ACTIVATION_DISTANCE
+        ? 'active'
+        : 'pending';
+      return {
+        ...active,
+        phase,
+        currentScreen: nextScreen,
+        current: nextCanvas,
+        additive: modifiers ? additiveSelectionModifier(modifiers) : active.additive,
+        ...(phase === 'active' ? { rect: rectFromPoints(active.start, nextCanvas) } : {})
+      };
+    }
+    if (active.kind === 'move-node') {
+      const phase = active.phase === 'active' || screenDistance(active.startScreen, nextScreen) > POINTER_ACTIVATION_DISTANCE
+        ? 'active'
+        : 'pending';
+      return {
+        ...active,
+        phase,
+        currentScreen: nextScreen,
+        additive: modifiers ? additiveSelectionModifier(modifiers) : active.additive,
+        ...(phase === 'active' ? { current: nextCanvas } : {})
+      };
+    }
+    const next = {
+      ...active,
+      currentScreen: nextScreen,
+      current: nextCanvas
+    };
+    if (!modifiers) {
       return next;
     }
     return {
       ...next,
       preserveAspect: resizePreserveAspect(next, modifiers)
     };
+  };
+
+  const marqueeSelection = (
+    interaction: Extract<CanvasRuntimePointerInteraction, { kind: 'selection-marquee' }>
+  ): CanvasSelection | undefined => {
+    if (interaction.phase !== 'active' || !interaction.rect) {
+      return interaction.initialSelection;
+    }
+    const hitPaths = manualLayoutLifecycle.getPresentedNodes()
+      .filter((node) => rectsIntersect(interaction.rect!, node))
+      .map((node) => node.projectRelativePath);
+    return interaction.additive
+      ? unionCanvasNodeSelection(interaction.initialSelection, hitPaths)
+      : canvasNodeSelection(hitPaths);
+  };
+
+  const stopMarqueeEdgeScroll = () => {
+    if (marqueeEdgeScrollFrame !== undefined) {
+      window.cancelAnimationFrame(marqueeEdgeScrollFrame);
+      marqueeEdgeScrollFrame = undefined;
+    }
+    marqueeEdgeEnteredAt = undefined;
+    marqueeEdgeLastFrameAt = undefined;
+  };
+
+  const marqueeEdgeVector = (
+    interaction: Extract<CanvasRuntimePointerInteraction, { kind: 'selection-marquee' }>
+  ): CanvasPoint => {
+    const rect = surfaceRect();
+    return {
+      x: edgeProximity(interaction.currentScreen.x, rect.left, rect.left + rect.width),
+      y: edgeProximity(
+        interaction.currentScreen.y,
+        rect.top + interaction.topEdgeInset,
+        rect.top + rect.height
+      )
+    };
+  };
+
+  const runMarqueeEdgeScrollFrame = (timestamp: number) => {
+    marqueeEdgeScrollFrame = undefined;
+    const active = state.pointerInteraction;
+    if (active?.kind !== 'selection-marquee' || active.phase !== 'active') {
+      stopMarqueeEdgeScroll();
+      return;
+    }
+    const edge = marqueeEdgeVector(active);
+    if (edge.x === 0 && edge.y === 0) {
+      stopMarqueeEdgeScroll();
+      return;
+    }
+    marqueeEdgeEnteredAt ??= timestamp;
+    marqueeEdgeLastFrameAt ??= timestamp;
+    const elapsed = timestamp - marqueeEdgeEnteredAt;
+    const frameSeconds = Math.max(0, Math.min(64, timestamp - marqueeEdgeLastFrameAt)) / 1000;
+    marqueeEdgeLastFrameAt = timestamp;
+    if (elapsed > MARQUEE_EDGE_SCROLL_DELAY_MS && frameSeconds > 0) {
+      const ease = Math.min(1, (elapsed - MARQUEE_EDGE_SCROLL_DELAY_MS) / MARQUEE_EDGE_SCROLL_EASE_MS);
+      cameraController.panBy({
+        x: -edge.x * MARQUEE_EDGE_SCROLL_MAX_SPEED * ease * frameSeconds,
+        y: -edge.y * MARQUEE_EDGE_SCROLL_MAX_SPEED * ease * frameSeconds
+      });
+      const next = pointerInteractionWithPointer(active, active.currentScreen, undefined);
+      setPointerInteraction(next, { notifySnapshot: false });
+      commitSelection(marqueeSelection(next as Extract<CanvasRuntimePointerInteraction, { kind: 'selection-marquee' }>));
+    }
+    syncMarqueeEdgeScroll(state.pointerInteraction);
+  };
+
+  const syncMarqueeEdgeScroll = (
+    interaction: CanvasRuntimePointerInteraction | undefined
+  ) => {
+    if (interaction?.kind !== 'selection-marquee' || interaction.phase !== 'active') {
+      stopMarqueeEdgeScroll();
+      return;
+    }
+    const edge = marqueeEdgeVector(interaction);
+    if (edge.x === 0 && edge.y === 0) {
+      stopMarqueeEdgeScroll();
+      return;
+    }
+    if (marqueeEdgeScrollFrame === undefined) {
+      marqueeEdgeScrollFrame = window.requestAnimationFrame(runMarqueeEdgeScrollFrame);
+    }
   };
 
   const handleWheel = (event: WheelEvent) => {
@@ -473,6 +673,28 @@ export function createCanvasEditorRuntime(initial: {
       getPresentation: () => manualLayoutLifecycle.getPresentation(),
       acceptProjection: (projection) => {
         manualLayoutLifecycle.acceptProjection(projection);
+        const currentPaths = new Set(projection.nodes.map((node) => node.projectRelativePath));
+        const active = state.pointerInteraction;
+        if (active?.kind === 'move-node' && active.origins.some((origin) => !currentPaths.has(origin.projectRelativePath))) {
+          setPointerInteraction(undefined, { notifySnapshot: true });
+          commitSelection(pruneCanvasSelection(active.initialSelection, currentPaths));
+          return;
+        }
+        if (active?.kind === 'resize-node' && !currentPaths.has(active.node.projectRelativePath)) {
+          setPointerInteraction(undefined, { notifySnapshot: true });
+          commitSelection(pruneCanvasSelection(active.initialSelection, currentPaths));
+          return;
+        }
+        if (active?.kind === 'selection-marquee') {
+          const next = pointerInteractionWithPointer({
+            ...active,
+            initialSelection: pruneCanvasSelection(active.initialSelection, currentPaths)
+          }, active.currentScreen, undefined);
+          setPointerInteraction(next, { notifySnapshot: false });
+          commitSelection(marqueeSelection(next as Extract<CanvasRuntimePointerInteraction, { kind: 'selection-marquee' }>));
+          return;
+        }
+        commitSelection(pruneCanvasSelection(state.selection, currentPaths));
       },
       subscribeRejection: (listener) => {
         manualLayoutListeners.add(listener);
@@ -483,26 +705,62 @@ export function createCanvasEditorRuntime(initial: {
     },
     input: {
       screenToCanvasPoint: screenToCanvas,
+      beginSelectionMarquee: (input) => {
+        setPointerInteraction({
+          kind: 'selection-marquee',
+          pointerId: input.pointerId,
+          phase: 'pending',
+          startScreen: input.screenPoint,
+          currentScreen: input.screenPoint,
+          start: screenToCanvas(input.screenPoint),
+          current: screenToCanvas(input.screenPoint),
+          initialSelection: state.selection,
+          additive: additiveSelectionModifier(input.modifiers),
+          topEdgeInset: input.topEdgeInset ?? 0
+        }, { notifySnapshot: false });
+      },
       beginNodeMove: (input) => {
-        const selectedPaths = new Set(selectedNodeProjectRelativePaths(input.selection));
-        if (!selectedPaths.has(input.projectRelativePath)) {
-          selectedPaths.add(input.projectRelativePath);
-        }
+        const initialSelection = state.selection;
+        const additive = additiveSelectionModifier(input.modifiers);
+        const alreadySelected = isCanvasNodeSelected(initialSelection, input.projectRelativePath);
+        const moveSelection = additive
+          ? alreadySelected
+            ? initialSelection
+            : unionCanvasNodeSelection(initialSelection, [input.projectRelativePath])
+          : alreadySelected
+            ? initialSelection
+            : canvasNodeSelection([input.projectRelativePath]);
         presentedNode(input.projectRelativePath);
-        setDragState({
+        commitSelection(moveSelection);
+        const selectedPaths = new Set(selectedNodeProjectRelativePaths(moveSelection));
+        const start = screenToCanvas(input.screenPoint);
+        setPointerInteraction({
           kind: 'move-node',
           pointerId: input.pointerId,
-          start: input.start,
+          phase: 'pending',
+          startScreen: input.screenPoint,
+          currentScreen: input.screenPoint,
+          start,
+          initialSelection,
+          pressedProjectRelativePath: input.projectRelativePath,
+          additive,
           origins: manualLayoutLifecycle.getPresentedNodes().filter((node) => selectedPaths.has(node.projectRelativePath))
-        }, { notifySnapshot: true });
+        }, { notifySnapshot: false });
       },
       beginNodeResize: (input) => {
         const node = presentedNode(input.projectRelativePath);
-        setDragState({
+        const initialSelection = state.selection;
+        const start = screenToCanvas(input.screenPoint);
+        commitSelection(canvasNodeSelection([input.projectRelativePath]));
+        setPointerInteraction({
           kind: 'resize-node',
           pointerId: input.pointerId,
+          phase: 'active',
+          startScreen: input.screenPoint,
+          currentScreen: input.screenPoint,
           handle: input.handle,
-          start: input.start,
+          start,
+          initialSelection,
           node: {
             projectRelativePath: node.projectRelativePath,
             nodeKind: node.nodeKind,
@@ -518,24 +776,42 @@ export function createCanvasEditorRuntime(initial: {
             handle: input.handle,
             node
           }, input.modifiers)
-        }, { notifySnapshot: true });
+        }, { notifySnapshot: false });
       },
-      updatePointer: (input) => {
-        const active = state.dragState;
+      updatePointerInteraction: (input) => {
+        const active = state.pointerInteraction;
         if (!active || active.pointerId !== input.pointerId) {
           return false;
         }
-        setDragState(dragStateWithPointer(active, input.point, input.modifiers), { notifySnapshot: false });
+        const next = pointerInteractionWithPointer(active, input.screenPoint, input.modifiers);
+        setPointerInteraction(next, { notifySnapshot: false });
+        if (next.kind === 'selection-marquee') {
+          commitSelection(marqueeSelection(next));
+        }
         return true;
       },
-      finishPointer: async (input) => {
-        const active = state.dragState;
+      finishPointerInteraction: async (input) => {
+        const active = state.pointerInteraction;
         if (!active || active.pointerId !== input.pointerId) {
           return undefined;
         }
-        const finished = dragStateWithPointer(active, input.point, input.modifiers);
-        const submission = manualLayoutLifecycle.submitFinishedDrag(finished);
-        setDragState(undefined, { notifySnapshot: true });
+        const finished = pointerInteractionWithPointer(active, input.screenPoint, input.modifiers);
+        if (finished.kind === 'selection-marquee') {
+          commitSelection(finished.phase === 'pending'
+            ? finished.additive ? finished.initialSelection : undefined
+            : marqueeSelection(finished));
+          setPointerInteraction(undefined, { notifySnapshot: true });
+          return finished;
+        }
+        if (finished.kind === 'move-node' && finished.phase === 'pending') {
+          commitSelection(finished.additive
+            ? toggleCanvasNodeSelection(finished.initialSelection, finished.pressedProjectRelativePath)
+            : canvasNodeSelection([finished.pressedProjectRelativePath]));
+          setPointerInteraction(undefined, { notifySnapshot: true });
+          return finished;
+        }
+        const submission = manualLayoutLifecycle.submitFinishedInteraction(finished);
+        setPointerInteraction(undefined, { notifySnapshot: true });
         try {
           await submission;
         } catch (error) {
@@ -544,9 +820,11 @@ export function createCanvasEditorRuntime(initial: {
         }
         return finished;
       },
-      cancelPointer: (pointerId) => {
-        if (state.dragState?.pointerId === pointerId) {
-          setDragState(undefined, { notifySnapshot: true });
+      cancelPointerInteraction: (pointerId) => {
+        const active = state.pointerInteraction;
+        if (active?.pointerId === pointerId) {
+          setPointerInteraction(undefined, { notifySnapshot: true });
+          commitSelection(active.initialSelection);
         }
       }
     },
@@ -580,10 +858,10 @@ export function createCanvasEditorRuntime(initial: {
         surfaceSizeListeners.delete(listener);
       };
     },
-    subscribeDragState: (listener) => {
-      dragStateListeners.add(listener);
+    subscribePointerInteraction: (listener) => {
+      pointerInteractionListeners.add(listener);
       return () => {
-        dragStateListeners.delete(listener);
+        pointerInteractionListeners.delete(listener);
       };
     },
     getSnapshot: snapshot,
@@ -628,18 +906,11 @@ export function createCanvasEditorRuntime(initial: {
         detachWindowInput = () => undefined;
       };
     },
-    setSelection: (selection) => {
-      if (state.selection === selection) {
-        return;
-      }
-      state.selection = selection;
-      invalidateSnapshot();
-      flushSelectionListeners(selection);
-      notify();
-    },
+    setSelection: commitSelection,
     dispose: () => {
       disposed = true;
       manualLayoutLifecycle.dispose();
+      stopMarqueeEdgeScroll();
       clearIdleTimer();
       resizeObserver?.disconnect();
       resizeObserver = undefined;
@@ -650,7 +921,7 @@ export function createCanvasEditorRuntime(initial: {
       cameraStateListeners.clear();
       selectionListeners.clear();
       surfaceSizeListeners.clear();
-      dragStateListeners.clear();
+      pointerInteractionListeners.clear();
       manualLayoutListeners.clear();
       boundElements = undefined;
     }
@@ -661,4 +932,37 @@ export function createCanvasEditorRuntime(initial: {
 
 function positiveFiniteScale(value: number): number | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+const POINTER_ACTIVATION_DISTANCE = 4;
+const MARQUEE_EDGE_SCROLL_ZONE = 8;
+const MARQUEE_EDGE_SCROLL_DELAY_MS = 200;
+const MARQUEE_EDGE_SCROLL_EASE_MS = 200;
+const MARQUEE_EDGE_SCROLL_MAX_SPEED = 800;
+
+function additiveSelectionModifier(modifiers: CanvasRuntimePointerModifiers | undefined): boolean {
+  return modifiers ? isAdditiveCanvasSelectionModifier(modifiers) : false;
+}
+
+function screenDistance(left: CanvasPoint, right: CanvasPoint): number {
+  return Math.hypot(right.x - left.x, right.y - left.y);
+}
+
+function edgeProximity(value: number, min: number, max: number): number {
+  if (value < min + MARQUEE_EDGE_SCROLL_ZONE) {
+    return -((min + MARQUEE_EDGE_SCROLL_ZONE - value) / MARQUEE_EDGE_SCROLL_ZONE);
+  }
+  if (value > max - MARQUEE_EDGE_SCROLL_ZONE) {
+    return (value - (max - MARQUEE_EDGE_SCROLL_ZONE)) / MARQUEE_EDGE_SCROLL_ZONE;
+  }
+  return 0;
+}
+
+function rectFromPoints(left: CanvasPoint, right: CanvasPoint): CanvasRect {
+  return {
+    x: Math.min(left.x, right.x),
+    y: Math.min(left.y, right.y),
+    width: Math.abs(right.x - left.x),
+    height: Math.abs(right.y - left.y)
+  };
 }

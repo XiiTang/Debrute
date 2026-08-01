@@ -28,7 +28,12 @@ describe('native window shell', () => {
     const unsubscribe = api.onNativeWindowStateChanged(listener);
     const stateListener = on.mock.calls[0]?.[1] as ((event: unknown, state: { maximized: boolean }) => void);
     stateListener({}, { maximized: true });
+    const editListener = vi.fn();
+    const unsubscribeEdit = api.onNativeEditCommand(editListener);
+    const nativeEditListener = on.mock.calls[1]?.[1] as ((event: unknown, command: string) => void);
+    nativeEditListener({}, 'edit.copy');
     unsubscribe();
+    unsubscribeEdit();
 
     expect(invoke.mock.calls).toEqual([
       [nativeWindowIpcChannels.getState],
@@ -42,7 +47,10 @@ describe('native window shell', () => {
     ]);
     expect(on).toHaveBeenCalledWith(nativeWindowIpcChannels.stateChanged, stateListener);
     expect(listener).toHaveBeenCalledWith({ maximized: true });
+    expect(on).toHaveBeenCalledWith(nativeWindowIpcChannels.editCommand, nativeEditListener);
+    expect(editListener).toHaveBeenCalledWith('edit.copy');
     expect(removeListener).toHaveBeenCalledWith(nativeWindowIpcChannels.stateChanged, stateListener);
+    expect(removeListener).toHaveBeenCalledWith(nativeWindowIpcChannels.editCommand, nativeEditListener);
   });
 
   it('binds every native-window handler to the BrowserWindow for event.sender', async () => {

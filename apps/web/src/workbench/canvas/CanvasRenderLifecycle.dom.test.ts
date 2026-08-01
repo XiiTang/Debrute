@@ -37,7 +37,7 @@ describe('CanvasRenderLifecycle', () => {
     expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(false);
 
     fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-    fixture.runtime.setSelection({ kind: 'node', projectRelativePath: 'far' });
+    fixture.runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['far'] });
 
     expect(fixture.canceledFrames).toEqual([1]);
     expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(true);
@@ -90,8 +90,7 @@ describe('CanvasRenderLifecycle', () => {
     fixture.runtime.input.beginNodeMove({
       pointerId: 1,
       projectRelativePath: 'far',
-      start: { x: 5000, y: 0 },
-      selection: { kind: 'node', projectRelativePath: 'far' }
+      screenPoint: { x: 5000, y: 0 }
     });
 
     expect(fixture.canceledFrames).toEqual([1]);
@@ -166,25 +165,24 @@ describe('CanvasRenderLifecycle', () => {
     fixture.runtime.input.beginNodeMove({
       pointerId: 1,
       projectRelativePath: 'near',
-      start: { x: 0, y: 0 },
-      selection: { kind: 'node', projectRelativePath: 'near' }
+      screenPoint: { x: 0, y: 0 }
     });
-    fixture.runtime.input.updatePointer({
+    fixture.runtime.input.updatePointerInteraction({
       pointerId: 1,
-      point: { x: 100, y: 0 }
+      screenPoint: { x: 100, y: 0 }
     });
 
     expect(fixture.lifecycle.getSnapshot().nodesByPath.get('near')?.x).toBe(100);
 
-    const finishPointer = fixture.runtime.input.finishPointer({
+    const finishPointerInteraction = fixture.runtime.input.finishPointerInteraction({
       pointerId: 1,
-      point: { x: 100, y: 0 }
+      screenPoint: { x: 100, y: 0 }
     });
     fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
 
     expect(fixture.frames).toHaveLength(1);
 
-    await expect(finishPointer).rejects.toThrow('layout rejected');
+    await expect(finishPointerInteraction).rejects.toThrow('layout rejected');
 
     expect(fixture.canceledFrames).toEqual([1]);
     expect(fixture.lifecycle.getSnapshot().nodesByPath.get('near')?.x).toBe(0);
@@ -216,7 +214,7 @@ describe('CanvasRenderLifecycle', () => {
 
     fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
     fixture.detach();
-    fixture.runtime.setSelection({ kind: 'node', projectRelativePath: 'far' });
+    fixture.runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['far'] });
     fixture.frames[0]?.(0);
 
     expect(fixture.canceledFrames).toEqual([1]);

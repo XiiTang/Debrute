@@ -63,7 +63,7 @@ async function executeBrowserMenuCommand(
   }
 }
 
-function executeDocumentEditCommand(
+export function executeDocumentEditCommand(
   commandId: 'edit.undo' | 'edit.redo' | 'edit.cut' | 'edit.copy' | 'edit.paste' | 'edit.delete' | 'edit.select-all'
 ): void {
   const commandById = {

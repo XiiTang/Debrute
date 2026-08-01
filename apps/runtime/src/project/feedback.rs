@@ -10,7 +10,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::{
     CanvasMediaKind, ProjectCapabilityFs, ProjectError, canvas_media_kind_from_path,
-    normalize_project_relative_path, project_content_hash,
+    normalize_project_directory_path, project_content_hash,
 };
 
 mod artifacts;
@@ -72,7 +72,7 @@ pub enum CanvasFeedbackItemKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CanvasFeedbackScope {
-    File,
+    Node,
     Moment,
 }
 
@@ -167,11 +167,12 @@ pub struct NewCanvasFeedbackItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum UpdateCanvasFeedbackEntryInput {
-    SetMarks {
-        #[serde(rename = "projectRelativePath")]
-        project_relative_path: String,
-        marks: Vec<CanvasFeedbackMark>,
+pub enum UpdateCanvasFeedbackInput {
+    SetMark {
+        #[serde(rename = "projectRelativePaths")]
+        project_relative_paths: Vec<String>,
+        mark: CanvasFeedbackMark,
+        selected: bool,
     },
     AddItem {
         #[serde(rename = "projectRelativePath")]
@@ -196,15 +197,15 @@ pub enum UpdateCanvasFeedbackEntryInput {
     },
 }
 
-impl UpdateCanvasFeedbackEntryInput {
+impl UpdateCanvasFeedbackInput {
     #[must_use]
-    pub fn project_relative_path(&self) -> &str {
+    pub fn target_project_relative_paths(&self) -> Vec<&str> {
         match self {
-            Self::SetMarks {
-                project_relative_path,
+            Self::SetMark {
+                project_relative_paths,
                 ..
-            }
-            | Self::AddItem {
+            } => project_relative_paths.iter().map(String::as_str).collect(),
+            Self::AddItem {
                 project_relative_path,
                 ..
             }
@@ -215,14 +216,60 @@ impl UpdateCanvasFeedbackEntryInput {
             | Self::DeleteItem {
                 project_relative_path,
                 ..
-            } => project_relative_path,
+            } => vec![project_relative_path],
+        }
+    }
+
+    #[must_use]
+    pub fn requires_file_target(&self) -> bool {
+        match self {
+            Self::AddItem { item, .. } => {
+                item.scope == CanvasFeedbackScope::Moment
+                    || matches!(
+                        item.kind,
+                        CanvasFeedbackItemKind::Pin | CanvasFeedbackItemKind::Region
+                    )
+            }
+            Self::UpdateItem {
+                geometry: Some(_), ..
+            } => true,
+            Self::SetMark { .. }
+            | Self::UpdateItem { geometry: None, .. }
+            | Self::DeleteItem { .. } => false,
+        }
+    }
+
+    #[must_use]
+    pub fn rendered_artifact_source_path(&self) -> Option<&str> {
+        match self {
+            Self::AddItem {
+                project_relative_path,
+                item,
+            } if item.scope == CanvasFeedbackScope::Moment
+                || matches!(
+                    item.kind,
+                    CanvasFeedbackItemKind::Pin | CanvasFeedbackItemKind::Region
+                ) =>
+            {
+                Some(project_relative_path)
+            }
+            Self::UpdateItem {
+                project_relative_path,
+                geometry: Some(_),
+                ..
+            }
+            | Self::DeleteItem {
+                project_relative_path,
+                ..
+            } => Some(project_relative_path),
+            _ => None,
         }
     }
 
     #[must_use]
     pub fn affects_rendered_artifact(&self) -> bool {
         match self {
-            Self::SetMarks { .. } => false,
+            Self::SetMark { .. } => false,
             Self::AddItem { item, .. } => {
                 item.scope == CanvasFeedbackScope::Moment
                     || matches!(
@@ -306,12 +353,32 @@ pub(crate) fn write_canvas_feedback_document(
 #[allow(clippy::too_many_lines)]
 pub(crate) fn update_canvas_feedback_document(
     document: &CanvasFeedbackDocument,
-    input: &UpdateCanvasFeedbackEntryInput,
+    input: &UpdateCanvasFeedbackInput,
     updated_at: String,
 ) -> Result<CanvasFeedbackDocument, ProjectError> {
     validate_canvas_feedback_document(document)?;
     validate_iso_timestamp(&updated_at)?;
-    let project_relative_path = normalize_feedback_path(input.project_relative_path())?;
+    if let UpdateCanvasFeedbackInput::SetMark {
+        project_relative_paths,
+        mark,
+        selected,
+    } = input
+    {
+        return update_canvas_feedback_marks(
+            document,
+            project_relative_paths,
+            *mark,
+            *selected,
+            updated_at,
+        );
+    }
+    let project_relative_path = normalize_feedback_path(
+        input
+            .target_project_relative_paths()
+            .into_iter()
+            .next()
+            .expect("non-Mark Canvas feedback operations have exactly one target"),
+    )?;
     let mut next = document.clone();
     let mut entry = next
         .entries
@@ -325,10 +392,10 @@ pub(crate) fn update_canvas_feedback_document(
             updated_at: updated_at.clone(),
         });
     match input {
-        UpdateCanvasFeedbackEntryInput::SetMarks { marks, .. } => {
-            entry.marks = normalized_marks(marks);
+        UpdateCanvasFeedbackInput::SetMark { .. } => {
+            unreachable!("set-mark returns before the single-entry interpreter")
         }
-        UpdateCanvasFeedbackEntryInput::AddItem { item, .. } => {
+        UpdateCanvasFeedbackInput::AddItem { item, .. } => {
             let id = item.id.trim().to_owned();
             if id.is_empty() || id != item.id || id.len() > MAX_CANVAS_FEEDBACK_ITEM_ID_BYTES {
                 return Err(ProjectError::Validation(
@@ -374,7 +441,7 @@ pub(crate) fn update_canvas_feedback_document(
                 next_item.moment = Some(moment_ref_for_time(&mut entry, time)?);
             } else if item.moment_time_seconds.is_some() {
                 return Err(ProjectError::Validation(
-                    "Canvas feedback file item cannot include momentTimeSeconds.".to_owned(),
+                    "Canvas feedback node item cannot include momentTimeSeconds.".to_owned(),
                 ));
             }
             match item.kind {
@@ -408,7 +475,7 @@ pub(crate) fn update_canvas_feedback_document(
                     .then_with(|| left.id.cmp(&right.id))
             });
         }
-        UpdateCanvasFeedbackEntryInput::UpdateItem {
+        UpdateCanvasFeedbackInput::UpdateItem {
             item_id,
             geometry,
             comment,
@@ -436,7 +503,7 @@ pub(crate) fn update_canvas_feedback_document(
             }
             item.updated_at.clone_from(&updated_at);
         }
-        UpdateCanvasFeedbackEntryInput::DeleteItem { item_id, .. } => {
+        UpdateCanvasFeedbackInput::DeleteItem { item_id, .. } => {
             let before = entry.items.len();
             entry.items.retain(|item| item.id != *item_id);
             if before == entry.items.len() {
@@ -455,6 +522,68 @@ pub(crate) fn update_canvas_feedback_document(
     Ok(next)
 }
 
+fn update_canvas_feedback_marks(
+    document: &CanvasFeedbackDocument,
+    project_relative_paths: &[String],
+    mark: CanvasFeedbackMark,
+    selected: bool,
+    updated_at: String,
+) -> Result<CanvasFeedbackDocument, ProjectError> {
+    if project_relative_paths.is_empty() {
+        return Err(ProjectError::Validation(
+            "Canvas feedback set-mark requires at least one Project Path.".to_owned(),
+        ));
+    }
+    let mut normalized_paths = BTreeSet::new();
+    for path in project_relative_paths {
+        let normalized = normalize_feedback_path(path)?;
+        if !normalized_paths.insert(normalized.clone()) {
+            return Err(ProjectError::Validation(format!(
+                "Canvas feedback set-mark paths must be unique after normalization: {normalized}"
+            )));
+        }
+    }
+
+    let mut next = document.clone();
+    let mut changed = false;
+    for project_relative_path in normalized_paths {
+        let existing = next.entries.remove(&project_relative_path);
+        let mut entry = existing.unwrap_or(CanvasFeedbackEntry {
+            project_relative_path: project_relative_path.clone(),
+            marks: Vec::new(),
+            next_moment_label: 1,
+            next_spatial_label: 1,
+            items: Vec::new(),
+            updated_at: updated_at.clone(),
+        });
+        let already_selected = entry.marks.contains(&mark);
+        if already_selected == selected {
+            if !entry.marks.is_empty() || !entry.items.is_empty() {
+                next.entries.insert(project_relative_path, entry);
+            }
+            continue;
+        }
+        changed = true;
+        if selected {
+            entry.marks.push(mark);
+            entry.marks = normalized_marks(&entry.marks);
+        } else {
+            entry.marks.retain(|existing_mark| *existing_mark != mark);
+        }
+        entry.updated_at.clone_from(&updated_at);
+        if !entry.marks.is_empty() || !entry.items.is_empty() {
+            next.entries.insert(project_relative_path, entry);
+        }
+    }
+
+    if !changed {
+        return Ok(document.clone());
+    }
+    next.updated_at = updated_at;
+    validate_canvas_feedback_document(&next)?;
+    Ok(next)
+}
+
 pub(crate) fn validate_feedback_media_targets(
     document: &CanvasFeedbackDocument,
 ) -> Result<(), ProjectError> {
@@ -462,11 +591,11 @@ pub(crate) fn validate_feedback_media_targets(
         let media_kind = canvas_media_kind_from_path(&entry.project_relative_path);
         for item in &entry.items {
             if item.is_spatial()
-                && item.scope == CanvasFeedbackScope::File
+                && item.scope == CanvasFeedbackScope::Node
                 && media_kind != CanvasMediaKind::Image
             {
                 return Err(ProjectError::Validation(format!(
-                    "Canvas feedback file-scope spatial items require an image file: {}",
+                    "Canvas feedback node-scope spatial items require an image file: {}",
                     entry.project_relative_path
                 )));
             }
@@ -652,10 +781,10 @@ fn validate_item(item: &CanvasFeedbackItem) -> Result<(), ProjectError> {
     validate_iso_timestamp(&item.created_at)?;
     validate_iso_timestamp(&item.updated_at)?;
     match (item.kind, item.scope) {
-        (CanvasFeedbackItemKind::Comment, CanvasFeedbackScope::File) => {
+        (CanvasFeedbackItemKind::Comment, CanvasFeedbackScope::Node) => {
             if item.label.is_some() || item.geometry.is_some() || item.moment.is_some() {
                 return Err(ProjectError::Validation(
-                    "Canvas feedback file comment contains spatial or moment fields.".to_owned(),
+                    "Canvas feedback node comment contains spatial or moment fields.".to_owned(),
                 ));
             }
         }
@@ -739,10 +868,10 @@ pub(crate) fn validate_spatial_geometry(
     }
 }
 
-fn normalize_feedback_path(path: &str) -> Result<String, ProjectError> {
+pub(crate) fn normalize_feedback_path(path: &str) -> Result<String, ProjectError> {
     let normalized = path.replace('\\', "/");
     let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
-    let normalized = normalize_project_relative_path(normalized)?;
+    let normalized = normalize_project_directory_path(normalized)?;
     if normalized.len() > MAX_CANVAS_FEEDBACK_PATH_BYTES {
         return Err(ProjectError::Validation(format!(
             "Canvas feedback path exceeds {MAX_CANVAS_FEEDBACK_PATH_BYTES} bytes."
@@ -940,12 +1069,13 @@ mod tests {
 
     const T0: &str = "2026-07-15T01:02:03.004Z";
     const T1: &str = "2026-07-15T01:02:04.005Z";
+    const T2: &str = "2026-07-15T01:02:05.006Z";
 
-    fn file_comment(id: impl Into<String>, comment: impl Into<String>) -> CanvasFeedbackItem {
+    fn node_comment(id: impl Into<String>, comment: impl Into<String>) -> CanvasFeedbackItem {
         CanvasFeedbackItem {
             id: id.into(),
             kind: CanvasFeedbackItemKind::Comment,
-            scope: CanvasFeedbackScope::File,
+            scope: CanvasFeedbackScope::Node,
             label: None,
             geometry: None,
             moment: None,
@@ -967,6 +1097,86 @@ mod tests {
     }
 
     #[test]
+    fn set_mark_updates_only_changed_entries_removes_empty_entries_and_preserves_no_ops() {
+        let mut document = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
+        document.entries.insert(
+            "images/already.png".to_owned(),
+            marked_entry("images/already.png"),
+        );
+        document.entries.insert(
+            "images/mixed.png".to_owned(),
+            CanvasFeedbackEntry {
+                project_relative_path: "images/mixed.png".to_owned(),
+                marks: vec![CanvasFeedbackMark::Important],
+                next_moment_label: 1,
+                next_spatial_label: 1,
+                items: Vec::new(),
+                updated_at: T0.to_owned(),
+            },
+        );
+
+        let selected = update_canvas_feedback_document(
+            &document,
+            &UpdateCanvasFeedbackInput::SetMark {
+                project_relative_paths: vec![
+                    "images/already.png".to_owned(),
+                    "images/mixed.png".to_owned(),
+                    "images/new.png".to_owned(),
+                ],
+                mark: CanvasFeedbackMark::Like,
+                selected: true,
+            },
+            T1.to_owned(),
+        )
+        .expect("the batch should update");
+
+        assert_eq!(selected.entries["images/already.png"].updated_at, T0);
+        assert_eq!(
+            selected.entries["images/mixed.png"].marks,
+            vec![CanvasFeedbackMark::Like, CanvasFeedbackMark::Important]
+        );
+        assert_eq!(selected.entries["images/mixed.png"].updated_at, T1);
+        assert_eq!(
+            selected.entries["images/new.png"].marks,
+            vec![CanvasFeedbackMark::Like]
+        );
+
+        let cleared = update_canvas_feedback_document(
+            &selected,
+            &UpdateCanvasFeedbackInput::SetMark {
+                project_relative_paths: vec![
+                    "images/already.png".to_owned(),
+                    "images/mixed.png".to_owned(),
+                    "images/new.png".to_owned(),
+                ],
+                mark: CanvasFeedbackMark::Like,
+                selected: false,
+            },
+            T2.to_owned(),
+        )
+        .expect("the batch should clear");
+
+        assert!(!cleared.entries.contains_key("images/already.png"));
+        assert!(!cleared.entries.contains_key("images/new.png"));
+        assert_eq!(
+            cleared.entries["images/mixed.png"].marks,
+            vec![CanvasFeedbackMark::Important]
+        );
+
+        let no_op = update_canvas_feedback_document(
+            &cleared,
+            &UpdateCanvasFeedbackInput::SetMark {
+                project_relative_paths: vec!["images/mixed.png".to_owned()],
+                mark: CanvasFeedbackMark::Important,
+                selected: true,
+            },
+            "2026-07-15T01:02:06.007Z".to_owned(),
+        )
+        .expect("an already-satisfied batch should succeed");
+        assert_eq!(no_op, cleared);
+    }
+
+    #[test]
     fn moment_label_exhaustion_rejects_the_update_without_wrapping() {
         let mut document = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
         let mut entry = marked_entry("video/clip.mp4");
@@ -977,7 +1187,7 @@ mod tests {
 
         let error = update_canvas_feedback_document(
             &document,
-            &UpdateCanvasFeedbackEntryInput::AddItem {
+            &UpdateCanvasFeedbackInput::AddItem {
                 project_relative_path: "video/clip.mp4".to_owned(),
                 item: NewCanvasFeedbackItem {
                     id: "final-moment".to_owned(),
@@ -1006,9 +1216,20 @@ mod tests {
         let empty = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
         let marked = update_canvas_feedback_document(
             &empty,
-            &UpdateCanvasFeedbackEntryInput::SetMarks {
-                project_relative_path: "images/a.png".to_owned(),
-                marks: vec![CanvasFeedbackMark::Important, CanvasFeedbackMark::Like],
+            &UpdateCanvasFeedbackInput::SetMark {
+                project_relative_paths: vec!["images/a.png".to_owned()],
+                mark: CanvasFeedbackMark::Important,
+                selected: true,
+            },
+            T1.to_owned(),
+        )
+        .expect("marks should update");
+        let marked = update_canvas_feedback_document(
+            &marked,
+            &UpdateCanvasFeedbackInput::SetMark {
+                project_relative_paths: vec!["images/a.png".to_owned()],
+                mark: CanvasFeedbackMark::Like,
+                selected: true,
             },
             T1.to_owned(),
         )
@@ -1020,13 +1241,13 @@ mod tests {
 
         let with_item = update_canvas_feedback_document(
             &marked,
-            &UpdateCanvasFeedbackEntryInput::AddItem {
+            &UpdateCanvasFeedbackInput::AddItem {
                 project_relative_path: "images/a.png".to_owned(),
                 item: NewCanvasFeedbackItem {
                     id: "feedback-a".to_owned(),
                     created_at: T0.to_owned(),
                     kind: CanvasFeedbackItemKind::Pin,
-                    scope: CanvasFeedbackScope::File,
+                    scope: CanvasFeedbackScope::Node,
                     moment_time_seconds: None,
                     geometry: Some(CanvasFeedbackGeometry::Point { x: 0.5, y: 0.25 }),
                     comment: "  Fix this  ".to_owned(),
@@ -1047,13 +1268,13 @@ mod tests {
         let empty = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
         let later_created = update_canvas_feedback_document(
             &empty,
-            &UpdateCanvasFeedbackEntryInput::AddItem {
+            &UpdateCanvasFeedbackInput::AddItem {
                 project_relative_path: "images/a.png".to_owned(),
                 item: NewCanvasFeedbackItem {
                     id: "feedback-later".to_owned(),
                     created_at: T1.to_owned(),
                     kind: CanvasFeedbackItemKind::Comment,
-                    scope: CanvasFeedbackScope::File,
+                    scope: CanvasFeedbackScope::Node,
                     moment_time_seconds: None,
                     geometry: None,
                     comment: "Later".to_owned(),
@@ -1064,13 +1285,13 @@ mod tests {
         .expect("later item should update");
         let reordered = update_canvas_feedback_document(
             &later_created,
-            &UpdateCanvasFeedbackEntryInput::AddItem {
+            &UpdateCanvasFeedbackInput::AddItem {
                 project_relative_path: "images/a.png".to_owned(),
                 item: NewCanvasFeedbackItem {
                     id: "feedback-earlier".to_owned(),
                     created_at: T0.to_owned(),
                     kind: CanvasFeedbackItemKind::Comment,
-                    scope: CanvasFeedbackScope::File,
+                    scope: CanvasFeedbackScope::Node,
                     moment_time_seconds: None,
                     geometry: None,
                     comment: "Earlier".to_owned(),
@@ -1103,7 +1324,7 @@ mod tests {
                 items: vec![CanvasFeedbackItem {
                     id: "one".to_owned(),
                     kind: CanvasFeedbackItemKind::Pin,
-                    scope: CanvasFeedbackScope::File,
+                    scope: CanvasFeedbackScope::Node,
                     label: Some(1),
                     geometry: Some(CanvasFeedbackGeometry::Point { x: 0.1, y: 0.2 }),
                     moment: None,
@@ -1154,7 +1375,7 @@ mod tests {
         let null_field = serde_json::json!({
             "id": "one",
             "kind": "comment",
-            "scope": "file",
+            "scope": "node",
             "label": null,
             "comment": "comment",
             "createdAt": T0,
@@ -1168,7 +1389,7 @@ mod tests {
         let mut document = CanvasFeedbackDocument::empty(T0.to_owned()).unwrap();
         let path = "images/a.png";
         let mut entry = marked_entry(path);
-        entry.items = vec![file_comment(
+        entry.items = vec![node_comment(
             "x".repeat(MAX_CANVAS_FEEDBACK_ITEM_ID_BYTES + 1),
             "comment",
         )];
@@ -1176,7 +1397,7 @@ mod tests {
         assert!(validate_canvas_feedback_document(&document).is_err());
 
         let mut entry = marked_entry(path);
-        entry.items = vec![file_comment(
+        entry.items = vec![node_comment(
             "one",
             "x".repeat(MAX_CANVAS_FEEDBACK_COMMENT_BYTES + 1),
         )];

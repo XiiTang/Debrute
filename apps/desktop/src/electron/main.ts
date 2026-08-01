@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type {
   ActivationIntent,
   ControlEvent,
+  NativeEditCommandId,
   NativeMenuCommand,
   RecentProject
 } from '@debrute/app-protocol';
@@ -19,6 +20,7 @@ import { DesktopWindowHost } from './desktopWindowHost.js';
 import { DesktopProductQuit } from './desktopProductQuit.js';
 import { ElectronDesktopWindow } from './electronDesktopWindow.js';
 import {
+  nativeWindowIpcChannels,
   registerNativeWindowIpc
 } from './nativeWindowShell.js';
 import {
@@ -253,6 +255,12 @@ function installApplicationMenu(): void {
         runDesktopAction(reloadWindow(window));
       }
     },
+    dispatchEditCommand: (window, command) => {
+      const browserWindow = desktopBrowserWindow(window);
+      if (browserWindow) {
+        sendNativeEditCommand(browserWindow, command);
+      }
+    },
     quitProduct: requestProductQuit
   })));
 }
@@ -302,14 +310,21 @@ async function executeNativeMenuCommand(
     case 'view.toggle-devtools': window.webContents.toggleDevTools(); return;
     case 'edit.undo': window.webContents.undo(); return;
     case 'edit.redo': window.webContents.redo(); return;
-    case 'edit.cut': window.webContents.cut(); return;
-    case 'edit.copy': window.webContents.copy(); return;
-    case 'edit.paste': window.webContents.paste(); return;
+    case 'edit.cut': sendNativeEditCommand(window, command.commandId); return;
+    case 'edit.copy': sendNativeEditCommand(window, command.commandId); return;
+    case 'edit.paste': sendNativeEditCommand(window, command.commandId); return;
     case 'edit.paste-and-match-style': window.webContents.pasteAndMatchStyle(); return;
-    case 'edit.delete': window.webContents.delete(); return;
-    case 'edit.select-all': window.webContents.selectAll(); return;
+    case 'edit.delete': sendNativeEditCommand(window, command.commandId); return;
+    case 'edit.select-all': sendNativeEditCommand(window, command.commandId); return;
     default: throw new Error('Unsupported native menu command.');
   }
+}
+
+function sendNativeEditCommand(
+  window: Electron.BrowserWindow,
+  command: NativeEditCommandId
+): void {
+  window.webContents.send(nativeWindowIpcChannels.editCommand, command);
 }
 
 function requestProductQuit(): void {

@@ -8,6 +8,37 @@ import {
 } from './WorkbenchContextMenu.js';
 
 describe('WorkbenchContextMenu lazy items', () => {
+  it('labels recoverable and permanent deletion distinctly and pluralizes path copy', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en">
+          <WorkbenchContextMenu
+            productPlatform="darwin"
+            items={[
+              { kind: 'action', command: 'copy-path' },
+              { kind: 'action', command: 'delete' },
+              { kind: 'action', command: 'delete-permanently' }
+            ]}
+            selectionCount={2}
+            position={{ x: 12, y: 16 }}
+            onCommand={() => undefined}
+            onClose={() => undefined}
+          />
+        </I18nProvider>
+      );
+    });
+
+    expect(container.textContent).toContain('Copy Paths');
+    expect(container.textContent).toContain('Move to Trash');
+    expect(container.textContent).toContain('Delete Permanently');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it('focuses the first enabled command when lazy items become ready', async () => {
     const container = document.createElement('div');
     document.body.append(container);

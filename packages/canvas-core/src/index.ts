@@ -191,9 +191,9 @@ interface CanvasFeedbackItemBase {
   updatedAt: string;
 }
 
-interface CanvasFeedbackFileCommentItem extends CanvasFeedbackItemBase {
+interface CanvasFeedbackNodeCommentItem extends CanvasFeedbackItemBase {
   kind: 'comment';
-  scope: 'file';
+  scope: 'node';
 }
 
 interface CanvasFeedbackMomentCommentItem extends CanvasFeedbackItemBase {
@@ -202,9 +202,9 @@ interface CanvasFeedbackMomentCommentItem extends CanvasFeedbackItemBase {
   moment: CanvasFeedbackMomentRef;
 }
 
-interface CanvasFeedbackFileSpatialItem extends CanvasFeedbackItemBase {
+interface CanvasFeedbackNodeSpatialItem extends CanvasFeedbackItemBase {
   kind: 'pin' | 'region';
-  scope: 'file';
+  scope: 'node';
   label: number;
   geometry: CanvasFeedbackGeometry;
 }
@@ -217,8 +217,8 @@ interface CanvasFeedbackMomentSpatialItem extends CanvasFeedbackItemBase {
   moment: CanvasFeedbackMomentRef;
 }
 
-type CanvasFeedbackCommentItem = CanvasFeedbackFileCommentItem | CanvasFeedbackMomentCommentItem;
-export type CanvasFeedbackSpatialItem = CanvasFeedbackFileSpatialItem | CanvasFeedbackMomentSpatialItem;
+type CanvasFeedbackCommentItem = CanvasFeedbackNodeCommentItem | CanvasFeedbackMomentCommentItem;
+export type CanvasFeedbackSpatialItem = CanvasFeedbackNodeSpatialItem | CanvasFeedbackMomentSpatialItem;
 export type CanvasFeedbackItem = CanvasFeedbackCommentItem | CanvasFeedbackSpatialItem;
 
 export interface CanvasFeedbackEntry {
@@ -235,19 +235,20 @@ export interface CanvasFeedbackDocument {
   entries: Record<string, CanvasFeedbackEntry>;
 }
 
-export type UpdateCanvasFeedbackEntryInput =
+export type UpdateCanvasFeedbackInput =
   | {
-      operation: 'set-marks';
-      projectRelativePath: string;
-      marks: CanvasFeedbackMark[];
+      operation: 'set-mark';
+      projectRelativePaths: string[];
+      mark: CanvasFeedbackMark;
+      selected: boolean;
     }
   | {
       operation: 'add-item';
       projectRelativePath: string;
       item:
-        | { id: string; createdAt: string; kind: 'comment'; scope: 'file'; comment: string }
+        | { id: string; createdAt: string; kind: 'comment'; scope: 'node'; comment: string }
         | { id: string; createdAt: string; kind: 'comment'; scope: 'moment'; momentTimeSeconds: number; comment: string }
-        | { id: string; createdAt: string; kind: 'pin' | 'region'; scope: 'file'; geometry: CanvasFeedbackGeometry; comment: string }
+        | { id: string; createdAt: string; kind: 'pin' | 'region'; scope: 'node'; geometry: CanvasFeedbackGeometry; comment: string }
         | { id: string; createdAt: string; kind: 'pin' | 'region'; scope: 'moment'; momentTimeSeconds: number; geometry: CanvasFeedbackGeometry; comment: string };
     }
   | {

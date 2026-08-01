@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { CanvasFeedbackMark } from '@debrute/canvas-core';
-import { CanvasFeedbackBar } from './CanvasFeedbackBar';
+import { CanvasFeedbackBar, CanvasFeedbackSelectionBar } from './CanvasFeedbackBar.js';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';
 import { I18nProvider } from '../i18n';
@@ -17,6 +17,15 @@ describe('CanvasFeedbackBar', () => {
     expect(view.container.querySelector('.canvas-feedback-primary-row textarea')).toBeNull();
     expect(view.container.querySelector('.canvas-feedback-comment-strip')).not.toBeNull();
     expect(view.commentButton.textContent).toBe('Comment');
+    await view.unmount();
+  });
+
+  it('names the empty-path target as the Project Root', async () => {
+    const view = await renderBar({ projectRelativePath: '', capsules: [] });
+
+    expect(view.commentButton.getAttribute('aria-label')).toBe('New node comment for Project Root');
+    expect(view.container.querySelector('.canvas-feedback-comment-strip')?.getAttribute('aria-label'))
+      .toBe('Feedback comments for Project Root');
     await view.unmount();
   });
 
@@ -81,7 +90,7 @@ describe('CanvasFeedbackBar', () => {
       get capsules() { return capsules; },
       get focusedCapsuleId() { return focusedCapsuleId; },
       get authoringItemId() { return authoringItemId; },
-      onCreateFileCapsule: () => {
+      onCreateNodeCapsule: () => {
         capsules = [capsule('feedback-new', '', { isNew: true })];
         focusedCapsuleId = 'feedback-new';
         authoringItemId = 'feedback-new';
@@ -216,13 +225,13 @@ describe('CanvasFeedbackBar', () => {
   });
 
   it('keeps accepted Marks displayed until the Runtime result is projected', async () => {
-    const onSetMarks = vi.fn();
-    const view = await renderBar({ marks: [], onSetMarks });
+    const onSetMark = vi.fn();
+    const view = await renderBar({ marks: [], onSetMark });
     const important = view.container.querySelector('[aria-label="Important"]') as HTMLButtonElement;
 
     await act(async () => important.click());
 
-    expect(onSetMarks).toHaveBeenCalledWith(['important']);
+    expect(onSetMark).toHaveBeenCalledWith('important', true);
     expect(important.getAttribute('aria-pressed')).toBe('false');
     await view.unmount();
   });
@@ -314,6 +323,41 @@ describe('CanvasFeedbackBar', () => {
     expect(video.container.querySelector('[aria-label="Add moment comment"]')).not.toBeNull();
     await video.unmount();
   });
+
+  it('renders multi-selection as one Marks-only bar and disables the Project action while saving', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const overlayRuntime = createCanvasOverlayRuntime();
+    const onSetMark = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en">
+          <CanvasFeedbackSelectionBar
+            marks={['like']}
+            marksMutationPending
+            onSetMark={onSetMark}
+            overlayRuntime={overlayRuntime}
+          />
+        </I18nProvider>
+      );
+    });
+
+    const bar = container.querySelector('.canvas-feedback-bar--marks-only');
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('.canvas-feedback-mark')];
+    expect(bar).not.toBeNull();
+    expect(container.querySelector('.canvas-feedback-comment-row')).toBeNull();
+    expect(container.querySelector('.canvas-feedback-local-mode')).toBeNull();
+    expect(buttons).toHaveLength(7);
+    expect(buttons.every((button) => button.disabled)).toBe(true);
+    expect(container.querySelector('[aria-label="Like"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(cssRule('.canvas-feedback-bar--marks-only')).toContain('max-height: 38px;');
+
+    await act(async () => root.unmount());
+    overlayRuntime.dispose();
+    container.remove();
+  });
 });
 
 function cssRule(selector: string): string {
@@ -322,18 +366,20 @@ function cssRule(selector: string): string {
 }
 
 type BarOptions = {
+  projectRelativePath?: string;
   capsules?: CanvasFeedbackCapsule[];
   marks?: CanvasFeedbackMark[];
   focusedCapsuleId?: string | undefined;
   authoringItemId?: string | undefined;
   localToolset?: 'none' | 'image' | 'video';
   canStartVideoMomentFeedback?: boolean;
-  onCreateFileCapsule?: () => string;
+  onCreateNodeCapsule?: () => string;
   onCapsuleChange?: (itemId: string, value: string) => void;
   onCapsuleFocus?: (itemId: string) => void;
   onCapsuleBlur?: (itemId: string) => Promise<void>;
   onCapsuleDelete?: (itemId: string) => Promise<void>;
-  onSetMarks?: (marks: CanvasFeedbackMark[]) => void;
+  onSetMark?: (mark: CanvasFeedbackMark, selected: boolean) => void;
+  marksMutationPending?: boolean;
 };
 
 async function renderBar(options: BarOptions): Promise<{
@@ -351,16 +397,17 @@ async function renderBar(options: BarOptions): Promise<{
       root.render(
         <I18nProvider locale="en">
           <CanvasFeedbackBar
-            projectRelativePath="flow/cover.png"
+            projectRelativePath={options.projectRelativePath ?? 'flow/cover.png'}
             capsules={options.capsules ?? []}
             focusedCapsuleId={options.focusedCapsuleId}
             authoringItemId={options.authoringItemId}
             marks={options.marks ?? []}
-            onSetMarks={options.onSetMarks ?? (() => undefined)}
+            marksMutationPending={options.marksMutationPending ?? false}
+            onSetMark={options.onSetMark ?? (() => undefined)}
             overlayRuntime={overlayRuntime}
             localToolset={options.localToolset}
             canStartVideoMomentFeedback={options.canStartVideoMomentFeedback}
-            onCreateFileCapsule={options.onCreateFileCapsule ?? (() => 'feedback-new')}
+            onCreateNodeCapsule={options.onCreateNodeCapsule ?? (() => 'feedback-new')}
             onCapsuleChange={options.onCapsuleChange ?? (() => undefined)}
             onCapsuleFocus={options.onCapsuleFocus ?? (() => undefined)}
             onCapsuleBlur={options.onCapsuleBlur ?? (async () => undefined)}
@@ -395,7 +442,7 @@ function capsule(
     createdAt: '2026-07-23T00:00:00.000Z',
     projectRelativePath: 'flow/cover.png',
     kind: 'comment',
-    scope: 'file',
+    scope: 'node',
     comment,
     isNew: false,
     unsynchronized: false,

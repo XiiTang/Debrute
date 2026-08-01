@@ -170,6 +170,26 @@ describe('useProjectExplorerController', () => {
     await probe.unmount();
   });
 
+  it('removes externally deleted roots from the shared Cut clipboard', async () => {
+    let snapshot = snapshotWithFiles(['a.md', 'b.md']);
+    const probe = await renderController({}, () => snapshot);
+    await act(async () => {
+      probe.current.cutEntries(probe.scope, [
+        { projectRelativePath: 'a.md', kind: 'file' },
+        { projectRelativePath: 'b.md', kind: 'file' }
+      ]);
+    });
+
+    snapshot = snapshotWithFiles(['b.md']);
+    await probe.rerender();
+
+    expect(probe.current.fileClipboard).toEqual({
+      operation: 'cut',
+      entries: [{ projectRelativePath: 'b.md', kind: 'file' }]
+    });
+    await probe.unmount();
+  });
+
   it('does not submit an external import when admission closes during asynchronous drop planning', async () => {
     let acceptingCommands = true;
     let releaseDroppedFile!: () => void;
@@ -314,6 +334,7 @@ async function renderController(
 ): Promise<{
   readonly current: ProjectExplorerController;
   readonly scope: AcceptedProjectPathCommandScope;
+  rerender(): Promise<void>;
   unmount(): Promise<void>;
 }> {
   const container = document.createElement('div');
@@ -328,7 +349,7 @@ async function renderController(
     current = value;
     scope = acceptedScope;
   };
-  await act(async () => root.render(
+  const render = () => root.render(
     <ControllerProbe
       api={api}
       getSnapshot={getSnapshot}
@@ -337,10 +358,14 @@ async function renderController(
       notify={notify}
       onValue={onValue}
     />
-  ));
+  );
+  await act(async () => render());
   return {
     get current() { return current; },
     get scope() { return scope; },
+    async rerender() {
+      await act(async () => render());
+    },
     async unmount() {
       await act(async () => root.unmount());
       container.remove();

@@ -709,20 +709,7 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
   const textNode = page.locator(`[data-canvas-node-kind="file"][data-canvas-media-kind="text"][data-project-relative-path="${fixtureTextPath}"]`).first();
   await textNode.waitFor({ state: 'visible', timeout: 60000 });
   const textBody = textNode.locator('.canvas-text-body');
-  const stackOrderChange = observeCanvasTextResponse(page, (response) => (
-    response.request().method() === 'POST'
-    && response.url().includes('/node-stack-order/bring-to-front')
-    && response.ok()
-  ), { timeout: 10000 });
   await clickVisibleElementPoint(page, textBody, label, 'Canvas text body');
-  await waitForCanvasTextResponse(
-    stackOrderChange,
-    page,
-    textNode,
-    label,
-    requestLog,
-    'Canvas stack-order mutation'
-  );
   await assertCanvasImageWorkflow(page, `${label}: text active`);
   const scroller = textNode.locator('.cm-scroller').first();
   await scroller.waitFor({ state: 'visible', timeout: 60000 });

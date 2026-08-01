@@ -114,8 +114,8 @@ Map reconciliation preserves a surviving manual rectangle and excludes that
 node's rectangle from automatic placement and overlap guarantees. Traversal
 still reaches automatic descendants of a manual directory, and an explicit row
 still reserves each member's theoretical slot even when its durable rectangle
-is manual. Reset Layout removes manual mode for selected path rules or all
-nodes, then runs the same map reconciliation.
+is manual. Reset Layout removes manual mode for exact selected Canvas Node
+paths or for all nodes, then runs the same map reconciliation.
 
 Interactive Canvas state commits are exact actions, not optional or
 best-effort batches. Before a request is sent, Workbench may discard a late
@@ -137,21 +137,222 @@ mutation with a full-document write.
 A manual layout update contains at least one unique current node rectangle. A
 Playback Position update targets only current video file nodes, and a Text
 Viewport update targets only current text file nodes. A selective Reset Layout
-request contains explicit `paths` and `globs` arrays with at least one rule
-between them; a full reset uses the separate `all` shape.
+request contains a non-empty unique `nodePaths` array naming exact current
+Canvas Nodes; a full reset uses the separate `all` shape.
+
+## Canvas Node Selection
+
+Canvas Node Selection is transient Workbench state containing only Canvas
+Nodes. A Project Diagnostic may be selected on its own, but diagnostics never
+mix with a Canvas Node Selection. Selection is neither persisted nor restored
+per Canvas: switching Canvas, Project, or Runtime scope clears it. A current
+Projection update retains surviving selected nodes, removes nodes no longer in
+the Projection, keeps a one-item remainder in the same node-selection shape,
+and never automatically selects newly projected nodes.
+
+Empty, one-node, and many-node selections are cardinalities of this one Canvas
+Node Selection, not separate selection states. A Selection Marquee is a
+temporary pointer interaction that updates this selection; it is not another
+selection state or persistent mode, and its result may contain zero, one, or
+many nodes.
+
+Plain node click selects one node. Shift or the platform additive modifier
+(Command on macOS, Ctrl on Windows) toggles a node on click. Pointer-down on a
+member of an existing multi-selection preserves the group: movement beyond
+`4 CSS px` moves the group, release below that threshold collapses selection to
+the pressed node, and cancellation restores the pointer-down selection. An
+additive drag on an unselected node adds it before moving the expanded group;
+an additive drag on an already selected node moves the group without removing
+that node.
+
+A Selection Marquee begins only from true Canvas blank space. Nodes, resize
+handles, text or media interaction surfaces, Feedback, floating bars, and the
+title bar retain their own pointer behavior; non-interactive Canvas edges count
+as blank space. The marquee activates after `4 CSS px` of screen-space movement
+and selects every Canvas Node whose currently displayed rectangle intersects
+it, regardless of Stack Order, visual occlusion, or DOM culling. Its result is
+recomputed on every pointer move. Without a modifier it replaces the initial
+selection; with Shift or the platform additive modifier it unions with the
+pointer-down selection. A below-threshold blank click clears selection without
+a modifier and preserves it with an additive modifier.
+
+The pointer-down anchor is fixed in Canvas coordinates. After activation, the
+current pointer is converted through the latest camera on every
+frame, so edge-driven camera movement extends the same marquee through Canvas
+space instead of pinning its origin to a screen pixel. The displayed fill is
+Canvas-aligned while its outline keeps a zoom-invariant `1 CSS px` width.
+
+Marquee edge scrolling starts only after activation. Its edge zone is `8 CSS
+px`, independent of zoom, with a `200 ms` delay and `200 ms` ease-in; speed
+increases toward and beyond the viewport edge. The top edge begins below the
+transparent title bar, while floating Canvas bars do not create additional
+scroll edges. Pointer release commits the current selection. Escape, pointer
+cancel, lost capture, Project or Canvas replacement, and interaction blocking
+restore the pointer-down selection and stop edge scrolling.
+
+Every selected node renders its own outline. A single selection retains its
+eight resize handles; a multi-selection exposes group move only, with no group
+bounds, resize, or rotation handles.
+
+Canvas shortcuts are routed by focus domain and the active interaction owner.
+An active marquee owns Escape even if focus moves during the gesture.
+Otherwise, Canvas blank space and non-interactive nodes focus the Canvas root
+and receive Canvas shortcuts; text editors, form controls, video, Feedback,
+context menus, floating panels, and the title bar retain local behavior. Body
+or other outside focus does not infer Canvas ownership from an existing
+selection. Canvas-owned Command/Ctrl+A selects every node in the current
+Projection, including offscreen, occluded, and culled nodes; text-editing
+surfaces keep native text Select All. The Edit menu uses the same focus router.
+
+Canvas-owned Escape consumes only the highest-priority applicable behavior. An
+active Selection Marquee, node move, or resize cancels first and restores its
+interaction-start selection and geometry without changing the file clipboard.
+Otherwise, a pending Cut is cancelled while preserving selection. Otherwise,
+a non-empty Canvas Node Selection is cleared. Escape is a no-op when none of
+those conditions applies. Locally interactive surfaces retain their own Escape
+behavior.
+
+With Canvas shortcut ownership and a non-empty Canvas Node Selection,
+Command/Ctrl+C and Command/Ctrl+X run the same filesystem Copy and Cut commands
+as the Project Explorer. Move to Trash uses Command+Backspace on macOS and
+Delete on Windows; Delete Permanently uses Command+Option+Backspace on macOS
+and Shift+Delete on Windows. These shortcuts use the same batch resolution,
+directory folding, exclusions, and confirmation behavior as their Project Path
+Commands. They do nothing for an empty selection. Editable and other locally
+interactive surfaces retain their native keyboard behavior.
+
+Canvas-owned Command/Ctrl+V requires the current Canvas Node Selection to
+contain exactly one current directory node and pastes into that directory; the
+Project root is a valid destination. It is unavailable for an empty selection,
+a file, a multi-selection, or a directory no longer present as such. The
+keyboard command never substitutes a file's parent or chooses a directory from
+a multi-selection. Locally editable surfaces retain native Paste. A context
+menu may still Paste into its explicit directory invocation target while
+preserving a wider Canvas selection.
+
+The Canvas and Project Explorer project the same pending Cut clipboard. Every
+effective Cut source root visible in either surface is presented at `50%`
+opacity; a directory root alone represents its complete subtree, so projected
+descendants are not separately dimmed unless they are independent effective
+roots. Changing Canvas selection does not clear this presentation. Another
+Copy or Cut, Canvas-owned Escape at the Cut-cancellation priority, source
+deletion, or a successful Cut-Paste clears it; a failed Paste preserves it for
+retry. Copy has no pending-source presentation.
+
+Rename remains a Project Path Command exposed only by Project Explorer. Canvas
+single- and multi-selection menus omit it, and Canvas shortcut ownership does
+not assign F2 to filesystem rename. Batch rename and any Canvas-specific rename
+editor are outside this selection contract.
+
+Canvas shortcut ownership does not assign the arrow keys to node navigation or
+keyboard movement. Nodes and multi-selections move only through pointer drag;
+locally interactive media and text surfaces retain their own arrow-key
+behavior. Keyboard nudge and spatial keyboard navigation are outside this
+selection contract.
+
+Media shortcuts require the Canvas Node Selection to contain exactly one video
+node and the video behavior to own focus. A selection containing that video and
+any other node does not route Space or arrow keys to the video, and a context
+menu invocation target is never substituted for the current selection.
+
+Right-clicking a selected member preserves the Canvas Node Selection and opens
+a multi-selection menu. Right-clicking an unselected node first collapses to
+that node and opens the single-node menu. A preserved multi-selection also
+records the right-clicked node as that menu invocation's primary target. Batch
+commands act on the Canvas Node Selection, while explicitly node-local commands
+such as Open in Terminal act only on this invocation target. Open in Terminal
+uses the directory itself or the containing directory of a file and never opens
+one Terminal per selected directory. Reveal in Finder or File Explorer is also
+invocation-target-only: it reveals that file, directory, or Project root while
+preserving the Canvas Node Selection, never opens one system file-manager
+location per selected node, and does not fall back to another selected node if
+the invocation target no longer exists. Copy Paths and Copy Relative Paths
+include every explicitly selected node, including explicitly selected
+descendants of a selected directory; they emit one path per line in stable
+project-relative-path order.
+
+Right-clicking true Canvas blank space clears the Canvas Node Selection without
+starting a marquee, moving the camera, or changing stack order. It suppresses
+the native browser context menu but opens no Canvas background menu. Nodes,
+Feedback, floating bars, and other non-blank surfaces retain their own context
+behavior; non-interactive Canvas edges follow the blank-space rule.
+
+Reveal in Canvas is not a Project Path Command. A plain Project Explorer file
+click already selects and centers that file when it has a node in the active
+Canvas, while modified Explorer selection gestures do not navigate the Canvas.
+A plain directory click retains its existing expand-or-collapse behavior and
+does not locate or center a directory node; directories do not gain a
+replacement navigation command.
+
+Send to Photoshop remains available only for an eligible single-file
+selection. A multi-selection menu omits it even when the invocation target is
+an eligible file; it neither sends only that target nor sequences the selected
+files through the single-file command. Debrute-to-Photoshop batch placement is
+outside this selection contract and requires a separate design.
+
+Show Details is selection-scoped. It preserves a multi-selection and opens an
+Inspector summary containing the total, file and directory counts, availability
+counts, and Manual Layout count. Single-node paths, geometry, and generated
+metadata remain single-selection details and are not borrowed from the menu
+invocation target.
+
+Filesystem Copy and Cut share one Project Path Command pipeline. Their
+effective source set deduplicates paths, treats each current selected directory
+as one complete filesystem-subtree root, and removes explicitly selected
+descendants covered by that root. Descendants need not be projected or selected
+to travel with the directory. The Project root is not a filesystem Copy/Cut
+source. Healthy Projection reconciliation removes deleted nodes and prunes
+selection; if a transient or degraded Projection still exposes a top-level
+`missing` node, the batch is unavailable rather than silently reduced. Canvas
+`unreadable` alone does not make a source unavailable because it may describe a
+preview failure for an otherwise valid file. Runtime revalidates the complete
+effective source batch when Paste performs the copy or move; a failure never
+becomes a silent partial Project Path Command.
+
+Paste is a menu-invocation-target command rather than a Canvas Node Selection
+batch command. Invoking it on a directory pastes once into that directory,
+including when the directory is one member of a multi-selection. A file is not
+implicitly replaced by its containing directory, so Paste is unavailable when
+the invocation target is a file. The Project root may be a Paste destination
+even though it cannot be copied, cut, or deleted. Paste preserves the existing
+Canvas Node Selection, and newly projected results are not automatically
+selected. A successful Cut-Paste clears the clipboard only after the complete
+move succeeds; a failed Paste retains the Cut clipboard so the user can retry.
+
+Single-node and multi-selection context menus both expose Move to Trash and
+Delete Permanently. The two commands share the same effective-source resolver:
+selected directories cover their selected descendants, and the Project root is
+excluded. Multi-selection does not remove or otherwise change either deletion
+operation. Both require confirmation; permanent deletion additionally states
+that it cannot be undone. The recoverable command is labelled Move to Trash
+rather than the ambiguous Delete.
+
+Reset Auto Layout is a Canvas Node Selection command rather than a filesystem
+subtree command. Its selective form submits the exact unique `nodePaths` in the
+selection as one batch and resets only those nodes, including when one selected
+node is a directory; unselected descendants retain their layouts. The separate
+global Reset Layout action retains its all-nodes behavior. A successful
+selective reset preserves selection and zoom, then centers the updated menu
+invocation target after the confirming Projection arrives; if that node no
+longer exists, the camera does not move. Global Reset Layout does not move the
+camera.
 
 ## Stack Order
 
 Every Canvas Node has persisted stack order independent of its hierarchy and
-layout mode. Selecting one node brings it to front, compacting the
-back-to-front order while preserving the relative order of all other nodes. DOM
-order stays deterministic by path while CSS stacking reflects the persisted
+layout mode. Selection alone never changes stack order. A successfully committed
+direct move raises the moved Canvas Node Selection as one frontmost block while
+preserving the selected nodes' prior relative order and the relative order of
+all unselected nodes. A cancelled or failed move leaves stack order unchanged.
+There is no Bring to Front command or selection-driven stack-order
+synchronization; the layer change is part of the successful direct-move commit.
+DOM order stays deterministic by path while CSS stacking reflects the persisted
 order; the Project tree is not a layer panel.
 
 ## Workbench Interaction State
 
 `CanvasEditorRuntime` owns the live camera, camera activity state, selection,
-pointer drag state, surface measurement, and coordinate conversion. These are
+pointer interaction, surface measurement, and coordinate conversion. These are
 Workbench session state and are not persisted in Canvas JSON.
 
 Wheel input pans by default and Ctrl/Cmd-wheel zooms around the pointer; native
@@ -160,9 +361,8 @@ and Canvas floating bars, except controls marked for local scrolling. Textual
 or scrollable bodies use focus-gated local wheel handling: they keep wheel
 input only while focus is inside them.
 
-Selection can contain Canvas Nodes and diagnostics. Additive modifiers toggle
-items. Moving a selected node moves the selected node group from shared origin
-geometry; resizing acts on one node, clamps to a minimum size, and applies the
+Moving a selected node moves the selected node group from shared origin
+geometry. Single-node resizing clamps to a minimum size and applies the
 media-aware aspect-ratio rule.
 
 During move and resize, a Manual Layout Draft is the visual geometry. Node
@@ -232,7 +432,7 @@ state.
 
 ## Runtime And Rendering Ownership
 
-- `CanvasEditorRuntime` owns camera, coordinates, input, selection, and drag
+- `CanvasEditorRuntime` owns camera, coordinates, input, selection, and pointer interaction
   state.
 - One `CanvasRenderLifecycle` per mounted `CanvasSurface` owns the accepted
   Projection, render-related Runtime subscriptions, render scheduling,

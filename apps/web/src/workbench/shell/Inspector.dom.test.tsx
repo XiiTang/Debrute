@@ -74,7 +74,7 @@ describe('Inspector property density', () => {
     const html = renderStaticWithI18n(
       <Inspector
         activeCanvasId="canvas"
-        selection={{ kind: 'node', projectRelativePath: 'flow/cover.png' }}
+        selection={{ kind: 'nodes', projectRelativePaths: ['flow/cover.png'] }}
         state={{
           snapshot: {
             canvases: [{
@@ -127,6 +127,58 @@ describe('Inspector property density', () => {
     expect(html).not.toContain('<dt>Visible</dt>');
     expect(html).not.toContain('<dt>Locked</dt>');
     expect(html).not.toContain('<dt>Status</dt>');
+  });
+
+  it('summarizes many selected nodes without presenting single-node fields', () => {
+    const html = renderStaticWithI18n(
+      <Inspector
+        activeCanvasId="canvas"
+        selection={{ kind: 'nodes', projectRelativePaths: ['flow/assets', 'flow/cover.png'] }}
+        state={{
+          snapshot: {
+            canvases: [],
+            projections: [{
+              canvasId: 'canvas',
+              nodes: [{
+                projectRelativePath: 'flow/assets',
+                nodeKind: 'directory',
+                x: 0,
+                y: 0,
+                width: 200,
+                height: 120,
+                z: 0,
+                layoutMode: 'auto',
+                availability: { state: 'missing', message: 'missing' }
+              }, {
+                projectRelativePath: 'flow/cover.png',
+                nodeKind: 'file',
+                mediaKind: 'image',
+                x: 220,
+                y: 0,
+                width: 200,
+                height: 120,
+                z: 1,
+                layoutMode: 'manual',
+                availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
+              }],
+              edges: [],
+              diagnostics: []
+            }],
+            diagnostics: []
+          }
+        } as unknown as WorkbenchState}
+        actions={{} as WorkbenchActions}
+      />
+    );
+
+    expect(html).toContain('2 selected');
+    expect(html).toContain('<dt>Files</dt><dd>1</dd>');
+    expect(html).toContain('<dt>Directories</dt><dd>1</dd>');
+    expect(html).toContain('<dt>Manual Layout</dt><dd>1</dd>');
+    expect(html).toContain('<dt>Available</dt><dd>1</dd>');
+    expect(html).toContain('<dt>Missing</dt><dd>1</dd>');
+    expect(html).not.toContain('<dt>Position</dt>');
+    expect(html).not.toContain('<dt>Size</dt>');
   });
 
   it('shows Project Diagnostic fields without a redundant source taxonomy', () => {

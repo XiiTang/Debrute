@@ -19,7 +19,7 @@ describe('canvasMinimap geometry', () => {
         nodeFixture('flow/selected.png', 800, 400, 200, 100),
         nodeFixture('flow/invalid.png', Number.NaN, 0, 100, 100)
       ],
-      selection: { kind: 'node', projectRelativePath: 'flow/selected.png' },
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.png'] },
       camera: { x: -100, y: -50, z: 0.5 },
       surfaceSize: { width: 1000, height: 500 },
       minimapSize: { width: 220, height: 150 },
@@ -51,7 +51,7 @@ describe('canvasMinimap geometry', () => {
         nodeFixture('flow/a.png', 0, 0, 100, 100),
         nodeFixture('flow/selected.png', 800, 400, 200, 100)
       ],
-      selection: { kind: 'node', projectRelativePath: 'flow/selected.png' },
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.png'] },
       camera: { x: -100, y: -50, z: 0.5 },
       surfaceSize: { width: 1000, height: 500 },
       minimapSize: { width: 220, height: 150 },

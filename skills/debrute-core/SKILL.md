@@ -138,9 +138,9 @@ Canvas feedback is stored as current state in:
 .debrute/reviews/canvas-feedback.json
 ```
 
-Missing file means there is no Canvas feedback. Entries are keyed by project-relative path. The `marks` array contains only selected marks; unselected marks are absent. The mark set is `like`, `dislike`, `check`, `cross`, `pending`, `important`, and `needs_revision`.
+Missing file means there is no Canvas feedback. Entries are keyed by exact Project Paths; the Project root uses `""`. Files, directories, and root may each have independent entries. Directory feedback does not apply to descendants, and feedback does not follow a rename or move. The `marks` array contains only selected marks; unselected marks are absent. The mark set is `like`, `dislike`, `check`, `cross`, `pending`, `important`, and `needs_revision`.
 
-Entries use one unified `items` array for file-level comments, image spatial items, and video moment items:
+Entries use one unified `items` array for node comments, image spatial items, and video moment items. Node comments are valid for every Project Path target; node-scoped spatial items require image files, and moment-scoped items require video files:
 
 ```json
 {
@@ -150,9 +150,9 @@ Entries use one unified `items` array for file-level comments, image spatial ite
   "nextSpatialLabel": 3,
   "items": [
     {
-      "id": "item-file-comment",
+      "id": "item-node-comment",
       "kind": "comment",
-      "scope": "file",
+      "scope": "node",
       "comment": "overall note",
       "createdAt": "2026-06-21T12:00:00.000Z",
       "updatedAt": "2026-06-21T12:00:00.000Z"
@@ -160,7 +160,7 @@ Entries use one unified `items` array for file-level comments, image spatial ite
     {
       "id": "item-pin-1",
       "kind": "pin",
-      "scope": "file",
+      "scope": "node",
       "label": 1,
       "geometry": { "type": "point", "x": 0.42, "y": 0.31 },
       "comment": "face is blurry",
@@ -170,7 +170,7 @@ Entries use one unified `items` array for file-level comments, image spatial ite
     {
       "id": "item-rect-2",
       "kind": "region",
-      "scope": "file",
+      "scope": "node",
       "label": 2,
       "geometry": { "type": "rect", "x": 0.1, "y": 0.55, "width": 0.32, "height": 0.18 },
       "comment": "make this background brighter",

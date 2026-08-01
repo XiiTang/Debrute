@@ -22,6 +22,19 @@ The Canvas representation of one Project file or directory, identified by its
 project-relative path.
 _Avoid_: Asset record, layer
 
+**Canvas Node Selection**:
+The transient set of Canvas Nodes targeted together by the current Canvas
+interaction. Empty, one-node, and many-node selections are cardinalities of
+this one selection, not separate selection states. It contains only Canvas
+Nodes and is not Canvas Document state.
+_Avoid_: Mixed selection, selected assets
+
+**Selection Marquee**:
+A transient pointer interaction and displayed rectangle that updates the Canvas
+Node Selection from every Canvas Node whose current displayed rectangle
+intersects it. It is not a selection state or persistent selection mode.
+_Avoid_: Selection box, lasso
+
 **Canvas ID**:
 The stable filesystem-safe identity shared by one Canvas, its Canvas Map, and
 its registry entry. It does not change when the Canvas is renamed.
@@ -130,8 +143,9 @@ history, or Operation lifecycle and may be cancelled, coalesced, or superseded.
 _Avoid_: Runtime Operation, user task, source data
 
 **Feedback Mark**:
-A selected categorical review signal that applies to one Project file as a
-whole.
+A selected categorical review signal that applies to one Project Path target as a
+whole. One atomic Mark command may set or clear it across an exact path
+selection without expanding directories.
 _Avoid_: Reaction event, approval state
 
 **Feedback Composition**:
@@ -141,7 +155,7 @@ _Avoid_: Pending Item, Draft Item
 
 **Feedback Item**:
 A durable non-empty review comment, optionally paired with normalized spatial
-geometry, and scoped either to a file or a Feedback Moment.
+geometry, and scoped either to a Project Path target or a Feedback Moment.
 _Avoid_: Note, region record, feedback history
 
 **Feedback Moment**:

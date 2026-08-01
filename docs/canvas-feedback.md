@@ -1,6 +1,6 @@
 # Canvas Feedback
 
-Canvas Feedback is Project-scoped current review state for Project files. It is
+Canvas Feedback is Project-scoped current review state for Project Path targets. It is
 not Canvas layout, a workflow history, an approval gate, or Generated Asset
 metadata. This page records the current structured model, Workbench interaction,
 and derived artifact boundaries.
@@ -16,7 +16,7 @@ One Project file is the durable source of truth:
 The document is keyed by normalized project-relative path and stores only
 current entries. Missing storage means empty feedback. An entry is omitted when
 it has neither Feedback Marks nor Feedback Items. Feedback stays outside Canvas
-Documents so the same Project file keeps one review state across Canvas views
+Documents so the same Project Path target keeps one review state across Canvas views
 and can be read by external Agents through ordinary filesystem or generic
 Project-file access.
 
@@ -25,27 +25,48 @@ per Project file, and commits against the content hash it read. Invalid JSON,
 unexpected fields, invalid paths, invalid item combinations, and concurrent
 external edits fail validation or concurrency checks. Accepted changes are
 broadcast as shared Project-state events.
+The closed document limits remain 2 MiB, 1,000 entries, 500 Items per entry,
+5,000 Items total, and 200 Moments per entry. Multi-selection introduces no
+separate selection-size limit; the resulting document must satisfy those same
+limits atomically.
+
+Path is the complete identity of Feedback state. The Project root uses the
+empty path. Files, directories, and the Project root may each own independent
+entries; selecting a directory never expands a mutation to its descendants and
+never suppresses an independently selected descendant. Rename and move do not
+carry Feedback to the new path.
 
 ## Marks, Items, And Moments
 
 A Feedback Mark is one of the fixed selected-only values: like, dislike, check,
-cross, pending, important, or needs revision. Marks apply to the whole file,
+cross, pending, important, or needs revision. Marks apply to the whole Node,
 are independent toggles, and normalize into fixed order. Workbench renders only
-the Marks in Runtime-accepted Feedback state. The Feedback Bar has no optimistic
-Marks copy, Draft, or Working Copy. Selecting a Mark submits the exact next set
-while the current accepted set remains displayed; Runtime acceptance installs
-the returned set, and failure changes nothing. At most one Marks mutation for
-the same file is in flight. Workbench ignores another selection during that
-request and never turns it into an automatic retry.
+the Marks in Runtime-accepted Feedback state. A Mark command snapshots one or
+more exact Project Paths and sets or clears one Mark for all of them in one
+Runtime transaction. Runtime first validates that every target is a current
+real file, directory, or Project root, then writes the document once and emits
+one change event. One invalid or missing target rejects the whole command. A
+semantic no-op writes nothing, changes no timestamp or Project revision, and
+emits no Feedback event. Only entries whose Mark value changes receive a new
+timestamp; clearing the final Mark from an Item-free entry removes that entry.
+
+The Feedback Bar has no optimistic Marks copy, Draft, or Working Copy. The
+current accepted set remains displayed during a request; Runtime acceptance is
+installed by the ordinary ordered Project event, and failure changes nothing.
+At most one Marks mutation for the Project is in flight. All single- and
+multi-selection Mark buttons are disabled during it. Workbench ignores another
+selection during that request, never retargets the captured paths, never queues
+or retries it, and shows one global `Feedback not saved` notification on
+failure.
 
 A Feedback Item contains a non-empty comment and is one of:
 
-- a file-scoped comment;
-- an image file-scoped numbered pin or rectangle;
+- a node-scoped comment on any Project Path target;
+- an image node-scoped numbered pin or rectangle;
 - a video moment-scoped comment;
 - a video moment-scoped numbered pin or rectangle.
 
-File-scoped spatial items are valid only for images. Moment-scoped items are
+Node-scoped spatial items are valid only for image files. Moment-scoped items are
 valid only for videos. Item IDs are unique across the document. Each Item
 retains the Capsule's validated creation timestamp, and Runtime orders Items by
 creation timestamp plus Item ID rather than mutation arrival. Spatial labels are
@@ -65,22 +86,36 @@ excludes player controls, the title bar, Canvas chrome, and letterboxing.
 
 ## Workbench Editing And Display
 
-Hovering a node opens one shared floating Feedback Bar. Every media type gets
-the fixed Feedback Marks and a file-comment authoring affordance. Images also
-get pin and rectangle tools. Videos get moment-comment, moment-pin, and
-moment-rectangle tools only while a mounted player can supply a real timestamp.
+Hovering one node opens the shared full floating Feedback Bar. Every Canvas
+Node, including directories and the Project root, gets the fixed Feedback Marks
+and a node-comment authoring affordance. Image files also get pin and rectangle
+tools. Video files get moment-comment, moment-pin, and moment-rectangle tools
+only while a mounted player can supply a real timestamp.
+
+A Canvas selection of two or more nodes instead shows one persistent Marks-only
+Bar for the complete selection. It is horizontally centered below the outer
+selection bounds and falls back above when needed, using the same reserved-area
+placement rules as the single-node Bar. The selection outline is the only count
+or grouping cue: the Bar contains no item count, comments, Capsules, image
+tools, or video tools. It includes files, directories, and root exactly as
+selected, without descendant expansion or filtering. A Mark appears selected
+only when every selected Node has it. There is no mixed visual state: clicking
+an unselected aggregate sets the Mark on all captured paths; clicking a selected
+aggregate clears it from all captured paths. The multi-selection Bar replaces
+the single-node Bar immediately and the two shells are never rendered together.
+
 While any Feedback Capsule owns real input focus, that focus locks the Bar open
-and locks its target to the Capsule's Project file. Pointer movement cannot hide
+and locks its target to the Capsule's Canvas Node. Pointer movement cannot hide
 the Bar or retarget it to another node. After the user deliberately moves focus
 outside the Bar, its ordinary hover visibility and targeting resume while the
 focus-triggered save proceeds. If the pointer has already moved over another
-Project file, the Bar switches directly to that file after focus leaves; it
-never reuses the previous file's Capsules for the new target. Moving focus from
-a Capsule to a tool inside the same Bar keeps the current file target. Without a
-focused Capsule, leaving either the current Project file or the Bar starts the
-same 120-millisecond dismissal grace. Entering a Project file or re-entering the
-Bar cancels that pending dismissal; entering another file retargets the Bar
-immediately. If the target file disappears and forces the Bar to unmount, the
+Canvas Node, the Bar switches directly to that Node after focus leaves; it
+never reuses the previous Node's Capsules for the new target. Moving focus from
+a Capsule to a tool inside the same Bar keeps the current Node target. Without a
+focused Capsule, leaving either the current Canvas Node or the Bar starts the
+same 120-millisecond dismissal grace. Entering a Canvas Node or re-entering the
+Bar cancels that pending dismissal; entering another Node retargets the Bar
+immediately. If the target Node disappears and forces the Bar to unmount, the
 Capsule's Working Copy still protects its current value.
 
 The bar's width is derived from its visible fixed-size actions, not from
@@ -157,7 +192,7 @@ Canvas presentation uses the latest Workbench value for each stable Capsule
 until Runtime accepts the same value. Pins and rectangles therefore remain at
 their current geometry without response-driven removal or recreation, and
 clearing an Item to empty hides its geometry immediately. Values for different
-visible files render independently, including unsynchronized spatial Working
+visible Nodes render independently, including unsynchronized spatial Working
 Copies restored after reopening the Project.
 
 Each accepted item renders as the same always-editable Feedback Capsule.
@@ -212,7 +247,7 @@ Rendered feedback images are derived review outputs under:
 .debrute/reviews/rendered-feedback/<video-path>.moment-<M#>.annotated.png
 ```
 
-Image artifacts exist only when an entry has file-scoped spatial items. Every
+Image artifacts exist only when an entry has node-scoped spatial items. Every
 video moment with an item gets a frame artifact, including comment-only moments,
 because the frame supplies timestamp context. Artifacts draw only numbered
 yellow pins and rectangle outlines; comments and moment labels remain in the
@@ -233,7 +268,7 @@ for the same output, removes stale queued work, and atomically publishes only
 the latest complete PNG. Native raster work that has already begun is not
 cancelled; its temporary output is discarded when its identity is stale at the
 publication check. Source-image changes, source-video changes, external
-feedback-file changes, Project open, and geometry-affecting mutations requeue
+feedback-document changes, Project open, and geometry-affecting mutations requeue
 the relevant materialization. Mark changes and comment-text-only updates do not
 rerender pixels. Removing the final relevant item removes its artifact. These
 stable-path artifacts are rematerialized on Project open rather than treated as

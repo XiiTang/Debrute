@@ -141,11 +141,11 @@ impl WorkingCopyStore {
                 "Moment Feedback Working Copy requires momentTimeSeconds.",
             ));
         }
-        if working_copy.scope == CanvasFeedbackScope::File
+        if working_copy.scope == CanvasFeedbackScope::Node
             && working_copy.moment_time_seconds.is_some()
         {
             return Err(invalid(
-                "File Feedback Working Copy cannot include momentTimeSeconds.",
+                "Node Feedback Working Copy cannot include momentTimeSeconds.",
             ));
         }
         if matches!(
@@ -331,7 +331,7 @@ mod tests {
             created_at: "2026-07-23T00:00:00.000Z".to_owned(),
             project_relative_path: "image.png".to_owned(),
             kind: CanvasFeedbackItemKind::Pin,
-            scope: CanvasFeedbackScope::File,
+            scope: CanvasFeedbackScope::Node,
             moment_time_seconds: None,
             geometry: Some(CanvasFeedbackGeometry::Rect {
                 x: 0.1,
