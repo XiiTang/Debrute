@@ -1,29 +1,33 @@
 export type CanvasTextPreviewFailureStage =
-  | 'scene_not_ready'
-  | 'scene_invariant_violation'
+  | 'font_prepare_failed'
+  | 'content_read_failed'
+  | 'capture_not_ready'
+  | 'dom_snapshot_failed'
   | 'source_availability_failed'
   | 'raster_failed'
   | 'source_upload_failed'
-  | 'variant_failed'
-  | 'preview_decode_failed';
+  | 'variant_failed';
 
 export interface CanvasTextPreviewFailureFields {
   canvasId: string;
   projectRelativePath: string;
   fingerprint: string;
-  sceneWidth?: number | undefined;
-  sceneHeight?: number | undefined;
+  cssWidth?: number | undefined;
+  cssHeight?: number | undefined;
+  sourcePixelWidth?: number | undefined;
+  sourcePixelHeight?: number | undefined;
   durationMs?: number | undefined;
 }
 
 const DEFAULT_MESSAGES: Record<CanvasTextPreviewFailureStage, string> = {
-  scene_not_ready: 'Canvas text preview scene is not ready.',
-  scene_invariant_violation: 'Canvas text preview scene is invalid.',
+  font_prepare_failed: 'Canvas text preview font preparation failed.',
+  content_read_failed: 'Canvas text preview content read failed.',
+  capture_not_ready: 'Canvas text preview capture is not ready.',
+  dom_snapshot_failed: 'Canvas text preview DOM snapshot failed.',
   source_availability_failed: 'Canvas text preview source availability check failed.',
   raster_failed: 'Canvas text preview raster failed.',
   source_upload_failed: 'Canvas text preview source upload failed.',
-  variant_failed: 'Canvas text preview variant request failed.',
-  preview_decode_failed: 'Canvas text preview variant decode failed.'
+  variant_failed: 'Canvas text preview variant request failed.'
 };
 
 export class CanvasTextPreviewFailure extends Error {

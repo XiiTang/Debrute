@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::OnceLock,
     time::UNIX_EPOCH,
@@ -22,7 +22,8 @@ use super::{
     resolve_project_path_for_write,
 };
 
-const DEFAULT_MAX_TEXT_BYTES: u64 = 1024 * 1024;
+pub const MAX_EDITABLE_PROJECT_TEXT_BYTES: u32 = 2 * 1024 * 1024;
+const MAX_EDITABLE_PROJECT_TEXT_BYTES_U64: u64 = MAX_EDITABLE_PROJECT_TEXT_BYTES as u64;
 
 fn project_io_error(operation: &str, path: &Path, error: &io::Error) -> ProjectError {
     ProjectError::Io(io::Error::new(
@@ -69,7 +70,6 @@ pub enum ProjectUploadEntry {
 pub fn read_project_text_file(
     root: &Path,
     relative: &str,
-    max_bytes: Option<u64>,
 ) -> Result<ProjectTextFile, ProjectError> {
     let relative = assert_project_tree_visible_path(relative)?;
     let absolute = resolve_no_symlink_existing_project_path(root, &relative)?;
@@ -79,15 +79,24 @@ pub fn read_project_text_file(
             "Project path is not a file: {relative}"
         )));
     }
-    let maximum = max_bytes.unwrap_or(DEFAULT_MAX_TEXT_BYTES);
-    if metadata.len() > maximum {
-        return Err(ProjectError::Validation(format!(
-            "Project file is too large to open as text ({} bytes): {relative}",
-            metadata.len()
-        )));
+    if metadata.len() > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64 {
+        return Err(project_text_file_too_large(&relative, metadata.len()));
     }
-    let bytes = fs::read(&absolute)?;
-    if bytes.iter().take(8192).any(|byte| *byte == 0) {
+    let mut bytes = Vec::with_capacity(
+        usize::try_from(metadata.len())
+            .unwrap_or(usize::MAX)
+            .min(usize::try_from(MAX_EDITABLE_PROJECT_TEXT_BYTES).unwrap_or(usize::MAX)),
+    );
+    let mut limited = fs::File::open(&absolute)?.take(MAX_EDITABLE_PROJECT_TEXT_BYTES_U64 + 1);
+    limited.read_to_end(&mut bytes)?;
+    let read_metadata = limited.get_ref().metadata()?;
+    if bytes.len() as u64 > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64
+        || read_metadata.len() > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64
+    {
+        let actual_bytes = read_metadata.len().max(bytes.len() as u64);
+        return Err(project_text_file_too_large(&relative, actual_bytes));
+    }
+    if bytes.contains(&0) {
         return Err(ProjectError::Validation(format!(
             "Project file appears to be binary, not text: {relative}"
         )));
@@ -95,7 +104,7 @@ pub fn read_project_text_file(
     let content = String::from_utf8(bytes).map_err(|_| {
         ProjectError::Validation(format!("Project file is not valid UTF-8 text: {relative}"))
     })?;
-    project_text_file(relative, &absolute, content, &metadata)
+    project_text_file(relative, &absolute, content, &read_metadata)
 }
 
 /// Replaces a visible text file using a required content-revision comparison.
@@ -109,6 +118,10 @@ pub(crate) fn write_project_text_file(
     expected_revision: &str,
 ) -> Result<ProjectTextFile, ProjectError> {
     let relative = assert_project_tree_visible_path(relative)?;
+    let actual_bytes = u64::try_from(content.len()).unwrap_or(u64::MAX);
+    if actual_bytes > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64 {
+        return Err(project_text_file_too_large(&relative, actual_bytes));
+    }
     let absolute = resolve_no_symlink_existing_project_path(root, &relative)?;
     let metadata = fs::metadata(&absolute)?;
     if !metadata.is_file() {
@@ -150,6 +163,22 @@ pub(crate) fn write_project_text_file(
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn project_text_file_too_large(relative: &str, actual_bytes: u64) -> ProjectError {
+    ProjectError::service_with_fields(
+        "project_text_file_too_large",
+        format!(
+            "Project text file exceeds the editable limit ({actual_bytes} > {MAX_EDITABLE_PROJECT_TEXT_BYTES} bytes): {relative}"
+        ),
+        [
+            ("actual_bytes".to_owned(), actual_bytes.to_string()),
+            (
+                "max_bytes".to_owned(),
+                MAX_EDITABLE_PROJECT_TEXT_BYTES.to_string(),
+            ),
+        ],
+    )
 }
 
 fn project_text_file(

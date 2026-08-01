@@ -9,6 +9,7 @@ import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './
 import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
+import { canvasTextPresentationGeometry } from './CanvasTextPresentationGeometry.js';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 
@@ -115,6 +116,9 @@ function CanvasNodeShellComponent({
   }, [stageRuntime, node.height, node.projectRelativePath, node.width, node.x, node.y, zIndex]);
 
   const hasFeedback = canvasFeedbackEntryHasFeedback(feedbackEntry);
+  const textPresentationGeometry = node.mediaKind === 'text'
+    ? canvasTextPresentationGeometry(node)
+    : undefined;
   const className = [
     'canvas-node-element',
     'canvas-node-shell',
@@ -178,7 +182,17 @@ function CanvasNodeShellComponent({
       onContextMenu={(event) => onContextMenu(node, event)}
     >
       {usesFixedNodePresentation(node)
-        ? <div className="canvas-node-presentation">{content}</div>
+        ? (
+            <div
+              className="canvas-node-presentation"
+              style={textPresentationGeometry ? {
+                width: textPresentationGeometry.frameCssWidth,
+                height: textPresentationGeometry.frameCssHeight
+              } : undefined}
+            >
+              {content}
+            </div>
+          )
         : content}
       <CanvasFeedbackFrame entry={feedbackEntry} />
       {selected ? RESIZE_HANDLES.map((handle) => (

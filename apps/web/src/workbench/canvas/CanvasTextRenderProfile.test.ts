@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCanvasTextFontResource,
   createCanvasTextRenderProfile,
+  readVerifiedCanvasTextFontFace,
   type CanvasTextFontFaceDefinition,
   type CanvasTextRenderProfileDefinition
 } from './CanvasTextRenderProfile.js';
@@ -71,41 +72,12 @@ describe('CanvasTextRenderProfile', { tags: ['canvas-text'] }, () => {
       .not.toBe(changedFont.editorStyle['--canvas-text-editor-font-family']);
   });
 
-  it('prepares exact font bytes once per document for live and Worker rendering', async () => {
-    const read = vi.fn(async () => new Uint8Array([1]).buffer);
-    const documentToken = fontDocument();
-    const installedFaces = installFontFaceMock();
-    const profile = createCanvasTextRenderProfile(profileDefinition({ read }));
-
-    await profile.prepare(documentToken);
-    const preparedFont = await profile.prepare(documentToken);
-    const family = profile.editorStyle['--canvas-text-editor-font-family'].replaceAll('"', '');
-
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(installedFaces).toHaveLength(1);
-    expect(installedFaces[0]).toMatchObject({
-      family,
-      descriptors: { weight: '400', style: 'normal', stretch: '100%' }
-    });
-    expect(documentToken.fonts.add).toHaveBeenCalledTimes(1);
-    expect(preparedFont.identity).toBe(profileDefinition({ read }).font.identity);
-    expect(preparedFont.faces).toHaveLength(1);
-    expect(preparedFont.faces[0]).toMatchObject({
-      family,
-      descriptors: { weight: '400', style: 'normal', stretch: '100%' }
-    });
-    expect(new Uint8Array(preparedFont.faces[0]!.bytes)).toEqual(new Uint8Array([1]));
-  });
-
-  it('retains a failed preparation result without an implicit retry', async () => {
-    const failure = new Error('font source unavailable');
-    const read = vi.fn(async () => Promise.reject(failure));
-    const profile = createCanvasTextRenderProfile(profileDefinition({ read }));
-    const documentToken = fontDocument();
-
-    await expect(profile.prepare(documentToken)).rejects.toBe(failure);
-    await expect(profile.prepare(documentToken)).rejects.toBe(failure);
-    expect(read).toHaveBeenCalledTimes(1);
+  it('assigns distinct aliases to interactive and preview rendering', () => {
+    const profile = createCanvasTextRenderProfile(profileDefinition());
+    expect(profile.editorStyle['--canvas-text-editor-font-family'])
+      .not.toBe(profile.previewEditorStyle['--canvas-text-editor-font-family']);
+    expect(profile.font.families[0]?.interactiveAlias).toContain('__debrute_canvas_text_full_');
+    expect(profile.font.families[0]?.previewAlias).toContain('__debrute_canvas_text_preview_');
   });
 
   it('rejects font bytes whose digest does not match the managed asset identity', async () => {
@@ -113,7 +85,8 @@ describe('CanvasTextRenderProfile', { tags: ['canvas-text'] }, () => {
       digest: `sha256:${'f'.repeat(64)}`
     }));
 
-    await expect(profile.prepare(fontDocument())).rejects.toThrow('font digest mismatch');
+    await expect(readVerifiedCanvasTextFontFace(profile.font.families[0]!.faces[0]!))
+      .rejects.toThrow('font digest mismatch');
   });
 });
 
@@ -134,32 +107,4 @@ function profileDefinition(input: {
     letterSpacingPx: 0,
     ligatures: true
   };
-}
-
-function fontDocument(): Document & { fonts: { add: ReturnType<typeof vi.fn> } } {
-  return {
-    fonts: { add: vi.fn() }
-  } as unknown as Document & { fonts: { add: ReturnType<typeof vi.fn> } };
-}
-
-function installFontFaceMock(): Array<{
-  family: string;
-  descriptors: FontFaceDescriptors;
-}> {
-  const installed: Array<{ family: string; descriptors: FontFaceDescriptors }> = [];
-  class FontFaceMock {
-    constructor(
-      readonly family: string,
-      _source: ArrayBuffer,
-      readonly descriptors: FontFaceDescriptors
-    ) {
-      installed.push({ family, descriptors });
-    }
-
-    async load(): Promise<FontFace> {
-      return this as unknown as FontFace;
-    }
-  }
-  vi.stubGlobal('FontFace', FontFaceMock);
-  return installed;
 }

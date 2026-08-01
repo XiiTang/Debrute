@@ -827,7 +827,7 @@ async function assertCanvasTextPreviewRaster(page, textNode, label) {
     || statistics.content.quantizedColorCount < 3) {
     throw new Error(`[${label}] Canvas text preview raster was blank or incomplete: ${JSON.stringify(statistics)}.`);
   }
-  console.log(`[${label}] Canvas text Worker raster decoded with non-empty text detail: ${JSON.stringify(statistics)}.`);
+  console.log(`[${label}] Canvas text DOM raster decoded with non-empty text detail: ${JSON.stringify(statistics)}.`);
 }
 
 async function assertCanvasTextRenderProfile(page, textNode, label) {

@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 import {
   CanvasTextRenderProfileGate,
@@ -10,7 +10,59 @@ import {
 } from './CanvasTextRenderProfileContext.js';
 import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
+const environmentMock = vi.hoisted(() => ({
+  prepareInteractive: vi.fn(),
+  preparations: new WeakMap<object, Promise<void>>(),
+  activeProfile: undefined as CanvasTextRenderProfile | undefined,
+  environment: undefined as unknown as {
+    prepareInteractive: ReturnType<typeof vi.fn>;
+    readonly activeInteractiveProfile: CanvasTextRenderProfile | undefined;
+  }
+}));
+environmentMock.environment = {
+  prepareInteractive: environmentMock.prepareInteractive,
+  get activeInteractiveProfile() {
+    return environmentMock.activeProfile;
+  }
+};
+
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+  useCanvasTextProjectFontEnvironment: () => environmentMock.environment
+}));
+
+beforeEach(() => {
+  environmentMock.prepareInteractive.mockReset();
+  environmentMock.activeProfile = undefined;
+  environmentMock.prepareInteractive.mockImplementation((profile: object) => (
+    environmentMock.preparations.get(profile) ?? Promise.resolve()
+  ));
+});
+
 describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
+  it('does not treat a profile-only provider as an interactive font readiness gate', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const profile = profileWithPreparation(Promise.resolve());
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextRenderProfileProvider profile={profile}>
+            <CanvasTextRenderProfileGate profile={profile} pending={<span>loading</span>}>
+              <ProfileProbe />
+            </CanvasTextRenderProfileGate>
+          </CanvasTextRenderProfileProvider>
+        );
+      });
+
+      expect(environmentMock.prepareInteractive).toHaveBeenCalledWith(profile);
+      expect(container.textContent).toBe('12px');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('publishes a profile only after its font resource is ready', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -100,15 +152,41 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
     }
   });
 
+  it('keeps the project active profile for a newly mounted gate when replacement fails', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const initial = profileWithPreparation(Promise.resolve(), '12px');
+    const replacement = profileWithPreparation(
+      Promise.reject(new Error('replacement failed')),
+      '18px'
+    );
+    environmentMock.activeProfile = initial;
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextRenderProfileGate profile={replacement} pending={<span>loading</span>}>
+            <ProfileProbe />
+          </CanvasTextRenderProfileGate>
+        );
+      });
+
+      expect(container.textContent).toBe('12px');
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('keeps the active profile object when a replacement has the same render identity', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
     const initial = profileWithPreparation(Promise.resolve(), '12px');
-    const replacementPrepare = vi.fn(async () => ({ identity: 'test-font', faces: [] }));
     const replacement = {
-      ...initial,
-      prepare: replacementPrepare
+      ...initial
     };
     const observed: CanvasTextRenderProfile[] = [];
 
@@ -134,7 +212,7 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
         );
       });
 
-      expect(replacementPrepare).not.toHaveBeenCalled();
+      expect(environmentMock.prepareInteractive).toHaveBeenCalledTimes(1);
       expect(observed.at(-1)).toBe(initial);
     } finally {
       await act(async () => root.unmount());
@@ -171,15 +249,14 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
   });
 
   it('provides a profile without preparing its font resources', () => {
-    const prepare = vi.fn(DEFAULT_CANVAS_TEXT_RENDER_PROFILE.prepare);
-    const profile = { ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE, prepare };
+    const profile = DEFAULT_CANVAS_TEXT_RENDER_PROFILE;
 
     expect(renderToStaticMarkup(
       <CanvasTextRenderProfileProvider profile={profile}>
         <ProfileProbe />
       </CanvasTextRenderProfileProvider>
     )).toContain(profile.resolvedTypography.fontSize);
-    expect(prepare).not.toHaveBeenCalled();
+    expect(environmentMock.prepareInteractive).not.toHaveBeenCalled();
   });
 
   it('requires a render profile provider', () => {
@@ -208,18 +285,16 @@ function profileWithPreparation(
   preparation: Promise<void>,
   fontSize = '12px'
 ): CanvasTextRenderProfile {
-  return {
+  const profile: CanvasTextRenderProfile = {
     ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
     identity: `${DEFAULT_CANVAS_TEXT_RENDER_PROFILE.identity}:${fontSize}`,
     resolvedTypography: {
       ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE.resolvedTypography,
       fontSize
-    },
-    prepare: async () => {
-      await preparation;
-      return { identity: 'test-font', faces: [] };
     }
   };
+  environmentMock.preparations.set(profile, preparation);
+  return profile;
 }
 
 function deferred<T>() {

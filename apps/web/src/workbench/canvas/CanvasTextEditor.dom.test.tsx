@@ -8,13 +8,19 @@ import { canvasTextEditorApplyFocusRequest } from './CanvasTextEditorRuntime';
 import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
 import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
-const TEST_CANVAS_TEXT_RENDER_PROFILE = {
-  ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
-  prepare: async () => ({ identity: 'test-font', faces: [] })
-};
+const environmentMock = vi.hoisted(() => ({
+  prepareInteractive: vi.fn(async () => undefined)
+}));
+
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+  useCanvasTextProjectFontEnvironment: () => environmentMock
+}));
+
+const TEST_CANVAS_TEXT_RENDER_PROFILE = DEFAULT_CANVAS_TEXT_RENDER_PROFILE;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  environmentMock.prepareInteractive.mockClear();
 });
 
 describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {

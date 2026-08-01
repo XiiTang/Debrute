@@ -7,8 +7,6 @@ export interface CanvasTextPreviewPresentation {
   visibleCommittedSourceKey?: string | undefined;
 }
 
-export type CanvasTextPreviewImageFailureKind = 'load' | 'decode';
-
 export function CanvasTextPreviewImageHandoff({
   presentation,
   hidden = false,
@@ -20,8 +18,8 @@ export function CanvasTextPreviewImageHandoff({
   presentation: CanvasTextPreviewPresentation;
   hidden?: boolean | undefined;
   onPendingReady(source: CanvasTextPreviewSource): void;
-  onPendingFailure(source: CanvasTextPreviewSource, error: unknown, kind: CanvasTextPreviewImageFailureKind): void;
-  onVisibleFailure(source: CanvasTextPreviewSource, error: unknown, kind: CanvasTextPreviewImageFailureKind): void;
+  onPendingFailure(source: CanvasTextPreviewSource, error: unknown): void;
+  onVisibleFailure(source: CanvasTextPreviewSource, error: unknown): void;
   onVisibleCommitted(source: CanvasTextPreviewSource): void;
 }): React.ReactElement {
   if (!presentation.visible && !presentation.pending) {
@@ -39,7 +37,6 @@ export function CanvasTextPreviewImageHandoff({
           key={presentation.visible.sourceKey}
           layer="visible"
           source={presentation.visible}
-          onReady={onPendingReady}
           onFailure={onVisibleFailure}
           onVisibleCommitted={onVisibleCommitted}
         />
@@ -51,78 +48,50 @@ export function CanvasTextPreviewImageHandoff({
           source={presentation.pending}
           onReady={onPendingReady}
           onFailure={onPendingFailure}
-          onVisibleCommitted={onVisibleCommitted}
         />
       ) : null}
     </div>
   );
 }
 
-function CanvasTextPreviewImageLayer({
-  layer,
-  source,
-  onReady,
-  onFailure,
-  onVisibleCommitted
-}: {
-  layer: 'visible' | 'pending';
+type CanvasTextPreviewImageLayerProps = {
   source: CanvasTextPreviewSource;
+  onFailure(source: CanvasTextPreviewSource, error: unknown): void;
+} & ({
+  layer: 'pending';
   onReady(source: CanvasTextPreviewSource): void;
-  onFailure(source: CanvasTextPreviewSource, error: unknown, kind: CanvasTextPreviewImageFailureKind): void;
+} | {
+  layer: 'visible';
   onVisibleCommitted(source: CanvasTextPreviewSource): void;
-}): React.ReactElement {
-  const pendingLifecycleRef = useRef<{
-    cancelled: boolean;
-    settled: boolean;
-  } | undefined>(undefined);
+});
+
+function CanvasTextPreviewImageLayer(props: CanvasTextPreviewImageLayerProps): React.ReactElement {
+  const { layer, source } = props;
+  const pendingSettledSourceKeyRef = useRef<string | undefined>(undefined);
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const onVisibleCommittedRef = useRef(onVisibleCommitted);
-  onVisibleCommittedRef.current = onVisibleCommitted;
+  const onVisibleCommittedRef = useRef<((source: CanvasTextPreviewSource) => void) | undefined>(undefined);
+  onVisibleCommittedRef.current = props.layer === 'visible' ? props.onVisibleCommitted : undefined;
 
   const finishPendingLoad = (image: HTMLImageElement) => {
-    const lifecycle = pendingLifecycleRef.current;
-    if (layer !== 'pending' || !lifecycle || lifecycle.cancelled || lifecycle.settled) {
+    if (props.layer !== 'pending'
+      || pendingSettledSourceKeyRef.current === source.sourceKey
+      || !image.isConnected
+      || image.dataset.canvasTextPreviewSourceKey !== source.sourceKey) {
       return;
     }
-    const decode = image.decode();
-    void decode.then(() => {
-      if (pendingLifecycleRef.current === lifecycle
-        && !lifecycle.cancelled
-        && !lifecycle.settled
-        && image.isConnected
-        && image.dataset.canvasTextPreviewSourceKey === source.sourceKey) {
-        lifecycle.settled = true;
-        onReady(source);
-      }
-    }, (error: unknown) => {
-      if (pendingLifecycleRef.current === lifecycle
-        && !lifecycle.cancelled
-        && !lifecycle.settled
-        && image.isConnected
-        && image.dataset.canvasTextPreviewSourceKey === source.sourceKey) {
-        lifecycle.settled = true;
-        onFailure(source, error, 'decode');
-      }
-    });
+    pendingSettledSourceKeyRef.current = source.sourceKey;
+    props.onReady(source);
   };
 
   useLayoutEffect(() => {
     if (layer !== 'pending') {
-      pendingLifecycleRef.current = undefined;
       return undefined;
     }
-    const lifecycle = { cancelled: false, settled: false };
-    pendingLifecycleRef.current = lifecycle;
     const image = imageRef.current;
     if (image?.complete && image.naturalWidth > 0) {
       finishPendingLoad(image);
     }
-    return () => {
-      lifecycle.cancelled = true;
-      if (pendingLifecycleRef.current === lifecycle) {
-        pendingLifecycleRef.current = undefined;
-      }
-    };
+    return undefined;
   }, [layer, source.sourceKey]);
 
   useLayoutEffect(() => {
@@ -133,7 +102,7 @@ function CanvasTextPreviewImageLayer({
     const firstFrame = window.requestAnimationFrame(() => {
       secondFrame = window.requestAnimationFrame(() => {
         secondFrame = undefined;
-        onVisibleCommittedRef.current(source);
+        onVisibleCommittedRef.current?.(source);
       });
     });
     return () => {
@@ -155,18 +124,22 @@ function CanvasTextPreviewImageLayer({
       data-canvas-text-preview-layer={layer}
       data-canvas-text-preview-source-key={source.sourceKey}
       data-preview-width={source.previewWidth}
-      onLoad={(event) => finishPendingLoad(event.currentTarget)}
+      onLoad={layer === 'pending'
+        ? (event) => finishPendingLoad(event.currentTarget)
+        : undefined}
       onError={(event) => {
         if (layer === 'visible') {
-          onFailure(source, event.nativeEvent, 'load');
+          props.onFailure(source, event.nativeEvent);
           return;
         }
-        const lifecycle = pendingLifecycleRef.current;
-        if (!lifecycle || lifecycle.cancelled || lifecycle.settled) {
+        const image = event.currentTarget;
+        if (pendingSettledSourceKeyRef.current === source.sourceKey
+          || !image.isConnected
+          || image.dataset.canvasTextPreviewSourceKey !== source.sourceKey) {
           return;
         }
-        lifecycle.settled = true;
-        onFailure(source, event.nativeEvent, 'load');
+        pendingSettledSourceKeyRef.current = source.sourceKey;
+        props.onFailure(source, event.nativeEvent);
       }}
     />
   );

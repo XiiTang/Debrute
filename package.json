@@ -11,7 +11,10 @@
     "pnpm": ">=11.2.2 <12"
   },
   "scripts": {
+    "postinstall": "pnpm validate:canvas-text-font-subset",
+    "prebuild": "pnpm validate:canvas-text-font-subset",
     "build": "pnpm generate:control-protocol && pnpm check:typescript && pnpm build:artifacts",
+    "predev": "pnpm validate:canvas-text-font-subset",
     "build:artifacts": "pnpm --filter @debrute/desktop build:artifacts",
     "clean": "node scripts/clean.mjs",
     "brand:sync": "node scripts/sync-brand-assets.mjs",
@@ -25,6 +28,7 @@
     "check:rust:all": "cargo fmt --all -- --check && node scripts/run-cargo-with-native-raster.mjs -- clippy --workspace --all-targets --features test-support,native-watcher-probe -- -D warnings",
     "check:typescript": "tsc -b tsconfig.build.json --pretty false",
     "dev": "tsx --tsconfig tsconfig.base.json scripts/dev-workbench.ts",
+    "predev:electron": "pnpm validate:canvas-text-font-subset",
     "dev:electron": "pnpm --filter @debrute/desktop dev:electron",
     "generate:control-protocol": "node scripts/run-cargo-with-native-raster.mjs -- test -p debrute-runtime --lib export_bindings",
     "preview": "pnpm --filter @debrute/web preview",
@@ -43,6 +47,8 @@
     "verify:browser": "node scripts/verify-workbench-browser.mjs",
     "lint:arch": "node scripts/check-architecture.mjs",
     "native:raster:prepare": "node scripts/prepare-native-raster.mjs",
+    "build:canvas-text-font-subset": "node scripts/build-canvas-text-font-subset-wasm.mjs",
+    "validate:canvas-text-font-subset": "node scripts/validate-canvas-text-font-subset-wasm.mjs",
     "doctor": "node scripts/doctor.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:all": "node scripts/verify.mjs --all-rust-targets"

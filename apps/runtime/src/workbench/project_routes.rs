@@ -52,7 +52,10 @@ use crate::{
 use super::{
     RuntimeHttpServiceError, WorkbenchConnectionContext, WorkbenchRuntimeServices,
     multipart::read_multipart,
-    routes::{json_body, service_error_response},
+    routes::{
+        MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES, json_body, json_body_with_limit,
+        service_error_response,
+    },
     routing::{ProjectAuthorization, WorkbenchRouterState},
     services::project_response,
     websocket::{
@@ -82,7 +85,7 @@ pub(super) async fn text_file(
         Err(response) => return response,
     };
     if request.method() == Method::GET {
-        return match read_project_text_file(session.root(), &path, None) {
+        return match read_project_text_file(session.root(), &path) {
             Ok(file) => Json(public_text_file(file)).into_response(),
             Err(error) => project_error(error),
         };
@@ -93,10 +96,11 @@ pub(super) async fn text_file(
         content: String,
         expected_revision: String,
     }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
-    };
+    let input: Input =
+        match json_body_with_limit(request, MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES).await {
+            Ok(input) => input,
+            Err(response) => return response,
+        };
     execute_command(
         &session,
         ProjectCommand::WriteTextFile {

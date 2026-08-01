@@ -129,6 +129,7 @@ import {
   CanvasTextRenderProfileGate,
   CanvasTextRenderProfileProvider
 } from './canvas/CanvasTextRenderProfileContext.js';
+import { CanvasTextProjectFontEnvironmentProvider } from './canvas/font-subset/CanvasTextProjectFontEnvironment.js';
 import { workbenchStartupTimeline } from '../startup/workbenchStartupTimeline.js';
 import { waitForWorkbenchShellFonts } from '../startup/workbenchShellFonts.js';
 
@@ -395,13 +396,18 @@ function WorkbenchRuntimeApp({
     projectBindingLifecycle,
     isProjectOpening: projectBindingLifecycleState.opening
   };
+  const generationApp = <WorkbenchProjectGenerationApp {...projectGenerationAppProps} />;
   const surface = projectProjection.status === 'unbound' ? (
-    <WorkbenchProjectGenerationApp {...projectGenerationAppProps} />
+    <CanvasTextProjectFontEnvironmentProvider profile={canvasTextRenderProfile}>
+      {generationApp}
+    </CanvasTextProjectFontEnvironmentProvider>
   ) : (
-    <WorkbenchProjectGenerationApp
+    <CanvasTextProjectFontEnvironmentProvider
       key={projectProjection.generation}
-      {...projectGenerationAppProps}
-    />
+      profile={canvasTextRenderProfile}
+    >
+      {generationApp}
+    </CanvasTextProjectFontEnvironmentProvider>
   );
   return (
     <>
@@ -548,7 +554,6 @@ function WorkbenchProjectGenerationApp({
   const activeProjection = activeCanvas
     ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
     : undefined;
-  const activeCanvasHasText = activeCanvas?.nodeElements.some((node) => node.mediaKind === 'text') ?? false;
   const centerCanvasProjectionNode = useCallback((
     projection: WorkbenchProjectSessionSnapshot['projections'][number] | undefined,
     projectRelativePath: string
@@ -1404,20 +1409,7 @@ function WorkbenchProjectGenerationApp({
       interactionBlocked={projectPresentationBlocked}
     />
   );
-  const profiledCanvasEditor = activeCanvasHasText ? (
-    <CanvasTextRenderProfileGate
-      profile={canvasTextRenderProfile}
-      onReady={() => workbenchStartupTimeline.mark('canvas-text-ready')}
-      pending={(
-        <div className="empty-editor" role="status" aria-busy="true">
-          <Loader2 className="spin" size={22} />
-          <span>Preparing Canvas text rendering…</span>
-        </div>
-      )}
-    >
-      {canvasEditor}
-    </CanvasTextRenderProfileGate>
-  ) : activeCanvas ? (
+  const profiledCanvasEditor = activeCanvas ? (
     <CanvasTextRenderProfileProvider profile={canvasTextRenderProfile}>
       {canvasEditor}
     </CanvasTextRenderProfileProvider>

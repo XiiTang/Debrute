@@ -565,16 +565,8 @@
 
 .canvas-node-shell.fixed-presentation.text > .canvas-node-presentation {
   position: relative;
-  left: calc(-1px * var(--canvas-chrome-scale, 1));
-  top: calc(-1px * var(--canvas-chrome-scale, 1));
-  width: calc(
-    (100% + 2px * var(--canvas-chrome-scale, 1)) /
-    var(--canvas-node-presentation-scale, 1)
-  );
-  height: calc(
-    (100% + 2px * var(--canvas-chrome-scale, 1)) /
-    var(--canvas-node-presentation-scale, 1)
-  );
+  left: 0;
+  top: 0;
 }
 
 .canvas-node-preview {

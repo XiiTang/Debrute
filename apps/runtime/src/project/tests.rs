@@ -1686,6 +1686,7 @@ fn project_service_owns_canvas_registry_map_and_projection() {
     assert!(projection.nodes.iter().any(|node| {
         node.node.project_relative_path == "notes/scene.txt"
             && matches!(node.availability, CanvasNodeAvailability::Available { .. })
+            && node.text_language.as_deref() == Some("plaintext")
     }));
 
     let (second, _) = service
@@ -1709,6 +1710,36 @@ fn project_service_owns_canvas_registry_map_and_projection() {
             .code(),
         "canvas_registry_invalid"
     );
+}
+
+#[test]
+fn canvas_text_projection_uses_one_file_snapshot_for_revision_and_language() {
+    let project = TemporaryDirectory::new("canvas-text-snapshot");
+    let home = TemporaryDirectory::new("canvas-text-snapshot-home");
+    let shebang = "#!";
+    let content = format!(
+        "{shebang}{}é node\nconsole.log('ready');\n",
+        "a".repeat(4095 - shebang.len())
+    );
+    fs::write(project.as_ref().join("script"), &content).expect("script should be written");
+    let mut service =
+        ProjectService::open(project.as_ref(), home.as_ref(), Arc::new(FixedNodeAdapter))
+            .expect("Project should initialize");
+
+    let (_, projection, _) = service
+        .add_project_path_to_canvas_map("canvas-1", "script")
+        .expect("script should be added to Canvas Map");
+    let node = projection
+        .nodes
+        .iter()
+        .find(|node| node.node.project_relative_path == "script")
+        .expect("script should be projected");
+
+    assert_eq!(node.text_language.as_deref(), Some("javascript"));
+    let CanvasNodeAvailability::Available { revision, .. } = &node.availability else {
+        panic!("script should be available");
+    };
+    assert_eq!(revision, &project_content_hash(content.as_bytes()));
 }
 
 #[test]
@@ -2023,7 +2054,7 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
         ProjectPathKind::File,
     )
     .expect("file should be created");
-    let opened = read_project_text_file(project.as_ref(), &created.project_relative_path, None)
+    let opened = read_project_text_file(project.as_ref(), &created.project_relative_path)
         .expect("text file should open");
     let saved = write_project_text_file(
         project.as_ref(),
@@ -2105,6 +2136,56 @@ fn project_file_mutations_validate_then_apply_closed_batches() {
 }
 
 #[test]
+fn project_text_read_and_write_share_one_utf8_byte_limit() {
+    let project = TemporaryDirectory::new("text-byte-limit");
+    let path = project.as_ref().join("large.txt");
+    let maximum =
+        usize::try_from(MAX_EDITABLE_PROJECT_TEXT_BYTES).expect("editable limit should fit usize");
+    fs::write(&path, vec![b'a'; maximum]).expect("boundary text should be written");
+    let boundary = read_project_text_file(project.as_ref(), "large.txt")
+        .expect("boundary text should be editable");
+    assert_eq!(boundary.content.len(), maximum);
+
+    fs::write(&path, vec![b'a'; maximum + 1]).expect("oversize fixture should be written");
+    let read_error = read_project_text_file(project.as_ref(), "large.txt")
+        .expect_err("oversize text should not be read into the editor");
+    assert_eq!(read_error.code(), "project_text_file_too_large");
+    assert_eq!(
+        read_error
+            .field("actual_bytes")
+            .and_then(|value| value.parse::<usize>().ok()),
+        Some(maximum + 1)
+    );
+    assert_eq!(
+        read_error
+            .field("max_bytes")
+            .and_then(|value| value.parse::<usize>().ok()),
+        Some(maximum)
+    );
+
+    fs::write(&path, "current").expect("small text should replace the fixture");
+    let revision = project_content_hash(b"current");
+    let write_error = write_project_text_file(
+        project.as_ref(),
+        "large.txt",
+        &"中".repeat(maximum / 3 + 1),
+        &revision,
+    )
+    .expect_err("oversize UTF-8 text should not be written");
+    assert_eq!(write_error.code(), "project_text_file_too_large");
+    assert!(
+        write_error
+            .field("actual_bytes")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_some_and(|actual| actual > maximum)
+    );
+    assert_eq!(
+        fs::read_to_string(path).expect("original text should remain"),
+        "current"
+    );
+}
+
+#[test]
 fn temporary_upload_file_commits_without_consuming_source() {
     let project = TemporaryDirectory::new("temporary-upload-project");
     fs::create_dir(project.as_ref().join("target")).expect("upload target should be created");
@@ -2182,7 +2263,7 @@ fn project_text_classification_matches_registered_filename_extension_and_shebang
         ("make", "#! /usr/bin/make\n", "makefile", "text/plain"),
     ] {
         fs::write(project.as_ref().join(path), content).expect("fixture should be written");
-        let text = read_project_text_file(project.as_ref(), path, None)
+        let text = read_project_text_file(project.as_ref(), path)
             .expect("registered text fixture should be read");
         assert_eq!(text.language, language, "language mismatch for {path}");
         assert_eq!(text.mime_type, mime_type, "MIME mismatch for {path}");

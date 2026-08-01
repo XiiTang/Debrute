@@ -1028,9 +1028,17 @@ function isProjectedCanvasNode(value: unknown): boolean {
   if (value.videoPresentation !== undefined && !isCanvasVideoPresentation(value.videoPresentation)) {
     return false;
   }
-  return value.mediaKind !== 'video'
-    || value.availability.state !== 'available'
-    || isCanvasVideoPresentation(value.videoPresentation);
+  if (value.textLanguage !== undefined
+    && (typeof value.textLanguage !== 'string'
+      || !(PROJECT_TEXT_LANGUAGE_IDS as readonly string[]).includes(value.textLanguage))) {
+    return false;
+  }
+  return (value.mediaKind !== 'video'
+      || value.availability.state !== 'available'
+      || isCanvasVideoPresentation(value.videoPresentation))
+    && (value.mediaKind !== 'text'
+      || value.availability.state !== 'available'
+      || typeof value.textLanguage === 'string');
 }
 
 function isCanvasNode(value: unknown): boolean {

@@ -7,26 +7,19 @@ import {
 } from './CanvasTextPreviewCaptureLane';
 import { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure';
 import type {
-  CanvasTextPreviewRasterResult,
-  CanvasTextPreviewTarget
+  CanvasTextPreviewCaptureTarget,
+  CanvasTextPreviewCaptureResult,
 } from './CanvasTextPreviewCapture';
-import type {
-  CanvasTextPreviewSceneBuild,
-  CanvasTextPreviewBuiltScene
-} from './CanvasTextPreviewScene.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
+
+const TEST_RENDER_PROFILE = DEFAULT_CANVAS_TEXT_RENDER_PROFILE;
+const TEST_PREPARED_FONT = {
+  resourceIdentity: TEST_RENDER_PROFILE.font.identity,
+  embeddedFaces: [{ family: 'test', weight: '400', css: '@font-face{}' }]
+};
 
 const mocks = vi.hoisted(() => ({
-  createSceneBuild: vi.fn(),
   captureSource: vi.fn()
-}));
-
-vi.mock('./CanvasTextRenderProfileContext.js', async () => {
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
-  return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
-});
-
-vi.mock('./CanvasTextPreviewScene.js', () => ({
-  createCanvasTextPreviewSceneBuild: mocks.createSceneBuild
 }));
 
 vi.mock('./CanvasTextPreviewCapture', () => ({
@@ -43,10 +36,6 @@ vi.mock('./CanvasTextEditor', async () => {
       return ReactModule.createElement(
         'div',
         { className: 'cm-editor' },
-        ReactModule.createElement('button', {
-          'data-layout-ready': 'true',
-          onClick: onLayoutReady
-        }),
         ReactModule.createElement(
           'div',
           { className: 'cm-scroller' },
@@ -79,19 +68,14 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.captureSource.mockReset();
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
     frames = installAnimationFrameQueue();
     layoutAligned = true;
     restoreGeometry = installCaptureGeometry(() => layoutAligned);
-    mocks.createSceneBuild.mockReturnValue(completedSceneBuild());
-    mocks.captureSource.mockResolvedValue({
-      sourcePng: new Blob(['png'], { type: 'image/png' }),
-      sceneWidth: 320,
-      sceneHeight: 160,
-      rasterDurationMs: 2
-    });
+    mocks.captureSource.mockResolvedValue(rasterResult());
   });
 
   afterEach(async () => {
@@ -101,119 +85,109 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     restoreGeometry();
   });
 
-  it('starts readiness, scene building, and raster on separate eligible frames', async () => {
-    const stages: string[] = [];
+  it('checks readiness before starting one DOM capture job', async () => {
     const onRasterized = vi.fn();
+    await renderLane({ root, target: targetFixture(), interactionActive: false, onRasterized });
 
-    await renderLane({
-      root,
-      target: targetFixture(),
-      interactionActive: false,
-      onStage: (event) => stages.push(event.stage),
-      onRasterized
-    });
-
-    expect(stages).toEqual([]);
-    await frames.runNext();
-    expect(stages).toEqual(['capture-ready']);
-    await frames.runNext();
-    expect(stages).toEqual(['capture-ready', 'scene-built']);
     expect(mocks.captureSource).not.toHaveBeenCalled();
     await frames.runNext();
-    expect(stages).toEqual(['capture-ready', 'scene-built', 'raster-completed']);
+    expect(mocks.captureSource).not.toHaveBeenCalled();
+    await frames.runNext();
+
+    expect(mocks.captureSource).toHaveBeenCalledTimes(1);
+    expect(mocks.captureSource).toHaveBeenCalledWith(expect.objectContaining({
+      captureRoot: expect.any(HTMLElement),
+      target: expect.objectContaining({ projectRelativePath: 'notes/a.md' }),
+      signal: expect.any(AbortSignal),
+      isInteractionActive: expect.any(Function)
+    }));
     expect(onRasterized).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the capture editor mounted until asynchronous raster work completes', async () => {
-    const raster = deferred<CanvasTextPreviewRasterResult>();
+  it('keeps the only capture editor mounted until DOM rasterization completes', async () => {
+    const raster = deferred<CanvasTextPreviewCaptureResult>();
     mocks.captureSource.mockReturnValue(raster.promise);
     const onRasterized = vi.fn();
+    await renderLane({ root, target: targetFixture(), interactionActive: false, onRasterized });
+    await frames.runNext();
+    await frames.runNext();
+
+    expect(container.querySelector('.cm-editor')).not.toBeNull();
+    expect(onRasterized).not.toHaveBeenCalled();
+    await act(async () => {
+      raster.resolve(rasterResult());
+      await raster.promise;
+    });
+    expect(onRasterized).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start DOM capture while Canvas interaction is active', async () => {
+    const target = targetFixture();
+    await renderLane({ root, target, interactionActive: true, onRasterized: () => undefined });
+    expect(frames.pending()).toBe(0);
+
+    await renderLane({ root, target, interactionActive: false, onRasterized: () => undefined });
+    await frames.runNext();
+    await frames.runNext();
+    expect(mocks.captureSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts a replaced target and ignores its stale completion', async () => {
+    const firstRaster = deferred<CanvasTextPreviewCaptureResult>();
+    mocks.captureSource.mockReturnValueOnce(firstRaster.promise).mockResolvedValueOnce(rasterResult());
+    const onRasterized = vi.fn();
+    const first = targetFixture('notes/a.md');
+    await renderLane({ root, target: first, interactionActive: false, onRasterized });
+    await frames.runNext();
+    await frames.runNext();
+    const firstSignal = mocks.captureSource.mock.calls[0]?.[0].signal as AbortSignal;
 
     await renderLane({
       root,
-      target: targetFixture(),
+      target: targetFixture('notes/b.md'),
       interactionActive: false,
-      onStage: () => undefined,
       onRasterized
     });
+    expect(firstSignal.aborted).toBe(true);
     await frames.runNext();
-    await frames.runNext();
-    await frames.runNext();
-
-    expect(onRasterized).not.toHaveBeenCalled();
-    expect(container.querySelector('.cm-editor')).not.toBeNull();
     expect(mocks.captureSource).toHaveBeenCalledTimes(1);
     await act(async () => {
-      raster.resolve({
-        sourcePng: new Blob(['png'], { type: 'image/png' }),
-        sceneWidth: 320,
-        sceneHeight: 160,
-        rasterDurationMs: 2
-      });
-      await raster.promise;
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      firstRaster.resolve(rasterResult());
+      await firstRaster.promise;
     });
-    expect(onRasterized).toHaveBeenCalledTimes(1);
+    expect(onRasterized).not.toHaveBeenCalledWith(first, expect.anything());
+    await frames.runNext();
+    expect(mocks.captureSource).toHaveBeenCalledTimes(2);
+    expect(mocks.captureSource).toHaveBeenLastCalledWith(expect.objectContaining({
+      target: expect.objectContaining({ projectRelativePath: 'notes/b.md' })
+    }));
   });
 
-  it('pauses incremental scene building at its cursor during interaction', async () => {
-    const builtScene = builtSceneFixture();
-    const runSlice = vi.fn()
-      .mockReturnValueOnce({ done: false })
-      .mockReturnValueOnce({ done: true, builtScene });
-    mocks.createSceneBuild.mockReturnValue({ runSlice, dispose: vi.fn() });
-    const props = {
-      root,
-      target: targetFixture(),
-      onStage: () => undefined,
-      onRasterized: () => undefined
-    };
-
-    await renderLane({ ...props, interactionActive: false });
-    await frames.runNext();
-    await frames.runNext();
-    expect(runSlice).toHaveBeenCalledTimes(1);
-    expect(frames.pending()).toBe(1);
-
-    await renderLane({ ...props, interactionActive: true });
-    expect(frames.pending()).toBe(0);
-    expect(mocks.createSceneBuild).toHaveBeenCalledTimes(1);
-
-    await renderLane({ ...props, interactionActive: false });
-    await frames.runNext();
-    expect(runSlice).toHaveBeenCalledTimes(2);
-    expect(mocks.createSceneBuild).toHaveBeenCalledTimes(1);
-  });
-
-  it('reports a typed target failure and disposes its scene build', async () => {
-    const build = completedSceneBuild();
-    mocks.createSceneBuild.mockReturnValue(build);
+  it('reports the typed DOM capture failure for the current target', async () => {
     mocks.captureSource.mockRejectedValue(new CanvasTextPreviewFailure(
       'raster_failed',
       failureFields(),
       'Canvas text preview raster failed.'
     ));
     const onFailure = vi.fn();
-
     await renderLane({
       root,
       target: targetFixture(),
       interactionActive: false,
-      onStage: () => undefined,
       onRasterized: () => undefined,
       onFailure
     });
     await frames.runNext();
     await frames.runNext();
-    await frames.runNext();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     expect(onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ projectRelativePath: 'notes/a.md' }),
       expect.objectContaining({ stage: 'raster_failed' })
     );
-    expect(build.dispose).toHaveBeenCalledTimes(1);
   });
 
   it('requires visible aligned CodeMirror line and gutter geometry', () => {
@@ -224,13 +198,9 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
       '<div class="cm-content"><div class="cm-line">content</div></div>',
       '</div>'
     ].join('');
-    const scroller = captureRoot.querySelector<HTMLElement>('.cm-scroller');
-    const line = captureRoot.querySelector<HTMLElement>('.cm-line');
-    const gutter = captureRoot.querySelector<HTMLElement>('.cm-gutterElement');
-    expect(scroller && line && gutter).toBeTruthy();
-    if (!scroller || !line || !gutter) {
-      throw new Error('Expected CodeMirror fixture.');
-    }
+    const scroller = captureRoot.querySelector<HTMLElement>('.cm-scroller')!;
+    const line = captureRoot.querySelector<HTMLElement>('.cm-line')!;
+    const gutter = captureRoot.querySelector<HTMLElement>('.cm-gutterElement')!;
     setClientSize(scroller, 320, 160);
     setRect(scroller, rect(0, 0, 320, 160));
     setRect(line, rect(40, 10, 80, 20));
@@ -248,7 +218,6 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
       root,
       target: targetFixture(),
       interactionActive: false,
-      onStage: () => undefined,
       onRasterized: () => undefined,
       onFailure
     });
@@ -256,19 +225,17 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     for (let frame = 0; frame < 30; frame += 1) {
       await frames.runNext();
     }
-
     expect(onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ projectRelativePath: 'notes/a.md' }),
-      expect.objectContaining({ stage: 'scene_not_ready' })
+      expect.objectContaining({ stage: 'capture_not_ready' })
     );
   });
 });
 
 async function renderLane(input: {
   root: Root;
-  target: CanvasTextPreviewTarget;
+  target: CanvasTextPreviewCaptureTarget;
   interactionActive: boolean;
-  onStage: React.ComponentProps<typeof CanvasTextPreviewCaptureLane>['onStage'];
   onRasterized: React.ComponentProps<typeof CanvasTextPreviewCaptureLane>['onRasterized'];
   onFailure?: React.ComponentProps<typeof CanvasTextPreviewCaptureLane>['onFailure'];
 }): Promise<void> {
@@ -276,8 +243,9 @@ async function renderLane(input: {
     input.root.render(
       <CanvasTextPreviewCaptureLane
         target={input.target}
+        renderProfile={TEST_RENDER_PROFILE}
+        preparedFont={TEST_PREPARED_FONT}
         interactionActive={input.interactionActive}
-        onStage={input.onStage}
         onRasterized={input.onRasterized}
         onFailure={input.onFailure ?? (() => undefined)}
       />
@@ -285,11 +253,13 @@ async function renderLane(input: {
   });
 }
 
-function targetFixture(): CanvasTextPreviewTarget {
+function targetFixture(projectRelativePath = 'notes/a.md'): CanvasTextPreviewCaptureTarget {
   return {
     canvasId: 'canvas-1',
-    projectRelativePath: 'notes/a.md',
+    projectRelativePath,
     content: 'content',
+    contentDigest: 'sha256:content',
+    estimatedBytes: 7,
     language: 'markdown',
     wordWrap: true,
     contentCssWidth: 320,
@@ -297,7 +267,26 @@ function targetFixture(): CanvasTextPreviewTarget {
     scrollTop: 0,
     scrollLeft: 0,
     styleKey: 'sha256:style',
-    fingerprint: 'sha256:target'
+    sourcePixelWidth: 1280,
+    sourcePixelHeight: 640,
+    sourceScale: 4,
+    fingerprint: `sha256:${projectRelativePath}`
+  };
+}
+
+function rasterResult(): CanvasTextPreviewCaptureResult {
+  return {
+    sourcePng: new Blob(['png'], { type: 'image/png' }),
+    cssWidth: 320,
+    cssHeight: 160,
+    sourcePixelWidth: 1280,
+    sourcePixelHeight: 640,
+    snapshotDurationMs: 1,
+    rasterDurationMs: 2,
+    captureDurationMs: 3,
+    snapshotBytes: 100,
+    snapshotElementCount: 8,
+    maxSynchronousSliceMs: 1
   };
 }
 
@@ -305,23 +294,7 @@ function failureFields() {
   return {
     canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
-    fingerprint: 'sha256:target'
-  };
-}
-
-function builtSceneFixture(): CanvasTextPreviewBuiltScene {
-  return {
-    scene: { background: 'transparent', commands: [] },
-    width: 320,
-    height: 160
-  };
-}
-
-function completedSceneBuild(): CanvasTextPreviewSceneBuild & { dispose: ReturnType<typeof vi.fn> } {
-  const builtScene = builtSceneFixture();
-  return {
-    runSlice: vi.fn(() => ({ done: true as const, builtScene })),
-    dispose: vi.fn(() => undefined)
+    fingerprint: 'sha256:notes/a.md'
   };
 }
 
@@ -382,6 +355,14 @@ function installAnimationFrameQueue() {
   };
 }
 
+function deferred<T>() {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return { promise, resolve: resolvePromise };
+}
+
 function setClientSize(element: HTMLElement, width: number, height: number): void {
   Object.defineProperties(element, {
     clientWidth: { configurable: true, value: width },
@@ -389,31 +370,20 @@ function setClientSize(element: HTMLElement, width: number, height: number): voi
   });
 }
 
-function setRect(element: Element, value: DOMRect): void {
-  Object.defineProperty(element, 'getBoundingClientRect', {
-    configurable: true,
-    value: () => value
-  });
+function setRect(element: HTMLElement, value: DOMRect): void {
+  element.getBoundingClientRect = () => value;
 }
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
-    x: left,
-    y: top,
     left,
     top,
-    right: left + width,
-    bottom: top + height,
     width,
     height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
     toJSON: () => ({})
   } as DOMRect;
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
 }

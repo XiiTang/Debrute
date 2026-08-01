@@ -27,7 +27,7 @@ describe('CanvasTextPreviewFailure', { tags: ['canvas-text'] }, () => {
   it('turns a browser Event into a stable owned-stage message', () => {
     const failure = canvasTextPreviewFailureFromUnknown(
       'raster_failed',
-      { ...fields, sceneWidth: 420, sceneHeight: 280 },
+      { ...fields, sourcePixelWidth: 1680, sourcePixelHeight: 1120 },
       new Event('error')
     );
 
@@ -37,9 +37,9 @@ describe('CanvasTextPreviewFailure', { tags: ['canvas-text'] }, () => {
 
   it('uses a stage-specific message for an uninformative rejection', () => {
     expect(canvasTextPreviewFailureFromUnknown(
-      'preview_decode_failed',
+      'variant_failed',
       fields,
       undefined
-    ).message).toBe('Canvas text preview variant decode failed.');
+    ).message).toBe('Canvas text preview variant request failed.');
   });
 });

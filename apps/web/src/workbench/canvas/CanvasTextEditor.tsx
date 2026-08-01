@@ -45,7 +45,8 @@ export function CanvasTextEditor({
   onFocusRequestConsumed,
   onScrollPositionCommit,
   onReadOnlyTransition,
-  onLayoutReady
+  onLayoutReady,
+  fontPurpose = 'interactive'
 }: {
   value: string;
   language: ProjectTextLanguageId;
@@ -62,6 +63,7 @@ export function CanvasTextEditor({
   onScrollPositionCommit?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onReadOnlyTransition?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onLayoutReady?: (() => void) | undefined;
+  fontPurpose?: 'interactive' | 'preview' | undefined;
 }): React.ReactElement {
   const renderProfile = useCanvasTextRenderProfile();
   const hostRef = React.useRef<HTMLDivElement | null>(null);
@@ -336,7 +338,9 @@ export function CanvasTextEditor({
       data-word-wrap={wordWrap ? 'on' : 'off'}
       data-pointer-focus={!readOnly && pointerFocus ? 'true' : 'false'}
       className={`canvas-text-editor canvas-text-editor--${readOnly ? 'handoff' : 'edit'}`}
-      style={renderProfile.editorStyle as React.CSSProperties}
+      style={(fontPurpose === 'preview'
+        ? renderProfile.previewEditorStyle
+        : renderProfile.editorStyle) as React.CSSProperties}
       onPointerDownCapture={() => {
         if (!readOnly) {
           setPointerFocus(true);

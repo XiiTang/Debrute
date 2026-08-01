@@ -110,6 +110,7 @@ and enforced by Rust and contract tests.
 - [Inactive Text Nodes Use Derived Previews](../../packages/canvas-core/docs/adr/0003-inactive-text-nodes-use-derived-previews.md)
 - [Inactive Video Nodes Use Derived Previews](../../packages/canvas-core/docs/adr/0004-inactive-video-nodes-use-derived-previews.md)
 - [Feedback State Is Structured And Artifacts Are Derived](../../packages/canvas-core/docs/adr/0005-feedback-state-is-structured-and-artifacts-are-derived.md)
+- [Text Preview DOM Is The Visual Authority](../../packages/canvas-core/docs/adr/0006-text-preview-dom-is-the-visual-authority.md)
 
 ## Capability Decisions
 

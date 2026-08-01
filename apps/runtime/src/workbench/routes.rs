@@ -47,6 +47,8 @@ use super::{
 };
 
 const MAX_JSON_BODY_BYTES: usize = 2 * 1024 * 1024;
+pub(super) const MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES: usize =
+    crate::project::MAX_EDITABLE_PROJECT_TEXT_BYTES as usize * 6 + 512;
 const STREAM_CHANNEL_CAPACITY: usize = 64;
 
 pub(super) async fn workbench_connection(
@@ -1071,13 +1073,20 @@ impl Stream for JsonEventStream {
 }
 
 pub(super) async fn json_body<T: DeserializeOwned>(request: Request) -> Result<T, Response> {
-    let bytes = to_bytes(request.into_body(), MAX_JSON_BODY_BYTES)
+    json_body_with_limit(request, MAX_JSON_BODY_BYTES).await
+}
+
+pub(super) async fn json_body_with_limit<T: DeserializeOwned>(
+    request: Request,
+    maximum_bytes: usize,
+) -> Result<T, Response> {
+    let bytes = to_bytes(request.into_body(), maximum_bytes)
         .await
         .map_err(|_| {
             service_error_response(RuntimeHttpServiceError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request_body_too_large",
-                "JSON request body exceeds 2 MiB or could not be read.",
+                "JSON request body exceeds the endpoint limit or could not be read.",
             ))
         })?;
     serde_json::from_slice(&bytes).map_err(|error| {
@@ -1140,6 +1149,38 @@ fn one_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<Option<&
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn editable_text_json_limit_accepts_a_full_boundary_body_after_escaping() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Input {
+            content: String,
+            expected_revision: String,
+        }
+        let content = "\"".repeat(
+            usize::try_from(crate::project::MAX_EDITABLE_PROJECT_TEXT_BYTES)
+                .expect("editable text limit should fit usize"),
+        );
+        let body = serde_json::to_vec(&json!({
+            "content": content,
+            "expectedRevision": "sha256:revision"
+        }))
+        .expect("fixture should serialize");
+        assert!(body.len() > MAX_JSON_BODY_BYTES);
+        let request = Request::new(Body::from(body));
+
+        let input: Input = json_body_with_limit(request, MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES)
+            .await
+            .expect("the complete editable text envelope should fit its transport limit");
+
+        assert_eq!(
+            input.content.len(),
+            usize::try_from(crate::project::MAX_EDITABLE_PROJECT_TEXT_BYTES)
+                .expect("editable text limit should fit usize")
+        );
+        assert_eq!(input.expected_revision, "sha256:revision");
+    }
 
     #[test]
     fn cli_product_work_admission_follows_the_closed_command_write_contract() {

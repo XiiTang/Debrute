@@ -1,6 +1,7 @@
 import type { CanvasFontId, CanvasTextAppearance } from '@debrute/app-protocol';
 import {
   canvasTextFontUrlSource,
+  combineCanvasTextFontResources,
   createCanvasTextFontResource,
   createCanvasTextRenderProfile,
   type CanvasTextFontFaceDefinition,
@@ -164,16 +165,5 @@ function fontResourceWithFallback(
   primary: CanvasTextFontResource,
   fallback: CanvasTextFontResource
 ): CanvasTextFontResource {
-  const identity = JSON.stringify([primary.identity, fallback.identity]);
-  return {
-    identity,
-    fontFamily: `${primary.fontFamily}, ${fallback.fontFamily}`,
-    async prepare(document) {
-      const [primaryFont, fallbackFont] = await Promise.all([
-        primary.prepare(document),
-        fallback.prepare(document)
-      ]);
-      return { identity, faces: [...primaryFont.faces, ...fallbackFont.faces] };
-    }
-  };
+  return combineCanvasTextFontResources([primary, fallback]);
 }

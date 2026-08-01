@@ -1,7 +1,15 @@
 import React from 'react';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import { useCanvasTextProjectFontEnvironment } from './font-subset/CanvasTextProjectFontEnvironment.js';
 
-const CanvasTextRenderProfileContext = React.createContext<CanvasTextRenderProfile | undefined>(undefined);
+interface CanvasTextRenderProfileContextValue {
+  readonly profile: CanvasTextRenderProfile;
+  readonly interactiveReady: boolean;
+}
+
+const CanvasTextRenderProfileContext = React.createContext<
+  CanvasTextRenderProfileContextValue | undefined
+>(undefined);
 
 export function CanvasTextRenderProfileProvider({
   profile,
@@ -11,7 +19,7 @@ export function CanvasTextRenderProfileProvider({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <CanvasTextRenderProfileContext.Provider value={profile}>
+    <CanvasTextRenderProfileContext.Provider value={{ profile, interactiveReady: false }}>
       {children}
     </CanvasTextRenderProfileContext.Provider>
   );
@@ -28,7 +36,11 @@ export function CanvasTextRenderProfileGate({
   onReady?: (() => void) | undefined;
   children: React.ReactNode;
 }): React.ReactElement {
-  const inheritedProfile = React.useContext(CanvasTextRenderProfileContext);
+  const fontEnvironment = useCanvasTextProjectFontEnvironment();
+  const inherited = React.useContext(CanvasTextRenderProfileContext);
+  const inheritedProfile = inherited?.interactiveReady
+    ? inherited.profile
+    : fontEnvironment.activeInteractiveProfile;
   const requestedProfileRef = React.useRef(profile);
   requestedProfileRef.current = profile;
   const [state, setState] = React.useState<{
@@ -56,7 +68,7 @@ export function CanvasTextRenderProfileGate({
     setState((current) => current.requestedIdentity === requestedProfile.identity && !current.error
       ? current
       : { requestedIdentity: requestedProfile.identity, active: current.active });
-    void requestedProfile.prepare(document).then(() => {
+    void fontEnvironment.prepareInteractive(requestedProfile).then(() => {
       if (!cancelled) {
         setState({ requestedIdentity: requestedProfile.identity, active: requestedProfile });
       }
@@ -72,7 +84,7 @@ export function CanvasTextRenderProfileGate({
     return () => {
       cancelled = true;
     };
-  }, [inheritedProfile, profile.identity, state.active]);
+  }, [fontEnvironment, inheritedProfile, profile.identity, state.active]);
 
   const currentState = state.requestedIdentity === profile.identity
     ? state
@@ -82,7 +94,7 @@ export function CanvasTextRenderProfileGate({
       onReady?.();
     }
   }, [currentState.active?.identity, currentState.error, onReady, profile.identity]);
-  if (currentState?.error) {
+  if (currentState?.error && !currentState.active) {
     return (
       <main className="boot-screen" role="alert" data-testid="canvas-text-render-profile-error">
         <strong>Canvas text rendering is unavailable.</strong>
@@ -94,18 +106,21 @@ export function CanvasTextRenderProfileGate({
     return <>{pending}</>;
   }
   return (
-    <CanvasTextRenderProfileProvider profile={currentState.active}>
+    <CanvasTextRenderProfileContext.Provider value={{
+      profile: currentState.active,
+      interactiveReady: true
+    }}>
       {children}
-    </CanvasTextRenderProfileProvider>
+    </CanvasTextRenderProfileContext.Provider>
   );
 }
 
 export function useCanvasTextRenderProfile(): CanvasTextRenderProfile {
-  const profile = React.useContext(CanvasTextRenderProfileContext);
-  if (!profile) {
+  const value = React.useContext(CanvasTextRenderProfileContext);
+  if (!value) {
     throw new Error('CanvasTextRenderProfileProvider is required.');
   }
-  return profile;
+  return value.profile;
 }
 
 function errorFromUnknown(error: unknown): Error {

@@ -207,6 +207,7 @@ pub fn project_canvas(
             .map(|node| ProjectedCanvasNode {
                 availability: availability(&node),
                 node,
+                text_language: None,
                 video_presentation: None,
             })
             .collect(),
@@ -245,6 +246,19 @@ pub fn project_canvas_with_known_projection(
             )
     });
     for node in &mut result.nodes {
+        if node.node.media_kind == Some(CanvasMediaKind::Text)
+            && matches!(node.availability, CanvasNodeAvailability::Available { .. })
+        {
+            node.text_language = by_path
+                .get(node.node.project_relative_path.as_str())
+                .and_then(|projected| projected.text_language.clone());
+            if node.text_language.is_none() {
+                return Err(ProjectError::Validation(format!(
+                    "Canvas text language is not loaded: {}",
+                    node.node.project_relative_path
+                )));
+            }
+        }
         if node.node.media_kind == Some(CanvasMediaKind::Video)
             && matches!(node.availability, CanvasNodeAvailability::Available { .. })
         {

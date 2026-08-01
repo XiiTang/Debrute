@@ -35,12 +35,11 @@ describe('CanvasTextPreviewImageHandoff', { tags: ['canvas-text'] }, () => {
     expect(visibleElement).toBe(first);
     expect(visibleElement?.src).toContain('w=320');
     expect(pendingElement?.src).toContain('w=640');
-    const decode = vi.fn(async () => undefined);
+    const decode = vi.fn(() => Promise.reject(new Error('redundant decode must not run')));
     Object.defineProperty(pendingElement, 'decode', { configurable: true, value: decode });
-
     await act(async () => pendingElement?.dispatchEvent(new Event('load')));
 
-    expect(decode).toHaveBeenCalledTimes(1);
+    expect(decode).not.toHaveBeenCalled();
     expect(onPendingReady).toHaveBeenCalledWith(pending);
     await renderHandoff(root, { visible: pending }, { onPendingReady });
 
@@ -52,48 +51,69 @@ describe('CanvasTextPreviewImageHandoff', { tags: ['canvas-text'] }, () => {
   it('promotes a cached pending image whose load completed before the layout effect', async () => {
     const pending = source(640);
     const onPendingReady = vi.fn();
-    const decode = vi.fn(async () => undefined);
     const completeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'complete');
     const naturalWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth');
-    const decodeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'decode');
     Object.defineProperties(HTMLImageElement.prototype, {
       complete: { configurable: true, get: () => true },
-      naturalWidth: { configurable: true, get: () => 640 },
-      decode: { configurable: true, value: decode }
+      naturalWidth: { configurable: true, get: () => 640 }
     });
 
     try {
       await renderHandoff(root, { pending }, { onPendingReady });
 
-      expect(decode).toHaveBeenCalledTimes(1);
       expect(onPendingReady).toHaveBeenCalledWith(pending);
     } finally {
       restoreProperty(HTMLImageElement.prototype, 'complete', completeDescriptor);
       restoreProperty(HTMLImageElement.prototype, 'naturalWidth', naturalWidthDescriptor);
-      restoreProperty(HTMLImageElement.prototype, 'decode', decodeDescriptor);
     }
   });
 
-  it('ignores a stale pending decode after a newer width replaces its DOM element', async () => {
-    const visible = source(320);
-    const stale = source(480);
-    const current = source(640);
-    const staleDecode = deferred<void>();
+  it('promotes a cached pending image once across the StrictMode effect probe', async () => {
+    const pending = source(640);
+    const onPendingReady = vi.fn();
+    const completeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'complete');
+    const naturalWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth');
+    Object.defineProperties(HTMLImageElement.prototype, {
+      complete: { configurable: true, get: () => true },
+      naturalWidth: { configurable: true, get: () => 640 }
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <React.StrictMode>
+            <CanvasTextPreviewImageHandoff
+              presentation={{ pending }}
+              onPendingReady={onPendingReady}
+              onPendingFailure={() => undefined}
+              onVisibleFailure={() => undefined}
+              onVisibleCommitted={() => undefined}
+            />
+          </React.StrictMode>
+        );
+      });
+
+      expect(onPendingReady).toHaveBeenCalledTimes(1);
+      expect(onPendingReady).toHaveBeenCalledWith(pending);
+    } finally {
+      restoreProperty(HTMLImageElement.prototype, 'complete', completeDescriptor);
+      restoreProperty(HTMLImageElement.prototype, 'naturalWidth', naturalWidthDescriptor);
+    }
+  });
+
+  it('settles a pending image only once when load fires repeatedly', async () => {
+    const pending = source(640);
     const onPendingReady = vi.fn();
 
-    await renderHandoff(root, { visible, pending: stale }, { onPendingReady });
-    const staleElement = imageFor(container, 'pending');
-    Object.defineProperty(staleElement, 'decode', {
-      configurable: true,
-      value: () => staleDecode.promise
+    await renderHandoff(root, { pending }, { onPendingReady });
+    const pendingElement = imageFor(container, 'pending');
+    await act(async () => {
+      pendingElement?.dispatchEvent(new Event('load'));
+      pendingElement?.dispatchEvent(new Event('load'));
     });
-    await act(async () => staleElement?.dispatchEvent(new Event('load')));
 
-    await renderHandoff(root, { visible, pending: current }, { onPendingReady });
-    await act(async () => staleDecode.resolve(undefined));
-
-    expect(staleElement?.isConnected).toBe(false);
-    expect(onPendingReady).not.toHaveBeenCalledWith(stale);
+    expect(onPendingReady).toHaveBeenCalledTimes(1);
+    expect(onPendingReady).toHaveBeenCalledWith(pending);
   });
 
   it('reports an error from the promoted visible DOM image', async () => {
@@ -103,20 +123,15 @@ describe('CanvasTextPreviewImageHandoff', { tags: ['canvas-text'] }, () => {
 
     await renderHandoff(root, { pending }, { onPendingReady, onVisibleFailure });
     const pendingElement = imageFor(container, 'pending');
-    Object.defineProperty(pendingElement, 'decode', {
-      configurable: true,
-      value: async () => undefined
-    });
     await act(async () => pendingElement?.dispatchEvent(new Event('load')));
     await renderHandoff(root, { visible: pending }, { onPendingReady, onVisibleFailure });
     await act(async () => pendingElement?.dispatchEvent(new Event('error')));
 
-    expect(onVisibleFailure).toHaveBeenCalledWith(pending, expect.any(Event), 'load');
+    expect(onVisibleFailure).toHaveBeenCalledWith(pending, expect.any(Event));
   });
 
-  it('reports a pending image decode failure separately from a load failure', async () => {
+  it('reports a pending image load failure', async () => {
     const pending = source(640);
-    const decodeFailure = new Error('decode failed');
     const onPendingFailure = vi.fn();
 
     await act(async () => {
@@ -131,14 +146,9 @@ describe('CanvasTextPreviewImageHandoff', { tags: ['canvas-text'] }, () => {
       );
     });
     const pendingElement = imageFor(container, 'pending');
-    Object.defineProperty(pendingElement, 'decode', {
-      configurable: true,
-      value: async () => Promise.reject(decodeFailure)
-    });
+    await act(async () => pendingElement?.dispatchEvent(new Event('error')));
 
-    await act(async () => pendingElement?.dispatchEvent(new Event('load')));
-
-    expect(onPendingFailure).toHaveBeenCalledWith(pending, decodeFailure, 'decode');
+    expect(onPendingFailure).toHaveBeenCalledWith(pending, expect.any(Event));
   });
 
   it('reports one visible commit only after a rendering opportunity', async () => {
@@ -192,11 +202,6 @@ describe('CanvasTextPreviewImageHandoff', { tags: ['canvas-text'] }, () => {
       );
     });
     const pendingElement = imageFor(container, 'pending');
-    Object.defineProperty(pendingElement, 'decode', {
-      configurable: true,
-      value: async () => undefined
-    });
-
     await act(async () => pendingElement?.dispatchEvent(new Event('load')));
 
     expect(onPendingReady).toHaveBeenCalledWith(pending);
@@ -224,14 +229,6 @@ async function renderHandoff(
     );
   });
   return imageFor(document.body, 'visible');
-}
-
-function deferred<T>() {
-  let resolvePromise!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return { promise, resolve: resolvePromise };
 }
 
 function source(previewWidth: number): CanvasTextPreviewSource {

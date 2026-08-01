@@ -21,8 +21,24 @@ import { I18nProvider } from '../i18n';
 
 vi.mock('./CanvasTextRenderProfileContext.js', async () => {
   const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
-  return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
+  return {
+    useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
+    CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => <>{children}</>
+  };
 });
+
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+  useCanvasTextProjectFontEnvironment: () => ({
+    previewSession: {
+      prepareCoverage: async () => {
+        const preparedFont = { resourceIdentity: 'test', embeddedFaces: [] };
+        return { activate: () => preparedFont, discard: () => undefined };
+      },
+      dispose: () => undefined
+    },
+    setPreviewMetricsObserver: () => undefined
+  })
+}));
 
 vi.mock('./CanvasTextPreviewStyleKey', () => ({
   canvasTextPreviewStyleSnapshotForDocument: () => ({ color: '#fff' }),
@@ -51,6 +67,8 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
         resourceZoom={1}
         devicePixelRatio={1}
         culledNodePaths={new Set()}
+        visibleRect={{ x: 0, y: 0, width: 1000, height: 1000 }}
+        virtualRect={{ x: -1000, y: -1000, width: 3000, height: 3000 }}
         styleDependencyKey="test"
         previewResourceScheduler={previewResourceScheduler}
       >
@@ -369,7 +387,7 @@ describe('CanvasNodeContent', () => {
           selected={false}
           culled={false}
           actions={actionsFixture()}
-          textBuffer={textBuffer('flow/readme.md', 'rev-a')}
+          textBuffer={undefined}
           textPreview={{
             projectRelativePath: 'flow/readme.md',
             sourceKey: 'canvas-1\u001fflow/readme.md\u001ffp\u001f700',
@@ -393,6 +411,7 @@ describe('CanvasNodeContent', () => {
       expect(html).toContain('data-preview-width="700"');
       expect(html).not.toContain('data-canvas-text-editor="true"');
       expect(html).not.toContain('data-editor-engine="codemirror"');
+      expect(html).not.toContain('Loading');
     });
 
     it('uses the first inactive text preview click as the mounted editor caret request', async () => {
@@ -1113,7 +1132,7 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
     )).toBe('flow/readme.md');
   });
 
-  it('does not read text content for a culled node until visibility or edit intent requests it', () => {
+  it('does not read inactive text content merely because viewport presentation requests it', () => {
     const node = textNode('flow/readme.md', 'rev-a');
     expect(canvasTextBufferEnsureKey(node, undefined, false)).toBeUndefined();
     expect(canvasTextBufferEnsureKey(node, undefined, true)).toBe('flow/readme.md');
@@ -1122,6 +1141,44 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
   it('skips ensure whenever the current text buffer is already loaded', () => {
     expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-a'), textBuffer('flow/readme.md', 'rev-a'), true)).toBeUndefined();
     expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-b'), textBuffer('flow/readme.md', 'rev-a'), true)).toBeUndefined();
+  });
+
+  it('loads an editor buffer only when the text node actually enters edit mode', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const ensureTextFileBuffer = vi.fn(async () => undefined);
+    const renderNode = (selected: boolean) => (
+      <TestProviders>
+        <CanvasNodeContent
+          node={textNode('flow/readme.md', 'rev-a')}
+          selected={selected}
+          culled={false}
+          actions={actionsFixture({ ensureTextFileBuffer })}
+          textBuffer={undefined}
+          onVideoPlayerMounted={() => undefined}
+          onVideoPlayingChange={() => undefined}
+          onRegisterVideoTarget={() => undefined}
+          onUpdateVideoPlaybackTime={() => undefined}
+          onUpdateTextViewport={() => undefined}
+          onSelectNode={() => undefined}
+          onTitlePointerDown={() => undefined}
+          onTitlePointerMove={() => undefined}
+          onTitlePointerUp={() => undefined}
+        />
+      </TestProviders>
+    );
+    try {
+      await act(async () => root.render(renderNode(false)));
+      expect(ensureTextFileBuffer).not.toHaveBeenCalled();
+
+      await act(async () => root.render(renderNode(true)));
+      expect(ensureTextFileBuffer).toHaveBeenCalledOnce();
+      expect(ensureTextFileBuffer).toHaveBeenCalledWith('flow/readme.md');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 });
 
@@ -1300,14 +1357,15 @@ function renderImagePreview(imageState: CanvasImageNodeAssetHookState): string {
   );
 }
 
-function actionsFixture(): WorkbenchActions {
+function actionsFixture(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {
   return {
     ensureTextFileBuffer: async () => undefined,
     saveTextFileBuffer: async () => undefined,
     discardTextFileBuffer: async () => undefined,
     openTextEditorWindow: () => undefined,
     updateTextFileBuffer: () => undefined,
-    toggleTextFileWordWrap: () => undefined
+    toggleTextFileWordWrap: () => undefined,
+    ...overrides
   } as unknown as WorkbenchActions;
 }
 

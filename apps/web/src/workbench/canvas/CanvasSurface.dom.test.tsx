@@ -35,12 +35,30 @@ import { CANVAS_CAMERA_IDLE_MS, type CanvasCamera } from './runtime/canvasCamera
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
-import { I18nProvider } from '../i18n';
+import { I18nProvider as WorkbenchI18nProvider } from '../i18n/index.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
+import { CanvasTextProjectFontEnvironmentProvider } from './font-subset/CanvasTextProjectFontEnvironment.js';
 
-vi.mock('./CanvasTextRenderProfileContext.js', async () => {
+vi.mock('./CanvasTextRenderProfileContext.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./CanvasTextRenderProfileContext.js')>();
   const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
-  return { useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE };
+  return {
+    ...actual,
+    useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
+    CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => children
+  };
 });
+
+function I18nProvider({
+  locale,
+  children
+}: React.ComponentProps<typeof WorkbenchI18nProvider>): React.ReactElement {
+  return (
+    <CanvasTextProjectFontEnvironmentProvider profile={DEFAULT_CANVAS_TEXT_RENDER_PROFILE}>
+      <WorkbenchI18nProvider locale={locale}>{children}</WorkbenchI18nProvider>
+    </CanvasTextProjectFontEnvironmentProvider>
+  );
+}
 
 const {
   videoTogglePlaybackSpy,
@@ -496,7 +514,7 @@ describe('CanvasSurface', () => {
       });
       await waitForCanvasSurfaceElement(container, '[data-editor-mode="edit"]');
       expect(container.querySelectorAll('[data-editor-mode="edit"]')).toHaveLength(1);
-      expect(container.querySelectorAll('.canvas-text-preview-empty')).toHaveLength(1);
+      expect(container.querySelectorAll('.canvas-text-node')).toHaveLength(2);
       expect(container.querySelector('[data-editor-mode="preview"]')).toBeNull();
     } finally {
       await act(async () => root.unmount());
@@ -884,7 +902,7 @@ describe('CanvasSurface', () => {
     } as unknown as typeof Image;
     vi.stubGlobal('Image', ImageMock);
     const restoreAnimationFrame = installAnimationFrame();
-    const restoreTextBodyMeasurement = installCanvasTextBodyMeasurement({ width: 420, height: 260 });
+    const restoreTextBodyMeasurement = installCanvasTextBodyMeasurement({ width: 20, height: 1 });
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -937,7 +955,7 @@ describe('CanvasSurface', () => {
         canvasId: canvas.id,
         sources: [expect.objectContaining({ projectRelativePath: node.projectRelativePath })]
       });
-      expect(previewImage?.getAttribute('data-preview-width')).toBe('210');
+      expect(previewImage?.getAttribute('data-preview-width')).toBe('80');
     } finally {
       await act(async () => {
         root.unmount();
@@ -1979,6 +1997,7 @@ function textProjectionNode(path: string, x: number, y: number, revision: string
   return {
     ...nodeFixture(path, x, y),
     mediaKind: 'text',
+    textLanguage: 'markdown',
     availability: {
       state: 'available',
       size: 100,

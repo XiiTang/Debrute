@@ -1,4 +1,5 @@
-const CANVAS_TEXT_FONT_ALIAS_PREFIX = '__debrute_canvas_text_';
+const CANVAS_TEXT_FULL_FONT_ALIAS_PREFIX = '__debrute_canvas_text_full_';
+const CANVAS_TEXT_PREVIEW_FONT_ALIAS_PREFIX = '__debrute_canvas_text_preview_';
 
 const CANVAS_TEXT_EDITOR_GEOMETRY = {
   linePaddingInlinePx: 8,
@@ -6,10 +7,11 @@ const CANVAS_TEXT_EDITOR_GEOMETRY = {
   gutterPaddingRightPx: 3
 } as const;
 
-type CanvasTextFontDigest = `sha256:${string}`;
+export type CanvasTextFontDigest = `sha256:${string}`;
 
-interface CanvasTextFontSource {
-  read(): Promise<ArrayBuffer>;
+export interface CanvasTextFontSource {
+  readonly url?: string | undefined;
+  read(signal?: AbortSignal): Promise<ArrayBuffer>;
 }
 
 export interface CanvasTextFontFaceDefinition {
@@ -18,21 +20,35 @@ export interface CanvasTextFontFaceDefinition {
   readonly weight: number;
 }
 
+export interface CanvasTextFontFace {
+  readonly source: CanvasTextFontSource;
+  readonly digest: CanvasTextFontDigest;
+  readonly weight: string;
+}
+
+export interface CanvasTextFontFamily {
+  readonly identity: string;
+  readonly interactiveAlias: string;
+  readonly previewAlias: string;
+  readonly faces: readonly CanvasTextFontFace[];
+}
+
 export interface CanvasTextFontResource {
   readonly identity: string;
-  readonly fontFamily: string;
-  prepare(document: Document): Promise<CanvasTextPreparedFont>;
+  readonly interactiveFontFamily: string;
+  readonly previewFontFamily: string;
+  readonly families: readonly CanvasTextFontFamily[];
 }
 
-export interface CanvasTextPreparedFontFace {
+export interface CanvasTextPreparedFont {
+  readonly resourceIdentity: string;
+  readonly embeddedFaces: readonly CanvasTextEmbeddedFontFace[];
+}
+
+export interface CanvasTextEmbeddedFontFace {
   readonly family: string;
-  readonly bytes: ArrayBuffer;
-  readonly descriptors: FontFaceDescriptors;
-}
-
-interface CanvasTextPreparedFont {
-  readonly identity: string;
-  readonly faces: readonly CanvasTextPreparedFontFace[];
+  readonly weight: string;
+  readonly css: string;
 }
 
 export interface CanvasTextRenderProfileDefinition {
@@ -81,29 +97,22 @@ type CanvasTextRenderProfileCssVariable =
   | `--canvas-text-editor-${typeof CANVAS_TEXT_TYPOGRAPHY_BINDINGS[number][1]}`
   | `--canvas-text-editor-${typeof CANVAS_TEXT_GEOMETRY_BINDINGS[number][1]}`;
 
+export type CanvasTextEditorStyle = Readonly<Record<CanvasTextRenderProfileCssVariable, string>>;
+
 export interface CanvasTextRenderProfile {
   readonly identity: string;
+  readonly font: CanvasTextFontResource;
   readonly resolvedTypography: CanvasTextResolvedTypography;
   readonly editorGeometry: CanvasTextEditorGeometry;
-  readonly editorStyle: Readonly<Record<CanvasTextRenderProfileCssVariable, string>>;
-  prepare(document: Document): Promise<CanvasTextPreparedFont>;
-}
-
-interface ResolvedCanvasTextFontFace {
-  readonly source: CanvasTextFontSource;
-  readonly digest: CanvasTextFontDigest;
-  readonly weight: string;
-}
-
-interface ResolvedCanvasTextFontFamily {
-  readonly alias: string;
-  readonly faces: readonly ResolvedCanvasTextFontFace[];
+  readonly editorStyle: CanvasTextEditorStyle;
+  readonly previewEditorStyle: CanvasTextEditorStyle;
 }
 
 export function canvasTextFontUrlSource(url: string): CanvasTextFontSource {
   return {
-    async read() {
-      const response = await fetch(url);
+    url,
+    async read(signal) {
+      const response = await fetch(url, signal ? { signal } : undefined);
       if (!response.ok) {
         throw new Error(`Canvas text font asset request failed (${response.status}): ${url}.`);
       }
@@ -115,30 +124,42 @@ export function canvasTextFontUrlSource(url: string): CanvasTextFontSource {
 export function createCanvasTextFontResource(
   faces: readonly CanvasTextFontFaceDefinition[]
 ): CanvasTextFontResource {
-  const resolvedFaces = faces.map((face): ResolvedCanvasTextFontFace => ({
+  if (faces.length === 0) {
+    throw new Error('Canvas text font resource requires at least one face.');
+  }
+  const resolvedFaces = faces.map((face): CanvasTextFontFace => ({
     source: face.source,
     digest: face.sha256,
     weight: String(face.weight)
   }));
-  const faceIdentity = resolvedFaces.map(({ digest, weight }) => ({ digest, weight }));
-  const identity = JSON.stringify(faceIdentity);
-  const families: readonly ResolvedCanvasTextFontFamily[] = [{
-    alias: `${CANVAS_TEXT_FONT_ALIAS_PREFIX}0_${encodeURIComponent(identity)}`,
-    faces: resolvedFaces
-  }];
-  const preparedDocuments = new WeakMap<Document, Promise<CanvasTextPreparedFont>>();
-  return {
+  const identity = JSON.stringify(resolvedFaces.map(({ digest, weight }) => ({ digest, weight })));
+  const encodedIdentity = encodeURIComponent(identity);
+  return canvasTextFontResourceFromFamilies([{
     identity,
-    fontFamily: families.map((family) => `"${family.alias}"`).join(', '),
-    prepare(document) {
-      const current = preparedDocuments.get(document);
-      if (current) {
-        return current;
-      }
-      const pending = prepareCanvasTextFont(document, identity, families);
-      preparedDocuments.set(document, pending);
-      return pending;
-    }
+    interactiveAlias: `${CANVAS_TEXT_FULL_FONT_ALIAS_PREFIX}${encodedIdentity}`,
+    previewAlias: `${CANVAS_TEXT_PREVIEW_FONT_ALIAS_PREFIX}${encodedIdentity}`,
+    faces: resolvedFaces
+  }]);
+}
+
+export function combineCanvasTextFontResources(
+  resources: readonly CanvasTextFontResource[]
+): CanvasTextFontResource {
+  const families = resources.flatMap((resource) => resource.families);
+  if (families.length === 0) {
+    throw new Error('Canvas text font resource combination requires at least one family.');
+  }
+  return canvasTextFontResourceFromFamilies(families);
+}
+
+function canvasTextFontResourceFromFamilies(
+  families: readonly CanvasTextFontFamily[]
+): CanvasTextFontResource {
+  return {
+    identity: JSON.stringify(families.map((family) => family.identity)),
+    interactiveFontFamily: families.map((family) => `"${family.interactiveAlias}"`).join(', '),
+    previewFontFamily: families.map((family) => `"${family.previewAlias}"`).join(', '),
+    families
   };
 }
 
@@ -164,8 +185,7 @@ export function createCanvasTextRenderProfile(
     fontSynthesis: 'none'
   };
   const editorGeometry = CANVAS_TEXT_EDITOR_GEOMETRY;
-  const editorStyle = Object.fromEntries([
-    ['--canvas-text-editor-font-family', definition.font.fontFamily],
+  const sharedStyle = Object.fromEntries([
     ...CANVAS_TEXT_TYPOGRAPHY_BINDINGS.map(([key, cssProperty]) => [
       `--canvas-text-editor-${cssProperty}`,
       resolvedTypography[key]
@@ -174,57 +194,46 @@ export function createCanvasTextRenderProfile(
       `--canvas-text-editor-${cssProperty}`,
       `${editorGeometry[key]}px`
     ])
-  ]) as Record<CanvasTextRenderProfileCssVariable, string>;
+  ]);
+  const editorStyle = {
+    '--canvas-text-editor-font-family': definition.font.interactiveFontFamily,
+    ...sharedStyle
+  } as CanvasTextEditorStyle;
+  const previewEditorStyle = {
+    '--canvas-text-editor-font-family': definition.font.previewFontFamily,
+    ...sharedStyle
+  } as CanvasTextEditorStyle;
   return {
     identity: JSON.stringify({
       font: definition.font.identity,
       typography: resolvedTypography,
       editorGeometry
     }),
+    font: definition.font,
     resolvedTypography,
     editorGeometry,
     editorStyle,
-    prepare: (document: Document) => definition.font.prepare(document)
+    previewEditorStyle
   };
 }
 
-async function prepareCanvasTextFont(
-  document: Document,
-  identity: string,
-  families: readonly ResolvedCanvasTextFontFamily[]
-): Promise<CanvasTextPreparedFont> {
-  const bytesByDigest = new Map<CanvasTextFontDigest, Promise<ArrayBuffer>>();
-  const load = (face: ResolvedCanvasTextFontFace): Promise<ArrayBuffer> => {
-    const current = bytesByDigest.get(face.digest);
-    if (current) {
-      return current;
-    }
-    const pending = face.source.read().then(async (bytes) => {
-      const digest = await sha256(bytes);
-      if (digest !== face.digest) {
-        throw new Error(
-          `Canvas text font digest mismatch: expected ${face.digest}, received ${digest}.`
-        );
-      }
-      return bytes;
-    });
-    bytesByDigest.set(face.digest, pending);
-    return pending;
-  };
-  const preparedFaces: CanvasTextPreparedFontFace[] = [];
-  for (const family of families) {
-    for (const face of family.faces) {
-      const bytes = await load(face);
-      const descriptors = fontFaceDescriptors(face);
-      const loaded = await new FontFace(family.alias, bytes, descriptors).load();
-      document.fonts.add(loaded);
-      preparedFaces.push({ family: family.alias, bytes, descriptors });
-    }
+export async function readVerifiedCanvasTextFontFace(
+  face: CanvasTextFontFace,
+  signal?: AbortSignal
+): Promise<ArrayBuffer> {
+  const bytes = await face.source.read(signal);
+  const digest = await canvasTextFontSha256(bytes);
+  if (digest !== face.digest) {
+    throw new Error(
+      `Canvas text font digest mismatch: expected ${face.digest}, received ${digest}.`
+    );
   }
-  return { identity, faces: preparedFaces };
+  return bytes;
 }
 
-function fontFaceDescriptors(face: ResolvedCanvasTextFontFace): FontFaceDescriptors {
+export function canvasTextFontFaceDescriptors(
+  face: Pick<CanvasTextFontFace, 'weight'>
+): FontFaceDescriptors {
   return {
     weight: face.weight,
     style: 'normal',
@@ -232,7 +241,32 @@ function fontFaceDescriptors(face: ResolvedCanvasTextFontFace): FontFaceDescript
   };
 }
 
-async function sha256(bytes: ArrayBuffer): Promise<CanvasTextFontDigest> {
+export async function canvasTextFontDataUrl(bytes: ArrayBuffer): Promise<string> {
+  if (typeof FileReader !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error('Canvas text font data URL encoding returned a non-string result.'));
+        }
+      }, { once: true });
+      reader.addEventListener('error', () => {
+        reject(reader.error ?? new Error('Canvas text font data URL encoding failed.'));
+      }, { once: true });
+      reader.readAsDataURL(new Blob([bytes], { type: 'font/woff2' }));
+    });
+  }
+  const source = new Uint8Array(bytes);
+  let binary = '';
+  for (let offset = 0; offset < source.length; offset += 32_768) {
+    binary += String.fromCharCode(...source.subarray(offset, offset + 32_768));
+  }
+  return `data:font/woff2;base64,${btoa(binary)}`;
+}
+
+async function canvasTextFontSha256(bytes: ArrayBuffer): Promise<CanvasTextFontDigest> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return `sha256:${[...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, '0'))

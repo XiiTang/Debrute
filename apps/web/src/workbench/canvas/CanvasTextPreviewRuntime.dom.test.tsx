@@ -3,1468 +3,476 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import type { TextFileBuffer, WorkbenchActions } from '../../types';
+import type { TextFileBuffer, WorkbenchActions } from '../../types.js';
 import type {
-  CanvasTextPreviewRasterResult,
-  CanvasTextPreviewTarget
-} from './CanvasTextPreviewCapture';
-import { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure';
-import type { CanvasTextPreviewPresentation } from './CanvasTextPreviewImageHandoff';
-import {
-  createCanvasPreviewResourceScheduler,
-  type CanvasPreviewResourceRequest,
-  type CanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler';
+  CanvasTextPreviewCaptureResult,
+  CanvasTextPreviewCaptureTarget
+} from './CanvasTextPreviewCapture.js';
+import type { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure.js';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
 import {
   CanvasTextPreviewProvider,
-  canvasTextPreviewNextCaptureTarget,
-  canvasTextPreviewTargetsForNodes,
-  useCanvasTextPreviewRuntime,
-  type CanvasTextPreviewMeasuredBody,
-  type CanvasTextPreviewRuntimeValue
-} from './CanvasTextPreviewRuntime';
+  useCanvasTextPreviewRuntime
+} from './CanvasTextPreviewRuntime.js';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
 import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
 import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
+import type { CanvasTextPreviewFontSession } from './font-subset/CanvasTextPreviewFontSession.js';
 
-const TEST_CANVAS_TEXT_RENDER_PROFILE = {
-  ...DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
-  prepare: async () => ({ identity: 'test-font', faces: [] })
-};
+type SavePreviewResult = Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>;
+
+const TEST_PROFILE = DEFAULT_CANVAS_TEXT_RENDER_PROFILE;
+
+const fontEnvironmentMock = vi.hoisted(() => {
+  const activeFont = {
+    resourceIdentity: 'test-font',
+    embeddedFaces: [{ family: 'test', weight: '400', css: '@font-face{}' }]
+  };
+  const prepareCoverage = vi.fn<CanvasTextPreviewFontSession['prepareCoverage']>(async () => ({
+    activate: () => activeFont,
+    discard: () => undefined
+  }));
+  return {
+    previewSession: { prepareCoverage, dispose: vi.fn() },
+    prepareCoverage,
+    prepareInteractive: vi.fn(async () => undefined),
+    setPreviewMetricsObserver: vi.fn()
+  };
+});
+
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+  useCanvasTextProjectFontEnvironment: () => fontEnvironmentMock
+}));
 
 const laneMock = vi.hoisted(() => ({
-  renderedTargets: [] as Array<string | undefined>,
   props: undefined as {
-    target: CanvasTextPreviewTarget | undefined;
-    interactionActive: boolean;
-    onRasterized(target: CanvasTextPreviewTarget, result: CanvasTextPreviewRasterResult): void;
-    onFailure(target: CanvasTextPreviewTarget, failure: Error): void;
-  } | undefined
+    target: CanvasTextPreviewCaptureTarget | undefined;
+    onRasterized(target: CanvasTextPreviewCaptureTarget, result: CanvasTextPreviewCaptureResult): void;
+    onFailure(target: CanvasTextPreviewCaptureTarget, failure: CanvasTextPreviewFailure): void;
+  } | undefined,
+  history: [] as string[]
 }));
-vi.mock('./CanvasTextPreviewCaptureLane', async () => {
+
+vi.mock('./CanvasTextPreviewCaptureLane.js', async () => {
   const ReactModule = await import('react');
   return {
     CanvasTextPreviewCaptureLane: (props: NonNullable<typeof laneMock.props>) => {
       laneMock.props = props;
-      laneMock.renderedTargets.push(props.target?.projectRelativePath);
+      if (props.target && laneMock.history.at(-1) !== props.target.projectRelativePath) {
+        laneMock.history.push(props.target.projectRelativePath);
+      }
       return ReactModule.createElement('div', { 'data-capture-target': props.target?.projectRelativePath });
     }
   };
 });
 
-it('requires CanvasTextPreviewProvider', () => {
-  expect(() => renderToStaticMarkup(<TextRuntimeConsumer />)).toThrow('CanvasTextPreviewProvider is required.');
-});
-
-function TextRuntimeConsumer(): React.ReactElement {
-  useCanvasTextPreviewRuntime();
-  return <div />;
-}
-
-vi.mock('./CanvasTextPreviewStyleKey', () => ({
-  canvasTextPreviewStyleSnapshotForDocument: (renderProfile: CanvasTextRenderProfile) => ({
-    color: '#fff',
-    renderProfileIdentity: renderProfile.identity
-  }),
-  canvasTextPreviewStyleKey: async (snapshot: { renderProfileIdentity: string }) => (
-    `sha256:${snapshot.renderProfileIdentity}`
-  )
+vi.mock('./CanvasTextPreviewStyleKey.js', () => ({
+  canvasTextPreviewStyleSnapshotForDocument: (profile: CanvasTextRenderProfile) => ({ identity: profile.identity }),
+  canvasTextPreviewStyleKey: async (snapshot: { identity: string }) => `sha256:${snapshot.identity}`
 }));
 
-let previewResourceScheduler: CanvasPreviewResourceScheduler;
-
 describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
-  let container: HTMLDivElement;
   let root: Root;
-  let frames: ReturnType<typeof installAnimationFrameQueue>;
+  let container: HTMLDivElement;
 
   beforeEach(() => {
     vi.clearAllMocks();
     laneMock.props = undefined;
-    laneMock.renderedTargets = [];
+    laneMock.history = [];
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
-    frames = installAnimationFrameQueue();
-    previewResourceScheduler = createCanvasPreviewResourceScheduler();
   });
 
   afterEach(async () => {
     await act(async () => root.unmount());
-    previewResourceScheduler.dispose();
     container.remove();
-    frames.restore();
-    vi.unstubAllGlobals();
   });
 
-  it('selects one missing source target and skips uploading or failed keys', () => {
-    const targets = [targetFixture('a.md'), targetFixture('b.md'), targetFixture('c.md')];
-    expect(canvasTextPreviewNextCaptureTarget({
-      targets,
-      sourceAvailability: {
-        'a.md': { fingerprint: targets[0]!.fingerprint, available: false },
-        'b.md': { fingerprint: targets[1]!.fingerprint, available: false },
-        'c.md': { fingerprint: targets[2]!.fingerprint, available: false }
-      },
-      uploadingTargetKeys: new Set([targetKey(targets[0]!)]),
-      failedTargetKeys: new Set([targetKey(targets[1]!)])
-    })).toEqual(targets[2]);
+  it('requires a provider', () => {
+    expect(() => renderToStaticMarkup(<RuntimeConsumer />)).toThrow('CanvasTextPreviewProvider is required.');
   });
 
-  it('starts a later capture only after the earlier raster completes while its upload remains unresolved', async () => {
-    const firstUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
-    const secondUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
-    const save = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>((input) => (
-      input.projectRelativePath === 'a.md' ? firstUpload.promise : secondUpload.promise
-    ));
-    const actions = actionsFixture({ available: false, save });
-
-    await renderProvider({
-      root,
-      nodes: [nodeFixture('a.md', 0), nodeFixture('b.md', 100)],
-      actions,
-      cameraState: 'idle'
-    });
-    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'a.md');
-    const first = laneMock.props!.target!;
-
-    expect(laneMock.props?.target?.projectRelativePath).toBe('a.md');
-    expect(save).not.toHaveBeenCalled();
-    await act(async () => laneMock.props?.onRasterized(first, rasterResult()));
-
-    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
-    expect(save).toHaveBeenCalledTimes(1);
-    laneMock.renderedTargets = [];
-    expect(laneMock.renderedTargets).not.toContain(undefined);
-    const second = laneMock.props!.target!;
-    await act(async () => laneMock.props?.onRasterized(second, rasterResult()));
-    expect(save).toHaveBeenCalledTimes(2);
-    expect(firstUpload.settled()).toBe(false);
-    expect(secondUpload.settled()).toBe(false);
-  });
-
-  it('resumes serialized capture after pending preview publication drains', async () => {
-    const firstUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
-    const secondUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
-    const thirdUpload = deferred<Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>>();
-    const save = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>((input) => (
-      input.projectRelativePath === 'a.md'
-        ? firstUpload.promise
-        : input.projectRelativePath === 'b.md'
-          ? secondUpload.promise
-          : thirdUpload.promise
-    ));
-    const nodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100), nodeFixture('c.md', 200)];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-
-    await renderProvider({
-      root,
-      nodes,
-      actions: actionsFixture({ available: false, save }),
-      cameraState: 'idle',
-      probe: (runtime) => {
-        runtimeValue = runtime;
-      }
-    });
-    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'a.md');
-    const first = laneMock.props!.target!;
-    await act(async () => laneMock.props?.onRasterized(first, rasterResult()));
-    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
-
-    await act(async () => firstUpload.resolve(saveResult(save.mock.calls[0]![0])));
-    await runFramesUntil(frames, () => runtimeValue?.presentationForNode({ node: nodes[0]! }).pending !== undefined);
-    const firstPending = runtimeValue!.presentationForNode({ node: nodes[0]! }).pending!;
-    await act(async () => runtimeValue?.reportPendingReady(nodes[0]!, firstPending));
-
-    const second = laneMock.props!.target!;
-    await act(async () => laneMock.props?.onRasterized(second, rasterResult()));
-    await runFramesUntil(frames, () => runtimeValue?.presentationForNode({ node: nodes[0]! }).visible !== undefined);
-    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'c.md');
-
-    expect(laneMock.props?.target?.projectRelativePath).toBe('c.md');
-    expect(secondUpload.settled()).toBe(false);
-  });
-
-  it('keeps one source availability request in flight and coalesces a latest follow-up batch', async () => {
-    const firstRequest = deferred<Awaited<ReturnType<WorkbenchActions['readCanvasTextPreviewSources']>>>();
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>()
-      .mockImplementationOnce(() => firstRequest.promise)
-      .mockImplementation(async (request) => missingSourcesResult(request));
-    const firstNode = nodeFixture('a.md', 0);
-
-    await renderProvider({
-      root,
-      nodes: [firstNode],
-      actions: actionsFixture({ available: false, read }),
-      cameraState: 'idle'
-    });
-    await runFramesUntil(frames, () => read.mock.calls.length === 1);
-    const firstInput = read.mock.calls[0]![0];
-
-    await renderProvider({
-      root,
-      nodes: [firstNode, nodeFixture('b.md', 100)],
-      actions: actionsFixture({ available: false, read }),
-      cameraState: 'idle'
-    });
-    await flushWork();
-
-    expect(read).toHaveBeenCalledTimes(1);
-
-    await act(async () => firstRequest.resolve(missingSourcesResult(firstInput)));
-    await runFramesUntil(frames, () => read.mock.calls.length === 2);
-
-    expect(read.mock.calls[1]![0].sources.map((source) => source.projectRelativePath)).toEqual(['b.md']);
-  });
-
-  it('keeps queued source availability off moving frames and resumes the latest batch once idle', async () => {
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
-      missingSourcesResult(request)
-    ));
-    const nodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100)];
-    const actions = actionsFixture({ available: false, read });
-
-    await renderProvider({ root, nodes, actions, cameraState: 'idle' });
-    await frames.runNext();
-    await waitFor(() => frames.pending() === 1);
-    expect(read).not.toHaveBeenCalled();
-
-    await renderProvider({ root, nodes, actions, cameraState: 'moving' });
-
-    expect(frames.pending()).toBe(0);
-    expect(read).not.toHaveBeenCalled();
-
-    await renderProvider({ root, nodes, actions, cameraState: 'idle' });
-    await runFramesUntil(frames, () => read.mock.calls.length === 1);
-
-    expect(read.mock.calls[0]![0].sources.map((source) => source.projectRelativePath)).toEqual(['a.md', 'b.md']);
-  });
-
-  it('records body measurement that first becomes pending after interaction is already active', async () => {
-    const recordCounter = vi.fn();
-    const actions = actionsFixture({ available: false });
-
-    await renderProvider({
-      root,
-      nodes: [],
-      actions,
-      cameraState: 'moving',
-      perfMonitor: { recordCounter }
-    });
-    await renderProvider({
-      root,
-      nodes: [nodeFixture('a.md', 0)],
-      actions,
-      cameraState: 'moving',
-      perfMonitor: { recordCounter }
-    });
-    await flushWork();
-
-    const pauseCounters = recordCounter.mock.calls
-      .map(([event]) => event.name)
-      .filter((name) => name.endsWith('-paused'));
-    expect(pauseCounters).toEqual(['text-preview-body-measurement-paused']);
-  });
-
-  it('records source availability that first becomes pending after interaction is already active', async () => {
-    const recordCounter = vi.fn();
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
-      missingSourcesResult(request)
-    ));
-    const node = nodeFixture('a.md', 0);
-    const actions = actionsFixture({ available: false, read });
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      content: 'first',
-      perfMonitor: { recordCounter }
-    });
-    await runFramesUntil(frames, () => read.mock.calls.length === 1);
-    recordCounter.mockClear();
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'moving',
-      content: 'second',
-      perfMonitor: { recordCounter }
-    });
-    await waitFor(() => recordCounter.mock.calls.some(([event]) => (
-      event.name === 'text-preview-source-check-paused'
-    )));
-
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(recordCounter.mock.calls.filter(([event]) => (
-      event.name === 'text-preview-source-check-paused'
-    ))).toHaveLength(1);
-  });
-
-  it('reuses unchanged target fingerprints when another node joins the Canvas', async () => {
-    const recordCounter = vi.fn();
-    const actions = actionsFixture({ available: true });
-    const firstNodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100)];
-    const fingerprintPaths = () => recordCounter.mock.calls
-      .map(([event]) => event)
-      .filter((event) => event.name === 'text-preview-target-fingerprint-computed')
-      .map((event) => event.detail?.projectRelativePath);
-
-    await renderProvider({
-      root,
-      nodes: firstNodes,
-      actions,
-      cameraState: 'idle',
-      perfMonitor: { recordCounter }
-    });
-    await runFramesUntil(frames, () => fingerprintPaths().length === 2);
-
-    await renderProvider({
-      root,
-      nodes: [...firstNodes, nodeFixture('c.md', 200)],
-      actions,
-      cameraState: 'idle',
-      perfMonitor: { recordCounter }
-    });
-    await runFramesUntil(frames, () => fingerprintPaths().length === 3);
-
-    expect(fingerprintPaths().sort()).toEqual(['a.md', 'b.md', 'c.md']);
-  });
-
-  it('reads each text body geometry only in the scheduled measurement frame', async () => {
-    const bodyWidthRead = vi.fn();
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
-      missingSourcesResult(request)
-    ));
-
-    await renderProvider({
-      root,
-      nodes: [nodeFixture('a.md', 0)],
-      actions: actionsFixture({ available: false, read }),
-      cameraState: 'idle',
-      onBodyWidthRead: bodyWidthRead,
-      strictMode: true
-    });
-
-    expect(bodyWidthRead).not.toHaveBeenCalled();
-    await runFramesUntil(frames, () => read.mock.calls.length === 1);
-    expect(bodyWidthRead).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps queued text body measurements off moving frames and resumes the latest batch once idle', async () => {
-    const bodyWidthRead = vi.fn();
-    const nodes = Array.from({ length: 100 }, (_, index) => nodeFixture(`node-${index}.md`, index * 100));
-    const actions = actionsFixture({ available: false });
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'idle',
-      onBodyWidthRead: bodyWidthRead
-    });
-    expect(frames.pending()).toBe(1);
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'moving',
-      onBodyWidthRead: bodyWidthRead
-    });
-
-    expect(frames.pending()).toBe(0);
-    expect(bodyWidthRead).not.toHaveBeenCalled();
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'idle',
-      onBodyWidthRead: bodyWidthRead
-    });
-    expect(frames.pending()).toBe(1);
-    await frames.runNext();
-
-    expect(bodyWidthRead).toHaveBeenCalledTimes(100);
-  });
-
-  it('measures only eligible text bodies and schedules newly eligible paths once', async () => {
-    const measuredPaths: string[] = [];
-    const onBodyWidthRead = (path: string) => measuredPaths.push(path);
-    const nodes = [
-      nodeFixture('visible.md', 0),
-      nodeFixture('culled.md', 100),
-      nodeFixture('active.md', 200)
-    ];
-    const actions = actionsFixture({ available: false });
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'idle',
-      activeInlineTextPath: 'active.md',
-      culledNodePaths: new Set(['culled.md']),
-      onBodyWidthRead
-    });
-    await frames.runNext();
-
-    expect(measuredPaths).toEqual(['visible.md']);
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'idle',
-      onBodyWidthRead
-    });
-    await runFramesUntil(frames, () => measuredPaths.length === 3);
-
-    expect(measuredPaths).toEqual(['visible.md', 'culled.md', 'active.md']);
-  });
-
-  it('ignores a disconnected body observer callback after the path registers a replacement', async () => {
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      observer: ResizeObserver;
-    }> = [];
-    vi.stubGlobal('ResizeObserver', class implements ResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        observers.push({ callback, observer: this });
-      }
-      disconnect(): void {}
-      observe(): void {}
-      unobserve(): void {}
-    });
-    const measuredWidths: number[] = [];
-    const node = nodeFixture('a.md', 0);
-    const actions = actionsFixture({ available: false });
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      bodyMeasurements: { 'a.md': { width: 320, height: 160 } },
-      onBodyWidthRead: (_path, width) => measuredWidths.push(width)
-    });
-    await runFramesUntil(frames, () => measuredWidths.length === 1);
-
-    const staleObserver = observers[0]!;
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      bodyMeasurements: { 'a.md': { width: 640, height: 160 } },
-      onBodyWidthRead: (_path, width) => measuredWidths.push(width)
-    });
-    staleObserver.callback([], staleObserver.observer);
-    await runFramesUntil(frames, () => measuredWidths.length === 2);
-
-    expect(measuredWidths).toEqual([320, 640]);
-  });
-
-  it('captures the node that just left inline editing before ordinary visible maintenance', async () => {
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => (
-      missingSourcesResult(request)
-    ));
-    const actions = actionsFixture({ available: false, read });
-    const nodes = [nodeFixture('a.md', 0), nodeFixture('b.md', 100)];
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'moving',
-      activeInlineTextPath: 'b.md'
-    });
-    await flushWork();
-    expect(read).not.toHaveBeenCalled();
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'moving'
-    });
-    await flushWork();
-    expect(read).not.toHaveBeenCalled();
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'idle'
-    });
-    await runFramesUntil(frames, () => laneMock.props?.target !== undefined);
-
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(laneMock.props?.target?.projectRelativePath).toBe('b.md');
-  });
-
-  it('keeps a culled text node in the current target identity set', async () => {
-    const node = nodeFixture('a.md', 0);
-    const targets = canvasTextPreviewTargetsForNodes({
-      canvasId: 'canvas-1',
-      nodes: [node],
-      textFileBuffers: { 'a.md': bufferFixture('a.md', 'active') },
-      measuredBodies: new Map([['a.md', { width: 320, height: 160 }]]),
-      styleKey: 'sha256:style'
-    });
-
-    expect(targets.map((target) => target.projectRelativePath)).toEqual(['a.md']);
-  });
-
-  it('does not start preview work for a missing culled target until it becomes eligible', async () => {
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
-      sources: Object.fromEntries(request.sources.map((source) => [
-        source.projectRelativePath,
-        { ...source, status: 'missing' as const }
-      ]))
-    }));
-    const actions = actionsFixture({ available: false, read });
-    const node = nodeFixture('a.md', 0);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      culledNodePaths: new Set(['a.md'])
-    });
-    await flushWork();
-
-    expect(read).not.toHaveBeenCalled();
-    expect(laneMock.props?.target).toBeUndefined();
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle'
-    });
-    await runFramesUntil(frames, () => laneMock.props?.target !== undefined);
-
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(laneMock.props?.target?.projectRelativePath).toBe('a.md');
-  });
-
-  it('keeps an item-local availability error from blocking another target in the batch', async () => {
-    const recordCounter = vi.fn();
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
-      sources: Object.fromEntries(request.sources.map((source) => [
-        source.projectRelativePath,
-        source.projectRelativePath === 'broken.md'
-          ? {
-              ...source,
-              status: 'error' as const,
-              message: 'Canvas text preview source metadata read failed.'
-            }
-          : { ...source, status: 'missing' as const }
-      ]))
-    }));
-    const brokenNode = nodeFixture('broken.md', 0);
-    const normalNode = nodeFixture('notes/scene.md', 100);
-
-    await renderProvider({
-      root,
-      nodes: [brokenNode, normalNode],
-      actions: actionsFixture({ available: false, read }),
-      cameraState: 'idle',
-      perfMonitor: { recordCounter }
-    });
-    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'notes/scene.md');
-
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(recordCounter).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'text-preview-failed',
-      detail: expect.objectContaining({
-        projectRelativePath: 'broken.md',
-        stage: 'source_availability_failed'
-      })
-    }));
-  });
-
-  it('retains the exact committed presentation while the active editor owns the node', async () => {
-    const fetchMock = vi.fn(async () => new Response(new Blob(['png']), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
-    const probe = (runtime: CanvasTextPreviewRuntimeValue) => {
-      runtimeValue = runtime;
-      observed.push(runtime.presentationForNode({ node }));
-    };
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      probe
-    });
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-    const pending = latest(observed)?.pending;
-    await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-    await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
-    const visible = latest(observed)?.visible;
-    await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
-    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      activeInlineTextPath: 'a.md',
-      probe
-    });
-    await flushWork();
-
-    expect(latest(observed)?.visible?.sourceKey).toBe(visible?.sourceKey);
-    expect(latest(observed)?.visibleCommittedSourceKey).toBe(visible?.sourceKey);
-    expect(laneMock.props?.target).toBeUndefined();
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      probe
-    });
-    await flushWork();
-
-    expect(latest(observed)?.visible?.sourceKey).toBe(visible?.sourceKey);
-    expect(latest(observed)?.pending).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      activeInlineTextPath: 'a.md',
-      content: 'edited content',
-      probe
-    });
-    await flushWork();
-
-    expect(latest(observed)).toEqual({});
-  });
-
-  it('does not request preview availability for active intermediate content', async () => {
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
-      sources: Object.fromEntries(request.sources.map((source) => [
-        source.projectRelativePath,
-        { ...source, status: 'missing' as const }
-      ]))
-    }));
-    const actions = actionsFixture({ available: false, read });
-    const node = nodeFixture('a.md', 0);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      activeInlineTextPath: 'a.md',
-      content: 'first edit'
-    });
-    await flushWork();
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      activeInlineTextPath: 'a.md',
-      content: 'second edit'
-    });
-    await flushWork();
-
-    expect(read).not.toHaveBeenCalled();
-    expect(laneMock.props?.target).toBeUndefined();
-  });
-
-  it('retains the exact committed presentation when the node becomes culled', async () => {
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
-    const probe = (runtime: CanvasTextPreviewRuntimeValue) => {
-      runtimeValue = runtime;
-      observed.push(runtime.presentationForNode({ node }));
-    };
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      probe
-    });
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-    const pending = latest(observed)?.pending;
-    await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-    await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
-    const visible = latest(observed)?.visible;
-    await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
-    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      culledNodePaths: new Set(['a.md']),
-      probe
-    });
-    await flushWork();
-
-    expect(latest(observed)?.visible?.sourceKey).toBe(visible?.sourceKey);
-    expect(latest(observed)?.visibleCommittedSourceKey).toBe(visible?.sourceKey);
-  });
-
-  it('ignores a hidden body 0x0 measurement and reuses the committed preview after culling', async () => {
-    const read = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+  it('checks canonical source availability before reading content or preparing fonts', async () => {
+    const readProjectTextFile = vi.fn<WorkbenchActions['readProjectTextFile']>();
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
       sources: Object.fromEntries(request.sources.map((source) => [
         source.projectRelativePath,
         { ...source, status: 'available' as const }
       ]))
     }));
-    const actions = actionsFixture({ available: true, read });
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
-    const probe = (runtime: CanvasTextPreviewRuntimeValue) => {
-      runtimeValue = runtime;
-      observed.push(runtime.presentationForNode({ node }));
-    };
-
     await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      probe
+      nodes: [textNode('cached.md', 0, 0)],
+      actions: actionsFixture({ readProjectTextFile, readCanvasTextPreviewSources })
     });
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-    const pending = latest(observed)?.pending;
-    await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-    await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
-    const visible = latest(observed)?.visible;
-    await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
-    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
-    const readCount = read.mock.calls.length;
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      culledNodePaths: new Set(['a.md']),
-      bodyMeasurements: { 'a.md': { width: 0, height: 0 } },
-      probe
-    });
+    await waitFor(() => readCanvasTextPreviewSources.mock.calls.length === 1);
+    await flushWork();
     await flushWork();
 
-    expect(latest(observed)?.visible?.sourceKey).toBe(visible?.sourceKey);
-    expect(latest(observed)?.visibleCommittedSourceKey).toBe(visible?.sourceKey);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions,
-      cameraState: 'idle',
-      bodyMeasurements: { 'a.md': { width: 320, height: 160 } },
-      probe
-    });
-    await flushWork();
-
-    expect(latest(observed)?.visible?.sourceKey).toBe(visible?.sourceKey);
-    expect(latest(observed)?.visibleCommittedSourceKey).toBe(visible?.sourceKey);
-    expect(read).toHaveBeenCalledTimes(readCount);
-  });
-
-  it('does not enter the capture lane while interaction is active', async () => {
-    await renderProvider({
-      root,
-      nodes: [nodeFixture('a.md', 0)],
-      actions: actionsFixture({ available: false }),
-      cameraState: 'moving'
-    });
-    await flushWork();
-
-    expect(laneMock.props?.interactionActive).toBe(true);
+    expect(readCanvasTextPreviewSources).toHaveBeenCalledTimes(1);
+    expect(readProjectTextFile).not.toHaveBeenCalled();
+    expect(fontEnvironmentMock.prepareCoverage).not.toHaveBeenCalled();
     expect(laneMock.props?.target).toBeUndefined();
   });
 
-  it('continues to the next current target after one capture failure', async () => {
-    await renderProvider({
-      root,
-      nodes: [nodeFixture('a.md', 0), nodeFixture('b.md', 100)],
-      actions: actionsFixture({ available: false }),
-      cameraState: 'idle'
+  it('admits offscreen targets and uses viewport only to order canonical work', async () => {
+    const reads = new Map<string, ReturnType<typeof deferred<Awaited<ReturnType<WorkbenchActions['readProjectTextFile']>>>>>();
+    const readProjectTextFile = vi.fn<WorkbenchActions['readProjectTextFile']>((path) => {
+      const pending = deferred<Awaited<ReturnType<WorkbenchActions['readProjectTextFile']>>>();
+      reads.set(path, pending);
+      return pending.promise;
     });
-    await runFramesUntil(frames, () => laneMock.props?.target?.projectRelativePath === 'a.md');
-    const first = laneMock.props!.target!;
-    await act(async () => laneMock.props?.onFailure(first, new CanvasTextPreviewFailure(
-      'scene_not_ready',
-      {
-        canvasId: first.canvasId,
-        projectRelativePath: first.projectRelativePath,
-        fingerprint: first.fingerprint
-      },
-      'Canvas text preview scene is not ready.'
-    )));
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+      sources: Object.fromEntries(request.sources.map((source) => [
+        source.projectRelativePath,
+        { ...source, status: 'missing' as const }
+      ]))
+    }));
+    await renderProvider({
+      nodes: [
+        textNode('outside.md', 5000, 0),
+        textNode('overscan.md', 1200, 0),
+        textNode('visible.md', 0, 0)
+      ],
+      textFileBuffers: {},
+      visibleRect: { x: 0, y: 0, width: 800, height: 800 },
+      virtualRect: { x: -800, y: -800, width: 2800, height: 2400 },
+      actions: actionsFixture({ readProjectTextFile, readCanvasTextPreviewSources })
+    });
+    await waitFor(() => readProjectTextFile.mock.calls.length === 2);
 
-    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
+    expect(readCanvasTextPreviewSources.mock.calls[0]![0].sources.map((source) => source.projectRelativePath)).toEqual([
+      'visible.md', 'overscan.md', 'outside.md'
+    ]);
+    expect(readProjectTextFile.mock.calls.map(([path]) => path)).toEqual(['visible.md', 'overscan.md']);
+
+    reads.get('visible.md')!.resolve(textFile('visible.md'));
+    await waitFor(() => readProjectTextFile.mock.calls.length === 3);
+    expect(readProjectTextFile.mock.calls[2]![0]).toBe('outside.md');
   });
 
-  it('queues a text variant during interaction and mounts it on the next idle frame', async () => {
-    const observed: CanvasTextPreviewPresentation[] = [];
-    const node = nodeFixture('a.md', 0);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'moving',
-      probe: (runtime) => observed.push(runtime.presentationForNode({ node }))
+  it('limits physical content reads when a latest-wins target replaces an in-flight task', async () => {
+    const reads: Array<{
+      path: string;
+      pending: ReturnType<typeof deferred<Awaited<ReturnType<WorkbenchActions['readProjectTextFile']>>>>;
+    }> = [];
+    const readProjectTextFile = vi.fn<WorkbenchActions['readProjectTextFile']>((path) => {
+      const pending = deferred<Awaited<ReturnType<WorkbenchActions['readProjectTextFile']>>>();
+      reads.push({ path, pending });
+      return pending.promise;
     });
-    await flushWork();
-    expect(latest(observed)).toEqual({ visible: undefined, pending: undefined });
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      probe: (runtime) => observed.push(runtime.presentationForNode({ node }))
-    });
-    await waitFor(() => frames.pending() > 0);
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-
-    expect(latest(observed)?.pending).toMatchObject({
-      projectRelativePath: 'a.md',
-      fingerprint: expect.stringMatching(/^sha256:/)
-    });
-  });
-
-  it('mounts one pending image without prefetching its resource URL', async () => {
-    const fetchMock = vi.fn(async () => new Response(new Blob(['png']), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      probe: (runtime) => {
-        runtimeValue = runtime;
-        observed.push(runtime.presentationForNode({ node }));
-      }
-    });
-    await waitFor(() => frames.pending() > 0);
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-
-    const pending = latest(observed)?.pending;
-    expect(pending).toBeDefined();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(latest(observed)?.visible).toBeUndefined();
-    await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-    expect(latest(observed)?.visible).toBeUndefined();
-    await runFramesUntil(frames, () => latest(observed)?.visible?.sourceKey === pending?.sourceKey);
-
-    expect(latest(observed)).toEqual({ visible: pending, pending: undefined });
-    expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
-  });
-
-  it('can revisit a previously published resolution after a high-low-high roundtrip', async () => {
-    const actions = actionsFixture({ available: true });
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
-    const probe = (runtime: CanvasTextPreviewRuntimeValue) => {
-      runtimeValue = runtime;
-      observed.push(runtime.presentationForNode({ node }));
-    };
-    const settlePending = async (expectedWidth: number) => {
-      await runFramesUntil(frames, () => latest(observed)?.pending?.previewWidth === expectedWidth);
-      const pending = latest(observed)?.pending;
-      await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-      await runFramesUntil(frames, () => latest(observed)?.visible?.sourceKey === pending?.sourceKey);
-      const visible = latest(observed)?.visible;
-      await act(async () => runtimeValue?.reportVisibleCommitted(node, visible!));
-      await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === visible?.sourceKey);
-    };
-
-    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.1, probe });
-    await settlePending(640);
-    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.2, probe });
-    await settlePending(1280);
-    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.1, probe });
-    await settlePending(640);
-    await renderProvider({ root, nodes: [node], actions, cameraState: 'idle', resourceZoom: 0.2, probe });
-    await settlePending(1280);
-
-    expect(latest(observed)?.visible?.previewWidth).toBe(1280);
-  });
-
-  it('mounts pending text previews through the shared resource start scheduler', async () => {
-    const starts: CanvasPreviewResourceRequest[] = [];
-    const controlledScheduler: CanvasPreviewResourceScheduler = {
-      enqueue: (request) => starts.push(request),
-      enqueuePublication: () => undefined,
-      cancel: () => undefined,
-      setInteractionState: () => undefined,
-      getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
-      notifyVisibilityChanged: () => undefined,
-      dispose: () => undefined
-    };
-    const observed: CanvasTextPreviewPresentation[] = [];
-    const node = nodeFixture('a.md', 0);
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      previewResourceScheduler: controlledScheduler,
-      probe: (runtime) => observed.push(runtime.presentationForNode({ node }))
-    });
-    await runFramesUntil(frames, () => starts.length > 0);
-
-    expect(latest(observed)?.pending).toBeUndefined();
-    expect(starts[0]?.kind).toBe('text');
-    expect(starts[0]?.isCurrent()).toBe(true);
-    expect(starts[0]?.isCulled()).toBe(false);
-
-    await act(async () => starts.shift()?.run());
-
-    expect(latest(observed)?.pending).toBeDefined();
-  });
-
-  it('publishes at most three ready text previews in one shared scheduler frame', async () => {
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+      sources: Object.fromEntries(request.sources.map((source) => [
+        source.projectRelativePath,
+        { ...source, status: 'missing' as const }
+      ]))
+    }));
+    const actions = actionsFixture({ readProjectTextFile, readCanvasTextPreviewSources });
+    const previewResourceScheduler = immediateScheduler();
     const nodes = [
-      nodeFixture('a.md', 0),
-      nodeFixture('b.md', 100),
-      nodeFixture('c.md', 200),
-      nodeFixture('d.md', 300)
+      textNode('a.md', 0, 0),
+      textNode('b.md', 0, 1000),
+      textNode('c.md', 0, 2000)
     ];
-    const observed: Array<Record<string, CanvasTextPreviewPresentation>> = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
 
+    await renderProvider({ nodes, textFileBuffers: {}, actions, previewResourceScheduler });
+    await waitFor(() => reads.length === 2);
+    expect(reads.map((read) => read.path)).toEqual(['a.md', 'b.md']);
+
+    const replacement = {
+      ...nodes[0]!,
+      availability: {
+        ...nodes[0]!.availability,
+        revision: 'sha256:a-next'
+      }
+    };
     await renderProvider({
-      root,
-      nodes,
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      probe: (runtime) => {
-        runtimeValue = runtime;
-        observed.push(Object.fromEntries(nodes.map((node) => [
-          node.projectRelativePath,
-          runtime.presentationForNode({ node })
-        ])));
-      }
+      nodes: [replacement, nodes[1]!, nodes[2]!],
+      textFileBuffers: {},
+      actions,
+      previewResourceScheduler
     });
-    await runFramesUntil(frames, () => presentationCount(latest(observed), 'pending') === nodes.length);
+    await waitFor(() => readCanvasTextPreviewSources.mock.calls.length === 2);
+    expect(reads).toHaveLength(2);
 
-    const pending = latest(observed)!;
-    await act(async () => {
-      for (const node of nodes) {
-        runtimeValue?.reportPendingReady(node, pending[node.projectRelativePath]!.pending!);
-      }
-    });
-    await runFramesUntil(frames, () => presentationCount(latest(observed), 'visible') > 0);
+    reads[1]!.pending.resolve(textFile('b.md'));
+    await waitFor(() => reads.length === 3);
+    expect(reads[2]!.path).toBe('c.md');
 
-    expect(presentationCount(latest(observed), 'visible')).toBe(3);
-    expect(presentationCount(latest(observed), 'pending')).toBe(1);
-
-    await runFramesUntil(frames, () => presentationCount(latest(observed), 'visible') === nodes.length);
-    const visible = latest(observed)!;
-
-    await act(async () => {
-      for (const node of nodes) {
-        runtimeValue?.reportVisibleCommitted(node, visible[node.projectRelativePath]!.visible!);
-      }
-    });
-    await runFramesUntil(frames, () => committedPresentationCount(latest(observed)) > 0);
-
-    expect(committedPresentationCount(latest(observed))).toBe(3);
-    await runFramesUntil(frames, () => committedPresentationCount(latest(observed)) === nodes.length);
+    reads[0]!.pending.resolve(textFile('a.md'));
+    await waitFor(() => reads.length === 4);
+    expect(reads[3]!.path).toBe('a.md');
   });
 
-  it('does not add a follow-up commit for every text preview publication batch', async () => {
-    const nodes = Array.from({ length: 30 }, (_, index) => nodeFixture(`node-${index}.md`, index * 100));
-    const starts: CanvasPreviewResourceRequest[] = [];
-    const controlledScheduler: CanvasPreviewResourceScheduler = {
-      enqueue: (request) => starts.push(request),
-      enqueuePublication: () => undefined,
-      cancel: () => undefined,
-      setInteractionState: () => undefined,
-      getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
-      notifyVisibilityChanged: () => undefined,
-      dispose: () => undefined
+  it('does not dispatch availability, content, font, or capture jobs during interaction', async () => {
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+      sources: Object.fromEntries(request.sources.map((source) => [
+        source.projectRelativePath,
+        { ...source, status: 'missing' as const }
+      ]))
+    }));
+    const input = {
+      nodes: [textNode('a.md', 0, 0)],
+      actions: actionsFixture({ readCanvasTextPreviewSources }),
+      interactionActive: true
     };
-    let commitCount = 0;
-    let pendingCount = 0;
+    await renderProvider(input);
+    await flushWork();
+    expect(readCanvasTextPreviewSources).not.toHaveBeenCalled();
+
+    await renderProvider({ ...input, interactionActive: false });
+    await waitFor(() => readCanvasTextPreviewSources.mock.calls.length === 1);
+  });
+
+  it('keeps capture and the current concurrent upload path decoupled', async () => {
+    const uploads = [deferred<SavePreviewResult>(), deferred<SavePreviewResult>()];
+    let uploadIndex = 0;
+    const saveCanvasTextPreviewSource = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>(() => {
+      const upload = uploads[uploadIndex]!;
+      uploadIndex += 1;
+      return upload.promise;
+    });
+    await renderProvider({
+      nodes: [textNode('a.md', 0, 0), textNode('b.md', 0, 1000)],
+      actions: actionsFixture({ saveCanvasTextPreviewSource })
+    });
+    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'a.md');
+    const first = laneMock.props!.target!;
+    await act(async () => laneMock.props!.onRasterized(first, rasterResult()));
+    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
+
+    expect(saveCanvasTextPreviewSource).toHaveBeenCalledTimes(1);
+    expect(uploads[0]!.settled).toBe(false);
+    expect(laneMock.history).toEqual(['a.md', 'b.md']);
+  });
+
+  it('publishes 200 cached presentations without scheduling no-op state updates', async () => {
+    const publicationQueue: Array<{
+      isCurrent(): boolean;
+      run(): void | Promise<void>;
+    }> = [];
+    const scheduler = immediateScheduler({
+      enqueue: (request) => publicationQueue.push(request)
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const nodes = Array.from({ length: 200 }, (_, index) => (
+      textNode(`cached-${String(index).padStart(3, '0')}.md`, index % 20 * 5000, Math.floor(index / 20) * 3400)
+    ));
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+      sources: Object.fromEntries(request.sources.map((source) => [
+        source.projectRelativePath,
+        { ...source, status: 'available' as const }
+      ]))
+    }));
 
     await renderProvider({
-      root,
       nodes,
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      previewResourceScheduler: controlledScheduler,
-      onCommit: () => {
-        commitCount += 1;
-      },
-      probe: (runtime) => {
-        pendingCount = nodes.filter((node) => runtime.presentationForNode({ node }).pending !== undefined).length;
-      }
+      actions: actionsFixture({ readCanvasTextPreviewSources }),
+      culledNodePaths: new Set(),
+      previewResourceScheduler: scheduler
     });
-    await runFramesUntil(frames, () => starts.length === nodes.length);
-    const commitCountBeforeStarts = commitCount;
-    for (let batch = 0; batch < 20 && pendingCount !== nodes.length; batch += 1) {
-      await act(async () => {
-        for (const start of starts.splice(0, 3)) {
-          start.run();
-        }
-      });
+    await waitFor(() => publicationQueue.length === nodes.length);
+    for (const work of publicationQueue.splice(0)) {
+      expect(work.isCurrent()).toBe(true);
+      await act(async () => work.run());
     }
+    await flushWork();
 
-    expect(pendingCount).toBe(nodes.length);
-    expect(commitCount - commitCountBeforeStarts).toBeLessThanOrEqual(12);
+    expect(consoleError.mock.calls.some(([message]) => (
+      String(message).includes('Maximum update depth exceeded')
+    ))).toBe(false);
   });
 
-  it('records publication only after the visible DOM commit callback', async () => {
-    const recordCounter = vi.fn();
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
+  it('adds a node leaving edit mode to the live registry without waiting for existing upload work', async () => {
+    const save = deferred<SavePreviewResult>();
+    const nodes = [textNode('a.md', 0, 0), textNode('b.md', 0, 1000)];
+    const actions = actionsFixture({ saveCanvasTextPreviewSource: () => save.promise });
+    await renderProvider({ nodes, actions, activeInlineTextPath: 'a.md' });
+    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
+    const b = laneMock.props!.target!;
+    await act(async () => laneMock.props!.onRasterized(b, rasterResult()));
 
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      perfMonitor: { recordCounter },
-      probe: (runtime) => {
-        runtimeValue = runtime;
-        observed.push(runtime.presentationForNode({ node }));
-      }
-    });
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-    const pending = latest(observed)?.pending;
-    await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-    expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-pending-ready')).toBe(true);
-    await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
-
-    expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-published')).toBe(false);
-    expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
-    await act(async () => runtimeValue?.reportVisibleCommitted(node, pending!));
-    expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-published')).toBe(false);
-    expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
-    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === pending?.sourceKey);
-    expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-published')).toBe(true);
-    expect(latest(observed)?.visibleCommittedSourceKey).toBe(pending?.sourceKey);
+    await renderProvider({ nodes, actions, activeInlineTextPath: undefined });
+    await waitFor(() => laneMock.props?.target?.projectRelativePath === 'a.md');
+    expect(save.settled).toBe(false);
   });
 
-  it('defers a ready visible commit that arrives after interaction starts', async () => {
-    const recordCounter = vi.fn();
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
-    const nodes = [node];
-    const actions = actionsFixture({ available: true });
-    const probe = (runtime: CanvasTextPreviewRuntimeValue) => {
-      runtimeValue = runtime;
-      observed.push(runtime.presentationForNode({ node }));
-    };
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'idle',
-      perfMonitor: { recordCounter },
-      probe
+  async function renderProvider(input: {
+    nodes: ProjectedCanvasNode[];
+    actions: WorkbenchActions;
+    textFileBuffers?: Record<string, TextFileBuffer>;
+    activeInlineTextPath?: string | undefined;
+    interactionActive?: boolean;
+    visibleRect?: { x: number; y: number; width: number; height: number };
+    virtualRect?: { x: number; y: number; width: number; height: number };
+    culledNodePaths?: ReadonlySet<string>;
+    previewResourceScheduler?: CanvasPreviewResourceScheduler;
+  }): Promise<void> {
+    const buffers = input.textFileBuffers ?? Object.fromEntries(input.nodes.map((node) => [
+      node.projectRelativePath,
+      buffer(node.projectRelativePath)
+    ]));
+    await act(async () => {
+      root.render(
+        <CanvasTextRenderProfileGate profile={TEST_PROFILE} pending={null}>
+          <CanvasTextPreviewProvider
+            canvasId="canvas-1"
+            nodes={input.nodes}
+            activeInlineTextPath={input.activeInlineTextPath}
+            textFileBuffers={buffers}
+            actions={input.actions}
+            interactionActive={input.interactionActive ?? false}
+            resourceZoom={0.1}
+            devicePixelRatio={2}
+            culledNodePaths={input.culledNodePaths ?? new Set(input.nodes.map((node) => node.projectRelativePath))}
+            visibleRect={input.visibleRect ?? { x: 0, y: 0, width: 800, height: 800 }}
+            virtualRect={input.virtualRect ?? { x: -800, y: -800, width: 2400, height: 2400 }}
+            styleDependencyKey="test"
+            previewResourceScheduler={input.previewResourceScheduler ?? immediateScheduler()}
+          >
+            <div />
+          </CanvasTextPreviewProvider>
+        </CanvasTextRenderProfileGate>
+      );
     });
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-    const pending = latest(observed)?.pending;
-    await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-    await runFramesUntil(frames, () => latest(observed)?.visible?.sourceKey === pending?.sourceKey);
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'moving',
-      perfMonitor: { recordCounter },
-      probe
-    });
-    await waitFor(() => laneMock.props?.interactionActive === true);
-    await act(async () => runtimeValue?.reportVisibleCommitted(node, pending!));
-
-    expect(latest(observed)?.visibleCommittedSourceKey).toBeUndefined();
-    expect(recordCounter.mock.calls.some(([event]) => event.name === 'text-preview-published')).toBe(false);
-
-    await renderProvider({
-      root,
-      nodes,
-      actions,
-      cameraState: 'idle',
-      perfMonitor: { recordCounter },
-      probe
-    });
-    await runFramesUntil(frames, () => latest(observed)?.visibleCommittedSourceKey === pending?.sourceKey);
-
-    expect(recordCounter.mock.calls.filter(([event]) => event.name === 'text-preview-published')).toHaveLength(1);
-  });
-
-  it('invalidates an older fingerprint instead of keeping it visible', async () => {
-    const observed: CanvasTextPreviewPresentation[] = [];
-    let runtimeValue: CanvasTextPreviewRuntimeValue | undefined;
-    const node = nodeFixture('a.md', 0);
-    const probe = (runtime: CanvasTextPreviewRuntimeValue) => {
-      runtimeValue = runtime;
-      observed.push(runtime.presentationForNode({ node }));
-    };
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: true }),
-      cameraState: 'idle',
-      probe,
-      content: 'first'
-    });
-    await waitFor(() => frames.pending() > 0);
-    await runFramesUntil(frames, () => latest(observed)?.pending !== undefined);
-    const pending = latest(observed)?.pending;
-    await act(async () => runtimeValue?.reportPendingReady(node, pending!));
-    await runFramesUntil(frames, () => latest(observed)?.visible !== undefined);
-    expect(latest(observed)?.visible).toBeDefined();
-
-    await renderProvider({
-      root,
-      nodes: [node],
-      actions: actionsFixture({ available: false }),
-      cameraState: 'idle',
-      probe,
-      content: 'second'
-    });
-    await waitFor(() => latest(observed)?.visible === undefined && latest(observed)?.pending === undefined);
-    expect(latest(observed)).toEqual({ visible: undefined, pending: undefined });
-  });
-
+  }
 });
 
-async function renderProvider(input: {
-  root: Root;
-  nodes: ProjectedCanvasNode[];
-  actions: WorkbenchActions;
-  cameraState: 'idle' | 'moving';
-  resourceZoom?: number | undefined;
-  probe?: ((runtime: CanvasTextPreviewRuntimeValue) => void) | undefined;
-  content?: string | undefined;
-  activeInlineTextPath?: string | undefined;
-  culledNodePaths?: ReadonlySet<string> | undefined;
-  bodyMeasurements?: Record<string, CanvasTextPreviewMeasuredBody> | undefined;
-  perfMonitor?: { recordCounter(event: Parameters<NonNullable<React.ComponentProps<typeof CanvasTextPreviewProvider>['perfMonitor']>['recordCounter']>[0]): void } | undefined;
-  previewResourceScheduler?: CanvasPreviewResourceScheduler | undefined;
-  onCommit?: (() => void) | undefined;
-  onBodyWidthRead?: ((path: string, width: number) => void) | undefined;
-  strictMode?: boolean | undefined;
-}): Promise<void> {
-  const buffers = Object.fromEntries(input.nodes.map((node) => [
-    node.projectRelativePath,
-    bufferFixture(node.projectRelativePath, input.content ?? node.projectRelativePath)
-  ]));
-  await act(async () => {
-    const scheduler = input.previewResourceScheduler ?? previewResourceScheduler;
-    scheduler.setInteractionState({
-      cameraState: input.cameraState,
-      dragActive: false
-    });
-    const provider = (
-      <CanvasTextPreviewProvider
-        canvasId="canvas-1"
-        nodes={input.nodes}
-        activeInlineTextPath={input.activeInlineTextPath}
-        textFileBuffers={buffers}
-        actions={input.actions}
-        interactionActive={input.cameraState !== 'idle'}
-        resourceZoom={input.resourceZoom ?? 0.1}
-        devicePixelRatio={2}
-        culledNodePaths={input.culledNodePaths ?? new Set()}
-        styleDependencyKey="dark"
-        perfMonitor={input.perfMonitor}
-        previewResourceScheduler={scheduler}
-      >
-        {input.nodes.map((node) => (
-          <RegisteredBody
-            key={node.projectRelativePath}
-            path={node.projectRelativePath}
-            measurement={input.bodyMeasurements?.[node.projectRelativePath]}
-            onWidthRead={input.onBodyWidthRead}
-          />
-        ))}
-        {input.probe ? <RuntimeProbe onRuntime={input.probe} /> : null}
-      </CanvasTextPreviewProvider>
-    );
-    const withRenderProfile = (
-      <CanvasTextRenderProfileGate profile={TEST_CANVAS_TEXT_RENDER_PROFILE} pending={null}>
-        {provider}
-      </CanvasTextRenderProfileGate>
-    );
-    const profiled = input.onCommit
-      ? <React.Profiler id="canvas-text-preview-runtime" onRender={input.onCommit}>{withRenderProfile}</React.Profiler>
-      : withRenderProfile;
-    input.root.render(input.strictMode ? <React.StrictMode>{profiled}</React.StrictMode> : profiled);
-  });
-}
-
-function RegisteredBody({
-  path,
-  measurement = { width: 320, height: 160 },
-  onWidthRead
-}: {
-  path: string;
-  measurement?: CanvasTextPreviewMeasuredBody | undefined;
-  onWidthRead?: ((path: string, width: number) => void) | undefined;
-}): React.ReactElement {
-  const { registerTextBody } = useCanvasTextPreviewRuntime();
-  React.useEffect(() => {
-    const body = document.createElement('div');
-    Object.defineProperties(body, {
-      clientWidth: {
-        configurable: true,
-        get: () => {
-          onWidthRead?.(path, measurement.width);
-          return measurement.width;
-        }
-      },
-      clientHeight: { configurable: true, value: measurement.height }
-    });
-    registerTextBody(path, body);
-    return () => registerTextBody(path, null);
-  }, [measurement.height, measurement.width, onWidthRead, path, registerTextBody]);
+function RuntimeConsumer(): React.ReactElement {
+  useCanvasTextPreviewRuntime();
   return <div />;
 }
 
-function RuntimeProbe({ onRuntime }: { onRuntime(runtime: CanvasTextPreviewRuntimeValue): void }): React.ReactElement {
-  const runtime = useCanvasTextPreviewRuntime();
-  React.useEffect(() => {
-    onRuntime(runtime);
-  });
-  return <div />;
-}
-
-function nodeFixture(projectRelativePath: string, y: number): ProjectedCanvasNode {
+function textNode(path: string, x: number, y: number): ProjectedCanvasNode {
   return {
-    projectRelativePath,
+    projectRelativePath: path,
     nodeKind: 'file',
     mediaKind: 'text',
-    x: 0,
+    textLanguage: 'markdown',
+    x,
     y,
-    width: 3200,
-    height: 1600,
+    width: 4200,
+    height: 2800,
     z: 0,
     availability: {
       state: 'available',
-      size: 32,
+      size: path.length,
       mimeType: 'text/markdown',
-      fileUrl: `/api/projects/p/files/raw/${projectRelativePath}?v=rev-a`,
-      revision: 'rev-a'
+      fileUrl: `/api/projects/p/files/raw/${path}?v=sha256%3A${path}`,
+      revision: `sha256:${path}`
     }
   };
 }
 
-function bufferFixture(projectRelativePath: string, content: string): TextFileBuffer {
+function buffer(path: string): TextFileBuffer {
   return {
-    projectRelativePath,
-    content,
+    projectRelativePath: path,
+    content: path,
     language: 'markdown',
-    wordWrap: true,
+    wordWrap: false,
     dirty: false,
     saving: false,
-    baseRevision: 'rev-a',
+    baseRevision: `sha256:${path}`,
     externalChange: false
   };
 }
 
-function targetFixture(projectRelativePath: string): CanvasTextPreviewTarget {
+function textFile(path: string) {
   return {
-    canvasId: 'canvas-1',
-    projectRelativePath,
-    content: projectRelativePath,
-    language: 'markdown',
-    wordWrap: true,
-    contentCssWidth: 320,
-    contentCssHeight: 160,
-    scrollTop: 0,
-    scrollLeft: 0,
-    styleKey: 'sha256:style',
-    fingerprint: `sha256:${projectRelativePath}`
+    projectRelativePath: path,
+    content: path,
+    size: path.length,
+    mtimeMs: 0,
+    revision: `sha256:${path}`,
+    language: 'markdown' as const,
+    mimeType: 'text/markdown'
   };
 }
 
-function targetKey(target: CanvasTextPreviewTarget): string {
-  return `${target.canvasId}\u001f${target.projectRelativePath}\u001f${target.fingerprint}`;
-}
-
-function rasterResult(): CanvasTextPreviewRasterResult {
+function actionsFixture(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {
   return {
-    sourcePng: new Blob(['png'], { type: 'image/png' }),
-    sceneWidth: 320,
-    sceneHeight: 160,
-    rasterDurationMs: 2
-  };
-}
-
-function actionsFixture(input: {
-  available: boolean;
-  read?: WorkbenchActions['readCanvasTextPreviewSources'] | undefined;
-  save?: WorkbenchActions['saveCanvasTextPreviewSource'] | undefined;
-}): WorkbenchActions {
-  return {
-    readCanvasTextPreviewSources: input.read ?? (async (
-      request: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]
-    ) => ({
+    readProjectTextFile: async (path) => textFile(path),
+    readCanvasTextPreviewSources: async (request) => ({
       sources: Object.fromEntries(request.sources.map((source) => [
         source.projectRelativePath,
-        { ...source, status: input.available ? 'available' as const : 'missing' as const }
+        { ...source, status: 'missing' as const }
       ]))
-    })),
-    saveCanvasTextPreviewSource: input.save ?? (async (request) => saveResult(request))
-  } as unknown as WorkbenchActions;
+    }),
+    saveCanvasTextPreviewSource: async (request) => ({
+      ok: true,
+      source: { projectRelativePath: request.projectRelativePath, fingerprint: request.fingerprint, status: 'available' }
+    }),
+    ...overrides
+  } as WorkbenchActions;
 }
 
-function saveResult(input: Parameters<WorkbenchActions['saveCanvasTextPreviewSource']>[0]) {
+function immediateScheduler(overrides: Partial<CanvasPreviewResourceScheduler> = {}): CanvasPreviewResourceScheduler {
   return {
-    ok: true as const,
-    source: {
-      projectRelativePath: input.projectRelativePath,
-      fingerprint: input.fingerprint,
-      status: 'available' as const
+    enqueue: () => undefined,
+    enqueuePublication: () => undefined,
+    cancel: () => undefined,
+    setInteractionState: () => undefined,
+    getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
+    notifyVisibilityChanged: () => undefined,
+    dispose: () => undefined,
+    ...overrides
+  };
+}
+
+function rasterResult(): CanvasTextPreviewCaptureResult {
+  return {
+    sourcePng: new Blob(['png'], { type: 'image/png' }),
+    cssWidth: 420,
+    cssHeight: 248,
+    sourcePixelWidth: 1680,
+    sourcePixelHeight: 992,
+    snapshotDurationMs: 1,
+    rasterDurationMs: 1,
+    captureDurationMs: 2,
+    snapshotBytes: 128,
+    snapshotElementCount: 8,
+    maxSynchronousSliceMs: 1
+  };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (predicate()) {
+      return;
     }
-  };
+    await flushWork();
+  }
+  throw new Error('Timed out waiting for Canvas text preview work.');
 }
 
-function missingSourcesResult(
-  input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]
-): Awaited<ReturnType<WorkbenchActions['readCanvasTextPreviewSources']>> {
-  return {
-    sources: Object.fromEntries(input.sources.map((source) => [
-      source.projectRelativePath,
-      { ...source, status: 'missing' as const }
-    ]))
-  };
+async function flushWork(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 function deferred<T>() {
   let resolvePromise!: (value: T | PromiseLike<T>) => void;
   let rejectPromise!: (reason?: unknown) => void;
-  let isSettled = false;
+  let settled = false;
   const promise = new Promise<T>((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
   });
   return {
     promise,
+    get settled() {
+      return settled;
+    },
     resolve(value: T) {
-      isSettled = true;
+      settled = true;
       resolvePromise(value);
     },
-    reject(error: unknown) {
-      isSettled = true;
-      rejectPromise(error);
-    },
-    settled: () => isSettled
-  };
-}
-
-function installAnimationFrameQueue() {
-  const previousRequest = window.requestAnimationFrame;
-  const previousCancel = window.cancelAnimationFrame;
-  let nextHandle = 1;
-  const callbacks = new Map<number, FrameRequestCallback>();
-  window.requestAnimationFrame = (callback) => {
-    const handle = nextHandle++;
-    callbacks.set(handle, callback);
-    return handle;
-  };
-  window.cancelAnimationFrame = (handle) => callbacks.delete(handle);
-  return {
-    pending: () => callbacks.size,
-    async runNext() {
-      const entry = callbacks.entries().next().value as [number, FrameRequestCallback] | undefined;
-      if (!entry) {
-        throw new Error('Expected an animation frame.');
-      }
-      callbacks.delete(entry[0]);
-      await act(async () => {
-        entry[1](performance.now());
-        await Promise.resolve();
-      });
-    },
-    restore() {
-      window.requestAnimationFrame = previousRequest;
-      window.cancelAnimationFrame = previousCancel;
+    reject(reason?: unknown) {
+      settled = true;
+      rejectPromise(reason);
     }
   };
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (predicate()) {
-      return;
-    }
-    await flushWork();
-  }
-  throw new Error('Timed out waiting for Runtime state.');
-}
-
-async function flushWork(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
-
-async function runFramesUntil(
-  frames: ReturnType<typeof installAnimationFrameQueue>,
-  predicate: () => boolean
-): Promise<void> {
-  for (let attempt = 0; attempt < 80 && !predicate(); attempt += 1) {
-    await waitFor(() => frames.pending() > 0);
-    await frames.runNext();
-  }
-  if (!predicate()) {
-    throw new Error('Timed out waiting for animation-frame publication.');
-  }
-}
-
-function latest<T>(items: T[]): T | undefined {
-  return items.at(-1);
-}
-
-function presentationCount(
-  presentations: Record<string, CanvasTextPreviewPresentation> | undefined,
-  layer: 'visible' | 'pending'
-): number {
-  return Object.values(presentations ?? {}).filter((presentation) => presentation[layer] !== undefined).length;
-}
-
-function committedPresentationCount(
-  presentations: Record<string, CanvasTextPreviewPresentation> | undefined
-): number {
-  return Object.values(presentations ?? {}).filter((presentation) => (
-    presentation.visibleCommittedSourceKey !== undefined
-  )).length;
 }

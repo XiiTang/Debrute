@@ -970,6 +970,8 @@ function CanvasSurfaceRuntime({
           resourceZoom={resourceZoom}
           devicePixelRatio={devicePixelRatio}
           culledNodePaths={renderSnapshot.culledNodePaths}
+          visibleRect={renderSnapshot.visibleRect}
+          virtualRect={renderSnapshot.virtualRect}
           previewResourceScheduler={previewResourceScheduler}
         >
           <CanvasTextPreviewProvider
@@ -982,6 +984,8 @@ function CanvasSurfaceRuntime({
             resourceZoom={resourceZoom}
             devicePixelRatio={devicePixelRatio}
             culledNodePaths={renderSnapshot.culledNodePaths}
+            visibleRect={renderSnapshot.visibleRect}
+            virtualRect={renderSnapshot.virtualRect}
             styleDependencyKey={textPreviewStyleDependencyKey}
             perfMonitor={instrumentationMonitor}
             previewResourceScheduler={previewResourceScheduler}

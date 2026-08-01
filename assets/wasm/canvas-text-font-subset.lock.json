@@ -1,0 +1,114 @@
+{
+  "contractVersion": 1,
+  "artifact": {
+    "path": "assets/wasm/canvas-text-font-subset-v1.wasm",
+    "sha256": "aed5b73929fb091535aa4752f41fcc4f1681a0cb4fd88540ac820def9a7b0e7d",
+    "bytes": 1359474
+  },
+  "inputs": {
+    "wrapper": {
+      "path": "scripts/canvas-text-font-subset/canvas_text_font_subset.cc",
+      "sha256": "4b03bfc17a5bc9199f44aec20e87af61e811e84f142b817f3f068345641c47ad"
+    },
+    "configOverride": {
+      "path": "scripts/canvas-text-font-subset/config-override-subset.h",
+      "sha256": "aabe30b510a34f62406f801bf4cc1251bb08176c85c4b7b0221643654107e627"
+    },
+    "harfbuzz": {
+      "commit": "4c2aa804671d7276e8a0eb95da07202ead05c843",
+      "url": "https://github.com/harfbuzz/harfbuzz/archive/4c2aa804671d7276e8a0eb95da07202ead05c843.tar.gz",
+      "sha256": "00a2d6c4e315d54f7283088fbfb22205e6acf887747568113827ac6d59a458c8"
+    },
+    "woff2": {
+      "commit": "fb9c3379f2605b10f3e8f1d9636664ab5576775c",
+      "url": "https://github.com/google/woff2/archive/fb9c3379f2605b10f3e8f1d9636664ab5576775c.tar.gz",
+      "sha256": "f32f80941d621632fd668a00f3e30b00cde69df04ccb4730afb1809144bc6299"
+    },
+    "brotli": {
+      "commit": "533843e3546cd24c8344eaa899c6b0b681c8d222",
+      "url": "https://github.com/google/brotli/archive/533843e3546cd24c8344eaa899c6b0b681c8d222.tar.gz",
+      "sha256": "60209cc58dfe13d260199b149c3585ddc89fd02f5ad4d3b47cebfef51a1c7ec7"
+    },
+    "emscripten": {
+      "version": "6.0.5",
+      "releaseCommit": "dbd755b5da399329c2576f6e3dfa7f419f5d8409",
+      "compilerCommit": "1db513782be24469589d7cb8a1f1834e9a33f271",
+      "darwinArm64Url": "https://storage.googleapis.com/webassembly/emscripten-releases-builds/mac/dbd755b5da399329c2576f6e3dfa7f419f5d8409/wasm-binaries-arm64.tar.xz",
+      "darwinArm64Sha256": "82231ed58d0134a9c8796b4133207563b94704088cd5a355464a061ad0d31c15"
+    }
+  },
+  "licenses": [
+    {
+      "path": "assets/wasm/LICENSES/HARFBUZZ.txt",
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64"
+    },
+    {
+      "path": "assets/wasm/LICENSES/WOFF2.txt",
+      "sha256": "d42a3e363d99da22b860ab760faa37dfa9781d74c9f3ed634d05109081616513"
+    },
+    {
+      "path": "assets/wasm/LICENSES/BROTLI.txt",
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+    }
+  ],
+  "build": {
+    "cFlags": [
+      "-std=c11",
+      "-Oz",
+      "-flto",
+      "-ffile-prefix-map=<build-root>=/debrute-font-subset",
+      "-fdebug-prefix-map=<build-root>=/debrute-font-subset",
+      "-fmacro-prefix-map=<build-root>=/debrute-font-subset"
+    ],
+    "cxxFlags": [
+      "-std=c++17",
+      "-Oz",
+      "-flto",
+      "-fno-exceptions",
+      "-fno-rtti",
+      "-fno-threadsafe-statics",
+      "-fvisibility-inlines-hidden",
+      "-ffile-prefix-map=<build-root>=/debrute-font-subset",
+      "-fdebug-prefix-map=<build-root>=/debrute-font-subset",
+      "-fmacro-prefix-map=<build-root>=/debrute-font-subset",
+      "-DHB_TINY",
+      "-DHB_USE_INTERNAL_QSORT",
+      "-DHB_EXPERIMENTAL_API",
+      "-DHB_CONFIG_OVERRIDE_H=\"config-override-subset.h\""
+    ],
+    "linkFlags": [
+      "--no-entry",
+      "-sSTANDALONE_WASM=1",
+      "-sFILESYSTEM=0",
+      "-sALLOW_MEMORY_GROWTH=1",
+      "-sINITIAL_MEMORY=33554432",
+      "-sMAXIMUM_MEMORY=201326592",
+      "-sSTACK_SIZE=1048576",
+      "-sASSERTIONS=0",
+      "-sERROR_ON_UNDEFINED_SYMBOLS=1",
+      "-sEXPORTED_FUNCTIONS=[\"_malloc\",\"_free\",\"_debrute_subset_woff2\",\"_debrute_subset_free\",\"_debrute_subset_contract_version\"]",
+      "-Wl,--strip-all"
+    ]
+  },
+  "abi": {
+    "imports": [
+      "env.emscripten_notify_memory_growth:function",
+      "wasi_snapshot_preview1.proc_exit:function",
+      "wasi_snapshot_preview1.fd_close:function",
+      "wasi_snapshot_preview1.fd_write:function",
+      "wasi_snapshot_preview1.fd_seek:function"
+    ],
+    "exports": [
+      "memory:memory",
+      "debrute_subset_woff2:function",
+      "malloc:function",
+      "debrute_subset_free:function",
+      "free:function",
+      "debrute_subset_contract_version:function",
+      "_initialize:function",
+      "__indirect_function_table:table",
+      "_emscripten_stack_restore:function",
+      "emscripten_stack_get_current:function"
+    ]
+  }
+}

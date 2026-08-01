@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fs,
-    io::Read,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::Arc,
     time::UNIX_EPOCH,
@@ -18,14 +18,15 @@ use super::{
     CanvasNodeLayoutUpdate, CanvasProjection, CanvasRegistryDocument, CanvasRegistryState,
     CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, CanvasVideoPresentation,
     DebruteProjectIdentity, DebruteProjectMetadata, DebruteProjectPaths, ExpandedCanvasMap,
-    ProjectCapabilityFs, ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity,
-    ProjectDocumentDelete, ProjectDocumentRead, ProjectDocumentTransaction, ProjectDocumentWrite,
-    ProjectError, ProjectHealthSummary, ProjectPathEntry, ProjectSnapshot,
-    UpdateCanvasFeedbackEntryInput, bring_canvas_node_to_front, canvas_map_path,
-    canvas_media_kind_from_path, clear_canvas_manual_layouts, commit_project_document_transaction,
-    create_canvas_document, debrute_project_paths, expand_canvas_map, expand_canvas_map_path_rules,
-    is_project_indexed_path, is_valid_stable_project_id, list_explicit_project_path,
-    list_project_directory, list_project_files, list_project_subtree_files, normalize_canvas_name,
+    MAX_EDITABLE_PROJECT_TEXT_BYTES, ProjectCapabilityFs, ProjectDiagnostic,
+    ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectDocumentDelete, ProjectDocumentRead,
+    ProjectDocumentTransaction, ProjectDocumentWrite, ProjectError, ProjectHealthSummary,
+    ProjectPathEntry, ProjectSnapshot, UpdateCanvasFeedbackEntryInput, bring_canvas_node_to_front,
+    canvas_map_path, canvas_media_kind_from_path, clear_canvas_manual_layouts,
+    commit_project_document_transaction, create_canvas_document, debrute_project_paths,
+    expand_canvas_map, expand_canvas_map_path_rules, is_project_indexed_path,
+    is_valid_stable_project_id, list_explicit_project_path, list_project_directory,
+    list_project_files, list_project_subtree_files, normalize_canvas_name,
     open_no_symlink_existing_project_file, parse_canvas_map, project_canvas,
     project_canvas_with_known_projection, project_content_hash, project_document_directory_hash,
     project_document_file_hash, project_file_metadata_revision, project_media_revision,
@@ -1753,16 +1754,33 @@ impl ProjectService {
                         node.project_relative_path
                     ),
                 },
-                |(availability, _)| availability.clone(),
+                |(availability, _, _)| availability.clone(),
             )
         });
         for node in &mut projection.nodes {
+            if node.node.media_kind == Some(CanvasMediaKind::Text)
+                && matches!(node.availability, CanvasNodeAvailability::Available { .. })
+            {
+                let language = inspections
+                    .get(&node.node.project_relative_path)
+                    .and_then(|(_, _, language)| language.clone());
+                if let Some(language) = language {
+                    node.text_language = Some(language);
+                } else {
+                    node.availability = CanvasNodeAvailability::Unreadable {
+                        message: format!(
+                            "Canvas text language is unavailable: {}",
+                            node.node.project_relative_path
+                        ),
+                    };
+                }
+            }
             if node.node.media_kind == Some(CanvasMediaKind::Video)
                 && matches!(node.availability, CanvasNodeAvailability::Available { .. })
             {
                 let presentation = inspections
                     .get(&node.node.project_relative_path)
-                    .and_then(|(_, presentation)| presentation.clone());
+                    .and_then(|(_, presentation, _)| presentation.clone());
                 if let Some(presentation) = presentation {
                     node.video_presentation = Some(presentation);
                 } else {
@@ -1781,11 +1799,15 @@ impl ProjectService {
     fn inspect_canvas_node(
         &self,
         node: &CanvasNodeElement,
-    ) -> (CanvasNodeAvailability, Option<CanvasVideoPresentation>) {
+    ) -> (
+        CanvasNodeAvailability,
+        Option<CanvasVideoPresentation>,
+        Option<String>,
+    ) {
         if node.node_kind == CanvasNodeKind::Directory {
             let (metadata, mtime_ms) = match self.inspect_canvas_metadata(node) {
                 Ok(inspected) => inspected,
-                Err(availability) => return (availability, None),
+                Err(availability) => return (availability, None, None),
             };
             if !metadata.is_dir() {
                 return (
@@ -1795,6 +1817,7 @@ impl ProjectService {
                             node.project_relative_path
                         ),
                     },
+                    None,
                     None,
                 );
             }
@@ -1809,27 +1832,20 @@ impl ProjectService {
                     revision: project_file_metadata_revision(0, mtime_ms),
                 },
                 None,
+                None,
             );
         }
-        let (metadata, mtime_ms, revision) = match self.inspect_revisioned_canvas_file(node) {
-            Ok(inspected) => inspected,
-            Err(availability) => return (availability, None),
-        };
+        let (metadata, mtime_ms, revision, text_classification_line) =
+            match self.inspect_revisioned_canvas_file(node) {
+                Ok(inspected) => inspected,
+                Err(availability) => return (availability, None, None),
+            };
         let (preview, presentation) = match self.inspect_node_adapter_data(node) {
             Ok(data) => data,
-            Err(availability) => return (availability, None),
+            Err(availability) => return (availability, None, None),
         };
-        let mime_type = match project_mime_type(&self.root, node) {
-            Ok(mime_type) => mime_type,
-            Err(error) => {
-                return (
-                    CanvasNodeAvailability::Unreadable {
-                        message: error.to_string(),
-                    },
-                    None,
-                );
-            }
-        };
+        let (mime_type, text_language) =
+            project_content_type(node, text_classification_line.as_deref());
         (
             CanvasNodeAvailability::Available {
                 size: metadata.len(),
@@ -1841,6 +1857,7 @@ impl ProjectService {
                 revision,
             },
             presentation,
+            text_language,
         )
     }
 
@@ -1873,7 +1890,7 @@ impl ProjectService {
     fn inspect_revisioned_canvas_file(
         &self,
         node: &CanvasNodeElement,
-    ) -> Result<(fs::Metadata, f64, String), CanvasNodeAvailability> {
+    ) -> Result<(fs::Metadata, f64, String, Option<String>), CanvasNodeAvailability> {
         let mut file =
             open_no_symlink_existing_project_file(&self.root, &node.project_relative_path)
                 .map_err(|error| match &error {
@@ -1908,7 +1925,16 @@ impl ProjectService {
                 message: error.to_string(),
             }
         })?;
-        Ok((metadata, mtime_ms, revision))
+        let text_classification_line = if node.media_kind == Some(CanvasMediaKind::Text) {
+            read_text_classification_line(&mut file).map_err(|error| {
+                CanvasNodeAvailability::Unreadable {
+                    message: error.to_string(),
+                }
+            })?
+        } else {
+            None
+        };
+        Ok((metadata, mtime_ms, revision, text_classification_line))
     }
 
     fn inspect_node_adapter_data(
@@ -2472,7 +2498,8 @@ fn canvas_media_kind_for_project_file(
         return Ok(kind);
     }
     let absolute = resolve_existing_project_path(project_root, project_relative_path)?;
-    let first_line = read_text_classification_line(&absolute)?;
+    let mut file = fs::File::open(absolute)?;
+    let first_line = read_text_classification_line(&mut file)?;
     Ok(
         if first_line.as_deref().is_some_and(|line| {
             project_text_file_type_for_path(project_relative_path, Some(line)).is_some()
@@ -2621,7 +2648,10 @@ fn is_full_width(code: u32) -> bool {
     )
 }
 
-fn project_mime_type(root: &Path, node: &CanvasNodeElement) -> Result<String, ProjectError> {
+fn project_content_type(
+    node: &CanvasNodeElement,
+    text_classification_line: Option<&str>,
+) -> (String, Option<String>) {
     let path = &node.project_relative_path;
     let lower = path.to_ascii_lowercase();
     for (extensions, mime) in [
@@ -2646,37 +2676,37 @@ fn project_mime_type(root: &Path, node: &CanvasNodeElement) -> Result<String, Pr
             .iter()
             .any(|extension| lower.ends_with(extension))
         {
-            return Ok(mime.to_owned());
+            return (mime.to_owned(), None);
         }
     }
     if node.media_kind == Some(CanvasMediaKind::Text) {
-        if let Some((_, mime_type)) = project_text_file_type_for_path(path, None) {
-            return Ok(mime_type.to_owned());
+        if let Some((language, mime_type)) = project_text_file_type_for_path(path, None) {
+            return (mime_type.to_owned(), Some(language.to_owned()));
         }
-        let absolute = resolve_existing_project_path(root, path)?;
-        let first_line = read_text_classification_line(&absolute)?;
-        return Ok(project_text_file_type_for_path(path, first_line.as_deref())
-            .map_or("text/plain", |(_, mime_type)| mime_type)
-            .to_owned());
+        let (language, mime_type) = project_text_file_type_for_path(path, text_classification_line)
+            .unwrap_or(("plaintext", "text/plain"));
+        return (mime_type.to_owned(), Some(language.to_owned()));
     }
-    Ok("text/plain".to_owned())
+    ("text/plain".to_owned(), None)
 }
 
-fn read_text_classification_line(path: &Path) -> Result<Option<String>, ProjectError> {
-    let mut file = fs::File::open(path)?;
-    let mut bytes = Vec::with_capacity(4096);
-    file.by_ref().take(4096).read_to_end(&mut bytes)?;
+fn read_text_classification_line(file: &mut fs::File) -> Result<Option<String>, ProjectError> {
+    file.seek(SeekFrom::Start(0))?;
+    let classification_limit = u64::from(MAX_EDITABLE_PROJECT_TEXT_BYTES) + 1;
+    let mut bytes =
+        Vec::with_capacity(usize::try_from(MAX_EDITABLE_PROJECT_TEXT_BYTES).unwrap_or(usize::MAX));
+    file.by_ref()
+        .take(classification_limit)
+        .read_to_end(&mut bytes)?;
     if bytes.contains(&0) {
         return Ok(None);
     }
-    let Ok(content) = String::from_utf8(bytes) else {
+    let first_line_end = bytes
+        .iter()
+        .position(|byte| matches!(byte, b'\r' | b'\n'))
+        .unwrap_or(bytes.len());
+    let Ok(first_line) = std::str::from_utf8(&bytes[..first_line_end]) else {
         return Ok(None);
     };
-    Ok(Some(
-        content
-            .split(['\r', '\n'])
-            .next()
-            .unwrap_or_default()
-            .to_owned(),
-    ))
+    Ok(Some(first_line.to_owned()))
 }

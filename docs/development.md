@@ -34,6 +34,14 @@ contracts that depend on those versions are executable:
   metadata through the Runtime-owned Raster Preview Engine; product packaging
   copies and validates the checksum-pinned `rs-vips` 0.7.0/libvips 8.18.4
   native payload for each supported macOS and Windows target.
+- Canvas text preview font subsetting uses the checked-in
+  `assets/wasm/canvas-text-font-subset-v1.wasm`. Install, development, build,
+  doctor, and verification validate its locked sources, wrapper, licenses,
+  byte length, SHA-256, ABI, and contract version without network access or a
+  rebuild. `pnpm build:canvas-text-font-subset` is the explicit Apple Silicon
+  maintainer reproduction command; it downloads only the pinned official
+  archives, verifies each before extraction, and replaces the artifact only
+  when the output exactly matches the lock. See `assets/wasm/SOURCES.md`.
 - the inline Canvas text editor uses the current CodeMirror stack while durable
   scroll position remains the Canvas-owned Text Viewport described in
   [`text-files.md`](./text-files.md);
@@ -45,6 +53,23 @@ contracts that depend on those versions are executable:
 `pnpm verify:browser` is an explicit development diagnostic and is not part of
 `pnpm verify`. Run it only when live browser verification is intentionally in
 scope.
+
+For explicit Canvas text-preview stress work, create the deterministic 200-file
+Project fixture with:
+
+```bash
+node scripts/prepare-canvas-text-preview-benchmark.mjs
+```
+
+The fixture contains one manually laid-out Canvas, mixed small and CJK files,
+long lines from 64 KiB through 896 KiB, exact 1 MiB and 2 MiB long-line files,
+and a 512 KiB multiline truncation case. It totals roughly 10 MiB. The command
+creates a unique temporary directory and prints its path; an explicit output
+path must not already exist. A real ten-schedule run changes all 200 contents
+before each schedule with
+`node scripts/prepare-canvas-text-preview-benchmark.mjs --bump <project> <1-10>`;
+it does not create ten Canvases or serialize every file mutation through one
+unrepresentative loop.
 
 ## Repository Layout
 
@@ -255,6 +280,8 @@ pnpm dev
 pnpm dev:electron
 pnpm preview
 pnpm clean
+pnpm validate:canvas-text-font-subset
+pnpm build:canvas-text-font-subset
 node scripts/run-cargo-with-native-raster.mjs -- run -p debrute-runtime --bin debrute -- project validate path/to/project
 ```
 

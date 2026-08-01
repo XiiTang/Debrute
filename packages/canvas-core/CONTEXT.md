@@ -38,8 +38,9 @@ _Avoid_: Canvas Map, live editor state
 
 **Canvas Projection**:
 The runtime view produced from a Canvas Document and current Project state. It
-adds current availability, derived file-tree edges, and Project Diagnostics
-without making them persisted Canvas state.
+adds current availability, exact text language for available text files, derived
+file-tree edges, and Project Diagnostics without making them persisted Canvas
+state.
 _Avoid_: Canvas Document
 
 **Canvas Registry**:

@@ -1,24 +1,25 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
   captureCanvasTextPreviewSource,
-  type CanvasTextPreviewRasterResult,
-  type CanvasTextPreviewTarget
-} from './CanvasTextPreviewCapture';
+  type CanvasTextPreviewCaptureResult,
+  type CanvasTextPreviewCaptureTarget
+} from './CanvasTextPreviewCapture.js';
 import {
   CanvasTextPreviewFailure,
   canvasTextPreviewFailureFromUnknown,
   type CanvasTextPreviewFailureFields
-} from './CanvasTextPreviewFailure';
+} from './CanvasTextPreviewFailure.js';
 import {
-  createCanvasTextPreviewSceneBuild,
-  type CanvasTextPreviewBuiltScene,
-  type CanvasTextPreviewSceneBuild,
-} from './CanvasTextPreviewScene.js';
-import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
-import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
+  CANVAS_PERF_INTERACTION_SESSION_TYPES,
+  type CanvasPerfCounterName,
+  type CanvasPerfMonitor
+} from './CanvasPerfMonitor.js';
 import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
+import type {
+  CanvasTextPreparedFont,
+  CanvasTextRenderProfile
+} from './CanvasTextRenderProfile.js';
 
-const CANVAS_TEXT_PREVIEW_CAPTURE_SLICE_MS = 16;
 const CANVAS_TEXT_PREVIEW_LAYOUT_FRAME_LIMIT = 30;
 const CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
 const CanvasTextEditor = React.lazy(async () => {
@@ -28,95 +29,91 @@ const CanvasTextEditor = React.lazy(async () => {
   return { default: module.CanvasTextEditor };
 });
 
-export type CanvasTextPreviewCaptureStage =
-  | 'capture-ready'
-  | 'scene-built'
-  | 'raster-completed';
-
-export interface CanvasTextPreviewCaptureStageEvent {
-  stage: CanvasTextPreviewCaptureStage;
-  target: CanvasTextPreviewTarget;
-  durationMs: number;
-  sceneWidth?: number | undefined;
-  sceneHeight?: number | undefined;
-}
-
 export interface CanvasTextPreviewCaptureLaneProps {
-  target: CanvasTextPreviewTarget | undefined;
+  target: CanvasTextPreviewCaptureTarget | undefined;
+  renderProfile: CanvasTextRenderProfile;
+  preparedFont: CanvasTextPreparedFont | undefined;
   interactionActive: boolean;
-  onStage(event: CanvasTextPreviewCaptureStageEvent): void;
-  onRasterized(target: CanvasTextPreviewTarget, result: CanvasTextPreviewRasterResult): void;
-  onFailure(target: CanvasTextPreviewTarget, failure: CanvasTextPreviewFailure): void;
+  perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
+  onRasterized(target: CanvasTextPreviewCaptureTarget, result: CanvasTextPreviewCaptureResult): void;
+  onFailure(target: CanvasTextPreviewCaptureTarget, failure: CanvasTextPreviewFailure): void;
 }
 
-type LanePhase = 'waiting-layout' | 'readiness' | 'scene' | 'raster' | 'rasterizing' | 'complete';
+type LanePhase = 'waiting-layout' | 'readiness' | 'capture' | 'capturing' | 'complete';
 
 interface LaneJob {
   key: string;
-  target: CanvasTextPreviewTarget;
+  target: CanvasTextPreviewCaptureTarget;
   renderProfile: CanvasTextRenderProfile;
+  preparedFont: CanvasTextPreparedFont;
   phase: LanePhase;
-  sceneBuild?: CanvasTextPreviewSceneBuild | undefined;
-  builtScene?: CanvasTextPreviewBuiltScene | undefined;
   frame?: number | undefined;
-  sceneMaxSliceMs: number;
   readinessAttempts: number;
+  abortController: AbortController;
   disposed: boolean;
-}
-
-function releaseSceneBuild(job: LaneJob): void {
-  const build = job.sceneBuild;
-  job.sceneBuild = undefined;
-  build?.dispose();
 }
 
 export function CanvasTextPreviewCaptureLane({
   target,
+  renderProfile,
+  preparedFont,
   interactionActive,
-  onStage,
+  perfMonitor,
   onRasterized,
   onFailure
 }: CanvasTextPreviewCaptureLaneProps): React.ReactElement | null {
-  const renderProfile = useCanvasTextRenderProfile();
   const elementRef = useRef<HTMLDivElement | null>(null);
   const jobRef = useRef<LaneJob | undefined>(undefined);
-  const rasterInFlightRef = useRef(false);
+  const captureInFlightRef = useRef(false);
   const interactionActiveRef = useRef(interactionActive);
-  const onStageRef = useRef(onStage);
   const onRasterizedRef = useRef(onRasterized);
   const onFailureRef = useRef(onFailure);
+  const perfMonitorRef = useRef(perfMonitor);
   const layoutReadyTargetKeysRef = useRef(new Set<string>());
   interactionActiveRef.current = interactionActive;
-  onStageRef.current = onStage;
   onRasterizedRef.current = onRasterized;
   onFailureRef.current = onFailure;
+  perfMonitorRef.current = perfMonitor;
   const targetKey = target ? canvasTextPreviewLaneTargetKey(target) : undefined;
+
+  const record = useCallback((
+    name: CanvasPerfCounterName,
+    targetValue: CanvasTextPreviewCaptureTarget,
+    detail?: Record<string, unknown>
+  ) => {
+    perfMonitorRef.current?.recordCounter({
+      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
+      timestamp: performance.now(),
+      source: 'CanvasTextPreviewRuntime',
+      name,
+      detail: {
+        projectRelativePath: targetValue.projectRelativePath,
+        fingerprint: targetValue.fingerprint,
+        ...detail
+      }
+    });
+  }, []);
 
   const disposeJob = useCallback((job: LaneJob) => {
     if (job.disposed) {
       return;
     }
+    job.disposed = true;
+    job.abortController.abort();
     if (job.frame !== undefined) {
       window.cancelAnimationFrame(job.frame);
       job.frame = undefined;
     }
-    if (job.phase === 'rasterizing') {
-      return;
-    }
-    job.disposed = true;
-    releaseSceneBuild(job);
   }, []);
 
-  const failJob = useCallback((job: LaneJob, error: unknown) => {
+  const failJob = useCallback((job: LaneJob, stage: 'capture_not_ready' | 'raster_failed', error: unknown) => {
     if (job.disposed) {
       return;
     }
-    const stage = job.phase === 'raster' ? 'raster_failed' : 'scene_not_ready';
+    job.phase = 'complete';
     const failure = error instanceof CanvasTextPreviewFailure
       ? error
       : canvasTextPreviewFailureFromUnknown(stage, failureFieldsForTarget(job.target), error);
-    job.phase = 'complete';
-    releaseSceneBuild(job);
     onFailureRef.current(job.target, failure);
   }, []);
 
@@ -127,16 +124,16 @@ export function CanvasTextPreviewCaptureLane({
       || job.disposed
       || job.frame !== undefined
       || job.phase === 'waiting-layout'
-      || job.phase === 'rasterizing'
+      || job.phase === 'capturing'
       || job.phase === 'complete'
-      || (job.phase === 'raster' && rasterInFlightRef.current)
+      || (job.phase === 'capture' && captureInFlightRef.current)
       || interactionActiveRef.current) {
       return;
     }
     job.frame = window.requestAnimationFrame((timestamp) => runJobFrameRef.current(timestamp));
   }, []);
 
-  runJobFrameRef.current = (timestamp) => {
+  runJobFrameRef.current = () => {
     const job = jobRef.current;
     if (!job || job.disposed) {
       return;
@@ -147,7 +144,7 @@ export function CanvasTextPreviewCaptureLane({
     }
     const element = elementRef.current;
     if (!element) {
-      failJob(job, 'Canvas text preview capture element is not mounted.');
+      failJob(job, 'capture_not_ready', 'Canvas text preview capture element is not mounted.');
       return;
     }
     if (job.phase === 'readiness') {
@@ -155,85 +152,62 @@ export function CanvasTextPreviewCaptureLane({
       if (!isCanvasTextPreviewCaptureLayoutReady(element)) {
         job.readinessAttempts += 1;
         if (job.readinessAttempts >= CANVAS_TEXT_PREVIEW_LAYOUT_FRAME_LIMIT) {
-          failJob(job, 'Canvas text preview CodeMirror layout did not become capture-ready.');
+          failJob(job, 'capture_not_ready', 'Canvas text preview CodeMirror layout did not become capture-ready.');
           return;
         }
         scheduleJob();
         return;
       }
-      job.phase = 'scene';
-      onStageRef.current({
-        stage: 'capture-ready',
-        target: job.target,
-        durationMs: performance.now() - startedAt
+      job.phase = 'capture';
+      record('text-preview-capture-ready', job.target, {
+        durationMs: performance.now() - startedAt,
+        cssWidth: job.target.contentCssWidth,
+        cssHeight: job.target.contentCssHeight,
+        sourcePixelWidth: job.target.sourcePixelWidth,
+        sourcePixelHeight: job.target.sourcePixelHeight
       });
       scheduleJob();
       return;
     }
-    if (job.phase === 'scene') {
-      try {
-        const sliceStartedAt = performance.now();
-        if (!job.sceneBuild) {
-          job.sceneBuild = createCanvasTextPreviewSceneBuild({
-            captureRoot: element,
-            fields: failureFieldsForTarget(job.target)
-          });
-        }
-        const result = job.sceneBuild.runSlice(timestamp + CANVAS_TEXT_PREVIEW_CAPTURE_SLICE_MS);
-        job.sceneMaxSliceMs = Math.max(job.sceneMaxSliceMs, performance.now() - sliceStartedAt);
-        if (!result.done) {
-          scheduleJob();
-          return;
-        }
-        job.builtScene = result.builtScene;
-        job.phase = 'raster';
-        onStageRef.current({
-          stage: 'scene-built',
-          target: job.target,
-          durationMs: job.sceneMaxSliceMs,
-          sceneWidth: result.builtScene.width,
-          sceneHeight: result.builtScene.height
-        });
-        scheduleJob();
-      } catch (error) {
-        failJob(job, error);
-      }
+    if (job.phase !== 'capture') {
       return;
     }
-    if (job.phase === 'raster' && job.builtScene) {
-      const builtScene = job.builtScene;
-      job.phase = 'rasterizing';
-      rasterInFlightRef.current = true;
-      void captureCanvasTextPreviewSource({
-        builtScene,
-        document: element.ownerDocument,
-        renderProfile: job.renderProfile,
-        fields: failureFieldsForTarget(job.target)
+    job.phase = 'capturing';
+    captureInFlightRef.current = true;
+    void captureCanvasTextPreviewSource({
+        captureRoot: element,
+        target: job.target,
+        fields: failureFieldsForTarget(job.target),
+        preparedFont: job.preparedFont,
+        signal: job.abortController.signal,
+        isInteractionActive: () => interactionActiveRef.current
       }).then((result) => {
-        if (job.disposed) {
-          return;
-        }
-        onStageRef.current({
-          stage: 'raster-completed',
-          target: job.target,
-          durationMs: result.rasterDurationMs,
-          sceneWidth: result.sceneWidth,
-          sceneHeight: result.sceneHeight
-        });
-        onRasterizedRef.current(job.target, result);
-      }, (error: unknown) => {
-        if (job.disposed) {
-          return;
-        }
-        job.phase = 'raster';
-        failJob(job, error);
-      }).finally(() => {
-        releaseSceneBuild(job);
-        job.disposed = true;
-        rasterInFlightRef.current = false;
-        scheduleJob();
+      if (job.disposed) {
+        return;
+      }
+      record('text-preview-dom-snapshot-completed', job.target, {
+        durationMs: result.snapshotDurationMs,
+        snapshotBytes: result.snapshotBytes,
+        snapshotElementCount: result.snapshotElementCount,
+        maxSynchronousSliceMs: result.maxSynchronousSliceMs
       });
-    }
+      record('text-preview-raster-completed', job.target, {
+        durationMs: result.rasterDurationMs,
+        captureDurationMs: result.captureDurationMs,
+        sourcePixelWidth: result.sourcePixelWidth,
+        sourcePixelHeight: result.sourcePixelHeight
+      });
+      onRasterizedRef.current(job.target, result);
+    }, (error: unknown) => {
+      if (job.disposed || isAbortError(error)) {
+        return;
+      }
+      failJob(job, 'raster_failed', error);
+    }).finally(() => {
+      job.phase = 'complete';
+      captureInFlightRef.current = false;
+      scheduleJob();
+    });
   };
 
   useEffect(() => {
@@ -241,7 +215,7 @@ export function CanvasTextPreviewCaptureLane({
     if (previous) {
       disposeJob(previous);
     }
-    if (!target || !targetKey) {
+    if (!target || !targetKey || !preparedFont) {
       jobRef.current = undefined;
       return undefined;
     }
@@ -249,9 +223,10 @@ export function CanvasTextPreviewCaptureLane({
       key: targetKey,
       target,
       renderProfile,
+      preparedFont,
       phase: layoutReadyTargetKeysRef.current.has(targetKey) ? 'readiness' : 'waiting-layout',
       readinessAttempts: 0,
-      sceneMaxSliceMs: 0,
+      abortController: new AbortController(),
       disposed: false
     };
     jobRef.current = job;
@@ -263,7 +238,7 @@ export function CanvasTextPreviewCaptureLane({
       }
       disposeJob(job);
     };
-  }, [disposeJob, renderProfile, scheduleJob, target, targetKey]);
+  }, [disposeJob, preparedFont, renderProfile, scheduleJob, target, targetKey]);
 
   useEffect(() => {
     const job = jobRef.current;
@@ -314,6 +289,7 @@ export function CanvasTextPreviewCaptureLane({
             wordWrap={target.wordWrap}
             visible
             readOnly
+            fontPurpose="preview"
             initialScrollTop={target.scrollTop}
             initialScrollLeft={target.scrollLeft}
             onChange={() => undefined}
@@ -374,7 +350,7 @@ function firstVisibleElement(
   return undefined;
 }
 
-function failureFieldsForTarget(target: CanvasTextPreviewTarget): CanvasTextPreviewFailureFields {
+function failureFieldsForTarget(target: CanvasTextPreviewCaptureTarget): CanvasTextPreviewFailureFields {
   return {
     canvasId: target.canvasId,
     projectRelativePath: target.projectRelativePath,
@@ -382,6 +358,10 @@ function failureFieldsForTarget(target: CanvasTextPreviewTarget): CanvasTextPrev
   };
 }
 
-function canvasTextPreviewLaneTargetKey(target: CanvasTextPreviewTarget): string {
+function canvasTextPreviewLaneTargetKey(target: CanvasTextPreviewCaptureTarget): string {
   return `${target.canvasId}\u001f${target.projectRelativePath}\u001f${target.fingerprint}`;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
 }

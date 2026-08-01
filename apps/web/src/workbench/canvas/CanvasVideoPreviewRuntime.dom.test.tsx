@@ -303,6 +303,8 @@ async function renderVideoPreviewProvider(input: {
         resourceZoom={0.1}
         devicePixelRatio={2}
         culledNodePaths={culledNodePaths}
+        visibleRect={{ x: 0, y: 0, width: 1000, height: 1000 }}
+        virtualRect={{ x: -1000, y: -1000, width: 3000, height: 3000 }}
         previewResourceScheduler={previewResourceScheduler}
       >
         {input.children}

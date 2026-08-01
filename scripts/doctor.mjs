@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { packageManagerCommand } from './package-manager-command.mjs';
 import { validateNativeRasterLock } from './native-raster-payload.mjs';
+import { validateCanvasTextFontSubsetWasm } from './validate-canvas-text-font-subset-wasm.mjs';
 
 const root = process.cwd();
 const desktopRequire = createRequire(join(root, 'apps/desktop/package.json'));
@@ -124,6 +125,13 @@ try {
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   failures.push(`Native raster payload lock is invalid. ${message}`);
+}
+
+try {
+  await validateCanvasTextFontSubsetWasm();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  failures.push(`Canvas text font subset WASM supply is invalid. ${message}`);
 }
 
 if (process.platform !== 'darwin' && process.platform !== 'win32') {

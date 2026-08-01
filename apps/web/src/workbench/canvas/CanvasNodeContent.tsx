@@ -20,8 +20,15 @@ import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
 import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
+import {
+  CanvasTextRenderProfileGate,
+  useCanvasTextRenderProfile
+} from './CanvasTextRenderProfileContext.js';
+import {
+  CANVAS_NODE_PRESENTATION_SCALE,
+  canvasTextPresentationGeometry
+} from './CanvasTextPresentationGeometry.js';
 
-const FIXED_NODE_PRESENTATION_SCALE = 10;
 const GENERIC_NODE_WRAP_VISUAL_HEIGHT = 88;
 const CanvasTextEditor = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('text-editor');
@@ -104,7 +111,7 @@ export function CanvasNodeContent({
   const textBufferEnsureKey = canvasTextBufferEnsureKey(
     node,
     textBuffer,
-    !culled || selected
+    selected
   );
   const mediaSrc = node.mediaKind === 'image'
     ? undefined
@@ -400,7 +407,7 @@ function CanvasGenericNodeContent({
 }
 
 function genericNodeAllowsLabelWrap(node: Pick<ProjectedCanvasNode, 'height'>): boolean {
-  return node.height / FIXED_NODE_PRESENTATION_SCALE >= GENERIC_NODE_WRAP_VISUAL_HEIGHT;
+  return node.height / CANVAS_NODE_PRESENTATION_SCALE >= GENERIC_NODE_WRAP_VISUAL_HEIGHT;
 }
 
 function CanvasImagePlaceholder({
@@ -466,8 +473,8 @@ function CanvasTextNodeContent({
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
+  const textRenderProfile = useCanvasTextRenderProfile();
   const {
-    registerTextBody,
     reportPendingReady,
     reportPendingFailure,
     reportVisibleFailure,
@@ -491,17 +498,33 @@ function CanvasTextNodeContent({
   const textPreviewBlockingProblem = textPreview ? undefined : textPreviewProblem;
   const textPreviewOverlayProblem = textPreview ? textPreviewProblem : undefined;
   const bodyProblem = problem ?? (visibleTextLayer === 'preview' ? textPreviewBlockingProblem : undefined);
-  const status = textBufferStatus(buffer, problem ?? textPreviewProblem, i18n);
+  const status = textBufferStatus(buffer, problem ?? textPreviewProblem, active, i18n);
+  const geometry = canvasTextPresentationGeometry(node);
   const bodyRef = useCallback((element: HTMLDivElement | null) => {
-    registerTextBody(node.projectRelativePath, element);
-  }, [node.projectRelativePath, registerTextBody]);
+    if (!element || !import.meta.env.DEV) {
+      return;
+    }
+    const assertGeometry = () => {
+      if (element.clientWidth > 0
+        && element.clientHeight > 0
+        && (element.clientWidth !== geometry.contentCssWidth
+          || element.clientHeight !== geometry.contentCssHeight)) {
+        throw new Error(
+          `Canvas text presentation geometry mismatch for ${node.projectRelativePath}: `
+          + `${element.clientWidth}x${element.clientHeight} != `
+          + `${geometry.contentCssWidth}x${geometry.contentCssHeight}.`
+        );
+      }
+    };
+    assertGeometry();
+  }, [geometry.contentCssHeight, geometry.contentCssWidth, node.projectRelativePath]);
   const selectSelf = () => {
     if (!selected) {
       onSelectNode();
     }
   };
   const focusRequestForPointerEvent = (event: React.PointerEvent<Element>): CanvasTextEditorFocusRequest | undefined => {
-    if (selected || !buffer || bodyProblem || buffer.error) {
+    if (selected || bodyProblem || buffer?.error) {
       return undefined;
     }
     nextFocusRequestIdRef.current += 1;
@@ -542,7 +565,10 @@ function CanvasTextNodeContent({
     visibleTextLayer
   ]);
 
-  const showTextEditor = Boolean(buffer && (active || visibleTextLayer === 'editor'));
+  const editorBuffer = buffer && (active || visibleTextLayer === 'editor')
+    ? buffer
+    : undefined;
+  const showTextEditor = editorBuffer !== undefined;
   const showTextPreviewHandoff = !active || textPreview !== undefined;
   const textPreviewHidden = active || (visibleTextLayer === 'editor' && !previewHandoffReady);
 
@@ -607,37 +633,43 @@ function CanvasTextNodeContent({
             <strong>{bodyProblem?.title ?? i18n.t('canvas.node.textError')}</strong>
             <span>{bodyProblem?.message ?? buffer?.error}</span>
           </div>
-        ) : buffer ? (
+        ) : (
           <>
             {showTextEditor ? (
-              <React.Suspense fallback={<div className="canvas-text-preview-empty" aria-busy="true" />}>
-                <CanvasTextEditor
-                  value={buffer.content}
-                  language={buffer.language}
-                  wordWrap={buffer.wordWrap}
-                  readOnly={!active}
-                  visible={!culled || selected}
-                  focusRequest={active ? focusRequest : undefined}
-                  initialScrollTop={node.textViewport?.scrollTop}
-                  initialScrollLeft={node.textViewport?.scrollLeft}
-                  onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
-                  onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
-                  onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
-                  onScrollPositionCommit={commitTextViewport}
-                  onReadOnlyTransition={setHandoffViewport}
-                  onFocusRequestConsumed={(requestId) => {
-                    setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
-                  }}
-                />
-              </React.Suspense>
+              <CanvasTextRenderProfileGate
+                profile={textRenderProfile}
+                pending={<div className="canvas-text-preview-empty" aria-busy="true" />}
+                onReady={() => workbenchStartupTimeline.mark('canvas-text-ready')}
+              >
+                <React.Suspense fallback={<div className="canvas-text-preview-empty" aria-busy="true" />}>
+                  <CanvasTextEditor
+                    value={editorBuffer.content}
+                    language={editorBuffer.language}
+                    wordWrap={editorBuffer.wordWrap}
+                    readOnly={!active}
+                    visible={!culled || selected}
+                    focusRequest={active ? focusRequest : undefined}
+                    initialScrollTop={node.textViewport?.scrollTop}
+                    initialScrollLeft={node.textViewport?.scrollLeft}
+                    onChange={(content) => actions.updateTextFileBuffer(node.projectRelativePath, content)}
+                    onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
+                    onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
+                    onScrollPositionCommit={commitTextViewport}
+                    onReadOnlyTransition={setHandoffViewport}
+                    onFocusRequestConsumed={(requestId) => {
+                      setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
+                    }}
+                  />
+                </React.Suspense>
+              </CanvasTextRenderProfileGate>
             ) : null}
             {showTextPreviewHandoff ? (
               <CanvasTextPreviewImageHandoff
                 presentation={{ visible: textPreview, pending: pendingTextPreview }}
                 hidden={textPreviewHidden}
                 onPendingReady={(source) => reportPendingReady(node, source)}
-                onPendingFailure={(source, error, kind) => reportPendingFailure(node, source, error, kind)}
-                onVisibleFailure={(source, error, kind) => reportVisibleFailure(node, source, error, kind)}
+                onPendingFailure={(source, error) => reportPendingFailure(node, source, error)}
+                onVisibleFailure={(source, error) => reportVisibleFailure(node, source, error)}
                 onVisibleCommitted={(source) => reportVisibleCommitted(node, source)}
               />
             ) : null}
@@ -648,9 +680,10 @@ function CanvasTextNodeContent({
                 <span>{textPreviewOverlayProblem.message}</span>
               </div>
             ) : null}
+            {!showTextEditor && !showTextPreviewHandoff ? (
+              <div className="canvas-text-preview-empty" aria-hidden="true" />
+            ) : null}
           </>
-        ) : (
-          <div className="canvas-text-preview-empty" aria-hidden="true" />
         )}
       </div>
     </section>
@@ -660,13 +693,16 @@ function CanvasTextNodeContent({
 function textBufferStatus(
   buffer: TextFileBuffer | undefined,
   problem: { title: string; message: string } | undefined,
+  contentRequested: boolean,
   i18n: WorkbenchI18n
 ): { label: string; tone: 'danger' | 'info' | 'loading' } | undefined {
   if (problem || buffer?.error) {
     return { label: i18n.t('canvas.node.error'), tone: 'danger' };
   }
   if (!buffer) {
-    return { label: i18n.t('canvas.node.loading'), tone: 'loading' };
+    return contentRequested
+      ? { label: i18n.t('canvas.node.loading'), tone: 'loading' }
+      : undefined;
   }
   if (buffer.externalChange) {
     return { label: i18n.t('canvas.node.externalChange'), tone: 'info' };

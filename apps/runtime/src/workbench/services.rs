@@ -1042,6 +1042,13 @@ fn project_binding_error(
 
 impl RuntimeHttpServiceError {
     pub(crate) fn from_project(error: crate::project::ProjectError) -> Self {
+        let code = error.code();
+        let details = (code == "project_text_file_too_large").then(|| {
+            serde_json::json!({
+                "actualBytes": error.field("actual_bytes").and_then(|value| value.parse::<u64>().ok()),
+                "maxBytes": error.field("max_bytes").and_then(|value| value.parse::<u64>().ok())
+            })
+        });
         Self {
             status: if matches!(
                 error,
@@ -1049,12 +1056,14 @@ impl RuntimeHttpServiceError {
                     | crate::project::ProjectError::ProjectNotOpen(_)
             ) {
                 StatusCode::NOT_FOUND
+            } else if code == "project_text_file_too_large" {
+                StatusCode::PAYLOAD_TOO_LARGE
             } else {
                 StatusCode::BAD_REQUEST
             },
-            code: error.code(),
+            code,
             message: error.to_string(),
-            details: None,
+            details,
         }
     }
 
@@ -1223,5 +1232,34 @@ fn current_platform() -> Platform {
     #[cfg(target_os = "windows")]
     {
         Platform::Windows
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    use super::RuntimeHttpServiceError;
+
+    #[test]
+    fn oversized_project_text_maps_to_typed_public_details() {
+        let project_error = crate::project::ProjectError::service_with_fields(
+            "project_text_file_too_large",
+            "too large",
+            [
+                ("actual_bytes".to_owned(), "1048577".to_owned()),
+                ("max_bytes".to_owned(), "1048576".to_owned()),
+            ],
+        );
+
+        let error = RuntimeHttpServiceError::from_project(project_error);
+
+        assert_eq!(error.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(error.code, "project_text_file_too_large");
+        assert_eq!(
+            error.details,
+            Some(json!({ "actualBytes": 1_048_577, "maxBytes": 1_048_576 }))
+        );
     }
 }

@@ -7,6 +7,10 @@ import {
   canvasVideoPreviewSource,
   type CanvasVideoPreviewSource
 } from './canvasVideoPreviews';
+import {
+  orderCanvasPreviewTasks,
+  type CanvasPreviewRect
+} from './CanvasPreviewScheduling.js';
 
 export interface CanvasVideoPreviewTarget {
   canvasId: string;
@@ -50,6 +54,8 @@ export function CanvasVideoPreviewProvider({
   resourceZoom,
   devicePixelRatio,
   culledNodePaths,
+  visibleRect,
+  virtualRect,
   previewResourceScheduler,
   children
 }: {
@@ -61,6 +67,8 @@ export function CanvasVideoPreviewProvider({
   resourceZoom: number;
   devicePixelRatio: number;
   culledNodePaths: ReadonlySet<string>;
+  visibleRect: CanvasPreviewRect;
+  virtualRect: CanvasPreviewRect;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -73,9 +81,16 @@ export function CanvasVideoPreviewProvider({
   const checkedTargetKeysRef = useRef(new Set<string>());
   const currentTargetKeysRef = useRef(new Map<string, string>());
   const currentResourceKeysRef = useRef(new Map<string, string>());
+  const sourceRequestRef = useRef<{ readonly targetKeys: ReadonlySet<string> } | undefined>(undefined);
   const currentCulledPathsRef = useRef<ReadonlySet<string>>(culledNodePaths);
   const interactionActiveRef = useRef(interactionActive);
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
+  const orderedCurrentTargets = useMemo(() => orderCanvasVideoPreviewTargets({
+    targets: Object.values(currentTargets),
+    nodesByPath,
+    visibleRect,
+    virtualRect
+  }), [currentTargets, nodesByPath, visibleRect, virtualRect]);
 
   currentCulledPathsRef.current = culledNodePaths;
   currentTargetsRef.current = currentTargets;
@@ -111,14 +126,22 @@ export function CanvasVideoPreviewProvider({
   }, [activeVideoPaths, canvasId, nodes]);
 
   useEffect(() => {
-    const targets = Object.values(currentTargets).filter((target) => (
-      !culledNodePaths.has(target.projectRelativePath)
-      && !checkedTargetKeysRef.current.has(canvasVideoPreviewTargetKey(target))
-    ));
-    if (!shouldStartCanvasVideoPreviewSourceWork({ interactionActive, pendingSourceCount: targets.length })) {
+    const targets = orderCanvasVideoPreviewTargets({
+      targets: Object.values(currentTargets).filter((target) => (
+        !checkedTargetKeysRef.current.has(canvasVideoPreviewTargetKey(target))
+      )),
+      nodesByPath,
+      visibleRect,
+      virtualRect
+    });
+    if (sourceRequestRef.current
+      || !shouldStartCanvasVideoPreviewSourceWork({ interactionActive, pendingSourceCount: targets.length })) {
       return undefined;
     }
-    let cancelled = false;
+    const request = {
+      targetKeys: new Set(targets.map(canvasVideoPreviewTargetKey))
+    };
+    sourceRequestRef.current = request;
     void actions.readCanvasVideoPreviewSources({
       canvasId,
       targets: targets.map(({ projectRelativePath, videoRevision, currentTimeSeconds }) => ({
@@ -127,9 +150,10 @@ export function CanvasVideoPreviewProvider({
         currentTimeSeconds
       }))
     }).then((result) => {
-      if (cancelled) {
+      if (sourceRequestRef.current !== request) {
         return;
       }
+      sourceRequestRef.current = undefined;
       setSourceViews((current) => canvasVideoPreviewSourcesWithViews({
         current,
         targets,
@@ -157,22 +181,21 @@ export function CanvasVideoPreviewProvider({
         checkedTargetKeysRef.current.add(canvasVideoPreviewTargetKey(target));
       }
     }).catch((error: unknown) => {
-      if (cancelled) {
+      if (sourceRequestRef.current !== request) {
         return;
       }
+      sourceRequestRef.current = undefined;
       setPreviewErrors((current) => canvasVideoPreviewErrorsForTargets({
         current,
         targets,
         message: messageFromUnknown(error)
       }));
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [actions, canvasId, culledNodePaths, currentTargets, interactionActive]);
+    return undefined;
+  }, [actions, canvasId, currentTargets, interactionActive, nodesByPath, visibleRect, virtualRect]);
 
   useEffect(() => {
-    const targets = Object.values(currentTargets);
+    const targets = orderedCurrentTargets;
     if (!shouldStartCanvasVideoPreviewSourceWork({ interactionActive, pendingSourceCount: targets.length })) {
       return;
     }
@@ -222,11 +245,6 @@ export function CanvasVideoPreviewProvider({
         }));
         setPreviewErrors((current) => clearCanvasVideoPreviewErrorForPath(current, target.projectRelativePath));
       };
-      const hasCurrentSourcePreview = published?.targetKey === targetKey;
-      if (!hasCurrentSourcePreview && !currentCulledPathsRef.current.has(target.projectRelativePath)) {
-        publishCurrentSource();
-        continue;
-      }
       previewResourceScheduler.enqueue({
         kind: 'video',
         nodeId: target.projectRelativePath,
@@ -241,7 +259,7 @@ export function CanvasVideoPreviewProvider({
     }
   }, [
     canvasId,
-    currentTargets,
+    orderedCurrentTargets,
     devicePixelRatio,
     interactionActive,
     nodesByPath,
@@ -252,6 +270,7 @@ export function CanvasVideoPreviewProvider({
   ]);
 
   useEffect(() => () => {
+    sourceRequestRef.current = undefined;
     for (const projectRelativePath of currentTargetKeysRef.current.keys()) {
       previewResourceScheduler.cancel('video', projectRelativePath);
     }
@@ -331,6 +350,19 @@ export function shouldStartCanvasVideoPreviewSourceWork(input: {
 }): boolean {
   return input.pendingSourceCount > 0
     && !input.interactionActive;
+}
+
+export function orderCanvasVideoPreviewTargets(input: {
+  targets: readonly CanvasVideoPreviewTarget[];
+  nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
+  visibleRect: CanvasPreviewRect;
+  virtualRect: CanvasPreviewRect;
+}): CanvasVideoPreviewTarget[] {
+  const spatial = input.targets.flatMap((target) => {
+    const node = input.nodesByPath.get(target.projectRelativePath);
+    return node ? [{ target, ...node }] : [];
+  });
+  return orderCanvasPreviewTasks(spatial, input).map(({ target }) => target);
 }
 
 function canvasVideoPreviewTargetKey(target: CanvasVideoPreviewTarget): string {

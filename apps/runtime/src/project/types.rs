@@ -232,6 +232,8 @@ pub struct ProjectedCanvasNode {
     pub node: CanvasNodeElement,
     pub availability: CanvasNodeAvailability,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub video_presentation: Option<CanvasVideoPresentation>,
 }
 
