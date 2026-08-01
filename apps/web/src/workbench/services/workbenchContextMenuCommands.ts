@@ -14,7 +14,6 @@ import {
   cameraCenteredOnNode,
   explorerContextMenuEntries,
   explorerContextMenuPrimaryEntry,
-  explorerContextMenuProjectRelativePaths,
   projectedContextMenuNode,
   type ProjectPathCommand,
   type PhotoshopDocumentTarget,
@@ -36,7 +35,6 @@ type ExplorerContextCommands = Pick<ProjectExplorerController,
   | 'copyEntries'
   | 'cutEntries'
   | 'pasteEntries'
-  | 'copyAbsolutePaths'
   | 'revealEntry'
   | 'trashEntries'
   | 'deleteEntriesPermanently'
@@ -57,8 +55,10 @@ export function runProjectPathCommand(input: {
   sendProjectFileToPhotoshop(
     input: Parameters<WorkbenchApiClient['sendProjectFileToPhotoshop']>[0]
   ): ReturnType<WorkbenchApiClient['sendProjectFileToPhotoshop']> | undefined;
+  copyProjectPathsToSystemClipboard(
+    input: Parameters<WorkbenchApiClient['copyProjectPathsToSystemClipboard']>[0]
+  ): ReturnType<WorkbenchApiClient['copyProjectPathsToSystemClipboard']> | undefined;
   explorerCommands: ExplorerContextCommands;
-  copyText: (text: string) => void | Promise<void>;
   notify: (message: string) => void;
   startNotification: (message: string) => (message: string) => void;
   photoshopLabels: {
@@ -192,16 +192,14 @@ function runSinglePathFileCommand(
     input.closeContextMenu();
     return true;
   }
-  if (input.command === 'copy-path') {
-    void input.explorerCommands.copyAbsolutePaths(input.scope, [...resolved.explicitSortedEntries])
-      .then((paths) => paths ? input.copyText(paths.join('\n')) : undefined)
-      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
-    input.closeContextMenu();
-    return true;
-  }
-  if (input.command === 'copy-relative-path') {
-    void Promise.resolve(input.copyText(explorerContextMenuProjectRelativePaths(target).join('\n')))
-      .catch((error) => input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error)));
+  if (input.command === 'copy-path' || input.command === 'copy-relative-path') {
+    const request = input.copyProjectPathsToSystemClipboard({
+      format: input.command === 'copy-path' ? 'absolute' : 'relative',
+      entries: [...resolved.selectionEntries]
+    });
+    void request?.catch((error) => {
+      input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error));
+    });
     input.closeContextMenu();
     return true;
   }

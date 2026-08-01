@@ -230,7 +230,7 @@ describe('CanvasImageNodeAsset', () => {
       hasLoadedImage: true,
       culled: false,
       becameVisibleAfterCull: false,
-      dragActive: false,
+      pointerInteractionActive: false,
       loadedLoadKey: loaded.loaded?.loadKey,
     })).toBe(false);
   });
@@ -251,7 +251,7 @@ describe('CanvasImageNodeAsset', () => {
       hasLoadedImage: false,
       culled: false,
       becameVisibleAfterCull: false,
-      dragActive: false,
+      pointerInteractionActive: false,
       loadedLoadKey: undefined,
     })).toBe(true);
 
@@ -263,7 +263,7 @@ describe('CanvasImageNodeAsset', () => {
       hasLoadedImage: true,
       culled: false,
       becameVisibleAfterCull: false,
-      dragActive: false,
+      pointerInteractionActive: false,
       loadedLoadKey: `${previewUrl('flow/cover.png', 'rev-a', 213)}:0`,
     })).toBe(true);
 
@@ -275,7 +275,7 @@ describe('CanvasImageNodeAsset', () => {
       hasLoadedImage: true,
       culled: false,
       becameVisibleAfterCull: false,
-      dragActive: false,
+      pointerInteractionActive: false,
       loadedLoadKey: `${previewUrl('flow/cover.png', 'rev-b', 213)}:0`,
     })).toBe(true);
   });
@@ -319,7 +319,7 @@ describe('CanvasImageNodeAsset', () => {
       hasLoadedImage: true,
       culled: false,
       becameVisibleAfterCull: false,
-      dragActive: false,
+      pointerInteractionActive: false,
       loadedLoadKey: loaded.loaded?.loadKey
     })).toBe(false);
   });
@@ -340,7 +340,7 @@ describe('CanvasImageNodeAsset', () => {
       hasLoadedImage: false,
       culled: false,
       becameVisibleAfterCull: true,
-      dragActive: false,
+      pointerInteractionActive: false,
       loadedLoadKey: undefined
     })).toBe(false);
   });
@@ -362,7 +362,7 @@ describe('CanvasImageNodeAsset', () => {
       hasLoadedImage: true,
       culled: false,
       becameVisibleAfterCull: false,
-      dragActive: true,
+      pointerInteractionActive: true,
       loadedLoadKey: loaded.loaded?.loadKey
     })).toBe(false);
   });

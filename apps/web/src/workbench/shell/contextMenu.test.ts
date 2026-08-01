@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PHOTOSHOP_MAX_FILE_BYTES } from '@debrute/app-protocol';
+import { PHOTOSHOP_MAX_FILE_BYTES, type ProjectPathEntry } from '@debrute/app-protocol';
 import type { CanvasProjection } from '@debrute/canvas-core';
 import {
   buildWorkbenchContextMenuItems,
@@ -43,7 +43,7 @@ describe('Workbench context menu', () => {
     expect(actionCommands(buildWorkbenchContextMenuItems({
       target: {
         source: 'explorer',
-        invocationEntry: { projectRelativePath: '', kind: 'directory' },
+        invocationEntry: { pathEntry: { projectRelativePath: '', kind: 'directory' } },
         selectedEntries: []
       },
       projection: undefined
@@ -138,12 +138,24 @@ describe('Workbench context menu', () => {
 
 function canvasTarget(
   invocationPath: string,
-  selectedEntries: WorkbenchContextMenuTarget['selectedEntries']
+  selectedEntries: Array<ProjectPathEntry & {
+    availability?: 'available' | 'missing' | 'unreadable';
+  }>
 ): WorkbenchContextMenuTarget {
+  const candidates = selectedEntries.map((entry) => ({
+    pathEntry: {
+      projectRelativePath: entry.projectRelativePath,
+      kind: entry.kind,
+      ...(entry.sizeBytes === undefined ? {} : { sizeBytes: entry.sizeBytes })
+    },
+    ...(entry.availability === undefined ? {} : { availability: entry.availability })
+  }));
   return {
     source: 'canvas',
-    invocationEntry: selectedEntries.find((entry) => entry.projectRelativePath === invocationPath)!,
-    selectedEntries
+    invocationEntry: candidates.find((candidate) => (
+      candidate.pathEntry.projectRelativePath === invocationPath
+    ))!,
+    selectedEntries: candidates
   };
 }
 

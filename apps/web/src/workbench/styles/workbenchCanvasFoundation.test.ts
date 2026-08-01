@@ -48,6 +48,27 @@ describe('Workbench Canvas foundation', () => {
     expect(emptyEditorRule).toContain('padding-block-start: var(--db-titlebar-height);');
     expect(titledBootRule).toContain('padding-block-start: var(--db-titlebar-height);');
   });
+
+  it('centres every Canvas resize handle on the selected node border', () => {
+    const expectedAnchors = new Map([
+      ['n', ['top: 0;', 'left: 50%;', 'transform: translate(-50%, -50%);']],
+      ['s', ['bottom: 0;', 'left: 50%;', 'transform: translate(-50%, 50%);']],
+      ['e', ['top: 50%;', 'right: 0;', 'transform: translate(50%, -50%);']],
+      ['w', ['top: 50%;', 'left: 0;', 'transform: translate(-50%, -50%);']],
+      ['nw', ['top: 0;', 'left: 0;', 'transform: translate(-50%, -50%);']],
+      ['ne', ['top: 0;', 'right: 0;', 'transform: translate(50%, -50%);']],
+      ['sw', ['bottom: 0;', 'left: 0;', 'transform: translate(-50%, 50%);']],
+      ['se', ['bottom: 0;', 'right: 0;', 'transform: translate(50%, 50%);']]
+    ]);
+
+    for (const [handle, declarations] of expectedAnchors) {
+      const rule = cssRule(canvasStyles, `.canvas-node-resize.${handle}`);
+      for (const declaration of declarations) {
+        expect(rule).toContain(declaration);
+      }
+    }
+    expect(canvasStyles).not.toContain('calc(-8px * var(--canvas-chrome-scale, 1))');
+  });
 });
 
 function cssRule(styles: string, selector: string): string {

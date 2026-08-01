@@ -166,8 +166,9 @@ interface WorkbenchProjectDeletePathsInput {
   entries: ProjectPathEntry[];
 }
 
-interface WorkbenchProjectAbsolutePathsResult {
-  paths: string[];
+export interface WorkbenchProjectPathClipboardInput {
+  format: 'absolute' | 'relative';
+  entries: ProjectPathEntry[];
 }
 
 interface WorkbenchProjectExternalLocalImportInput {
@@ -1345,7 +1346,7 @@ export interface WorkbenchApiClient {
   renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   copyProjectPaths(input: WorkbenchProjectCopyPathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   moveProjectPaths(input: WorkbenchProjectMovePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
-  copyProjectAbsolutePaths(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectAbsolutePathsResult>;
+  copyProjectPathsToSystemClipboard(input: WorkbenchProjectPathClipboardInput): Promise<{ ok: true }>;
   trashProjectPaths(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   deleteProjectPathsPermanently(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   importExternalLocalProjectPaths(input: WorkbenchProjectExternalLocalImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;

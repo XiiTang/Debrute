@@ -1,9 +1,8 @@
 use std::{
     collections::HashMap,
     error::Error,
-    io::{self, Write as _},
+    io,
     path::Path,
-    process::{Command, Stdio},
     sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
@@ -17,6 +16,7 @@ use debrute_runtime::control::{
 use debrute_runtime::login::MacOsLoginItem as PlatformLoginItem;
 #[cfg(target_os = "windows")]
 use debrute_runtime::login::WindowsLoginItem as PlatformLoginItem;
+use debrute_runtime::native_clipboard::write_text_to_system_clipboard;
 use tao::{
     event::{Event, StartCause},
     event_loop::{ControlFlow, EventLoopBuilder},
@@ -26,9 +26,6 @@ use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,
     menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
 };
-
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt as _;
 
 #[cfg(target_os = "macos")]
 use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
@@ -40,8 +37,6 @@ const OPEN_BROWSER_ID: &str = "open-browser";
 const COPY_URL_ID: &str = "copy-url";
 const START_AT_LOGIN_ID: &str = "start-at-login";
 const QUIT_ID: &str = "quit-debrute";
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub fn run(
     state: &Arc<RuntimeControlState>,
@@ -207,7 +202,7 @@ impl RuntimeApplication {
                 return;
             }
         };
-        if let Err(error) = copy_text_to_clipboard(&url) {
+        if let Err(error) = write_text_to_system_clipboard(&url) {
             eprintln!("Debrute Runtime tray could not copy the Workbench URL: {error}");
         }
     }
@@ -498,39 +493,6 @@ fn runtime_status_label(status: RuntimeStatus) -> &'static str {
         RuntimeStatus::Ready => "Ready",
         RuntimeStatus::Exiting => "Exiting",
         RuntimeStatus::Replacing => "Updating",
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
-    write_to_clipboard_command(Command::new("/usr/bin/pbcopy"), text)
-}
-
-#[cfg(target_os = "windows")]
-fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
-    let mut command = Command::new("clip.exe");
-    command.creation_flags(CREATE_NO_WINDOW);
-    write_to_clipboard_command(command, text)
-}
-
-fn write_to_clipboard_command(mut command: Command, text: &str) -> io::Result<()> {
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| io::Error::other("clipboard command stdin is unavailable"))?
-        .write_all(text.as_bytes())?;
-    let status = child.wait()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other(format!(
-            "clipboard command exited with {status}"
-        )))
     }
 }
 

@@ -77,6 +77,7 @@ export interface CanvasPerfRuntimeSession {
   lastFrameTimestamp: number;
   reactCommitCount: number;
   counterTotals: CanvasPerfCounterTotals;
+  pointerInteractionActivated?: boolean | undefined;
 }
 
 export interface CanvasPerfDebugSnapshotContext {
@@ -169,10 +170,10 @@ export function syncCanvasPerfPointerInteractionSessionState(input: {
     if (!input.sessionRef.current) {
       const sessionId = perfMonitor.startSession({
         type: input.pointerInteraction.kind === 'selection-marquee'
-          ? 'selection-marquee'
+          ? 'pointer-selection'
           : input.pointerInteraction.kind === 'move-node'
-            ? 'drag-move-node'
-            : 'drag-resize-node',
+            ? 'pointer-move-node'
+            : 'pointer-resize-node',
         timestamp,
         source: 'CanvasSurface',
         detail: canvasPerfPointerInteractionSessionDetail(input.pointerInteraction)
@@ -181,8 +182,11 @@ export function syncCanvasPerfPointerInteractionSessionState(input: {
         sessionId,
         lastFrameTimestamp: timestamp,
         reactCommitCount: input.reactCommitCountRef.current,
-        counterTotals: perfMonitor.getCounterTotals()
+        counterTotals: perfMonitor.getCounterTotals(),
+        pointerInteractionActivated: input.pointerInteraction.phase === 'active'
       };
+    } else if (input.pointerInteraction.phase === 'active') {
+      input.sessionRef.current.pointerInteractionActivated = true;
     }
     return;
   }
@@ -196,7 +200,8 @@ export function syncCanvasPerfPointerInteractionSessionState(input: {
         zoomLevel: input.snapshot.camera.z,
         cameraState: input.snapshot.cameraState,
         ...input.finalState
-      }
+      },
+      detail: { activated: session.pointerInteractionActivated === true }
     });
     input.sessionRef.current = undefined;
   }
@@ -344,7 +349,7 @@ export function canvasPreviewResourceInteractionState(
 ): CanvasPreviewResourceInteractionState {
   return {
     cameraState: snapshot.cameraState,
-    dragActive: snapshot.pointerInteraction !== undefined
+    pointerInteractionActive: snapshot.pointerInteraction !== undefined
   };
 }
 

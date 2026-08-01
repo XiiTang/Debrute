@@ -696,6 +696,67 @@ describe('CanvasEditorRuntime', () => {
     ]);
   });
 
+  it('raises a selected move group only after the existing movement threshold activates it', () => {
+    const runtime = createCanvasEditorRuntime({
+      canvasId: 'canvas-1',
+      initialProjection: {
+        canvasId: 'canvas-1',
+        nodes: ['a.png', 'b.png', 'c.png', 'd.png'].map((path, z) => ({
+          ...canvasProjection(path, z * 20).nodes[0]!,
+          z
+        })),
+        edges: [],
+        diagnostics: []
+      },
+      selection: { kind: 'nodes', projectRelativePaths: ['b.png', 'd.png'] },
+      submitManualLayout: async () => undefined
+    });
+
+    runtime.input.beginNodeMove({
+      pointerId: 20,
+      projectRelativePath: 'b.png',
+      screenPoint: { x: 0, y: 0 }
+    });
+    expect(runtime.manualLayout.getPresentation().stackOrder).toBeUndefined();
+
+    runtime.input.updatePointerInteraction({ pointerId: 20, screenPoint: { x: 5, y: 0 } });
+    expect(runtime.manualLayout.getPresentation().stackOrder).toEqual([
+      'a.png',
+      'c.png',
+      'b.png',
+      'd.png'
+    ]);
+
+    runtime.input.cancelPointerInteraction(20);
+    expect(runtime.manualLayout.getPresentation().stackOrder).toBeUndefined();
+  });
+
+  it('raises only the resized node as soon as its handle is pressed', () => {
+    const runtime = createCanvasEditorRuntime({
+      canvasId: 'canvas-1',
+      initialProjection: {
+        canvasId: 'canvas-1',
+        nodes: [
+          { ...canvasProjection('a.png', 0).nodes[0]!, z: 0 },
+          { ...canvasProjection('b.png', 20).nodes[0]!, z: 1 }
+        ],
+        edges: [],
+        diagnostics: []
+      },
+      submitManualLayout: async () => undefined
+    });
+
+    runtime.input.beginNodeResize({
+      pointerId: 21,
+      projectRelativePath: 'a.png',
+      handle: 'se',
+      screenPoint: { x: 0, y: 0 },
+      modifiers: noModifiers()
+    });
+
+    expect(runtime.manualLayout.getPresentation().stackOrder).toEqual(['b.png', 'a.png']);
+  });
+
   it('does not notify broad snapshot subscribers for pointer move drag previews', () => {
     const runtime = createRuntime();
     const snapshots: unknown[] = [];

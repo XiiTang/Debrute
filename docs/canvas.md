@@ -269,7 +269,13 @@ location per selected node, and does not fall back to another selected node if
 the invocation target no longer exists. Copy Paths and Copy Relative Paths
 include every explicitly selected node, including explicitly selected
 descendants of a selected directory; they emit one path per line in stable
-project-relative-path order.
+project-relative-path order. Both commands complete through the Runtime-owned
+system clipboard, so Browser and Desktop use the same native path-copy
+contract. Copy Paths validates the complete existing batch before changing the
+clipboard. Copy Relative Paths accepts unavailable Canvas nodes whose canonical
+Project path is still valid and formats separators for the Runtime platform
+(`\\` on Windows and `/` elsewhere); the canonical empty Project-root path is
+presented as `.`.
 
 Right-clicking true Canvas blank space clears the Canvas Node Selection without
 starting a marquee, moving the camera, or changing stack order. It suppresses
@@ -340,12 +346,16 @@ camera.
 ## Stack Order
 
 Every Canvas Node has persisted stack order independent of its hierarchy and
-layout mode. Selection alone never changes stack order. A successfully committed
-direct move raises the moved Canvas Node Selection as one frontmost block while
-preserving the selected nodes' prior relative order and the relative order of
-all unselected nodes. A cancelled or failed move leaves stack order unchanged.
+layout mode. Selection alone never changes stack order. Once a direct move
+crosses its existing activation threshold, its Manual Layout Draft immediately
+raises the moved Canvas Node Selection as one frontmost block while preserving
+the selected nodes' prior relative order and the relative order of all
+unselected nodes. A resize is active from handle pointer-down and immediately
+raises only that node. Pointer release persists geometry and this stack-order
+change in one mutation; cancellation or failure restores both.
 There is no Bring to Front command or selection-driven stack-order
-synchronization; the layer change is part of the successful direct-move commit.
+synchronization; the layer change belongs to the same Manual Layout lifecycle
+as move and resize geometry.
 DOM order stays deterministic by path while CSS stacking reflects the persisted
 order; the Project tree is not a layer panel.
 
@@ -365,15 +375,19 @@ Moving a selected node moves the selected node group from shared origin
 geometry. Single-node resizing clamps to a minimum size and applies the
 media-aware aspect-ratio rule.
 
-During move and resize, a Manual Layout Draft is the visual geometry. Node
-shells, connected edges, culling retention, and overlays read that same draft.
+During move and resize, a Manual Layout Draft is the visual geometry and stack
+order. Node shells, connected edges, culling retention, overlays, and CSS
+stacking read that same draft.
 On pointer release, Workbench submits the draft immediately and keeps presenting
-it until the Canvas Projection confirms the same rectangles or a target node
-disappears. A submitted draft is presentation state, not Canvas Document state.
+it until the Canvas Projection confirms the same rectangles and relative stack
+order, or a target node disappears. A submitted draft is presentation state,
+not Canvas Document state.
 A successful mutation outcome closes the Runtime command but does not itself
-confirm presentation. Confirmation requires exact rectangle equality in the
-already revision-ordered Canvas Projection; `projectRevision` orders authority
-but is not a substitute for that geometry check.
+confirm presentation. Confirmation requires exact rectangle equality and stack
+order in the already revision-ordered Canvas Projection; `projectRevision`
+orders authority but is not a substitute for that presentation check. A
+finished interaction is skipped only when neither geometry nor stack order
+would change.
 
 Workbench accepts another move or resize while earlier Manual Layout Drafts are
 still awaiting confirmation. Presented geometry composes the newest Canvas

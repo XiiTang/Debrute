@@ -17,6 +17,8 @@ export interface CanvasManualLayoutDraft {
   nodeLayouts: CanvasLayoutOverride[];
 }
 
+export type CanvasNodeStackOrder = readonly string[];
+
 export function canvasManualLayoutDraftFromMoveInteraction(input: {
   canvasId: string;
   interaction: Extract<CanvasRuntimeLayoutInteraction, { kind: 'move-node' }>;
@@ -104,5 +106,49 @@ export function canvasNodesWithLayoutOverrides(input: {
           height: layout.height
         }
       : node;
+  });
+}
+
+export function canvasNodeStackOrder(
+  nodes: readonly Pick<ProjectedCanvasNode, 'projectRelativePath' | 'z'>[]
+): string[] {
+  return [...nodes]
+    .sort(compareCanvasNodeStackOrder)
+    .map((node) => node.projectRelativePath);
+}
+
+function compareCanvasNodeStackOrder(
+  left: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'z'>,
+  right: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'z'>
+): number {
+  if (left.z !== right.z) {
+    return left.z < right.z ? -1 : 1;
+  }
+  return left.projectRelativePath < right.projectRelativePath
+    ? -1
+    : left.projectRelativePath > right.projectRelativePath ? 1 : 0;
+}
+
+export function canvasStackOrderWithRaisedGroup(
+  order: readonly string[],
+  raisedPaths: readonly string[]
+): string[] {
+  const raised = new Set(raisedPaths);
+  return order
+    .filter((path) => !raised.has(path))
+    .concat(order.filter((path) => raised.has(path)));
+}
+
+export function canvasNodesWithStackOrder(input: {
+  nodes: readonly ProjectedCanvasNode[];
+  stackOrder: CanvasNodeStackOrder | undefined;
+}): ProjectedCanvasNode[] {
+  if (!input.stackOrder) {
+    return [...input.nodes];
+  }
+  const zByPath = new Map(input.stackOrder.map((path, z) => [path, z]));
+  return input.nodes.map((node) => {
+    const z = zByPath.get(node.projectRelativePath);
+    return z === undefined || z === node.z ? node : { ...node, z };
   });
 }

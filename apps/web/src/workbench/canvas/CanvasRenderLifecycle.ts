@@ -171,13 +171,15 @@ function renderInput(
   runtime: CanvasEditorRuntime,
   snapshot: CanvasRuntimeSnapshot = runtime.getSnapshot()
 ): CanvasRenderCoordinatorUpdateInput {
+  const manualLayout = runtime.manualLayout.getPresentation();
   return {
     camera: snapshot.camera,
     cameraState: snapshot.cameraState,
     surfaceSize: snapshot.surfaceSize,
     selection: snapshot.selection,
     activeNodePaths: activeNodeProjectRelativePaths(snapshot.pointerInteraction),
-    layoutOverrides: runtime.manualLayout.getPresentation().layoutOverrides
+    layoutOverrides: manualLayout.layoutOverrides,
+    stackOrder: manualLayout.stackOrder
   };
 }
 

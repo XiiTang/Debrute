@@ -701,9 +701,9 @@ export function createHttpWorkbenchApiClient(options: {
     }),
     copyProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/copy'), input),
     moveProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/move'), input),
-    copyProjectAbsolutePaths: (input) => requestForCurrentProject<{ paths: string[] }>(
+    copyProjectPathsToSystemClipboard: (input) => requestForCurrentProject<{ ok: true }>(
       'POST',
-      '/files/path/batch/copy-path',
+      '/files/path/batch/copy-to-system-clipboard',
       input
     ),
     trashProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>(

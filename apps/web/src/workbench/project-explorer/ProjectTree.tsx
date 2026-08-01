@@ -764,17 +764,19 @@ function explorerTargetFromSelection(
   }
   return {
     source: 'explorer',
-    invocationEntry: invocationEntry
-      ?? entries.find((entry) => entry.projectRelativePath === selection.focusedPath)
-      ?? entries[0]!,
-    selectedEntries: entries
+    invocationEntry: {
+      pathEntry: invocationEntry
+        ?? entries.find((entry) => entry.projectRelativePath === selection.focusedPath)
+        ?? entries[0]!
+    },
+    selectedEntries: entries.map((pathEntry) => ({ pathEntry }))
   };
 }
 
 function rootExplorerTarget(): WorkbenchExplorerContextMenuTarget {
   return {
     source: 'explorer',
-    invocationEntry: { projectRelativePath: '', kind: 'directory' },
+    invocationEntry: { pathEntry: { projectRelativePath: '', kind: 'directory' } },
     selectedEntries: []
   };
 }

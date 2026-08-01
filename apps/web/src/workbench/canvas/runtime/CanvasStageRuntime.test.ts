@@ -89,7 +89,7 @@ describe('CanvasStageRuntime', () => {
 
   it('records layout and visibility counters', () => {
     const monitor = createCanvasPerfMonitor();
-    const sessionId = monitor.startSession({ type: 'drag-move-node', timestamp: 0, source: 'CanvasSurface' });
+    const sessionId = monitor.startSession({ type: 'pointer-move-node', timestamp: 0, source: 'CanvasSurface' });
     const runtime = createCanvasStageRuntime({ perfMonitor: monitor });
     const element = fakeElement();
 

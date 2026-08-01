@@ -8,6 +8,7 @@ describe('ProjectPathCommandRouter', () => {
       commandIntake: { canAccept: () => false, tryAccept: () => undefined },
       commandEffects: {
         sendProjectFileToPhotoshop: () => undefined,
+        copyProjectPathsToSystemClipboard: () => undefined,
         resetCanvasNodeLayouts: () => undefined
       },
       openTerminalPanel: vi.fn(),
@@ -23,12 +24,10 @@ describe('ProjectPathCommandRouter', () => {
           copyEntries: vi.fn(),
           cutEntries: vi.fn(),
           pasteEntries: vi.fn(),
-          copyAbsolutePaths: vi.fn(),
           revealEntry: vi.fn(),
           trashEntries: vi.fn(),
           deleteEntriesPermanently: vi.fn()
         },
-        copyText: vi.fn(),
         notify: vi.fn(),
         startNotification: () => vi.fn(),
         getProjectSnapshot: () => undefined,
@@ -43,8 +42,8 @@ describe('ProjectPathCommandRouter', () => {
     });
     const items = router.contextMenuItems({
       source: 'canvas',
-      invocationEntry: { projectRelativePath: 'a.png', kind: 'file' },
-      selectedEntries: [{ projectRelativePath: 'a.png', kind: 'file' }]
+      invocationEntry: { pathEntry: { projectRelativePath: 'a.png', kind: 'file' } },
+      selectedEntries: [{ pathEntry: { projectRelativePath: 'a.png', kind: 'file' } }]
     });
     expect(items.filter((item) => item.kind === 'action').every((item) => item.disabled)).toBe(true);
   });
@@ -64,6 +63,7 @@ describe('ProjectPathCommandRouter', () => {
       },
       commandEffects: {
         sendProjectFileToPhotoshop: () => undefined,
+        copyProjectPathsToSystemClipboard: () => undefined,
         resetCanvasNodeLayouts: () => undefined
       },
       openTerminalPanel: vi.fn(),
@@ -79,12 +79,10 @@ describe('ProjectPathCommandRouter', () => {
           copyEntries,
           cutEntries: vi.fn(),
           pasteEntries: vi.fn(),
-          copyAbsolutePaths: vi.fn(),
           revealEntry: vi.fn(),
           trashEntries: vi.fn(),
           deleteEntriesPermanently: vi.fn()
         },
-        copyText: vi.fn(),
         notify: vi.fn(),
         startNotification: () => vi.fn(),
         getProjectSnapshot: () => undefined,
@@ -99,8 +97,8 @@ describe('ProjectPathCommandRouter', () => {
     });
     const target = {
       source: 'canvas' as const,
-      invocationEntry: { projectRelativePath: 'a.png', kind: 'file' as const },
-      selectedEntries: [{ projectRelativePath: 'a.png', kind: 'file' as const }]
+      invocationEntry: { pathEntry: { projectRelativePath: 'a.png', kind: 'file' as const } },
+      selectedEntries: [{ pathEntry: { projectRelativePath: 'a.png', kind: 'file' as const } }]
     };
 
     router.run('copy', { target, position: { x: 0, y: 0 } });

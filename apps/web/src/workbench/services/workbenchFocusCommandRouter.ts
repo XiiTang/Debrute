@@ -4,7 +4,10 @@ import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.
 import { canvasNodeSelection, selectedNodeProjectRelativePaths } from '../canvas/runtime/canvasSelection.js';
 import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController.js';
 import type { ProjectPathCommandRouter } from './projectPathCommandRouter.js';
-import { projectPathCommandEntryForCanvasNode } from './projectPathCommandTarget.js';
+import {
+  projectPathCommandEntryForCanvasNode,
+  resolveProjectPathCommandTarget
+} from './projectPathCommandTarget.js';
 import type { WorkbenchMenuCommandId } from '../shell/workbenchTitleBarState.js';
 
 export type WorkbenchFocusCommand =
@@ -69,9 +72,10 @@ export function createWorkbenchFocusCommandRouter(input: {
       if (!router) {
         return true;
       }
+      const resolvedTarget = resolveProjectPathCommandTarget(target);
       if (command === 'paste' && (
-        target.selectedEntries.length !== 1
-        || target.selectedEntries[0]?.kind !== 'directory'
+        resolvedTarget.selectionEntries.length !== 1
+        || resolvedTarget.selectionEntries[0]?.kind !== 'directory'
       )) {
         return true;
       }

@@ -1236,53 +1236,57 @@
 }
 
 .canvas-node-resize.n {
-  top: calc(-8px * var(--canvas-chrome-scale, 1));
+  top: 0;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   cursor: ns-resize;
 }
 
 .canvas-node-resize.s {
-  bottom: calc(-8px * var(--canvas-chrome-scale, 1));
+  bottom: 0;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, 50%);
   cursor: ns-resize;
 }
 
 .canvas-node-resize.e {
   top: 50%;
-  right: calc(-8px * var(--canvas-chrome-scale, 1));
-  transform: translateY(-50%);
+  right: 0;
+  transform: translate(50%, -50%);
   cursor: ew-resize;
 }
 
 .canvas-node-resize.w {
   top: 50%;
-  left: calc(-8px * var(--canvas-chrome-scale, 1));
-  transform: translateY(-50%);
+  left: 0;
+  transform: translate(-50%, -50%);
   cursor: ew-resize;
 }
 
 .canvas-node-resize.nw {
-  top: calc(-8px * var(--canvas-chrome-scale, 1));
-  left: calc(-8px * var(--canvas-chrome-scale, 1));
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
   cursor: nwse-resize;
 }
 
 .canvas-node-resize.ne {
-  top: calc(-8px * var(--canvas-chrome-scale, 1));
-  right: calc(-8px * var(--canvas-chrome-scale, 1));
+  top: 0;
+  right: 0;
+  transform: translate(50%, -50%);
   cursor: nesw-resize;
 }
 
 .canvas-node-resize.sw {
-  bottom: calc(-8px * var(--canvas-chrome-scale, 1));
-  left: calc(-8px * var(--canvas-chrome-scale, 1));
+  bottom: 0;
+  left: 0;
+  transform: translate(-50%, 50%);
   cursor: nesw-resize;
 }
 
 .canvas-node-resize.se {
-  right: calc(-8px * var(--canvas-chrome-scale, 1));
-  bottom: calc(-8px * var(--canvas-chrome-scale, 1));
+  right: 0;
+  bottom: 0;
+  transform: translate(50%, 50%);
   cursor: nwse-resize;
 }

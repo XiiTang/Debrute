@@ -1,13 +1,14 @@
 import type { ProjectPathEntry } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 
-export interface WorkbenchProjectPathCommandEntry extends ProjectPathEntry {
+export interface WorkbenchProjectPathCommandCandidate {
+  pathEntry: ProjectPathEntry;
   availability?: 'available' | 'missing' | 'unreadable';
 }
 
 interface WorkbenchProjectPathCommandTargetFields {
-  invocationEntry: WorkbenchProjectPathCommandEntry;
-  selectedEntries: readonly WorkbenchProjectPathCommandEntry[];
+  invocationEntry: WorkbenchProjectPathCommandCandidate;
+  selectedEntries: readonly WorkbenchProjectPathCommandCandidate[];
 }
 
 export type WorkbenchProjectPathCommandTarget = WorkbenchProjectPathCommandTargetFields & (
@@ -16,16 +17,15 @@ export type WorkbenchProjectPathCommandTarget = WorkbenchProjectPathCommandTarge
 );
 
 export interface ResolvedProjectPathCommandTarget {
-  invocationEntry: WorkbenchProjectPathCommandEntry;
-  selectionEntries: readonly WorkbenchProjectPathCommandEntry[];
-  explicitSortedEntries: readonly WorkbenchProjectPathCommandEntry[];
-  effectiveFilesystemEntries: readonly WorkbenchProjectPathCommandEntry[];
+  invocationEntry: ProjectPathEntry;
+  selectionEntries: readonly ProjectPathEntry[];
+  effectiveFilesystemEntries: readonly ProjectPathEntry[];
   filesystemCommandsAvailable: boolean;
 }
 
 interface ResolvedProjectPathCommandEntries {
-  explicitSortedEntries: readonly WorkbenchProjectPathCommandEntry[];
-  effectiveFilesystemEntries: readonly WorkbenchProjectPathCommandEntry[];
+  selectionEntries: readonly ProjectPathEntry[];
+  effectiveFilesystemEntries: readonly ProjectPathEntry[];
   filesystemCommandsAvailable: boolean;
 }
 
@@ -34,59 +34,72 @@ export function resolveProjectPathCommandTarget(
 ): ResolvedProjectPathCommandTarget {
   const resolvedEntries = resolveProjectPathCommandEntries(target.selectedEntries);
   return {
-    invocationEntry: target.invocationEntry,
-    selectionEntries: resolvedEntries.explicitSortedEntries,
+    invocationEntry: exactProjectPathEntry(target.invocationEntry.pathEntry),
     ...resolvedEntries
   };
 }
 
 function resolveProjectPathCommandEntries(
-  entries: readonly WorkbenchProjectPathCommandEntry[]
+  entries: readonly WorkbenchProjectPathCommandCandidate[]
 ): ResolvedProjectPathCommandEntries {
-  const explicitSortedEntries = canonicalEntries(entries);
-  const nonRootEntries = explicitSortedEntries.filter((entry) => entry.projectRelativePath !== '');
-  const missing = nonRootEntries.some((entry) => entry.availability === 'missing');
-  const selectedDirectories = nonRootEntries
-    .filter((entry) => entry.kind === 'directory')
-    .map((entry) => entry.projectRelativePath);
-  const effectiveFilesystemEntries = nonRootEntries.filter((entry) => !selectedDirectories.some((directory) => (
-    directory !== entry.projectRelativePath
-    && entry.projectRelativePath.startsWith(`${directory}/`)
+  const explicitSortedCandidates = canonicalCandidates(entries);
+  const nonRootCandidates = explicitSortedCandidates.filter((candidate) => (
+    candidate.pathEntry.projectRelativePath !== ''
+  ));
+  const missing = nonRootCandidates.some((candidate) => candidate.availability === 'missing');
+  const selectedDirectories = nonRootCandidates
+    .filter((candidate) => candidate.pathEntry.kind === 'directory')
+    .map((candidate) => candidate.pathEntry.projectRelativePath);
+  const effectiveFilesystemCandidates = nonRootCandidates.filter((candidate) => !selectedDirectories.some((directory) => (
+    directory !== candidate.pathEntry.projectRelativePath
+    && candidate.pathEntry.projectRelativePath.startsWith(`${directory}/`)
   )));
+  const selectionEntries = explicitSortedCandidates.map((candidate) => (
+    exactProjectPathEntry(candidate.pathEntry)
+  ));
+  const effectiveFilesystemEntries = effectiveFilesystemCandidates.map((candidate) => (
+    exactProjectPathEntry(candidate.pathEntry)
+  ));
   return {
-    explicitSortedEntries,
+    selectionEntries,
     effectiveFilesystemEntries,
     filesystemCommandsAvailable: !missing && effectiveFilesystemEntries.length > 0
   };
 }
 
-export function effectiveProjectPathEntries(
-  entries: readonly WorkbenchProjectPathCommandEntry[]
-): readonly WorkbenchProjectPathCommandEntry[] {
-  return resolveProjectPathCommandEntries(entries).effectiveFilesystemEntries;
-}
-
 export function projectPathCommandEntryForCanvasNode(
   node: ProjectedCanvasNode
-): WorkbenchProjectPathCommandEntry {
+): WorkbenchProjectPathCommandCandidate {
   return {
-    projectRelativePath: node.projectRelativePath,
-    kind: node.nodeKind,
-    availability: node.availability.state,
-    ...(node.nodeKind === 'file' && node.availability.state === 'available'
-      ? { sizeBytes: node.availability.size }
-      : {})
+    pathEntry: {
+      projectRelativePath: node.projectRelativePath,
+      kind: node.nodeKind,
+      ...(node.nodeKind === 'file' && node.availability.state === 'available'
+        ? { sizeBytes: node.availability.size }
+        : {})
+    },
+    availability: node.availability.state
   };
 }
 
-function canonicalEntries(
-  entries: readonly WorkbenchProjectPathCommandEntry[]
-): WorkbenchProjectPathCommandEntry[] {
-  const byPath = new Map<string, WorkbenchProjectPathCommandEntry>();
-  for (const entry of entries) {
-    byPath.set(entry.projectRelativePath, entry);
+function canonicalCandidates(
+  candidates: readonly WorkbenchProjectPathCommandCandidate[]
+): WorkbenchProjectPathCommandCandidate[] {
+  const byPath = new Map<string, WorkbenchProjectPathCommandCandidate>();
+  for (const candidate of candidates) {
+    byPath.set(candidate.pathEntry.projectRelativePath, candidate);
   }
   return [...byPath.values()].sort((left, right) => (
-    left.projectRelativePath.localeCompare(right.projectRelativePath)
+    left.pathEntry.projectRelativePath < right.pathEntry.projectRelativePath
+      ? -1
+      : left.pathEntry.projectRelativePath > right.pathEntry.projectRelativePath ? 1 : 0
   ));
+}
+
+function exactProjectPathEntry(entry: ProjectPathEntry): ProjectPathEntry {
+  return {
+    projectRelativePath: entry.projectRelativePath,
+    kind: entry.kind,
+    ...(entry.sizeBytes === undefined ? {} : { sizeBytes: entry.sizeBytes })
+  };
 }

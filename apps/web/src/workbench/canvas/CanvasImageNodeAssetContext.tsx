@@ -130,7 +130,7 @@ export function useCanvasImageNodeAsset(input: {
       hasLoadedImage: Boolean(loaded),
       culled: input.culled,
       becameVisibleAfterCull,
-      dragActive: interaction.dragActive,
+      pointerInteractionActive: interaction.pointerInteractionActive,
       loadedLoadKey: loaded?.loadKey
     });
     retryRequestedRef.current = false;

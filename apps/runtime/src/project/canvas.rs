@@ -346,9 +346,7 @@ pub fn update_canvas_node_layouts(
             node.layout_mode = Some("manual".to_owned());
         }
     }
-    if interaction == CanvasLayoutInteraction::Move {
-        raise_canvas_node_group(&mut result, by_path.keys().copied());
-    }
+    raise_canvas_node_group(&mut result, by_path.keys().copied());
     Ok(result)
 }
 

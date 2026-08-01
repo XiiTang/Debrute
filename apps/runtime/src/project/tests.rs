@@ -1979,7 +1979,7 @@ fn interactive_canvas_media_updates_reject_inexact_batches_without_partial_chang
 }
 
 #[test]
-fn canvas_move_atomically_raises_a_group_while_resize_preserves_stack_order() {
+fn canvas_move_and_resize_atomically_raise_their_exact_targets() {
     let mut canvas = create_canvas_document("canvas-1").expect("Canvas should be valid");
     canvas.node_elements = ["a.png", "b.png", "c.png", "d.png"]
         .into_iter()
@@ -2046,18 +2046,19 @@ fn canvas_move_atomically_raises_a_group_while_resize_preserves_stack_order() {
         }],
     )
     .expect("single resize should succeed");
-    assert_eq!(
-        moved
-            .node_elements
-            .iter()
-            .map(|node| node.z)
-            .collect::<Vec<_>>(),
-        resized
-            .node_elements
-            .iter()
-            .map(|node| node.z)
+    let resized_order = {
+        let mut nodes = resized.node_elements.clone();
+        nodes.sort_by(|left, right| {
+            left.z
+                .cmp(&right.z)
+                .then_with(|| left.project_relative_path.cmp(&right.project_relative_path))
+        });
+        nodes
+            .into_iter()
+            .map(|node| node.project_relative_path)
             .collect::<Vec<_>>()
-    );
+    };
+    assert_eq!(resized_order, ["c.png", "b.png", "d.png", "a.png"]);
 }
 
 #[test]

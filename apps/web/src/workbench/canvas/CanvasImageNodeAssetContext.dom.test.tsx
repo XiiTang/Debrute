@@ -35,7 +35,7 @@ describe('CanvasImageNodeAssetContext', () => {
       enqueuePublication: (request) => publications.push(request),
       cancel: () => undefined,
       setInteractionState: () => undefined,
-      getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
+      getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
       notifyVisibilityChanged: () => undefined,
       dispose: () => undefined
     };
@@ -71,7 +71,7 @@ describe('CanvasImageNodeAssetContext', () => {
     const publications: CanvasPreviewResourceRequest[] = [];
     let interaction: ReturnType<CanvasPreviewResourceScheduler['getInteractionState']> = {
       cameraState: 'idle',
-      dragActive: false
+      pointerInteractionActive: false
     };
     let sourceStarts = 0;
     const scheduler: CanvasPreviewResourceScheduler = {
@@ -80,8 +80,8 @@ describe('CanvasImageNodeAssetContext', () => {
       cancel: () => undefined,
       setInteractionState: (next) => {
         interaction = next.cameraState === 'idle'
-          ? { cameraState: 'idle', dragActive: next.dragActive }
-          : { cameraState: 'moving', dragActive: next.dragActive };
+          ? { cameraState: 'idle', pointerInteractionActive: next.pointerInteractionActive }
+          : { cameraState: 'moving', pointerInteractionActive: next.pointerInteractionActive };
       },
       getInteractionState: () => interaction,
       notifyVisibilityChanged: () => undefined,
@@ -107,7 +107,7 @@ describe('CanvasImageNodeAssetContext', () => {
     const sourceStartsBeforeInteraction = sourceStarts;
     const publicationsBeforeInteraction = publications.length;
 
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: true });
+    scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: true });
     await act(async () => root.render(render()));
 
     expect(publications[0]?.isCurrent()).toBe(true);
@@ -224,7 +224,7 @@ function createLoadedImageAssetHarness(root: Root) {
     enqueuePublication: (request) => publications.push(request),
     cancel: () => undefined,
     setInteractionState: () => undefined,
-    getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
+    getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
     notifyVisibilityChanged: () => undefined,
     dispose: () => undefined
   };

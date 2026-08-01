@@ -423,10 +423,16 @@ describe('CanvasSurface', () => {
         selectedInvocation.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       });
       expect(onOpenContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({
-        invocationEntry: expect.objectContaining({ projectRelativePath: 'flow/b.png' }),
+        invocationEntry: expect.objectContaining({
+          pathEntry: expect.objectContaining({ projectRelativePath: 'flow/b.png' })
+        }),
         selectedEntries: [
-          expect.objectContaining({ projectRelativePath: 'flow/a.png' }),
-          expect.objectContaining({ projectRelativePath: 'flow/b.png' })
+          expect.objectContaining({
+            pathEntry: expect.objectContaining({ projectRelativePath: 'flow/a.png' })
+          }),
+          expect.objectContaining({
+            pathEntry: expect.objectContaining({ projectRelativePath: 'flow/b.png' })
+          })
         ]
       }), { x: 0, y: 0 });
 
@@ -452,8 +458,12 @@ describe('CanvasSurface', () => {
         projectRelativePaths: ['flow/c.png']
       });
       expect(onOpenContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({
-        invocationEntry: expect.objectContaining({ projectRelativePath: 'flow/c.png' }),
-        selectedEntries: [expect.objectContaining({ projectRelativePath: 'flow/c.png' })]
+        invocationEntry: expect.objectContaining({
+          pathEntry: expect.objectContaining({ projectRelativePath: 'flow/c.png' })
+        }),
+        selectedEntries: [expect.objectContaining({
+          pathEntry: expect.objectContaining({ projectRelativePath: 'flow/c.png' })
+        })]
       }), { x: 0, y: 0 });
 
       const callCount = onOpenContextMenu.mock.calls.length;
@@ -533,16 +543,20 @@ describe('CanvasSurface', () => {
       expect(onOpenContextMenu).toHaveBeenCalledWith({
         source: 'canvas',
         invocationEntry: {
-          projectRelativePath: 'data/deep/cover.png',
-          kind: 'file',
           availability: 'available',
-          sizeBytes: 12_345
+          pathEntry: {
+            projectRelativePath: 'data/deep/cover.png',
+            kind: 'file',
+            sizeBytes: 12_345
+          }
         },
         selectedEntries: [{
-          projectRelativePath: 'data/deep/cover.png',
-          kind: 'file',
           availability: 'available',
-          sizeBytes: 12_345
+          pathEntry: {
+            projectRelativePath: 'data/deep/cover.png',
+            kind: 'file',
+            sizeBytes: 12_345
+          }
         }]
       }, { x: 40, y: 60 });
 
@@ -561,14 +575,18 @@ describe('CanvasSurface', () => {
       expect(onOpenContextMenu).toHaveBeenLastCalledWith({
         source: 'canvas',
         invocationEntry: {
-          projectRelativePath: 'data/deep/missing.png',
-          kind: 'file',
-          availability: 'missing'
+          availability: 'missing',
+          pathEntry: {
+            projectRelativePath: 'data/deep/missing.png',
+            kind: 'file'
+          }
         },
         selectedEntries: [{
-          projectRelativePath: 'data/deep/missing.png',
-          kind: 'file',
-          availability: 'missing'
+          availability: 'missing',
+          pathEntry: {
+            projectRelativePath: 'data/deep/missing.png',
+            kind: 'file'
+          }
         }]
       }, { x: 80, y: 100 });
 
@@ -587,14 +605,18 @@ describe('CanvasSurface', () => {
       expect(onOpenContextMenu).toHaveBeenLastCalledWith({
         source: 'canvas',
         invocationEntry: {
-          projectRelativePath: 'data/deep/unreadable.png',
-          kind: 'file',
-          availability: 'unreadable'
+          availability: 'unreadable',
+          pathEntry: {
+            projectRelativePath: 'data/deep/unreadable.png',
+            kind: 'file'
+          }
         },
         selectedEntries: [{
-          projectRelativePath: 'data/deep/unreadable.png',
-          kind: 'file',
-          availability: 'unreadable'
+          availability: 'unreadable',
+          pathEntry: {
+            projectRelativePath: 'data/deep/unreadable.png',
+            kind: 'file'
+          }
         }]
       }, { x: 120, y: 140 });
     } finally {
@@ -2080,7 +2102,7 @@ describe('CanvasSurface', () => {
       pointerInteraction: {
         kind: 'move-node',
         pointerId: 1,
-        phase: 'active',
+        phase: 'pending',
         startScreen: { x: 0, y: 0 },
         currentScreen: { x: 0, y: 0 },
         start: { x: 0, y: 0 },
@@ -2251,7 +2273,7 @@ describe('CanvasSurface', () => {
     });
 
     expect(monitor.getLastSession()).toMatchObject({
-      type: 'drag-move-node',
+      type: 'pointer-move-node',
       frameCount: 1,
       mountedNodeCount: 1,
       visibleNodeCount: 1,
@@ -2263,6 +2285,75 @@ describe('CanvasSurface', () => {
     expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
       kind: 'frame',
       cameraState: 'idle'
+    });
+  });
+
+  it('monitors the full pointer operation and records whether it activated', () => {
+    const monitor = createCanvasPerfMonitor();
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const reactCommitCountRef = { current: 0 };
+    const pointerInteraction = {
+      kind: 'move-node' as const,
+      pointerId: 43,
+      phase: 'pending' as 'pending' | 'active',
+      startScreen: { x: 0, y: 0 },
+      currentScreen: { x: 0, y: 0 },
+      start: { x: 0, y: 0 },
+      initialSelection: undefined,
+      pressedProjectRelativePath: 'flow/a.png',
+      additive: false,
+      origins: [nodeFixture('flow/a.png', 0, 0)]
+    };
+
+    syncCanvasPerfPointerInteractionSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      pointerInteraction,
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+    });
+    expect(monitor.getTrace().events.filter((event) => event.kind === 'session-start')).toHaveLength(1);
+    expect(sessionRef.current?.pointerInteractionActivated).toBe(false);
+
+    syncCanvasPerfPointerInteractionSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      pointerInteraction: { ...pointerInteraction, phase: 'active', current: { x: 5, y: 0 } },
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+    });
+    syncCanvasPerfPointerInteractionSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      pointerInteraction: undefined,
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+    });
+
+    expect(monitor.getLastSession()).toMatchObject({
+      type: 'pointer-move-node',
+      detail: { activated: true }
+    });
+
+    const pendingOnlyInteraction = { ...pointerInteraction, pointerId: 44 };
+    syncCanvasPerfPointerInteractionSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      pointerInteraction: pendingOnlyInteraction,
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+    });
+    syncCanvasPerfPointerInteractionSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      reactCommitCountRef,
+      pointerInteraction: undefined,
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+    });
+
+    expect(monitor.getLastSession()).toMatchObject({
+      type: 'pointer-move-node',
+      detail: { activated: false }
     });
   });
 });

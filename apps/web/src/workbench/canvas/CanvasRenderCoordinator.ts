@@ -35,6 +35,7 @@ export interface CanvasRenderCoordinatorUpdateInput {
   selection: CanvasSelection | undefined;
   activeNodePaths: readonly string[];
   layoutOverrides: readonly CanvasLayoutOverride[];
+  stackOrder?: readonly string[] | undefined;
 }
 
 export interface CanvasRenderCoordinator {
@@ -110,7 +111,7 @@ export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInpu
       virtualRect: rendered.virtualRect,
       culledNodePaths,
       nodesByPath,
-      nodeRenderOrder: nodeRenderOrderFor(nodes),
+      nodeRenderOrder: nodeRenderOrderFor(nodes, input.stackOrder),
       edges
     };
   };
@@ -205,7 +206,7 @@ function canvasRenderCoordinatorMountedInputKey(input: CanvasRenderCoordinatorUp
     ].join('\u001f'))
     .sort()
     .join('\u001e');
-  return [mountedPaths, layoutKey].join('\u001d');
+  return [mountedPaths, layoutKey, input.stackOrder?.join('\u001f') ?? ''].join('\u001d');
 }
 
 function renderSnapshotEdges(input: {
@@ -304,12 +305,18 @@ function uniqueNodePathPredicate(): (node: ProjectedCanvasNode) => boolean {
   };
 }
 
-function nodeRenderOrderFor(nodes: ProjectedCanvasNode[]): Map<string, CanvasNodeRenderOrderView> {
+function nodeRenderOrderFor(
+  nodes: ProjectedCanvasNode[],
+  stackOrder: readonly string[] | undefined
+): Map<string, CanvasNodeRenderOrderView> {
   const renderOrder = new Map<string, CanvasNodeRenderOrderView>();
+  const zIndexByPath = stackOrder
+    ? new Map(stackOrder.map((path, zIndex) => [path, zIndex]))
+    : undefined;
   for (const node of nodes) {
     renderOrder.set(node.projectRelativePath, {
       domOrder: node.projectRelativePath,
-      zIndex: node.z
+      zIndex: zIndexByPath?.get(node.projectRelativePath) ?? node.z
     });
   }
   return renderOrder;

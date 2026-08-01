@@ -104,10 +104,16 @@ describe('workbench focus command router', () => {
     expect(run).toHaveBeenLastCalledWith('copy', {
       target: {
         source: 'canvas',
-        invocationEntry: expect.objectContaining({ projectRelativePath: 'assets' }),
+        invocationEntry: expect.objectContaining({
+          pathEntry: expect.objectContaining({ projectRelativePath: 'assets' })
+        }),
         selectedEntries: [
-          expect.objectContaining({ projectRelativePath: 'assets', kind: 'directory' }),
-          expect.objectContaining({ projectRelativePath: 'b.png', kind: 'file' })
+          expect.objectContaining({
+            pathEntry: expect.objectContaining({ projectRelativePath: 'assets', kind: 'directory' })
+          }),
+          expect.objectContaining({
+            pathEntry: expect.objectContaining({ projectRelativePath: 'b.png', kind: 'file' })
+          })
         ]
       },
       position: { x: 0, y: 0 }
@@ -119,7 +125,9 @@ describe('workbench focus command router', () => {
     router.dispatch('paste', 'canvas');
     expect(run).toHaveBeenLastCalledWith('paste', expect.objectContaining({
       target: expect.objectContaining({
-        invocationEntry: expect.objectContaining({ projectRelativePath: 'assets' })
+        invocationEntry: expect.objectContaining({
+          pathEntry: expect.objectContaining({ projectRelativePath: 'assets' })
+        })
       })
     }));
 

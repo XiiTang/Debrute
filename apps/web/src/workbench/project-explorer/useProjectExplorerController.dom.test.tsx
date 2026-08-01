@@ -50,6 +50,57 @@ describe('useProjectExplorerController', () => {
     await probe.unmount();
   });
 
+  it('pastes exact entries from the controller-owned Copy and Cut clipboard', async () => {
+    const copyProjectPaths = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 2,
+      results: []
+    }));
+    const moveProjectPaths = vi.fn(async () => ({
+      projectId: 'project-1',
+      projectRevision: 3,
+      results: []
+    }));
+    const probe = await renderController(
+      { copyProjectPaths, moveProjectPaths },
+      () => snapshotWithFiles(['brief.md'])
+    );
+    const entries = [{ projectRelativePath: 'brief.md', kind: 'file' as const }];
+
+    await act(async () => {
+      probe.current.copyEntries(probe.scope, entries);
+    });
+    const copied = probe.current.fileClipboard!;
+    await act(async () => {
+      probe.current.pasteEntries(probe.scope, {
+        clipboard: copied,
+        targetDirectoryProjectRelativePath: 'copies'
+      });
+      await Promise.resolve();
+    });
+    expect(copyProjectPaths).toHaveBeenCalledWith({
+      entries,
+      targetDirectoryProjectRelativePath: 'copies'
+    });
+
+    await act(async () => {
+      probe.current.cutEntries(probe.scope, entries);
+    });
+    const cut = probe.current.fileClipboard!;
+    await act(async () => {
+      probe.current.pasteEntries(probe.scope, {
+        clipboard: cut,
+        targetDirectoryProjectRelativePath: 'archive'
+      });
+      await Promise.resolve();
+    });
+    expect(moveProjectPaths).toHaveBeenCalledWith({
+      entries,
+      targetDirectoryProjectRelativePath: 'archive'
+    });
+    await probe.unmount();
+  });
+
   it('loads a collapsed parent before creating a child inside it', async () => {
     const loadProjectDirectory = vi.fn(async () => ({
       projectId: 'project-1',

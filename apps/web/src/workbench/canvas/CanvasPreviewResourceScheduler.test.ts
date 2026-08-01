@@ -11,12 +11,12 @@ describe('CanvasPreviewResourceScheduler', () => {
 
     expect(scheduler.getInteractionState()).toEqual({
       cameraState: 'idle',
-      dragActive: false
+      pointerInteractionActive: false
     });
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: true });
+    scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: true });
     expect(scheduler.getInteractionState()).toEqual({
       cameraState: 'moving',
-      dragActive: true
+      pointerInteractionActive: true
     });
   });
 
@@ -31,7 +31,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     for (const nodeId of ['a', 'b']) {
       scheduler.enqueuePublication({
         kind: 'text',
@@ -119,7 +119,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(frames).toEqual([]);
 
     culled = false;
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     expect(frames).toEqual([]);
 
     scheduler.notifyVisibilityChanged();
@@ -178,13 +178,13 @@ describe('CanvasPreviewResourceScheduler', () => {
       isCulled: () => false,
       run: () => published.push('cover.png')
     });
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: false });
     frames[0]?.(16);
 
     expect(canceled).toEqual([1]);
     expect(published).toEqual([]);
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     frames[1]?.(32);
 
     expect(published).toEqual(['cover.png']);
@@ -201,7 +201,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     for (const nodeId of ['a', 'b', 'c', 'd']) {
       scheduler.enqueue({
         kind: 'image',
@@ -235,7 +235,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     scheduler.enqueue({
       kind: 'image',
       nodeId: 'cover.png',
@@ -263,7 +263,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     scheduler.enqueue({
       kind: 'image',
       nodeId: 'cover.png',
@@ -299,7 +299,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: false });
     scheduler.enqueue({
       kind: 'text',
       nodeId: 'notes.md',
@@ -312,10 +312,10 @@ describe('CanvasPreviewResourceScheduler', () => {
 
     expect(frames).toEqual([]);
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: true });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: true });
     expect(frames).toEqual([]);
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     expect(frames).toHaveLength(1);
     frames[0]?.(16);
 
@@ -334,7 +334,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: (handle) => canceled.push(handle)
     });
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     scheduler.enqueue({
       kind: 'image',
       nodeId: 'cover.png',
@@ -347,13 +347,13 @@ describe('CanvasPreviewResourceScheduler', () => {
 
     expect(frames).toHaveLength(1);
 
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: false });
     frames[0]?.(16);
 
     expect(canceled).toEqual([1]);
     expect(started).toEqual([]);
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     frames[1]?.(32);
 
     expect(started).toEqual(['cover.png']);
@@ -370,7 +370,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     scheduler.enqueue({
       kind: 'image',
       nodeId: 'stale.png',
@@ -411,7 +411,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     scheduler.enqueue({
       kind: 'text',
       nodeId: 'notes.md',
@@ -482,8 +482,8 @@ describe('CanvasPreviewResourceScheduler', () => {
       cancelFrame: vi.fn()
     });
 
-    scheduler.setInteractionState({ cameraState: 'moving', dragActive: false });
-    scheduler.setInteractionState({ cameraState: 'idle', dragActive: false });
+    scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: false });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
     scheduler.enqueue({
       kind: 'text',
       nodeId: 'notes.md',

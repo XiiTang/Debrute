@@ -101,6 +101,30 @@ describe('CanvasRenderLifecycle', () => {
     expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(true);
   });
 
+  it('presents the moved node above every other node as soon as movement activates', () => {
+    const fixture = createFixture({
+      nodes: [
+        directoryNode('back', 0, 0, 0),
+        directoryNode('front', 20, 0, 1)
+      ]
+    });
+
+    fixture.runtime.input.beginNodeMove({
+      pointerId: 2,
+      projectRelativePath: 'back',
+      screenPoint: { x: 0, y: 0 }
+    });
+    expect(fixture.lifecycle.getSnapshot().nodeRenderOrder.get('back')?.zIndex).toBe(0);
+
+    fixture.runtime.input.updatePointerInteraction({
+      pointerId: 2,
+      screenPoint: { x: 5, y: 0 }
+    });
+
+    expect(fixture.lifecycle.getSnapshot().nodeRenderOrder.get('front')?.zIndex).toBe(0);
+    expect(fixture.lifecycle.getSnapshot().nodeRenderOrder.get('back')?.zIndex).toBe(1);
+  });
+
   it('flushes the latest camera immediately when movement becomes idle', () => {
     vi.useFakeTimers();
     const fixture = createFixture();

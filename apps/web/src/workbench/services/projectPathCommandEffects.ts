@@ -9,7 +9,7 @@ export type ProjectPathEffectApi = Pick<WorkbenchApiClient,
   | 'renameProjectPath'
   | 'copyProjectPaths'
   | 'moveProjectPaths'
-  | 'copyProjectAbsolutePaths'
+  | 'copyProjectPathsToSystemClipboard'
   | 'trashProjectPaths'
   | 'deleteProjectPathsPermanently'
   | 'importExternalLocalProjectPaths'
@@ -51,9 +51,9 @@ export function createProjectPathCommandEffects(
     renameProjectPath: (scope, input) => submit(scope, () => api.renameProjectPath(input)),
     copyProjectPaths: (scope, input) => submit(scope, () => api.copyProjectPaths(input)),
     moveProjectPaths: (scope, input) => submit(scope, () => api.moveProjectPaths(input)),
-    copyProjectAbsolutePaths: (scope, input) => submit(
+    copyProjectPathsToSystemClipboard: (scope, input) => submit(
       scope,
-      () => api.copyProjectAbsolutePaths(input)
+      () => api.copyProjectPathsToSystemClipboard(input)
     ),
     trashProjectPaths: (scope, input) => submit(scope, () => api.trashProjectPaths(input)),
     deleteProjectPathsPermanently: (scope, input) => submit(

@@ -981,13 +981,6 @@ function WorkbenchProjectGenerationApp({
     setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity('inspector')));
   }, []);
 
-  const copyProjectRelativePath = useCallback(async (projectRelativePath: string) => {
-    if (!navigator.clipboard?.writeText) {
-      throw new Error('Clipboard unavailable');
-    }
-    await navigator.clipboard.writeText(projectRelativePath);
-  }, []);
-
   const currentNodesForActiveCanvas = activeCanvasCurrentNodes?.canvasId === activeCanvas?.id
     ? activeCanvasCurrentNodes
     : undefined;
@@ -1266,7 +1259,6 @@ function WorkbenchProjectGenerationApp({
       activeCanvasRuntime,
       fileClipboard,
       explorerCommands: explorerController,
-      copyText: copyProjectRelativePath,
       notify,
       startNotification,
       photoshopLabels: {
@@ -1296,7 +1288,6 @@ function WorkbenchProjectGenerationApp({
     confirmMoveOverwrite,
     confirmTrash,
     contextMenuCommandErrorLabels,
-    copyProjectRelativePath,
     confirmPermanentDelete,
     fileClipboard,
     getAcceptedProjectSnapshot,

@@ -1,9 +1,9 @@
 export type CanvasPerfSessionType =
   | 'camera-pan'
   | 'camera-minimap'
-  | 'selection-marquee'
-  | 'drag-move-node'
-  | 'drag-resize-node';
+  | 'pointer-selection'
+  | 'pointer-move-node'
+  | 'pointer-resize-node';
 
 export type CanvasPerfEventSource =
   | 'CanvasSurface'
@@ -73,9 +73,9 @@ export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;
 export const CANVAS_PERF_INTERACTION_SESSION_TYPES = [
   'camera-pan',
   'camera-minimap',
-  'selection-marquee',
-  'drag-move-node',
-  'drag-resize-node'
+  'pointer-selection',
+  'pointer-move-node',
+  'pointer-resize-node'
 ] as const satisfies readonly CanvasPerfSessionType[];
 
 export interface CanvasPerfLongAnimationFrameScript {

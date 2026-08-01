@@ -1,14 +1,19 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import {
   canvasManualLayoutDraftFromInteraction,
+  canvasNodeStackOrder,
   canvasNodesWithLayoutOverrides,
+  canvasNodesWithStackOrder,
+  canvasStackOrderWithRaisedGroup,
   type CanvasLayoutOverride,
-  type CanvasManualLayoutDraft
+  type CanvasManualLayoutDraft,
+  type CanvasNodeStackOrder
 } from '../canvasManualLayoutDraft';
 import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime.js';
 
 export interface CanvasManualLayoutPresentation {
   layoutOverrides: readonly CanvasLayoutOverride[];
+  stackOrder: CanvasNodeStackOrder | undefined;
 }
 
 export interface CanvasManualLayoutLifecycle {
@@ -23,6 +28,9 @@ export interface CanvasManualLayoutLifecycle {
 interface SubmittedManualLayoutDraft {
   id: number;
   draft: CanvasManualLayoutDraft;
+  raisedNodeProjectRelativePaths: string[];
+  expectedStackOrder: string[];
+  stackPending: boolean;
 }
 
 export function createCanvasManualLayoutLifecycle(input: {
@@ -38,6 +46,40 @@ export function createCanvasManualLayoutLifecycle(input: {
   let submitted: SubmittedManualLayoutDraft[] = [];
   let nextSubmissionId = 1;
   let disposed = false;
+
+  const rebasePendingStackOrders = () => {
+    let order = canvasNodeStackOrder(projection.nodes);
+    for (const submission of submitted) {
+      if (!submission.stackPending) {
+        continue;
+      }
+      order = canvasStackOrderWithRaisedGroup(order, submission.raisedNodeProjectRelativePaths);
+      submission.expectedStackOrder = order;
+    }
+  };
+
+  const confirmPendingStackOrders = (nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>) => {
+    for (const submission of submitted) {
+      if (submission.raisedNodeProjectRelativePaths.every((path) => !nodesByPath.has(path))) {
+        submission.stackPending = false;
+      }
+    }
+    const projectedStackOrder = canvasNodeStackOrder(projection.nodes);
+    const confirmedStackSubmission = [...submitted]
+      .reverse()
+      .find((submission) => (
+        submission.stackPending
+        && sameRelativeStackOrder(submission.expectedStackOrder, projectedStackOrder)
+      ));
+    if (!confirmedStackSubmission) {
+      return;
+    }
+    for (const submission of submitted) {
+      if (submission.id <= confirmedStackSubmission.id) {
+        submission.stackPending = false;
+      }
+    }
+  };
 
   const draftFromInteraction = (interaction: CanvasRuntimeLayoutInteraction): CanvasManualLayoutDraft => (
     canvasManualLayoutDraftFromInteraction({
@@ -57,15 +99,33 @@ export function createCanvasManualLayoutLifecycle(input: {
         merged.set(layout.projectRelativePath, layout);
       }
     }
-    return { layoutOverrides: [...merged.values()] };
+    const projectedStackOrder = canvasNodeStackOrder(projection.nodes);
+    const pendingStackOrder = [...submitted]
+      .reverse()
+      .find((submission) => submission.stackPending)
+      ?.expectedStackOrder ?? projectedStackOrder;
+    const stackOrder = active
+      ? canvasStackOrderWithRaisedGroup(
+          pendingStackOrder,
+          active.nodeLayouts.map((layout) => layout.projectRelativePath)
+        )
+      : pendingStackOrder;
+    return {
+      layoutOverrides: [...merged.values()],
+      stackOrder: sameStackOrder(projectedStackOrder, stackOrder) ? undefined : stackOrder
+    };
   };
 
   return {
     getPresentation: presentation,
     getPresentedNodes() {
-      return canvasNodesWithLayoutOverrides({
-        nodes: projection.nodes,
-        layoutOverrides: presentation().layoutOverrides
+      const current = presentation();
+      return canvasNodesWithStackOrder({
+        nodes: canvasNodesWithLayoutOverrides({
+          nodes: projection.nodes,
+          layoutOverrides: current.layoutOverrides
+        }),
+        stackOrder: current.stackOrder
       });
     },
     setActiveInteraction(interaction) {
@@ -84,11 +144,31 @@ export function createCanvasManualLayoutLifecycle(input: {
       if (
         draft.nodeLayouts.length === 0
         || draft.nodeLayouts.some((layout) => !currentNodePaths.has(layout.projectRelativePath))
-        || (draft.interaction === 'move' && interactionHasNoLayoutDelta(interaction))
       ) {
         return;
       }
-      const submission = { id: nextSubmissionId++, draft };
+      const basePresentation = presentation();
+      const baseNodes = canvasNodesWithLayoutOverrides({
+        nodes: projection.nodes,
+        layoutOverrides: basePresentation.layoutOverrides
+      });
+      const geometryChanged = draft.nodeLayouts.some((layout) => {
+        const node = baseNodes.find((candidate) => candidate.projectRelativePath === layout.projectRelativePath);
+        return !node || !sameLayout(node, layout);
+      });
+      const raisedNodeProjectRelativePaths = draft.nodeLayouts.map((layout) => layout.projectRelativePath);
+      const baseStackOrder = basePresentation.stackOrder ?? canvasNodeStackOrder(projection.nodes);
+      const expectedStackOrder = canvasStackOrderWithRaisedGroup(baseStackOrder, raisedNodeProjectRelativePaths);
+      if (!geometryChanged && sameStackOrder(baseStackOrder, expectedStackOrder)) {
+        return;
+      }
+      const submission = {
+        id: nextSubmissionId++,
+        draft,
+        raisedNodeProjectRelativePaths,
+        expectedStackOrder,
+        stackPending: true
+      };
       submitted.push(submission);
       try {
         await input.submitManualLayout({
@@ -97,6 +177,13 @@ export function createCanvasManualLayoutLifecycle(input: {
         });
       } catch (error) {
         submitted = submitted.filter((candidate) => candidate.id !== submission.id);
+        rebasePendingStackOrders();
+        confirmPendingStackOrders(new Map(
+          projection.nodes.map((node) => [node.projectRelativePath, node])
+        ));
+        submitted = submitted.filter((candidate) => (
+          candidate.draft.nodeLayouts.length > 0 || candidate.stackPending
+        ));
         throw error;
       }
     },
@@ -109,6 +196,7 @@ export function createCanvasManualLayoutLifecycle(input: {
       }
       projection = nextProjection;
       const nodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
+      confirmPendingStackOrders(nodesByPath);
       const confirmedSubmissionByPath = new Map<string, number>();
       for (let index = submitted.length - 1; index >= 0; index -= 1) {
         const submission = submitted[index]!;
@@ -136,7 +224,8 @@ export function createCanvasManualLayoutLifecycle(input: {
             })
           }
         }))
-        .filter((submission) => submission.draft.nodeLayouts.length > 0);
+        .filter((submission) => submission.draft.nodeLayouts.length > 0 || submission.stackPending);
+      rebasePendingStackOrders();
     },
     dispose() {
       disposed = true;
@@ -144,14 +233,6 @@ export function createCanvasManualLayoutLifecycle(input: {
       submitted = [];
     }
   };
-}
-
-function interactionHasNoLayoutDelta(interaction: CanvasRuntimeLayoutInteraction): boolean {
-  if (interaction.kind !== 'move-node') {
-    return false;
-  }
-  const current = interaction.current ?? interaction.start;
-  return current.x === interaction.start.x && current.y === interaction.start.y;
 }
 
 function sameLayout(
@@ -162,4 +243,17 @@ function sameLayout(
     && node.y === layout.y
     && node.width === layout.width
     && node.height === layout.height;
+}
+
+function sameStackOrder(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((path, index) => path === right[index]);
+}
+
+function sameRelativeStackOrder(expected: readonly string[], actual: readonly string[]): boolean {
+  const expectedPaths = new Set(expected);
+  const actualPaths = new Set(actual);
+  return sameStackOrder(
+    expected.filter((path) => actualPaths.has(path)),
+    actual.filter((path) => expectedPaths.has(path))
+  );
 }

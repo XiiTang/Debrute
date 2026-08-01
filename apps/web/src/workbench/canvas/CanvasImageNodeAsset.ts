@@ -234,7 +234,7 @@ export function shouldPublishCanvasImageNodeSourceImmediately(input: {
   hasLoadedImage: boolean;
   culled: boolean;
   becameVisibleAfterCull: boolean;
-  dragActive: boolean;
+  pointerInteractionActive: boolean;
   loadedLoadKey: string | undefined;
 }): boolean {
   const sourceLoadKey = input.source.kind === 'source'
@@ -246,7 +246,7 @@ export function shouldPublishCanvasImageNodeSourceImmediately(input: {
     || input.loadedLoadKey === sourceLoadKey) {
     return true;
   }
-  if (input.culled || input.becameVisibleAfterCull || input.dragActive) {
+  if (input.culled || input.becameVisibleAfterCull || input.pointerInteractionActive) {
     return false;
   }
   return !input.didResolveUrl || !input.hasLoadedImage;

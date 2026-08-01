@@ -173,10 +173,6 @@ export function explorerContextMenuPrimaryEntry(target: WorkbenchContextMenuTarg
   return resolveProjectPathCommandTarget(target).invocationEntry;
 }
 
-export function explorerContextMenuProjectRelativePaths(target: WorkbenchContextMenuTarget): string[] {
-  return resolveProjectPathCommandTarget(target).explicitSortedEntries.map((entry) => entry.projectRelativePath);
-}
-
 export function projectedContextMenuNode(
   projection: CanvasProjection | undefined,
   projectRelativePath: string

@@ -100,7 +100,7 @@ describe('CanvasPerfMonitor', () => {
   it('targets an explicit counter session instead of all active sessions', () => {
     const monitor = createCanvasPerfMonitor();
     const camera = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
-    const drag = monitor.startSession({ type: 'drag-move-node', timestamp: 5, source: 'CanvasSurface' });
+    const drag = monitor.startSession({ type: 'pointer-move-node', timestamp: 5, source: 'CanvasSurface' });
 
     monitor.recordCounter({
       sessionId: drag,
@@ -120,7 +120,7 @@ describe('CanvasPerfMonitor', () => {
   it('targets an explicit session plus matching active session types', () => {
     const monitor = createCanvasPerfMonitor();
     const camera = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
-    const drag = monitor.startSession({ type: 'drag-move-node', timestamp: 2, source: 'CanvasSurface' });
+    const drag = monitor.startSession({ type: 'pointer-move-node', timestamp: 2, source: 'CanvasSurface' });
 
     monitor.recordCounter({
       sessionId: drag,
@@ -223,7 +223,7 @@ describe('CanvasPerfMonitor', () => {
 
   it('does not invent final canvas state when a session has no frame or final state', () => {
     const monitor = createCanvasPerfMonitor();
-    const sessionId = monitor.startSession({ type: 'drag-resize-node', timestamp: 0, source: 'CanvasSurface' });
+    const sessionId = monitor.startSession({ type: 'pointer-resize-node', timestamp: 0, source: 'CanvasSurface' });
 
     const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
 

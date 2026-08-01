@@ -350,8 +350,8 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             post(super::project_routes::batch_delete),
         )
         .route(
-            "/projects/{project_id}/files/path/batch/copy-path",
-            post(super::project_routes::copy_absolute_paths),
+            "/projects/{project_id}/files/path/batch/copy-to-system-clipboard",
+            post(super::project_routes::copy_paths_to_system_clipboard),
         )
         .route(
             "/projects/{project_id}/files/path/batch/trash",

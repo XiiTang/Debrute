@@ -7,38 +7,63 @@ import type { WorkbenchContextMenuTarget } from '../shell/contextMenu.js';
 describe('workbench context menu commands', () => {
   it('uses folded roots for Copy but explicit sorted entries for Copy Relative Paths', () => {
     const copyEntries = vi.fn();
-    const copyText = vi.fn();
+    const cutEntries = vi.fn();
+    const copyProjectPathsToSystemClipboard = vi.fn(async () => ({ ok: true as const }));
     const target = canvasTarget('folder/a.png', [
-      { projectRelativePath: 'folder/b.png', kind: 'file' },
-      { projectRelativePath: 'folder', kind: 'directory' },
-      { projectRelativePath: 'folder/a.png', kind: 'file' }
+      { projectRelativePath: 'folder/b.png', kind: 'file', availability: 'available' },
+      { projectRelativePath: 'folder', kind: 'directory', availability: 'available' },
+      { projectRelativePath: 'folder/a.png', kind: 'file', availability: 'available' }
     ]);
     run({ command: 'copy', target, explorerCommands: { copyEntries } });
     expect(copyEntries.mock.calls[0]?.[1]).toEqual([{ projectRelativePath: 'folder', kind: 'directory' }]);
+    run({ command: 'cut', target, explorerCommands: { cutEntries } });
+    expect(cutEntries.mock.calls[0]?.[1]).toEqual([{ projectRelativePath: 'folder', kind: 'directory' }]);
 
-    run({ command: 'copy-relative-path', target, copyText });
-    expect(copyText).toHaveBeenCalledWith('folder\nfolder/a.png\nfolder/b.png');
+    run({ command: 'copy-relative-path', target, copyProjectPathsToSystemClipboard });
+    expect(copyProjectPathsToSystemClipboard).toHaveBeenCalledWith({
+      format: 'relative',
+      entries: [
+        { projectRelativePath: 'folder', kind: 'directory' },
+        { projectRelativePath: 'folder/a.png', kind: 'file' },
+        { projectRelativePath: 'folder/b.png', kind: 'file' }
+      ]
+    });
   });
 
-  it('copies every explicit absolute path returned by Runtime in stable selection order', async () => {
-    const copyAbsolutePaths = vi.fn(async (_scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]) => (
-      entries.map((entry: { projectRelativePath: string }) => `/project/${entry.projectRelativePath}`)
-    ));
-    const copyText = vi.fn();
+  it('asks Runtime to copy every explicit absolute path in stable selection order', () => {
+    const copyProjectPathsToSystemClipboard = vi.fn(async () => ({ ok: true as const }));
     run({
       command: 'copy-path',
       target: canvasTarget('b.png', [
-        { projectRelativePath: 'b.png', kind: 'file' },
-        { projectRelativePath: 'a.png', kind: 'file' }
+        { projectRelativePath: 'b.png', kind: 'file', availability: 'available' },
+        { projectRelativePath: 'a.png', kind: 'file', availability: 'available' }
       ]),
-      explorerCommands: { copyAbsolutePaths },
-      copyText
+      copyProjectPathsToSystemClipboard
+    });
+
+    expect(copyProjectPathsToSystemClipboard).toHaveBeenCalledWith({
+      format: 'absolute',
+      entries: [
+        { projectRelativePath: 'a.png', kind: 'file' },
+        { projectRelativePath: 'b.png', kind: 'file' }
+      ]
+    });
+  });
+
+  it('reports a Runtime system clipboard failure without attempting a Web clipboard fallback', async () => {
+    const notify = vi.fn();
+    run({
+      command: 'copy-relative-path',
+      target: canvasTarget('a.png', [{ projectRelativePath: 'a.png', kind: 'file' }]),
+      copyProjectPathsToSystemClipboard: async () => {
+        throw new Error('native clipboard unavailable');
+      },
+      notify
     });
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(copyAbsolutePaths.mock.calls[0]?.[1].map((entry) => entry.projectRelativePath)).toEqual(['a.png', 'b.png']);
-    expect(copyText).toHaveBeenCalledWith('/project/a.png\n/project/b.png');
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('native clipboard unavailable'));
   });
 
   it('uses the invocation entry for the one terminal and system reveal', () => {
@@ -60,8 +85,8 @@ describe('workbench context menu commands', () => {
     const confirmTrash = vi.fn(() => true);
     const confirmPermanentDelete = vi.fn(() => true);
     const target = canvasTarget('folder', [
-      { projectRelativePath: 'folder', kind: 'directory' },
-      { projectRelativePath: 'folder/a.png', kind: 'file' }
+      { projectRelativePath: 'folder', kind: 'directory', availability: 'available' },
+      { projectRelativePath: 'folder/a.png', kind: 'file', availability: 'available' }
     ]);
     run({ command: 'delete', target, explorerCommands: { trashEntries }, confirmTrash });
     run({
@@ -174,7 +199,7 @@ function run(overrides: {
   command: Parameters<typeof runProjectPathCommand>[0]['command'];
   target: WorkbenchContextMenuTarget;
   explorerCommands?: Partial<Parameters<typeof runProjectPathCommand>[0]['explorerCommands']>;
-  copyText?: Parameters<typeof runProjectPathCommand>[0]['copyText'];
+  copyProjectPathsToSystemClipboard?: Parameters<typeof runProjectPathCommand>[0]['copyProjectPathsToSystemClipboard'];
   openTerminalPanel?: Parameters<typeof runProjectPathCommand>[0]['openTerminalPanel'];
   confirmTrash?: Parameters<typeof runProjectPathCommand>[0]['confirmTrash'];
   confirmPermanentDelete?: Parameters<typeof runProjectPathCommand>[0]['confirmPermanentDelete'];
@@ -183,6 +208,7 @@ function run(overrides: {
   resetCanvasNodeLayouts?: Parameters<typeof runProjectPathCommand>[0]['resetCanvasNodeLayouts'];
   fileClipboard?: Parameters<typeof runProjectPathCommand>[0]['fileClipboard'];
   getProjectSnapshot?: Parameters<typeof runProjectPathCommand>[0]['getProjectSnapshot'];
+  notify?: Parameters<typeof runProjectPathCommand>[0]['notify'];
 }): void {
   const noop = () => undefined;
   runProjectPathCommand({
@@ -207,14 +233,13 @@ function run(overrides: {
       copyEntries: noop,
       cutEntries: noop,
       pasteEntries: noop,
-      copyAbsolutePaths: async () => undefined,
       revealEntry: noop,
       trashEntries: noop,
       deleteEntriesPermanently: noop,
       ...overrides.explorerCommands
     },
-    copyText: overrides.copyText ?? noop,
-    notify: noop,
+    copyProjectPathsToSystemClipboard: overrides.copyProjectPathsToSystemClipboard ?? (async () => ({ ok: true })),
+    notify: overrides.notify ?? noop,
     startNotification: () => noop,
     photoshopLabels: { sending: () => '', sent: () => '', failed: () => '' },
     closeContextMenu: noop,
@@ -229,12 +254,24 @@ function run(overrides: {
 
 function canvasTarget(
   invocationPath: string,
-  selectedEntries: WorkbenchContextMenuTarget['selectedEntries']
+  selectedEntries: Array<ProjectPathEntry & {
+    availability?: 'available' | 'missing' | 'unreadable';
+  }>
 ): WorkbenchContextMenuTarget {
+  const candidates = selectedEntries.map((entry) => ({
+    pathEntry: {
+      projectRelativePath: entry.projectRelativePath,
+      kind: entry.kind,
+      ...(entry.sizeBytes === undefined ? {} : { sizeBytes: entry.sizeBytes })
+    },
+    ...(entry.availability === undefined ? {} : { availability: entry.availability })
+  }));
   return {
     source: 'canvas',
-    invocationEntry: selectedEntries.find((entry) => entry.projectRelativePath === invocationPath)!,
-    selectedEntries
+    invocationEntry: candidates.find((candidate) => (
+      candidate.pathEntry.projectRelativePath === invocationPath
+    ))!,
+    selectedEntries: candidates
   };
 }
 

@@ -726,7 +726,7 @@ function immediateScheduler(overrides: Partial<CanvasPreviewResourceScheduler> =
     enqueuePublication: () => undefined,
     cancel: () => undefined,
     setInteractionState: () => undefined,
-    getInteractionState: () => ({ cameraState: 'idle', dragActive: false }),
+    getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
     notifyVisibilityChanged: () => undefined,
     dispose: () => undefined,
     ...overrides

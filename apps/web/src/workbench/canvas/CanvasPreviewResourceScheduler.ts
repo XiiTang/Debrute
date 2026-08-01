@@ -9,7 +9,7 @@ export type CanvasPreviewResourceKind = 'image' | 'text' | 'text-source' | 'vide
 
 export interface CanvasPreviewResourceInteractionState {
   cameraState: CanvasCameraState;
-  dragActive: boolean;
+  pointerInteractionActive: boolean;
 }
 
 export interface CanvasPreviewResourceRequest {
@@ -46,7 +46,7 @@ export function createCanvasPreviewResourceScheduler(input: {
   const queuedStarts = new Map<string, CanvasPreviewResourceRequest>();
   const queuedPublications = new Map<string, CanvasPreviewResourceRequest>();
   let cameraState: CanvasCameraState = 'idle';
-  let dragActive = false;
+  let pointerInteractionActive = false;
   let frameHandle: number | undefined;
 
   const record = (name: CanvasPerfCounterName, request?: CanvasPreviewResourceRequest): void => {
@@ -66,7 +66,7 @@ export function createCanvasPreviewResourceScheduler(input: {
     });
   };
 
-  const interactionActive = (): boolean => cameraState !== 'idle' || dragActive;
+  const interactionActive = (): boolean => cameraState !== 'idle' || pointerInteractionActive;
 
   const requestNeedsFrame = (request: CanvasPreviewResourceRequest): boolean => (
     !request.isCurrent() || !request.isCulled()
@@ -167,11 +167,14 @@ export function createCanvasPreviewResourceScheduler(input: {
     },
     cancel,
     setInteractionState(inputState) {
-      if (cameraState === inputState.cameraState && dragActive === inputState.dragActive) {
+      if (
+        cameraState === inputState.cameraState
+        && pointerInteractionActive === inputState.pointerInteractionActive
+      ) {
         return;
       }
       cameraState = inputState.cameraState;
-      dragActive = inputState.dragActive;
+      pointerInteractionActive = inputState.pointerInteractionActive;
       if (interactionActive()) {
         cancelPendingFrame();
         return;
@@ -179,7 +182,7 @@ export function createCanvasPreviewResourceScheduler(input: {
       scheduleFrame();
     },
     getInteractionState() {
-      return { cameraState, dragActive };
+      return { cameraState, pointerInteractionActive };
     },
     notifyVisibilityChanged() {
       scheduleFrame();

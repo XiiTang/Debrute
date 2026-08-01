@@ -658,6 +658,30 @@ describe('CanvasRenderCoordinator', () => {
     expect(next.nodeRenderOrder.get('flow/a.png')).toEqual({ domOrder: 'flow/a.png', zIndex: 2 });
     expect(counterNames(monitor.getTrace().events)).not.toContain('render-virtual-refresh');
   });
+
+  it('uses the Manual Layout stack presentation without treating z-only nodes as layout overrides', () => {
+    const coordinator = createCanvasRenderCoordinator({
+      projection: projection([
+        imageNode('flow/a.png', 0, 0, 0),
+        imageNode('flow/b.png', 20, 0, 1),
+        imageNode('flow/c.png', 40, 0, 2)
+      ])
+    });
+
+    const next = coordinator.update({
+      camera: { x: 0, y: 0, z: 1 },
+      cameraState: 'idle',
+      surfaceSize: { width: 800, height: 600 },
+      selection: undefined,
+      activeNodePaths: ['flow/a.png'],
+      layoutOverrides: [],
+      stackOrder: ['flow/b.png', 'flow/c.png', 'flow/a.png']
+    });
+
+    expect(next.nodeRenderOrder.get('flow/a.png')?.zIndex).toBe(2);
+    expect(next.nodeRenderOrder.get('flow/b.png')?.zIndex).toBe(0);
+    expect(next.nodeRenderOrder.get('flow/c.png')?.zIndex).toBe(1);
+  });
 });
 
 function counterNames(events: readonly CanvasPerfTraceEvent[]): string[] {

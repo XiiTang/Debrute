@@ -38,10 +38,10 @@ use crate::{
         CanvasLayoutInteraction, CanvasNodeLayoutUpdate, CanvasTextPreviewSourceStatus,
         CanvasTextPreviewSourceTarget, CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate,
         CanvasVideoPreviewSourceKind, CanvasVideoPreviewSourceStatus, CanvasVideoPreviewTarget,
-        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathEntry,
-        ProjectPathKind, ProjectRevisionResult, ProjectSession, ProjectUploadEntry,
-        RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
-        open_revisioned_project_file, read_project_text_file,
+        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError,
+        ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind, ProjectRevisionResult,
+        ProjectSession, ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse,
+        UpdateCanvasFeedbackInput, open_revisioned_project_file, read_project_text_file,
     },
     terminal::{
         TERMINAL_PROTOCOL_VERSION, TerminalClientFrame, TerminalEvent, TerminalObservation,
@@ -359,14 +359,21 @@ pub(super) async fn batch_delete(
     )
 }
 
-pub(super) async fn copy_absolute_paths(
+pub(super) async fn copy_paths_to_system_clipboard(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
 ) -> Response {
     #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    enum Format {
+        Absolute,
+        Relative,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
+        format: Format,
         entries: Vec<ProjectPathEntry>,
     }
     let input: Input = match json_body(request).await {
@@ -378,14 +385,15 @@ pub(super) async fn copy_absolute_paths(
         Ok(session) => session,
         Err(response) => return response,
     };
-    match runtime
-        .native_shell()
-        .copy_absolute_paths(session.root(), &input.entries)
-    {
-        Ok(paths) => Json(json!({
-            "paths": paths.into_iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>()
-        }))
-        .into_response(),
+    match runtime.native_shell().copy_paths_to_system_clipboard(
+        session.root(),
+        match input.format {
+            Format::Absolute => ProjectPathClipboardFormat::Absolute,
+            Format::Relative => ProjectPathClipboardFormat::Relative,
+        },
+        &input.entries,
+    ) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(error) => project_error(error),
     }
 }

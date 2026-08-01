@@ -226,9 +226,12 @@ Explorer selection, clipboard state, copy/cut/paste semantics, confirmations,
 and post-mutation invalidation belong to the Web Workbench. Project copy, move,
 upload, and permanent-delete operations use Runtime's Project mutation API.
 
-Copy Path, reveal, and recoverable deletion cross Runtime's validated native
-file boundary. Electron does not expose direct file-operation IPC for these
-commands, so browser and Desktop Workbenches share the same behavior.
+Copy Path, Copy Relative Path, reveal, and recoverable deletion cross Runtime's
+validated native file boundary. Both path-copy commands use one Runtime-owned
+system-clipboard implementation shared with the tray. Web never completes them
+through `navigator.clipboard`, and Electron does not expose direct
+file-operation or clipboard IPC for these commands, so browser and Desktop
+Workbenches share the same behavior.
 
 ## Executable Authorities
 

@@ -22,6 +22,12 @@ use super::{
 
 const NATIVE_SHELL_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectPathClipboardFormat {
+    Absolute,
+    Relative,
+}
+
 pub struct ProjectNativeShellService {
     supervisor: Arc<BoundedProcessSupervisor>,
 }
@@ -70,17 +76,20 @@ impl ProjectNativeShellService {
         ))
     }
 
-    /// Resolves a fully validated batch for clipboard presentation by the Workbench.
+    /// Validates and writes one complete Project-path batch to the system clipboard.
     ///
     /// # Errors
-    /// Returns an error before producing any result when one entry is invalid.
-    pub fn copy_absolute_paths(
+    /// Returns an error before changing the clipboard when one entry is invalid,
+    /// or when the platform clipboard command fails.
+    pub fn copy_paths_to_system_clipboard(
         &self,
         project_root: &Path,
+        format: ProjectPathClipboardFormat,
         entries: &[ProjectPathEntry],
-    ) -> Result<Vec<PathBuf>, ProjectError> {
-        validate_entries(project_root, entries)
-            .map(|entries| entries.into_iter().map(|entry| entry.absolute).collect())
+    ) -> Result<(), ProjectError> {
+        copy_project_paths_with(project_root, format, entries, |text| {
+            crate::native_clipboard::write_text_to_system_clipboard(text)
+        })
     }
 
     /// Opens a directory or selects a file in the platform file manager.
@@ -434,11 +443,101 @@ fn validate_entries(
         .collect()
 }
 
+fn validate_clipboard_entries(
+    project_root: &Path,
+    entries: &[ProjectPathEntry],
+) -> Result<Vec<ResolvedEntry>, ProjectError> {
+    entries
+        .iter()
+        .map(|entry| {
+            let relative = clipboard_entry_relative_path(entry)?;
+            validate_resolved_entry(project_root, entry, relative)
+        })
+        .collect()
+}
+
+fn project_path_clipboard_text(
+    project_root: &Path,
+    format: ProjectPathClipboardFormat,
+    entries: &[ProjectPathEntry],
+) -> Result<String, ProjectError> {
+    if entries.is_empty() {
+        return Err(ProjectError::Validation(
+            "Project path clipboard copy requires at least one entry.".to_owned(),
+        ));
+    }
+    let paths = match format {
+        ProjectPathClipboardFormat::Absolute => validate_clipboard_entries(project_root, entries)?
+            .into_iter()
+            .map(|entry| entry.absolute.to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+        ProjectPathClipboardFormat::Relative => entries
+            .iter()
+            .map(|entry| {
+                clipboard_entry_relative_path(entry).map(|path| {
+                    if path.is_empty() {
+                        ".".to_owned()
+                    } else {
+                        display_project_relative_path(&path)
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    };
+    Ok(paths.join("\n"))
+}
+
+fn copy_project_paths_with(
+    project_root: &Path,
+    format: ProjectPathClipboardFormat,
+    entries: &[ProjectPathEntry],
+    writer: impl FnOnce(&str) -> std::io::Result<()>,
+) -> Result<(), ProjectError> {
+    let text = project_path_clipboard_text(project_root, format, entries)?;
+    writer(&text).map_err(|error| {
+        ProjectError::service(
+            "native_clipboard_failed",
+            format!("System clipboard write failed: {error}"),
+        )
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn display_project_relative_path(path: &str) -> String {
+    path.replace('/', "\\")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn display_project_relative_path(path: &str) -> String {
+    path.to_owned()
+}
+
 fn validate_entry(
     project_root: &Path,
     entry: &ProjectPathEntry,
 ) -> Result<ResolvedEntry, ProjectError> {
     let relative = assert_project_tree_visible_path(&entry.project_relative_path)?;
+    validate_resolved_entry(project_root, entry, relative)
+}
+
+fn clipboard_entry_relative_path(entry: &ProjectPathEntry) -> Result<String, ProjectError> {
+    if entry.project_relative_path.is_empty() {
+        return if entry.kind == ProjectPathKind::Directory {
+            Ok(String::new())
+        } else {
+            Err(ProjectError::Validation(
+                "The Project root clipboard entry must be a directory.".to_owned(),
+            ))
+        };
+    }
+    assert_project_tree_visible_path(&entry.project_relative_path)
+}
+
+fn validate_resolved_entry(
+    project_root: &Path,
+    entry: &ProjectPathEntry,
+    relative: String,
+) -> Result<ResolvedEntry, ProjectError> {
     let absolute = resolve_no_symlink_existing_project_path(project_root, &relative)?;
     let metadata = fs::symlink_metadata(&absolute)?;
     let matches_kind = match entry.kind {
@@ -589,7 +688,7 @@ fn trash_action(path: &Path) -> NativeAction {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{cell::Cell, fs};
 
     use uuid::Uuid;
 
@@ -637,6 +736,160 @@ mod tests {
                 .code(),
             "native_project_picker_invalid_output"
         );
+    }
+
+    #[test]
+    fn project_path_clipboard_text_preserves_batch_order_and_validates_atomically() {
+        let root = std::env::temp_dir().join(format!("debrute-clipboard-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("folder")).unwrap();
+        fs::write(root.join("folder/a.txt"), "a").unwrap();
+        fs::write(root.join("b.txt"), "b").unwrap();
+        let entries = vec![
+            ProjectPathEntry {
+                project_relative_path: "b.txt".to_owned(),
+                kind: ProjectPathKind::File,
+                size_bytes: None,
+            },
+            ProjectPathEntry {
+                project_relative_path: "folder/a.txt".to_owned(),
+                kind: ProjectPathKind::File,
+                size_bytes: None,
+            },
+        ];
+
+        let absolute =
+            project_path_clipboard_text(&root, ProjectPathClipboardFormat::Absolute, &entries)
+                .unwrap();
+        assert_eq!(
+            absolute,
+            format!(
+                "{}\n{}",
+                root.join("b.txt").to_string_lossy(),
+                root.join("folder/a.txt").to_string_lossy()
+            )
+        );
+
+        let invalid_absolute = [
+            entries[0].clone(),
+            ProjectPathEntry {
+                project_relative_path: "missing.txt".to_owned(),
+                kind: ProjectPathKind::File,
+                size_bytes: None,
+            },
+        ];
+        assert!(
+            project_path_clipboard_text(
+                &root,
+                ProjectPathClipboardFormat::Absolute,
+                &invalid_absolute,
+            )
+            .is_err()
+        );
+        let writer_calls = Cell::new(0);
+        assert!(
+            copy_project_paths_with(
+                &root,
+                ProjectPathClipboardFormat::Absolute,
+                &invalid_absolute,
+                |_| {
+                    writer_calls.set(writer_calls.get() + 1);
+                    Ok(())
+                },
+            )
+            .is_err()
+        );
+        assert_eq!(writer_calls.get(), 0);
+
+        copy_project_paths_with(
+            &root,
+            ProjectPathClipboardFormat::Absolute,
+            &entries,
+            |_| {
+                writer_calls.set(writer_calls.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(writer_calls.get(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn relative_clipboard_text_accepts_missing_nodes_and_uses_platform_path_style() {
+        let entries = [ProjectPathEntry {
+            project_relative_path: "missing/final.png".to_owned(),
+            kind: ProjectPathKind::File,
+            size_bytes: None,
+        }];
+        let text = project_path_clipboard_text(
+            Path::new("/unused"),
+            ProjectPathClipboardFormat::Relative,
+            &entries,
+        )
+        .unwrap();
+        #[cfg(target_os = "windows")]
+        assert_eq!(text, "missing\\final.png");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(text, "missing/final.png");
+
+        let invalid = [ProjectPathEntry {
+            project_relative_path: "missing/../outside.png".to_owned(),
+            kind: ProjectPathKind::File,
+            size_bytes: None,
+        }];
+        assert!(
+            project_path_clipboard_text(
+                Path::new("/unused"),
+                ProjectPathClipboardFormat::Relative,
+                &invalid,
+            )
+            .is_err()
+        );
+        assert!(
+            project_path_clipboard_text(
+                Path::new("/unused"),
+                ProjectPathClipboardFormat::Relative,
+                &[],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn project_root_clipboard_text_uses_the_absolute_root_and_relative_dot() {
+        let root = std::env::temp_dir().join(format!("debrute-clipboard-root-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let root_entry = [ProjectPathEntry {
+            project_relative_path: String::new(),
+            kind: ProjectPathKind::Directory,
+            size_bytes: None,
+        }];
+
+        assert_eq!(
+            project_path_clipboard_text(&root, ProjectPathClipboardFormat::Absolute, &root_entry)
+                .unwrap(),
+            root.to_string_lossy()
+        );
+        assert_eq!(
+            project_path_clipboard_text(&root, ProjectPathClipboardFormat::Relative, &root_entry)
+                .unwrap(),
+            "."
+        );
+
+        let invalid_root = [ProjectPathEntry {
+            project_relative_path: String::new(),
+            kind: ProjectPathKind::File,
+            size_bytes: None,
+        }];
+        assert!(
+            project_path_clipboard_text(
+                &root,
+                ProjectPathClipboardFormat::Relative,
+                &invalid_root,
+            )
+            .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -9,7 +9,6 @@ import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime'
 import type { WorkbenchI18n } from '../i18n';
 import type { ProjectPathCommandEffects } from '../services/projectPathCommandEffects.js';
 import type { AcceptedProjectPathCommandScope } from '../services/projectPathCommandIntake.js';
-import { effectiveProjectPathEntries } from '../services/projectPathCommandTarget.js';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './projectTreeEditing';
 import { createProjectTreeExternalDropPlan } from './projectTreeExternalDrop';
@@ -57,7 +56,6 @@ export interface ProjectExplorerController {
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
   }): void;
-  copyAbsolutePaths(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): Promise<string[] | undefined>;
   revealEntry(scope: AcceptedProjectPathCommandScope, entry: ProjectPathEntry): void;
   trashEntries(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): void;
   deleteEntriesPermanently(scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]): void;
@@ -193,14 +191,14 @@ export function useProjectExplorerController(
     _scope: AcceptedProjectPathCommandScope,
     entries: ProjectPathEntry[]
   ) => {
-    setFileClipboard({ operation: 'copy', entries: [...effectiveProjectPathEntries(entries)] });
+    setFileClipboard({ operation: 'copy', entries: [...entries] });
   }, []);
 
   const cutEntries = useCallback((
     _scope: AcceptedProjectPathCommandScope,
     entries: ProjectPathEntry[]
   ) => {
-    setFileClipboard({ operation: 'cut', entries: [...effectiveProjectPathEntries(entries)] });
+    setFileClipboard({ operation: 'cut', entries: [...entries] });
   }, []);
 
   const updateEditValue = useCallback((value: string) => {
@@ -362,25 +360,6 @@ export function useProjectExplorerController(
       }
     });
   }, [copyPaths, input.i18n, input.notify, movePaths]);
-
-  const copyAbsolutePaths = useCallback(async (
-    scope: AcceptedProjectPathCommandScope,
-    entries: ProjectPathEntry[]
-  ): Promise<string[] | undefined> => {
-    try {
-      const request = commandEffects.copyProjectAbsolutePaths(scope, { entries });
-      if (!request) {
-        return undefined;
-      }
-      const result = await request;
-      return scope.isCurrent() ? result.paths : undefined;
-    } catch (error) {
-      if (scope.isCurrent()) {
-        input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.copyPathFailed'), error));
-      }
-      return undefined;
-    }
-  }, [commandEffects, input.i18n, input.notify]);
 
   const revealEntry = useCallback((scope: AcceptedProjectPathCommandScope, entry: ProjectPathEntry) => {
     const request = commandEffects.revealProjectPathInSystemFileManager(scope, entry);
@@ -556,7 +535,6 @@ export function useProjectExplorerController(
     copyEntries,
     cutEntries,
     pasteEntries,
-    copyAbsolutePaths,
     revealEntry,
     trashEntries,
     deleteEntriesPermanently,
@@ -573,7 +551,6 @@ export function useProjectExplorerController(
     beginRename,
     cancelEdit,
     clearCut,
-    copyAbsolutePaths,
     copyEntries,
     cutEntries,
     deleteEntriesPermanently,

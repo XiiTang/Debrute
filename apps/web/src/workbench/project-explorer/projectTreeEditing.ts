@@ -1,4 +1,5 @@
 import type { WorkbenchContextMenuTarget } from '../shell/contextMenu';
+import { resolveProjectPathCommandTarget } from '../services/projectPathCommandTarget.js';
 
 export type ProjectTreeInlineEditState =
   | {
@@ -46,9 +47,10 @@ export function validateInlineProjectName(value: string): { ok: true; name: stri
 }
 
 export function projectTreePasteTargetDirectory(target: WorkbenchContextMenuTarget): string {
-  return target.invocationEntry.kind === 'directory'
-    ? target.invocationEntry.projectRelativePath
-    : parentProjectPath(target.invocationEntry.projectRelativePath);
+  const invocationEntry = resolveProjectPathCommandTarget(target).invocationEntry;
+  return invocationEntry.kind === 'directory'
+    ? invocationEntry.projectRelativePath
+    : parentProjectPath(invocationEntry.projectRelativePath);
 }
 
 export function parentProjectPath(projectRelativePath: string): string {
