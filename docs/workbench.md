@@ -301,11 +301,11 @@ pointer facts and the latest Canvas Projection; `CanvasEditor` wires the existin
 Runtime mutation action into the lifecycle. Neither owns a parallel draft
 lifecycle. Rendering combines the
 Canvas Projection with submitted drafts in submission order and then the active
-draft, so nodes, edges, culling, and overlays observe one interaction geometry
+draft, so nodes, edges, viewport culling, and overlays observe one interaction geometry
 while earlier submissions await confirmation.
 See [`canvas.md`](./canvas.md) for the Canvas document, layout, registry, and
 interaction contract, and [`canvas-rendering.md`](./canvas-rendering.md) for
-render scheduling, virtualization, preview resources, and diagnostics.
+stable scene mounting, viewport culling, preview resources, and diagnostics.
 Text buffers, CodeMirror ownership, inline handoff, and Canvas text preview
 capture are documented in [`text-files.md`](./text-files.md).
 

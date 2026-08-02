@@ -1,39 +1,18 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
-import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from './CanvasPerfMonitor';
+import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfMonitor } from './CanvasPerfMonitor.js';
 import {
   canvasEdgeSegmentsForProjectionEdges,
-  createCanvasVirtualizationIndex,
-  nodeRect,
-  shouldRefreshVirtualizedRenderState,
-  type CanvasEdgeSegment,
-  type VirtualizedCanvasRenderState
-} from './canvasVirtualization';
+  type CanvasEdgeSegment
+} from './canvasViewport.js';
 import type { CanvasLayoutOverride } from './canvasManualLayoutDraft.js';
-import type { CanvasCamera, CanvasCameraState } from './runtime/canvasCamera';
-import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
-import { rectsIntersect } from './runtime/canvasGeometry';
-import { selectedNodeProjectRelativePaths, type CanvasSelection } from './runtime/canvasSelection';
-
-export interface CanvasNodeRenderOrderView {
-  domOrder: string;
-  zIndex: number;
-}
 
 export interface CanvasRenderCoordinatorSnapshot {
-  visibleRect: CanvasRect;
-  virtualRect: CanvasRect;
-  culledNodePaths: ReadonlySet<string>;
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
-  nodeRenderOrder: ReadonlyMap<string, CanvasNodeRenderOrderView>;
+  nodeZIndexByPath: ReadonlyMap<string, number>;
   edges: CanvasEdgeSegment[];
 }
 
 export interface CanvasRenderCoordinatorUpdateInput {
-  camera: CanvasCamera;
-  cameraState: CanvasCameraState;
-  surfaceSize: CanvasSize | undefined;
-  selection: CanvasSelection | undefined;
-  activeNodePaths: readonly string[];
   layoutOverrides: readonly CanvasLayoutOverride[];
   stackOrder?: readonly string[] | undefined;
 }
@@ -50,152 +29,73 @@ export interface CanvasRenderCoordinatorInput {
 
 export function createCanvasRenderCoordinator(input: CanvasRenderCoordinatorInput): CanvasRenderCoordinator {
   let projection = input.projection;
-  let membershipKey = canvasRenderProjectionMembershipKey(projection);
-  let latestNodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
-  let index = createCanvasVirtualizationIndex({
-    nodes: projection.nodes,
-    edges: projection.edges
-  });
+  let latestNodesByPath = nodesByPathFor(projection.nodes);
+  let baseEdges = canvasEdgeSegmentsForProjectionEdges(projection);
   let edgeOverlayIndex = createCanvasEdgeOverlayIndex(projection.edges);
   let snapshot: CanvasRenderCoordinatorSnapshot | undefined;
-  let mountedInputKey: string | undefined;
+  let snapshotInputKey: string | undefined;
 
-  const recordCounter = (name: CanvasPerfCounterName, detail?: Record<string, unknown>) => {
+  const recordCounter = (name: 'render-snapshot-build' | 'render-snapshot-reuse'): void => {
     input.perfMonitor?.recordCounter({
       sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
       timestamp: canvasRenderPerfTimestamp(),
       source: 'CanvasRenderCoordinator',
-      name,
-      detail
+      name
     });
   };
 
-  const buildSnapshot = (input: CanvasRenderCoordinatorUpdateInput): CanvasRenderCoordinatorSnapshot => {
-    const rendered: VirtualizedCanvasRenderState = index.render({
-      camera: input.camera,
-      surfaceSize: input.surfaceSize,
-      selection: input.selection,
-      activeNodeProjectRelativePaths: input.activeNodePaths
-    });
-    const layoutOverrides = input.layoutOverrides;
+  const buildSnapshot = (update: CanvasRenderCoordinatorUpdateInput): CanvasRenderCoordinatorSnapshot => {
     const layoutByPath = new Map(
-      layoutOverrides.map((layout) => [layout.projectRelativePath, layout])
+      update.layoutOverrides.map((layout) => [layout.projectRelativePath, layout])
     );
     const currentNodeForPath = (path: string): ProjectedCanvasNode | undefined => {
       const node = latestNodesByPath.get(path);
       const layout = layoutByPath.get(path);
       return node && layout ? canvasNodeWithLayoutOverride(node, layout) : node;
     };
-    const overrideNodes = layoutOverrides
-      .map((layout) => currentNodeForPath(layout.projectRelativePath))
-      .filter((node): node is ProjectedCanvasNode => Boolean(node));
-    const nodes = rendered.nodes
+    const nodes = projection.nodes
       .map((node) => currentNodeForPath(node.projectRelativePath) ?? node)
-      .concat(overrideNodes)
-      .filter(uniqueNodePathPredicate())
       .sort((left, right) => left.projectRelativePath.localeCompare(right.projectRelativePath));
-    const nodesByPath = new Map(nodes.map((node) => [node.projectRelativePath, node]));
-    const culledNodePaths = new Set(
-      nodes
-        .filter((node) => !rectsIntersect(rendered.virtualRect, nodeRect(node)))
-        .map((node) => node.projectRelativePath)
-    );
-    const edges = renderSnapshotEdges({
-      renderedEdges: rendered.edges,
-      currentNodeForPath,
-      layoutOverrides,
-      edgeOverlayIndex
-    });
+    const nodesByPath = nodesByPathFor(nodes);
     return {
-      visibleRect: rendered.visibleRect,
-      virtualRect: rendered.virtualRect,
-      culledNodePaths,
       nodesByPath,
-      nodeRenderOrder: nodeRenderOrderFor(nodes, input.stackOrder),
-      edges
+      nodeZIndexByPath: nodeZIndexByPathFor(nodes, update.stackOrder),
+      edges: renderSnapshotEdges({
+        renderedEdges: baseEdges,
+        currentNodeForPath,
+        layoutOverrides: update.layoutOverrides,
+        edgeOverlayIndex
+      })
     };
   };
 
   return {
     setProjection(nextProjection) {
-      projection = nextProjection;
-      latestNodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
-      const nextMembershipKey = canvasRenderProjectionMembershipKey(nextProjection);
-      if (nextMembershipKey !== membershipKey) {
-        membershipKey = nextMembershipKey;
-        index = createCanvasVirtualizationIndex({
-          nodes: projection.nodes,
-          edges: projection.edges
-        });
-        edgeOverlayIndex = createCanvasEdgeOverlayIndex(projection.edges);
-        snapshot = undefined;
-        mountedInputKey = undefined;
-        recordCounter('render-virtual-refresh', { reason: 'projection-membership-change' });
+      if (nextProjection === projection) {
         return;
       }
-      if (snapshot) {
-        snapshot = undefined;
-        mountedInputKey = undefined;
-      }
+      projection = nextProjection;
+      latestNodesByPath = nodesByPathFor(projection.nodes);
+      baseEdges = canvasEdgeSegmentsForProjectionEdges(projection);
+      edgeOverlayIndex = createCanvasEdgeOverlayIndex(projection.edges);
+      snapshot = undefined;
+      snapshotInputKey = undefined;
     },
-    update(input) {
-      const nextMountedInputKey = canvasRenderCoordinatorMountedInputKey(input);
-      if (
-        input.cameraState === 'moving'
-        && snapshot
-        && nextMountedInputKey === mountedInputKey
-        && !shouldRefreshVirtualizedRenderState({
-          currentVirtualRect: snapshot.virtualRect,
-          camera: input.camera,
-          surfaceSize: input.surfaceSize
-        })
-      ) {
+    update(update) {
+      const nextInputKey = canvasRenderCoordinatorInputKey(update);
+      if (snapshot && nextInputKey === snapshotInputKey) {
         recordCounter('render-snapshot-reuse');
         return snapshot;
       }
-      if (input.cameraState === 'moving' && snapshot) {
-        recordCounter('render-virtual-refresh', { reason: 'moving-refresh-margin' });
-      }
-      snapshot = buildSnapshot(input);
-      mountedInputKey = nextMountedInputKey;
-      recordCounter('render-snapshot-build', {
-        cameraState: input.cameraState,
-        mountedNodeCount: snapshot.nodesByPath.size,
-        culledNodeCount: snapshot.culledNodePaths.size
-      });
+      snapshot = buildSnapshot(update);
+      snapshotInputKey = nextInputKey;
+      recordCounter('render-snapshot-build');
       return snapshot;
     }
   };
 }
 
-export function canvasRenderProjectionMembershipKey(projection: CanvasProjection): string {
-  return [
-    projection.nodes
-      .map((node) => [
-        node.projectRelativePath,
-        node.x,
-        node.y,
-        node.width,
-        node.height
-      ].join('\u001f'))
-      .sort()
-      .join('\u001e'),
-    projection.edges
-      .map((edge) => [
-        edge.id,
-        edge.sourceProjectRelativePath,
-        edge.targetProjectRelativePath
-      ].join('\u001f'))
-      .join('\u001e')
-  ].join('\u001d');
-}
-
-function canvasRenderCoordinatorMountedInputKey(input: CanvasRenderCoordinatorUpdateInput): string {
-  const mountedPaths = [...new Set([
-    ...selectedNodeProjectRelativePaths(input.selection),
-    ...input.activeNodePaths,
-    ...input.layoutOverrides.map((layout) => layout.projectRelativePath)
-  ])].sort().join('\u001f');
+function canvasRenderCoordinatorInputKey(input: CanvasRenderCoordinatorUpdateInput): string {
   const layoutKey = [...input.layoutOverrides]
     .map((layout) => [
       layout.projectRelativePath,
@@ -206,7 +106,7 @@ function canvasRenderCoordinatorMountedInputKey(input: CanvasRenderCoordinatorUp
     ].join('\u001f'))
     .sort()
     .join('\u001e');
-  return [mountedPaths, layoutKey, input.stackOrder?.join('\u001f') ?? ''].join('\u001d');
+  return [layoutKey, input.stackOrder?.join('\u001f') ?? ''].join('\u001d');
 }
 
 function renderSnapshotEdges(input: {
@@ -294,32 +194,22 @@ function canvasNodeWithLayoutOverride(
   };
 }
 
-function uniqueNodePathPredicate(): (node: ProjectedCanvasNode) => boolean {
-  const seen = new Set<string>();
-  return (node) => {
-    if (seen.has(node.projectRelativePath)) {
-      return false;
-    }
-    seen.add(node.projectRelativePath);
-    return true;
-  };
+function nodesByPathFor(nodes: readonly ProjectedCanvasNode[]): Map<string, ProjectedCanvasNode> {
+  return new Map(nodes.map((node) => [node.projectRelativePath, node]));
 }
 
-function nodeRenderOrderFor(
+function nodeZIndexByPathFor(
   nodes: ProjectedCanvasNode[],
   stackOrder: readonly string[] | undefined
-): Map<string, CanvasNodeRenderOrderView> {
-  const renderOrder = new Map<string, CanvasNodeRenderOrderView>();
+): Map<string, number> {
+  const zIndexForNode = new Map<string, number>();
   const zIndexByPath = stackOrder
     ? new Map(stackOrder.map((path, zIndex) => [path, zIndex]))
     : undefined;
   for (const node of nodes) {
-    renderOrder.set(node.projectRelativePath, {
-      domOrder: node.projectRelativePath,
-      zIndex: zIndexByPath?.get(node.projectRelativePath) ?? node.z
-    });
+    zIndexForNode.set(node.projectRelativePath, zIndexByPath?.get(node.projectRelativePath) ?? node.z);
   }
-  return renderOrder;
+  return zIndexForNode;
 }
 
 function canvasRenderPerfTimestamp(): number {

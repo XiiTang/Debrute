@@ -9,9 +9,14 @@ import type {
   CanvasTextPreviewCaptureTarget
 } from './CanvasTextPreviewCapture.js';
 import type { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure.js';
-import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
+import type {
+  CanvasPreviewResourceRequest,
+  CanvasPreviewResourceScheduler
+} from './CanvasPreviewResourceScheduler.js';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
 import {
   CanvasTextPreviewProvider,
+  useCanvasTextPreviewNode,
   useCanvasTextPreviewRuntime
 } from './CanvasTextPreviewRuntime.js';
 import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
@@ -131,7 +136,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set(),
       consumerNode: renderedNode
     });
     await waitFor(() => harness.mountQueue.length === 1);
@@ -150,7 +154,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     const input = {
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set<string>()
     };
 
     await renderProvider({
@@ -188,7 +191,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set(),
       consumerNode: renderedNode
     });
     await waitFor(() => harness.mountQueue.length === 1);
@@ -207,7 +209,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set<string>(),
       consumerNode: stableNode,
       pendingReport: { kind: 'ready' as const, node: stableNode },
       styleDependencyKey: 'original'
@@ -262,7 +263,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set(),
       consumerNode: renderedNode,
       pendingReport: { kind: 'failure', node: stableNode, sourceNode: stableNode }
     });
@@ -284,7 +284,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set(),
       consumerNode: stableNode,
       pendingReport: { kind: 'failure', node: renderedNode, sourceNode: stableNode }
     });
@@ -306,7 +305,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set(),
       consumerNode: stableNode,
       pendingReport: { kind: 'ready', node: renderedNode, sourceNode: stableNode }
     });
@@ -327,7 +325,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set(),
       consumerNode: stableNode,
       pendingReport: { kind: 'ready', node: stableNode },
       visibleReport: { kind: 'failure', node: renderedNode }
@@ -352,7 +349,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       nodes: [stableNode],
       actions: harness.actions,
       previewResourceScheduler: harness.scheduler,
-      culledNodePaths: new Set(),
       consumerNode: stableNode,
       pendingReport: { kind: 'ready', node: stableNode },
       visibleReport: { kind: 'committed', node: renderedNode }
@@ -383,20 +379,19 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     await renderProvider({
       nodes: [
         textNode('outside.md', 5000, 0),
-        textNode('overscan.md', 1200, 0),
+        textNode('priority.md', 1200, 0),
         textNode('visible.md', 0, 0)
       ],
       textFileBuffers: {},
       visibleRect: { x: 0, y: 0, width: 800, height: 800 },
-      virtualRect: { x: -800, y: -800, width: 2800, height: 2400 },
       actions: actionsFixture({ readProjectTextFile, readCanvasTextPreviewSources })
     });
     await waitFor(() => readProjectTextFile.mock.calls.length === 2);
 
     expect(readCanvasTextPreviewSources.mock.calls[0]![0].sources.map((source) => source.projectRelativePath)).toEqual([
-      'visible.md', 'overscan.md', 'outside.md'
+      'visible.md', 'priority.md', 'outside.md'
     ]);
-    expect(readProjectTextFile.mock.calls.map(([path]) => path)).toEqual(['visible.md', 'overscan.md']);
+    expect(readProjectTextFile.mock.calls.map(([path]) => path)).toEqual(['visible.md', 'priority.md']);
 
     reads.get('visible.md')!.resolve(textFile('visible.md'));
     await waitFor(() => readProjectTextFile.mock.calls.length === 3);
@@ -463,16 +458,21 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
         { ...source, status: 'missing' as const }
       ]))
     }));
+    const previewResourceScheduler = immediateScheduler();
     const input = {
       nodes: [textNode('a.md', 0, 0)],
       actions: actionsFixture({ readCanvasTextPreviewSources }),
-      interactionActive: true
+      interactionActive: true,
+      previewResourceScheduler
     };
     await renderProvider(input);
     await flushWork();
     expect(readCanvasTextPreviewSources).not.toHaveBeenCalled();
 
-    await renderProvider({ ...input, interactionActive: false });
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'idle',
+      pointerInteractionActive: false
+    }));
     await waitFor(() => readCanvasTextPreviewSources.mock.calls.length === 1);
   });
 
@@ -520,7 +520,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     await renderProvider({
       nodes,
       actions: actionsFixture({ readCanvasTextPreviewSources }),
-      culledNodePaths: new Set(),
       previewResourceScheduler: scheduler
     });
     await waitFor(() => publicationQueue.length === nodes.length);
@@ -533,6 +532,69 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(consoleError.mock.calls.some(([message]) => (
       String(message).includes('Maximum update depth exceeded')
     ))).toBe(false);
+  });
+
+  it('notifies only the text node whose preview presentation changes', async () => {
+    const harness = availablePreviewHarness();
+    const first = textNode('first.md', 0, 0);
+    const second = textNode('second.md', 0, 1000);
+    const renders = new Map<string, number>();
+    await renderProvider({
+      nodes: [first, second],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      children: (
+        <>
+          <TextPreviewRenderCountProbe node={first} renders={renders} />
+          <TextPreviewRenderCountProbe node={second} renders={renders} />
+        </>
+      )
+    });
+    await waitFor(() => harness.mountQueue.length === 2);
+    renders.clear();
+
+    const firstRequest = harness.mountQueue.find((request) => request.nodeId === first.projectRelativePath);
+    await act(async () => firstRequest?.run());
+    await flushWork();
+
+    expect(renders.get(first.projectRelativePath)).toBeGreaterThan(0);
+    expect(renders.get(second.projectRelativePath) ?? 0).toBe(0);
+  });
+
+  it('does not commit the stable text preview provider when Canvas interaction changes', async () => {
+    const scheduler = immediateScheduler();
+    const node = textNode('failed.md', 0, 0);
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+      sources: Object.fromEntries(request.sources.map((source) => [
+        source.projectRelativePath,
+        { ...source, status: 'error' as const, message: 'preview unavailable' }
+      ]))
+    }));
+    let commitCount = 0;
+    await renderProvider({
+      nodes: [node],
+      actions: actionsFixture({ readCanvasTextPreviewSources }),
+      previewResourceScheduler: scheduler,
+      consumerNode: node,
+      onRender: () => {
+        commitCount += 1;
+      }
+    });
+    await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
+      'data-preview-error'
+    ) === 'preview unavailable');
+    commitCount = 0;
+
+    await act(async () => scheduler.setInteractionState({
+      cameraState: 'moving',
+      pointerInteractionActive: false
+    }));
+    await act(async () => scheduler.setInteractionState({
+      cameraState: 'idle',
+      pointerInteractionActive: false
+    }));
+
+    expect(commitCount).toBe(0);
   });
 
   it('adds a node leaving edit mode to the live registry without waiting for existing upload work', async () => {
@@ -556,20 +618,28 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     activeInlineTextPath?: string | undefined;
     interactionActive?: boolean;
     visibleRect?: { x: number; y: number; width: number; height: number };
-    virtualRect?: { x: number; y: number; width: number; height: number };
-    culledNodePaths?: ReadonlySet<string>;
     previewResourceScheduler?: CanvasPreviewResourceScheduler;
     consumerNode?: ProjectedCanvasNode | undefined;
     pendingReport?: PendingPreviewReport | undefined;
     visibleReport?: VisiblePreviewReport | undefined;
     styleDependencyKey?: string | undefined;
+    children?: React.ReactNode;
+    onRender?: React.ProfilerOnRenderCallback | undefined;
   }): Promise<void> {
     const buffers = input.textFileBuffers ?? Object.fromEntries(input.nodes.map((node) => [
       node.projectRelativePath,
       buffer(node.projectRelativePath)
     ]));
+    const scheduler = input.previewResourceScheduler ?? immediateScheduler();
+    const previewOrder = previewOrderSource({
+      visibleRect: input.visibleRect ?? { x: 0, y: 0, width: 800, height: 800 },
+    });
     await act(async () => {
-      root.render(
+      scheduler.setInteractionState({
+        cameraState: input.interactionActive ? 'moving' : 'idle',
+        pointerInteractionActive: false
+      });
+      const tree = (
         <CanvasTextRenderProfileGate profile={TEST_PROFILE} pending={null}>
           <CanvasTextPreviewProvider
             canvasId="canvas-1"
@@ -577,25 +647,27 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
             activeInlineTextPath={input.activeInlineTextPath}
             textFileBuffers={buffers}
             actions={input.actions}
-            interactionActive={input.interactionActive ?? false}
             resourceZoom={0.1}
             devicePixelRatio={2}
-            culledNodePaths={input.culledNodePaths ?? new Set(input.nodes.map((node) => node.projectRelativePath))}
-            visibleRect={input.visibleRect ?? { x: 0, y: 0, width: 800, height: 800 }}
-            virtualRect={input.virtualRect ?? { x: -800, y: -800, width: 2400, height: 2400 }}
+            previewOrder={previewOrder}
             styleDependencyKey={input.styleDependencyKey ?? 'test'}
-            previewResourceScheduler={input.previewResourceScheduler ?? immediateScheduler()}
+            previewResourceScheduler={scheduler}
           >
-            {input.consumerNode ? (
+            {input.children ?? (input.consumerNode ? (
               <RuntimePresentationProbe
                 node={input.consumerNode}
                 pendingReport={input.pendingReport}
                 visibleReport={input.visibleReport}
               />
-            ) : <div />}
+            ) : <div />)}
           </CanvasTextPreviewProvider>
         </CanvasTextRenderProfileGate>
       );
+      root.render(input.onRender ? (
+        <React.Profiler id="canvas-text-preview-provider" onRender={input.onRender}>
+          {tree}
+        </React.Profiler>
+      ) : tree);
     });
   }
 });
@@ -603,6 +675,27 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
 function RuntimeConsumer(): React.ReactElement {
   useCanvasTextPreviewRuntime();
   return <div />;
+}
+
+function TextPreviewRenderCountProbe({
+  node,
+  renders
+}: {
+  node: ProjectedCanvasNode;
+  renders: Map<string, number>;
+}): React.ReactElement {
+  useCanvasTextPreviewNode(node);
+  renders.set(node.projectRelativePath, (renders.get(node.projectRelativePath) ?? 0) + 1);
+  return <div />;
+}
+
+function previewOrderSource(input: {
+  visibleRect: { x: number; y: number; width: number; height: number };
+}): CanvasPreviewOrderSource {
+  return {
+    getPreviewOrderSnapshot: () => input.visibleRect,
+    subscribePreviewOrder: () => () => undefined
+  };
 }
 
 type PendingPreviewReport = {
@@ -622,10 +715,10 @@ function RuntimePresentationProbe({ node, pendingReport, visibleReport }: {
   visibleReport?: VisiblePreviewReport | undefined;
 }): React.ReactElement {
   const runtime = useCanvasTextPreviewRuntime();
-  const presentation = runtime.presentationForNode({ node });
-  const pendingPresentation = pendingReport
-    ? runtime.presentationForNode({ node: pendingReport.sourceNode ?? node })
-    : undefined;
+  const { presentation, previewError } = useCanvasTextPreviewNode(node);
+  const pendingNode = pendingReport?.sourceNode ?? node;
+  const pendingSnapshot = useCanvasTextPreviewNode(pendingNode);
+  const pendingPresentation = pendingReport ? pendingSnapshot.presentation : undefined;
   React.useEffect(() => {
     if (!pendingReport || !pendingPresentation?.pending) {
       return;
@@ -649,9 +742,9 @@ function RuntimePresentationProbe({ node, pendingReport, visibleReport }: {
   return (
     <div
       data-preview-presented={Boolean(presentation.visible || presentation.pending)}
-      data-preview-error={runtime.previewErrorForNode({ node }) ?? ''}
+      data-preview-error={previewError ?? ''}
       data-failure-node-error={pendingReport?.kind === 'failure'
-        ? runtime.previewErrorForNode({ node: pendingReport.node }) ?? ''
+        ? pendingSnapshot.previewError ?? ''
         : ''}
     />
   );
@@ -721,21 +814,38 @@ function actionsFixture(overrides: Partial<WorkbenchActions> = {}): WorkbenchAct
 }
 
 function immediateScheduler(overrides: Partial<CanvasPreviewResourceScheduler> = {}): CanvasPreviewResourceScheduler {
+  let interaction: ReturnType<CanvasPreviewResourceScheduler['getInteractionState']> = {
+    cameraState: 'idle',
+    pointerInteractionActive: false
+  };
+  const interactionListeners = new Set<Parameters<
+    CanvasPreviewResourceScheduler['subscribeInteraction']
+  >[0]>();
   return {
     enqueue: () => undefined,
     enqueuePublication: () => undefined,
     cancel: () => undefined,
-    setInteractionState: () => undefined,
-    getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
-    notifyVisibilityChanged: () => undefined,
+    setInteractionState: (next) => {
+      interaction = next.cameraState === 'idle'
+        ? { cameraState: 'idle', pointerInteractionActive: next.pointerInteractionActive }
+        : { cameraState: 'moving', pointerInteractionActive: next.pointerInteractionActive };
+      for (const listener of interactionListeners) {
+        listener(interaction);
+      }
+    },
+    getInteractionState: () => interaction,
+    subscribeInteraction: (listener) => {
+      interactionListeners.add(listener);
+      return () => interactionListeners.delete(listener);
+    },
     dispose: () => undefined,
     ...overrides
   };
 }
 
 function availablePreviewHarness() {
-  const mountQueue: Array<{ run(): void | Promise<void> }> = [];
-  const publicationQueue: Array<{ run(): void | Promise<void> }> = [];
+  const mountQueue: CanvasPreviewResourceRequest[] = [];
+  const publicationQueue: CanvasPreviewResourceRequest[] = [];
   const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
     sources: Object.fromEntries(request.sources.map((source) => [
       source.projectRelativePath,

@@ -6,23 +6,22 @@ import {
 
 describe('CanvasPreviewScheduling', { tags: ['canvas-text', 'canvas-video'] }, () => {
   const visibleRect = { x: 0, y: 0, width: 100, height: 100 };
-  const virtualRect = { x: -100, y: -100, width: 300, height: 300 };
 
-  it('uses viewport only as a three-tier ordering signal', () => {
+  it('uses the exact viewport only as a two-tier ordering signal', () => {
     const tasks = [
       task('outside.md', 500, -100),
       task('visible-b.md', 10, 30),
-      task('overscan.md', 120, 20),
+      task('priority.md', 120, 20),
       task('visible-a.md', 10, 10),
       task('outside-a.md', -500, -100)
     ];
 
-    expect(orderCanvasPreviewTasks(tasks, { visibleRect, virtualRect }).map((item) => item.projectRelativePath)).toEqual([
+    expect(orderCanvasPreviewTasks(tasks, visibleRect).map((item) => item.projectRelativePath)).toEqual([
       'visible-a.md',
       'visible-b.md',
-      'overscan.md',
       'outside-a.md',
-      'outside.md'
+      'outside.md',
+      'priority.md'
     ]);
     expect(tasks).toHaveLength(5);
   });
@@ -35,7 +34,7 @@ describe('CanvasPreviewScheduling', { tags: ['canvas-text', 'canvas-video'] }, (
       task('first.md', 80, 10)
     ];
 
-    expect(orderCanvasPreviewTasks(tasks, { visibleRect, virtualRect }).map((item) => item.projectRelativePath)).toEqual([
+    expect(orderCanvasPreviewTasks(tasks, visibleRect).map((item) => item.projectRelativePath)).toEqual([
       'first.md',
       'a.md',
       'b.md',
@@ -43,10 +42,10 @@ describe('CanvasPreviewScheduling', { tags: ['canvas-text', 'canvas-video'] }, (
     ]);
   });
 
-  it('classifies real viewport, overscan, and remaining nodes', () => {
-    expect(canvasPreviewPriorityTier(task('visible.md', 10, 10), { visibleRect, virtualRect })).toBe(0);
-    expect(canvasPreviewPriorityTier(task('overscan.md', 150, 10), { visibleRect, virtualRect })).toBe(1);
-    expect(canvasPreviewPriorityTier(task('outside.md', 500, 10), { visibleRect, virtualRect })).toBe(2);
+  it('classifies exact-viewport and background nodes without filtering either tier', () => {
+    expect(canvasPreviewPriorityTier(task('visible.md', 10, 10), visibleRect)).toBe(0);
+    expect(canvasPreviewPriorityTier(task('touching-edge.md', 100, 10), visibleRect)).toBe(0);
+    expect(canvasPreviewPriorityTier(task('outside.md', 500, 10), visibleRect)).toBe(1);
   });
 });
 

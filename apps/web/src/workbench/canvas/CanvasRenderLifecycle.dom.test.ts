@@ -1,11 +1,10 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createCanvasPerfMonitor, type CanvasPerfMonitor } from './CanvasPerfMonitor.js';
+import { createCanvasPerfMonitor } from './CanvasPerfMonitor.js';
 import {
   createCanvasRenderLifecycle,
   type CanvasRenderLifecycle
 } from './CanvasRenderLifecycle.js';
-import { createCanvasVisibilityController } from './CanvasVisibilityController.js';
 import {
   createCanvasEditorRuntime,
   type CanvasEditorRuntime
@@ -26,7 +25,7 @@ afterEach(() => {
 });
 
 describe('CanvasRenderLifecycle', () => {
-  it('keeps a newer selection when an older moving frame fires', () => {
+  it('mounts every current Canvas node regardless of the camera', () => {
     const fixture = createFixture({
       nodes: [
         directoryNode('near', 0, 0, 1),
@@ -34,74 +33,78 @@ describe('CanvasRenderLifecycle', () => {
       ]
     });
 
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(false);
+    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['far', 'near']);
+    const sceneBeforePan = fixture.lifecycle.getSnapshot();
+    const listener = vi.fn();
+    const unsubscribe = fixture.lifecycle.subscribe(listener);
 
-    fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-    fixture.runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['far'] });
-
-    expect(fixture.canceledFrames).toEqual([1]);
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(true);
-
+    fixture.runtime.camera.setCamera({ x: -5000, y: 0, z: 1 });
     fixture.frames[0]?.(0);
 
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(true);
+    expect(fixture.lifecycle.getSnapshot()).toBe(sceneBeforePan);
+    expect(listener).not.toHaveBeenCalled();
+    expect(fixture.lifecycle.previewTierForNode('near')).toBe(1);
+    expect(fixture.lifecycle.previewTierForNode('far')).toBe(0);
+    unsubscribe();
   });
 
-  it('coalesces camera movement and recomputes from the latest camera', () => {
+  it('culls mounted node shells through direct display writes while panning', () => {
+    const fixture = createFixture({
+      nodes: [
+        directoryNode('near', 0, 0, 1),
+        directoryNode('far', 5000, 0, 2)
+      ]
+    });
+    const near = document.createElement('div');
+    const far = document.createElement('div');
+    const unregisterNear = fixture.stageRuntime.registerNodeShell('near', near);
+    const unregisterFar = fixture.stageRuntime.registerNodeShell('far', far);
+
+    expect(near.style.display).toBe('block');
+    expect(far.style.display).toBe('none');
+
+    fixture.runtime.camera.setCamera({ x: -5000, y: 0, z: 1 });
+    fixture.frames[0]?.(0);
+
+    expect(near.style.display).toBe('none');
+    expect(far.style.display).toBe('block');
+    expect(fixture.lifecycle.getSnapshot().nodesByPath.size).toBe(2);
+
+    unregisterFar();
+    unregisterNear();
+  });
+
+  it('writes the live camera immediately and coalesces direct viewport culling per frame', () => {
     const fixture = createFixture();
+    const setCamera = vi.spyOn(fixture.stageRuntime, 'setCamera');
 
-    fixture.runtime.camera.setCamera({ x: -1800, y: 0, z: 1 });
-    fixture.runtime.camera.setCamera({ x: -4000, y: 0, z: 1 });
+    fixture.runtime.camera.setCamera({ x: -200, y: 0, z: 1 });
+    fixture.runtime.camera.setCamera({ x: -400, y: 0, z: 1 });
 
+    expect(setCamera).toHaveBeenLastCalledWith({ x: -400, y: 0, z: 1 });
     expect(fixture.frames).toHaveLength(1);
-
-    fixture.frames[0]?.(0);
-
-    expect(fixture.lifecycle.getSnapshot().visibleRect.x).toBe(4000);
   });
 
-  it('invalidates a moving frame when the Canvas Projection changes', () => {
-    const fixture = createFixture({
-      nodes: [directoryNode('old', 0, 0, 1)]
-    });
+  it('publishes the final viewport for resource ordering only when camera movement becomes idle', () => {
+    vi.useFakeTimers();
+    const fixture = createFixture();
+    const listener = vi.fn();
+    fixture.lifecycle.subscribePreviewOrder(listener);
+    const beforePan = fixture.lifecycle.getPreviewOrderSnapshot();
 
-    fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-    fixture.lifecycle.acceptProjection(projection([
-      directoryNode('new', 0, 0, 1)
-    ]));
-
-    expect(fixture.canceledFrames).toEqual([1]);
-    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['new']);
-
+    fixture.runtime.camera.setCamera({ x: -200, y: 0, z: 1 });
     fixture.frames[0]?.(0);
 
-    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['new']);
+    expect(fixture.lifecycle.getPreviewOrderSnapshot()).toBe(beforePan);
+    expect(listener).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(CANVAS_CAMERA_IDLE_MS);
+
+    expect(fixture.lifecycle.getPreviewOrderSnapshot().x).toBe(200);
+    expect(listener).toHaveBeenCalledOnce();
   });
 
-  it('keeps an active drag mounted when an older moving frame fires', () => {
-    const fixture = createFixture({
-      nodes: [
-        directoryNode('near', 0, 0, 1),
-        directoryNode('far', 5000, 0, 2)
-      ]
-    });
-
-    fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-    fixture.runtime.input.beginNodeMove({
-      pointerId: 1,
-      projectRelativePath: 'far',
-      screenPoint: { x: 5000, y: 0 }
-    });
-
-    expect(fixture.canceledFrames).toEqual([1]);
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(true);
-
-    fixture.frames[0]?.(0);
-
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(true);
-  });
-
-  it('presents the moved node above every other node as soon as movement activates', () => {
+  it('publishes Manual Layout geometry and keeps all nodes mounted', () => {
     const fixture = createFixture({
       nodes: [
         directoryNode('back', 0, 0, 0),
@@ -114,168 +117,51 @@ describe('CanvasRenderLifecycle', () => {
       projectRelativePath: 'back',
       screenPoint: { x: 0, y: 0 }
     });
-    expect(fixture.lifecycle.getSnapshot().nodeRenderOrder.get('back')?.zIndex).toBe(0);
-
     fixture.runtime.input.updatePointerInteraction({
       pointerId: 2,
       screenPoint: { x: 5, y: 0 }
     });
 
-    expect(fixture.lifecycle.getSnapshot().nodeRenderOrder.get('front')?.zIndex).toBe(0);
-    expect(fixture.lifecycle.getSnapshot().nodeRenderOrder.get('back')?.zIndex).toBe(1);
+    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['back', 'front']);
+    expect(fixture.lifecycle.getSnapshot().nodesByPath.get('back')?.x).toBe(5);
+    expect(fixture.lifecycle.getSnapshot().nodeZIndexByPath.get('back')).toBe(1);
   });
 
-  it('flushes the latest camera immediately when movement becomes idle', () => {
-    vi.useFakeTimers();
-    const fixture = createFixture();
+  it('invalidates queued viewport work when the Projection changes', () => {
+    const fixture = createFixture({ nodes: [directoryNode('old', 0, 0, 1)] });
 
     fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-
-    expect(fixture.lifecycle.getSnapshot().visibleRect.x).not.toBe(20);
-
-    vi.advanceTimersByTime(CANVAS_CAMERA_IDLE_MS);
+    fixture.lifecycle.acceptProjection(projection([directoryNode('new', 0, 0, 1)]));
 
     expect(fixture.canceledFrames).toEqual([1]);
-    expect(fixture.lifecycle.getSnapshot().visibleRect.x).toBe(20);
-
+    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['new']);
     fixture.frames[0]?.(0);
-
-    expect(fixture.lifecycle.getSnapshot().visibleRect.x).toBe(20);
+    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['new']);
   });
 
-  it('invalidates a moving frame when the Canvas surface size changes', () => {
-    const fixture = createFixture();
-    const surface = document.createElement('div');
-    surface.getBoundingClientRect = () => ({
-      x: 0,
-      y: 0,
-      top: 0,
-      right: 4000,
-      bottom: 3000,
-      left: 0,
-      width: 4000,
-      height: 3000,
-      toJSON: () => ({})
-    });
-
-    fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-    const unbindSurface = fixture.runtime.bindSurface({ surface });
-
-    expect(fixture.canceledFrames).toEqual([1]);
-    expect(fixture.lifecycle.getSnapshot().visibleRect).toMatchObject({
-      x: 20,
-      width: 4000,
-      height: 3000
-    });
-
-    fixture.frames[0]?.(0);
-
-    expect(fixture.lifecycle.getSnapshot().visibleRect).toMatchObject({
-      x: 20,
-      width: 4000,
-      height: 3000
-    });
-
-    unbindSurface();
-  });
-
-  it('removes rejected Manual Layout presentation from the render snapshot', async () => {
-    const fixture = createFixture({
-      submitManualLayout: async () => {
-        throw new Error('layout rejected');
-      }
-    });
-
-    fixture.runtime.input.beginNodeMove({
-      pointerId: 1,
-      projectRelativePath: 'near',
-      screenPoint: { x: 0, y: 0 }
-    });
-    fixture.runtime.input.updatePointerInteraction({
-      pointerId: 1,
-      screenPoint: { x: 100, y: 0 }
-    });
-
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.get('near')?.x).toBe(100);
-
-    const finishPointerInteraction = fixture.runtime.input.finishPointerInteraction({
-      pointerId: 1,
-      screenPoint: { x: 100, y: 0 }
-    });
-    fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-
-    expect(fixture.frames).toHaveLength(1);
-
-    await expect(finishPointerInteraction).rejects.toThrow('layout rejected');
-
-    expect(fixture.canceledFrames).toEqual([1]);
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.get('near')?.x).toBe(0);
-
-    fixture.frames[0]?.(0);
-
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.get('near')?.x).toBe(0);
-  });
-
-  it('writes the live camera to the stage before the scheduled render refresh', () => {
-    const fixture = createFixture();
-    const setCamera = vi.spyOn(fixture.stageRuntime, 'setCamera');
-    const renderSnapshotBeforeCameraMove = fixture.lifecycle.getSnapshot();
-
-    fixture.runtime.camera.setCamera({ x: -350, y: 0, z: 1 });
-
-    expect(setCamera).toHaveBeenCalledWith({ x: -350, y: 0, z: 1 });
-    expect(fixture.frames).toHaveLength(1);
-    expect(fixture.lifecycle.getSnapshot()).toBe(renderSnapshotBeforeCameraMove);
-  });
-
-  it('cancels pending work on detach and resynchronizes current state on reattach', () => {
-    const fixture = createFixture({
-      nodes: [
-        directoryNode('near', 0, 0, 1),
-        directoryNode('far', 5000, 0, 2)
-      ]
-    });
-
-    fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-    fixture.detach();
-    fixture.runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['far'] });
-    fixture.frames[0]?.(0);
-
-    expect(fixture.canceledFrames).toEqual([1]);
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(false);
-
-    fixture.attach();
-
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.has('far')).toBe(true);
-  });
-
-  it('records coalesced moving work and the idle flush under its lifecycle source', () => {
+  it('records viewport culling and idle publication without rebuilding the scene', () => {
     vi.useFakeTimers();
     const monitor = createCanvasPerfMonitor();
     const fixture = createFixture({ perfMonitor: monitor });
+    const buildsBeforePan = counterCount(monitor, 'render-snapshot-build');
 
     fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
     fixture.runtime.camera.setCamera({ x: -40, y: 0, z: 1 });
     fixture.frames[0]?.(0);
     vi.advanceTimersByTime(CANVAS_CAMERA_IDLE_MS);
 
-    expect(monitor.getTrace().events.filter((event) => (
-      event.kind === 'counter'
-      && (event.name === 'render-moving-queued' || event.name === 'render-idle-flush')
-    ))).toEqual([
-      expect.objectContaining({
-        kind: 'counter',
-        source: 'CanvasRenderLifecycle',
-        name: 'render-moving-queued'
-      }),
-      expect.objectContaining({
-        kind: 'counter',
-        source: 'CanvasRenderLifecycle',
-        name: 'render-idle-flush'
-      })
-    ]);
+    const names = monitor.getTrace().events
+      .filter((event) => event.kind === 'counter')
+      .map((event) => event.name);
+    expect(names).toContain('viewport-cull-queued');
+    expect(names).toContain('viewport-idle-publish');
+    expect(counterCount(monitor, 'render-snapshot-build')).toBe(buildsBeforePan);
   });
 });
+
+function counterCount(monitor: ReturnType<typeof createCanvasPerfMonitor>, name: string): number {
+  return monitor.getTrace().events.filter((event) => event.kind === 'counter' && event.name === name).length;
+}
 
 interface CanvasRenderLifecycleFixture {
   runtime: CanvasEditorRuntime;
@@ -283,15 +169,12 @@ interface CanvasRenderLifecycleFixture {
   lifecycle: CanvasRenderLifecycle;
   frames: FrameRequestCallback[];
   canceledFrames: number[];
-  attach(): void;
-  detach(): void;
   dispose(): void;
 }
 
 function createFixture(input: {
   nodes?: ProjectedCanvasNode[] | undefined;
-  submitManualLayout?: CanvasEditorRuntimeFixtureInput['submitManualLayout'] | undefined;
-  perfMonitor?: CanvasPerfMonitor | undefined;
+  perfMonitor?: ReturnType<typeof createCanvasPerfMonitor> | undefined;
 } = {}): CanvasRenderLifecycleFixture {
   const frames: FrameRequestCallback[] = [];
   const canceledFrames: number[] = [];
@@ -299,14 +182,13 @@ function createFixture(input: {
   const runtime = createCanvasEditorRuntime({
     canvasId: initialProjection.canvasId,
     initialProjection,
-    submitManualLayout: input.submitManualLayout ?? (async () => undefined)
+    submitManualLayout: async () => undefined
   });
   const stageRuntime = createCanvasStageRuntime();
   const lifecycle = createCanvasRenderLifecycle({
     projection: initialProjection,
     runtime,
     stageRuntime,
-    visibilityController: createCanvasVisibilityController({ stageRuntime }),
     perfMonitor: input.perfMonitor,
     requestFrame: (callback) => {
       frames.push(callback);
@@ -314,7 +196,7 @@ function createFixture(input: {
     },
     cancelFrame: (handle) => canceledFrames.push(handle)
   });
-  let unsubscribe: (() => void) | undefined;
+  const unsubscribe = lifecycle.subscribe(() => undefined);
   let disposed = false;
   const fixture: CanvasRenderLifecycleFixture = {
     runtime,
@@ -322,38 +204,23 @@ function createFixture(input: {
     lifecycle,
     frames,
     canceledFrames,
-    attach() {
-      unsubscribe ??= lifecycle.subscribe(() => undefined);
-    },
-    detach() {
-      unsubscribe?.();
-      unsubscribe = undefined;
-    },
     dispose() {
       if (disposed) {
         return;
       }
       disposed = true;
-      fixture.detach();
+      unsubscribe();
       stageRuntime.dispose();
       runtime.dispose();
       fixtures.delete(fixture);
     }
   };
-  fixture.attach();
   fixtures.add(fixture);
   return fixture;
 }
 
-type CanvasEditorRuntimeFixtureInput = Parameters<typeof createCanvasEditorRuntime>[0];
-
 function projection(nodes: ProjectedCanvasNode[]): CanvasProjection {
-  return {
-    canvasId: 'canvas',
-    nodes,
-    edges: [],
-    diagnostics: []
-  };
+  return { canvasId: 'canvas', nodes, edges: [], diagnostics: [] };
 }
 
 function directoryNode(path: string, x: number, y: number, z: number): ProjectedCanvasNode {

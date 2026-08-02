@@ -44,7 +44,6 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'idle',
-      culled: false
     });
 
     expect(next.loaded?.previewWidth).toBe(300);
@@ -68,7 +67,6 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'idle',
-      culled: false
     });
 
     expect(next).toBe(state);
@@ -77,7 +75,7 @@ describe('CanvasImageNodeAsset', () => {
     expect(next.error).toBeUndefined();
   });
 
-  it('keeps the loaded URL through a culled pan out and unculled pan back without scheduling another image', () => {
+  it('keeps the loaded URL through camera movement without scheduling another image', () => {
     const loaded = loadedState('flow/cover.png', 'rev-a', 213);
     const source = resolveImageNodeSourceForTest({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-a'),
@@ -90,13 +88,11 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'moving',
-      culled: true
     });
     const panBack = canvasImageNodeAssetReducer(panOut, {
       type: 'source-resolved',
       source,
       cameraState: 'idle',
-      culled: false
     });
     const renderState = deriveCanvasImageNodeRenderState({
       state: panBack,
@@ -129,34 +125,13 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'moving',
-      culled: false
     });
 
     expect(next.loaded).toEqual(state.loaded);
     expect(next.next).toBeUndefined();
   });
 
-  it('retains loaded image state while culled and skips new work', () => {
-    const state = loadedState('flow/cover.png', 'rev-a', 300);
-    const source = resolveImageNodeSourceForTest({
-      node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      resourceZoom: 1,
-      devicePixelRatio: 1,
-      retryKey: 0
-    });
-
-    const next = canvasImageNodeAssetReducer(state, {
-      type: 'source-resolved',
-      source,
-      cameraState: 'idle',
-      culled: true
-    });
-
-    expect(next.loaded).toEqual(state.loaded);
-    expect(next.next).toBeUndefined();
-  });
-
-  it('loads the first preview while moving once the image is display-visible', () => {
+  it('accepts the first preview independently of viewport membership', () => {
     const source = resolveImageNodeSourceForTest({
       node: imageNode('flow/near.png', 2400, 1200, 2400, 'rev-a'),
       resourceZoom: 0.1,
@@ -168,49 +143,12 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'moving',
-      culled: false
     });
 
     expect(next.next).toMatchObject({
       src: previewUrl('flow/near.png', 'rev-a', 300),
       previewWidth: 300
     });
-  });
-
-  it('does not warm the first preview for culled images while the camera is idle', () => {
-    const source = resolveImageNodeSourceForTest({
-      node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
-      resourceZoom: 0.1,
-      devicePixelRatio: 1,
-      retryKey: 0
-    });
-
-    const next = canvasImageNodeAssetReducer(emptyState(), {
-      type: 'source-resolved',
-      source,
-      cameraState: 'idle',
-      culled: true
-    });
-
-    expect(next.next).toBeUndefined();
-  });
-
-  it('still skips new work for far culled images', () => {
-    const source = resolveImageNodeSourceForTest({
-      node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
-      resourceZoom: 0.1,
-      devicePixelRatio: 1,
-      retryKey: 0
-    });
-
-    const next = canvasImageNodeAssetReducer(emptyState(), {
-      type: 'source-resolved',
-      source,
-      cameraState: 'moving',
-      culled: true
-    });
-
-    expect(next.next).toBeUndefined();
   });
 
   it('schedules settled resource zoom source changes when a loaded image exists', () => {
@@ -224,18 +162,13 @@ describe('CanvasImageNodeAsset', () => {
 
     expect(shouldPublishCanvasImageNodeSourceImmediately({
       source,
-      didResolveUrl: true,
       revisionChanged: false,
       retryRequested: false,
-      hasLoadedImage: true,
-      culled: false,
-      becameVisibleAfterCull: false,
-      pointerInteractionActive: false,
       loadedLoadKey: loaded.loaded?.loadKey,
     })).toBe(false);
   });
 
-  it('keeps first load, revision change, retry, and not-eligible transitions immediate', () => {
+  it('schedules the first load while keeping revision changes and retries immediate', () => {
     const source = resolveImageNodeSourceForTest({
       node: imageNode('flow/cover.png', 200, 120, 2400, 'rev-b'),
       resourceZoom: 1,
@@ -245,37 +178,22 @@ describe('CanvasImageNodeAsset', () => {
 
     expect(shouldPublishCanvasImageNodeSourceImmediately({
       source,
-      didResolveUrl: false,
       revisionChanged: false,
       retryRequested: false,
-      hasLoadedImage: false,
-      culled: false,
-      becameVisibleAfterCull: false,
-      pointerInteractionActive: false,
       loadedLoadKey: undefined,
-    })).toBe(true);
+    })).toBe(false);
 
     expect(shouldPublishCanvasImageNodeSourceImmediately({
       source,
-      didResolveUrl: true,
       revisionChanged: true,
       retryRequested: false,
-      hasLoadedImage: true,
-      culled: false,
-      becameVisibleAfterCull: false,
-      pointerInteractionActive: false,
       loadedLoadKey: `${previewUrl('flow/cover.png', 'rev-a', 213)}:0`,
     })).toBe(true);
 
     expect(shouldPublishCanvasImageNodeSourceImmediately({
       source,
-      didResolveUrl: true,
       revisionChanged: false,
       retryRequested: true,
-      hasLoadedImage: true,
-      culled: false,
-      becameVisibleAfterCull: false,
-      pointerInteractionActive: false,
       loadedLoadKey: `${previewUrl('flow/cover.png', 'rev-b', 213)}:0`,
     })).toBe(true);
   });
@@ -298,7 +216,6 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'idle',
-      culled: false
     })).toBe(state);
   });
 
@@ -313,18 +230,13 @@ describe('CanvasImageNodeAsset', () => {
 
     expect(shouldPublishCanvasImageNodeSourceImmediately({
       source,
-      didResolveUrl: true,
       revisionChanged: false,
       retryRequested: false,
-      hasLoadedImage: true,
-      culled: false,
-      becameVisibleAfterCull: false,
-      pointerInteractionActive: false,
       loadedLoadKey: loaded.loaded?.loadKey
     })).toBe(false);
   });
 
-  it('schedules first image load after a culled node becomes visible', () => {
+  it('schedules every first image load through the shared scheduler', () => {
     const source = resolveImageNodeSourceForTest({
       node: imageNode('flow/far.png', 2400, 1200, 2400, 'rev-a'),
       resourceZoom: 0.1,
@@ -334,36 +246,9 @@ describe('CanvasImageNodeAsset', () => {
 
     expect(shouldPublishCanvasImageNodeSourceImmediately({
       source,
-      didResolveUrl: false,
       revisionChanged: false,
       retryRequested: false,
-      hasLoadedImage: false,
-      culled: false,
-      becameVisibleAfterCull: true,
-      pointerInteractionActive: false,
       loadedLoadKey: undefined
-    })).toBe(false);
-  });
-
-  it('schedules direct image-node size churn while a canvas drag is active', () => {
-    const loaded = loadedState('flow/cover.png', 'rev-a', 300);
-    const source = resolveImageNodeSourceForTest({
-      node: imageNode('flow/cover.png', 2400, 1200, 2400, 'rev-a'),
-      resourceZoom: 1,
-      devicePixelRatio: 1,
-      retryKey: 0
-    });
-
-    expect(shouldPublishCanvasImageNodeSourceImmediately({
-      source,
-      didResolveUrl: true,
-      revisionChanged: false,
-      retryRequested: false,
-      hasLoadedImage: true,
-      culled: false,
-      becameVisibleAfterCull: false,
-      pointerInteractionActive: true,
-      loadedLoadKey: loaded.loaded?.loadKey
     })).toBe(false);
   });
 
@@ -424,7 +309,6 @@ describe('CanvasImageNodeAsset', () => {
       type: 'source-resolved',
       source,
       cameraState: 'idle',
-      culled: false
     });
 
     expect(next.sourceRevisionKey).toBe('flow/cover.png\u001frev-b');

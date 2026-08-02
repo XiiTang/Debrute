@@ -4,9 +4,11 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  useSyncExternalStore
 } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -39,6 +41,11 @@ import {
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor.js';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
+import {
+  canvasChangedRecordPaths,
+  createCanvasPathSnapshotStore
+} from './CanvasPathSnapshotStore.js';
 import { canvasRawFileProjectId } from './canvasRawFileUrls.js';
 import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
 import type { CanvasTextPreparedFont } from './CanvasTextRenderProfile.js';
@@ -56,11 +63,10 @@ import {
   reconcileCanvasTextPreviewTasks,
   type CanvasTextPreviewTask
 } from './CanvasTextPreviewTaskRegistry.js';
-import {
-  orderCanvasPreviewTasks,
-  type CanvasPreviewRect
-} from './CanvasPreviewScheduling.js';
+import { orderCanvasPreviewTasks } from './CanvasPreviewScheduling.js';
 import { canvasTextPresentationGeometry } from './CanvasTextPresentationGeometry.js';
+import { useCanvasPreviewInteractionGate } from './useCanvasPreviewInteractionGate.js';
+import type { CanvasRect } from './runtime/canvasGeometry.js';
 
 export interface CanvasTextPreviewSource {
   projectRelativePath: string;
@@ -146,12 +152,17 @@ interface CanvasTextPreviewFontCandidate {
 }
 
 export interface CanvasTextPreviewRuntimeValue {
-  presentationForNode(input: { node: ProjectedCanvasNode }): CanvasTextPreviewPresentation;
-  previewErrorForNode(input: { node: ProjectedCanvasNode }): string | undefined;
   reportPendingReady(node: ProjectedCanvasNode, source: CanvasTextPreviewSource): void;
   reportPendingFailure(node: ProjectedCanvasNode, source: CanvasTextPreviewSource, error: unknown): void;
   reportVisibleFailure(node: ProjectedCanvasNode, source: CanvasTextPreviewSource, error: unknown): void;
   reportVisibleCommitted(node: ProjectedCanvasNode, source: CanvasTextPreviewSource): void;
+  getNodeSnapshot(node: ProjectedCanvasNode): CanvasTextPreviewNodeSnapshot;
+  subscribeNode(node: ProjectedCanvasNode, listener: () => void): () => void;
+}
+
+export interface CanvasTextPreviewNodeSnapshot {
+  readonly presentation: CanvasTextPreviewPresentation;
+  readonly previewError: string | undefined;
 }
 
 const CanvasTextPreviewRuntimeContext = createContext<CanvasTextPreviewRuntimeValue | undefined>(undefined);
@@ -164,18 +175,25 @@ export function useCanvasTextPreviewRuntime(): CanvasTextPreviewRuntimeValue {
   return runtime;
 }
 
+export function useCanvasTextPreviewNode(node: ProjectedCanvasNode): CanvasTextPreviewNodeSnapshot {
+  const runtime = useCanvasTextPreviewRuntime();
+  const subscribe = useCallback(
+    (listener: () => void) => runtime.subscribeNode(node, listener),
+    [node, runtime]
+  );
+  const getSnapshot = useCallback(() => runtime.getNodeSnapshot(node), [node, runtime]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 export function CanvasTextPreviewProvider({
   canvasId,
   nodes,
   activeInlineTextPath,
   textFileBuffers,
   actions,
-  interactionActive,
   resourceZoom,
   devicePixelRatio,
-  culledNodePaths,
-  visibleRect,
-  virtualRect,
+  previewOrder,
   styleDependencyKey,
   perfMonitor,
   previewResourceScheduler,
@@ -186,12 +204,9 @@ export function CanvasTextPreviewProvider({
   activeInlineTextPath?: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   actions: WorkbenchActions;
-  interactionActive: boolean;
   resourceZoom: number;
   devicePixelRatio: number;
-  culledNodePaths: ReadonlySet<string>;
-  visibleRect: CanvasPreviewRect;
-  virtualRect: CanvasPreviewRect;
+  previewOrder: CanvasPreviewOrderSource;
   styleDependencyKey: string;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
@@ -217,13 +232,18 @@ export function CanvasTextPreviewProvider({
   const tasksRef = useRef(tasks);
   const sourceAvailabilityRef = useRef(sourceAvailability);
   const previewPresentationsRef = useRef(previewPresentations);
+  const previewErrorsRef = useRef(previewErrors);
+  const changedNodePathsRef = useRef(new Set<string>());
   const currentResourceKeysRef = useRef(new Map<string, string>());
   const currentCanvasIdRef = useRef(canvasId);
   const textFileBuffersRef = useRef(textFileBuffers);
   const styleKeyRef = useRef(styleKeyState.key);
-  const interactionActiveRef = useRef(interactionActive);
+  const previewOrderSnapshot = useSyncExternalStore(
+    previewOrder.subscribePreviewOrder,
+    previewOrder.getPreviewOrderSnapshot,
+    previewOrder.getPreviewOrderSnapshot
+  );
   const activeInlineTextPathRef = useRef(activeInlineTextPath);
-  const currentCulledNodePathsRef = useRef(culledNodePaths);
   const runtimeEpochRef = useRef(0);
   const mountedRef = useRef(true);
   const availabilityInFlightRef = useRef<CanvasTextPreviewAvailabilityRequest | undefined>(undefined);
@@ -244,32 +264,66 @@ export function CanvasTextPreviewProvider({
     commit: new Map()
   });
   const publishingSourceKeysRef = useRef(new Set<string>());
+  const hasPendingPreviewWork = useCallback(() => (
+    [...tasksRef.current.values()].some((task) => (
+      task.state === 'checking'
+      || task.state === 'needs-content'
+      || task.state === 'ready'
+      || task.state === 'waiting-font'
+    ))
+  ), []);
+  const {
+    interactionActiveRef,
+    resumeVersion: interactionResumeVersion
+  } = useCanvasPreviewInteractionGate({
+    scheduler: previewResourceScheduler,
+    hasPendingWork: hasPendingPreviewWork
+  });
+  const markNodePathChanged = useCallback((path: string) => {
+    changedNodePathsRef.current.add(path);
+  }, []);
+  const markChangedNodeRecords = useCallback(<Value,>(
+    previous: Readonly<Record<string, Value>>,
+    next: Readonly<Record<string, Value>>
+  ) => {
+    for (const path of canvasChangedRecordPaths(previous, next)) {
+      changedNodePathsRef.current.add(path);
+    }
+  }, []);
+  const setCurrentResourceKey = useCallback((path: string, sourceKey: string | undefined) => {
+    if (currentResourceKeysRef.current.get(path) === sourceKey) {
+      return;
+    }
+    if (sourceKey === undefined) {
+      currentResourceKeysRef.current.delete(path);
+    } else {
+      currentResourceKeysRef.current.set(path, sourceKey);
+    }
+    changedNodePathsRef.current.add(path);
+  }, []);
 
   currentCanvasIdRef.current = canvasId;
   textFileBuffersRef.current = textFileBuffers;
   styleKeyRef.current = styleKeyState.key;
-  interactionActiveRef.current = interactionActive;
   activeInlineTextPathRef.current = activeInlineTextPath;
-  currentCulledNodePathsRef.current = culledNodePaths;
   currentTargetsRef.current = currentTargets;
   tasksRef.current = tasks;
   sourceAvailabilityRef.current = sourceAvailability;
   previewPresentationsRef.current = previewPresentations;
+  previewErrorsRef.current = previewErrors;
   fontCandidateRef.current = fontCandidate;
 
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
   const orderedTasks = useMemo(() => orderCanvasTextPreviewTasks({
     tasks,
     nodesByPath,
-    visibleRect,
-    virtualRect
-  }), [nodesByPath, tasks, visibleRect, virtualRect]);
+    visibleRect: previewOrderSnapshot
+  }), [nodesByPath, previewOrderSnapshot, tasks]);
   const orderedCurrentTargets = useMemo(() => orderCanvasTextPreviewTargets({
     targets: Object.values(currentTargets),
     nodesByPath,
-    visibleRect,
-    virtualRect
-  }), [currentTargets, nodesByPath, visibleRect, virtualRect]);
+    visibleRect: previewOrderSnapshot
+  }), [currentTargets, nodesByPath, previewOrderSnapshot]);
   const captureTask = orderedTasks.find((task) => task.state === 'capturing' && task.content !== undefined);
   const captureTarget = useMemo<CanvasTextPreviewCaptureTarget | undefined>(() => (
     captureTask?.content === undefined
@@ -316,10 +370,13 @@ export function CanvasTextPreviewProvider({
     if (currentTargetKeysRef.current.get(target.projectRelativePath) !== targetKey) {
       return;
     }
-    setPreviewErrors((current) => ({
-      ...current,
-      [target.projectRelativePath]: { targetKey, sourceKey, error }
-    }));
+    setPreviewErrors((current) => {
+      markNodePathChanged(target.projectRelativePath);
+      return {
+        ...current,
+        [target.projectRelativePath]: { targetKey, sourceKey, error }
+      };
+    });
     updateTasks((current) => updateCanvasTextPreviewTask(current, target, {
       state: 'failed',
       content: undefined,
@@ -332,7 +389,7 @@ export function CanvasTextPreviewProvider({
       stage: error.stage,
       message: error.message
     });
-  }, [recordTextPreviewCounter, updateTasks]);
+  }, [markNodePathChanged, recordTextPreviewCounter, updateTasks]);
 
   const clearCurrentPreviewFailure = useCallback((target: CanvasTextPreviewTarget, sourceKey?: string) => {
     const targetKey = canvasTextPreviewTargetKey(target);
@@ -343,9 +400,10 @@ export function CanvasTextPreviewProvider({
         || (sourceKey !== undefined && existing.sourceKey !== undefined && existing.sourceKey !== sourceKey)) {
         return current;
       }
+      markNodePathChanged(target.projectRelativePath);
       return withoutRecordPath(current, target.projectRelativePath);
     });
-  }, []);
+  }, [markNodePathChanged]);
 
   useEffect(() => {
     fontEnvironment.setPreviewMetricsObserver((metrics) => {
@@ -492,6 +550,7 @@ export function CanvasTextPreviewProvider({
       setSourceAvailability,
       setPreviewPresentations,
       setPreviewErrors,
+      markChangedNodeRecords,
       presentationQueues: presentationQueuesRef.current
     });
     void Promise.all([...next.values()].map((resolution) => resolution.pending)).then((resolved) => {
@@ -509,10 +568,11 @@ export function CanvasTextPreviewProvider({
         setSourceAvailability,
         setPreviewPresentations,
         setPreviewErrors,
+        markChangedNodeRecords,
         presentationQueues: presentationQueuesRef.current
       });
     });
-  }, [activeInlineTextPath, canvasId, nodes, recordTextPreviewCounter, styleKeyState.key, textFileBuffers]);
+  }, [activeInlineTextPath, canvasId, markChangedNodeRecords, nodes, recordTextPreviewCounter, styleKeyState.key, textFileBuffers]);
 
   useEffect(() => {
     const path = activeInlineTextPath;
@@ -532,12 +592,19 @@ export function CanvasTextPreviewProvider({
       if (!presentation?.pending) {
         return current;
       }
+      markNodePathChanged(path);
       return presentation.visible
         ? { ...current, [path]: { visible: presentation.visible, pending: undefined } }
         : withoutRecordPath(current, path);
     });
-    setPreviewErrors((current) => withoutRecordPath(current, path));
-  }, [activeInlineTextPath, previewResourceScheduler]);
+    setPreviewErrors((current) => {
+      if (!(path in current)) {
+        return current;
+      }
+      markNodePathChanged(path);
+      return withoutRecordPath(current, path);
+    });
+  }, [activeInlineTextPath, markNodePathChanged, previewResourceScheduler]);
 
   useEffect(() => {
     const workTargets = Object.values(currentTargets).filter((target) => (
@@ -593,7 +660,7 @@ export function CanvasTextPreviewProvider({
   }, [recordTextPreviewCounter, tasks]);
 
   useEffect(() => {
-    if (interactionActive || availabilityInFlightRef.current) {
+    if (interactionActiveRef.current || availabilityInFlightRef.current) {
       return;
     }
     const checking = orderedTasks.filter((task) => (
@@ -673,14 +740,14 @@ export function CanvasTextPreviewProvider({
   }, [
     actions,
     canvasId,
-    interactionActive,
+    interactionResumeVersion,
     orderedTasks,
     recordTextPreviewCounter,
     setCurrentPreviewFailure
   ]);
 
   useEffect(() => {
-    if (interactionActive) {
+    if (interactionActiveRef.current) {
       return;
     }
     const allocated = orderedTasks.filter(canvasTextPreviewTaskHoldsContent);
@@ -781,10 +848,10 @@ export function CanvasTextPreviewProvider({
         ));
       });
     }
-  }, [actions, contentReadSettlementVersion, interactionActive, orderedTasks, recordTextPreviewCounter, setCurrentPreviewFailure, tasks, textFileBuffers, updateTasks]);
+  }, [actions, contentReadSettlementVersion, interactionResumeVersion, orderedTasks, recordTextPreviewCounter, setCurrentPreviewFailure, tasks, textFileBuffers, updateTasks]);
 
   useEffect(() => {
-    if (interactionActive || coverageJobRef.current) {
+    if (interactionActiveRef.current || coverageJobRef.current) {
       return;
     }
     const uncovered = orderedTasks.filter((task) => task.state === 'ready' && task.content !== undefined);
@@ -841,10 +908,10 @@ export function CanvasTextPreviewProvider({
         ));
       }
     });
-  }, [interactionActive, orderedTasks, recordTextPreviewCounter, setCurrentPreviewFailure, updateTasks]);
+  }, [interactionResumeVersion, orderedTasks, recordTextPreviewCounter, setCurrentPreviewFailure, updateTasks]);
 
   useEffect(() => {
-    if (interactionActive || fontBuildRef.current || fontCandidate) {
+    if (interactionActiveRef.current || fontBuildRef.current || fontCandidate) {
       return;
     }
     const needsFont = orderedTasks.some((task) => task.state === 'waiting-font'
@@ -881,7 +948,7 @@ export function CanvasTextPreviewProvider({
         }
       }
     });
-  }, [fontCandidate, interactionActive, orderedTasks, previewFontSession, setCurrentPreviewFailure]);
+  }, [fontCandidate, interactionResumeVersion, orderedTasks, previewFontSession, setCurrentPreviewFailure]);
 
   useEffect(() => {
     if (!fontCandidate) {
@@ -898,7 +965,7 @@ export function CanvasTextPreviewProvider({
   }, [fontCandidate, orderedTasks]);
 
   useEffect(() => {
-    if (interactionActive || orderedTasks.some((task) => task.state === 'capturing')) {
+    if (interactionActiveRef.current || orderedTasks.some((task) => task.state === 'capturing')) {
       return;
     }
     let preparedFont = activePreparedFont;
@@ -940,7 +1007,7 @@ export function CanvasTextPreviewProvider({
       return;
     }
     updateTasks((current) => updateCanvasTextPreviewTask(current, firstRunnable, { state: 'capturing' }));
-  }, [activePreparedFont, fontCandidate, interactionActive, orderedTasks, setCurrentPreviewFailure, updateTasks]);
+  }, [activePreparedFont, fontCandidate, interactionResumeVersion, orderedTasks, setCurrentPreviewFailure, updateTasks]);
 
   const presentationWorkMatchesCurrentIdentity = useCallback((work: CanvasTextPreviewPresentationWork): boolean => {
     const path = work.source.projectRelativePath;
@@ -953,7 +1020,6 @@ export function CanvasTextPreviewProvider({
   const presentationWorkCanPublish = useCallback((work: CanvasTextPreviewPresentationWork): boolean => (
     presentationWorkMatchesCurrentIdentity(work)
     && activeInlineTextPathRef.current !== work.source.projectRelativePath
-    && !currentCulledNodePathsRef.current.has(work.source.projectRelativePath)
   ), [presentationWorkMatchesCurrentIdentity]);
 
   const presentationWorkIsQueued = useCallback((
@@ -978,6 +1044,7 @@ export function CanvasTextPreviewProvider({
         || existing.visible.committed) {
         return current;
       }
+      markNodePathChanged(path);
       return {
         ...current,
         [path]: { ...existing, visible: { ...existing.visible, committed: true } }
@@ -989,7 +1056,7 @@ export function CanvasTextPreviewProvider({
       fingerprint: work.source.fingerprint,
       previewWidth: work.source.previewWidth
     });
-  }, [clearCurrentPreviewFailure, presentationWorkCanPublish, recordTextPreviewCounter]);
+  }, [clearCurrentPreviewFailure, markNodePathChanged, presentationWorkCanPublish, recordTextPreviewCounter]);
 
   const publishPresentationWork = useCallback((
     phase: CanvasTextPreviewPublicationPhase,
@@ -1015,6 +1082,7 @@ export function CanvasTextPreviewProvider({
         if (!presentationWorkCanPublish(work)) {
           return current;
         }
+        markNodePathChanged(path);
         if (phase === 'promote') {
           if (existing?.pending?.sourceKey !== work.sourceKey) {
             return current;
@@ -1030,7 +1098,7 @@ export function CanvasTextPreviewProvider({
         };
       });
     });
-  }, [commitVisiblePresentation, presentationWorkCanPublish, presentationWorkIsQueued]);
+  }, [commitVisiblePresentation, markNodePathChanged, presentationWorkCanPublish, presentationWorkIsQueued]);
 
   const enqueuePresentationWork = useCallback((
     phase: CanvasTextPreviewPublicationPhase,
@@ -1043,7 +1111,6 @@ export function CanvasTextPreviewProvider({
       sourceKey: `${phase}\u001f${work.sourceKey}`,
       targetWidth: work.source.previewWidth,
       isCurrent: () => presentationWorkIsQueued(phase, work),
-      isCulled: () => currentCulledNodePathsRef.current.has(work.source.projectRelativePath),
       run: () => publishPresentationWork(phase, work)
     } as const;
     if (phase === 'mount') {
@@ -1052,17 +1119,6 @@ export function CanvasTextPreviewProvider({
       previewResourceScheduler.enqueuePublication(request);
     }
   }, [presentationWorkIsQueued, previewResourceScheduler, publishPresentationWork]);
-
-  useEffect(() => {
-    forEachPresentationQueue(presentationQueuesRef.current, (phase, queue) => {
-      for (const work of queue.values()) {
-        if (presentationWorkMatchesCurrentIdentity(work)
-          && !culledNodePaths.has(work.source.projectRelativePath)) {
-          enqueuePresentationWork(phase, work);
-        }
-      }
-    });
-  }, [culledNodePaths, enqueuePresentationWork, presentationWorkMatchesCurrentIdentity]);
 
   useEffect(() => {
     forEachPresentationQueue(presentationQueuesRef.current, (phase, queue) => {
@@ -1086,18 +1142,18 @@ export function CanvasTextPreviewProvider({
     for (const target of orderedCurrentTargets) {
       const path = target.projectRelativePath;
       const presentation = previewPresentations[path];
-      if (path === activeInlineTextPath || culledNodePaths.has(path)) {
+      if (path === activeInlineTextPath) {
         const retained = presentation?.pending ?? presentation?.visible;
         if (retained) {
           desiredSourceKeys.set(path, retained.sourceKey);
-          currentResourceKeysRef.current.set(path, retained.sourceKey);
+          setCurrentResourceKey(path, retained.sourceKey);
         }
         continue;
       }
       const availability = sourceAvailability[path];
       const node = nodesByPath.get(path);
       if (!node || availability?.fingerprint !== target.fingerprint || !availability.available) {
-        currentResourceKeysRef.current.delete(path);
+        setCurrentResourceKey(path, undefined);
         continue;
       }
       const source = canvasTextPreviewForNode({ canvasId, node, target, resourceZoom, devicePixelRatio });
@@ -1106,7 +1162,7 @@ export function CanvasTextPreviewProvider({
       }
       const targetKey = canvasTextPreviewTargetKey(target);
       desiredSourceKeys.set(path, source.sourceKey);
-      currentResourceKeysRef.current.set(path, source.sourceKey);
+      setCurrentResourceKey(path, source.sourceKey);
       const error = previewErrors[path];
       if (presentation?.visible?.sourceKey === source.sourceKey
         || presentation?.pending?.sourceKey === source.sourceKey
@@ -1137,21 +1193,23 @@ export function CanvasTextPreviewProvider({
       desiredSourceKeys
     });
     if (reconciledPresentations !== previewPresentations) {
+      markChangedNodeRecords(previewPresentations, reconciledPresentations);
       setPreviewPresentations(reconciledPresentations);
     }
   }, [
     activeInlineTextPath,
     canvasId,
     clearCurrentPreviewFailure,
-    culledNodePaths,
     currentTargets,
     devicePixelRatio,
     enqueuePresentationWork,
+    markChangedNodeRecords,
     nodesByPath,
     previewErrors,
     previewPresentations,
     orderedCurrentTargets,
     resourceZoom,
+    setCurrentResourceKey,
     sourceAvailability
   ]);
 
@@ -1274,16 +1332,18 @@ export function CanvasTextPreviewProvider({
     presentationQueuesRef.current.promote.delete(source.sourceKey);
     setPreviewPresentations((current) => {
       const existing = current[node.projectRelativePath];
-      return existing?.pending?.sourceKey === source.sourceKey
-        ? { ...current, [node.projectRelativePath]: { visible: existing.visible, pending: undefined } }
-        : current;
+      if (existing?.pending?.sourceKey !== source.sourceKey) {
+        return current;
+      }
+      markNodePathChanged(node.projectRelativePath);
+      return { ...current, [node.projectRelativePath]: { visible: existing.visible, pending: undefined } };
     });
     setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
       'variant_failed',
       failureFieldsForTarget(target),
       error
     ), source.sourceKey);
-  }, [currentTargetForRenderedNode, previewPresentations, setCurrentPreviewFailure]);
+  }, [currentTargetForRenderedNode, markNodePathChanged, previewPresentations, setCurrentPreviewFailure]);
 
   const reportVisibleFailure = useCallback((
     node: ProjectedCanvasNode,
@@ -1298,16 +1358,18 @@ export function CanvasTextPreviewProvider({
     presentationQueuesRef.current.commit.delete(source.sourceKey);
     setPreviewPresentations((current) => {
       const existing = current[node.projectRelativePath];
-      return existing?.visible?.sourceKey === source.sourceKey
-        ? { ...current, [node.projectRelativePath]: { visible: undefined, pending: existing.pending } }
-        : current;
+      if (existing?.visible?.sourceKey !== source.sourceKey) {
+        return current;
+      }
+      markNodePathChanged(node.projectRelativePath);
+      return { ...current, [node.projectRelativePath]: { visible: undefined, pending: existing.pending } };
     });
     setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
       'variant_failed',
       failureFieldsForTarget(target),
       error
     ), source.sourceKey);
-  }, [currentTargetForRenderedNode, previewPresentations, setCurrentPreviewFailure]);
+  }, [currentTargetForRenderedNode, markNodePathChanged, previewPresentations, setCurrentPreviewFailure]);
 
   const reportVisibleCommitted = useCallback((node: ProjectedCanvasNode, source: CanvasTextPreviewSource) => {
     const target = currentTargetForRenderedNode(node);
@@ -1317,55 +1379,73 @@ export function CanvasTextPreviewProvider({
     }
   }, [currentTargetForRenderedNode, enqueuePresentationWork, previewPresentations]);
 
-  const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
-    presentationForNode: ({ node }) => {
-      const target = currentTargetForRenderedNode(node);
-      const presentation = previewPresentations[node.projectRelativePath];
-      if (!target) {
-        return {};
-      }
-      const targetKey = canvasTextPreviewTargetKey(target);
-      return {
-        visible: presentation?.visible?.targetKey === targetKey ? presentation.visible.source : undefined,
-        pending: presentation?.pending?.targetKey === targetKey ? presentation.pending.source : undefined,
-        ...(presentation?.visible?.targetKey === targetKey && presentation.visible.committed
-          ? { visibleCommittedSourceKey: presentation.visible.sourceKey }
-          : {})
-      };
-    },
-    previewErrorForNode: ({ node }) => {
-      const target = currentTargetForRenderedNode(node);
-      const error = previewErrors[node.projectRelativePath];
-      if (!target || error?.targetKey !== canvasTextPreviewTargetKey(target)) {
-        return undefined;
-      }
-      return error.sourceKey === undefined
-        || currentResourceKeysRef.current.get(node.projectRelativePath) === error.sourceKey
-        ? error.error.message
-        : undefined;
-    },
+  const commandHandlersRef = useRef({
     reportPendingReady,
     reportPendingFailure,
     reportVisibleFailure,
     reportVisibleCommitted
-  }), [
-    currentTargets,
-    currentTargetForRenderedNode,
-    previewErrors,
-    previewPresentations,
-    reportPendingFailure,
+  });
+  commandHandlersRef.current = {
     reportPendingReady,
-    reportVisibleCommitted,
+    reportPendingFailure,
     reportVisibleFailure,
-    styleKeyState.key
-  ]);
+    reportVisibleCommitted
+  };
+
+  const deriveNodeSnapshot = useCallback((node: ProjectedCanvasNode): CanvasTextPreviewNodeSnapshot => {
+    const target = currentTargetForRenderedNode(node);
+    const presentationState = previewPresentationsRef.current[node.projectRelativePath];
+    let presentation: CanvasTextPreviewPresentation = {};
+    let previewError: string | undefined;
+    if (target) {
+      const targetKey = canvasTextPreviewTargetKey(target);
+      presentation = {
+        visible: presentationState?.visible?.targetKey === targetKey
+          ? presentationState.visible.source
+          : undefined,
+        pending: presentationState?.pending?.targetKey === targetKey
+          ? presentationState.pending.source
+          : undefined,
+        ...(presentationState?.visible?.targetKey === targetKey && presentationState.visible.committed
+          ? { visibleCommittedSourceKey: presentationState.visible.sourceKey }
+          : {})
+      };
+      const error = previewErrorsRef.current[node.projectRelativePath];
+      if (error?.targetKey === targetKey
+        && (error.sourceKey === undefined
+          || currentResourceKeysRef.current.get(node.projectRelativePath) === error.sourceKey)) {
+        previewError = error.error.message;
+      }
+    }
+    return { presentation, previewError };
+  }, [currentTargetForRenderedNode]);
+
+  const nodeSnapshotStore = useMemo(() => createCanvasPathSnapshotStore({
+    deriveSnapshot: deriveNodeSnapshot,
+    snapshotsEqual: sameCanvasTextPreviewNodeSnapshot
+  }), [deriveNodeSnapshot]);
+
+  useLayoutEffect(() => {
+    const changedPaths = new Set(changedNodePathsRef.current);
+    changedNodePathsRef.current.clear();
+    nodeSnapshotStore.flush(changedPaths);
+  });
+
+  const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
+    reportPendingReady: (...args) => commandHandlersRef.current.reportPendingReady(...args),
+    reportPendingFailure: (...args) => commandHandlersRef.current.reportPendingFailure(...args),
+    reportVisibleFailure: (...args) => commandHandlersRef.current.reportVisibleFailure(...args),
+    reportVisibleCommitted: (...args) => commandHandlersRef.current.reportVisibleCommitted(...args),
+    getNodeSnapshot: nodeSnapshotStore.getSnapshot,
+    subscribeNode: nodeSnapshotStore.subscribe
+  }), [nodeSnapshotStore]);
 
   const captureLayer = (
     <CanvasTextPreviewCaptureLane
       target={captureTarget}
       renderProfile={renderProfile}
       preparedFont={activePreparedFont}
-      interactionActive={interactionActive}
+      interactionSource={previewResourceScheduler}
       perfMonitor={perfMonitor}
       onRasterized={finishRasterizedTarget}
       onFailure={finishFailedTarget}
@@ -1494,6 +1574,10 @@ function commitCanvasTextPreviewTargets(input: {
   setSourceAvailability: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewSourceAvailability>>>;
   setPreviewPresentations: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewPresentationState>>>;
   setPreviewErrors: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewErrorState>>>;
+  markChangedNodeRecords<Value>(
+    previous: Readonly<Record<string, Value>>,
+    next: Readonly<Record<string, Value>>
+  ): void;
   presentationQueues: CanvasTextPreviewPresentationQueues;
 }): void {
   const targetKeys = new Map(input.targets.map((target) => [target.projectRelativePath, canvasTextPreviewTargetKey(target)]));
@@ -1508,12 +1592,20 @@ function commitCanvasTextPreviewTargets(input: {
     targets: input.targets,
     sourceAvailability: current
   }));
-  input.setPreviewPresentations((current) => canvasTextPreviewCurrentPresentations({
-    targets: input.targets,
-    presentations: current,
-    retainedPath: input.activeInlineTextPath
-  }));
-  input.setPreviewErrors((current) => clearStaleCanvasTextPreviewErrors(current, targetKeys));
+  input.setPreviewPresentations((current) => {
+    const next = canvasTextPreviewCurrentPresentations({
+      targets: input.targets,
+      presentations: current,
+      retainedPath: input.activeInlineTextPath
+    });
+    input.markChangedNodeRecords(current, next);
+    return next;
+  });
+  input.setPreviewErrors((current) => {
+    const next = clearStaleCanvasTextPreviewErrors(current, targetKeys);
+    input.markChangedNodeRecords(current, next);
+    return next;
+  });
   forEachPresentationQueue(input.presentationQueues, (_phase, queue) => {
     for (const [sourceKey, work] of queue) {
       if (targetKeys.get(work.source.projectRelativePath) !== work.targetKey) {
@@ -1526,27 +1618,25 @@ function commitCanvasTextPreviewTargets(input: {
 function orderCanvasTextPreviewTasks(input: {
   tasks: ReadonlyMap<string, CanvasTextPreviewTask>;
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
-  visibleRect: CanvasPreviewRect;
-  virtualRect: CanvasPreviewRect;
+  visibleRect: CanvasRect;
 }): CanvasTextPreviewTask[] {
   const spatial = [...input.tasks.values()].flatMap((task) => {
     const node = input.nodesByPath.get(task.projectRelativePath);
     return node ? [{ task, ...node }] : [];
   });
-  return orderCanvasPreviewTasks(spatial, input).map(({ task }) => task);
+  return orderCanvasPreviewTasks(spatial, input.visibleRect).map(({ task }) => task);
 }
 
 function orderCanvasTextPreviewTargets(input: {
   targets: readonly CanvasTextPreviewTarget[];
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
-  visibleRect: CanvasPreviewRect;
-  virtualRect: CanvasPreviewRect;
+  visibleRect: CanvasRect;
 }): CanvasTextPreviewTarget[] {
   const spatial = input.targets.flatMap((target) => {
     const node = input.nodesByPath.get(target.projectRelativePath);
     return node ? [{ target, ...node }] : [];
   });
-  return orderCanvasPreviewTasks(spatial, input).map(({ target }) => target);
+  return orderCanvasPreviewTasks(spatial, input.visibleRect).map(({ target }) => target);
 }
 
 function updateCanvasTextPreviewTask(
@@ -1740,6 +1830,16 @@ function forEachPresentationQueue(
   for (const phase of CANVAS_TEXT_PREVIEW_PUBLICATION_PHASES) {
     visit(phase, queues[phase]);
   }
+}
+
+function sameCanvasTextPreviewNodeSnapshot(
+  left: CanvasTextPreviewNodeSnapshot,
+  right: CanvasTextPreviewNodeSnapshot
+): boolean {
+  return left.presentation.visible === right.presentation.visible
+    && left.presentation.pending === right.presentation.pending
+    && left.presentation.visibleCommittedSourceKey === right.presentation.visibleCommittedSourceKey
+    && left.previewError === right.previewError;
 }
 
 function errorFromUnknown(error: unknown): Error {

@@ -4,7 +4,7 @@ import type { CanvasPoint, CanvasRect } from './runtime/canvasGeometry';
 import { finiteNumber, pointInRect, rectCenter } from './runtime/canvasGeometry';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection.js';
-import { canvasVisibleRect } from './canvasVirtualization';
+import { canvasVisibleRect } from './canvasViewport.js';
 
 export interface CanvasSize {
   width: number;

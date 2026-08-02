@@ -1,18 +1,9 @@
 import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
-import type { CanvasCamera } from './runtime/canvasCamera';
-import { assertCanvasCamera } from './runtime/canvasCamera';
-import type { CanvasRect } from './runtime/canvasGeometry';
-import { canvasRectContainsRect, expandCanvasRect, rectsIntersect } from './runtime/canvasGeometry';
-import { visibleCanvasRectForCamera } from './runtime/canvasCoordinateSystem';
-import type { CanvasSelection } from './runtime/canvasSelection';
-import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection';
+import type { CanvasCamera } from './runtime/canvasCamera.js';
+import type { CanvasRect } from './runtime/canvasGeometry.js';
+import { rectsIntersect } from './runtime/canvasGeometry.js';
+import { visibleCanvasRectForCamera } from './runtime/canvasCoordinateSystem.js';
 
-export const CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX = 768;
-export const CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX = CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX / 2;
-export const CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO = 4;
-export { canvasRectContainsRect, expandCanvasRect } from './runtime/canvasGeometry';
-
-const SPATIAL_INDEX_CELL_SIZE = 1024;
 const SVG_EDGE_PADDING = 64;
 const TREE_EDGE_TRUNK_MAX_GAP = 96;
 const TREE_EDGE_TRUNK_FALLBACK_OFFSET = 48;
@@ -41,22 +32,17 @@ export interface CanvasEdgeSegment {
   svgViewBox: string;
 }
 
-export interface VirtualizedCanvasRenderState {
+export interface CanvasViewportQueryResult {
   visibleRect: CanvasRect;
-  virtualRect: CanvasRect;
-  nodes: ProjectedCanvasNode[];
-  edges: CanvasEdgeSegment[];
+  visibleNodePaths: ReadonlySet<string>;
+  visibleEdgeIds: ReadonlySet<string>;
 }
 
-export interface CanvasVirtualizationIndex {
-  render: (input: CanvasVirtualizationQueryInput) => VirtualizedCanvasRenderState;
-}
-
-export interface CanvasVirtualizationQueryInput {
+export interface CanvasViewportQueryInput {
+  nodes: readonly ProjectedCanvasNode[];
+  edges: readonly CanvasEdgeSegment[];
   camera: CanvasCamera;
   surfaceSize: Partial<CanvasSize> | undefined;
-  selection: CanvasSelection | undefined;
-  activeNodeProjectRelativePaths: Iterable<string>;
 }
 
 export function canvasVisibleRect(input: {
@@ -66,38 +52,24 @@ export function canvasVisibleRect(input: {
   return visibleCanvasRectForCamera(input);
 }
 
-export function canvasVirtualRenderRect(input: {
-  camera: CanvasCamera;
-  surfaceSize: Partial<CanvasSize> | undefined;
-}): CanvasRect {
-  assertCanvasCamera(input.camera);
-  return expandCanvasRect(
-    canvasVisibleRect(input),
-    CANVAS_VIRTUAL_OVERSCAN_SCREEN_PX / input.camera.z
-  );
-}
-
-export function createCanvasVirtualizationIndex(input: {
-  nodes: ProjectedCanvasNode[];
-  edges: CanvasProjection['edges'];
-}): CanvasVirtualizationIndex {
-  const retainedNodes = input.nodes.filter(isRetainedCanvasNode);
-  const nodeByPath = new Map(input.nodes.map((node) => [node.projectRelativePath, node]));
-  const nodeIndex = new CanvasNodeSpatialIndex(input.nodes);
-  const edgeSegments = indexedCanvasEdgeSegmentsForProjectionEdges({
-    nodes: input.nodes,
-    edges: input.edges
-  });
-  const edgeIndex = new CanvasEdgeSpatialIndex(edgeSegments);
-
+export function queryCanvasViewport(input: CanvasViewportQueryInput): CanvasViewportQueryResult {
+  const visibleRect = canvasVisibleRect(input);
+  const visibleNodePaths = new Set<string>();
+  const visibleEdgeIds = new Set<string>();
+  for (const node of input.nodes) {
+    if (rectsIntersect(visibleRect, nodeRect(node))) {
+      visibleNodePaths.add(node.projectRelativePath);
+    }
+  }
+  for (const edge of input.edges) {
+    if (edgeIntersectsRect(edge, visibleRect)) {
+      visibleEdgeIds.add(edge.id);
+    }
+  }
   return {
-    render: (query) => buildVirtualizedCanvasRenderStateFromIndex({
-      ...query,
-      nodeByPath,
-      retainedNodes,
-      nodeIndex,
-      edgeIndex
-    })
+    visibleRect,
+    visibleNodePaths,
+    visibleEdgeIds
   };
 }
 
@@ -107,32 +79,6 @@ export function canvasEdgeSegmentsForProjectionEdges(input: {
 }): CanvasEdgeSegment[] {
   return indexedCanvasEdgeSegmentsForProjectionEdges(input)
     .map(({ order: _order, ...edge }) => edge);
-}
-
-function buildVirtualizedCanvasRenderStateFromIndex(input: CanvasVirtualizationQueryInput & {
-  nodeByPath: Map<string, ProjectedCanvasNode>;
-  retainedNodes: readonly ProjectedCanvasNode[];
-  nodeIndex: CanvasNodeSpatialIndex;
-  edgeIndex: CanvasEdgeSpatialIndex;
-}): VirtualizedCanvasRenderState {
-  const visibleRect = canvasVisibleRect(input);
-  const virtualRect = canvasVirtualRenderRect(input);
-  const selectedPaths = selectedNodeProjectRelativePaths(input.selection);
-  const activePaths = [...input.activeNodeProjectRelativePaths];
-  const nodes = uniqueNodes([
-    ...input.nodeIndex.query(virtualRect),
-    ...input.retainedNodes,
-    ...selectedPaths.flatMap((path) => input.nodeByPath.get(path) ?? []),
-    ...activePaths.flatMap((path) => input.nodeByPath.get(path) ?? [])
-  ]);
-  const edges = input.edgeIndex.query(virtualRect);
-
-  return {
-    visibleRect,
-    virtualRect,
-    nodes,
-    edges
-  };
 }
 
 function indexedCanvasEdgeSegmentsForProjectionEdges(input: {
@@ -145,28 +91,6 @@ function indexedCanvasEdgeSegmentsForProjectionEdges(input: {
     return resolved ? [resolved] : [];
   });
   return routedEdges(resolvedEdges);
-}
-
-export function shouldRefreshVirtualizedRenderState(input: {
-  currentVirtualRect: CanvasRect | undefined;
-  camera: CanvasCamera;
-  surfaceSize: Partial<CanvasSize> | undefined;
-  force?: boolean;
-}): boolean {
-  if (input.force || !input.currentVirtualRect) {
-    return true;
-  }
-  assertCanvasCamera(input.camera);
-  const visibleRect = canvasVisibleRect(input);
-  const refreshRect = expandCanvasRect(
-    visibleRect,
-    CANVAS_VIRTUAL_REFRESH_MARGIN_SCREEN_PX / input.camera.z
-  );
-  if (!canvasRectContainsRect(input.currentVirtualRect, refreshRect)) {
-    return true;
-  }
-  const nextVirtualRect = canvasVirtualRenderRect(input);
-  return rectArea(input.currentVirtualRect) > rectArea(nextVirtualRect) * CANVAS_VIRTUAL_MAX_STALE_AREA_RATIO;
 }
 
 export function nodeRect(node: Pick<ProjectedCanvasNode, 'x' | 'y' | 'width' | 'height'>): CanvasRect {
@@ -197,66 +121,6 @@ export function segmentIntersectsRect(
     || lineSegmentsIntersect(start, end, bottomLeft, topLeft);
 }
 
-function uniqueNodes(nodes: ProjectedCanvasNode[]): ProjectedCanvasNode[] {
-  const seen = new Set<string>();
-  const result: ProjectedCanvasNode[] = [];
-  for (const node of nodes) {
-    if (seen.has(node.projectRelativePath)) {
-      continue;
-    }
-    seen.add(node.projectRelativePath);
-    result.push(node);
-  }
-  return result;
-}
-
-function isRetainedCanvasNode(node: ProjectedCanvasNode): boolean {
-  return node.nodeKind === 'file'
-    && (node.mediaKind === 'image' || node.mediaKind === 'text');
-}
-
-function rectArea(rect: CanvasRect): number {
-  return Math.max(0, rect.width) * Math.max(0, rect.height);
-}
-
-class CanvasNodeSpatialIndex {
-  private readonly cells = new Map<string, ProjectedCanvasNode[]>();
-
-  constructor(nodes: ProjectedCanvasNode[]) {
-    for (const node of nodes) {
-      const range = cellRangeForRect(nodeRect(node));
-      for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
-        for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
-          const key = cellKey(cellX, cellY);
-          const cell = this.cells.get(key);
-          if (cell) {
-            cell.push(node);
-          } else {
-            this.cells.set(key, [node]);
-          }
-        }
-      }
-    }
-  }
-
-  query(rect: CanvasRect): ProjectedCanvasNode[] {
-    const range = cellRangeForRect(rect);
-    const seen = new Set<string>();
-    const result: ProjectedCanvasNode[] = [];
-    for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
-      for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
-        for (const node of this.cells.get(cellKey(cellX, cellY)) ?? []) {
-          if (!seen.has(node.projectRelativePath) && rectsIntersect(rect, nodeRect(node))) {
-            seen.add(node.projectRelativePath);
-            result.push(node);
-          }
-        }
-      }
-    }
-    return result;
-  }
-}
-
 interface IndexedCanvasEdgeSegment extends CanvasEdgeSegment {
   order: number;
 }
@@ -268,46 +132,6 @@ interface ResolvedCanvasEdge {
   source: ProjectedCanvasNode;
   target: ProjectedCanvasNode;
   order: number;
-}
-
-class CanvasEdgeSpatialIndex {
-  private readonly cells = new Map<string, IndexedCanvasEdgeSegment[]>();
-
-  constructor(edges: IndexedCanvasEdgeSegment[]) {
-    for (const edge of edges) {
-      const range = cellRangeForRect(edgeBoundingRect(edge));
-      for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
-        for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
-          const key = cellKey(cellX, cellY);
-          const cell = this.cells.get(key);
-          if (cell) {
-            cell.push(edge);
-          } else {
-            this.cells.set(key, [edge]);
-          }
-        }
-      }
-    }
-  }
-
-  query(rect: CanvasRect): CanvasEdgeSegment[] {
-    const range = cellRangeForRect(rect);
-    const seen = new Set<string>();
-    const result: IndexedCanvasEdgeSegment[] = [];
-    for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
-      for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
-        for (const edge of this.cells.get(cellKey(cellX, cellY)) ?? []) {
-          if (!seen.has(edge.id) && edgeIntersectsRect(edge, rect)) {
-            seen.add(edge.id);
-            result.push(edge);
-          }
-        }
-      }
-    }
-    return result
-      .sort((left, right) => left.order - right.order)
-      .map(({ order: _order, ...edge }) => edge);
-  }
 }
 
 function resolveEdgeNodes(
@@ -382,26 +206,6 @@ function edgeRouteFromNodes(edge: ResolvedCanvasEdge, trunkX: number): IndexedCa
     svgBounds,
     svgViewBox: rectViewBox(svgBounds),
     order: edge.order
-  };
-}
-
-function edgeBoundingRect(edge: Pick<CanvasEdgeSegment, 'points'>): CanvasRect {
-  const first = edge.points[0] ?? { x: 0, y: 0 };
-  let minX = first.x;
-  let minY = first.y;
-  let maxX = first.x;
-  let maxY = first.y;
-  for (const point of edge.points.slice(1)) {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
-  }
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY
   };
 }
 
@@ -489,19 +293,6 @@ function direction(a: CanvasPoint, b: CanvasPoint, c: CanvasPoint): number {
 function pointOnSegment(a: CanvasPoint, b: CanvasPoint, c: CanvasPoint): boolean {
   return Math.min(a.x, c.x) <= b.x && b.x <= Math.max(a.x, c.x)
     && Math.min(a.y, c.y) <= b.y && b.y <= Math.max(a.y, c.y);
-}
-
-function cellRangeForRect(rect: CanvasRect): { minX: number; maxX: number; minY: number; maxY: number } {
-  return {
-    minX: Math.floor(rect.x / SPATIAL_INDEX_CELL_SIZE),
-    maxX: Math.floor((rect.x + rect.width) / SPATIAL_INDEX_CELL_SIZE),
-    minY: Math.floor(rect.y / SPATIAL_INDEX_CELL_SIZE),
-    maxY: Math.floor((rect.y + rect.height) / SPATIAL_INDEX_CELL_SIZE)
-  };
-}
-
-function cellKey(x: number, y: number): string {
-  return `${x}:${y}`;
 }
 
 function rectViewBox(rect: CanvasRect): string {

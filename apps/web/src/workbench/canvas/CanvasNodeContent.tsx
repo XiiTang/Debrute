@@ -40,7 +40,6 @@ const CanvasTextEditor = React.lazy(async () => {
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
   selected: boolean;
-  culled: boolean;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
   textPreview?: CanvasTextPreviewSource | undefined;
@@ -75,7 +74,6 @@ export interface CanvasNodeContentProps {
 export function CanvasNodeContent({
   node,
   selected,
-  culled,
   actions,
   textBuffer,
   textPreview,
@@ -162,7 +160,6 @@ export function CanvasNodeContent({
         buffer={textBuffer}
         problem={problem}
         selected={selected}
-        culled={culled}
         actions={actions}
         textPreview={textPreview}
         pendingTextPreview={pendingTextPreview}
@@ -216,7 +213,7 @@ export function CanvasNodeContent({
         <div className="canvas-node-preview">
           {node.mediaKind === 'image' ? (
             <>
-              <CanvasImageNodeContent node={node} culled={culled} />
+              <CanvasImageNodeContent node={node} />
               <CanvasMediaFeedbackLayer
                 items={imageSpatialFeedbackItems(feedbackEntry)}
                 mode={localFeedbackMode}
@@ -291,15 +288,12 @@ export function canvasTextBufferEnsureKey(
 }
 
 function CanvasImageNodeContent({
-  node,
-  culled
+  node
 }: {
   node: ProjectedCanvasNode;
-  culled: boolean;
 }): React.ReactElement {
   const imageState = useCanvasImageNodeAsset({
-    source: canvasImageNodeSourceInputForNode(node),
-    culled
+    source: canvasImageNodeSourceInputForNode(node)
   });
 
   return <CanvasImageNodePreview node={node} imageState={imageState} />;
@@ -443,7 +437,6 @@ function CanvasTextNodeContent({
   buffer,
   problem,
   selected,
-  culled,
   actions,
   textPreview,
   pendingTextPreview,
@@ -460,7 +453,6 @@ function CanvasTextNodeContent({
   buffer: TextFileBuffer | undefined;
   problem: { title: string; message: string } | undefined;
   selected: boolean;
-  culled: boolean;
   actions: WorkbenchActions;
   textPreview?: CanvasTextPreviewSource | undefined;
   pendingTextPreview?: CanvasTextPreviewSource | undefined;
@@ -647,7 +639,7 @@ function CanvasTextNodeContent({
                     language={editorBuffer.language}
                     wordWrap={editorBuffer.wordWrap}
                     readOnly={!active}
-                    visible={!culled || selected}
+                    visible={active}
                     focusRequest={active ? focusRequest : undefined}
                     initialScrollTop={node.textViewport?.scrollTop}
                     initialScrollLeft={node.textViewport?.scrollLeft}

@@ -5,7 +5,8 @@ import {
 } from './CanvasPerfMonitor';
 import type { CanvasCameraState } from './runtime/canvasCamera';
 
-export type CanvasPreviewResourceKind = 'image' | 'text' | 'text-source' | 'video';
+export type CanvasPreviewResourceKind = 'image' | 'text' | 'video';
+export type CanvasPreviewPriorityTier = 0 | 1;
 
 export interface CanvasPreviewResourceInteractionState {
   cameraState: CanvasCameraState;
@@ -18,7 +19,6 @@ export interface CanvasPreviewResourceRequest {
   sourceKey: string;
   targetWidth: number;
   isCurrent: () => boolean;
-  isCulled: () => boolean;
   run: () => void;
 }
 
@@ -28,25 +28,35 @@ export interface CanvasPreviewResourceScheduler {
   cancel(kind: CanvasPreviewResourceKind, nodeId: string): void;
   setInteractionState(input: CanvasPreviewResourceInteractionState): void;
   getInteractionState(): CanvasPreviewResourceInteractionState;
-  notifyVisibilityChanged(): void;
+  subscribeInteraction(listener: (state: CanvasPreviewResourceInteractionState) => void): () => void;
   dispose(): void;
 }
 
 export const CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME = 3;
 
+export function canvasPreviewResourceInteractionActive(
+  interaction: CanvasPreviewResourceInteractionState
+): boolean {
+  return interaction.cameraState !== 'idle' || interaction.pointerInteractionActive;
+}
+
 export function createCanvasPreviewResourceScheduler(input: {
+  priorityForNode: (nodeId: string) => CanvasPreviewPriorityTier;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   now?: (() => number) | undefined;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
-} = {}): CanvasPreviewResourceScheduler {
+}): CanvasPreviewResourceScheduler {
   const requestFrame = input.requestFrame ?? window.requestAnimationFrame.bind(window);
   const cancelFrame = input.cancelFrame ?? window.cancelAnimationFrame.bind(window);
   const now = input.now ?? (() => performance.now());
   const queuedStarts = new Map<string, CanvasPreviewResourceRequest>();
   const queuedPublications = new Map<string, CanvasPreviewResourceRequest>();
-  let cameraState: CanvasCameraState = 'idle';
-  let pointerInteractionActive = false;
+  let interactionState: CanvasPreviewResourceInteractionState = {
+    cameraState: 'idle',
+    pointerInteractionActive: false
+  };
+  const interactionListeners = new Set<(state: CanvasPreviewResourceInteractionState) => void>();
   let frameHandle: number | undefined;
 
   const record = (name: CanvasPerfCounterName, request?: CanvasPreviewResourceRequest): void => {
@@ -60,17 +70,14 @@ export function createCanvasPreviewResourceScheduler(input: {
             kind: request.kind,
             nodeId: request.nodeId,
             sourceKey: request.sourceKey,
-            targetWidth: request.targetWidth
+            targetWidth: request.targetWidth,
+            priorityTier: input.priorityForNode(request.nodeId)
           }
         : undefined
     });
   };
 
-  const interactionActive = (): boolean => cameraState !== 'idle' || pointerInteractionActive;
-
-  const requestNeedsFrame = (request: CanvasPreviewResourceRequest): boolean => (
-    !request.isCurrent() || !request.isCulled()
-  );
+  const interactionActive = (): boolean => canvasPreviewResourceInteractionActive(interactionState);
 
   const cancelPendingFrame = (): void => {
     if (frameHandle !== undefined) {
@@ -87,10 +94,6 @@ export function createCanvasPreviewResourceScheduler(input: {
       record('preview-resource-paused-moving');
       return;
     }
-    if (![...queuedPublications.values()].some(requestNeedsFrame)
-      && ![...queuedStarts.values()].some(requestNeedsFrame)) {
-      return;
-    }
     frameHandle = requestFrame(() => {
       frameHandle = undefined;
       runQueued();
@@ -102,22 +105,26 @@ export function createCanvasPreviewResourceScheduler(input: {
       scheduleFrame();
       return;
     }
+    for (const queue of [queuedPublications, queuedStarts]) {
+      for (const [key, request] of queue) {
+        if (request.isCurrent()) {
+          continue;
+        }
+        queue.delete(key);
+        record('preview-resource-skip-stale', request);
+      }
+    }
     let completed = 0;
-    const runCurrent = (
+    const runTier = (
       queue: Map<string, CanvasPreviewResourceRequest>,
-      phase: 'start' | 'publication'
+      phase: 'start' | 'publication',
+      tier: CanvasPreviewPriorityTier
     ): void => {
       for (const [key, request] of [...queue]) {
         if (completed >= CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME) {
           break;
         }
-        if (!request.isCurrent()) {
-          queue.delete(key);
-          record('preview-resource-skip-stale', request);
-          continue;
-        }
-        if (request.isCulled()) {
-          record('preview-resource-skip-culled', request);
+        if (input.priorityForNode(request.nodeId) !== tier) {
           continue;
         }
         queue.delete(key);
@@ -126,9 +133,9 @@ export function createCanvasPreviewResourceScheduler(input: {
         completed += 1;
       }
     };
-    runCurrent(queuedPublications, 'publication');
-    if (completed < CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME) {
-      runCurrent(queuedStarts, 'start');
+    for (const tier of [0, 1] as const) {
+      runTier(queuedPublications, 'publication', tier);
+      runTier(queuedStarts, 'start', tier);
     }
     scheduleFrame();
   };
@@ -168,28 +175,30 @@ export function createCanvasPreviewResourceScheduler(input: {
     cancel,
     setInteractionState(inputState) {
       if (
-        cameraState === inputState.cameraState
-        && pointerInteractionActive === inputState.pointerInteractionActive
+        interactionState.cameraState === inputState.cameraState
+        && interactionState.pointerInteractionActive === inputState.pointerInteractionActive
       ) {
         return;
       }
-      cameraState = inputState.cameraState;
-      pointerInteractionActive = inputState.pointerInteractionActive;
+      interactionState = { ...inputState };
       if (interactionActive()) {
         cancelPendingFrame();
-        return;
+      } else {
+        scheduleFrame();
       }
-      scheduleFrame();
+      for (const listener of interactionListeners) {
+        listener(interactionState);
+      }
     },
-    getInteractionState() {
-      return { cameraState, pointerInteractionActive };
-    },
-    notifyVisibilityChanged() {
-      scheduleFrame();
+    getInteractionState: () => interactionState,
+    subscribeInteraction(listener) {
+      interactionListeners.add(listener);
+      return () => interactionListeners.delete(listener);
     },
     dispose() {
       queuedStarts.clear();
       queuedPublications.clear();
+      interactionListeners.clear();
       cancelPendingFrame();
     }
   };

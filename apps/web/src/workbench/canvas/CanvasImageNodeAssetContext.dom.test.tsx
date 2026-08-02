@@ -29,14 +29,15 @@ describe('CanvasImageNodeAssetContext', () => {
   });
 
   it('publishes a decoded image handoff through the shared resource publication scheduler', async () => {
+    const starts: CanvasPreviewResourceRequest[] = [];
     const publications: CanvasPreviewResourceRequest[] = [];
     const scheduler: CanvasPreviewResourceScheduler = {
-      enqueue: () => undefined,
+      enqueue: (request) => starts.push(request),
       enqueuePublication: (request) => publications.push(request),
       cancel: () => undefined,
       setInteractionState: () => undefined,
       getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
-      notifyVisibilityChanged: () => undefined,
+      subscribeInteraction: () => () => undefined,
       dispose: () => undefined
     };
     const observed: CanvasImageNodeAssetHookState[] = [];
@@ -52,6 +53,8 @@ describe('CanvasImageNodeAssetContext', () => {
         </CanvasImageNodeAssetProvider>
       );
     });
+    expect(starts).toHaveLength(1);
+    await act(async () => starts[0]?.run());
     await waitFor(() => latest(observed)?.kind === 'image' && latestImage(observed)?.next !== undefined);
     const loadKey = latestImage(observed)?.next?.loadKey;
 
@@ -60,7 +63,6 @@ describe('CanvasImageNodeAssetContext', () => {
     expect(publications).toHaveLength(1);
     expect(latestImage(observed)?.visible).toBeUndefined();
     expect(publications[0]?.isCurrent()).toBe(true);
-    expect(publications[0]?.isCulled()).toBe(false);
 
     await act(async () => publications[0]?.run());
 
@@ -75,7 +77,10 @@ describe('CanvasImageNodeAssetContext', () => {
     };
     let sourceStarts = 0;
     const scheduler: CanvasPreviewResourceScheduler = {
-      enqueue: () => { sourceStarts += 1; },
+      enqueue: (request) => {
+        sourceStarts += 1;
+        request.run();
+      },
       enqueuePublication: (request) => publications.push(request),
       cancel: () => undefined,
       setInteractionState: (next) => {
@@ -84,7 +89,7 @@ describe('CanvasImageNodeAssetContext', () => {
           : { cameraState: 'moving', pointerInteractionActive: next.pointerInteractionActive };
       },
       getInteractionState: () => interaction,
-      notifyVisibilityChanged: () => undefined,
+      subscribeInteraction: () => () => undefined,
       dispose: () => undefined
     };
     const observed: CanvasImageNodeAssetHookState[] = [];
@@ -225,7 +230,7 @@ function createLoadedImageAssetHarness(root: Root) {
     cancel: () => undefined,
     setInteractionState: () => undefined,
     getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
-    notifyVisibilityChanged: () => undefined,
+    subscribeInteraction: () => () => undefined,
     dispose: () => undefined
   };
   const perfMonitor = {
@@ -262,6 +267,8 @@ function createLoadedImageAssetHarness(root: Root) {
     render,
     loadInitialImage: async (): Promise<void> => {
       await render();
+      expect(sourceRequests).toHaveLength(1);
+      await act(async () => sourceRequests.shift()?.run());
       await waitFor(() => latestImage(observed)?.next !== undefined);
       const loadKey = latestImage(observed)?.next?.loadKey;
       await act(async () => latest(observed)?.resolveNext(loadKey!));
@@ -279,8 +286,7 @@ function ImageAssetProbe({
   onState: (state: CanvasImageNodeAssetHookState) => void;
 }): React.ReactElement {
   const state = useCanvasImageNodeAsset({
-    source: canvasImageNodeSourceInputForNode(node),
-    culled: false
+    source: canvasImageNodeSourceInputForNode(node)
   });
   useEffect(() => {
     onState(state);

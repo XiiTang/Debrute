@@ -659,8 +659,8 @@ describe('CanvasSurface', () => {
     expect(unavailableMarkup).toContain('Unable to read image metadata.');
   });
 
-  it('keeps image and text nodes mounted while still virtualizing other offscreen nodes', () => {
-    const canvas = createCanvasDocument({ id: 'virtual-nodes' });
+  it('keeps every current Canvas node mounted regardless of media type or viewport', () => {
+    const canvas = createCanvasDocument({ id: 'stable-nodes' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
       nodes: [
@@ -701,7 +701,7 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-canvas-node-path="flow/visible.png"');
     expect(html).toContain('data-canvas-node-path="flow/offscreen.png"');
     expect(html).toContain('data-canvas-node-path="flow/offscreen.txt"');
-    expect(html).not.toContain('data-canvas-node-path="flow/offscreen-dir"');
+    expect(html).toContain('data-canvas-node-path="flow/offscreen-dir"');
   });
 
   it('keeps camera transforms out of React stage markup', () => {
@@ -1276,7 +1276,7 @@ describe('CanvasSurface', () => {
     }
   });
 
-  it('renders structure edges when their segments intersect the virtual viewport', () => {
+  it('keeps every current structure edge mounted for direct viewport culling', () => {
     const canvas = createCanvasDocument({ id: 'edge-canvas' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -1314,7 +1314,7 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-canvas-edge-id="edge:both"');
     expect(html).toContain('data-canvas-edge-id="edge:one-endpoint"');
     expect(html).toContain('data-canvas-edge-id="edge:crossing"');
-    expect(html).not.toContain('data-canvas-edge-id="edge:outside"');
+    expect(html).toContain('data-canvas-edge-id="edge:outside"');
     expect(html).toContain('<path');
   });
 
@@ -2075,6 +2075,7 @@ describe('CanvasSurface', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
     const scheduler = createCanvasPreviewResourceScheduler({
+      priorityForNode: () => 0,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -2092,7 +2093,6 @@ describe('CanvasSurface', () => {
       sourceKey: 'source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: () => started.push('cover.png')
     });
     expect(frames).toEqual([]);
@@ -2151,11 +2151,13 @@ describe('CanvasSurface', () => {
           ['flow/a.png', nodeFixture('flow/a.png', 0, 0)],
           ['flow/b.png', nodeFixture('flow/b.png', 5000, 0)]
         ]),
-        culledNodePaths: new Set(['flow/b.png']),
-        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
-        virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
-        nodeRenderOrder: new Map(),
+        nodeZIndexByPath: new Map(),
         edges: []
+      },
+      cullingCounts: {
+        displayVisibleNodeCount: 1,
+        culledNodeCount: 1,
+        visibleEdgeCount: 0
       },
       reactCommitCountRef
     });
@@ -2206,11 +2208,13 @@ describe('CanvasSurface', () => {
         nodesByPath: new Map([
           ['flow/a.png', nodeFixture('flow/a.png', 0, 0)]
         ]),
-        culledNodePaths: new Set(),
-        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
-        virtualRect: { x: -100, y: -100, width: 600, height: 500 },
-        nodeRenderOrder: new Map(),
+        nodeZIndexByPath: new Map(),
         edges: []
+      },
+      cullingCounts: {
+        displayVisibleNodeCount: 1,
+        culledNodeCount: 0,
+        visibleEdgeCount: 0
       },
       reactCommitCountRef
     });
@@ -2256,11 +2260,13 @@ describe('CanvasSurface', () => {
       cameraState: 'idle',
       renderSnapshot: {
         nodesByPath: new Map([[activeNode.projectRelativePath, activeNode]]),
-        culledNodePaths: new Set(),
-        visibleRect: { x: 0, y: 0, width: 400, height: 300 },
-        virtualRect: { x: -768, y: -768, width: 1936, height: 1836 },
-        nodeRenderOrder: new Map(),
+        nodeZIndexByPath: new Map(),
         edges: []
+      },
+      cullingCounts: {
+        displayVisibleNodeCount: 1,
+        culledNodeCount: 0,
+        visibleEdgeCount: 0
       },
       reactCommitCountRef
     });
@@ -2627,7 +2633,6 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     showResizeHandles: false,
     textEditorActive: false,
     hovered: false,
-    culled: false,
     zIndex: node.z,
     stageRuntime: createCanvasStageRuntime(),
     actions,

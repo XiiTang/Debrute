@@ -87,7 +87,7 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
 
   it('checks readiness before starting one DOM capture job', async () => {
     const onRasterized = vi.fn();
-    await renderLane({ root, target: targetFixture(), interactionActive: false, onRasterized });
+    await renderLane({ root, target: targetFixture(), onRasterized });
 
     expect(mocks.captureSource).not.toHaveBeenCalled();
     await frames.runNext();
@@ -108,7 +108,7 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     const raster = deferred<CanvasTextPreviewCaptureResult>();
     mocks.captureSource.mockReturnValue(raster.promise);
     const onRasterized = vi.fn();
-    await renderLane({ root, target: targetFixture(), interactionActive: false, onRasterized });
+    await renderLane({ root, target: targetFixture(), onRasterized });
     await frames.runNext();
     await frames.runNext();
 
@@ -123,10 +123,11 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
 
   it('does not start DOM capture while Canvas interaction is active', async () => {
     const target = targetFixture();
-    await renderLane({ root, target, interactionActive: true, onRasterized: () => undefined });
+    const interactionSource = createInteractionSource(true);
+    await renderLane({ root, target, interactionSource, onRasterized: () => undefined });
     expect(frames.pending()).toBe(0);
 
-    await renderLane({ root, target, interactionActive: false, onRasterized: () => undefined });
+    await act(async () => interactionSource.setActive(false));
     await frames.runNext();
     await frames.runNext();
     expect(mocks.captureSource).toHaveBeenCalledTimes(1);
@@ -137,7 +138,7 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     mocks.captureSource.mockReturnValueOnce(firstRaster.promise).mockResolvedValueOnce(rasterResult());
     const onRasterized = vi.fn();
     const first = targetFixture('notes/a.md');
-    await renderLane({ root, target: first, interactionActive: false, onRasterized });
+    await renderLane({ root, target: first, onRasterized });
     await frames.runNext();
     await frames.runNext();
     const firstSignal = mocks.captureSource.mock.calls[0]?.[0].signal as AbortSignal;
@@ -145,7 +146,6 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     await renderLane({
       root,
       target: targetFixture('notes/b.md'),
-      interactionActive: false,
       onRasterized
     });
     expect(firstSignal.aborted).toBe(true);
@@ -173,7 +173,6 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     await renderLane({
       root,
       target: targetFixture(),
-      interactionActive: false,
       onRasterized: () => undefined,
       onFailure
     });
@@ -217,7 +216,6 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
     await renderLane({
       root,
       target: targetFixture(),
-      interactionActive: false,
       onRasterized: () => undefined,
       onFailure
     });
@@ -235,7 +233,7 @@ describe('CanvasTextPreviewCaptureLane', { tags: ['canvas-text'] }, () => {
 async function renderLane(input: {
   root: Root;
   target: CanvasTextPreviewCaptureTarget;
-  interactionActive: boolean;
+  interactionSource?: React.ComponentProps<typeof CanvasTextPreviewCaptureLane>['interactionSource'];
   onRasterized: React.ComponentProps<typeof CanvasTextPreviewCaptureLane>['onRasterized'];
   onFailure?: React.ComponentProps<typeof CanvasTextPreviewCaptureLane>['onFailure'];
 }): Promise<void> {
@@ -245,12 +243,40 @@ async function renderLane(input: {
         target={input.target}
         renderProfile={TEST_RENDER_PROFILE}
         preparedFont={TEST_PREPARED_FONT}
-        interactionActive={input.interactionActive}
+        interactionSource={input.interactionSource ?? createInteractionSource(false)}
         onRasterized={input.onRasterized}
         onFailure={input.onFailure ?? (() => undefined)}
       />
     );
   });
+}
+
+function createInteractionSource(initiallyActive: boolean): React.ComponentProps<
+  typeof CanvasTextPreviewCaptureLane
+>['interactionSource'] & { setActive(active: boolean): void } {
+  let state = {
+    cameraState: initiallyActive ? 'moving' as const : 'idle' as const,
+    pointerInteractionActive: false
+  };
+  const listeners = new Set<Parameters<React.ComponentProps<
+    typeof CanvasTextPreviewCaptureLane
+  >['interactionSource']['subscribeInteraction']>[0]>();
+  return {
+    getInteractionState: () => state,
+    subscribeInteraction: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    setActive(active) {
+      state = {
+        cameraState: active ? 'moving' : 'idle',
+        pointerInteractionActive: false
+      };
+      for (const listener of listeners) {
+        listener(state);
+      }
+    }
+  };
 }
 
 function targetFixture(projectRelativePath = 'notes/a.md'): CanvasTextPreviewCaptureTarget {

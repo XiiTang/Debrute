@@ -27,7 +27,7 @@ Use strict TypeScript ESM with `.js` extensions in relative imports that compile
 
 ## Testing Guidelines
 
-Vitest discovers `tests/**/*.test.ts`, `packages/**/*.test.ts`, `apps/**/*.test.ts`, and `apps/**/*.test.tsx`. Add tests near changed behavior or in top-level `tests/` for cross-package contracts. For Canvas performance, interaction, image loading, virtualization, render scheduler, stage DOM write, or trace/debug work, start with:
+Vitest discovers `tests/**/*.test.ts`, `packages/**/*.test.ts`, `apps/**/*.test.ts`, and `apps/**/*.test.tsx`. Add tests near changed behavior or in top-level `tests/` for cross-package contracts. For Canvas performance, interaction, image loading, viewport culling, render scheduler, stage DOM write, or trace/debug work, start with:
 
 ```bash
 pnpm exec vitest run \
@@ -35,10 +35,18 @@ pnpm exec vitest run \
   apps/web/src/workbench/canvas/CanvasPerfMonitor.test.ts \
   apps/web/src/workbench/canvas/CanvasPerfBrowserAdapter.test.ts \
   apps/web/src/workbench/canvas/CanvasImageNodeAsset.test.ts \
+  apps/web/src/workbench/canvas/CanvasResourceZoom.test.ts \
+  apps/web/src/workbench/canvas/CanvasPreviewResourceScheduler.test.ts \
+  apps/web/src/workbench/canvas/CanvasPreviewScheduling.test.ts \
+  apps/web/src/workbench/canvas/CanvasTextPreviewCaptureFlow.dom.test.tsx \
+  apps/web/src/workbench/canvas/CanvasTextPreviewRuntime.dom.test.tsx \
+  apps/web/src/workbench/canvas/CanvasVideoPreviewRuntime.dom.test.tsx \
   apps/web/src/workbench/canvas/CanvasRenderCoordinator.test.ts \
+  apps/web/src/workbench/canvas/CanvasCullingController.test.ts \
+  apps/web/src/workbench/canvas/CanvasRenderLifecycle.dom.test.ts \
   apps/web/src/workbench/canvas/runtime/CanvasStageRuntime.test.ts \
-  apps/web/src/workbench/canvas/CanvasSurface.test.tsx \
-  apps/web/src/workbench/canvas/canvasVirtualization.test.ts
+  apps/web/src/workbench/canvas/CanvasSurface.dom.test.tsx \
+  apps/web/src/workbench/canvas/canvasViewport.test.ts
 
 pnpm check
 ```

@@ -24,11 +24,19 @@ import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './
 import { CanvasNodeShell } from './CanvasNodeShell';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import {
-  initialCanvasResourceZoomState,
-  nextCanvasResourceZoomState
-} from './CanvasResourceZoom';
-import { CanvasTextPreviewProvider, useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
-import { CanvasVideoPreviewProvider, useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime';
+  initialCanvasResourceZoom,
+  nextCanvasResourceZoom
+} from './CanvasResourceZoom.js';
+import {
+  CanvasTextPreviewProvider,
+  useCanvasTextPreviewNode,
+  type CanvasTextPreviewNodeSnapshot
+} from './CanvasTextPreviewRuntime.js';
+import {
+  CanvasVideoPreviewProvider,
+  useCanvasVideoPreviewNode,
+  useCanvasVideoPreviewRuntime
+} from './CanvasVideoPreviewRuntime.js';
 import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
@@ -38,7 +46,7 @@ import {
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
 import { createCanvasRenderLifecycle } from './CanvasRenderLifecycle.js';
-import { createCanvasVisibilityController } from './CanvasVisibilityController';
+import type { CanvasEdgeSegment } from './canvasViewport.js';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimeSnapshot
@@ -191,13 +199,11 @@ function CanvasSurfaceRuntime({
   const pointerInteraction = useCanvasPointerInteraction(runtime);
   const surfaceSize = useCanvasSurfaceSize(runtime);
   const initialRuntimeSnapshot = runtime.getSnapshot();
-  const [cameraState, setCameraState] = useState(initialRuntimeSnapshot.cameraState);
-  const [pointerInteractionActive, setPointerInteractionActive] = useState(initialRuntimeSnapshot.pointerInteraction !== undefined);
-  const interactionActive = cameraState !== 'idle' || pointerInteractionActive;
-  const [resourceZoomState, setResourceZoomState] = useState(() => (
-    initialCanvasResourceZoomState(initialRuntimeSnapshot.camera.z)
+  const [resourceZoom, setResourceZoom] = useState(() => (
+    initialCanvasResourceZoom(initialRuntimeSnapshot.camera.z)
   ));
-  const resourceZoom = resourceZoomState.resourceZoom;
+  const resourceZoomRef = useRef(resourceZoom);
+  resourceZoomRef.current = resourceZoom;
   const selectionRef = useRef<CanvasSelection | undefined>(selection);
   const fittedCanvasIdRef = useRef<string | undefined>(undefined);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
@@ -289,15 +295,16 @@ function CanvasSurfaceRuntime({
   const devicePixelRatio = devicePixelRatioValue();
   const instrumentationMonitor = perfMonitor;
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
-  const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
-  const visibilityController = useMemo(() => createCanvasVisibilityController({ stageRuntime }), [stageRuntime]);
   const renderLifecycle = useMemo(() => createCanvasRenderLifecycle({
     projection,
     runtime,
     stageRuntime,
-    visibilityController,
     perfMonitor: instrumentationMonitor
-  }), [instrumentationMonitor, runtime, stageRuntime, visibilityController]);
+  }), [instrumentationMonitor, runtime, stageRuntime]);
+  const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({
+    perfMonitor: instrumentationMonitor,
+    priorityForNode: renderLifecycle.previewTierForNode
+  }), [instrumentationMonitor, renderLifecycle]);
   const renderSnapshot = useSyncExternalStore(
     renderLifecycle.subscribe,
     renderLifecycle.getSnapshot,
@@ -320,14 +327,9 @@ function CanvasSurfaceRuntime({
     runtime,
     resourceZoom,
     renderSnapshot,
+    renderLifecycle,
     surfaceElement: surfaceRef.current
   };
-
-  useEffect(() => {
-    if (perfMonitor) {
-      reactCommitCountRef.current += 1;
-    }
-  });
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -378,18 +380,22 @@ function CanvasSurfaceRuntime({
 
   useEffect(() => () => previewResourceScheduler.dispose(), [previewResourceScheduler]);
 
-  useEffect(() => {
-    previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState({
-      cameraState,
-      pointerInteraction: pointerInteractionActive ? runtime.getSnapshot().pointerInteraction : undefined
-    }));
-  }, [cameraState, pointerInteractionActive, previewResourceScheduler, runtime]);
+  useLayoutEffect(() => {
+    previewResourceScheduler.setInteractionState(
+      canvasPreviewResourceInteractionState(runtime.getSnapshot())
+    );
+  }, [previewResourceScheduler, runtime]);
 
   const syncResourceZoomForSnapshot = useCallback((input: {
     cameraState: CanvasRuntimeSnapshot['cameraState'];
     cameraZoom: number;
   }) => {
-    setResourceZoomState((current) => nextCanvasResourceZoomState(current, input));
+    const nextResourceZoom = nextCanvasResourceZoom(resourceZoomRef.current, input);
+    if (nextResourceZoom === resourceZoomRef.current) {
+      return;
+    }
+    resourceZoomRef.current = nextResourceZoom;
+    setResourceZoom(nextResourceZoom);
   }, []);
 
   useLayoutEffect(() => {
@@ -437,10 +443,6 @@ function CanvasSurfaceRuntime({
     };
   }, [interactionBlocked, stageRuntime, runtime]);
 
-  useLayoutEffect(() => {
-    previewResourceScheduler.notifyVisibilityChanged();
-  }, [previewResourceScheduler, renderSnapshot]);
-
   useEffect(() => {
     if (
       fittedCanvasIdRef.current === canvas.id
@@ -472,6 +474,7 @@ function CanvasSurfaceRuntime({
       sessionRef: canvasPerfSessionRef,
       cameraState: snapshot.cameraState,
       renderSnapshot: renderLifecycle.getSnapshot(),
+      cullingCounts: renderLifecycle.getCullingCounts(),
       reactCommitCountRef
     });
   }), [
@@ -489,7 +492,6 @@ function CanvasSurfaceRuntime({
         cameraState,
         pointerInteraction: snapshot.pointerInteraction
       }));
-      setCameraState(cameraState);
       syncResourceZoomForSnapshot({
         cameraState,
         cameraZoom: snapshot.camera.z
@@ -522,8 +524,9 @@ function CanvasSurfaceRuntime({
       pointerInteraction: initialSnapshot.pointerInteraction,
       snapshot: initialSnapshot,
       finalState: canvasPerfFinalState({
-        snapshot: initialSnapshot,
-        renderSnapshot: renderLifecycle.getSnapshot()
+          snapshot: initialSnapshot,
+          renderSnapshot: renderLifecycle.getSnapshot(),
+          cullingCounts: renderLifecycle.getCullingCounts()
       })
     });
     if (initialSnapshot.pointerInteraction) {
@@ -532,6 +535,7 @@ function CanvasSurfaceRuntime({
         sessionRef: canvasPerfPointerInteractionSessionRef,
         cameraState: initialSnapshot.cameraState,
         renderSnapshot: renderLifecycle.getSnapshot(),
+        cullingCounts: renderLifecycle.getCullingCounts(),
         reactCommitCountRef
       });
     }
@@ -541,7 +545,6 @@ function CanvasSurfaceRuntime({
         cameraState: snapshot.cameraState,
         pointerInteraction: nextPointerInteraction
       }));
-      setPointerInteractionActive(nextPointerInteraction !== undefined);
       syncCanvasPerfPointerInteractionSessionState({
         perfMonitor,
         sessionRef: canvasPerfPointerInteractionSessionRef,
@@ -550,7 +553,8 @@ function CanvasSurfaceRuntime({
         snapshot,
         finalState: canvasPerfFinalState({
           snapshot,
-          renderSnapshot: renderLifecycle.getSnapshot()
+          renderSnapshot: renderLifecycle.getSnapshot(),
+          cullingCounts: renderLifecycle.getCullingCounts()
         })
       });
       if (nextPointerInteraction) {
@@ -559,6 +563,7 @@ function CanvasSurfaceRuntime({
           sessionRef: canvasPerfPointerInteractionSessionRef,
           cameraState: snapshot.cameraState,
           renderSnapshot: renderLifecycle.getSnapshot(),
+          cullingCounts: renderLifecycle.getCullingCounts(),
           reactCommitCountRef
         });
       }
@@ -571,7 +576,9 @@ function CanvasSurfaceRuntime({
   ]);
 
   useEffect(() => {
-    setResourceZoomState(initialCanvasResourceZoomState(runtime.getSnapshot().camera.z));
+    const nextResourceZoom = initialCanvasResourceZoom(runtime.getSnapshot().camera.z);
+    resourceZoomRef.current = nextResourceZoom;
+    setResourceZoom(nextResourceZoom);
   }, [canvas.id, runtime]);
 
   const pointerScreenPoint = useCallback((
@@ -974,7 +981,7 @@ function CanvasSurfaceRuntime({
     onFeedbackBarTargetChange?.(undefined);
   }, [onFeedbackBarTargetChange]);
 
-  return (
+  const surface = (
     <div
       ref={surfaceRef}
       className="canvas-surface"
@@ -1013,36 +1020,20 @@ function CanvasSurfaceRuntime({
         className="canvas-world-stage"
       >
         {renderSnapshot.edges.map((edge) => (
-          <svg
+          <CanvasSurfaceEdgeLayer
             key={edge.id}
-            className="canvas-edge-layer"
-            aria-hidden="true"
-            viewBox={edge.svgViewBox}
-            style={{
-              left: edge.svgBounds.x,
-              top: edge.svgBounds.y,
-              width: edge.svgBounds.width,
-              height: edge.svgBounds.height
-            }}
-          >
-            <path
-              data-canvas-edge-id={edge.id}
-              className="canvas-edge"
-              d={edge.path}
-            />
-          </svg>
+            edge={edge}
+            stageRuntime={stageRuntime}
+          />
         ))}
         <CanvasVideoPreviewProvider
           canvasId={canvas.id}
           nodes={projectedNodes}
           activeVideoPaths={activeVideoPaths}
           actions={actions}
-          interactionActive={interactionActive}
           resourceZoom={resourceZoom}
           devicePixelRatio={devicePixelRatio}
-          culledNodePaths={renderSnapshot.culledNodePaths}
-          visibleRect={renderSnapshot.visibleRect}
-          virtualRect={renderSnapshot.virtualRect}
+          previewOrder={renderLifecycle}
           previewResourceScheduler={previewResourceScheduler}
         >
           <CanvasTextPreviewProvider
@@ -1051,12 +1042,9 @@ function CanvasSurfaceRuntime({
             activeInlineTextPath={activeInlineTextPath}
             textFileBuffers={textFileBuffers}
             actions={actions}
-            interactionActive={interactionActive}
             resourceZoom={resourceZoom}
             devicePixelRatio={devicePixelRatio}
-            culledNodePaths={renderSnapshot.culledNodePaths}
-            visibleRect={renderSnapshot.visibleRect}
-            virtualRect={renderSnapshot.virtualRect}
+            previewOrder={renderLifecycle}
             styleDependencyKey={textPreviewStyleDependencyKey}
             perfMonitor={instrumentationMonitor}
             previewResourceScheduler={previewResourceScheduler}
@@ -1076,8 +1064,7 @@ function CanvasSurfaceRuntime({
                     && selection.projectRelativePaths[0] === node.projectRelativePath
                     && node.mediaKind === 'text'}
                   hovered={hoveredNodePath === node.projectRelativePath}
-                  culled={renderSnapshot.culledNodePaths.has(node.projectRelativePath)}
-                  zIndex={renderSnapshot.nodeRenderOrder.get(node.projectRelativePath)?.zIndex ?? node.z}
+                  zIndex={renderSnapshot.nodeZIndexByPath.get(node.projectRelativePath) ?? node.z}
                   stageRuntime={stageRuntime}
                   actions={actions}
                   textBuffer={textFileBuffers[node.projectRelativePath]}
@@ -1128,47 +1115,64 @@ function CanvasSurfaceRuntime({
       ) : null}
     </div>
   );
+  return instrumentationMonitor ? (
+    <React.Profiler
+      id="canvas-surface"
+      onRender={() => {
+        reactCommitCountRef.current += 1;
+      }}
+    >
+      {surface}
+    </React.Profiler>
+  ) : surface;
 }
 
-function CanvasSurfaceNodeShell({
-  node,
-  selected,
-  cut,
-  showResizeHandles,
-  textEditorActive,
-  hovered,
-  culled,
-  zIndex,
-  stageRuntime,
-  actions,
-  textBuffer,
-  forceVideoPlayerMounted,
-  feedbackEntry,
-  activeFeedbackItemId,
-  localFeedbackMode,
-  localFeedbackRegions,
-  activeFeedbackMomentTimeSeconds,
-  onLocalFeedbackDraft,
-  onFeedbackItemActivate,
-  onPointerDown,
-  onPointerEnter,
-  onPointerLeave,
-  onSelectNode,
-  onContextMenu,
-  onResizePointerDown,
-  onVideoPlayerMounted,
-  onVideoPlayingChange,
-  onRegisterVideoTarget,
-  onUpdateVideoPlaybackTime,
-  onUpdateTextViewport
+function CanvasSurfaceEdgeLayer({
+  edge,
+  stageRuntime
 }: {
+  edge: CanvasEdgeSegment;
+  stageRuntime: CanvasStageRuntime;
+}): React.ReactElement {
+  const elementRef = useRef<SVGSVGElement | null>(null);
+
+  useLayoutEffect(() => {
+    const element = elementRef.current;
+    if (!element) {
+      return;
+    }
+    return stageRuntime.registerEdgeLayer(edge.id, element);
+  }, [edge.id, stageRuntime]);
+
+  return (
+    <svg
+      ref={elementRef}
+      className="canvas-edge-layer"
+      aria-hidden="true"
+      viewBox={edge.svgViewBox}
+      style={{
+        left: edge.svgBounds.x,
+        top: edge.svgBounds.y,
+        width: edge.svgBounds.width,
+        height: edge.svgBounds.height
+      }}
+    >
+      <path
+        data-canvas-edge-id={edge.id}
+        className="canvas-edge"
+        d={edge.path}
+      />
+    </svg>
+  );
+}
+
+interface CanvasSurfaceNodeShellProps {
   node: ProjectedCanvasNode;
   selected: boolean;
   cut: boolean;
   showResizeHandles: boolean;
   textEditorActive: boolean;
   hovered: boolean;
-  culled: boolean;
   zIndex: number;
   stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
@@ -1195,33 +1199,91 @@ function CanvasSurfaceNodeShell({
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
-}): React.ReactElement {
-  const textPreviewRuntime = useCanvasTextPreviewRuntime();
-  const videoPreviewRuntime = useCanvasVideoPreviewRuntime();
-  const textPreviewPresentation = node.mediaKind === 'text'
-    ? textPreviewRuntime.presentationForNode({ node })
-    : undefined;
-  const textPreviewError = node.mediaKind === 'text'
-    ? textPreviewRuntime.previewErrorForNode({ node })
-    : undefined;
-  const videoPreview = node.mediaKind === 'video'
-    ? videoPreviewRuntime.previewForNode({ node })
-    : undefined;
-  const videoPreviewError = node.mediaKind === 'video'
-    ? videoPreviewRuntime.previewErrorForNode({ node })
-    : undefined;
-  const reportPreviewError = videoPreviewRuntime.reportPreviewError;
+}
+
+function CanvasSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.ReactElement {
+  if (props.node.mediaKind === 'text') {
+    return <CanvasTextSurfaceNodeShell {...props} />;
+  }
+  if (props.node.mediaKind === 'video') {
+    return <CanvasVideoSurfaceNodeShell {...props} />;
+  }
+  return <CanvasSurfaceNodeShellBase {...props} />;
+}
+
+function CanvasTextSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.ReactElement {
+  const { presentation, previewError } = useCanvasTextPreviewNode(props.node);
+  return (
+    <CanvasSurfaceNodeShellBase
+      {...props}
+      textPreviewPresentation={presentation}
+      textPreviewError={previewError}
+    />
+  );
+}
+
+function CanvasVideoSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.ReactElement {
+  const { preview, previewError } = useCanvasVideoPreviewNode(props.node);
+  const { reportPreviewError } = useCanvasVideoPreviewRuntime();
   const reportVideoPreviewError = useCallback((
     projectRelativePath: string,
-    preview: CanvasVideoPreviewSource,
+    source: CanvasVideoPreviewSource,
     message: string
   ) => {
-    reportPreviewError({
-      projectRelativePath,
-      preview,
-      message
-    });
+    reportPreviewError({ projectRelativePath, preview: source, message });
   }, [reportPreviewError]);
+  return (
+    <CanvasSurfaceNodeShellBase
+      {...props}
+      videoPreview={preview}
+      videoPreviewError={previewError}
+      onVideoPreviewError={reportVideoPreviewError}
+    />
+  );
+}
+
+function CanvasSurfaceNodeShellBase({
+  node,
+  selected,
+  cut,
+  showResizeHandles,
+  textEditorActive,
+  hovered,
+  zIndex,
+  stageRuntime,
+  actions,
+  textBuffer,
+  forceVideoPlayerMounted,
+  feedbackEntry,
+  activeFeedbackItemId,
+  localFeedbackMode,
+  localFeedbackRegions,
+  activeFeedbackMomentTimeSeconds,
+  onLocalFeedbackDraft,
+  onFeedbackItemActivate,
+  onPointerDown,
+  onPointerEnter,
+  onPointerLeave,
+  onSelectNode,
+  onContextMenu,
+  onResizePointerDown,
+  onVideoPlayerMounted,
+  onVideoPlayingChange,
+  onRegisterVideoTarget,
+  onUpdateVideoPlaybackTime,
+  onUpdateTextViewport,
+  textPreviewPresentation,
+  textPreviewError,
+  videoPreview,
+  videoPreviewError,
+  onVideoPreviewError
+}: CanvasSurfaceNodeShellProps & {
+  textPreviewPresentation?: CanvasTextPreviewNodeSnapshot['presentation'] | undefined;
+  textPreviewError?: string | undefined;
+  videoPreview?: CanvasVideoPreviewSource | undefined;
+  videoPreviewError?: string | undefined;
+  onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
+}): React.ReactElement {
   return (
     <CanvasNodeShell
       node={node}
@@ -1230,7 +1292,6 @@ function CanvasSurfaceNodeShell({
       showResizeHandles={showResizeHandles}
       textEditorActive={textEditorActive}
       hovered={hovered}
-      culled={culled}
       zIndex={zIndex}
       stageRuntime={stageRuntime}
       actions={actions}
@@ -1260,7 +1321,7 @@ function CanvasSurfaceNodeShell({
       onRegisterVideoTarget={onRegisterVideoTarget}
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}
-      onVideoPreviewError={reportVideoPreviewError}
+      onVideoPreviewError={onVideoPreviewError}
     />
   );
 }

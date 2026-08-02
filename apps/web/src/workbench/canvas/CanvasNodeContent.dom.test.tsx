@@ -17,6 +17,7 @@ import {
   type CanvasTextPreviewSource
 } from './CanvasTextPreviewRuntime';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
 import { I18nProvider } from '../i18n';
 
 vi.mock('./CanvasTextRenderProfileContext.js', async () => {
@@ -45,14 +46,21 @@ vi.mock('./CanvasTextPreviewStyleKey', () => ({
   canvasTextPreviewStyleKey: async () => 'sha256:style'
 }));
 
+const previewResourceInteraction = { cameraState: 'idle' as const, pointerInteractionActive: false };
 const previewResourceScheduler: CanvasPreviewResourceScheduler = {
   enqueue: () => undefined,
   enqueuePublication: () => undefined,
   cancel: () => undefined,
   setInteractionState: () => undefined,
-  getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
-  notifyVisibilityChanged: () => undefined,
+  getInteractionState: () => previewResourceInteraction,
+  subscribeInteraction: () => () => undefined,
   dispose: () => undefined
+};
+
+const previewOrderSnapshot = { x: 0, y: 0, width: 1000, height: 1000 };
+const previewOrder: CanvasPreviewOrderSource = {
+  getPreviewOrderSnapshot: () => previewOrderSnapshot,
+  subscribePreviewOrder: () => () => undefined
 };
 
 function TestProviders({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -63,12 +71,9 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
         nodes={[]}
         textFileBuffers={{}}
         actions={actionsFixture()}
-        interactionActive={false}
         resourceZoom={1}
         devicePixelRatio={1}
-        culledNodePaths={new Set()}
-        visibleRect={{ x: 0, y: 0, width: 1000, height: 1000 }}
-        virtualRect={{ x: -1000, y: -1000, width: 3000, height: 3000 }}
+        previewOrder={previewOrder}
         styleDependencyKey="test"
         previewResourceScheduler={previewResourceScheduler}
       >
@@ -95,7 +100,6 @@ function renderStaticWithI18n(element: React.ReactElement): string {
 const canvasNodeContentPropsWithoutVideoRegistry: CanvasNodeContentProps = {
   node: directoryNode('type-check'),
   selected: false,
-  culled: false,
   actions: actionsFixture(),
   textBuffer: undefined,
   onSelectNode: () => undefined,
@@ -179,7 +183,6 @@ describe('CanvasNodeContent', () => {
       <CanvasNodeContent
         node={directoryNode('')}
         selected
-        culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -202,7 +205,6 @@ describe('CanvasNodeContent', () => {
       <CanvasNodeContent
         node={directoryNode('references/archive')}
         selected
-        culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -233,7 +235,6 @@ describe('CanvasNodeContent', () => {
           layoutMode: 'manual'
         }}
         selected
-        culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -257,7 +258,6 @@ describe('CanvasNodeContent', () => {
       <CanvasNodeContent
         node={unavailableDirectoryNode('references/archive', 'Unable to read references/archive.')}
         selected
-        culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -290,7 +290,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={textNode('flow/readme.md', 'rev-a')}
                 selected
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer('flow/readme.md', 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -333,7 +332,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={videoNode('media/clip.mp4', 'rev-a')}
                 selected={false}
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={undefined}
                 videoPreview={{
@@ -385,7 +383,6 @@ describe('CanvasNodeContent', () => {
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
           selected={false}
-          culled={false}
           actions={actionsFixture()}
           textBuffer={undefined}
           textPreview={{
@@ -436,7 +433,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={textNode('flow/readme.md', 'rev-a')}
                 selected={selected}
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer('flow/readme.md', 'rev-a')}
                 textPreview={textPreviewSource(700)}
@@ -712,7 +708,6 @@ describe('CanvasNodeContent', () => {
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
           selected={false}
-          culled={false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreviewError="Canvas text preview source capture did not produce a PNG blob."
@@ -739,7 +734,6 @@ describe('CanvasNodeContent', () => {
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
           selected
-          culled={false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreview={{
@@ -782,7 +776,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={node}
                 selected
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -824,7 +817,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={node}
                 selected
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -863,7 +855,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={node}
                 selected={false}
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -893,7 +884,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={persistedNode}
                 selected
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -929,7 +919,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={persistedNode}
                 selected={false}
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -969,7 +958,6 @@ describe('CanvasNodeContent', () => {
               <CanvasNodeContent
                 node={node}
                 selected={selected}
-                culled={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -1019,7 +1007,6 @@ describe('CanvasNodeContent', () => {
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
           selected={false}
-          culled={false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           onVideoPlayerMounted={() => undefined}
@@ -1054,7 +1041,6 @@ describe('CanvasNodeContent', () => {
           }
         }}
         selected
-        culled={false}
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -1078,7 +1064,6 @@ describe('CanvasNodeContent', () => {
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
           selected
-          culled={false}
           actions={actionsFixture()}
           textBuffer={{ ...textBuffer('flow/readme.md', 'rev-a'), externalChange: true }}
           onVideoPlayerMounted={() => undefined}
@@ -1103,7 +1088,6 @@ describe('CanvasNodeContent', () => {
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
           selected
-          culled={false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           onVideoPlayerMounted={() => undefined}
@@ -1153,7 +1137,6 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
           selected={selected}
-          culled={false}
           actions={actionsFixture({ ensureTextFileBuffer })}
           textBuffer={undefined}
           onVideoPlayerMounted={() => undefined}
@@ -1260,7 +1243,6 @@ async function renderTextPreviewNode(
         <CanvasNodeContent
           node={options?.node ?? textNode('flow/readme.md', 'rev-a')}
           selected={options?.selected ?? false}
-          culled={false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreview={textPreview}

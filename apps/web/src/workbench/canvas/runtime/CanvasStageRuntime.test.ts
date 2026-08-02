@@ -65,6 +65,17 @@ describe('CanvasStageRuntime', () => {
     expect(element.style.properties.get('display')).toBe('block');
   });
 
+  it('writes edge display state without changing React edge membership', () => {
+    const runtime = createCanvasStageRuntime();
+    const element = fakeElement();
+
+    runtime.registerEdgeLayer('edge-a-b', element as unknown as SVGSVGElement);
+    runtime.setEdgeVisible('edge-a-b', false);
+    runtime.setEdgeVisible('edge-a-b', true);
+
+    expect(element.style.properties.get('display')).toBe('block');
+  });
+
   it('records camera write and no-op counters', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
@@ -98,13 +109,19 @@ describe('CanvasStageRuntime', () => {
     runtime.setNodeLayout('flow/a.png', { x: 10, y: 20, width: 320, height: 180, z: 7 });
     runtime.setNodeVisible('flow/a.png', false);
     runtime.setNodeVisible('flow/a.png', false);
+    const edge = fakeElement();
+    runtime.registerEdgeLayer('edge-a-b', edge as unknown as SVGSVGElement);
+    runtime.setEdgeVisible('edge-a-b', false);
+    runtime.setEdgeVisible('edge-a-b', false);
     monitor.endSession({ sessionId, timestamp: 20, source: 'CanvasSurface' });
 
     expect(monitor.getLastSession()?.counters).toMatchObject({
       'stage-node-layout-write': 1,
       'stage-node-layout-noop': 1,
       'stage-node-visibility-write': 1,
-      'stage-node-visibility-noop': 1
+      'stage-node-visibility-noop': 1,
+      'stage-edge-visibility-write': 1,
+      'stage-edge-visibility-noop': 1
     });
   });
 });

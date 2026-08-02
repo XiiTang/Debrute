@@ -91,11 +91,10 @@ timestamp, or the raw video.
 Source readiness is returned as a Project-path-keyed record with exactly one
 entry per requested video target; it is not an ordered array. A missing or
 identity-mismatched entry is a preview protocol error rather than an empty
-preview. The first current, visible preview may publish immediately. Later
-width changes share the image/video preview start scheduler, which pauses
-deferred starts during interaction, rejects stale work, and retains current
-culled work until visibility changes. Active and culled videos are not new
-preview targets.
+preview. Preview starts share the image/video/text scheduler, which pauses
+deferred starts during interaction and rejects stale work. Exact-viewport
+videos run before offscreen videos, but culling never admits, cancels, or delays
+preview production. An active video player is not a new poster target.
 
 Cache identity includes Canvas ID, Project path key, video revision, source
 kind, and source key. The source key includes the `Canvas Video Preview Source

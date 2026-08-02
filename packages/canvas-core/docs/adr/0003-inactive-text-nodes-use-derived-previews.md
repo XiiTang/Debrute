@@ -15,6 +15,6 @@ keeping every CodeMirror editor live. One serialized capture lane renders the
 current hidden CodeMirror DOM into the canonical source described by
 [`0006-text-preview-dom-is-the-visual-authority.md`](./0006-text-preview-dom-is-the-visual-authority.md).
 All stable missing text sources enter one viewport-independent latest-wins task
-registry. Viewport affects only next-job order and width-variant presentation
-demand. Image, text, and video sources then share one Runtime width-variant
-service.
+registry. The exact viewport affects only next-job and width-variant request
+order; every current node remains admitted. Image, text, and video sources then
+share one Runtime width-variant service.

@@ -29,6 +29,8 @@ import type { CanvasRenderCoordinatorSnapshot } from './CanvasRenderCoordinator'
 import type { CanvasSelection } from './runtime/canvasSelection';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPreviewResourceInteractionState } from './CanvasPreviewResourceScheduler';
+import type { CanvasCullingCounts } from './CanvasCullingController.js';
+import type { CanvasRenderLifecycle } from './CanvasRenderLifecycle.js';
 
 export function canvasMapProjectTreeDropEntry(
   dataTransfer: Pick<DataTransfer, 'getData'>
@@ -85,13 +87,15 @@ export interface CanvasPerfDebugSnapshotContext {
   runtime: Pick<CanvasEditorRuntime, 'getSnapshot'>;
   resourceZoom: number;
   renderSnapshot: CanvasRenderCoordinatorSnapshot;
+  renderLifecycle: Pick<CanvasRenderLifecycle, 'getCullingCounts'>;
   surfaceElement: HTMLElement | null;
 }
 
 const STAGE_WRITE_COUNTERS = [
   'stage-camera-write',
   'stage-node-layout-write',
-  'stage-node-visibility-write'
+  'stage-node-visibility-write',
+  'stage-edge-visibility-write'
 ] as const satisfies readonly CanvasPerfCounterName[];
 
 const IMAGE_NODE_WORK_COUNTERS = [
@@ -100,7 +104,6 @@ const IMAGE_NODE_WORK_COUNTERS = [
   'image-node-next-load-resolve',
   'image-node-next-load-reject',
   'image-node-handoff-promote',
-  'image-node-upgrade-skip-culled',
   'image-node-upgrade-skip-moving',
   'image-node-source-reset',
   'image-node-retry'
@@ -212,6 +215,7 @@ export function recordCanvasPerfFrame(input: {
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
   cameraState: CanvasRuntimeSnapshot['cameraState'];
   renderSnapshot: CanvasRenderCoordinatorSnapshot;
+  cullingCounts: CanvasCullingCounts;
   reactCommitCountRef: { current: number };
 }): void {
   const perfMonitor = input.perfMonitor;
@@ -240,8 +244,8 @@ export function recordCanvasPerfFrame(input: {
     elapsedMs,
     cameraState: input.cameraState,
     mountedNodeCount: input.renderSnapshot.nodesByPath.size,
-    visibleNodeCount: Math.max(0, input.renderSnapshot.nodesByPath.size - input.renderSnapshot.culledNodePaths.size),
-    culledNodeCount: input.renderSnapshot.culledNodePaths.size,
+    visibleNodeCount: input.cullingCounts.displayVisibleNodeCount,
+    culledNodeCount: input.cullingCounts.culledNodeCount,
     reactCommitCount,
     renderSnapshotBuildCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-build'),
     renderSnapshotReuseCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-reuse'),
@@ -290,11 +294,12 @@ function canvasPerfPointerInteractionSessionDetail(state: CanvasRuntimePointerIn
 export function canvasPerfFinalState(input: {
   snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
   renderSnapshot: CanvasRenderCoordinatorSnapshot;
+  cullingCounts: CanvasCullingCounts;
 }): CanvasPerfFinalState {
   return {
     mountedNodeCount: input.renderSnapshot.nodesByPath.size,
-    visibleNodeCount: Math.max(0, input.renderSnapshot.nodesByPath.size - input.renderSnapshot.culledNodePaths.size),
-    culledNodeCount: input.renderSnapshot.culledNodePaths.size,
+    visibleNodeCount: input.cullingCounts.displayVisibleNodeCount,
+    culledNodeCount: input.cullingCounts.culledNodeCount,
     zoomLevel: input.snapshot.camera.z,
     cameraState: input.snapshot.cameraState
   };
@@ -303,14 +308,14 @@ export function canvasPerfFinalState(input: {
 export function canvasPerfDebugSnapshot(input: CanvasPerfDebugSnapshotContext): DebruteCanvasPerfCanvasSnapshot {
   const snapshot = input.runtime.getSnapshot();
   const mountedNodeCount = input.renderSnapshot.nodesByPath.size;
-  const culledNodeCount = input.renderSnapshot.culledNodePaths.size;
+  const cullingCounts = input.renderLifecycle.getCullingCounts();
   return {
     canvasId: input.canvasId,
     camera: { ...snapshot.camera },
     cameraState: snapshot.cameraState,
     mountedNodeCount,
-    visibleNodeCount: Math.max(0, mountedNodeCount - culledNodeCount),
-    culledNodeCount,
+    visibleNodeCount: cullingCounts.displayVisibleNodeCount,
+    culledNodeCount: cullingCounts.culledNodeCount,
     resourceZoom: input.resourceZoom,
     imageLayers: canvasImageLayerDebugCounts(input.surfaceElement)
   };

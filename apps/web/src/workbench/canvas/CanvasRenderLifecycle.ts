@@ -8,26 +8,37 @@ import {
   type CanvasRenderCoordinatorSnapshot,
   type CanvasRenderCoordinatorUpdateInput
 } from './CanvasRenderCoordinator.js';
-import type { CanvasVisibilityController } from './CanvasVisibilityController.js';
+import {
+  createCanvasCullingController,
+  type CanvasCullingCounts
+} from './CanvasCullingController.js';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction,
   CanvasRuntimeSnapshot
 } from './runtime/CanvasEditorRuntime.js';
+import type { CanvasRect } from './runtime/canvasGeometry.js';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime.js';
 import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection.js';
 
-export interface CanvasRenderLifecycle {
+export interface CanvasPreviewOrderSource {
+  getPreviewOrderSnapshot(): CanvasRect;
+  subscribePreviewOrder(listener: () => void): () => void;
+}
+
+export interface CanvasRenderLifecycle extends CanvasPreviewOrderSource {
   acceptProjection(projection: CanvasProjection): void;
   getSnapshot(): CanvasRenderCoordinatorSnapshot;
   subscribe(listener: () => void): () => void;
+  previewTierForNode(path: string): 0 | 1;
+  getCullingCounts(): CanvasCullingCounts;
 }
 
-export interface CanvasRenderLifecycleInput {
+interface CanvasRenderLifecycleInput {
   projection: CanvasProjection;
   runtime: CanvasEditorRuntime;
-  stageRuntime: Pick<CanvasStageRuntime, 'setCamera'>;
-  visibilityController: CanvasVisibilityController;
+  stageRuntime: Pick<CanvasStageRuntime,
+    'setCamera' | 'setNodeVisible' | 'setEdgeVisible'>;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
@@ -40,34 +51,28 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
     projection: input.projection,
     perfMonitor: input.perfMonitor
   });
+  const culling = createCanvasCullingController({ stageRuntime: input.stageRuntime });
   const listeners = new Set<() => void>();
-  let snapshot = coordinator.update(renderInput(input.runtime));
+  const previewOrderListeners = new Set<() => void>();
+  let scene = coordinator.update(renderInput(input.runtime));
+  let previewOrderSnapshot: CanvasRect = { x: 0, y: 0, width: 0, height: 0 };
   let pendingFrame: number | undefined;
   let frameEpoch = 0;
   let detachRuntime: (() => void) | undefined;
   let acceptedProjection = input.projection;
+  culling.acceptScene(scene);
 
-  const recordMovingQueued = () => {
+  const recordCounter = (name: 'viewport-cull-queued' | 'viewport-idle-publish'): void => {
     input.perfMonitor?.recordCounter({
       sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-      timestamp: canvasRenderLifecycleTimestamp(),
+      timestamp: performance.now(),
       source: 'CanvasRenderLifecycle',
-      name: 'render-moving-queued',
+      name,
       value: 1
     });
   };
 
-  const recordIdleFlush = () => {
-    input.perfMonitor?.recordCounter({
-      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-      timestamp: canvasRenderLifecycleTimestamp(),
-      source: 'CanvasRenderLifecycle',
-      name: 'render-idle-flush',
-      value: 1
-    });
-  };
-
-  const cancelPendingFrame = () => {
+  const cancelPendingFrame = (): void => {
     if (pendingFrame === undefined) {
       return;
     }
@@ -76,62 +81,84 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
     pendingFrame = undefined;
   };
 
-  const commitCurrent = (cancelPending: boolean) => {
-    if (cancelPending) {
-      cancelPendingFrame();
-    }
-    const runtimeSnapshot = input.runtime.getSnapshot();
-    const next = coordinator.update(renderInput(input.runtime, runtimeSnapshot));
-    input.visibilityController.sync({
-      nodesByPath: next.nodesByPath,
-      culledNodePaths: next.culledNodePaths,
-      selectedNodePaths: new Set(selectedNodeProjectRelativePaths(runtimeSnapshot.selection)),
-      activeNodePaths: new Set(activeNodeProjectRelativePaths(runtimeSnapshot.pointerInteraction))
-    });
-    if (next === snapshot) {
+  const syncCulling = (
+    runtimeSnapshot: CanvasRuntimeSnapshot = input.runtime.getSnapshot()
+  ): CanvasRect => culling.sync({
+    camera: runtimeSnapshot.camera,
+    surfaceSize: runtimeSnapshot.surfaceSize,
+    displayRetainedNodePaths: displayRetainedNodePaths(runtimeSnapshot)
+  });
+
+  const publishPreviewOrder = (
+    runtimeSnapshot: CanvasRuntimeSnapshot = input.runtime.getSnapshot()
+  ): void => {
+    const nextSnapshot = syncCulling(runtimeSnapshot);
+    if (sameCanvasRect(previewOrderSnapshot, nextSnapshot)) {
       return;
     }
-    snapshot = next;
-    for (const listener of listeners) {
+    previewOrderSnapshot = nextSnapshot;
+    for (const listener of previewOrderListeners) {
       listener();
     }
   };
 
-  const requestMoving = () => {
+  const commitScene = (): void => {
+    cancelPendingFrame();
+    const next = coordinator.update(renderInput(input.runtime));
+    if (next !== scene) {
+      scene = next;
+      culling.acceptScene(scene);
+      publishPreviewOrder(input.runtime.getSnapshot());
+      for (const listener of listeners) {
+        listener();
+      }
+      return;
+    }
+    syncCulling();
+  };
+
+  const requestCullingSync = (): void => {
     if (pendingFrame !== undefined) {
       return;
     }
-    recordMovingQueued();
+    recordCounter('viewport-cull-queued');
     const epoch = frameEpoch;
     pendingFrame = requestFrame(() => {
       if (epoch !== frameEpoch || pendingFrame === undefined) {
         return;
       }
       pendingFrame = undefined;
-      commitCurrent(false);
+      syncCulling();
     });
   };
 
-  const attachRuntime = () => {
+  const attachRuntime = (): void => {
     if (detachRuntime) {
       return;
     }
-    input.stageRuntime.setCamera(input.runtime.getSnapshot().camera);
+    const initialSnapshot = input.runtime.getSnapshot();
+    input.stageRuntime.setCamera(initialSnapshot.camera);
+    publishPreviewOrder(initialSnapshot);
     const detach = [
       input.runtime.subscribeCamera((camera) => {
         input.stageRuntime.setCamera(camera);
-        requestMoving();
+        requestCullingSync();
       }),
       input.runtime.subscribeCameraState((cameraState) => {
-        if (cameraState === 'idle') {
-          recordIdleFlush();
-          commitCurrent(true);
+        if (cameraState !== 'idle') {
+          return;
         }
+        recordCounter('viewport-idle-publish');
+        cancelPendingFrame();
+        publishPreviewOrder(input.runtime.getSnapshot());
       }),
-      input.runtime.subscribeSelection(() => commitCurrent(true)),
-      input.runtime.subscribeSurfaceSize(() => commitCurrent(true)),
-      input.runtime.subscribePointerInteraction(() => commitCurrent(true)),
-      input.runtime.manualLayout.subscribeRejection(() => commitCurrent(true))
+      input.runtime.subscribeSelection(() => syncCulling()),
+      input.runtime.subscribeSurfaceSize(() => {
+        cancelPendingFrame();
+        publishPreviewOrder(input.runtime.getSnapshot());
+      }),
+      input.runtime.subscribePointerInteraction(commitScene),
+      input.runtime.manualLayout.subscribeRejection(commitScene)
     ];
     detachRuntime = () => {
       cancelPendingFrame();
@@ -140,7 +167,6 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       }
       detachRuntime = undefined;
     };
-    commitCurrent(true);
   };
 
   return {
@@ -151,9 +177,9 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       acceptedProjection = projection;
       input.runtime.manualLayout.acceptProjection(projection);
       coordinator.setProjection(projection);
-      commitCurrent(true);
+      commitScene();
     },
-    getSnapshot: () => snapshot,
+    getSnapshot: () => scene,
     subscribe: (listener) => {
       listeners.add(listener);
       attachRuntime();
@@ -163,24 +189,30 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
           detachRuntime?.();
         }
       };
-    }
+    },
+    getPreviewOrderSnapshot: () => previewOrderSnapshot,
+    subscribePreviewOrder(listener) {
+      previewOrderListeners.add(listener);
+      return () => previewOrderListeners.delete(listener);
+    },
+    previewTierForNode: (path) => culling.isNodeInViewport(path) ? 0 : 1,
+    getCullingCounts: culling.getCounts
   };
 }
 
-function renderInput(
-  runtime: CanvasEditorRuntime,
-  snapshot: CanvasRuntimeSnapshot = runtime.getSnapshot()
-): CanvasRenderCoordinatorUpdateInput {
+function renderInput(runtime: CanvasEditorRuntime): CanvasRenderCoordinatorUpdateInput {
   const manualLayout = runtime.manualLayout.getPresentation();
   return {
-    camera: snapshot.camera,
-    cameraState: snapshot.cameraState,
-    surfaceSize: snapshot.surfaceSize,
-    selection: snapshot.selection,
-    activeNodePaths: activeNodeProjectRelativePaths(snapshot.pointerInteraction),
     layoutOverrides: manualLayout.layoutOverrides,
     stackOrder: manualLayout.stackOrder
   };
+}
+
+function displayRetainedNodePaths(snapshot: CanvasRuntimeSnapshot): ReadonlySet<string> {
+  return new Set([
+    ...selectedNodeProjectRelativePaths(snapshot.selection),
+    ...activeNodeProjectRelativePaths(snapshot.pointerInteraction)
+  ]);
 }
 
 function activeNodeProjectRelativePaths(state: CanvasRuntimePointerInteraction | undefined): string[] {
@@ -192,6 +224,9 @@ function activeNodeProjectRelativePaths(state: CanvasRuntimePointerInteraction |
     : [state.node.projectRelativePath];
 }
 
-function canvasRenderLifecycleTimestamp(): number {
-  return performance.now();
+function sameCanvasRect(left: CanvasRect, right: CanvasRect): boolean {
+  return left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height;
 }

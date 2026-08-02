@@ -18,47 +18,46 @@ Camera movement is not a React geometry loop. `CanvasEditorRuntime` publishes
 the live camera and `CanvasStageRuntime` writes the stage transform directly.
 Each mounted `CanvasSurface` has one `CanvasRenderLifecycle` bound to its
 `CanvasEditorRuntime`. The lifecycle owns the current accepted Canvas
-Projection, its `CanvasRenderCoordinator`, the published render snapshot,
-visibility synchronization, render-related Runtime subscriptions, and at most
-one pending animation-frame invalidation. React reads that snapshot through an
-external-store subscription; it does not coordinate the underlying input
+Projection, its `CanvasRenderCoordinator`, the stable full-scene render
+snapshot, culling synchronization, preview-order publication, render-related
+Runtime subscriptions, and at most one pending animation-frame cull. React
+reads the scene snapshot through
+an external-store subscription; it does not coordinate the underlying input
 lifetimes.
 
-Moving camera events update the stage immediately and coalesce render
-recomputation onto one animation frame. A pending frame captures no camera,
-selection, drag, surface, Projection, or Manual Layout value; when it runs, it
-re-reads the latest complete Runtime and lifecycle state. Projection changes,
-selection changes, surface-size changes, drag changes, and Manual Layout
-rejection cancel a pending moving frame and publish one current snapshot
-immediately. When camera movement becomes idle, the lifecycle likewise cancels
-pending work and flushes the final state. Detaching the last snapshot subscriber
-removes the Runtime subscriptions and cancels pending work, so a callback from
-an older mounted lifetime cannot publish later.
+`CanvasRenderCoordinator` composes every current Projected Canvas node and
+every routed edge into that scene. Manual Layout Draft geometry and stack order
+replace their projected values, and connected edges are rerouted from the same
+draft geometry. Camera, surface size, selection, and viewport position never
+change React scene membership. Projection and Manual Layout changes publish a
+new scene; ordinary camera movement retains the exact same scene snapshot.
 
-Within that lifecycle, `CanvasRenderCoordinator` calculates mounted render
-membership. It builds reusable spatial indexes for nodes and routed edge
-segments, queries an overscanned virtual rectangle, and refreshes a moving
-snapshot only when the live viewport approaches the retained margin or a zoom
-change makes the previous virtual area too broad. Geometry or edge membership
-changes rebuild the index once; availability, presentation, and stack-order-
-only changes update current node data without rebuilding spatial membership.
+Moving camera events update the stage transform immediately and coalesce one
+exact-viewport query onto the next animation frame. `CanvasCullingController`
+keeps culling cost bounded by current scene complexity rather than the canvas
+area covered by a low-zoom viewport. Repeating synchronization with the same
+scene, camera, and surface does not repeat geometric work, while
+`CanvasStageRuntime` writes only changed node-shell and edge-layer `display`
+values. Selected and active move/resize nodes remain display-visible when they
+are outside the viewport, but retention-only changes do not repeat geometric
+work or make those nodes viewport-priority preview targets. These direct DOM
+writes do not publish a React scene snapshot and do not remove node-local preview
+state. This culling state is a rendering decision, not Canvas Document visibility.
 
-Selection, active move/resize paths, and Manual Layout Drafts pin the affected
-nodes into the snapshot. Edges are queried independently of endpoint-node
-mounting and are rerouted from draft geometry when an endpoint moves or
-resizes. Ordinary snapshot composition maps only the nodes returned by the
-virtualization query through the current Projection. Manual Layout is a small
-path-keyed overlay: the coordinator fetches those nodes directly, uses a
-membership-time node-to-edge adjacency index to find only connected edges, and
-merges rerouted segments in Projection order. It does not copy every Projected
-node or scan every edge for each local draft update.
+When camera movement becomes idle, the lifecycle ensures that the final camera
+has been synchronized and publishes its viewport rectangle for preview-resource
+ordering without repeating already completed culling work. Producers divide
+current work into two tiers: nodes intersecting the exact viewport, then every
+remaining node. The viewport never admits, cancels, or delays required preview
+production. Projection, surface-size, and Manual Layout changes publish the
+corresponding current scene and preview order immediately. Detaching the last
+scene subscriber removes the Runtime subscriptions and cancels pending work, so
+a callback from an older mounted lifetime cannot publish later.
 
-Image and text nodes retain stable component identity while they belong to the
-active Canvas, even when offscreen. Other node types can be omitted outside the
-virtual rectangle. `CanvasVisibilityController` turns retained-but-culled node
-shells on and off through cached stage writes; selected and active nodes remain
-display-visible. This culling state is a rendering decision, not Canvas
-Document visibility.
+There is no Canvas mount virtualization, retained virtual rectangle, overscan,
+or node-type retention exception. All current node shells and edge layers remain
+mounted until their Canvas membership ends. The exact viewport controls direct
+DOM culling and foreground-versus-background preview order only.
 
 ## Image Preview Source Selection
 
@@ -96,9 +95,11 @@ intentional blur or visible loss of quality.
 
 Resource zoom follows the live camera while idle, freezes at the last idle zoom
 for the whole movement, and catches up to the final camera zoom when movement
-settles. This keeps camera transforms independent from preview-resolution churn.
-The short camera-idle threshold answers only whether interaction is still in
-progress; it does not authorize an immediate quality replacement.
+settles. A pure pan leaves the resource-zoom state untouched at both the moving
+and idle transitions, so it does not render `CanvasSurface`. This keeps camera
+transforms independent from preview-resolution churn. The short camera-idle
+threshold answers only whether interaction is still in progress; it does not
+authorize an immediate quality replacement.
 
 ## Node-Local Image Lifecycle
 
@@ -111,9 +112,10 @@ projection is not copied into every image provider value. An image node reads
 it only when its desired source actually changes or queued work runs, so pan
 and drag state edges do not rerun every image resource effect.
 
-The first eligible display-visible image may begin immediately. Once an image
-is loaded, camera movement and culling retain it and suppress replacement
-quality work. A different desired preview becomes a hidden next image while the
+The first eligible image enters the shared scheduler like any other preview
+start. Once an image is loaded, camera movement retains it and suppresses
+replacement quality work until interaction ends. Culling never controls image
+production. A different desired preview becomes a hidden next image while the
 loaded image stays visible. A matching browser load event promotes the next
 image only after a paint opportunity; stale load events are ignored. A failed
 replacement leaves the loaded image intact, retry affects one node, and a
@@ -121,8 +123,8 @@ source-revision change resets only that node.
 
 The direct-source tier uses the same loaded/next handoff and revision identity
 as derived variants; reaching source width never replaces the visible image
-before the original can be painted. Leaving and re-entering the viewport
-therefore does not recreate the image resource or flash a placeholder. Node
+before the original can be painted. Leaving and re-entering the viewport does
+not recreate the image resource or flash a placeholder. Node
 deletion naturally releases its local state. There is no production-wide image
 asset runtime, loading-plan store, or decoded-image budget acting as the source
 of truth.
@@ -141,30 +143,40 @@ The scheduler:
 - coalesces queued request starts and queued result publications independently
   by preview kind and node identity, with the newest work in each phase winning;
 - pauses deferred starts while camera movement or node dragging is active;
-- starts current visible queued work on the next animation frame after
+- starts current queued work on the next animation frame after
   interaction becomes idle;
 - shares a three-operation animation-frame budget across eligible request starts
   and image or text result publications;
-- gives ready publications priority over starting more resource work; and
-- rechecks current identity and culling immediately before either operation.
+- processes exact-viewport publications, exact-viewport starts, remaining
+  publications, then remaining starts; and
+- rechecks current identity immediately before either operation.
 
 The camera-idle boundary is the only time gate. Resource zoom remains fixed
 while the camera moves, and queued starts coalesce by node, so intermediate
 image, video, or text-preview tiers are already suppressed without a second
 post-idle timer.
-Once idle, current visible starts and ready publications share the next-frame
-budget. Publications enter React as low-priority transitions so new input can
-preempt them. Stale publications are discarded. Culled publications and
-still-current request starts stay deferred until a later idle visibility check
-rather than committing offscreen, losing eligible work, or restarting already
-completed decode work.
+Once idle, current starts and ready publications share the next-frame budget.
+Publications enter React as low-priority transitions so new input can preempt
+them. Stale work is discarded; current offscreen work proceeds in the second
+priority tier. The scheduler therefore completes the current preview set even
+when the camera never visits every node.
 
-Immediate first loads, source revision changes, explicit retries, and
-not-eligible transitions remain node-owned. A direct-source image is immediate
-when it is the first eligible resource; a later quality replacement starts from
-the shared next-frame budget after interaction becomes idle. Scheduled request
-starts are discarded when stale. A current culled start is retained without
-scheduling an animation-frame loop until visibility changes.
+Text and video preview producers observe interaction imperatively. A moving
+transition updates their gate and capture-lane frame scheduling without
+publishing a React provider snapshot. An idle transition reruns provider work
+only when that provider still owns pending work; a stable completed Canvas does
+not commit either provider merely because camera state changed.
+
+Source revision changes, explicit retries, already-loaded identities, and
+not-eligible transitions remain immediate node-owned state changes. Initial
+image loads and later quality replacements start from the shared frame budget
+after interaction becomes idle. Scheduled request starts are discarded only
+when stale, not because their node is offscreen.
+
+Text and video preview Runtime contexts expose stable command surfaces and
+path-local external-store subscriptions. A presentation, error, or source
+change for one path therefore rerenders that node shell without broadcasting a
+new provider value to every mounted text or video node.
 
 ## Local Image Preview Service And Cache
 
@@ -400,6 +412,9 @@ diagnostics directly instead of turning on the live global probe.
 frames; ownership-specific counters; final Canvas counts; and optional Long
 Animation Frame entries. Summaries report observed work rather than making
 machine-dependent timing promises.
+When diagnostics are enabled, one React Profiler boundary surrounds the Canvas
+surface subtree so the `react-commit` counter includes nested preview-provider
+and node commits rather than only `CanvasSurface` renders.
 
 `CanvasPerfBrowserAdapter` maps session boundaries to browser performance marks
 and measures and observes non-buffered Long Animation Frames only when supported

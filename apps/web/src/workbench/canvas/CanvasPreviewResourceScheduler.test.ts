@@ -1,29 +1,49 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
-import type { CanvasPerfMonitor } from './CanvasPerfMonitor';
+import {
+  createCanvasPreviewResourceScheduler,
+  type CanvasPreviewPriorityTier
+} from './CanvasPreviewResourceScheduler.js';
+import type { CanvasPerfMonitor } from './CanvasPerfMonitor.js';
 
 describe('CanvasPreviewResourceScheduler', () => {
   it('exposes the current interaction state to resource consumers', () => {
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: () => 1,
       cancelFrame: vi.fn()
     });
 
-    expect(scheduler.getInteractionState()).toEqual({
+    const initial = scheduler.getInteractionState();
+    const listener = vi.fn();
+    const unsubscribe = scheduler.subscribeInteraction(listener);
+    expect(initial).toEqual({
       cameraState: 'idle',
       pointerInteractionActive: false
     });
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
+    expect(scheduler.getInteractionState()).toBe(initial);
+    expect(listener).not.toHaveBeenCalled();
+
     scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: true });
     expect(scheduler.getInteractionState()).toEqual({
       cameraState: 'moving',
       pointerInteractionActive: true
     });
+    expect(scheduler.getInteractionState()).not.toBe(initial);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({
+      cameraState: 'moving',
+      pointerInteractionActive: true
+    });
+
+    unsubscribe();
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it('shares one three-operation frame budget between result publications and request starts', () => {
     const frames: FrameRequestCallback[] = [];
     const published: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -39,7 +59,6 @@ describe('CanvasPreviewResourceScheduler', () => {
         sourceKey: `${nodeId}:source`,
         targetWidth: 640,
         isCurrent: () => true,
-        isCulled: () => false,
         run: () => published.push(nodeId)
       });
     }
@@ -50,7 +69,6 @@ describe('CanvasPreviewResourceScheduler', () => {
         sourceKey: `${nodeId}:source`,
         targetWidth: 640,
         isCurrent: () => true,
-        isCulled: () => false,
         run: () => published.push(nodeId)
       });
     }
@@ -65,11 +83,11 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(published).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('defers a culled publication until a later idle visibility check makes it current', () => {
+  it('runs background publication work without requiring a visibility change', () => {
     const frames: FrameRequestCallback[] = [];
     const published: string[] = [];
-    let culled = true;
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
+      priorityForNode: () => 1,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -83,14 +101,10 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'notes:source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => culled,
       run: () => published.push('notes.md')
     });
 
-    expect(frames).toEqual([]);
-
-    culled = false;
-    scheduler.notifyVisibilityChanged();
+    expect(frames).toHaveLength(1);
     frames[0]?.(16);
 
     expect(published).toEqual(['notes.md']);
@@ -98,8 +112,7 @@ describe('CanvasPreviewResourceScheduler', () => {
 
   it('does not treat a repeated identical interaction state as a new scheduling event', () => {
     const frames: FrameRequestCallback[] = [];
-    let culled = true;
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -113,24 +126,23 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => culled,
       run: vi.fn()
     });
-    expect(frames).toEqual([]);
+    expect(frames).toHaveLength(1);
 
-    culled = false;
     scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
-    expect(frames).toEqual([]);
-
-    scheduler.notifyVisibilityChanged();
     expect(frames).toHaveLength(1);
   });
 
-  it('retains a current culled start until a later visibility check makes it eligible', () => {
+  it('orders viewport work before background work while completing both', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    let culled = true;
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const priorityByNode = new Map([
+      ['background.md', 1 as const],
+      ['visible.md', 0 as const]
+    ]);
+    const scheduler = createScheduler({
+      priorityForNode: (path) => priorityByNode.get(path) ?? 1,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -140,28 +152,91 @@ describe('CanvasPreviewResourceScheduler', () => {
 
     scheduler.enqueue({
       kind: 'text',
-      nodeId: 'notes.md',
-      sourceKey: 'notes:source',
+      nodeId: 'background.md',
+      sourceKey: 'background:source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => culled,
-      run: () => started.push('notes.md')
+      run: () => started.push('background.md')
     });
-    expect(frames).toEqual([]);
-    expect(started).toEqual([]);
-
-    culled = false;
-    scheduler.notifyVisibilityChanged();
+    scheduler.enqueue({
+      kind: 'text',
+      nodeId: 'visible.md',
+      sourceKey: 'visible:source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      run: () => started.push('visible.md')
+    });
     frames[0]?.(16);
 
-    expect(started).toEqual(['notes.md']);
+    expect(started).toEqual(['visible.md', 'background.md']);
+  });
+
+  it('orders publications before starts inside each viewport tier', () => {
+    const frames: FrameRequestCallback[] = [];
+    const operations: string[] = [];
+    const scheduler = createScheduler({
+      priorityForNode: (path) => path.startsWith('visible') ? 0 : 1,
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: vi.fn()
+    });
+
+    scheduler.enqueue({
+      kind: 'image',
+      nodeId: 'background-start',
+      sourceKey: 'background-start',
+      targetWidth: 640,
+      isCurrent: () => true,
+      run: () => operations.push('background-start')
+    });
+    scheduler.enqueuePublication({
+      kind: 'text',
+      nodeId: 'background-publication',
+      sourceKey: 'background-publication',
+      targetWidth: 640,
+      isCurrent: () => true,
+      run: () => operations.push('background-publication')
+    });
+    scheduler.enqueue({
+      kind: 'image',
+      nodeId: 'visible-start',
+      sourceKey: 'visible-start',
+      targetWidth: 640,
+      isCurrent: () => true,
+      run: () => operations.push('visible-start')
+    });
+    scheduler.enqueuePublication({
+      kind: 'text',
+      nodeId: 'visible-publication',
+      sourceKey: 'visible-publication',
+      targetWidth: 640,
+      isCurrent: () => true,
+      run: () => operations.push('visible-publication')
+    });
+
+    frames[0]?.(16);
+    expect(operations).toEqual([
+      'visible-publication',
+      'visible-start',
+      'background-publication'
+    ]);
+
+    frames[1]?.(32);
+    expect(operations).toEqual([
+      'visible-publication',
+      'visible-start',
+      'background-publication',
+      'background-start'
+    ]);
   });
 
   it('cancels a pending publication frame when interaction resumes', () => {
     const frames: FrameRequestCallback[] = [];
     const canceled: number[] = [];
     const published: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -175,7 +250,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'cover:source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: () => published.push('cover.png')
     });
     scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: false });
@@ -190,10 +264,10 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(published).toEqual(['cover.png']);
   });
 
-  it('starts at most three current visible requests per frame while idle', () => {
+  it('starts at most three current requests per frame while idle', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -209,7 +283,6 @@ describe('CanvasPreviewResourceScheduler', () => {
         sourceKey: `${nodeId}:source`,
         targetWidth: 640,
         isCurrent: () => true,
-        isCulled: () => false,
         run: () => started.push(nodeId)
       });
     }
@@ -227,7 +300,7 @@ describe('CanvasPreviewResourceScheduler', () => {
   it('starts an idle request on the next animation frame', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -242,7 +315,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: () => started.push('cover.png')
     });
 
@@ -255,7 +327,7 @@ describe('CanvasPreviewResourceScheduler', () => {
   it('coalesces by preview kind and node id with newest request winning', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -270,7 +342,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'old',
       targetWidth: 320,
       isCurrent: () => true,
-      isCulled: () => false,
       run: () => started.push('old')
     });
     scheduler.enqueue({
@@ -279,7 +350,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'new',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: () => started.push('new')
     });
 
@@ -291,7 +361,7 @@ describe('CanvasPreviewResourceScheduler', () => {
   it('pauses queued starts while camera movement or drag is active', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -306,7 +376,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: () => started.push('notes.md')
     });
 
@@ -322,11 +391,49 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(started).toEqual(['notes.md']);
   });
 
+  it('does not schedule queued background work until the active interaction ends', () => {
+    const frames: FrameRequestCallback[] = [];
+    const counters: string[] = [];
+    const started: string[] = [];
+    const perfMonitor = {
+      recordCounter: (input) => counters.push(input.name)
+    } satisfies Pick<CanvasPerfMonitor, 'recordCounter'>;
+    const scheduler = createScheduler({
+      perfMonitor,
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: vi.fn()
+    });
+
+    scheduler.setInteractionState({ cameraState: 'moving', pointerInteractionActive: false });
+    scheduler.enqueue({
+      kind: 'image',
+      nodeId: 'cover.png',
+      sourceKey: 'source',
+      targetWidth: 640,
+      isCurrent: () => true,
+      run: () => started.push('cover.png')
+    });
+    expect(frames).toEqual([]);
+    expect(counters).toEqual([
+      'preview-resource-queued',
+      'preview-resource-paused-moving'
+    ]);
+
+    scheduler.setInteractionState({ cameraState: 'idle', pointerInteractionActive: false });
+    expect(frames).toHaveLength(1);
+    frames[0]?.(16);
+
+    expect(started).toEqual(['cover.png']);
+  });
+
   it('cancels a pending start frame when interaction begins before the frame fires', () => {
     const frames: FrameRequestCallback[] = [];
     const canceled: number[] = [];
     const started: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -341,7 +448,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: () => started.push('cover.png')
     });
 
@@ -359,10 +465,10 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(started).toEqual(['cover.png']);
   });
 
-  it('skips stale and culled requests at start time', () => {
+  it('skips stale requests but still runs current background requests', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -377,22 +483,20 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'old',
       targetWidth: 320,
       isCurrent: () => false,
-      isCulled: () => false,
       run: () => started.push('stale')
     });
     scheduler.enqueue({
       kind: 'image',
-      nodeId: 'culled.png',
+      nodeId: 'background.png',
       sourceKey: 'current',
       targetWidth: 320,
       isCurrent: () => true,
-      isCulled: () => true,
-      run: () => started.push('culled')
+      run: () => started.push('background')
     });
 
     frames[0]?.(16);
 
-    expect(started).toEqual([]);
+    expect(started).toEqual(['background']);
   });
 
   it('records scheduler counters', () => {
@@ -401,7 +505,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     const perfMonitor = {
       recordCounter: (input) => counters.push(input.name)
     } satisfies Pick<CanvasPerfMonitor, 'recordCounter'>;
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       perfMonitor,
       now: () => 10,
       requestFrame: (callback) => {
@@ -418,7 +522,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'old',
       targetWidth: 320,
       isCurrent: () => true,
-      isCulled: () => false,
       run: vi.fn()
     });
     scheduler.enqueue({
@@ -427,7 +530,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'new',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: vi.fn()
     });
     frames[0]?.(16);
@@ -445,7 +547,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     const perfMonitor = {
       recordCounter: (input) => counters.push(input.name)
     } satisfies Pick<CanvasPerfMonitor, 'recordCounter'>;
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       perfMonitor,
       requestFrame: (callback) => {
         frames.push(callback);
@@ -460,7 +562,6 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'cover:source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: vi.fn()
     });
     frames[0]?.(16);
@@ -476,7 +577,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     const perfMonitor = {
       recordCounter: (input) => counters.push(input.name)
     } satisfies Pick<CanvasPerfMonitor, 'recordCounter'>;
-    const scheduler = createCanvasPreviewResourceScheduler({
+    const scheduler = createScheduler({
       perfMonitor,
       requestFrame: vi.fn(),
       cancelFrame: vi.fn()
@@ -490,10 +591,20 @@ describe('CanvasPreviewResourceScheduler', () => {
       sourceKey: 'source',
       targetWidth: 640,
       isCurrent: () => true,
-      isCulled: () => false,
       run: vi.fn()
     });
 
     expect(counters).toEqual(['preview-resource-queued']);
   });
 });
+
+function createScheduler(
+  input: Omit<Parameters<typeof createCanvasPreviewResourceScheduler>[0], 'priorityForNode'> & {
+    priorityForNode?: (nodeId: string) => CanvasPreviewPriorityTier;
+  }
+) {
+  return createCanvasPreviewResourceScheduler({
+    priorityForNode: () => 0,
+    ...input
+  });
+}

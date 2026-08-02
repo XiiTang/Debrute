@@ -10,23 +10,30 @@ export interface CanvasNodeLayout {
   z: number;
 }
 
-interface RegisteredCanvasNode {
-  element?: HTMLElement;
-  layout?: CanvasNodeLayout;
+interface RegisteredCanvasDisplay<TElement extends HTMLElement | SVGSVGElement> {
+  element?: TElement;
   visible?: boolean;
+  lastDisplay?: string;
+}
+
+interface RegisteredCanvasNode extends RegisteredCanvasDisplay<HTMLElement> {
+  layout?: CanvasNodeLayout;
   lastTransform?: string;
   lastWidth?: string;
   lastHeight?: string;
   lastZIndex?: string;
-  lastDisplay?: string;
 }
+
+type RegisteredCanvasEdge = RegisteredCanvasDisplay<SVGSVGElement>;
 
 export interface CanvasStageRuntime {
   bindStage(stage: HTMLElement): () => void;
   setCamera(camera: CanvasCamera): void;
   registerNodeShell(path: string, element: HTMLElement): () => void;
+  registerEdgeLayer(id: string, element: SVGSVGElement): () => void;
   setNodeLayout(path: string, layout: CanvasNodeLayout): void;
   setNodeVisible(path: string, visible: boolean): void;
+  setEdgeVisible(id: string, visible: boolean): void;
   dispose(): void;
 }
 
@@ -36,6 +43,7 @@ export interface CanvasStageRuntimeInput {
 
 export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): CanvasStageRuntime {
   const nodes = new Map<string, RegisteredCanvasNode>();
+  const edges = new Map<string, RegisteredCanvasEdge>();
   let stage: HTMLElement | undefined;
   let camera: CanvasCamera | undefined;
   let lastCameraTransform: string | undefined;
@@ -118,12 +126,26 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
         writeNodeLayout(record, record.layout);
       }
       if (record.visible !== undefined) {
-        recordCounter(writeNodeDisplay(record, record.visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
+        recordCounter(writeDisplay(record, record.visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
       }
       return () => {
         const current = nodes.get(path);
         if (current?.element === element) {
           nodes.delete(path);
+        }
+      };
+    },
+    registerEdgeLayer: (id, element) => {
+      const record = edges.get(id) ?? {};
+      record.element = element;
+      edges.set(id, record);
+      if (record.visible !== undefined) {
+        recordCounter(writeDisplay(record, record.visible) ? 'stage-edge-visibility-write' : 'stage-edge-visibility-noop');
+      }
+      return () => {
+        const current = edges.get(id);
+        if (current?.element === element) {
+          edges.delete(id);
         }
       };
     },
@@ -142,10 +164,20 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
         return;
       }
       node.visible = visible;
-      recordCounter(writeNodeDisplay(node, visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
+      recordCounter(writeDisplay(node, visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
+    },
+    setEdgeVisible: (id, visible) => {
+      const edge = edges.get(id);
+      if (!edge) {
+        edges.set(id, { visible });
+        return;
+      }
+      edge.visible = visible;
+      recordCounter(writeDisplay(edge, visible) ? 'stage-edge-visibility-write' : 'stage-edge-visibility-noop');
     },
     dispose: () => {
       nodes.clear();
+      edges.clear();
       stage = undefined;
       camera = undefined;
     }
@@ -181,16 +213,19 @@ function writeStyleProperty(
   return true;
 }
 
-function writeNodeDisplay(node: RegisteredCanvasNode, visible: boolean): boolean {
-  if (!node.element) {
+function writeDisplay<TElement extends HTMLElement | SVGSVGElement>(
+  record: RegisteredCanvasDisplay<TElement>,
+  visible: boolean
+): boolean {
+  if (!record.element) {
     return false;
   }
   const display = visible ? 'block' : 'none';
-  if (node.lastDisplay === display) {
+  if (record.lastDisplay === display) {
     return false;
   }
-  node.lastDisplay = display;
-  node.element.style.setProperty('display', display);
+  record.lastDisplay = display;
+  record.element.style.setProperty('display', display);
   return true;
 }
 

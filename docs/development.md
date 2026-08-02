@@ -248,7 +248,7 @@ behavior remain source-owned.
 The Canvas source/pushed/projection split, registry and identity rules,
 membership expansion, automatic and manual layout, stack order, and transient
 Workbench interaction model are documented in [`canvas.md`](./canvas.md).
-Rendering, virtualization, image preview resources, cache reconciliation, and
+Rendering, viewport culling, image preview resources, cache reconciliation, and
 development-only performance diagnostics are documented in
 [`canvas-rendering.md`](./canvas-rendering.md).
 Project text access, Workbench buffer saves, CodeMirror, persisted Canvas text

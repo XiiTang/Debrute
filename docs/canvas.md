@@ -449,13 +449,14 @@ state.
 - `CanvasEditorRuntime` owns camera, coordinates, input, selection, and pointer interaction
   state.
 - One `CanvasRenderLifecycle` per mounted `CanvasSurface` owns the accepted
-  Projection, render-related Runtime subscriptions, render scheduling,
-  visibility sync, and the single externally published render snapshot.
-  Pending moving work always recomputes from current Runtime and Manual Layout
-  state.
-- Its `CanvasRenderCoordinator` combines Projection, Manual Layout Drafts,
-  selection, active nodes, and virtualization into that render snapshot.
-- `CanvasStageRuntime` performs cached stage-camera and node-shell DOM writes.
+  Projection, render-related Runtime subscriptions, the stable full-scene
+  render snapshot, and coalesced viewport synchronization.
+- Its `CanvasRenderCoordinator` combines every current Projected node and edge
+  with Manual Layout Draft geometry and stack order. Camera movement does not
+  change React scene membership.
+- `CanvasStageRuntime` performs cached stage-camera, node-shell, and edge-layer
+  DOM writes. Exact-viewport culling changes `display` directly while keeping
+  all current nodes and edges mounted.
 - `CanvasOverlayRuntime` places screen-space overlays from Canvas geometry.
 - React composes controls and node content; it does not become the per-pointer
   geometry store.

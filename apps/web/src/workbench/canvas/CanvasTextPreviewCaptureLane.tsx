@@ -19,6 +19,10 @@ import type {
   CanvasTextPreparedFont,
   CanvasTextRenderProfile
 } from './CanvasTextRenderProfile.js';
+import {
+  canvasPreviewResourceInteractionActive,
+  type CanvasPreviewResourceScheduler
+} from './CanvasPreviewResourceScheduler.js';
 
 const CANVAS_TEXT_PREVIEW_LAYOUT_FRAME_LIMIT = 30;
 const CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
@@ -33,7 +37,7 @@ export interface CanvasTextPreviewCaptureLaneProps {
   target: CanvasTextPreviewCaptureTarget | undefined;
   renderProfile: CanvasTextRenderProfile;
   preparedFont: CanvasTextPreparedFont | undefined;
-  interactionActive: boolean;
+  interactionSource: Pick<CanvasPreviewResourceScheduler, 'getInteractionState' | 'subscribeInteraction'>;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   onRasterized(target: CanvasTextPreviewCaptureTarget, result: CanvasTextPreviewCaptureResult): void;
   onFailure(target: CanvasTextPreviewCaptureTarget, failure: CanvasTextPreviewFailure): void;
@@ -57,7 +61,7 @@ export function CanvasTextPreviewCaptureLane({
   target,
   renderProfile,
   preparedFont,
-  interactionActive,
+  interactionSource,
   perfMonitor,
   onRasterized,
   onFailure
@@ -65,12 +69,13 @@ export function CanvasTextPreviewCaptureLane({
   const elementRef = useRef<HTMLDivElement | null>(null);
   const jobRef = useRef<LaneJob | undefined>(undefined);
   const captureInFlightRef = useRef(false);
-  const interactionActiveRef = useRef(interactionActive);
+  const interactionActiveRef = useRef(
+    canvasPreviewResourceInteractionActive(interactionSource.getInteractionState())
+  );
   const onRasterizedRef = useRef(onRasterized);
   const onFailureRef = useRef(onFailure);
   const perfMonitorRef = useRef(perfMonitor);
   const layoutReadyTargetKeysRef = useRef(new Set<string>());
-  interactionActiveRef.current = interactionActive;
   onRasterizedRef.current = onRasterized;
   onFailureRef.current = onFailure;
   perfMonitorRef.current = perfMonitor;
@@ -241,19 +246,25 @@ export function CanvasTextPreviewCaptureLane({
   }, [disposeJob, preparedFont, renderProfile, scheduleJob, target, targetKey]);
 
   useEffect(() => {
-    const job = jobRef.current;
-    if (!job) {
-      return;
-    }
-    if (interactionActive) {
-      if (job.frame !== undefined) {
-        window.cancelAnimationFrame(job.frame);
-        job.frame = undefined;
+    const syncInteraction = (interaction: ReturnType<typeof interactionSource.getInteractionState>): void => {
+      const interactionActive = canvasPreviewResourceInteractionActive(interaction);
+      interactionActiveRef.current = interactionActive;
+      const job = jobRef.current;
+      if (!job) {
+        return;
       }
-      return;
-    }
-    scheduleJob();
-  }, [interactionActive, scheduleJob]);
+      if (interactionActive) {
+        if (job.frame !== undefined) {
+          window.cancelAnimationFrame(job.frame);
+          job.frame = undefined;
+        }
+        return;
+      }
+      scheduleJob();
+    };
+    syncInteraction(interactionSource.getInteractionState());
+    return interactionSource.subscribeInteraction(syncInteraction);
+  }, [interactionSource, scheduleJob]);
 
   const markEditorLayoutReady = useCallback(() => {
     if (targetKey) {

@@ -80,7 +80,6 @@ export type CanvasImageNodeAssetEvent =
       type: 'source-resolved';
       source: CanvasImageNodeResolvedSource;
       cameraState: CanvasCameraState;
-      culled: boolean;
     }
   | { type: 'next-loaded'; loadKey: string }
   | { type: 'next-failed'; loadKey: string; message: string }
@@ -228,28 +227,17 @@ export function deriveCanvasImageNodeRenderState(input: {
 
 export function shouldPublishCanvasImageNodeSourceImmediately(input: {
   source: CanvasImageNodeResolvedSource;
-  didResolveUrl: boolean;
   revisionChanged: boolean;
   retryRequested: boolean;
-  hasLoadedImage: boolean;
-  culled: boolean;
-  becameVisibleAfterCull: boolean;
-  pointerInteractionActive: boolean;
   loadedLoadKey: string | undefined;
 }): boolean {
   const sourceLoadKey = input.source.kind === 'source'
     ? input.source.image.loadKey
     : undefined;
-  if (input.source.kind === 'not-eligible'
+  return input.source.kind === 'not-eligible'
     || input.revisionChanged
     || input.retryRequested
-    || input.loadedLoadKey === sourceLoadKey) {
-    return true;
-  }
-  if (input.culled || input.becameVisibleAfterCull || input.pointerInteractionActive) {
-    return false;
-  }
-  return !input.didResolveUrl || !input.hasLoadedImage;
+    || input.loadedLoadKey === sourceLoadKey;
 }
 
 function reduceResolvedSource(
@@ -293,7 +281,7 @@ function reduceResolvedSource(
     };
   }
 
-  if (event.culled || (event.cameraState === 'moving' && base.loaded)) {
+  if (event.cameraState === 'moving' && base.loaded) {
     if (!base.next) {
       return base;
     }

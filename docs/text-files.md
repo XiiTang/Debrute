@@ -243,17 +243,16 @@ quota, LRU, or TTL applies to width variants.
 
 `CanvasTextPreviewRuntime` owns one real-time task registry keyed by Canvas ID
 and project-relative path; the current fingerprint is the task version. Every
-stable missing-or-stale target is admitted, including nodes outside both the
-real and virtual viewport. The same path is latest-wins: new input replaces
-pending work, invalidates a running target, and makes any stale read, capture,
+stable missing-or-stale target is admitted, including offscreen nodes. The same
+path is latest-wins: new input replaces pending work, invalidates a running target,
+and makes any stale read, capture,
 upload, or publication result ineligible. There is no frozen cohort, historical
 queue, viewport-admission queue, or editor-priority batch.
 
 Text and video canonical preview lanes share one pure scheduling rule while
 retaining separate executors. At each new-job boundary Workbench orders current
-tasks by real-viewport intersection, then virtual-viewport/overscan
-intersection, then every remaining node; each tier is ordered by `y`, `x`, and
-project-relative path. Camera movement and node dragging prevent new
+tasks by exact-viewport intersection, then every remaining node; each tier is
+ordered by `y`, `x`, and project-relative path. Camera movement and node dragging prevent new
 availability, content-read, coverage, font, and capture jobs from starting.
 In-flight reads, font work, capture, and upload may finish, but identity checks
 discard stale results. The latest stable viewport is consulted again at the
@@ -340,11 +339,11 @@ producer does not reimplement variant generation.
 
 Variant width uses the same node display width, settled resource zoom, device
 pixel ratio, and stepped raster scale model as image previews. Canonical source
-admission is viewport-independent, but width variants are presentation demand:
-the real viewport is scheduled before overscan, and nodes beyond the virtual
-viewport request no new current-width variant. Text variant mounts use the
-shared image/video/text resource-start scheduler; promotion and visible commit
-use its publication queue.
+admission and current-width variant production are viewport-independent. The
+exact viewport is scheduled before every remaining node, but all current
+variants are eventually requested. Text variant mounts use the shared
+image/video/text resource-start scheduler; promotion and visible commit use its
+publication queue.
 
 Presentation uses mounted visible and pending `<img>` layers. A pending variant
 is mounted once, and that DOM image owns network loading, error, and readiness.
@@ -355,11 +354,12 @@ rejection as a permanent preview failure can discard a valid image under memory
 pressure. It is promoted only if it is still the current source and DOM element;
 there is no preliminary `fetch(...).blob()` request. The prior visible image
 remains mounted throughout, including hidden retention beneath the selected
-editor. Mounting, promotion, and visible commit run only on eligible idle frames.
+editor. Mounting, promotion, and visible commit run on idle scheduler frames.
 Stale work is discarded by runtime epoch, target key, and source key.
 
-Viewport culling suppresses only presentation-resource work and retains an
-already committed image. It never removes or delays a canonical source task.
+Viewport culling changes only shell display. It does not suppress canonical
+source work, current-width variant work, mounted handoff, or committed preview
+state.
 
 ## Failure And Observability Contract
 

@@ -1,25 +1,16 @@
-export interface CanvasPreviewRect {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
+import type { CanvasRect } from './runtime/canvasGeometry.js';
+import { rectsIntersect } from './runtime/canvasGeometry.js';
 
-export interface CanvasPreviewSpatialTask extends CanvasPreviewRect {
+interface CanvasPreviewSpatialTask extends CanvasRect {
   readonly projectRelativePath: string;
-}
-
-export interface CanvasPreviewViewportPriority {
-  readonly visibleRect: CanvasPreviewRect;
-  readonly virtualRect: CanvasPreviewRect;
 }
 
 export function orderCanvasPreviewTasks<T extends CanvasPreviewSpatialTask>(
   tasks: readonly T[],
-  viewport: CanvasPreviewViewportPriority
+  visibleRect: CanvasRect
 ): T[] {
   return [...tasks].sort((left, right) => (
-    canvasPreviewPriorityTier(left, viewport) - canvasPreviewPriorityTier(right, viewport)
+    canvasPreviewPriorityTier(left, visibleRect) - canvasPreviewPriorityTier(right, visibleRect)
       || left.y - right.y
       || left.x - right.x
       || left.projectRelativePath.localeCompare(right.projectRelativePath)
@@ -28,17 +19,7 @@ export function orderCanvasPreviewTasks<T extends CanvasPreviewSpatialTask>(
 
 export function canvasPreviewPriorityTier(
   task: CanvasPreviewSpatialTask,
-  viewport: CanvasPreviewViewportPriority
-): 0 | 1 | 2 {
-  if (rectsIntersect(task, viewport.visibleRect)) {
-    return 0;
-  }
-  return rectsIntersect(task, viewport.virtualRect) ? 1 : 2;
-}
-
-function rectsIntersect(left: CanvasPreviewRect, right: CanvasPreviewRect): boolean {
-  return left.x < right.x + right.width
-    && left.x + left.width > right.x
-    && left.y < right.y + right.height
-    && left.y + left.height > right.y;
+  visibleRect: CanvasRect
+): 0 | 1 {
+  return rectsIntersect(task, visibleRect) ? 0 : 1;
 }

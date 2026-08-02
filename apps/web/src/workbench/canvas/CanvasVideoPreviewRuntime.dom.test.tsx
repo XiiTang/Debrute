@@ -7,11 +7,14 @@ import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { CanvasVideoPreviewSourceRequest } from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../types';
 import type { CanvasPreviewResourceRequest, CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
 import {
   CanvasVideoPreviewProvider,
   canvasVideoPreviewTargetsForNodes,
   shouldStartCanvasVideoPreviewSourceWork,
-  useCanvasVideoPreviewRuntime
+  useCanvasVideoPreviewNode,
+  useCanvasVideoPreviewRuntime,
+  type CanvasVideoPreviewRuntimeValue
 } from './CanvasVideoPreviewRuntime';
 
 let root: Root | undefined;
@@ -66,17 +69,22 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
   it('keeps pending video preview work paused during interaction and resumes it afterward', async () => {
     const node = videoNode('media/a.mp4', 'rev-a');
     const readCanvasVideoPreviewSources = vi.fn(async () => ({ sources: {} }));
-    const renderResult = await renderVideoPreviewProvider({
+    const previewResourceScheduler = createImmediateScheduler();
+    await renderVideoPreviewProvider({
       nodes: [node],
       actions: { readCanvasVideoPreviewSources } as unknown as WorkbenchActions,
       interactionActive: true,
+      previewResourceScheduler,
       children: <PreviewProbe node={node} />
     });
 
     await act(async () => undefined);
     expect(readCanvasVideoPreviewSources).not.toHaveBeenCalled();
 
-    await renderResult.rerender([node], false);
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'idle',
+      pointerInteractionActive: false
+    }));
     await act(async () => undefined);
     expect(readCanvasVideoPreviewSources).toHaveBeenCalled();
   });
@@ -124,7 +132,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     );
   });
 
-  it('retains a published video preview while interaction culls and reveals the node', async () => {
+  it('retains a published video preview throughout camera interaction', async () => {
     const node = videoNode('media/a.mp4', 'rev-a');
     const nodes = [node];
     const readCanvasVideoPreviewSources = vi.fn(async (input: CanvasVideoPreviewSourceRequest) => ({
@@ -148,12 +156,205 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     const previewSrc = container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src');
     expect(previewSrc).toBeTruthy();
 
-    await renderResult.rerender(nodes, true, new Set([node.projectRelativePath]));
+    await renderResult.rerender(nodes, true);
     expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toBe(previewSrc);
 
-    await renderResult.rerender(nodes, true, new Set());
+    await renderResult.rerender(nodes, false);
     expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toBe(previewSrc);
     expect(readCanvasVideoPreviewSources).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifies only the video node whose preview state changes', async () => {
+    const first = videoNode('media/first.mp4', 'rev-a');
+    const second = videoNode('media/second.mp4', 'rev-b');
+    const renders = new Map<string, number>();
+    let runtime: CanvasVideoPreviewRuntimeValue | undefined;
+    await renderVideoPreviewProvider({
+      nodes: [first, second],
+      actions: {
+        readCanvasVideoPreviewSources: async (input: CanvasVideoPreviewSourceRequest) => ({
+          sources: Object.fromEntries(input.targets.map((target) => [
+            target.projectRelativePath,
+            {
+              ...target,
+              status: 'available' as const,
+              sourceKind: 'initial-poster' as const,
+              sourceKey: `${target.projectRelativePath}:poster`,
+              sourceWidth: 1200
+            }
+          ]))
+        })
+      } as unknown as WorkbenchActions,
+      children: (
+        <>
+          <VideoPreviewRenderCountProbe node={first} renders={renders} />
+          <VideoPreviewRenderCountProbe node={second} renders={renders} />
+          <VideoRuntimeCapture onRuntime={(value) => { runtime = value; }} />
+        </>
+      )
+    });
+    await act(async () => undefined);
+    await act(async () => undefined);
+    const preview = runtime?.getNodeSnapshot(first).preview;
+    expect(preview).toBeDefined();
+    renders.clear();
+
+    await act(async () => runtime?.reportPreviewError({
+      projectRelativePath: first.projectRelativePath,
+      preview: preview!,
+      message: 'failed'
+    }));
+
+    expect(renders.get(first.projectRelativePath)).toBeGreaterThan(0);
+    expect(renders.get(second.projectRelativePath) ?? 0).toBe(0);
+  });
+
+  it('does not commit the stable video preview provider when Canvas interaction changes', async () => {
+    const previewResourceScheduler = createImmediateScheduler();
+    const node = videoNode('media/stable.mp4', 'rev-stable');
+    let commitCount = 0;
+    await renderVideoPreviewProvider({
+      nodes: [node],
+      actions: {
+        readCanvasVideoPreviewSources: async (input: CanvasVideoPreviewSourceRequest) => ({
+          sources: Object.fromEntries(input.targets.map((target) => [
+            target.projectRelativePath,
+            {
+              ...target,
+              status: 'available' as const,
+              sourceKind: 'initial-poster' as const,
+              sourceKey: 'stable-source',
+              sourceWidth: 1200
+            }
+          ]))
+        })
+      } as unknown as WorkbenchActions,
+      previewResourceScheduler,
+      onRender: () => {
+        commitCount += 1;
+      },
+      children: <PreviewProbe node={node} />
+    });
+    await act(async () => undefined);
+    expect(container?.querySelector('[data-preview-src]')).not.toBeNull();
+    commitCount = 0;
+
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'moving',
+      pointerInteractionActive: false
+    }));
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'idle',
+      pointerInteractionActive: false
+    }));
+
+    expect(commitCount).toBe(0);
+  });
+
+  it('publishes a source error that resolves while Canvas interaction is active', async () => {
+    const node = videoNode('media/error-during-pan.mp4', 'rev-a');
+    const sourceResponse = deferred<Awaited<ReturnType<WorkbenchActions['readCanvasVideoPreviewSources']>>>();
+    const previewResourceScheduler = createImmediateScheduler();
+    await renderVideoPreviewProvider({
+      nodes: [node],
+      actions: {
+        readCanvasVideoPreviewSources: () => sourceResponse.promise
+      } as unknown as WorkbenchActions,
+      previewResourceScheduler,
+      children: <PreviewProbe node={node} />
+    });
+
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'moving',
+      pointerInteractionActive: false
+    }));
+    await act(async () => sourceResponse.resolve({
+      sources: {
+        [node.projectRelativePath]: {
+          projectRelativePath: node.projectRelativePath,
+          videoRevision: 'rev-a',
+          currentTimeSeconds: 0,
+          status: 'error',
+          sourceKind: 'initial-poster',
+          message: 'poster failed during pan'
+        }
+      }
+    }));
+    expect(container?.querySelector('[data-preview-error]')).toBeNull();
+
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'idle',
+      pointerInteractionActive: false
+    }));
+
+    expect(container?.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe(
+      'poster failed during pan'
+    );
+  });
+
+  it('publishes a changed source identity that resolves while Canvas interaction is active', async () => {
+    const node = videoNode('media/source-during-pan.mp4', 'rev-a');
+    const nextSourceResponse = deferred<Awaited<ReturnType<WorkbenchActions['readCanvasVideoPreviewSources']>>>();
+    let sourceRequestCount = 0;
+    const readCanvasVideoPreviewSources = vi.fn<WorkbenchActions['readCanvasVideoPreviewSources']>(async (input) => (
+      (sourceRequestCount += 1) === 1
+        ? {
+            sources: Object.fromEntries(input.targets.map((target) => [
+              target.projectRelativePath,
+              {
+                ...target,
+                status: 'available' as const,
+                sourceKind: 'initial-poster' as const,
+                sourceKey: 'source-a',
+                sourceWidth: 1200
+              }
+            ]))
+          }
+        : nextSourceResponse.promise
+    ));
+    const previewResourceScheduler = createImmediateScheduler();
+    const renderResult = await renderVideoPreviewProvider({
+      nodes: [node],
+      actions: { readCanvasVideoPreviewSources } as unknown as WorkbenchActions,
+      previewResourceScheduler,
+      children: <PreviewProbe node={node} />
+    });
+    await act(async () => undefined);
+    expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toContain(
+      'sourceKey=source-a'
+    );
+
+    await renderResult.rerender([{ ...node }]);
+    expect(readCanvasVideoPreviewSources).toHaveBeenCalledTimes(2);
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'moving',
+      pointerInteractionActive: false
+    }));
+    await act(async () => nextSourceResponse.resolve({
+      sources: {
+        [node.projectRelativePath]: {
+          projectRelativePath: node.projectRelativePath,
+          videoRevision: 'rev-a',
+          currentTimeSeconds: 0,
+          status: 'available',
+          sourceKind: 'initial-poster',
+          sourceKey: 'source-b',
+          sourceWidth: 1200
+        }
+      }
+    }));
+    expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toContain(
+      'sourceKey=source-a'
+    );
+
+    await act(async () => previewResourceScheduler.setInteractionState({
+      cameraState: 'idle',
+      pointerInteractionActive: false
+    }));
+
+    expect(container?.querySelector('[data-preview-src]')?.getAttribute('data-preview-src')).toContain(
+      'sourceKey=source-b'
+    );
   });
 
   it('exposes source errors for the current video target', async () => {
@@ -270,63 +471,89 @@ function VideoRuntimeConsumer(): React.ReactElement {
   return <div />;
 }
 
+function VideoRuntimeCapture({
+  onRuntime
+}: {
+  onRuntime: (runtime: CanvasVideoPreviewRuntimeValue) => void;
+}): React.ReactElement {
+  const runtime = useCanvasVideoPreviewRuntime();
+  React.useEffect(() => onRuntime(runtime), [onRuntime, runtime]);
+  return <div />;
+}
+
+function VideoPreviewRenderCountProbe({
+  node,
+  renders
+}: {
+  node: ProjectedCanvasNode;
+  renders: Map<string, number>;
+}): React.ReactElement {
+  useCanvasVideoPreviewNode(node);
+  renders.set(node.projectRelativePath, (renders.get(node.projectRelativePath) ?? 0) + 1);
+  return <div />;
+}
+
 async function renderVideoPreviewProvider(input: {
   nodes: ProjectedCanvasNode[];
   actions: WorkbenchActions;
   children: React.ReactNode;
   interactionActive?: boolean | undefined;
+  previewResourceScheduler?: CanvasPreviewResourceScheduler | undefined;
+  onRender?: React.ProfilerOnRenderCallback | undefined;
 }): Promise<{
   rerender(
     nodes: ProjectedCanvasNode[],
-    interactionActive?: boolean,
-    culledNodePaths?: ReadonlySet<string>
+    interactionActive?: boolean
   ): Promise<void>;
 }> {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   const activeVideoPaths = new Set<string>();
-  const defaultCulledNodePaths = new Set<string>();
-  const previewResourceScheduler = createImmediateScheduler();
+  const previewResourceScheduler = input.previewResourceScheduler ?? createImmediateScheduler();
   const render = (
     nodes: ProjectedCanvasNode[],
-    interactionActive = input.interactionActive ?? false,
-    culledNodePaths: ReadonlySet<string> = defaultCulledNodePaths
+    interactionActive = input.interactionActive ?? false
   ) => {
-    root?.render(
+    previewResourceScheduler.setInteractionState({
+      cameraState: interactionActive ? 'moving' : 'idle',
+      pointerInteractionActive: false
+    });
+    const previewOrder = previewOrderSource();
+    const tree = (
       <CanvasVideoPreviewProvider
         canvasId="canvas-1"
         nodes={nodes}
         activeVideoPaths={activeVideoPaths}
         actions={input.actions}
-        interactionActive={interactionActive}
         resourceZoom={0.1}
         devicePixelRatio={2}
-        culledNodePaths={culledNodePaths}
-        visibleRect={{ x: 0, y: 0, width: 1000, height: 1000 }}
-        virtualRect={{ x: -1000, y: -1000, width: 3000, height: 3000 }}
+        previewOrder={previewOrder}
         previewResourceScheduler={previewResourceScheduler}
       >
         {input.children}
       </CanvasVideoPreviewProvider>
     );
+    root?.render(input.onRender ? (
+      <React.Profiler id="canvas-video-preview-provider" onRender={input.onRender}>
+        {tree}
+      </React.Profiler>
+    ) : tree);
   };
   await act(async () => {
     render(input.nodes);
   });
   return {
-    rerender: async (nodes, interactionActive, culledNodePaths) => {
+    rerender: async (nodes, interactionActive) => {
       await act(async () => {
-        render(nodes, interactionActive, culledNodePaths);
+        render(nodes, interactionActive);
       });
     }
   };
 }
 
 function PreviewProbe({ node }: { node: ProjectedCanvasNode }): React.ReactElement {
-  const runtime = useCanvasVideoPreviewRuntime();
-  const preview = runtime.previewForNode({ node });
-  const error = runtime.previewErrorForNode({ node });
+  const { preview, previewError: error } = useCanvasVideoPreviewNode(node);
   return (
     <div>
       {preview ? <span data-preview-src={preview.src} /> : null}
@@ -337,8 +564,7 @@ function PreviewProbe({ node }: { node: ProjectedCanvasNode }): React.ReactEleme
 
 function PreviewImageFailureProbe({ node }: { node: ProjectedCanvasNode }): React.ReactElement {
   const runtime = useCanvasVideoPreviewRuntime();
-  const preview = runtime.previewForNode({ node });
-  const error = runtime.previewErrorForNode({ node });
+  const { preview, previewError: error } = useCanvasVideoPreviewNode(node);
   React.useEffect(() => {
     if (preview) {
       runtime.reportPreviewError({
@@ -357,22 +583,47 @@ function PreviewImageFailureProbe({ node }: { node: ProjectedCanvasNode }): Reac
 }
 
 function createImmediateScheduler(): CanvasPreviewResourceScheduler {
+  let interaction: ReturnType<CanvasPreviewResourceScheduler['getInteractionState']> = {
+    cameraState: 'idle',
+    pointerInteractionActive: false
+  };
+  const interactionListeners = new Set<Parameters<
+    CanvasPreviewResourceScheduler['subscribeInteraction']
+  >[0]>();
   return {
     enqueue: (request: CanvasPreviewResourceRequest) => {
-      if (request.isCurrent() && !request.isCulled()) {
+      if (request.isCurrent()) {
         request.run();
       }
     },
     enqueuePublication: (request: CanvasPreviewResourceRequest) => {
-      if (request.isCurrent() && !request.isCulled()) {
+      if (request.isCurrent()) {
         request.run();
       }
     },
     cancel: () => undefined,
-    setInteractionState: () => undefined,
-    getInteractionState: () => ({ cameraState: 'idle', pointerInteractionActive: false }),
-    notifyVisibilityChanged: () => undefined,
+    setInteractionState: (next) => {
+      interaction = next.cameraState === 'idle'
+        ? { cameraState: 'idle', pointerInteractionActive: next.pointerInteractionActive }
+        : { cameraState: 'moving', pointerInteractionActive: next.pointerInteractionActive };
+      for (const listener of interactionListeners) {
+        listener(interaction);
+      }
+    },
+    getInteractionState: () => interaction,
+    subscribeInteraction: (listener) => {
+      interactionListeners.add(listener);
+      return () => interactionListeners.delete(listener);
+    },
     dispose: () => undefined
+  };
+}
+
+function previewOrderSource(): CanvasPreviewOrderSource {
+  const snapshot = { x: 0, y: 0, width: 1000, height: 1000 };
+  return {
+    getPreviewOrderSnapshot: () => snapshot,
+    subscribePreviewOrder: () => () => undefined
   };
 }
 
@@ -399,5 +650,19 @@ function videoNode(projectRelativePath: string, revision: string): ProjectedCanv
       height: 360,
       textTracks: []
     }
+  };
+}
+
+function deferred<T>() {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  let rejectPromise!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
+    reject: rejectPromise
   };
 }

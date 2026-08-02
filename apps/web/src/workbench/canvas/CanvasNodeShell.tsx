@@ -20,7 +20,6 @@ export interface CanvasNodeShellProps {
   showResizeHandles: boolean;
   textEditorActive: boolean;
   hovered: boolean;
-  culled: boolean;
   zIndex: number;
   stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
@@ -63,7 +62,6 @@ function CanvasNodeShellComponent({
   showResizeHandles,
   textEditorActive,
   hovered,
-  culled,
   zIndex,
   stageRuntime,
   actions,
@@ -135,7 +133,6 @@ function CanvasNodeShellComponent({
     <CanvasNodeContent
       node={node}
       selected={node.mediaKind === 'text' ? textEditorActive : selected}
-      culled={culled}
       actions={actions}
       textBuffer={textBuffer}
       textPreview={textPreview}
@@ -218,7 +215,6 @@ export function areCanvasNodeShellPropsEqual(
     && previous.showResizeHandles === next.showResizeHandles
     && previous.textEditorActive === next.textEditorActive
     && previous.hovered === next.hovered
-    && previous.culled === next.culled
     && previous.zIndex === next.zIndex
     && previous.stageRuntime === next.stageRuntime
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)

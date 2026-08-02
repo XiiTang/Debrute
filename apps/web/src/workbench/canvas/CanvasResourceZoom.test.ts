@@ -1,87 +1,85 @@
 import { describe, expect, it } from 'vitest';
 import {
-  initialCanvasResourceZoomState,
-  nextCanvasResourceZoomState
-} from './CanvasResourceZoom';
+  initialCanvasResourceZoom,
+  nextCanvasResourceZoom
+} from './CanvasResourceZoom.js';
 
 describe('CanvasResourceZoom', () => {
-  it('starts idle at current camera zoom', () => {
-    expect(initialCanvasResourceZoomState(1.25)).toEqual({
-      cameraState: 'idle',
-      resourceZoom: 1.25
-    });
+  it('starts at current camera zoom', () => {
+    expect(initialCanvasResourceZoom(1.25)).toBe(1.25);
   });
 
   it('tracks live zoom while idle', () => {
-    const state = nextCanvasResourceZoomState(initialCanvasResourceZoomState(1), {
+    const resourceZoom = nextCanvasResourceZoom(initialCanvasResourceZoom(1), {
       cameraState: 'idle',
       cameraZoom: 2
     });
 
-    expect(state).toEqual({
-      cameraState: 'idle',
-      resourceZoom: 2
-    });
+    expect(resourceZoom).toBe(2);
   });
 
-  it('freezes at the zoom before movement starts', () => {
-    const state = nextCanvasResourceZoomState(initialCanvasResourceZoomState(1), {
+  it('keeps the same resource zoom when movement starts', () => {
+    const initial = initialCanvasResourceZoom(1);
+    const resourceZoom = nextCanvasResourceZoom(initial, {
       cameraState: 'moving',
       cameraZoom: 2
     });
 
-    expect(state).toEqual({
-      cameraState: 'moving',
-      resourceZoom: 1
-    });
+    expect(resourceZoom).toBe(initial);
   });
 
   it('keeps same resource zoom for whole movement', () => {
-    const moving = nextCanvasResourceZoomState(initialCanvasResourceZoomState(1), {
+    const moving = nextCanvasResourceZoom(initialCanvasResourceZoom(1), {
       cameraState: 'moving',
       cameraZoom: 2
     });
-    const continuedMoving = nextCanvasResourceZoomState(moving, {
+    const continuedMoving = nextCanvasResourceZoom(moving, {
       cameraState: 'moving',
       cameraZoom: 3
     });
 
     expect(continuedMoving).toBe(moving);
-    expect(continuedMoving).toEqual({
+    expect(continuedMoving).toBe(1);
+  });
+
+  it('keeps the same resource zoom when a pure pan becomes idle', () => {
+    const initial = initialCanvasResourceZoom(1);
+    const moving = nextCanvasResourceZoom(initial, {
       cameraState: 'moving',
-      resourceZoom: 1
+      cameraZoom: 1
     });
+    const idle = nextCanvasResourceZoom(moving, {
+      cameraState: 'idle',
+      cameraZoom: 1
+    });
+
+    expect(moving).toBe(initial);
+    expect(idle).toBe(initial);
   });
 
   it('catches up immediately when movement becomes idle', () => {
-    const moving = nextCanvasResourceZoomState(initialCanvasResourceZoomState(1), {
+    const moving = nextCanvasResourceZoom(initialCanvasResourceZoom(1), {
       cameraState: 'moving',
       cameraZoom: 2
     });
-    const idle = nextCanvasResourceZoomState(moving, {
+    const idle = nextCanvasResourceZoom(moving, {
       cameraState: 'idle',
       cameraZoom: 3
     });
 
-    expect(idle).toEqual({
-      cameraState: 'idle',
-      resourceZoom: 3
-    });
+    expect(idle).toBe(3);
   });
 
   it('captures last idle resource zoom for next movement', () => {
-    const idle = nextCanvasResourceZoomState(initialCanvasResourceZoomState(1), {
+    const idle = nextCanvasResourceZoom(initialCanvasResourceZoom(1), {
       cameraState: 'idle',
       cameraZoom: 2
     });
-    const moving = nextCanvasResourceZoomState(idle, {
+    const moving = nextCanvasResourceZoom(idle, {
       cameraState: 'moving',
       cameraZoom: 3
     });
 
-    expect(moving).toEqual({
-      cameraState: 'moving',
-      resourceZoom: 2
-    });
+    expect(moving).toBe(2);
   });
 });

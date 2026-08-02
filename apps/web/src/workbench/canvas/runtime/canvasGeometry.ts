@@ -57,19 +57,3 @@ export function pointInRect(point: CanvasPoint, rect: CanvasRect): boolean {
     && point.y >= rect.y
     && point.y <= rect.y + rect.height;
 }
-
-export function expandCanvasRect(rect: CanvasRect, amount: number): CanvasRect {
-  return {
-    x: rect.x - amount,
-    y: rect.y - amount,
-    width: rect.width + amount * 2,
-    height: rect.height + amount * 2
-  };
-}
-
-export function canvasRectContainsRect(container: CanvasRect, rect: CanvasRect): boolean {
-  return rect.x >= container.x
-    && rect.y >= container.y
-    && rect.x + rect.width <= container.x + container.width
-    && rect.y + rect.height <= container.y + container.height;
-}
