@@ -303,7 +303,7 @@ function CanvasSurfaceRuntime({
   }), [instrumentationMonitor, runtime, stageRuntime]);
   const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({
     perfMonitor: instrumentationMonitor,
-    priorityForNode: renderLifecycle.previewTierForNode
+    distanceSquaredForNode: renderLifecycle.previewDistanceSquaredForNode
   }), [instrumentationMonitor, renderLifecycle]);
   const renderSnapshot = useSyncExternalStore(
     renderLifecycle.subscribe,
@@ -738,7 +738,7 @@ function CanvasSurfaceRuntime({
       return next;
     });
   }, []);
-  const handleUpdateVideoPlaybackTime = useCallback((projectRelativePath: string, currentTimeSeconds: number) => {
+  const handleUpdateVideoPlaybackTime = useCallback((projectRelativePath: string, currentTimeMs: number) => {
     const node = projectedNodesRef.current.find((candidate) => (
       candidate.projectRelativePath === projectRelativePath
     ));
@@ -749,7 +749,7 @@ function CanvasSurfaceRuntime({
     const version = (videoPlaybackUpdateVersionsRef.current.get(updateKey) ?? 0) + 1;
     videoPlaybackUpdateVersionsRef.current.set(updateKey, version);
     void actions.updateCanvasVideoPlaybackState(canvas.id, {
-      updates: [{ projectRelativePath, currentTimeSeconds }]
+      updates: [{ projectRelativePath, currentTimeMs }]
     }).then(() => {
       if (videoPlaybackUpdateVersionsRef.current.get(updateKey) === version) {
         videoPlaybackUpdateVersionsRef.current.delete(updateKey);
@@ -767,7 +767,7 @@ function CanvasSurfaceRuntime({
       }
       videoTargetsRef.current
         .get(projectRelativePath)
-        ?.restorePersistedTime(durableNode.videoPlayback?.currentTimeSeconds ?? 0);
+        ?.restorePersistedTime(durableNode.videoPlayback?.currentTimeMs ?? 0);
     });
   }, [actions, canvas.id]);
   const handleUpdateTextViewport = useCallback((projectRelativePath: string, viewport: CanvasTextViewportState) => {
@@ -1197,7 +1197,7 @@ interface CanvasSurfaceNodeShellProps {
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
-  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
 }
 
@@ -1224,7 +1224,7 @@ function CanvasTextSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.R
 
 function CanvasVideoSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.ReactElement {
   const { preview, previewError } = useCanvasVideoPreviewNode(props.node);
-  const { reportPreviewError } = useCanvasVideoPreviewRuntime();
+  const { reportPreviewError, retryPreview } = useCanvasVideoPreviewRuntime();
   const reportVideoPreviewError = useCallback((
     projectRelativePath: string,
     source: CanvasVideoPreviewSource,
@@ -1232,12 +1232,16 @@ function CanvasVideoSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.
   ) => {
     reportPreviewError({ projectRelativePath, preview: source, message });
   }, [reportPreviewError]);
+  const retryVideoPreview = useCallback(() => {
+    retryPreview(props.node.projectRelativePath);
+  }, [props.node.projectRelativePath, retryPreview]);
   return (
     <CanvasSurfaceNodeShellBase
       {...props}
       videoPreview={preview}
       videoPreviewError={previewError}
       onVideoPreviewError={reportVideoPreviewError}
+      onVideoPreviewRetry={retryVideoPreview}
     />
   );
 }
@@ -1276,13 +1280,15 @@ function CanvasSurfaceNodeShellBase({
   textPreviewError,
   videoPreview,
   videoPreviewError,
-  onVideoPreviewError
+  onVideoPreviewError,
+  onVideoPreviewRetry
 }: CanvasSurfaceNodeShellProps & {
   textPreviewPresentation?: CanvasTextPreviewNodeSnapshot['presentation'] | undefined;
   textPreviewError?: string | undefined;
   videoPreview?: CanvasVideoPreviewSource | undefined;
   videoPreviewError?: string | undefined;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
+  onVideoPreviewRetry?: (() => void) | undefined;
 }): React.ReactElement {
   return (
     <CanvasNodeShell
@@ -1322,6 +1328,7 @@ function CanvasSurfaceNodeShellBase({
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}
       onVideoPreviewError={onVideoPreviewError}
+      onVideoPreviewRetry={onVideoPreviewRetry}
     />
   );
 }

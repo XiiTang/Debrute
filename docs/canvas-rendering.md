@@ -40,24 +40,26 @@ scene, camera, and surface does not repeat geometric work, while
 `CanvasStageRuntime` writes only changed node-shell and edge-layer `display`
 values. Selected and active move/resize nodes remain display-visible when they
 are outside the viewport, but retention-only changes do not repeat geometric
-work or make those nodes viewport-priority preview targets. These direct DOM
+work or alter preview scheduling identity. These direct DOM
 writes do not publish a React scene snapshot and do not remove node-local preview
 state. This culling state is a rendering decision, not Canvas Document visibility.
 
 When camera movement becomes idle, the lifecycle ensures that the final camera
 has been synchronized and publishes its viewport rectangle for preview-resource
-ordering without repeating already completed culling work. Producers divide
-current work into two tiers: nodes intersecting the exact viewport, then every
-remaining node. The viewport never admits, cancels, or delays required preview
-production. Projection, surface-size, and Manual Layout changes publish the
-corresponding current scene and preview order immediately. Detaching the last
-scene subscriber removes the Runtime subscriptions and cancels pending work, so
-a callback from an older mounted lifetime cannot publish later.
+ordering without repeating already completed culling work. Producers order all
+current work by squared distance from the viewport center to the nearest point
+of each node rectangle, with Project path as the exact tie-breaker. The viewport
+never admits, cancels, or delays required preview production. Projection,
+surface-size, and Manual Layout changes publish the corresponding current scene
+and preview order immediately. Detaching the last scene subscriber removes the
+Runtime subscriptions and cancels pending work, so a callback from an older
+mounted lifetime cannot publish later.
 
 There is no Canvas mount virtualization, retained virtual rectangle, overscan,
 or node-type retention exception. All current node shells and edge layers remain
 mounted until their Canvas membership ends. The exact viewport controls direct
-DOM culling and foreground-versus-background preview order only.
+DOM culling; its center controls preview distance ordering without creating an
+inside/outside tier.
 
 ## Image Preview Source Selection
 
@@ -147,8 +149,9 @@ The scheduler:
   interaction becomes idle;
 - shares a three-operation animation-frame budget across eligible request starts
   and image or text result publications;
-- processes exact-viewport publications, exact-viewport starts, remaining
-  publications, then remaining starts; and
+- orders all eligible operations by squared distance from the viewport center
+  to the nearest point of the node rectangle, prefers publication over start
+  only at equal distance, and then breaks ties by exact Project path; and
 - rechecks current identity immediately before either operation.
 
 The camera-idle boundary is the only time gate. Resource zoom remains fixed
@@ -157,9 +160,9 @@ image, video, or text-preview tiers are already suppressed without a second
 post-idle timer.
 Once idle, current starts and ready publications share the next-frame budget.
 Publications enter React as low-priority transitions so new input can preempt
-them. Stale work is discarded; current offscreen work proceeds in the second
-priority tier. The scheduler therefore completes the current preview set even
-when the camera never visits every node.
+them. Stale work is discarded; distance changes order only, so the scheduler
+still completes the current preview set even when the camera never visits every
+node.
 
 Text and video preview producers observe interaction imperatively. A moving
 transition updates their gate and capture-lane frame scheduling without
@@ -350,7 +353,7 @@ increment it automatically. `Version` identifies a code contract, while
 The shared variant service does not create an equal-width variant. When a requested
 width reaches a browser-displayable source's intrinsic width, its caller serves
 that exact revision-bound source: a Project file for an image, the canonical
-browser-captured PNG for text, or the selected poster/extracted frame for video.
+browser-captured PNG for text, or the canonical extracted frame for video.
 This direct-source tier consumes no Raster Preview Pool slot and creates no
 `preview-w<source-width>` file. It retains the caller's source-identity checks
 and the same loaded/next visual handoff as lower-width variants. TIFF remains a
@@ -385,10 +388,10 @@ current engine path.
 Text caches resolve only the exact requested source identity for each Canvas and
 Project path; superseded fingerprint directories do not participate in current
 lookup. Video caches retain the current video revision and the source identity
-implied by its persisted Playback Position or initial poster. Video source-
-identity changes remove superseded frame identities. Current-identity width
-variants remain reusable across zoom changes, displays, and sessions. This
-policy does not add a user-facing cache setting or cleanup command.
+implied by its persisted Playback Position; superseded frame identities do not
+participate in current lookup. Current-identity width variants remain reusable
+across zoom changes, displays, and sessions. This policy does not add a
+user-facing cache setting or cleanup command.
 
 The loopback image-preview response is also revision-addressed by Project path,
 source revision, and quantized width. After Runtime validates that identity, it

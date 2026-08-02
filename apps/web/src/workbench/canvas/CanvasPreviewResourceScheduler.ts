@@ -4,9 +4,9 @@ import {
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
 import type { CanvasCameraState } from './runtime/canvasCamera';
+import { compareCanvasPreviewPaths } from './CanvasPreviewScheduling.js';
 
 export type CanvasPreviewResourceKind = 'image' | 'text' | 'video';
-export type CanvasPreviewPriorityTier = 0 | 1;
 
 export interface CanvasPreviewResourceInteractionState {
   cameraState: CanvasCameraState;
@@ -41,7 +41,7 @@ export function canvasPreviewResourceInteractionActive(
 }
 
 export function createCanvasPreviewResourceScheduler(input: {
-  priorityForNode: (nodeId: string) => CanvasPreviewPriorityTier;
+  distanceSquaredForNode: (nodeId: string) => number;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   now?: (() => number) | undefined;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
@@ -71,7 +71,7 @@ export function createCanvasPreviewResourceScheduler(input: {
             nodeId: request.nodeId,
             sourceKey: request.sourceKey,
             targetWidth: request.targetWidth,
-            priorityTier: input.priorityForNode(request.nodeId)
+            distanceSquared: input.distanceSquaredForNode(request.nodeId)
           }
         : undefined
     });
@@ -114,28 +114,34 @@ export function createCanvasPreviewResourceScheduler(input: {
         record('preview-resource-skip-stale', request);
       }
     }
-    let completed = 0;
-    const runTier = (
-      queue: Map<string, CanvasPreviewResourceRequest>,
-      phase: 'start' | 'publication',
-      tier: CanvasPreviewPriorityTier
-    ): void => {
-      for (const [key, request] of [...queue]) {
-        if (completed >= CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME) {
-          break;
-        }
-        if (input.priorityForNode(request.nodeId) !== tier) {
-          continue;
-        }
-        queue.delete(key);
-        record(phase === 'start' ? 'preview-resource-started' : 'preview-publication-committed', request);
-        request.run();
-        completed += 1;
-      }
-    };
-    for (const tier of [0, 1] as const) {
-      runTier(queuedPublications, 'publication', tier);
-      runTier(queuedStarts, 'start', tier);
+    const candidates = [
+      ...[...queuedPublications].map(([key, request]) => ({
+        key,
+        request,
+        phase: 'publication' as const,
+        queue: queuedPublications,
+        distanceSquared: input.distanceSquaredForNode(request.nodeId)
+      })),
+      ...[...queuedStarts].map(([key, request]) => ({
+        key,
+        request,
+        phase: 'start' as const,
+        queue: queuedStarts,
+        distanceSquared: input.distanceSquaredForNode(request.nodeId)
+      }))
+    ].sort((left, right) => (
+      left.distanceSquared - right.distanceSquared
+        || (left.phase === right.phase ? 0 : left.phase === 'publication' ? -1 : 1)
+        || compareCanvasPreviewPaths(left.request.nodeId, right.request.nodeId)
+        || compareCanvasPreviewPaths(left.request.kind, right.request.kind)
+    ));
+    for (const candidate of candidates.slice(0, CANVAS_PREVIEW_RESOURCE_OPERATIONS_PER_FRAME)) {
+      candidate.queue.delete(candidate.key);
+      record(
+        candidate.phase === 'start' ? 'preview-resource-started' : 'preview-publication-committed',
+        candidate.request
+      );
+      candidate.request.run();
     }
     scheduleFrame();
   };

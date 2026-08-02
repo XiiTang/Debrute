@@ -11,7 +11,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
   CanvasVideoPlayerAdapter: React.forwardRef(function MockCanvasVideoPlayerAdapter(
     {
       node,
-      initialTimeSeconds,
+      initialTimeMs,
       onPointerInside,
       onFocusInside,
       onError,
@@ -22,12 +22,12 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       formatPlayError
     }: {
       node: ProjectedCanvasNode;
-      initialTimeSeconds: number;
+      initialTimeMs: number;
       onPointerInside: () => void;
       onFocusInside: () => void;
       onError: (message: string) => void;
       onPlayingChange: (playing: boolean) => void;
-      onPlaybackBoundary: (currentTimeSeconds: number) => void;
+      onPlaybackBoundary: (currentTimeMs: number) => void;
       onReadyForDisplay: () => void;
       playRequest?: { requestId: number } | undefined;
       formatPlayError: (projectRelativePath: string) => string;
@@ -47,7 +47,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       <div
         data-testid="video-player-adapter"
         data-path={node.projectRelativePath}
-        data-initial-time={initialTimeSeconds}
+        data-initial-time={initialTimeMs}
         data-play-request-id={playRequest?.requestId}
         onPointerDown={onPointerInside}
         onFocus={onFocusInside}
@@ -67,7 +67,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
           data-testid="mock-video-paused"
           onClick={() => {
             onPlayingChange(false);
-            onPlaybackBoundary(4.25);
+            onPlaybackBoundary(4_250);
           }}
         >
           paused
@@ -171,6 +171,107 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     expect(html).not.toContain('data-testid="video-player-adapter"');
   });
 
+  it('keeps a same-revision preview visible until its replacement has loaded', async () => {
+    const imageLoader = installFakeImageLoader();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const current = previewSource();
+    const replacement = { ...current, src: `${current.src}&frameTimeMs=2500` };
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={current}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={replacement}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')?.getAttribute('src')).toBe(current.src);
+      expect(imageLoader.loads).toHaveLength(1);
+
+      imageLoader.loads[0]?.emit('load');
+      await act(async () => {
+        await Promise.resolve();
+        imageLoader.frames.shift()?.(16);
+        imageLoader.frames.shift()?.(32);
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')?.getAttribute('src')).toBe(replacement.src);
+    } finally {
+      imageLoader.restore();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('keeps the last same-revision preview behind a replacement error', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const current = previewSource();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreview={current}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              selected={false}
+              videoPreviewError="replacement failed"
+              onVideoPreviewRetry={() => undefined}
+              onSelectNode={() => undefined}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('img.canvas-video-preview-image')?.getAttribute('src')).toBe(current.src);
+      expect(container.textContent).toContain('replacement failed');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('renders the video title bar before the player shell', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
@@ -192,7 +293,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <CanvasVideoNodeContent
-          node={videoNode({ currentTimeSeconds: 4.5 })}
+          node={videoNode({ currentTimeMs: 4_500 })}
           selected
           videoPreview={previewSource()}
           onSelectNode={() => undefined}
@@ -203,7 +304,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     );
 
     expect(html).toContain('data-testid="video-player-adapter"');
-    expect(html).toContain('data-initial-time="4.5"');
+    expect(html).toContain('data-initial-time="4500"');
     expect(html).not.toContain('class="canvas-video-preview-image"');
   });
 
@@ -213,7 +314,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
         <CanvasVideoNodeContent
           node={videoNode()}
           selected={false}
-          videoPreviewError="poster is broken"
+          videoPreviewError="preview frame is unavailable"
+          onVideoPreviewRetry={() => undefined}
           onSelectNode={() => undefined}
           onRegisterVideoTarget={() => undefined}
           onUpdatePlaybackTime={() => undefined}
@@ -221,9 +323,10 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       </I18nProvider>
     );
 
-    expect(html).toContain('poster is broken');
+    expect(html).toContain('preview frame is unavailable');
     expect(html).toContain('db-canvas-node-error-overlay');
     expect(html).toContain('canvas-node-error-presentation');
+    expect(html).toContain('Retry');
     expect(html).not.toContain('data-testid="video-player-adapter"');
   });
 
@@ -743,14 +846,14 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       await act(async () => {
         button(container, 'mock-video-paused').click();
       });
-      expect(onUpdatePlaybackTime).toHaveBeenLastCalledWith('media/clip.mp4', 4.25);
+      expect(onUpdatePlaybackTime).toHaveBeenLastCalledWith('media/clip.mp4', 4_250);
       expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
 
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
-              node={videoNode({ currentTimeSeconds: 4.25 })}
+              node={videoNode({ currentTimeMs: 4_250 })}
               selected={false}
               videoPreview={previewSource()}
               onSelectNode={() => undefined}
@@ -859,7 +962,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
         root.render(
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
-              node={videoNode({ currentTimeSeconds: 4.25 })}
+              node={videoNode({ currentTimeMs: 4_250 })}
               selected
               videoPreview={previewSource()}
               onSelectNode={() => undefined}
@@ -943,7 +1046,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
         root.render(
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
-              node={videoNode({ currentTimeSeconds: 4.25 })}
+              node={videoNode({ currentTimeMs: 4_250 })}
               selected
               feedbackEntry={videoFeedbackEntry()}
               onSelectNode={() => undefined}
@@ -1022,7 +1125,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
 
 function videoNode(options: {
   revision?: string;
-  currentTimeSeconds?: number;
+  currentTimeMs?: number;
 } = {}): ProjectedCanvasNode {
   const revision = options.revision ?? 'rev';
   const node: ProjectedCanvasNode = {
@@ -1057,9 +1160,9 @@ function videoNode(options: {
       }]
     }
   };
-  return options.currentTimeSeconds === undefined
+  return options.currentTimeMs === undefined
     ? node
-    : { ...node, videoPlayback: { currentTimeSeconds: options.currentTimeSeconds } };
+    : { ...node, videoPlayback: { currentTimeMs: options.currentTimeMs } };
 }
 
 function previewSource(): CanvasVideoPreviewSource {

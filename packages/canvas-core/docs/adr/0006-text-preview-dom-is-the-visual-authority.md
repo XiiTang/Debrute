@@ -13,8 +13,9 @@ faces, decodes one SVG `foreignObject`, draws it once to an adaptive-size
 
 Canonical work is owned by one real-time latest-wins registry, not frozen
 cohorts. Every stable missing-or-stale text target is admitted regardless of
-viewport. At each job boundary exact-viewport intersection followed by
-`y → x → project-relative path` order chooses the next work. Canvas
+viewport. At each job boundary the squared distance from the viewport center
+to the nearest point of each node rectangle chooses the next work, with Project
+path as an exact tie-breaker. Canvas
 interaction gates new dispatch without changing membership. The canonical
 text geometry is derived once from node geometry, the fixed 10x presentation
 scale, and the 32px titlebar; live presentation and hidden capture consume the
@@ -42,9 +43,11 @@ pixels total. Exactly one source capture owns the hidden CodeMirror DOM at a
 time. Source uploads retain the current asynchronous concurrency behavior and
 may overlap later captures; Runtime-confirmed save or an already matching
 `source.png` is the canonical completion authority. Width variants and mounted
-image decoding are a separate presentation pipeline. The exact viewport orders
-that work without deciding its membership, and it does not keep canonical work
-active.
+image decoding are a separate presentation pipeline. The shared spatial
+priority orders that work without deciding its membership, and it does not keep
+canonical work active. Preview maintenance shares this priority contract rather
+than one executor, as recorded in
+[`0007-preview-maintenance-shares-scheduling-not-execution.md`](./0007-preview-maintenance-shares-scheduling-not-execution.md).
 
 The captured DOM is the sole visual authority. There is no parallel
 drawing-command scene, text-specific renderer, raster Worker, compatibility

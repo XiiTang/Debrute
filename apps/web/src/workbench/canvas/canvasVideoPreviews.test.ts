@@ -19,16 +19,16 @@ describe('canvas video preview URLs', { tags: ['canvas-video'] }, () => {
     const source = canvasVideoPreviewSource({
       canvasId: 'canvas-1',
       node: videoNode('media/clip.mp4', 'rev-video'),
-      sourceKey: 'v1--explicit--poster',
+      sourceKey: 'frame-v1--ms-0',
       sourceWidth: 1200,
-      currentTimeSeconds: 0,
+      frameTimeMs: 0,
       resourceZoom: 0.1,
       devicePixelRatio: 2
     });
 
     expect(source).toEqual({
       previewWidth: 300,
-      src: '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&videoRevision=rev-video&t=0&sourceKey=v1--explicit--poster&w=300'
+      src: '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&videoRevision=rev-video&frameTimeMs=0&sourceKey=frame-v1--ms-0&w=300'
     });
   });
 
@@ -40,9 +40,9 @@ describe('canvas video preview URLs', { tags: ['canvas-video'] }, () => {
         'rev-video',
         `http://127.0.0.1:17321${rawUrl('media/clip.mp4')}`
       ),
-      sourceKey: 'poster',
+      sourceKey: 'frame-v1--ms-0',
       sourceWidth: 1200,
-      currentTimeSeconds: 0,
+      frameTimeMs: 0,
       resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
@@ -57,7 +57,7 @@ describe('canvas video preview URLs', { tags: ['canvas-video'] }, () => {
       },
       sourceKey: 'source',
       sourceWidth: 1200,
-      currentTimeSeconds: 0,
+      frameTimeMs: 0,
       resourceZoom: 0.1,
       devicePixelRatio: 1
     })).toBeUndefined();

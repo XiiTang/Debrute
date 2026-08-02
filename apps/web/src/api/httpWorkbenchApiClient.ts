@@ -2,7 +2,8 @@ import type {
   WorkbenchActivityNoticeInput,
   AddProjectPathToCanvasMapInput,
   CanvasTextPreviewSourceAvailabilityResponse,
-  CanvasVideoPreviewSourceResponse,
+  CanvasVideoPreviewEnsureResponse,
+  CanvasVideoPreviewProbeResponse,
   DebruteGlobalSettingsView,
   DebruteHttpErrorBody,
   RuntimeProjectUploadImportPlan,
@@ -314,10 +315,17 @@ export function createHttpWorkbenchApiClient(options: {
     return binding?.projectId === scope.projectId && binding.generation === scope.generation;
   };
   const runProjectRequest = async <T>(
-    operation: (scope: ProjectRequestScope, signal: AbortSignal) => Promise<T>
+    operation: (scope: ProjectRequestScope, signal: AbortSignal) => Promise<T>,
+    callerSignal?: AbortSignal
   ): Promise<T> => {
     const scope = captureProjectScope();
     const controller = new AbortController();
+    const abortFromCaller = (): void => controller.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) {
+      abortFromCaller();
+    } else {
+      callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+    }
     projectRequestControllers.add(controller);
     try {
       const result = await operation(scope, controller.signal);
@@ -334,16 +342,18 @@ export function createHttpWorkbenchApiClient(options: {
       }
       throw error;
     } finally {
+      callerSignal?.removeEventListener('abort', abortFromCaller);
       projectRequestControllers.delete(controller);
     }
   };
   const requestForCurrentProject = <T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    callerSignal?: AbortSignal
   ): Promise<T> => runProjectRequest((scope, signal) => (
     request<T>(method, projectPathFor(scope.projectId, path), body, signal)
-  ));
+  ), callerSignal);
   const requestProjectMutation = <T extends RevisionedProjectCommandResult>(
     method: string,
     path: string,
@@ -728,10 +738,17 @@ export function createHttpWorkbenchApiClient(options: {
         signal
       )
     )),
-    readCanvasVideoPreviewSources: (input) => requestForCurrentProject<CanvasVideoPreviewSourceResponse>(
+    probeCanvasVideoPreviewSources: (input, signal) => requestForCurrentProject<CanvasVideoPreviewProbeResponse>(
       'POST',
-      '/canvas-video-previews/sources',
-      input
+      '/canvas-video-previews/probe',
+      input,
+      signal
+    ),
+    ensureCanvasVideoPreviewSource: (input, signal) => requestForCurrentProject<CanvasVideoPreviewEnsureResponse>(
+      'POST',
+      '/canvas-video-previews/ensure',
+      input,
+      signal
     ),
     createProjectFile: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'file' }),
     createProjectDirectory: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'directory' }),

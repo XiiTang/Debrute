@@ -597,6 +597,79 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(commitCount).toBe(0);
   });
 
+  it('does not auto-retry a failed source check and explicit Retry restarts checking', async () => {
+    const node = textNode('retry.md', 0, 0);
+    let requestCount = 0;
+    let runtime: ReturnType<typeof useCanvasTextPreviewRuntime> | undefined;
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+      sources: Object.fromEntries(request.sources.map((source) => [
+        source.projectRelativePath,
+        (requestCount += 1) === 1
+          ? { ...source, status: 'error' as const, message: 'preview unavailable' }
+          : { ...source, status: 'available' as const }
+      ]))
+    }));
+    const input = {
+      nodes: [node],
+      actions: actionsFixture({ readCanvasTextPreviewSources }),
+      consumerNode: node,
+      children: (
+        <>
+          <RuntimePresentationProbe node={node} />
+          <TextRuntimeCapture onRuntime={(value) => { runtime = value; }} />
+        </>
+      )
+    };
+    await renderProvider(input);
+    await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
+      'data-preview-error'
+    ) === 'preview unavailable');
+
+    await renderProvider(input);
+    await flushWork();
+    expect(readCanvasTextPreviewSources).toHaveBeenCalledTimes(1);
+
+    await act(async () => runtime?.retryPreview(node.projectRelativePath));
+    await waitFor(() => readCanvasTextPreviewSources.mock.calls.length === 2);
+    await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
+      'data-preview-error'
+    ) === '');
+  });
+
+  it('restarts availability checking when Retry follows a cached variant failure', async () => {
+    const harness = availablePreviewHarness();
+    const node = textNode('variant-retry.md', 0, 0);
+    let runtime: ReturnType<typeof useCanvasTextPreviewRuntime> | undefined;
+    await renderProvider({
+      nodes: [node],
+      actions: harness.actions,
+      previewResourceScheduler: harness.scheduler,
+      consumerNode: node,
+      pendingReport: { kind: 'failure', node },
+      children: (
+        <>
+          <RuntimePresentationProbe
+            node={node}
+            pendingReport={{ kind: 'failure', node }}
+          />
+          <TextRuntimeCapture onRuntime={(value) => { runtime = value; }} />
+        </>
+      )
+    });
+    await waitFor(() => harness.mountQueue.length === 1);
+    await act(async () => harness.mountQueue.shift()!.run());
+    await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
+      'data-preview-error'
+    ) === 'stale variant failed');
+    expect(harness.readCanvasTextPreviewSources).toHaveBeenCalledTimes(1);
+
+    await act(async () => runtime?.retryPreview(node.projectRelativePath));
+    await waitFor(() => harness.readCanvasTextPreviewSources.mock.calls.length === 2);
+    await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
+      'data-preview-error'
+    ) === '');
+  });
+
   it('adds a node leaving edit mode to the live registry without waiting for existing upload work', async () => {
     const save = deferred<SavePreviewResult>();
     const nodes = [textNode('a.md', 0, 0), textNode('b.md', 0, 1000)];
@@ -674,6 +747,16 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
 
 function RuntimeConsumer(): React.ReactElement {
   useCanvasTextPreviewRuntime();
+  return <div />;
+}
+
+function TextRuntimeCapture({
+  onRuntime
+}: {
+  onRuntime: (runtime: ReturnType<typeof useCanvasTextPreviewRuntime>) => void;
+}): React.ReactElement {
+  const runtime = useCanvasTextPreviewRuntime();
+  React.useEffect(() => onRuntime(runtime), [onRuntime, runtime]);
   return <div />;
 }
 

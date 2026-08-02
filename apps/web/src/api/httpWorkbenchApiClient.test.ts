@@ -183,6 +183,38 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('sends Video Preview Probe and Ensure as separate Project-scoped commands', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    await client.openProject({ projectRoot: '/tmp/project' });
+    const target = {
+      projectRelativePath: 'media/clip.mp4',
+      videoRevision: 'sha256:video',
+      frameTimeMs: 1_500
+    };
+
+    await expect(client.probeCanvasVideoPreviewSources({
+      canvasId: 'canvas-1',
+      targets: [target]
+    })).resolves.toEqual({ sources: {} });
+    await expect(client.ensureCanvasVideoPreviewSource({
+      canvasId: 'canvas-1',
+      target,
+      sourceKey: 'frame-key'
+    })).resolves.toEqual({ status: 'source-changed' });
+
+    const [probe, ensure] = harness.calls.slice(-2);
+    expect(probe?.path).toBe('/api/projects/project-1/canvas-video-previews/probe');
+    expect(ensure?.path).toBe('/api/projects/project-1/canvas-video-previews/ensure');
+    expect(JSON.parse(String(probe?.init?.body))).toEqual({ canvasId: 'canvas-1', targets: [target] });
+    expect(JSON.parse(String(ensure?.init?.body))).toEqual({
+      canvasId: 'canvas-1',
+      target,
+      sourceKey: 'frame-key'
+    });
+    client.dispose();
+  });
+
   it('replaces a bound Project directly without prepare, commit, or unload requests', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
@@ -525,6 +557,12 @@ function createHarness(globalRevision = 1) {
         projectId: 'project-1',
         projectRevision: 2
       });
+    }
+    if (path === '/api/projects/project-1/canvas-video-previews/probe') {
+      return Response.json({ sources: {} });
+    }
+    if (path === '/api/projects/project-1/canvas-video-previews/ensure') {
+      return Response.json({ status: 'source-changed' });
     }
     if (path === '/api/projects/project-1/files/import/uploads') {
       return Response.json({

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  createCanvasPreviewResourceScheduler,
-  type CanvasPreviewPriorityTier
+  createCanvasPreviewResourceScheduler
 } from './CanvasPreviewResourceScheduler.js';
 import type { CanvasPerfMonitor } from './CanvasPerfMonitor.js';
 
@@ -87,7 +86,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     const frames: FrameRequestCallback[] = [];
     const published: string[] = [];
     const scheduler = createScheduler({
-      priorityForNode: () => 1,
+      distanceSquaredForNode: () => 1,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -134,7 +133,7 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(frames).toHaveLength(1);
   });
 
-  it('orders viewport work before background work while completing both', () => {
+  it('orders nearer work before farther work while completing both', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
     const priorityByNode = new Map([
@@ -142,7 +141,7 @@ describe('CanvasPreviewResourceScheduler', () => {
       ['visible.md', 0 as const]
     ]);
     const scheduler = createScheduler({
-      priorityForNode: (path) => priorityByNode.get(path) ?? 1,
+      distanceSquaredForNode: (path) => priorityByNode.get(path) ?? 1,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -171,11 +170,11 @@ describe('CanvasPreviewResourceScheduler', () => {
     expect(started).toEqual(['visible.md', 'background.md']);
   });
 
-  it('orders publications before starts inside each viewport tier', () => {
+  it('orders publications before starts at the same distance', () => {
     const frames: FrameRequestCallback[] = [];
     const operations: string[] = [];
     const scheduler = createScheduler({
-      priorityForNode: (path) => path.startsWith('visible') ? 0 : 1,
+      distanceSquaredForNode: (path) => path.startsWith('visible') ? 0 : 1,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -599,12 +598,12 @@ describe('CanvasPreviewResourceScheduler', () => {
 });
 
 function createScheduler(
-  input: Omit<Parameters<typeof createCanvasPreviewResourceScheduler>[0], 'priorityForNode'> & {
-    priorityForNode?: (nodeId: string) => CanvasPreviewPriorityTier;
+  input: Omit<Parameters<typeof createCanvasPreviewResourceScheduler>[0], 'distanceSquaredForNode'> & {
+    distanceSquaredForNode?: (nodeId: string) => number;
   }
 ) {
   return createCanvasPreviewResourceScheduler({
-    priorityForNode: () => 0,
+    distanceSquaredForNode: () => 0,
     ...input
   });
 }

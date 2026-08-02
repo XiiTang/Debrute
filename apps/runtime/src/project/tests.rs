@@ -1401,7 +1401,7 @@ fn persisted_project_documents_reject_unexpected_fields_at_every_owned_boundary(
             "width": 320.0,
             "height": 180.0,
             "z": 0,
-            "videoPlayback": { "currentTimeSeconds": 0.0 },
+            "videoPlayback": { "currentTimeMs": 0 },
             "textViewport": { "scrollTop": 0.0, "scrollLeft": 0.0 }
         }],
         "annotations": [{ "id": "note-1", "text": "Note", "x": 0.0, "y": 0.0 }],
@@ -1949,16 +1949,27 @@ fn interactive_canvas_layouts_reject_inexact_batches_without_partial_changes() {
 #[test]
 fn interactive_canvas_media_updates_reject_inexact_batches_without_partial_changes() {
     let canvas = canvas_with_interactive_nodes();
+    let unsafe_video_time = update_canvas_video_playback(
+        &canvas,
+        &[CanvasVideoPlaybackUpdate {
+            project_relative_path: "clip.mp4".to_owned(),
+            current_time_ms: CANVAS_VIDEO_TIME_MAX_MS + 1,
+        }],
+    )
+    .expect_err("an unsafe JavaScript integer must fail");
+    assert!(unsafe_video_time.to_string().contains("safe integer"));
+    assert!(canvas.node_elements[1].video_playback.is_none());
+
     let missing_video = update_canvas_video_playback(
         &canvas,
         &[
             CanvasVideoPlaybackUpdate {
                 project_relative_path: "clip.mp4".to_owned(),
-                current_time_seconds: 1.5,
+                current_time_ms: 1_500,
             },
             CanvasVideoPlaybackUpdate {
                 project_relative_path: "missing.mp4".to_owned(),
-                current_time_seconds: 2.0,
+                current_time_ms: 2_000,
             },
         ],
     )

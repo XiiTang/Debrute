@@ -14,7 +14,7 @@ export function canvasVideoPreviewSource(input: {
   node: ProjectedCanvasNode;
   sourceKey: string;
   sourceWidth: number;
-  currentTimeSeconds: number;
+  frameTimeMs: number;
   resourceZoom: number;
   devicePixelRatio: number;
 }): CanvasVideoPreviewSource | undefined {
@@ -34,7 +34,7 @@ export function canvasVideoPreviewSource(input: {
       canvasId: input.canvasId,
       projectRelativePath: input.node.projectRelativePath,
       videoRevision: input.node.availability.revision,
-      currentTimeSeconds: input.currentTimeSeconds,
+      frameTimeMs: input.frameTimeMs,
       sourceKey: input.sourceKey,
       width: previewWidth
     })
@@ -55,7 +55,7 @@ export function canvasVideoPreviewUrl(input: {
   canvasId: string;
   projectRelativePath: string;
   videoRevision: string;
-  currentTimeSeconds: number;
+  frameTimeMs: number;
   sourceKey: string;
   width: number;
 }): string {
@@ -64,7 +64,7 @@ export function canvasVideoPreviewUrl(input: {
     canvasId: input.canvasId,
     path: input.projectRelativePath,
     videoRevision: input.videoRevision,
-    t: String(input.currentTimeSeconds),
+    frameTimeMs: String(input.frameTimeMs),
     sourceKey: input.sourceKey,
     w: String(input.width)
   });

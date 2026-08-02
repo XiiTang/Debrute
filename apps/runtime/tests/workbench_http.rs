@@ -628,7 +628,7 @@ fn passive_media_routes_reject_missing_or_empty_identity_values() {
             project.id
         ),
         format!(
-            "/api/projects/{}/canvas-video-preview?w=64&t=0&path=image.png&videoRevision=revision&canvasId=canvas-1",
+            "/api/projects/{}/canvas-video-preview?w=64&frameTimeMs=0&path=image.png&videoRevision=revision&canvasId=canvas-1",
             project.id
         ),
     ] {
@@ -835,7 +835,7 @@ fn canvas_media_state_routes_require_exact_non_empty_collections() {
             json!({
                 "updates": [{
                     "projectRelativePath": "clip.mp4",
-                    "currentTimeSeconds": 0,
+                    "currentTimeMs": 0,
                     "unexpectedField": true
                 }]
             }),
@@ -1317,16 +1317,13 @@ fn read_canvas_feedback(
 }
 
 #[test]
-fn video_preview_sources_are_keyed_by_project_path() {
+fn video_preview_probe_and_ensure_use_frame_source_identity() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("video-preview-sources");
     let project_root = Path::new(&project.root);
     fs::create_dir_all(project_root.join("media")).expect("media directory should be created");
     let video = project_root.join("media/clip.mp4");
     fs::write(&video, b"video").expect("video fixture should be written");
-    image::RgbaImage::new(8, 4)
-        .save(project_root.join("media/clip.poster.png"))
-        .expect("poster fixture should be written");
     let video_revision = media_revision(&video);
     let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
@@ -1334,7 +1331,7 @@ fn video_preview_sources_are_keyed_by_project_path() {
 
     let response = client
         .post(format!(
-            "{}/api/projects/{}/canvas-video-previews/sources",
+            "{}/api/projects/{}/canvas-video-previews/probe",
             runtime.origin(),
             project.id
         ))
@@ -1346,7 +1343,7 @@ fn video_preview_sources_are_keyed_by_project_path() {
             "targets": [{
                 "projectRelativePath": "media/clip.mp4",
                 "videoRevision": video_revision,
-                "currentTimeSeconds": 0
+                "frameTimeMs": 0
             }]
         }))
         .send()
@@ -1361,8 +1358,38 @@ fn video_preview_sources_are_keyed_by_project_path() {
         body["sources"]["media/clip.mp4"]["projectRelativePath"],
         "media/clip.mp4"
     );
-    assert_eq!(body["sources"]["media/clip.mp4"]["status"], "available");
-    assert_eq!(body["sources"]["media/clip.mp4"]["sourceWidth"], 8);
+    assert_eq!(body["sources"]["media/clip.mp4"]["status"], "needs-source");
+    assert_eq!(
+        body["sources"]["media/clip.mp4"]["sourceKey"],
+        "frame-v1--ms-0"
+    );
+
+    let response = client
+        .post(format!(
+            "{}/api/projects/{}/canvas-video-previews/ensure",
+            runtime.origin(),
+            project.id
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({
+            "canvasId": "canvas-1",
+            "target": {
+                "projectRelativePath": "media/clip.mp4",
+                "videoRevision": video_revision,
+                "frameTimeMs": 0
+            },
+            "sourceKey": "stale-source-key"
+        }))
+        .send()
+        .expect("video preview Ensure request should complete");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body: Value = response
+        .json()
+        .expect("video preview Ensure response should be JSON");
+    assert_eq!(body["status"], "source-changed");
 }
 
 fn open_unbound_connection(client: &Client, runtime: &TestRuntime) -> (String, String, SseEvents) {

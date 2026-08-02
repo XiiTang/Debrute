@@ -152,6 +152,7 @@ interface CanvasTextPreviewFontCandidate {
 }
 
 export interface CanvasTextPreviewRuntimeValue {
+  retryPreview(projectRelativePath: string): void;
   reportPendingReady(node: ProjectedCanvasNode, source: CanvasTextPreviewSource): void;
   reportPendingFailure(node: ProjectedCanvasNode, source: CanvasTextPreviewSource, error: unknown): void;
   reportVisibleFailure(node: ProjectedCanvasNode, source: CanvasTextPreviewSource, error: unknown): void;
@@ -404,6 +405,39 @@ export function CanvasTextPreviewProvider({
       return withoutRecordPath(current, target.projectRelativePath);
     });
   }, [markNodePathChanged]);
+
+  const retryPreview = useCallback<CanvasTextPreviewRuntimeValue['retryPreview']>((projectRelativePath) => {
+    const target = currentTargetsRef.current[projectRelativePath];
+    const error = previewErrorsRef.current[projectRelativePath];
+    if (!target
+      || error?.targetKey !== canvasTextPreviewTargetKey(target)) {
+      return;
+    }
+    sourceCheckedTargetKeysRef.current.delete(projectRelativePath);
+    setSourceAvailability((current) => {
+      const next = withoutRecordPath(current, projectRelativePath);
+      sourceAvailabilityRef.current = next;
+      return next;
+    });
+    setPreviewErrors((current) => {
+      const next = withoutRecordPath(current, projectRelativePath);
+      markNodePathChanged(projectRelativePath);
+      return next;
+    });
+    updateTasks((current) => {
+      const existing = current.get(projectRelativePath);
+      const checking = {
+        state: 'checking' as const,
+        content: undefined,
+        contentBytes: undefined,
+        coverage: undefined
+      };
+      if (existing && canvasTextPreviewTargetKey(existing) === canvasTextPreviewTargetKey(target)) {
+        return updateCanvasTextPreviewTask(current, target, checking);
+      }
+      return new Map(current).set(projectRelativePath, { ...target, ...checking });
+    });
+  }, [markNodePathChanged, updateTasks]);
 
   useEffect(() => {
     fontEnvironment.setPreviewMetricsObserver((metrics) => {
@@ -1380,12 +1414,14 @@ export function CanvasTextPreviewProvider({
   }, [currentTargetForRenderedNode, enqueuePresentationWork, previewPresentations]);
 
   const commandHandlersRef = useRef({
+    retryPreview,
     reportPendingReady,
     reportPendingFailure,
     reportVisibleFailure,
     reportVisibleCommitted
   });
   commandHandlersRef.current = {
+    retryPreview,
     reportPendingReady,
     reportPendingFailure,
     reportVisibleFailure,
@@ -1432,6 +1468,7 @@ export function CanvasTextPreviewProvider({
   });
 
   const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
+    retryPreview: (...args) => commandHandlersRef.current.retryPreview(...args),
     reportPendingReady: (...args) => commandHandlersRef.current.reportPendingReady(...args),
     reportPendingFailure: (...args) => commandHandlersRef.current.reportPendingFailure(...args),
     reportVisibleFailure: (...args) => commandHandlersRef.current.reportVisibleFailure(...args),

@@ -50,9 +50,10 @@ export interface CanvasNodeShellProps {
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
-  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
+  onVideoPreviewRetry?: (() => void) | undefined;
 }
 
 function CanvasNodeShellComponent({
@@ -91,7 +92,8 @@ function CanvasNodeShellComponent({
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
   onUpdateTextViewport,
-  onVideoPreviewError
+  onVideoPreviewError,
+  onVideoPreviewRetry
 }: CanvasNodeShellProps): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
 
@@ -155,6 +157,7 @@ function CanvasNodeShellComponent({
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}
       onVideoPreviewError={onVideoPreviewError}
+      onVideoPreviewRetry={onVideoPreviewRetry}
       onSelectNode={() => onSelectNode(node)}
       onTitlePointerDown={(event) => onPointerDown(node, event)}
     />
@@ -244,7 +247,8 @@ export function areCanvasNodeShellPropsEqual(
     && previous.onRegisterVideoTarget === next.onRegisterVideoTarget
     && previous.onUpdateVideoPlaybackTime === next.onUpdateVideoPlaybackTime
     && previous.onUpdateTextViewport === next.onUpdateTextViewport
-    && previous.onVideoPreviewError === next.onVideoPreviewError;
+    && previous.onVideoPreviewError === next.onVideoPreviewError
+    && previous.onVideoPreviewRetry === next.onVideoPreviewRetry;
 }
 
 function usesFixedNodePresentation(node: ProjectedCanvasNode): boolean {

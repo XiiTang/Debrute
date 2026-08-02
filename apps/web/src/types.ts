@@ -2,8 +2,10 @@ import type {
   AddProjectPathToCanvasMapInput,
   CanvasTextPreviewSourceAvailabilityRequest,
   CanvasTextPreviewSourceAvailabilityResponse,
-  CanvasVideoPreviewSourceRequest,
-  CanvasVideoPreviewSourceResponse,
+  CanvasVideoPreviewEnsureRequest,
+  CanvasVideoPreviewEnsureResponse,
+  CanvasVideoPreviewProbeRequest,
+  CanvasVideoPreviewProbeResponse,
   GeneratedAssetMetadataLookup,
   PhotoshopStateView,
   SaveCanvasTextPreviewSourceInput,
@@ -76,7 +78,8 @@ export interface WorkbenchActions {
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources: (input: CanvasTextPreviewSourceAvailabilityRequest) => Promise<CanvasTextPreviewSourceAvailabilityResponse>;
-  readCanvasVideoPreviewSources: (input: CanvasVideoPreviewSourceRequest) => Promise<CanvasVideoPreviewSourceResponse>;
+  probeCanvasVideoPreviewSources: (input: CanvasVideoPreviewProbeRequest, signal?: AbortSignal) => Promise<CanvasVideoPreviewProbeResponse>;
+  ensureCanvasVideoPreviewSource: (input: CanvasVideoPreviewEnsureRequest, signal?: AbortSignal) => Promise<CanvasVideoPreviewEnsureResponse>;
   ensureTextFileBuffer: (projectRelativePath: string) => Promise<void>;
   updateTextFileBuffer: (projectRelativePath: string, content: string) => void;
   saveTextFileBuffer: (projectRelativePath: string) => Promise<void>;

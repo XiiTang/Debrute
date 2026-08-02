@@ -305,44 +305,53 @@ export interface CanvasTextPreviewSourceAvailabilityResponse {
   sources: Record<string, CanvasTextPreviewSourceAvailabilityView>;
 }
 
-type CanvasVideoPreviewSourceKind =
-  | 'initial-poster'
-  | 'playback-frame';
-
-interface CanvasVideoPreviewSourceTarget {
+export interface CanvasVideoPreviewTarget {
   projectRelativePath: string;
   videoRevision: string;
-  currentTimeSeconds: number;
+  frameTimeMs: number;
 }
 
-export type CanvasVideoPreviewSourceView = CanvasVideoPreviewSourceTarget & (
+export type CanvasVideoPreviewProbeView = CanvasVideoPreviewTarget & (
   | {
-      status: 'available';
-      sourceKind: CanvasVideoPreviewSourceKind;
+      status: 'ready';
       sourceKey: string;
       sourceWidth: number;
     }
   | {
-      status: 'error';
-      sourceKind: CanvasVideoPreviewSourceKind;
+      status: 'needs-source';
+      sourceKey: string;
+    }
+  | {
+      status: 'failed';
       message: string;
     }
 );
 
-export interface CanvasVideoPreviewSourceRequest {
+export interface CanvasVideoPreviewProbeRequest {
   canvasId: string;
-  targets: CanvasVideoPreviewSourceTarget[];
+  targets: CanvasVideoPreviewTarget[];
 }
 
-export interface CanvasVideoPreviewSourceResponse {
-  sources: Record<string, CanvasVideoPreviewSourceView>;
+export interface CanvasVideoPreviewProbeResponse {
+  sources: Record<string, CanvasVideoPreviewProbeView>;
 }
+
+export interface CanvasVideoPreviewEnsureRequest {
+  canvasId: string;
+  target: CanvasVideoPreviewTarget;
+  sourceKey: string;
+}
+
+export type CanvasVideoPreviewEnsureResponse =
+  | { status: 'ready'; sourceKey: string; sourceWidth: number }
+  | { status: 'source-changed' }
+  | { status: 'failed'; message: string };
 
 export interface UpdateCanvasVideoPlaybackStateInput {
   canvasId: string;
   updates: Array<{
     projectRelativePath: string;
-    currentTimeSeconds: number;
+    currentTimeMs: number;
   }>;
 }
 
@@ -1309,8 +1318,8 @@ function isCanvasNode(value: unknown): boolean {
     && (value.layoutMode === undefined || value.layoutMode === 'manual')
     && (value.videoPlayback === undefined || (
       isProtocolObject(value.videoPlayback)
-      && isFiniteNumber(value.videoPlayback.currentTimeSeconds)
-      && value.videoPlayback.currentTimeSeconds >= 0
+      && Number.isSafeInteger(value.videoPlayback.currentTimeMs)
+      && (value.videoPlayback.currentTimeMs as number) >= 0
     ))
     && (value.textViewport === undefined || (
       isProtocolObject(value.textViewport)
@@ -1607,7 +1616,8 @@ export interface WorkbenchApiClient {
   clearFeedbackWorkingCopy(projectId: string, itemId: string): Promise<void>;
   saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
-  readCanvasVideoPreviewSources(input: CanvasVideoPreviewSourceRequest): Promise<CanvasVideoPreviewSourceResponse>;
+  probeCanvasVideoPreviewSources(input: CanvasVideoPreviewProbeRequest, signal?: AbortSignal): Promise<CanvasVideoPreviewProbeResponse>;
+  ensureCanvasVideoPreviewSource(input: CanvasVideoPreviewEnsureRequest, signal?: AbortSignal): Promise<CanvasVideoPreviewEnsureResponse>;
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;

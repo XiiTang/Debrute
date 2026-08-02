@@ -56,11 +56,13 @@ pub enum CanvasLayoutInteraction {
     Resize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanvasVideoPlaybackUpdate {
     pub project_relative_path: String,
-    pub current_time_seconds: f64,
+    pub current_time_ms: u64,
 }
+
+pub const CANVAS_VIDEO_TIME_MAX_MS: u64 = 9_007_199_254_740_991;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanvasTextViewportUpdate {
@@ -155,8 +157,7 @@ pub fn validate_canvas_document(canvas: &CanvasDocument) -> Result<(), ProjectEr
             || node.video_playback.as_ref().is_some_and(|playback| {
                 node.node_kind != CanvasNodeKind::File
                     || node.media_kind != Some(CanvasMediaKind::Video)
-                    || !playback.current_time_seconds.is_finite()
-                    || playback.current_time_seconds < 0.0
+                    || playback.current_time_ms > CANVAS_VIDEO_TIME_MAX_MS
             })
             || node.text_viewport.as_ref().is_some_and(|viewport| {
                 node.node_kind != CanvasNodeKind::File
@@ -411,15 +412,16 @@ pub fn update_canvas_video_playback(
     }
     let mut by_path = HashMap::new();
     for update in updates {
-        if !update.current_time_seconds.is_finite() || update.current_time_seconds < 0.0 {
+        if update.current_time_ms > CANVAS_VIDEO_TIME_MAX_MS {
             return Err(ProjectError::Validation(
-                "Canvas video playback time must be a non-negative finite number.".to_owned(),
+                "Canvas video playback time must be a non-negative safe integer in milliseconds."
+                    .to_owned(),
             ));
         }
         if by_path
             .insert(
                 update.project_relative_path.as_str(),
-                (update.current_time_seconds * 1000.0).round() / 1000.0,
+                update.current_time_ms,
             )
             .is_some()
         {
@@ -451,8 +453,8 @@ pub fn update_canvas_video_playback(
         let Some(time) = by_path.get(node.project_relative_path.as_str()) else {
             continue;
         };
-        node.video_playback = (*time != 0.0).then_some(CanvasVideoPlaybackState {
-            current_time_seconds: *time,
+        node.video_playback = (*time != 0).then_some(CanvasVideoPlaybackState {
+            current_time_ms: *time,
         });
     }
     Ok(result)

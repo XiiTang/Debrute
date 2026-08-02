@@ -43,8 +43,8 @@ describe('CanvasRenderLifecycle', () => {
 
     expect(fixture.lifecycle.getSnapshot()).toBe(sceneBeforePan);
     expect(listener).not.toHaveBeenCalled();
-    expect(fixture.lifecycle.previewTierForNode('near')).toBe(1);
-    expect(fixture.lifecycle.previewTierForNode('far')).toBe(0);
+    expect(fixture.lifecycle.previewDistanceSquaredForNode('near'))
+      .toBeLessThan(fixture.lifecycle.previewDistanceSquaredForNode('far'));
     unsubscribe();
   });
 

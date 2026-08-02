@@ -1,51 +1,60 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canvasPreviewPriorityTier,
+  canvasPreviewDistanceSquared,
+  compareCanvasPreviewPaths,
   orderCanvasPreviewTasks
 } from './CanvasPreviewScheduling.js';
 
 describe('CanvasPreviewScheduling', { tags: ['canvas-text', 'canvas-video'] }, () => {
   const visibleRect = { x: 0, y: 0, width: 100, height: 100 };
 
-  it('uses the exact viewport only as a two-tier ordering signal', () => {
+  it('orders every target by the viewport center distance to its nearest rectangle point', () => {
     const tasks = [
-      task('outside.md', 500, -100),
-      task('visible-b.md', 10, 30),
-      task('priority.md', 120, 20),
-      task('visible-a.md', 10, 10),
-      task('outside-a.md', -500, -100)
+      task('touching-corner.md', 100, 100),
+      task('outside-near-center.md', 101, 40),
+      { ...task('contains-center.md', 0, 0), width: 100, height: 100 }
     ];
 
     expect(orderCanvasPreviewTasks(tasks, visibleRect).map((item) => item.projectRelativePath)).toEqual([
-      'visible-a.md',
-      'visible-b.md',
-      'outside-a.md',
-      'outside.md',
-      'priority.md'
+      'contains-center.md',
+      'outside-near-center.md',
+      'touching-corner.md'
     ]);
-    expect(tasks).toHaveLength(5);
+    expect(tasks).toHaveLength(3);
   });
 
-  it('orders y then x then path inside a viewport tier', () => {
+  it('uses project path only to make equal distances deterministic', () => {
     const tasks = [
-      task('z.md', 20, 20),
-      task('b.md', 10, 20),
-      task('a.md', 10, 20),
-      task('first.md', 80, 10)
+      task('z.md', 10, 40),
+      task('a.md', 70, 40)
     ];
 
     expect(orderCanvasPreviewTasks(tasks, visibleRect).map((item) => item.projectRelativePath)).toEqual([
-      'first.md',
       'a.md',
-      'b.md',
       'z.md'
     ]);
   });
 
-  it('classifies exact-viewport and background nodes without filtering either tier', () => {
-    expect(canvasPreviewPriorityTier(task('visible.md', 10, 10), visibleRect)).toBe(0);
-    expect(canvasPreviewPriorityTier(task('touching-edge.md', 100, 10), visibleRect)).toBe(0);
-    expect(canvasPreviewPriorityTier(task('outside.md', 500, 10), visibleRect)).toBe(1);
+  it('breaks exact path ties by raw code-unit order instead of locale equivalence', () => {
+    const composed = '\u00e9.md';
+    const decomposed = 'e\u0301.md';
+    expect(composed.localeCompare(decomposed)).toBe(0);
+    expect(compareCanvasPreviewPaths(decomposed, composed)).toBeLessThan(0);
+    expect(orderCanvasPreviewTasks([
+      task(composed, 10, 40),
+      task(decomposed, 70, 40)
+    ], visibleRect).map((item) => item.projectRelativePath)).toEqual([
+      decomposed,
+      composed
+    ]);
+  });
+
+  it('gives a large node containing the viewport center zero distance', () => {
+    expect(canvasPreviewDistanceSquared(
+      { ...task('large.md', -500, -500), width: 1_000, height: 1_000 },
+      visibleRect
+    )).toBe(0);
+    expect(canvasPreviewDistanceSquared(task('right.md', 100, 40), visibleRect)).toBe(2_500);
   });
 });
 

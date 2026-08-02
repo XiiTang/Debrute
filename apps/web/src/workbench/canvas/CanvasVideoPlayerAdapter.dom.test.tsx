@@ -74,7 +74,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
           <TestCanvasVideoPlayerAdapter
             ref={ref}
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -119,7 +119,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -152,7 +152,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -175,7 +175,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             playRequest={{ requestId: 1 }}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
@@ -191,7 +191,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             playRequest={{ requestId: 1 }}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
@@ -207,7 +207,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             playRequest={{ requestId: 2 }}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
@@ -237,7 +237,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={onError}
@@ -262,7 +262,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             playRequest={{ requestId: 1 }}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
@@ -293,7 +293,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -338,7 +338,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 10 })}
-            initialTimeSeconds={4.5}
+            initialTimeMs={4_500}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -380,7 +380,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 5 })}
-            initialTimeSeconds={6.25}
+            initialTimeMs={6_250}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={onError}
@@ -425,7 +425,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={4.5}
+            initialTimeMs={4_500}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -456,7 +456,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         video.dispatchEvent(new Event('pause', { bubbles: true }));
       });
       expect(onPlayingChange).toHaveBeenLastCalledWith(false);
-      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6.25);
+      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6_250);
 
       video.currentTime = 8;
       act(() => {
@@ -483,7 +483,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -500,7 +500,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
       });
 
       expect(onPlaybackBoundary).toHaveBeenCalledTimes(1);
-      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6.25);
+      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6_250);
 
       video.currentTime = 0;
       act(() => {
@@ -531,7 +531,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
           <TestCanvasVideoPlayerAdapter
             ref={ref}
             node={videoNode()}
-            initialTimeSeconds={0}
+            initialTimeMs={0}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={() => undefined}
@@ -544,7 +544,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
       Object.defineProperty(video, 'pause', { configurable: true, value: vi.fn() });
 
       act(() => {
-        ref.current?.restorePersistedTime(3.25);
+        ref.current?.restorePersistedTime(3_250);
         video.dispatchEvent(new Event('seeked', { bubbles: true }));
       });
 
@@ -570,7 +570,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 5 })}
-            initialTimeSeconds={6.25}
+            initialTimeMs={6_250}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={onError}
@@ -610,7 +610,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         root.render(
           <TestCanvasVideoPlayerAdapter
             node={videoNode({ durationSeconds: 10 })}
-            initialTimeSeconds={4.5}
+            initialTimeMs={4_500}
             onPointerInside={() => undefined}
             onFocusInside={() => undefined}
             onError={onError}

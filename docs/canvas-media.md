@@ -27,17 +27,17 @@ and an explicit retry surface for media-load errors. Audio playback state is not
 stored in the Canvas Document.
 
 An available video projection must include intrinsic width and height, optional
-duration, and discovered WebVTT text tracks. Poster data is deliberately absent
-from the projection: static video images belong to the video-preview pipeline,
+duration, and discovered WebVTT text tracks. Static preview data is deliberately
+absent from the projection because it belongs to the video-preview pipeline,
 not the player metadata contract.
 
 ## Video Playback Position
 
 Playback Position is persisted Canvas state because it controls the still frame
 shown after a player is unloaded or Workbench is reopened. The Canvas Document
-stores only a non-negative timestamp on video file nodes. Positive timestamps
-are normalized to millisecond precision; zero removes the stored playback
-field.
+stores only a non-negative safe-integer millisecond timestamp on video file nodes;
+zero removes the stored playback field. Browser media time is converted to and
+from seconds only at the player adapter boundary.
 
 Workbench writes Playback Position at playback boundaries such as pause, ended
 playback, player unload, Canvas switch, and Project close. It does not persist
@@ -70,63 +70,61 @@ changes reset node-local handoff state so stale media cannot satisfy readiness.
 
 ## Video Preview Sources
 
-Video previews have two source kinds:
+Every video preview is the frame at the exact persisted Playback Position,
+including zero milliseconds. Runtime owns an opaque source key that binds the
+Canvas Video Preview Source Version to the target frame. Workbench stores,
+compares, and returns that key without parsing or deriving it.
 
-- `initial-poster` when Playback Position is zero;
-- `playback-frame` for the exact positive Playback Position.
+Workbench owns one latest-wins Video Preview registry per mounted Canvas. The
+registry is keyed by Project path, and the target identity comprises Canvas ID,
+Project path, video revision, and frame time in milliseconds. Active players
+have no preview target. Each task moves through `needs-probe`, `probing`,
+`needs-source`, `ensuring`, or `failed`; Runtime-confirmed canonical readiness
+removes the task instead of introducing a completed state.
 
-For an initial poster, Runtime checks one ordered same-directory,
-same-basename chain: `name.poster.*`, then `name.*`, then automatic extraction
-at zero seconds when no candidate exists. A selected explicit candidate is
-copied into the preview cache before variants are produced. If an existing
-candidate is broken or is not a regular file, that source is an error; the
-service does not continue down the chain.
+Runtime exposes two source operations. Probe accepts one rolling window of at
+most ten targets and returns exactly one Project-path-keyed result per target: ready,
+needs-source, or failed. Probe does not extract a frame. Ensure accepts one
+target and its exact Probe-owned source key, and returns ready, source-changed,
+or failed. One registry has at most one Probe window and one Ensure request in
+flight. A source-changed result returns the target to Probe. There is no
+automatic retry; the node-local Retry action restarts the current target at
+Probe.
 
-A positive Playback Position always targets an extracted playback frame. An
-out-of-duration timestamp, extraction failure, stale revision, missing source
-key, variant failure, or image load failure is surfaced as a preview error. It
-does not fall back to the initial poster, a Generated Asset last frame, another
-timestamp, or the raw video.
+One invalid target does not cancel a Probe window; its stale result is rejected
+while the remaining results settle independently. An obsolete Ensure is
+actively cancelled when its own target becomes ineligible or changes identity.
+Camera movement and priority changes do not cancel in-flight work. Whole
+Project, Canvas, provider, or connection invalidation cancels its scoped
+requests.
 
-Source readiness is returned as a Project-path-keyed record with exactly one
-entry per requested video target; it is not an ordered array. A missing or
-identity-mismatched entry is a preview protocol error rather than an empty
-preview. Preview starts share the image/video/text scheduler, which pauses
-deferred starts during interaction and rejects stale work. Exact-viewport
-videos run before offscreen videos, but culling never admits, cancels, or delays
-preview production. An active video player is not a new poster target.
-
-Cache identity includes Canvas ID, Project path key, video revision, source
-kind, and source key. The source key includes the `Canvas Video Preview Source
-Version` together with the selected poster or frame-extraction inputs. The
-source directory contains one cached source; width-specific JPEG variants add
-the same `Raster Preview Engine Version` used by image and text variants:
+Cache identity includes Canvas ID, Project path key, video revision, and source
+key. The source directory contains one extracted JPEG; width-specific JPEG
+variants add the same Raster Preview Engine Version used by image and text:
 
 ```text
 .debrute/cache/canvas-video-previews/
-  <canvas>/<path-key>/<revision>/<source-kind>/<source-key>/
-    source.<ext>
+  <canvas>/<path-key>/<revision>/<source-key>/
+    source.jpg
     raster-engine-v<version>/
       preview-w<width>.jpg
 ```
 
-When the requested width reaches the selected source's intrinsic width,
-Runtime returns `source.<ext>` directly rather than decoding it and encoding an
-equal-width JPEG. This applies to both explicit/automatic initial posters and
-positive Playback Position frames, creates no equal-width variant, and consumes
-no Raster Preview Pool slot.
+When the requested width reaches the source's intrinsic width, Runtime returns
+`source.jpg` directly rather than decoding and encoding an equal-width JPEG.
+This creates no equal-width variant and consumes no Raster Preview Pool slot.
 
 The requested width uses the same raster-preview width model as Canvas images.
-After poster selection or frame extraction produces `source.<ext>`, video uses
-the same Runtime raster-variant service as image and text. Video contributes its
-JPEG output policy and source-current validator; it does not own separate width
-validation, locking, resize, cache-publication, or response-file logic.
+After Ensure produces `source.jpg`, video uses the same Runtime raster-variant
+service as image and text. Video contributes its JPEG output policy and
+source-current validator; it does not own separate width validation, locking,
+resize, cache-publication, or response-file logic.
 Cache paths are derived state and are excluded from Project-visible content.
-Runtime removes superseded video revisions and source identities that no longer
-match the persisted Playback Position or selected initial poster. Under the
-current source identity it reads and writes only the exact current Raster Engine
-path; it neither enumerates nor removes sibling engine-version directories. It
-retains requested width variants without a byte quota, LRU, or TTL.
+Superseded video revisions and source identities do not participate in current
+lookup. Under the current source identity Runtime reads and writes only the
+exact current Raster Engine path; it neither enumerates nor removes sibling
+engine-version directories. It retains requested width variants without a byte
+quota, LRU, TTL, or compatibility cleanup path.
 
 ## Player Metadata And Raw Media
 
@@ -145,12 +143,13 @@ revisioned URL.
 
 ## Error Ownership
 
-Missing or unreadable source media is node availability. Preview discovery,
-frame extraction, variant, and preview-image failures are preview errors.
+Missing or unreadable source media is node availability. Probe, Ensure,
+variant, and preview-image failures are preview errors.
 Browser loading, play, and initial-seek failures are player errors. During a
 handoff, failure leaves the current visible layer intact and places the target
-layer's error above it. Retry reloads only the current player source; source
-selection has no alternate path.
+layer's error above it. Preview Retry restarts that node at Probe, while Player
+Retry reloads only the current player source. Source selection has no alternate
+path.
 
 Node-availability and media-load error titles and messages use the same
 Canvas-scaled semantic presentation as other Canvas text. They remain attached

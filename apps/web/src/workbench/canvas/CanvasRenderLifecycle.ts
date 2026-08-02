@@ -20,6 +20,7 @@ import type {
 import type { CanvasRect } from './runtime/canvasGeometry.js';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime.js';
 import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection.js';
+import { canvasPreviewDistanceSquared } from './CanvasPreviewScheduling.js';
 
 export interface CanvasPreviewOrderSource {
   getPreviewOrderSnapshot(): CanvasRect;
@@ -30,7 +31,7 @@ export interface CanvasRenderLifecycle extends CanvasPreviewOrderSource {
   acceptProjection(projection: CanvasProjection): void;
   getSnapshot(): CanvasRenderCoordinatorSnapshot;
   subscribe(listener: () => void): () => void;
-  previewTierForNode(path: string): 0 | 1;
+  previewDistanceSquaredForNode(path: string): number;
   getCullingCounts(): CanvasCullingCounts;
 }
 
@@ -195,7 +196,10 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       previewOrderListeners.add(listener);
       return () => previewOrderListeners.delete(listener);
     },
-    previewTierForNode: (path) => culling.isNodeInViewport(path) ? 0 : 1,
+    previewDistanceSquaredForNode: (path) => {
+      const node = scene.nodesByPath.get(path);
+      return node ? canvasPreviewDistanceSquared(node, previewOrderSnapshot) : Number.POSITIVE_INFINITY;
+    },
     getCullingCounts: culling.getCounts
   };
 }

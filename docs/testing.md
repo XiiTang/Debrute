@@ -194,7 +194,7 @@ macOS library code signing.
 
 Requested live acceptance runs on macOS arm64 in both a real browser and
 Electron. `pnpm verify:browser` owns an isolated Project with a large raster,
-text document, and real video plus explicit poster. Its browser context uses a
+text document, and real video. Its browser context uses a
 Retina-equivalent device pixel ratio of 2. It requires image, inactive text, and
 inactive video previews to decode, then observes every media kind switch from
 the initial tier to a lower tier, a higher tier, a repeated lower tier, and a

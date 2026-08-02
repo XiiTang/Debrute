@@ -24,7 +24,7 @@ use super::{
     },
 };
 use crate::project::{
-    ProjectCapabilityFs, ProjectError, normalize_project_relative_path,
+    CANVAS_VIDEO_TIME_MAX_MS, ProjectCapabilityFs, ProjectError, normalize_project_relative_path,
     open_no_symlink_existing_project_file, project_media_revision,
     resolve_no_symlink_existing_project_path,
 };
@@ -32,12 +32,12 @@ use crate::project::{
 const MEDIA_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const VIDEO_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
 const MEDIA_OUTPUT_LIMIT: usize = 1024 * 1024;
-const MAX_EXPLICIT_POSTER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_EXTRACTED_FRAME_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_STABLE_VIDEO_COPY_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const STABLE_VIDEO_COPY_DISK_RESERVE: u64 = 256 * 1024 * 1024;
 const STABLE_VIDEO_COPY_TIMEOUT: Duration = Duration::from_secs(30);
 const VIDEO_FRAME_SCALE_FILTER: &str = "scale=w='min(4096,iw)':h='min(4096,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2";
+pub const CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MediaToolPaths {
@@ -62,43 +62,50 @@ pub struct CanvasVideoMetadata {
     pub duration_seconds: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CanvasVideoPreviewSourceKind {
-    InitialPoster,
-    PlaybackFrame,
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanvasVideoPreviewTarget {
     pub project_relative_path: String,
     pub video_revision: String,
-    pub current_time_seconds: f64,
+    pub frame_time_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum CanvasVideoPreviewSourceStatus {
-    Available {
-        source_kind: CanvasVideoPreviewSourceKind,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CanvasVideoPreviewProbeStatus {
+    Ready {
         source_key: String,
         source_width: u32,
     },
-    Error {
-        source_kind: CanvasVideoPreviewSourceKind,
+    NeedsSource {
+        source_key: String,
+    },
+    Failed {
         message: String,
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CanvasVideoPreviewSourceView {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanvasVideoPreviewProbeView {
     pub target: CanvasVideoPreviewTarget,
-    pub status: CanvasVideoPreviewSourceStatus,
+    pub status: CanvasVideoPreviewProbeStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CanvasVideoPreviewEnsureStatus {
+    Ready {
+        source_key: String,
+        source_width: u32,
+    },
+    SourceChanged,
+    Failed {
+        message: String,
+    },
 }
 
 pub struct CanvasVideoPreviewService {
     supervisor: Arc<BoundedProcessSupervisor>,
     tools: MediaToolPaths,
     raster_variants: Arc<RasterPreviewVariantService>,
-    stable_copy_admission: Semaphore,
+    stable_input_copy_admission: Semaphore,
     source_locks: KeyedLocks,
 }
 
@@ -112,7 +119,7 @@ impl CanvasVideoPreviewService {
             supervisor,
             tools,
             raster_variants,
-            stable_copy_admission: Semaphore::new(1),
+            stable_input_copy_admission: Semaphore::new(1),
             source_locks: KeyedLocks::default(),
         }
     }
@@ -130,7 +137,7 @@ impl CanvasVideoPreviewService {
         let source = StableVideoInput::open(
             project_root,
             project_relative_path,
-            &self.stable_copy_admission,
+            &self.stable_input_copy_admission,
             cancellation,
         )?;
         self.read_metadata_path(&source.path, cancellation)
@@ -151,7 +158,7 @@ impl CanvasVideoPreviewService {
         let source = StableVideoInput::open(
             project_root,
             project_relative_path,
-            &self.stable_copy_admission,
+            &self.stable_input_copy_admission,
             cancellation,
         )?;
         let temporary =
@@ -167,34 +174,67 @@ impl CanvasVideoPreviewService {
         })()
     }
 
-    /// Resolves the requested video preview sources independently.
+    /// Probes requested canonical frame sources without generating missing frames.
     ///
     /// # Errors
-    /// Returns an error when a target has an invalid playback timestamp.
-    pub fn read_sources(
+    /// Returns an error only when the whole request is cancelled.
+    pub fn probe_sources(
         &self,
         project_root: &Path,
         canvas_id: &str,
         targets: &[CanvasVideoPreviewTarget],
         cancellation: &PreviewCancellation,
-    ) -> Result<Vec<CanvasVideoPreviewSourceView>, ProjectError> {
+    ) -> Result<Vec<CanvasVideoPreviewProbeView>, ProjectError> {
         let mut result = Vec::with_capacity(targets.len());
         for target in targets.iter().cloned() {
-            let source_kind = source_kind(target.current_time_seconds)?;
-            let status = match self.resolve_source(project_root, canvas_id, &target, cancellation) {
-                Ok(source) => CanvasVideoPreviewSourceStatus::Available {
-                    source_kind,
-                    source_key: source.source_key,
-                    source_width: source.source_width,
-                },
-                Err(error) => CanvasVideoPreviewSourceStatus::Error {
-                    source_kind,
+            cancellation.check()?;
+            let status = match self.probe_source(project_root, canvas_id, &target, cancellation) {
+                Ok(status) => status,
+                Err(error) if error.code() == "canvas_preview_cancelled" => return Err(error),
+                Err(error) => CanvasVideoPreviewProbeStatus::Failed {
                     message: error.to_string(),
                 },
             };
-            result.push(CanvasVideoPreviewSourceView { target, status });
+            result.push(CanvasVideoPreviewProbeView { target, status });
         }
         Ok(result)
+    }
+
+    /// Ensures one exact canonical frame source bound to a Probe-owned source key.
+    ///
+    /// # Errors
+    /// Returns an error when the request is cancelled.
+    pub fn ensure_source(
+        &self,
+        project_root: &Path,
+        canvas_id: &str,
+        target: &CanvasVideoPreviewTarget,
+        source_key: &str,
+        cancellation: &PreviewCancellation,
+    ) -> Result<CanvasVideoPreviewEnsureStatus, ProjectError> {
+        if assert_source_key_current(target, source_key).is_err() {
+            return Ok(CanvasVideoPreviewEnsureStatus::SourceChanged);
+        }
+        match self.ensure_source_inner(project_root, canvas_id, target, source_key, cancellation) {
+            Ok(source) => Ok(CanvasVideoPreviewEnsureStatus::Ready {
+                source_key: source.source_key,
+                source_width: source.source_width,
+            }),
+            Err(error) if error.code() == "canvas_preview_cancelled" => Err(error),
+            Err(error)
+                if matches!(
+                    error.code(),
+                    "canvas_video_preview_revision_mismatch"
+                        | "canvas_video_preview_source_changed"
+                        | "project_path_changed"
+                ) =>
+            {
+                Ok(CanvasVideoPreviewEnsureStatus::SourceChanged)
+            }
+            Err(error) => Ok(CanvasVideoPreviewEnsureStatus::Failed {
+                message: error.to_string(),
+            }),
+        }
     }
 
     /// Resolves one revision-bound JPEG variant from an accepted source key.
@@ -210,16 +250,14 @@ impl CanvasVideoPreviewService {
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
-        let kind = source_kind(target.current_time_seconds)?;
         let directory = video_source_directory(
             canvas_id,
             &target.project_relative_path,
             &target.video_revision,
-            kind,
             source_key,
         )?;
         assert_video_revision(project_root, target)?;
-        assert_source_key_current(project_root, target, kind, source_key)?;
+        assert_source_key_current(target, source_key)?;
         let (source_project_path, source) =
             source_file(project_root, &directory)?.ok_or_else(|| {
                 ProjectError::service_with_fields(
@@ -245,7 +283,7 @@ impl CanvasVideoPreviewService {
             RasterPreviewVariantRequest {
                 source_path: source,
                 source_file: file,
-                source_content_type: direct_source_content_type(&source_project_path),
+                source_content_type: Some("image/jpeg"),
                 cache_directory: directory,
                 width,
                 output_policy: RasterPreviewVariantOutputPolicy::Jpeg,
@@ -257,181 +295,64 @@ impl CanvasVideoPreviewService {
             cancellation,
             || {
                 assert_video_revision(project_root, target)?;
-                assert_source_key_current(project_root, target, kind, source_key)
+                assert_source_key_current(target, source_key)
             },
         )
     }
 
-    fn resolve_source(
+    fn probe_source(
         &self,
         project_root: &Path,
         canvas_id: &str,
         target: &CanvasVideoPreviewTarget,
         cancellation: &PreviewCancellation,
+    ) -> Result<CanvasVideoPreviewProbeStatus, ProjectError> {
+        cancellation.check()?;
+        assert_video_revision(project_root, target)?;
+        let source_key = frame_source_key(target.frame_time_ms)?;
+        let directory = video_source_directory(
+            canvas_id,
+            &target.project_relative_path,
+            &target.video_revision,
+            &source_key,
+        )?;
+        let Some((source_project_path, source)) = source_file(project_root, &directory)? else {
+            return Ok(CanvasVideoPreviewProbeStatus::NeedsSource { source_key });
+        };
+        let mut file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
+        let metadata = self
+            .raster_variants
+            .metadata_file(&source, &mut file, cancellation)?;
+        Ok(CanvasVideoPreviewProbeStatus::Ready {
+            source_key,
+            source_width: metadata.width,
+        })
+    }
+
+    fn ensure_source_inner(
+        &self,
+        project_root: &Path,
+        canvas_id: &str,
+        target: &CanvasVideoPreviewTarget,
+        source_key: &str,
+        cancellation: &PreviewCancellation,
     ) -> Result<ResolvedSource, ProjectError> {
         cancellation.check()?;
         assert_video_revision(project_root, target)?;
-        let kind = source_kind(target.current_time_seconds)?;
-        let hint = match kind {
-            CanvasVideoPreviewSourceKind::InitialPoster => "initial".to_owned(),
-            CanvasVideoPreviewSourceKind::PlaybackFrame => {
-                playback_source_key(target.current_time_seconds)?
-            }
-        };
+        assert_source_key_current(target, source_key)?;
         let key = format!(
-            "{}\0{canvas_id}\0{}\0{}\0{hint}",
+            "{}\0{canvas_id}\0{}\0{}\0{source_key}",
             project_root.display(),
             target.project_relative_path,
             target.video_revision
         );
         let _lock = self.source_locks.acquire(&key, cancellation)?;
         assert_video_revision(project_root, target)?;
-        match kind {
-            CanvasVideoPreviewSourceKind::InitialPoster => {
-                if let Some(poster) = explicit_poster(project_root, &target.project_relative_path)?
-                {
-                    self.resolve_explicit_poster(
-                        project_root,
-                        canvas_id,
-                        target,
-                        poster,
-                        cancellation,
-                    )
-                } else {
-                    let source_key = auto_initial_source_key(&target.video_revision)?;
-                    self.resolve_extracted_frame(
-                        project_root,
-                        canvas_id,
-                        target,
-                        kind,
-                        &source_key,
-                        0.0,
-                        cancellation,
-                    )
-                }
-            }
-            CanvasVideoPreviewSourceKind::PlaybackFrame => {
-                let metadata =
-                    self.read_metadata(project_root, &target.project_relative_path, cancellation)?;
-                if metadata
-                    .duration_seconds
-                    .is_some_and(|duration| target.current_time_seconds > duration)
-                {
-                    return Err(ProjectError::service(
-                        "canvas_video_preview_time_out_of_range",
-                        format!(
-                            "Canvas video playback time exceeds video duration: {}",
-                            target.project_relative_path
-                        ),
-                    ));
-                }
-                let source_key = playback_source_key(target.current_time_seconds)?;
-                self.resolve_extracted_frame(
-                    project_root,
-                    canvas_id,
-                    target,
-                    kind,
-                    &source_key,
-                    target.current_time_seconds,
-                    cancellation,
-                )
-            }
-        }
-    }
-
-    fn resolve_explicit_poster(
-        &self,
-        project_root: &Path,
-        canvas_id: &str,
-        target: &CanvasVideoPreviewTarget,
-        mut poster: ExplicitPoster,
-        cancellation: &PreviewCancellation,
-    ) -> Result<ResolvedSource, ProjectError> {
-        let source_key = explicit_poster_source_key(&poster)?;
+        assert_source_key_current(target, source_key)?;
         let directory = video_source_directory(
             canvas_id,
             &target.project_relative_path,
             &target.video_revision,
-            CanvasVideoPreviewSourceKind::InitialPoster,
-            &source_key,
-        )?;
-        let extension = poster
-            .absolute
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .map_or_else(|| "jpg".to_owned(), str::to_ascii_lowercase);
-        let source_project_path = format!("{directory}/source.{extension}");
-        let source = if let Some(source) = existing_file(project_root, &source_project_path)? {
-            source
-        } else {
-            poster.file.rewind()?;
-            let mut bytes = Vec::new();
-            poster
-                .file
-                .by_ref()
-                .take(MAX_EXPLICIT_POSTER_BYTES + 1)
-                .read_to_end(&mut bytes)?;
-            if bytes.len() as u64 > MAX_EXPLICIT_POSTER_BYTES {
-                return Err(ProjectError::service(
-                    "canvas_video_poster_invalid",
-                    format!(
-                        "Canvas video explicit poster grew beyond the size limit: {}",
-                        poster.relative
-                    ),
-                ));
-            }
-            let actual_revision = project_media_revision(&mut poster.file)?;
-            if actual_revision != poster.revision {
-                return Err(ProjectError::service(
-                    "canvas_video_poster_changed",
-                    format!(
-                        "Canvas video explicit poster changed during preview rendering: {}",
-                        poster.relative
-                    ),
-                ));
-            }
-            ProjectCapabilityFs::open(project_root)?.atomic_write_checked(
-                &source_project_path,
-                &bytes,
-                || {
-                    cancellation.check()?;
-                    assert_video_revision(project_root, target)?;
-                    assert_source_key_current(
-                        project_root,
-                        target,
-                        CanvasVideoPreviewSourceKind::InitialPoster,
-                        &source_key,
-                    )
-                },
-            )?;
-            resolve_no_symlink_existing_project_path(project_root, &source_project_path)?
-        };
-        let mut file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
-        let metadata = self
-            .raster_variants
-            .metadata_file(&source, &mut file, cancellation)?;
-        Ok(ResolvedSource {
-            source_key,
-            source_width: metadata.width,
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)] // The complete cache identity is intentionally explicit.
-    fn resolve_extracted_frame(
-        &self,
-        project_root: &Path,
-        canvas_id: &str,
-        target: &CanvasVideoPreviewTarget,
-        kind: CanvasVideoPreviewSourceKind,
-        source_key: &str,
-        time: f64,
-        cancellation: &PreviewCancellation,
-    ) -> Result<ResolvedSource, ProjectError> {
-        let directory = video_source_directory(
-            canvas_id,
-            &target.project_relative_path,
-            &target.video_revision,
-            kind,
             source_key,
         )?;
         let source_project_path = format!("{directory}/source.jpg");
@@ -441,10 +362,27 @@ impl CanvasVideoPreviewService {
             let video = StableVideoInput::open(
                 project_root,
                 &target.project_relative_path,
-                &self.stable_copy_admission,
+                &self.stable_input_copy_admission,
                 cancellation,
             )?;
-            let temporary = self.extract_frame_temporary(&video.path, time, cancellation)?;
+            let metadata = self.read_metadata_path(&video.path, cancellation)?;
+            if metadata
+                .duration_seconds
+                .is_some_and(|duration| frame_time_seconds(target.frame_time_ms) > duration)
+            {
+                return Err(ProjectError::service(
+                    "canvas_video_preview_time_out_of_range",
+                    format!(
+                        "Canvas video playback time exceeds video duration: {}",
+                        target.project_relative_path
+                    ),
+                ));
+            }
+            let temporary = self.extract_frame_temporary(
+                &video.path,
+                frame_time_seconds(target.frame_time_ms),
+                cancellation,
+            )?;
             let publication = (|| {
                 assert_video_revision(project_root, target)?;
                 let bytes = read_file_limited(
@@ -459,7 +397,7 @@ impl CanvasVideoPreviewService {
                     || {
                         cancellation.check()?;
                         assert_video_revision(project_root, target)?;
-                        assert_source_key_current(project_root, target, kind, source_key)
+                        assert_source_key_current(target, source_key)
                     },
                 )
             })();
@@ -566,23 +504,10 @@ impl CanvasVideoPreviewService {
 }
 
 fn assert_source_key_current(
-    project_root: &Path,
     target: &CanvasVideoPreviewTarget,
-    kind: CanvasVideoPreviewSourceKind,
     source_key: &str,
 ) -> Result<(), ProjectError> {
-    let expected = match kind {
-        CanvasVideoPreviewSourceKind::InitialPoster => {
-            if let Some(poster) = explicit_poster(project_root, &target.project_relative_path)? {
-                explicit_poster_source_key(&poster)?
-            } else {
-                auto_initial_source_key(&target.video_revision)?
-            }
-        }
-        CanvasVideoPreviewSourceKind::PlaybackFrame => {
-            playback_source_key(target.current_time_seconds)?
-        }
-    };
+    let expected = frame_source_key(target.frame_time_ms)?;
     if source_key == expected {
         Ok(())
     } else {
@@ -605,15 +530,21 @@ fn assert_source_key_current(
     }
 }
 
-fn explicit_poster_source_key(poster: &ExplicitPoster) -> Result<String, ProjectError> {
+fn frame_source_key(frame_time_ms: u64) -> Result<String, ProjectError> {
+    if frame_time_ms > CANVAS_VIDEO_TIME_MAX_MS {
+        return Err(ProjectError::Validation(
+            "Canvas video preview time must be a non-negative safe integer in milliseconds."
+                .to_owned(),
+        ));
+    }
     validate_cache_segment(
-        &format!(
-            "v1--explicit--{}--{}",
-            project_relative_path_cache_key(&poster.relative)?,
-            project_revision_cache_key(&poster.revision)?
-        ),
+        &format!("frame-v1--ms-{frame_time_ms}"),
         "Canvas video preview source key",
     )
+}
+
+fn frame_time_seconds(frame_time_ms: u64) -> f64 {
+    Duration::from_millis(frame_time_ms).as_secs_f64()
 }
 
 fn read_file_limited(
@@ -710,13 +641,6 @@ fn positive_f64(value: Option<&Value>) -> Option<f64> {
 struct ResolvedSource {
     source_key: String,
     source_width: u32,
-}
-
-struct ExplicitPoster {
-    relative: String,
-    absolute: PathBuf,
-    revision: String,
-    file: File,
 }
 
 struct StableVideoInput {
@@ -893,63 +817,6 @@ impl Drop for StableVideoInput {
     }
 }
 
-fn explicit_poster(
-    project_root: &Path,
-    video_path: &str,
-) -> Result<Option<ExplicitPoster>, ProjectError> {
-    let video = normalize_project_relative_path(video_path)?;
-    let (directory, name) = video
-        .rsplit_once('/')
-        .map_or(("", video.as_str()), |value| value);
-    let base = name.rsplit_once('.').map_or(name, |(base, _)| base);
-    for suffix in [
-        ".poster.png",
-        ".poster.jpg",
-        ".poster.jpeg",
-        ".poster.webp",
-        ".poster.avif",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp",
-        ".avif",
-    ] {
-        let candidate = if directory.is_empty() {
-            format!("{base}{suffix}")
-        } else {
-            format!("{directory}/{base}{suffix}")
-        };
-        let mut file = match open_no_symlink_existing_project_file(project_root, &candidate) {
-            Ok(file) => file,
-            Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
-        let metadata = file.metadata()?;
-        if !metadata.is_file() {
-            return Err(ProjectError::service(
-                "canvas_video_poster_invalid",
-                format!("Canvas video explicit poster is not a file: {candidate}"),
-            ));
-        }
-        if metadata.len() > MAX_EXPLICIT_POSTER_BYTES {
-            return Err(ProjectError::service(
-                "canvas_video_poster_invalid",
-                format!("Canvas video explicit poster is too large: {candidate}"),
-            ));
-        }
-        let absolute = resolve_no_symlink_existing_project_path(project_root, &candidate)?;
-        return Ok(Some(ExplicitPoster {
-            relative: candidate,
-            absolute,
-            revision: project_media_revision(&mut file)?,
-            file,
-        }));
-    }
-    Ok(None)
-}
-
 fn assert_video_revision(
     project_root: &Path,
     target: &CanvasVideoPreviewTarget,
@@ -972,39 +839,10 @@ fn assert_video_revision(
     }
 }
 
-fn source_kind(time: f64) -> Result<CanvasVideoPreviewSourceKind, ProjectError> {
-    if !time.is_finite() || time < 0.0 {
-        return Err(ProjectError::Validation(
-            "Canvas video preview timestamp must be a non-negative finite number.".to_owned(),
-        ));
-    }
-    Ok(if time == 0.0 {
-        CanvasVideoPreviewSourceKind::InitialPoster
-    } else {
-        CanvasVideoPreviewSourceKind::PlaybackFrame
-    })
-}
-
-fn playback_source_key(time: f64) -> Result<String, ProjectError> {
-    source_kind(time)?;
-    validate_cache_segment(
-        &format!("v1--playback--t-{time}"),
-        "Canvas video preview source key",
-    )
-}
-
-fn auto_initial_source_key(revision: &str) -> Result<String, ProjectError> {
-    validate_cache_segment(
-        &format!("v1--auto-0s--{}", project_revision_cache_key(revision)?),
-        "Canvas video preview source key",
-    )
-}
-
 fn video_source_directory(
     canvas_id: &str,
     video_path: &str,
     revision: &str,
-    kind: CanvasVideoPreviewSourceKind,
     source_key: &str,
 ) -> Result<String, ProjectError> {
     if canvas_id.is_empty()
@@ -1017,12 +855,8 @@ fn video_source_directory(
             "Canvas video preview canvas id must be a valid id.".to_owned(),
         ));
     }
-    let kind = match kind {
-        CanvasVideoPreviewSourceKind::InitialPoster => "initial-poster",
-        CanvasVideoPreviewSourceKind::PlaybackFrame => "playback-frame",
-    };
     Ok(format!(
-        ".debrute/cache/canvas-video-previews/{canvas_id}/{}/{}/{kind}/{}",
+        ".debrute/cache/canvas-video-previews/{canvas_id}/{}/{}/{}",
         project_relative_path_cache_key(video_path)?,
         project_revision_cache_key(revision)?,
         validate_cache_segment(source_key, "Canvas video preview source key")?
@@ -1033,54 +867,9 @@ fn source_file(
     project_root: &Path,
     directory: &str,
 ) -> Result<Option<(String, PathBuf)>, ProjectError> {
-    let project = ProjectCapabilityFs::open(project_root)?;
-    let mut candidates = match project.open_directory(directory) {
-        Ok(entries) => entries
-            .entries()?
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter_map(|entry| {
-                let name = entry.file_name().into_string().ok()?;
-                (name.starts_with("source.")
-                    && name["source.".len()..]
-                        .bytes()
-                        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()))
-                .then_some(name)
-            })
-            .collect::<Vec<_>>(),
-        Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(None);
-        }
-        Err(error) => return Err(error),
-    };
-    candidates.sort();
-    match candidates.as_slice() {
-        [] => Ok(None),
-        [name] => {
-            let project_path = format!("{directory}/{name}");
-            resolve_no_symlink_existing_project_path(project_root, &project_path)
-                .map(|absolute| Some((project_path, absolute)))
-        }
-        _ => Err(ProjectError::service(
-            "canvas_video_preview_cache_invalid",
-            format!("Canvas video preview source is ambiguous: {directory}"),
-        )),
-    }
-}
-
-fn direct_source_content_type(project_path: &str) -> Option<&'static str> {
-    match Path::new(project_path)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "webp" => Some("image/webp"),
-        "avif" => Some("image/avif"),
-        _ => None,
-    }
+    let project_path = format!("{directory}/source.jpg");
+    existing_file(project_root, &project_path)
+        .map(|source| source.map(|absolute| (project_path, absolute)))
 }
 
 #[cfg(test)]
@@ -1099,18 +888,24 @@ mod tests {
     }
 
     #[test]
-    fn source_identity_includes_canvas_path_revision_kind_and_key() {
+    fn source_identity_includes_canvas_path_revision_and_runtime_key() {
         assert_eq!(
             video_source_directory(
                 "canvas-1",
                 "assets/clip.mp4",
                 "1000:20",
-                CanvasVideoPreviewSourceKind::PlaybackFrame,
-                "v1--playback--t-1.5",
+                "frame-v1--ms-1500",
             )
             .unwrap(),
-            ".debrute/cache/canvas-video-previews/canvas-1/assets%2Fclip.mp4--b00959a8cfb7dc12/1000%3A20/playback-frame/v1--playback--t-1.5"
+            ".debrute/cache/canvas-video-previews/canvas-1/assets%2Fclip.mp4--b00959a8cfb7dc12/1000%3A20/frame-v1--ms-1500"
         );
+    }
+
+    #[test]
+    fn zero_milliseconds_is_an_ordinary_frame_source_identity() {
+        assert_eq!(frame_source_key(0).unwrap(), "frame-v1--ms-0");
+        assert_eq!(frame_source_key(1_500).unwrap(), "frame-v1--ms-1500");
+        assert!(frame_source_key(CANVAS_VIDEO_TIME_MAX_MS + 1).is_err());
     }
 
     #[test]
@@ -1159,52 +954,15 @@ mod tests {
     }
 
     #[test]
-    fn explicit_poster_change_rejects_the_previous_source_key() {
-        let root = std::env::temp_dir().join(format!("debrute-video-poster-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("media")).unwrap();
-        fs::write(root.join("media/clip.mp4"), b"video").unwrap();
-        image::RgbaImage::new(2, 2)
-            .save(root.join("media/clip.poster.png"))
-            .unwrap();
-        let mut video = File::open(root.join("media/clip.mp4")).unwrap();
-        let target = CanvasVideoPreviewTarget {
-            project_relative_path: "media/clip.mp4".to_owned(),
-            video_revision: project_media_revision(&mut video).unwrap(),
-            current_time_seconds: 0.0,
-        };
-        let poster = explicit_poster(&root, &target.project_relative_path)
-            .unwrap()
-            .unwrap();
-        let old_source_key = explicit_poster_source_key(&poster).unwrap();
-        image::RgbaImage::new(5, 3)
-            .save(root.join("media/clip.poster.png"))
-            .unwrap();
-
-        let error = assert_source_key_current(
-            &root,
-            &target,
-            CanvasVideoPreviewSourceKind::InitialPoster,
-            &old_source_key,
-        )
-        .unwrap_err();
-        assert_eq!(error.code(), "canvas_video_preview_source_changed");
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn intrinsic_video_preview_width_returns_the_selected_source_and_smaller_variants_use_engine_identity()
-     {
+    fn probe_reports_a_missing_zero_millisecond_frame_without_generating_it() {
         let root = std::env::temp_dir().join(format!("debrute-video-direct-{}", Uuid::new_v4()));
         fs::create_dir_all(root.join("media")).unwrap();
         fs::write(root.join("media/clip.mp4"), b"video").unwrap();
-        image::RgbaImage::new(2, 2)
-            .save(root.join("media/clip.poster.png"))
-            .unwrap();
         let mut video = File::open(root.join("media/clip.mp4")).unwrap();
         let target = CanvasVideoPreviewTarget {
             project_relative_path: "media/clip.mp4".to_owned(),
             video_revision: project_media_revision(&mut video).unwrap(),
-            current_time_seconds: 0.0,
+            frame_time_ms: 0,
         };
         let workers = crate::workers::RuntimeWorkerServices::new();
         let raster_pool = Arc::new(Semaphore::new(3));
@@ -1213,36 +971,20 @@ mod tests {
             MediaToolPaths::unavailable(),
             Arc::new(RasterPreviewVariantService::new(raster_pool)),
         );
-        let source = service
-            .resolve_source(&root, "canvas-1", &target, &PreviewCancellation::default())
-            .unwrap();
-        let direct = service
-            .resolve_variant(
+        let sources = service
+            .probe_sources(
                 &root,
                 "canvas-1",
-                &target,
-                &source.source_key,
-                2,
+                std::slice::from_ref(&target),
                 &PreviewCancellation::default(),
             )
             .unwrap();
-        assert!(direct.absolute_path.ends_with("source.png"));
-
-        let derived = service
-            .resolve_variant(
-                &root,
-                "canvas-1",
-                &target,
-                &source.source_key,
-                1,
-                &PreviewCancellation::default(),
-            )
-            .unwrap();
-        assert!(
-            derived
-                .absolute_path
-                .ends_with("raster-engine-v1/preview-w1.jpg")
-        );
+        assert!(matches!(
+            sources[0].status,
+            CanvasVideoPreviewProbeStatus::NeedsSource { ref source_key }
+                if source_key == "frame-v1--ms-0"
+        ));
+        assert!(!root.join(".debrute/cache/canvas-video-previews").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -124,7 +124,7 @@ interface CanvasStructureEdgeProjection {
 }
 
 interface CanvasVideoPlaybackState {
-  currentTimeSeconds: number;
+  currentTimeMs: number;
 }
 
 export interface CanvasTextViewportState {
@@ -275,9 +275,9 @@ export function canvasNodeStackOrderTopFirst(canvas: Pick<CanvasDocument, 'nodeE
     .map((nodeElement) => nodeElement.projectRelativePath);
 }
 
-export function normalizeCanvasVideoPlaybackTime(currentTimeSeconds: number): number {
-  if (!Number.isFinite(currentTimeSeconds) || currentTimeSeconds < 0) {
-    throw new Error('Canvas video playback time must be a non-negative finite number.');
+export function normalizeCanvasVideoPlaybackTimeMs(currentTimeMs: number): number {
+  if (!Number.isSafeInteger(currentTimeMs) || currentTimeMs < 0) {
+    throw new Error('Canvas video playback time must be a non-negative safe integer in milliseconds.');
   }
-  return Math.round(currentTimeSeconds * 1000) / 1000;
+  return currentTimeMs;
 }

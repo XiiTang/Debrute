@@ -14,12 +14,12 @@ import {
   MediaTimeRange,
   MediaVolumeRange
 } from 'media-chrome/react';
-import { normalizeCanvasVideoPlaybackTime, type ProjectedCanvasNode } from '@debrute/canvas-core';
+import { normalizeCanvasVideoPlaybackTimeMs, type ProjectedCanvasNode } from '@debrute/canvas-core';
 
 export interface CanvasVideoPlayerHandle {
   readCurrentTimeSeconds(): number | undefined;
   pauseAt(seconds: number): void;
-  restorePersistedTime(seconds: number): void;
+  restorePersistedTime(currentTimeMs: number): void;
   togglePlayback(): void;
   seekBy(seconds: number): void;
   toggleMuted(): void;
@@ -35,7 +35,7 @@ export interface CanvasVideoPlayRequest {
 
 export interface CanvasVideoPlayerAdapterProps {
   node: ProjectedCanvasNode;
-  initialTimeSeconds: number;
+  initialTimeMs: number;
   playRequest?: CanvasVideoPlayRequest | undefined;
   onPointerInside: () => void;
   onFocusInside: () => void;
@@ -43,14 +43,14 @@ export interface CanvasVideoPlayerAdapterProps {
   formatSeekError: (projectRelativePath: string, seconds: number) => string;
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
-  onPlaybackBoundary: (currentTimeSeconds: number) => void;
+  onPlaybackBoundary: (currentTimeMs: number) => void;
   onReadyForDisplay?: (() => void) | undefined;
   onPlayRequestConsumed?: ((requestId: number) => void) | undefined;
 }
 
 export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, CanvasVideoPlayerAdapterProps>(function CanvasVideoPlayerAdapter({
   node,
-  initialTimeSeconds,
+  initialTimeMs,
   playRequest,
   onPointerInside,
   onFocusInside,
@@ -79,14 +79,16 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   }));
 
   const publishPlaybackBoundary = useCallback((currentTimeSeconds: number) => {
-    const normalizedTimeSeconds = Number.isFinite(currentTimeSeconds) && currentTimeSeconds > 0
-      ? currentTimeSeconds
-      : 0;
-    if (lastPlaybackBoundaryRef.current === normalizedTimeSeconds) {
+    const currentTimeMs = normalizeCanvasVideoPlaybackTimeMs(
+      Number.isFinite(currentTimeSeconds) && currentTimeSeconds > 0
+        ? Math.round(currentTimeSeconds * 1000)
+        : 0
+    );
+    if (lastPlaybackBoundaryRef.current === currentTimeMs) {
       return;
     }
-    lastPlaybackBoundaryRef.current = normalizedTimeSeconds;
-    onPlaybackBoundary(normalizedTimeSeconds);
+    lastPlaybackBoundaryRef.current = currentTimeMs;
+    onPlaybackBoundary(currentTimeMs);
   }, [onPlaybackBoundary]);
 
   const reportReadyForDisplay = useCallback(() => {
@@ -104,9 +106,10 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   }, [onError]);
 
   const handleLoadedMetadata = useCallback((event: React.SyntheticEvent<HTMLVideoElement>) => {
-    if (initialTimeSeconds <= 0) {
+    if (initialTimeMs <= 0) {
       return;
     }
+    const initialTimeSeconds = initialTimeMs / 1000;
     const message = formatSeekError(node.projectRelativePath, initialTimeSeconds);
     if (presentation.durationSeconds !== undefined && initialTimeSeconds > presentation.durationSeconds) {
       reportInitialSeekError(message);
@@ -118,7 +121,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     } catch {
       reportInitialSeekError(message);
     }
-  }, [formatSeekError, initialTimeSeconds, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
+  }, [formatSeekError, initialTimeMs, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
 
   const handleDisplayDataReady = useCallback(() => {
     if (!pendingInitialSeekRef.current) {
@@ -164,25 +167,25 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     readCurrentTimeSeconds: () => {
       const video = videoRef.current;
       return video && Number.isFinite(video.currentTime)
-        ? normalizeCanvasVideoPlaybackTime(Math.max(0, video.currentTime))
+        ? normalizeCanvasVideoPlaybackTimeMs(Math.round(Math.max(0, video.currentTime) * 1000)) / 1000
         : undefined;
     },
     pauseAt: (seconds) => {
       const video = videoRef.current;
       if (!video) return;
-      const currentTimeSeconds = normalizeCanvasVideoPlaybackTime(Math.max(0, seconds));
+      const currentTimeSeconds = normalizeCanvasVideoPlaybackTimeMs(Math.round(Math.max(0, seconds) * 1000)) / 1000;
       video.pause();
       video.currentTime = currentTimeSeconds;
       publishPlaybackBoundary(currentTimeSeconds);
       onPlayingChange(false);
     },
-    restorePersistedTime: (seconds) => {
+    restorePersistedTime: (currentTimeMs) => {
       const video = videoRef.current;
       if (!video) return;
-      const currentTimeSeconds = normalizeCanvasVideoPlaybackTime(Math.max(0, seconds));
+      const normalizedTimeMs = normalizeCanvasVideoPlaybackTimeMs(currentTimeMs);
       video.pause();
-      lastPlaybackBoundaryRef.current = currentTimeSeconds;
-      video.currentTime = currentTimeSeconds;
+      lastPlaybackBoundaryRef.current = normalizedTimeMs;
+      video.currentTime = normalizedTimeMs / 1000;
       onPlayingChange(false);
     },
     togglePlayback: () => {

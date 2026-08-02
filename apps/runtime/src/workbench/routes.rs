@@ -481,8 +481,12 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             get(super::project_routes::text_preview).head(super::project_routes::text_preview),
         )
         .route(
-            "/projects/{project_id}/canvas-video-previews/sources",
-            post(super::project_routes::video_preview_sources),
+            "/projects/{project_id}/canvas-video-previews/probe",
+            post(super::project_routes::video_preview_probe),
+        )
+        .route(
+            "/projects/{project_id}/canvas-video-previews/ensure",
+            post(super::project_routes::video_preview_ensure),
         )
         .route(
             "/projects/{project_id}/canvas-video-preview",

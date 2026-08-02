@@ -62,9 +62,10 @@ export interface CanvasNodeContentProps {
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
-  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+  onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
+  onVideoPreviewRetry?: (() => void) | undefined;
   onSelectNode: () => void;
   onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
   onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
@@ -96,6 +97,7 @@ export function CanvasNodeContent({
   onUpdateVideoPlaybackTime,
   onUpdateTextViewport,
   onVideoPreviewError,
+  onVideoPreviewRetry,
   onSelectNode,
   onTitlePointerDown,
   onTitlePointerMove,
@@ -189,6 +191,7 @@ export function CanvasNodeContent({
         onRegisterVideoTarget={onRegisterVideoTarget}
         onUpdatePlaybackTime={onUpdateVideoPlaybackTime}
         onVideoPreviewError={onVideoPreviewError}
+        onVideoPreviewRetry={onVideoPreviewRetry}
         feedbackEntry={feedbackEntry}
         activeFeedbackItemId={activeFeedbackItemId}
         localFeedbackMode={localFeedbackMode}
@@ -467,11 +470,15 @@ function CanvasTextNodeContent({
 }): React.ReactElement {
   const textRenderProfile = useCanvasTextRenderProfile();
   const {
+    retryPreview,
     reportPendingReady,
     reportPendingFailure,
     reportVisibleFailure,
     reportVisibleCommitted
   } = useCanvasTextPreviewRuntime();
+  const retryCurrentTextPreview = useCallback(() => {
+    retryPreview(node.projectRelativePath);
+  }, [node.projectRelativePath, retryPreview]);
   const active = selected;
   const [visibleTextLayer, setVisibleTextLayer] = useState<'editor' | 'preview'>(() => active ? 'editor' : 'preview');
   const [handoffViewport, setHandoffViewport] = useState<CanvasTextViewportState>();
@@ -624,6 +631,17 @@ function CanvasTextNodeContent({
             <AlertTriangle size={18} />
             <strong>{bodyProblem?.title ?? i18n.t('canvas.node.textError')}</strong>
             <span>{bodyProblem?.message ?? buffer?.error}</span>
+            {textPreviewBlockingProblem !== undefined && bodyProblem === textPreviewBlockingProblem ? (
+              <Button
+                className="db-canvas-node-retry"
+                size="xs"
+                iconStart={<RefreshCw size={12} />}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={retryCurrentTextPreview}
+              >
+                {i18n.t('canvas.node.retry')}
+              </Button>
+            ) : null}
           </div>
         ) : (
           <>
@@ -670,6 +688,15 @@ function CanvasTextNodeContent({
                 <AlertTriangle size={18} />
                 <strong>{textPreviewOverlayProblem.title}</strong>
                 <span>{textPreviewOverlayProblem.message}</span>
+                <Button
+                  className="db-canvas-node-retry"
+                  size="xs"
+                  iconStart={<RefreshCw size={12} />}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={retryCurrentTextPreview}
+                >
+                  {i18n.t('canvas.node.retry')}
+                </Button>
               </div>
             ) : null}
             {!showTextEditor && !showTextPreviewHandoff ? (

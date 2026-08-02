@@ -251,8 +251,9 @@ queue, viewport-admission queue, or editor-priority batch.
 
 Text and video canonical preview lanes share one pure scheduling rule while
 retaining separate executors. At each new-job boundary Workbench orders current
-tasks by exact-viewport intersection, then every remaining node; each tier is
-ordered by `y`, `x`, and project-relative path. Camera movement and node dragging prevent new
+tasks by the squared distance from the viewport center to the nearest point of
+each node rectangle; project-relative path breaks exact ties. Camera movement
+and node dragging prevent new
 availability, content-read, coverage, font, and capture jobs from starting.
 In-flight reads, font work, capture, and upload may finish, but identity checks
 discard stale results. The latest stable viewport is consulted again at the
@@ -340,10 +341,15 @@ producer does not reimplement variant generation.
 Variant width uses the same node display width, settled resource zoom, device
 pixel ratio, and stepped raster scale model as image previews. Canonical source
 admission and current-width variant production are viewport-independent. The
-exact viewport is scheduled before every remaining node, but all current
-variants are eventually requested. Text variant mounts use the shared
+nearest current node is scheduled first, but all current variants are admitted.
+Text variant mounts use the shared
 image/video/text resource-start scheduler; promotion and visible commit use its
 publication queue.
+
+Typed failures remain visible and do not retry automatically. A node-local
+Retry clears only the current target's failure and restarts source availability
+checking; any still-valid visible presentation remains mounted until a new
+presentation is ready.
 
 Presentation uses mounted visible and pending `<img>` layers. A pending variant
 is mounted once, and that DOM image owns network loading, error, and readiness.

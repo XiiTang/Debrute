@@ -79,7 +79,7 @@ const {
     registerOnMount: true,
     lastPath: undefined as string | undefined,
     lastRegister: undefined as undefined | ((projectRelativePath: string, target: unknown | undefined) => void),
-    lastUpdatePlaybackTime: undefined as undefined | ((projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>)
+    lastUpdatePlaybackTime: undefined as undefined | ((projectRelativePath: string, currentTimeMs: number) => void | Promise<void>)
   }
 }));
 
@@ -110,7 +110,7 @@ vi.mock('./CanvasVideoNodeContent', async () => {
         pauseAt: (seconds: number) => void;
         restorePersistedTime: (seconds: number) => void;
       } | undefined) => void;
-      onUpdatePlaybackTime: (projectRelativePath: string, currentTimeSeconds: number) => void | Promise<void>;
+      onUpdatePlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
     }) => {
       ReactModule.useEffect(() => {
         const target = {
@@ -991,7 +991,7 @@ describe('CanvasSurface', () => {
     const canvas = createCanvasDocument({ id: 'video-persistence-failure' });
     const videoNode = {
       ...videoProjectionNode('media/clip.mp4', 0, 0),
-      videoPlayback: { currentTimeSeconds: 2.5 }
+      videoPlayback: { currentTimeMs: 2_500 }
     };
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -1022,14 +1022,14 @@ describe('CanvasSurface', () => {
       });
 
       await act(async () => {
-        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8.25);
+        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8_250);
         await Promise.resolve();
       });
 
       expect(updateCanvasVideoPlaybackState).toHaveBeenCalledWith(canvas.id, {
-        updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeSeconds: 8.25 }]
+        updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeMs: 8_250 }]
       });
-      expect(videoRestorePersistedTimeSpy).toHaveBeenCalledWith(2.5);
+      expect(videoRestorePersistedTimeSpy).toHaveBeenCalledWith(2_500);
     } finally {
       await act(async () => {
         root.unmount();
@@ -1045,7 +1045,7 @@ describe('CanvasSurface', () => {
     const canvas = createCanvasDocument({ id: 'video-persistence-order' });
     const videoNode = {
       ...videoProjectionNode('media/clip.mp4', 0, 0),
-      videoPlayback: { currentTimeSeconds: 2.5 }
+      videoPlayback: { currentTimeMs: 2_500 }
     };
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -1078,8 +1078,8 @@ describe('CanvasSurface', () => {
       });
 
       await act(async () => {
-        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8.25);
-        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 9.5);
+        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8_250);
+        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 9_500);
         secondUpdate.resolve(undefined);
         await secondUpdate.promise;
         firstUpdate.reject(new Error('older persistence failed'));
@@ -1088,7 +1088,7 @@ describe('CanvasSurface', () => {
       });
 
       expect(updateCanvasVideoPlaybackState).toHaveBeenNthCalledWith(2, canvas.id, {
-        updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeSeconds: 9.5 }]
+        updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeMs: 9_500 }]
       });
       expect(videoRestorePersistedTimeSpy).not.toHaveBeenCalled();
     } finally {
@@ -2075,7 +2075,7 @@ describe('CanvasSurface', () => {
     const frames: FrameRequestCallback[] = [];
     const started: string[] = [];
     const scheduler = createCanvasPreviewResourceScheduler({
-      priorityForNode: () => 0,
+      distanceSquaredForNode: () => 0,
       requestFrame: (callback) => {
         frames.push(callback);
         return frames.length;
@@ -2738,7 +2738,8 @@ const actions: WorkbenchActions = {
     throw new Error('not used');
   },
   readCanvasTextPreviewSources: async () => ({ sources: {} }),
-  readCanvasVideoPreviewSources: async () => ({ sources: {} }),
+  probeCanvasVideoPreviewSources: async () => ({ sources: {} }),
+  ensureCanvasVideoPreviewSource: async () => ({ status: 'failed', message: 'not used' }),
   ensureTextFileBuffer: async () => undefined,
   updateTextFileBuffer: () => undefined,
   saveTextFileBuffer: async () => undefined,
