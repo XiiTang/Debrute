@@ -106,9 +106,10 @@ Object. Sending several files requires several explicit commands. Debrute does
 not choose a position, scale, crop, fit, alignment, or post-placement transform;
 the initial presentation follows Photoshop's native embedded-placement behavior.
 
-The context menu closes on submission. One non-blocking Workbench notice
-evolves from sending to the final result. A session admits only one command at
-a time; another command fails as busy instead of being queued.
+The context menu closes on submission. Runtime creates one non-blocking
+Photoshop Activity task before transfer and updates that same record to its
+terminal result. Every connected Workbench sees it. A session admits only one
+command at a time; another command fails as busy instead of being queued.
 
 ## Photoshop To Debrute
 

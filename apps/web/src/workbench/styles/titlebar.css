@@ -66,8 +66,19 @@
 .workbench-titlebar__menubar,
 .workbench-titlebar__window-controls,
 .workbench-titlebar__update-button,
+.workbench-titlebar__activity-trigger,
 .workbench-titlebar__menu-popover {
   -webkit-app-region: no-drag;
+}
+
+.workbench-titlebar__activity-trigger {
+  position: relative;
+  flex: 0 0 auto;
+  height: var(--db-control-sm);
+}
+
+.workbench-titlebar__activity-trigger .db-icon-button[aria-pressed="true"] {
+  color: var(--db-text);
 }
 
 .workbench-titlebar__update-button {

@@ -8,7 +8,6 @@ import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.
 import { projectTreePasteTargetDirectory } from '../project-explorer/projectTreeEditing.js';
 import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction.js';
 import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController.js';
-import { notificationMessageForFileCommandError } from '../project-explorer/workbenchFileCommands.js';
 import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
 import {
   cameraCenteredOnNode,
@@ -22,11 +21,7 @@ import {
   type WorkbenchFileClipboard
 } from '../shell/contextMenu.js';
 import { resolveProjectPathCommandTarget } from './projectPathCommandTarget.js';
-
-export interface ProjectPathCommandErrorLabels {
-  copyPathFailed: string;
-  resetAutoLayoutFailed: string;
-}
+import type { WorkbenchActivityNoticeReporter } from './WorkbenchActivities.js';
 
 type ExplorerContextCommands = Pick<ProjectExplorerController,
   | 'beginCreateFile'
@@ -59,13 +54,7 @@ export function runProjectPathCommand(input: {
     input: Parameters<WorkbenchApiClient['copyProjectPathsToSystemClipboard']>[0]
   ): ReturnType<WorkbenchApiClient['copyProjectPathsToSystemClipboard']> | undefined;
   explorerCommands: ExplorerContextCommands;
-  notify: (message: string) => void;
-  startNotification: (message: string) => (message: string) => void;
-  photoshopLabels: {
-    sending(path: string, documentTitle: string): string;
-    sent(path: string, documentTitle: string): string;
-    failed(message: string): string;
-  };
+  activities: WorkbenchActivityNoticeReporter;
   closeContextMenu: () => void;
   openInspectorPanel: () => void;
   confirmPermanentDelete: (input: { entries: ProjectPathEntry[] }) => boolean;
@@ -75,7 +64,6 @@ export function runProjectPathCommand(input: {
     entries: ProjectPathEntry[];
     targetDirectoryProjectRelativePath: string;
   }) => boolean;
-  errorLabels: ProjectPathCommandErrorLabels;
 }): void {
   const target = input.contextMenu?.target;
   if (!target) {
@@ -147,8 +135,11 @@ export function runProjectPathCommand(input: {
           surfaceSize: snapshot.surfaceSize,
           camera: snapshot.camera
         }));
-      }).catch((error) => {
-        input.notify(notificationMessageForFileCommandError(input.errorLabels.resetAutoLayoutFailed, error));
+      }).catch(() => {
+        input.activities.report({
+          kind: 'canvas-operation-failed',
+          operation: 'reset-auto-layout'
+        });
       });
     }
   }
@@ -197,8 +188,13 @@ function runSinglePathFileCommand(
       format: input.command === 'copy-path' ? 'absolute' : 'relative',
       entries: [...resolved.selectionEntries]
     });
-    void request?.catch((error) => {
-      input.notify(notificationMessageForFileCommandError(input.errorLabels.copyPathFailed, error));
+    void request?.catch(() => {
+      input.activities.report({
+        kind: target.source === 'canvas'
+          ? 'canvas-operation-failed'
+          : 'explorer-operation-failed',
+        operation: 'copy-path'
+      });
     });
     input.closeContextMenu();
     return true;
@@ -217,20 +213,7 @@ function runSinglePathFileCommand(
         pluginSessionId: destination.pluginSessionId,
         documentId: destination.documentId
       });
-      if (request) {
-        const updateNotification = input.startNotification(input.photoshopLabels.sending(
-          singleEntry.projectRelativePath,
-          destination.title
-        ));
-        void request.then((result) => {
-          updateNotification(input.photoshopLabels.sent(
-            primaryEntry.projectRelativePath,
-            result.documentTitle
-          ));
-        }).catch((error) => {
-          updateNotification(input.photoshopLabels.failed(errorMessage(error)));
-        });
-      }
+      void request?.catch(() => undefined);
     }
     input.closeContextMenu();
     return true;
@@ -262,10 +245,6 @@ function runSinglePathFileCommand(
     return true;
   }
   return false;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function runExplorerSpecificCommand(

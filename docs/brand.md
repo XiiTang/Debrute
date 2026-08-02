@@ -108,7 +108,7 @@ area; they never alter the complete mascot.
 
 The Complete Mascot Mark appears in README identity, the Web favicon, Electron
 application and Dock icons, ICNS and ICO output, and Runtime tray icons. It does
-not appear in title bars, empty states, panels, buttons, notifications, Canvas
+not appear in title bars, empty states, panels, buttons, Activity cards, Canvas
 nodes, Terminal content, or other product UI positions.
 
 Operating-system, browser, and Photoshop host chrome remain host-owned. Product

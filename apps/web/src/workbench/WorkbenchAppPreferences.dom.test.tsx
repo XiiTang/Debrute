@@ -3,6 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type DebruteShellApi,
+  type ActivityRecord,
+  type WorkbenchActivityNoticeInput,
   type DebruteGlobalSettingsView,
   type DebruteProductState,
   type ImageModelSettingRecord,
@@ -18,6 +20,10 @@ import {
   createWorkbenchProjectProjection,
   type WorkbenchProjectProjection
 } from './services/WorkbenchProjectProjection.js';
+import {
+  createWorkbenchActivities,
+  type WorkbenchActivities
+} from './services/WorkbenchActivities.js';
 
 vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
   const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/CanvasTextRenderProfile.test-support.js');
@@ -35,6 +41,7 @@ const apiState = vi.hoisted(() => {
     api: undefined as WorkbenchApiClient | undefined,
     globalProjection: undefined as WorkbenchGlobalProjectionWriter | undefined,
     projectProjection: undefined as WorkbenchProjectProjection | undefined,
+    activities: undefined as WorkbenchActivities | undefined,
     listeners: new Set<(event: WorkbenchEvent) => void>(),
     connectionListeners: new Set<(error: Error) => void>()
   };
@@ -54,6 +61,12 @@ const apiState = vi.hoisted(() => {
           throw new Error('WorkbenchApp test Global Projection was not configured.');
         }
         return state.globalProjection;
+      }
+      if (property === 'activities') {
+        if (!state.activities) {
+          throw new Error('WorkbenchApp test Activity projection was not configured.');
+        }
+        return state.activities;
       }
       const value = Reflect.get(state.api, property, state.api);
       if (property === 'openProject' && typeof value === 'function') {
@@ -121,6 +134,15 @@ describe('WorkbenchApp preferences and project behavior', () => {
       state: { sessions: [] }
     });
     apiState.projectProjection = createWorkbenchProjectProjection();
+    apiState.activities = createWorkbenchActivities({
+      dismiss: async () => undefined,
+      clearTerminal: async () => undefined
+    });
+    apiState.activities.acceptFrame({
+      type: 'activity.snapshot',
+      activityRevision: 0,
+      records: []
+    });
     apiState.listeners.clear();
     apiState.connectionListeners.clear();
     document.documentElement.removeAttribute('data-theme');
@@ -142,6 +164,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
     apiState.api = undefined;
     apiState.globalProjection = undefined;
     apiState.projectProjection = undefined;
+    apiState.activities?.dispose();
+    apiState.activities = undefined;
     document.documentElement.removeAttribute('data-theme');
     document.documentElement.style.removeProperty('--db-text');
     document.documentElement.style.removeProperty('--db-text-muted');
@@ -311,7 +335,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
     const { container, root } = await renderWorkbenchApp('/');
 
-    expect(container.textContent).toContain('Window state failed: native state unavailable');
+    expect(container.textContent).toContain('Window state is unavailable.');
     expect(findButton(container, 'Minimize window')).toBeUndefined();
     expect(findButton(container, 'Maximize window')).toBeUndefined();
     expect(findButton(container, 'Close window')).toBeUndefined();
@@ -852,7 +876,38 @@ function emptyWorkingCopies() {
 }
 
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
+  let nextActivityId = 0;
   return {
+    reportActivityNotice: vi.fn(async (input: WorkbenchActivityNoticeInput) => {
+      const activities = apiState.activities;
+      if (!activities) throw new Error('Activity projection is unavailable.');
+      nextActivityId += 1;
+      const projectState = apiState.projectProjection?.getState();
+      const project = projectState && projectState.status !== 'unbound'
+        ? {
+            projectId: projectState.projectId,
+            projectName: projectState.presentedSnapshot.metadata.project.name
+          }
+        : undefined;
+      const source = activitySource(input);
+      const record: ActivityRecord = {
+        id: `activity-${nextActivityId}`,
+        source,
+        ...(project ? { project } : {}),
+        createdAt: '2026-08-02T00:00:00.000Z',
+        updatedAt: '2026-08-02T00:00:00.000Z',
+        type: 'notice',
+        message: input
+      };
+      activities.acceptFrame({
+        type: 'activity.upsert',
+        activityRevision: activities.getSnapshot().activityRevision + 1,
+        record
+      });
+      return { activityId: record.id };
+    }),
+    dismissActivity: vi.fn(async () => ({ ok: true as const })),
+    clearTerminalActivities: vi.fn(async () => ({ ok: true as const, cleared: 0 })),
     globalSettingsSave: vi.fn(async () => ({ ok: true as const })),
     onEvent: vi.fn((listener: (event: WorkbenchEvent) => void) => {
       apiState.listeners.add(listener);
@@ -886,6 +941,18 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     subscribeTerminalSessions: vi.fn(() => ({ close: vi.fn() })),
     ...overrides
   } as unknown as WorkbenchApiClient;
+}
+
+function activitySource(input: WorkbenchActivityNoticeInput): ActivityRecord['source'] {
+  switch (input.kind) {
+    case 'project-opened':
+    case 'project-view-state-reset':
+    case 'project-operation-failed': return 'project';
+    case 'canvas-operation-failed': return 'canvas';
+    case 'explorer-operation-failed': return 'explorer';
+    case 'workbench-operation-failed': return 'workbench';
+    case 'update-install-failed': return 'update';
+  }
 }
 
 function productStateFixture(): DebruteProductState {

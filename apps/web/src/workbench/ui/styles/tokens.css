@@ -9,6 +9,8 @@
   --db-radius-sm: 0;
   --db-radius-md: 0;
   --db-radius-lg: 0;
+  --db-radius-activity: 12px;
+  --db-radius-full: 999px;
   --db-control-xs: 24px;
   --db-control-sm: 28px;
   --db-control-md: 32px;
@@ -50,9 +52,10 @@
   --db-z-floating-bars: 100;
   --db-z-panels: 200;
   --db-z-titlebar: 250;
-  --db-z-toasts: 300;
+  --db-z-activities: 300;
   --db-z-overlays: 400;
   --db-z-titlebar-menu: 450;
+  --db-z-blocking: 500;
 }
 
 :root,

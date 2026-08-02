@@ -1,10 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     fmt,
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
     time::Duration,
@@ -150,12 +150,16 @@ pub struct ModelOperationSnapshot {
     pub id: String,
     pub model_kind: ModelKind,
     pub project_root: String,
+    pub project_id: String,
+    pub project_name: String,
     pub state: OperationState,
     pub accepted_at: String,
     pub execution: ModelOperationExecution,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log: Option<String>,
 }
+
+pub(crate) type ModelOperationObserver = Arc<dyn Fn(ModelOperationSnapshot) + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -459,6 +463,7 @@ struct OperationRecord<ModelBinding> {
     model_kind: ModelKind,
     project_root: PathBuf,
     project_id: String,
+    project_name: String,
     project_capability: ProjectCapabilityFs,
     state: OperationState,
     accepted_at: String,
@@ -501,6 +506,8 @@ impl<ModelBinding> OperationRecord<ModelBinding> {
             id: self.id.clone(),
             model_kind: self.model_kind,
             project_root: self.project_root.to_string_lossy().into_owned(),
+            project_id: self.project_id.clone(),
+            project_name: self.project_name.clone(),
             state: self.state,
             accepted_at: self.accepted_at.clone(),
             execution,
@@ -521,12 +528,27 @@ struct RegistryState<ModelBinding> {
     terminal_order: VecDeque<String>,
 }
 
+struct PendingModelOperationObservation {
+    revision: u64,
+    observer: Option<ModelOperationObserver>,
+    snapshot: ModelOperationSnapshot,
+}
+
+struct ModelOperationObserverDispatch {
+    next_revision: u64,
+    pending: BTreeMap<u64, PendingModelOperationObservation>,
+    draining: bool,
+}
+
 #[allow(private_bounds)]
 pub struct ModelOperationService<Executor: ModelOperationExecutor> {
     executor: Arc<Executor>,
     runtime_id: String,
     state: Mutex<RegistryState<Executor::ModelBinding>>,
     changed: Condvar,
+    observer: Mutex<Option<ModelOperationObserver>>,
+    observer_revision: AtomicU64,
+    observer_dispatch: Mutex<ModelOperationObserverDispatch>,
     workers: Mutex<HashMap<String, thread::JoinHandle<()>>>,
     lifecycle: Mutex<()>,
     shutting_down: AtomicBool,
@@ -535,6 +557,7 @@ pub struct ModelOperationService<Executor: ModelOperationExecutor> {
 struct ValidatedSubmission<ModelBinding> {
     project_root: PathBuf,
     project_id: String,
+    project_name: String,
     project_capability: ProjectCapabilityFs,
     model_kind: ModelKind,
     timeout_seconds: u64,
@@ -566,10 +589,26 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 terminal_order: VecDeque::new(),
             }),
             changed: Condvar::new(),
+            observer: Mutex::new(None),
+            observer_revision: AtomicU64::new(1),
+            observer_dispatch: Mutex::new(ModelOperationObserverDispatch {
+                next_revision: 1,
+                pending: BTreeMap::new(),
+                draining: false,
+            }),
             workers: Mutex::new(HashMap::new()),
             lifecycle: Mutex::new(()),
             shutting_down: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn install_observer(&self, observer: ModelOperationObserver) -> bool {
+        let mut installed = lock(&self.observer, "Model Operation observer");
+        if installed.is_some() {
+            return false;
+        }
+        *installed = Some(observer);
+        true
     }
 
     /// Validates and atomically accepts one Model Operation.
@@ -613,7 +652,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             })
             .map_err(|error| ModelOperationError::new("internal_error", error.to_string()))?;
 
-        let snapshot = {
+        let (snapshot, observation) = {
             let mut state = self.lock_state();
             let sequence = state.next_sequence;
             state.next_sequence = state
@@ -626,6 +665,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 model_kind: validated.model_kind,
                 project_root: validated.project_root,
                 project_id: validated.project_id,
+                project_name: validated.project_name,
                 project_capability: validated.project_capability,
                 state: OperationState::Queued,
                 accepted_at,
@@ -648,8 +688,10 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             };
             let snapshot = record.snapshot();
             state.operations.insert(id.clone(), record);
-            snapshot
+            let observation = self.prepare_observed(snapshot.clone());
+            (snapshot, observation)
         };
+        self.publish_observed(observation);
         lock(&self.workers, "Model Operation worker registry").insert(id.clone(), worker);
         if start_sender.send(()).is_err() {
             self.finish_failed(&id, "Model Operation execution task did not start.");
@@ -706,7 +748,8 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         &self,
         input: &mut SubmitModelOperation,
     ) -> Result<ValidatedSubmission<Executor::ModelBinding>, ModelOperationError> {
-        let (project_root, project_id, project_capability) = validate_project(&input.project_root)?;
+        let (project_root, project_id, project_name, project_capability) =
+            validate_project(&input.project_root)?;
         validate_shape(input.shape, &input.requests, input.concurrency)?;
         let mut output_names = HashSet::new();
         for request in &input.requests {
@@ -794,6 +837,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         Ok(ValidatedSubmission {
             project_root,
             project_id,
+            project_name,
             project_capability,
             model_kind,
             timeout_seconds,
@@ -875,27 +919,27 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             Arc::clone(&record.completion)
         };
         let _completion = lock(&completion, "Model Operation completion");
-        let mut retain_terminal = false;
-        let snapshot = {
+        let (snapshot, observation) = {
             let mut state = self.lock_state();
             let record = state
                 .operations
                 .get_mut(id)
                 .ok_or_else(operation_not_found)?;
-            match record.state {
+            let changed = match record.state {
                 OperationState::Queued => {
                     record.cancellation.cancel();
                     record.state = OperationState::Cancelled;
                     record.release_model_bindings();
                     record.change += 1;
-                    retain_terminal = true;
+                    true
                 }
                 OperationState::Running => {
                     record.cancellation.cancel();
                     record.state = OperationState::Cancelling;
                     record.change += 1;
+                    true
                 }
-                OperationState::Cancelling | OperationState::Cancelled => {}
+                OperationState::Cancelling | OperationState::Cancelled => false,
                 OperationState::Succeeded | OperationState::Failed => {
                     return Err(ModelOperationError::new(
                         "operation_already_terminal",
@@ -903,10 +947,16 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                     )
                     .with_snapshot(record.snapshot()));
                 }
-            }
-            record.snapshot()
+            };
+            let snapshot = record.snapshot();
+            let observation = changed.then(|| self.prepare_observed(snapshot.clone()));
+            (snapshot, observation)
         };
-        if retain_terminal {
+        let changed = observation.is_some();
+        if let Some(observation) = observation {
+            self.publish_observed(observation);
+        }
+        if changed && snapshot.state == OperationState::Cancelled {
             self.retain_terminal(id);
         }
         self.changed.notify_all();
@@ -954,7 +1004,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                     .is_none_or(|kind| kind == record.model_kind)
             })
             .filter(|record| {
-                project.as_ref().is_none_or(|(root, project_id, _)| {
+                project.as_ref().is_none_or(|(root, project_id, _, _)| {
                     root == &record.project_root && project_id == &record.project_id
                 })
             })
@@ -979,7 +1029,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     }
 
     fn execute(self: &Arc<Self>, id: &str) {
-        let shape = {
+        let (shape, observation) = {
             let mut state = self.lock_state();
             let Some(record) = state.operations.get_mut(id) else {
                 return;
@@ -989,8 +1039,12 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             }
             record.state = OperationState::Running;
             record.change += 1;
-            record.shape
+            let snapshot = record.snapshot();
+            let shape = record.shape;
+            let observation = self.prepare_observed(snapshot);
+            (shape, observation)
         };
+        self.publish_observed(observation);
         self.changed.notify_all();
         match shape {
             ExecutionShape::Single => self.execute_single(id),
@@ -1064,15 +1118,19 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 }
                 match self.executor.commit(&root, staged) {
                     Ok(()) => {
-                        let mut state = self.lock_state();
-                        let Some(record) = state.operations.get_mut(id) else {
-                            return;
+                        let observation = {
+                            let mut state = self.lock_state();
+                            let Some(record) = state.operations.get_mut(id) else {
+                                return;
+                            };
+                            record.single_artifacts = artifacts;
+                            record.state = OperationState::Succeeded;
+                            record.release_model_bindings();
+                            record.change += 1;
+                            let snapshot = record.snapshot();
+                            self.prepare_observed(snapshot)
                         };
-                        record.single_artifacts = artifacts;
-                        record.state = OperationState::Succeeded;
-                        record.release_model_bindings();
-                        record.change += 1;
-                        drop(state);
+                        self.publish_observed(observation);
                         self.retain_terminal(id);
                         self.changed.notify_all();
                     }
@@ -1274,7 +1332,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         model: String,
         result: Result<Vec<ArtifactPointer>, ModelRunError>,
     ) {
-        {
+        let observation = {
             let mut state = self.lock_state();
             let Some(record) = state.operations.get_mut(id) else {
                 return;
@@ -1315,12 +1373,15 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 record.outcomes.push(outcome);
             }
             record.change += 1;
-        }
+            let snapshot = record.snapshot();
+            self.prepare_observed(snapshot)
+        };
+        self.publish_observed(observation);
         self.changed.notify_all();
     }
 
     fn finish_succeeded_batch(&self, id: &str) {
-        let changed = {
+        let observation = {
             let mut state = self.lock_state();
             let Some(record) = state.operations.get_mut(id) else {
                 return;
@@ -1329,57 +1390,63 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 record.state = OperationState::Succeeded;
                 record.release_model_bindings();
                 record.change += 1;
-                true
+                let snapshot = record.snapshot();
+                Some(self.prepare_observed(snapshot))
             } else {
-                false
+                None
             }
         };
-        if changed {
+        if let Some(observation) = observation {
+            self.publish_observed(observation);
             self.retain_terminal(id);
             self.changed.notify_all();
         }
     }
 
     fn finish_cancelled(&self, id: &str) {
-        let changed = {
+        let observation = {
             let mut state = self.lock_state();
             let Some(record) = state.operations.get_mut(id) else {
                 return;
             };
             if record.state.is_terminal() {
-                false
+                None
             } else {
                 record.state = OperationState::Cancelled;
                 record.active = 0;
                 record.release_model_bindings();
                 record.change += 1;
-                true
+                let snapshot = record.snapshot();
+                Some(self.prepare_observed(snapshot))
             }
         };
-        if changed {
+        if let Some(observation) = observation {
+            self.publish_observed(observation);
             self.retain_terminal(id);
             self.changed.notify_all();
         }
     }
 
     fn finish_failed(&self, id: &str, log: &str) {
-        let changed = {
+        let observation = {
             let mut state = self.lock_state();
             let Some(record) = state.operations.get_mut(id) else {
                 return;
             };
             if record.state.is_terminal() {
-                false
+                None
             } else {
                 record.state = OperationState::Failed;
                 record.active = 0;
                 record.log = Some(log.to_owned());
                 record.release_model_bindings();
                 record.change += 1;
-                true
+                let snapshot = record.snapshot();
+                Some(self.prepare_observed(snapshot))
             }
         };
-        if changed {
+        if let Some(observation) = observation {
+            self.publish_observed(observation);
             self.retain_terminal(id);
             self.changed.notify_all();
         }
@@ -1410,6 +1477,64 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
 
     fn lock_state(&self) -> MutexGuard<'_, RegistryState<Executor::ModelBinding>> {
         lock(&self.state, "Model Operation registry")
+    }
+
+    fn prepare_observed(
+        &self,
+        snapshot: ModelOperationSnapshot,
+    ) -> PendingModelOperationObservation {
+        let revision = self
+            .observer_revision
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .expect("Model Operation observer revision exhausted");
+        let observer = lock(&self.observer, "Model Operation observer").clone();
+        PendingModelOperationObservation {
+            revision,
+            observer,
+            snapshot,
+        }
+    }
+
+    fn publish_observed(&self, observation: PendingModelOperationObservation) {
+        let should_drain = {
+            let mut dispatch = lock(&self.observer_dispatch, "Model Operation observer dispatch");
+            assert!(
+                dispatch
+                    .pending
+                    .insert(observation.revision, observation)
+                    .is_none(),
+                "Model Operation observer revision was queued twice"
+            );
+            if dispatch.draining {
+                false
+            } else {
+                dispatch.draining = true;
+                true
+            }
+        };
+        if !should_drain {
+            return;
+        }
+        loop {
+            let observation = {
+                let mut dispatch =
+                    lock(&self.observer_dispatch, "Model Operation observer dispatch");
+                let revision = dispatch.next_revision;
+                let Some(observation) = dispatch.pending.remove(&revision) else {
+                    dispatch.draining = false;
+                    return;
+                };
+                dispatch.next_revision = revision
+                    .checked_add(1)
+                    .expect("Model Operation published observer revision exhausted");
+                observation
+            };
+            if let Some(observer) = observation.observer {
+                observer(observation.snapshot);
+            }
+        }
     }
 
     fn wait_for_change(&self, id: &str, change: u64) {
@@ -1488,7 +1613,7 @@ pub fn parse_model_requests(
 
 fn validate_project(
     root: &Path,
-) -> Result<(PathBuf, String, ProjectCapabilityFs), ModelOperationError> {
+) -> Result<(PathBuf, String, String, ProjectCapabilityFs), ModelOperationError> {
     let root = root
         .canonicalize()
         .map_err(|error| ModelOperationError::new("project_invalid", error.to_string()))?;
@@ -1515,11 +1640,11 @@ fn validate_project(
             "Debrute Project metadata is invalid.",
         ));
     }
-    Ok((root, metadata.project.id, capability))
+    Ok((root, metadata.project.id, metadata.project.name, capability))
 }
 
 fn validate_project_identity(root: &Path, expected_id: &str) -> Result<(), ModelRunError> {
-    let (_, current_id, _) =
+    let (_, current_id, _, _) =
         validate_project(root).map_err(|error| ModelRunError::failed(error.to_string()))?;
     if current_id == expected_id {
         Ok(())
@@ -2035,6 +2160,108 @@ mod tests {
     }
 
     #[test]
+    fn accepted_operation_publishes_authoritative_snapshots_for_runtime_activity() {
+        let fixture = Fixture::new(vec![Ok(vec![artifact("generated/cover.jpg")])]);
+        let snapshots = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&snapshots);
+        assert!(fixture.service.install_observer(Arc::new(move |snapshot| {
+            observed.lock().unwrap().push(snapshot);
+        })));
+
+        let accepted = fixture
+            .service
+            .submit(SubmitModelOperation {
+                project_root: fixture.project.clone(),
+                shape: ExecutionShape::Single,
+                requests: vec![request("image-model")],
+                concurrency: None,
+                timeout_seconds: None,
+                replace: false,
+            })
+            .expect("submission should be accepted");
+        fixture
+            .service
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap();
+
+        let snapshots = snapshots.lock().unwrap();
+        assert!(
+            snapshots
+                .iter()
+                .any(|snapshot| snapshot.state == OperationState::Running)
+        );
+        let terminal = snapshots.last().expect("terminal observer snapshot");
+        assert_eq!(terminal.id, accepted.id);
+        assert_eq!(terminal.project_name, "Fixture");
+        assert_eq!(terminal.state, OperationState::Succeeded);
+    }
+
+    #[test]
+    fn observer_dispatch_preserves_order_without_blocking_model_operation_state() {
+        let fixture = Fixture::new(vec![Ok(Vec::new())]);
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let observed_states = Arc::clone(&states);
+        let (running_entered_sender, running_entered_receiver) = mpsc::channel();
+        let (release_running_sender, release_running_receiver) = mpsc::channel();
+        let release_running_receiver = Mutex::new(release_running_receiver);
+        assert!(fixture.service.install_observer(Arc::new(move |snapshot| {
+            if snapshot.state == OperationState::Running {
+                running_entered_sender.send(()).unwrap();
+                release_running_receiver.lock().unwrap().recv().unwrap();
+            }
+            observed_states.lock().unwrap().push(snapshot.state);
+        })));
+
+        let accepted = fixture
+            .service
+            .submit(SubmitModelOperation {
+                project_root: fixture.project.clone(),
+                shape: ExecutionShape::Single,
+                requests: vec![request("image-model")],
+                concurrency: None,
+                timeout_seconds: None,
+                replace: false,
+            })
+            .expect("submission should be accepted");
+        running_entered_receiver.recv().unwrap();
+
+        let cancel_service = Arc::clone(&fixture.service);
+        let operation_id = accepted.id.clone();
+        let (cancel_done_sender, cancel_done_receiver) = mpsc::channel();
+        let cancel = thread::spawn(move || {
+            let result = cancel_service.cancel(&operation_id);
+            cancel_done_sender.send(()).unwrap();
+            result
+        });
+        cancel_done_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("observer delivery must not block the Model Operation authority");
+        let cancelling = cancel
+            .join()
+            .unwrap()
+            .expect("cancellation must linearize while the observer is blocked");
+        assert_eq!(cancelling.state, OperationState::Cancelling);
+        release_running_sender.send(()).unwrap();
+        let terminal = fixture
+            .service
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap()
+            .expect("cancelled operation must remain observable");
+        assert_eq!(terminal.state, OperationState::Cancelled);
+
+        let states = states.lock().unwrap();
+        assert_eq!(
+            *states,
+            vec![
+                OperationState::Queued,
+                OperationState::Running,
+                OperationState::Cancelling,
+                OperationState::Cancelled,
+            ]
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "Model Operation sequence exhausted")]
     fn exhausted_operation_sequence_is_process_fatal() {
         let fixture = Fixture::new(Vec::new());
@@ -2306,6 +2533,11 @@ mod tests {
     #[test]
     fn queued_or_running_cancellation_is_idempotent_and_terminal_success_rejects_cancel() {
         let fixture = Fixture::new(vec![Ok(Vec::new())]);
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let observed_states = Arc::clone(&observed);
+        assert!(fixture.service.install_observer(Arc::new(move |snapshot| {
+            observed_states.lock().unwrap().push(snapshot.state);
+        })));
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
@@ -2330,6 +2562,7 @@ mod tests {
             .wait(&accepted.id, || true, |_| true, |_| true)
             .expect("wait")
             .expect("test observer remains connected");
+        let observed_before_repeat = observed.lock().unwrap().len();
         match terminal.state {
             OperationState::Cancelled => {
                 assert_eq!(
@@ -2349,6 +2582,7 @@ mod tests {
             }
             state => panic!("unexpected terminal state: {state:?}"),
         }
+        assert_eq!(observed.lock().unwrap().len(), observed_before_repeat);
     }
 
     #[test]
@@ -2436,7 +2670,7 @@ mod tests {
     #[test]
     fn project_identity_recheck_rejects_a_replaced_root() {
         let fixture = Fixture::new(Vec::new());
-        let (_, accepted_id, _) = validate_project(&fixture.project).unwrap();
+        let (_, accepted_id, _, _) = validate_project(&fixture.project).unwrap();
         let replacement_id = Uuid::new_v4().to_string();
         fs::write(
             fixture.project.join(".debrute/project.json"),

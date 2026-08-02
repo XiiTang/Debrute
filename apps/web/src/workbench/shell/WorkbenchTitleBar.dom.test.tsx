@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,11 +6,19 @@ import { buildWorkbenchTitleBarState } from './workbenchTitleBarState';
 import { WorkbenchTitleBar } from './WorkbenchTitleBar';
 import { I18nProvider } from '../i18n';
 
+const closedActivityProps = {
+  activityCenterOpen: false,
+  activityBellRef: createRef<HTMLButtonElement>(),
+  onToggleActivityCenter: () => undefined,
+  onCloseActivityCenter: () => undefined
+};
+
 describe('WorkbenchTitleBar', () => {
   it('hides Web menus and window controls on macOS Desktop', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <WorkbenchTitleBar
+          {...closedActivityProps}
           state={buildWorkbenchTitleBarState({
             platform: 'darwin',
             host: 'desktop', locale: 'en',
@@ -28,12 +36,14 @@ describe('WorkbenchTitleBar', () => {
     expect(html).toContain('workbench-titlebar--traffic-spacer');
     expect(html).not.toContain('>File<');
     expect(html).not.toContain('Minimize window');
+    expect(html).toContain('aria-label="Activity"');
   });
 
   it('renders Web menus and window controls on Windows Desktop', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <WorkbenchTitleBar
+          {...closedActivityProps}
           state={buildWorkbenchTitleBarState({
             platform: 'win32',
             host: 'desktop', locale: 'en',
@@ -54,7 +64,7 @@ describe('WorkbenchTitleBar', () => {
     expect(html).toContain('Restore window');
     expect(html).toContain('Close window');
     expect(html.match(/db-icon-button--window(?:\s|")/g) ?? []).toHaveLength(3);
-    expect(html.match(/db-icon-button--titlebar(?:\s|")/g) ?? []).toHaveLength(2);
+    expect(html.match(/db-icon-button--titlebar(?:\s|")/g) ?? []).toHaveLength(3);
     expect(html).toMatch(/aria-label="Close window"[^>]*db-icon-button--window-close/);
     expect(html).toContain('-webkit-app-region:drag');
     expect(html).toContain('-webkit-app-region:no-drag');
@@ -64,6 +74,7 @@ describe('WorkbenchTitleBar', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <WorkbenchTitleBar
+          {...closedActivityProps}
           state={buildWorkbenchTitleBarState({
             platform: 'win32',
             host: 'desktop', locale: 'en',
@@ -86,6 +97,7 @@ describe('WorkbenchTitleBar', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <WorkbenchTitleBar
+          {...closedActivityProps}
           state={buildWorkbenchTitleBarState({
             platform: 'win32',
             host: 'web', locale: 'en',
@@ -115,6 +127,7 @@ describe('WorkbenchTitleBar', () => {
         root.render(
           <I18nProvider locale="en">
             <WorkbenchTitleBar
+              {...closedActivityProps}
               state={buildWorkbenchTitleBarState({
                 platform: 'win32',
                 host: 'web', locale: 'en',
@@ -137,6 +150,11 @@ describe('WorkbenchTitleBar', () => {
       await act(async () => {
         fileButton.click();
       });
+
+      const titleBar = container.querySelector('.workbench-titlebar');
+      const menuPopover = container.querySelector('.workbench-titlebar__menu-popover');
+      expect(menuPopover).not.toBeNull();
+      expect(titleBar?.contains(menuPopover)).toBe(false);
 
       const recentTrigger = requireButton(container, 'Open Recent');
       expect(recentTrigger.getAttribute('role')).toBe('menuitem');
@@ -190,6 +208,7 @@ describe('WorkbenchTitleBar', () => {
         root.render(
           <I18nProvider locale="en">
             <WorkbenchTitleBar
+              {...closedActivityProps}
               state={buildWorkbenchTitleBarState({
                 platform: 'win32',
                 host: 'web',
@@ -225,17 +244,63 @@ describe('WorkbenchTitleBar', () => {
     }
   });
 
-  it('installs an available Product update directly from the title bar', async () => {
+  it('keeps the Activity Center and application menus mutually exclusive', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const onInstallProductUpdate = vi.fn();
+    const onCloseActivityCenter = vi.fn();
+    const onToggleActivityCenter = vi.fn();
 
     try {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
             <WorkbenchTitleBar
+              {...closedActivityProps}
+              activityCenterOpen
+              state={buildWorkbenchTitleBarState({
+                platform: 'win32',
+                host: 'web',
+                locale: 'en',
+                recentProjects: []
+              })}
+              nativeWindowState={undefined}
+              onCommand={() => undefined}
+              onCloseActivityCenter={onCloseActivityCenter}
+              onToggleActivityCenter={onToggleActivityCenter}
+              onWindowCommand={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const fileButton = requireButton(container, 'File');
+      await act(async () => fileButton.click());
+      expect(onCloseActivityCenter).toHaveBeenCalledOnce();
+      expect(fileButton.getAttribute('aria-expanded')).toBe('true');
+
+      const bell = container.querySelector<HTMLButtonElement>('[data-workbench-activity-bell]');
+      await act(async () => bell?.click());
+      expect(fileButton.getAttribute('aria-expanded')).toBe('false');
+      expect(onToggleActivityCenter).toHaveBeenCalledOnce();
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('installs an available Product update directly from the title bar', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onInstallProductUpdate = vi.fn();
+    const onToggleActivityCenter = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <WorkbenchTitleBar
+              {...closedActivityProps}
               state={buildWorkbenchTitleBarState({
                 platform: 'darwin',
                 host: 'desktop', locale: 'en',
@@ -246,6 +311,7 @@ describe('WorkbenchTitleBar', () => {
               updateVersion="1.2.3"
               onCommand={() => undefined}
               onInstallProductUpdate={onInstallProductUpdate}
+              onToggleActivityCenter={onToggleActivityCenter}
               onWindowCommand={() => undefined}
             />
           </I18nProvider>
@@ -256,6 +322,16 @@ describe('WorkbenchTitleBar', () => {
         requireButton(container, 'Update 1.2.3').click();
       });
       expect(onInstallProductUpdate).toHaveBeenCalledOnce();
+
+      const buttons = Array.from(container.querySelectorAll('button'));
+      const updateIndex = buttons.findIndex((button) => button.textContent === 'Update 1.2.3');
+      const activityIndex = buttons.findIndex((button) => button.getAttribute('aria-label') === 'Activity');
+      expect(updateIndex).toBeLessThan(activityIndex);
+
+      await act(async () => {
+        buttons[activityIndex]?.click();
+      });
+      expect(onToggleActivityCenter).toHaveBeenCalledOnce();
     } finally {
       await unmount(root, container);
     }

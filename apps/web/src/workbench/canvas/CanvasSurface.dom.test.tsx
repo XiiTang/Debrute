@@ -2720,8 +2720,7 @@ function workbenchStateFixture(
     resolvedTheme: 'dark',
     canvasFeedback: undefined,
     textFileBuffers: {},
-    textEditorWindows: {},
-    notifications: []
+    textEditorWindows: {}
   };
 }
 

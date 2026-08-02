@@ -369,7 +369,9 @@ function ControllerProbe({
     getSnapshot,
     activeCanvasRuntime: undefined,
     centerProjectFileInCanvas: vi.fn(),
-    notify,
+    activities: {
+      report: (input) => notify(input.kind)
+    },
     i18n: createI18n('en')
   });
   useEffect(() => onValue(controller, scope), [controller, onValue, scope]);

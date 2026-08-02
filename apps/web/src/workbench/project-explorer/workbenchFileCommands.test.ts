@@ -9,7 +9,6 @@ import {
   externalDropPlanHasConflict,
   nearestExistingParentSelection,
   permanentDeleteConfirmationMessage,
-  notificationMessageForFileCommandError,
   projectTreeSelectionFromPaths,
   reconcileCutClipboardWithProjectEntries,
   singleFileBatchResultPath
@@ -138,10 +137,6 @@ describe('workbench file command helpers', () => {
     }, permanentDeleteLabels)).toBe('Permanently delete file "briefs/concept.md"? This cannot be undone.');
   });
 
-  it('formats command errors for notifications', () => {
-    expect(notificationMessageForFileCommandError('Paste failed', new Error('File exists'))).toBe('Paste failed: File exists');
-    expect(notificationMessageForFileCommandError('Rename failed', 'bad')).toBe('Rename failed: bad');
-  });
 });
 
 const permanentDeleteLabels = {

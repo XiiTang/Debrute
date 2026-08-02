@@ -28,16 +28,13 @@ describe('ProjectPathCommandRouter', () => {
           trashEntries: vi.fn(),
           deleteEntriesPermanently: vi.fn()
         },
-        notify: vi.fn(),
-        startNotification: () => vi.fn(),
+        activities: { report: vi.fn() },
         getProjectSnapshot: () => undefined,
-        photoshopLabels: { sending: () => '', sent: () => '', failed: () => '' },
         closeContextMenu: vi.fn(),
         openInspectorPanel: vi.fn(),
         confirmTrash: () => true,
         confirmPermanentDelete: () => true,
         confirmMoveOverwrite: () => true,
-        errorLabels: { copyPathFailed: '', resetAutoLayoutFailed: '' }
       }
     });
     const items = router.contextMenuItems({
@@ -83,16 +80,13 @@ describe('ProjectPathCommandRouter', () => {
           trashEntries: vi.fn(),
           deleteEntriesPermanently: vi.fn()
         },
-        notify: vi.fn(),
-        startNotification: () => vi.fn(),
+        activities: { report: vi.fn() },
         getProjectSnapshot: () => undefined,
-        photoshopLabels: { sending: () => '', sent: () => '', failed: () => '' },
         closeContextMenu: vi.fn(),
         openInspectorPanel: vi.fn(),
         confirmTrash: () => true,
         confirmPermanentDelete: () => true,
         confirmMoveOverwrite: () => true,
-        errorLabels: { copyPathFailed: '', resetAutoLayoutFailed: '' }
       }
     });
     const target = {
@@ -105,5 +99,69 @@ describe('ProjectPathCommandRouter', () => {
 
     expect(copyEntries).toHaveBeenCalledOnce();
     expect(copyEntries.mock.calls[0]?.[0]).toBe(acceptedScope);
+  });
+
+  it('drops a late Project-scoped Activity report after its accepted scope is retired', async () => {
+    let current = true;
+    let rejectClipboard!: (error: Error) => void;
+    const clipboard = new Promise<never>((_resolve, reject) => {
+      rejectClipboard = reject;
+    });
+    const report = vi.fn();
+    const acceptedScope = {
+      projectId: 'project-1',
+      generation: 7,
+      canSubmit: () => current,
+      isCurrent: () => current
+    } as AcceptedProjectPathCommandScope;
+    const router = createProjectPathCommandRouter({
+      commandIntake: {
+        canAccept: () => current,
+        tryAccept: () => current ? acceptedScope : undefined
+      },
+      commandEffects: {
+        sendProjectFileToPhotoshop: () => undefined,
+        copyProjectPathsToSystemClipboard: () => clipboard,
+        resetCanvasNodeLayouts: () => undefined
+      },
+      openTerminalPanel: vi.fn(),
+      menuContext: { projection: undefined },
+      commandContext: {
+        activeProjection: undefined,
+        activeCanvasRuntime: undefined,
+        fileClipboard: undefined,
+        explorerCommands: {
+          beginCreateFile: vi.fn(),
+          beginCreateDirectory: vi.fn(),
+          beginRename: vi.fn(),
+          copyEntries: vi.fn(),
+          cutEntries: vi.fn(),
+          pasteEntries: vi.fn(),
+          revealEntry: vi.fn(),
+          trashEntries: vi.fn(),
+          deleteEntriesPermanently: vi.fn()
+        },
+        activities: { report },
+        getProjectSnapshot: () => undefined,
+        closeContextMenu: vi.fn(),
+        openInspectorPanel: vi.fn(),
+        confirmTrash: () => true,
+        confirmPermanentDelete: () => true,
+        confirmMoveOverwrite: () => true,
+      }
+    });
+    const target = {
+      source: 'canvas' as const,
+      invocationEntry: { pathEntry: { projectRelativePath: 'a.png', kind: 'file' as const } },
+      selectedEntries: [{ pathEntry: { projectRelativePath: 'a.png', kind: 'file' as const } }]
+    };
+
+    router.run('copy-path', { target, position: { x: 0, y: 0 } });
+    current = false;
+    rejectClipboard(new Error('old Project clipboard failed'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(report).not.toHaveBeenCalled();
   });
 });

@@ -117,10 +117,6 @@ export function clearCanvasSelectionAfterDeletedPath(
   )));
 }
 
-export function notificationMessageForFileCommandError(prefix: string, error: unknown): string {
-  return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
-}
-
 export interface PermanentDeleteConfirmationLabels {
   directory: (path: string) => string;
   file: (path: string) => string;

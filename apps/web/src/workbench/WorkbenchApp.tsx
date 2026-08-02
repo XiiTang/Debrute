@@ -109,7 +109,11 @@ import {
 } from './shell/floatingPanels';
 import { FloatingDock } from './shell/FloatingDock';
 import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/FloatingPanel';
-import { NotificationStack } from './shell/NotificationStack';
+import { WorkbenchActivitySurfaces } from './shell/WorkbenchActivitySurfaces.js';
+import {
+  scopeWorkbenchActivityNoticeReporter,
+  type WorkbenchActivityNoticeReporter
+} from './services/WorkbenchActivities.js';
 import { Button, WorkbenchIconProvider } from './ui/index.js';
 import { FIXED_TOP_FLOATING_BAR_RECTS, TITLE_BAR_RESERVED_RECT } from './shell/workbenchLayers';
 import {
@@ -250,29 +254,11 @@ function WorkbenchRuntimeApp({
     [api]
   );
   const [connectionEnded, setConnectionEnded] = useState<Error>();
-  const notificationIdRef = useRef(0);
-  const [notificationEntries, setNotificationEntries] = useState<Array<{ id: number; message: string }>>([]);
-  const notifications = notificationEntries.map((entry) => entry.message);
   const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
   const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
   const [projectOpenError, setProjectOpenError] = useState<string>();
   const initialProjectOpeningRef = useRef<ReturnType<ProjectBindingLifecycle['open']> | undefined>(undefined);
   const announcedProjectGenerationsRef = useRef(new Set<number>());
-  const notify = useCallback((message: string) => {
-    notificationIdRef.current += 1;
-    const entry = { id: notificationIdRef.current, message };
-    setNotificationEntries((current) => [entry, ...current].slice(0, 4));
-  }, []);
-  const startNotification = useCallback((message: string) => {
-    notificationIdRef.current += 1;
-    const id = notificationIdRef.current;
-    setNotificationEntries((current) => [{ id, message }, ...current].slice(0, 4));
-    return (nextMessage: string) => {
-      setNotificationEntries((current) => current.map((entry) => (
-        entry.id === id ? { ...entry, message: nextMessage } : entry
-      )));
-    };
-  }, []);
   const presentationController = useWorkbenchPresentationController({
     globalProjection: api.globalProjection
   });
@@ -319,23 +305,17 @@ function WorkbenchRuntimeApp({
   );
   const announceProjectGeneration = useCallback((input: {
     generation: number;
-    projectName: string;
     viewStateInvalid: boolean;
   }) => {
     if (announcedProjectGenerationsRef.current.has(input.generation)) {
       return;
     }
     announcedProjectGenerationsRef.current.add(input.generation);
-    const currentI18n = presentationController.getCurrentI18n();
     if (input.viewStateInvalid) {
-      notify(currentI18n.t('shell.notifications.projectViewStateReset', {
-        name: input.projectName
-      }));
+      void api.reportActivityNotice({ kind: 'project-view-state-reset' }).catch(() => undefined);
     }
-    notify(currentI18n.t('shell.notifications.projectOpened', {
-      name: input.projectName
-    }));
-  }, [notify, presentationController.getCurrentI18n]);
+    void api.reportActivityNotice({ kind: 'project-opened' }).catch(() => undefined);
+  }, [api]);
 
   useEffect(() => api.onConnectionEnded(setConnectionEnded), []);
 
@@ -365,7 +345,7 @@ function WorkbenchRuntimeApp({
         }
       } catch (error) {
         if (!disposed) {
-          notify(presentationController.getCurrentI18n().t('shell.notifications.projectStartupFailed', {
+          setProjectOpenError(presentationController.getCurrentI18n().t('shell.boot.projectStartupFailed', {
             message: errorMessage(error)
           }));
         }
@@ -378,7 +358,7 @@ function WorkbenchRuntimeApp({
     return () => {
       disposed = true;
     };
-  }, [initialRoute, notify, presentationController.getCurrentI18n, projectBindingLifecycle]);
+  }, [initialRoute, presentationController.getCurrentI18n, projectBindingLifecycle]);
 
   const projectGenerationAppProps = {
     api,
@@ -386,9 +366,6 @@ function WorkbenchRuntimeApp({
     canvasTextRenderProfile,
     projectProjection,
     connectionEnded,
-    notifications,
-    notify,
-    startNotification,
     announceProjectGeneration,
     presentationController,
     settingsFeatureController,
@@ -422,13 +399,10 @@ function WorkbenchRuntimeApp({
         <React.Suspense fallback={null}>
           <WorkbenchSettingsFeatureHost
             api={api}
-            notify={notify}
-            getCurrentI18n={presentationController.getCurrentI18n}
             onController={setSettingsFeatureController}
           />
         </React.Suspense>
       ) : null}
-      <NotificationStack notifications={notifications} />
     </>
   );
 }
@@ -439,9 +413,6 @@ function WorkbenchProjectGenerationApp({
   canvasTextRenderProfile,
   projectProjection,
   connectionEnded,
-  notifications,
-  notify,
-  startNotification,
   announceProjectGeneration,
   presentationController,
   settingsFeatureController,
@@ -460,12 +431,8 @@ function WorkbenchProjectGenerationApp({
   canvasTextRenderProfile: ReturnType<typeof canvasTextRenderProfileForAppearance>;
   projectProjection: WorkbenchProjectProjectionState;
   connectionEnded: Error | undefined;
-  notifications: string[];
-  notify(message: string): void;
-  startNotification(message: string): (message: string) => void;
   announceProjectGeneration(input: {
     generation: number;
-    projectName: string;
     viewStateInvalid: boolean;
   }): void;
   presentationController: WorkbenchPresentationController;
@@ -480,11 +447,43 @@ function WorkbenchProjectGenerationApp({
   projectBindingLifecycle: ProjectBindingLifecycle;
   isProjectOpening: boolean;
 }): React.ReactElement {
+  const activityBellRef = useRef<HTMLButtonElement>(null);
+  const activitySnapshot = useSyncExternalStore(
+    api.activities.subscribe,
+    api.activities.getSnapshot,
+    api.activities.getSnapshot
+  );
+  const toggleActivityCenter = useCallback(() => {
+    if (api.activities.getSnapshot().centerOpen) {
+      api.activities.closeCenter();
+    } else {
+      api.activities.openCenter();
+    }
+  }, [api.activities]);
+  const titleBarActivityProps = {
+    activityCenterOpen: activitySnapshot.centerOpen,
+    activityBellRef,
+    onToggleActivityCenter: toggleActivityCenter,
+    onCloseActivityCenter: api.activities.closeCenter
+  };
+  const globalActivities = useMemo<WorkbenchActivityNoticeReporter>(() => ({
+    report: (input) => {
+      void api.reportActivityNotice(input).catch(() => undefined);
+    }
+  }), [api]);
+  const projectActivities = useMemo(() => scopeWorkbenchActivityNoticeReporter(
+    globalActivities,
+    () => {
+      const current = api.projectProjection.getState();
+      return current.status !== 'unbound'
+        && current.generation === projectProjection.generation;
+    }
+  ), [api.projectProjection, globalActivities, projectProjection.generation]);
   const installProductUpdateFromTitleBar = useCallback(() => {
-    void api.applyProductUpdate().catch((error: unknown) => {
-      notify(errorMessage(error));
+    void api.applyProductUpdate().catch(() => {
+      globalActivities.report({ kind: 'update-install-failed' });
     });
-  }, [api, notify]);
+  }, [api, globalActivities]);
   const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
   const hasAcceptedProject = acceptedProject !== undefined;
   const snapshot = acceptedProject?.presentedSnapshot;
@@ -603,14 +602,18 @@ function WorkbenchProjectGenerationApp({
   const fileClipboard = explorerController?.fileClipboard;
   const inlineProjectTreeEdit = explorerController?.inlineEdit;
 
-  const notifyCanvasFeedbackUnavailable = useCallback((message: string) => {
-    const currentI18n = presentationController.getCurrentI18n();
-    notify(currentI18n.t('canvas.feedback.unavailable', { message }));
-  }, [notify, presentationController.getCurrentI18n]);
-  const notifyCanvasFeedbackSaveFailed = useCallback((message: string) => {
-    const currentI18n = presentationController.getCurrentI18n();
-    notify(currentI18n.t('canvas.feedback.saveFailed', { message }));
-  }, [notify, presentationController.getCurrentI18n]);
+  const notifyCanvasFeedbackUnavailable = useCallback((_message: string) => {
+    projectActivities.report({
+      kind: 'canvas-operation-failed',
+      operation: 'feedback-unavailable'
+    });
+  }, [projectActivities]);
+  const notifyCanvasFeedbackSaveFailed = useCallback((_message: string) => {
+    projectActivities.report({
+      kind: 'canvas-operation-failed',
+      operation: 'feedback-save'
+    });
+  }, [projectActivities]);
   const feedbackInteraction = useCanvasFeedbackInteraction({
     api,
     projectId: runtimeProjectId,
@@ -625,7 +628,6 @@ function WorkbenchProjectGenerationApp({
     }
     announceProjectGeneration({
       generation: acceptedProject.generation,
-      projectName: acceptedProject.presentedSnapshot.metadata.project.name,
       viewStateInvalid: initialProjectPresentation.viewStateInvalid
     });
     setProjectOpenAttemptedPath(undefined);
@@ -685,15 +687,17 @@ function WorkbenchProjectGenerationApp({
     void shell.getNativeWindowState().then((state) => {
       setNativeWindowState(state);
       reconcileCurrentWorkbenchViewportLayout();
-    }).catch((error) => {
-      const currentI18n = presentationController.getCurrentI18n();
-      notify(currentI18n.t('shell.notifications.windowStateFailed', { message: errorMessage(error) }));
+    }).catch(() => {
+      globalActivities.report({
+        kind: 'workbench-operation-failed',
+        operation: 'window-state'
+      });
     });
     return shell.onNativeWindowStateChanged((state) => {
       setNativeWindowState(state);
       reconcileCurrentWorkbenchViewportLayout();
     });
-  }, [notify, presentationController.getCurrentI18n, reconcileCurrentWorkbenchViewportLayout]);
+  }, [globalActivities, reconcileCurrentWorkbenchViewportLayout]);
 
   useEffect(() => {
     if (!runtimeProjectId) {
@@ -785,12 +789,13 @@ function WorkbenchProjectGenerationApp({
     try {
       await canvasTextViewportStateController.update(canvasId, input);
     } catch (error) {
-      notify(i18n.t('shell.notifications.updateCanvasTextViewportFailed', {
-        message: errorMessage(error)
-      }));
+      projectActivities.report({
+        kind: 'canvas-operation-failed',
+        operation: 'save-text-viewport'
+      });
       throw error;
     }
-  }, [canvasTextViewportStateController, i18n, notify]);
+  }, [canvasTextViewportStateController, projectActivities]);
 
   const updateCanvasNodeLayouts = useCallback<WorkbenchActions['updateCanvasNodeLayouts']>(async (canvasId, input) => {
     try {
@@ -799,10 +804,13 @@ function WorkbenchProjectGenerationApp({
         ...input
       });
     } catch (error) {
-      notify(i18n.t('shell.notifications.updateCanvasLayoutFailed', { message: errorMessage(error) }));
+      projectActivities.report({
+        kind: 'canvas-operation-failed',
+        operation: 'save-layout'
+      });
       throw error;
     }
-  }, [i18n, notify]);
+  }, [api, projectActivities]);
 
   const resetCanvasNodeLayouts = useCallback<WorkbenchActions['resetCanvasNodeLayouts']>(async (canvasId, input) => {
     const scope = projectPathCommandIntake.tryAccept();
@@ -826,12 +834,13 @@ function WorkbenchProjectGenerationApp({
         ...input
       });
     } catch (error) {
-      notify(i18n.t('shell.notifications.updateCanvasVideoPlaybackFailed', {
-        message: errorMessage(error)
-      }));
+      projectActivities.report({
+        kind: 'canvas-operation-failed',
+        operation: 'save-video-playback'
+      });
       throw error;
     }
-  }, [i18n, notify]);
+  }, [api, projectActivities]);
 
   const addProjectPathToCanvasMap = useCallback<WorkbenchActions['addProjectPathToCanvasMap']>(async (input) => {
     const scope = projectPathCommandIntake.tryAccept();
@@ -854,17 +863,19 @@ function WorkbenchProjectGenerationApp({
       setActiveCanvasId(input.canvasId);
       explorerController?.setSelection(projectTreeSelectionFromPaths([input.projectRelativePath]));
       centerCanvasProjectionNode(projection, input.projectRelativePath);
-    } catch (error) {
+    } catch {
       if (!scope.isCurrent()) {
         return;
       }
-      notify(i18n.t('shell.notifications.addToCanvasMapFailed', { message: errorMessage(error) }));
+      projectActivities.report({
+        kind: 'canvas-operation-failed',
+        operation: 'add-to-canvas-map'
+      });
     }
   }, [
     centerCanvasProjectionNode,
     explorerController,
-    i18n,
-    notify,
+    projectActivities,
     projectPathCommandEffects,
     projectPathCommandIntake
   ]);
@@ -910,13 +921,15 @@ function WorkbenchProjectGenerationApp({
   }, [activeCanvasId]);
 
   const presentProjectOpenFailure = useCallback((error: Error) => {
-    const message = i18n.t('projectOpen.openFailed', { message: error.message });
     if (hasAcceptedProject) {
-      notify(message);
+      projectActivities.report({
+        kind: 'project-operation-failed',
+        operation: 'open'
+      });
       return;
     }
-    setProjectOpenError(message);
-  }, [hasAcceptedProject, i18n, notify, setProjectOpenError]);
+    setProjectOpenError(i18n.t('projectOpen.openFailed', { message: error.message }));
+  }, [hasAcceptedProject, i18n, projectActivities, setProjectOpenError]);
 
   const presentProjectOpenOutcome = useCallback((outcome: ProjectBindingLifecycleOutcome) => {
     if (outcome.outcome === 'failed') {
@@ -1034,7 +1047,6 @@ function WorkbenchProjectGenerationApp({
     canvasFeedback: feedbackInteraction.feedback,
     textFileBuffers,
     textEditorWindows,
-    notifications
   };
 
   const openProjectPathTerminalPanel = useCallback((
@@ -1123,10 +1135,13 @@ function WorkbenchProjectGenerationApp({
       openProjectRoot: async (projectRoot) => {
         presentProjectOpenOutcome(await openProjectRoot(projectRoot));
       }
-    }).catch((error) => {
-      notify(i18n.t('shell.notifications.menuCommandFailed', { message: errorMessage(error) }));
+    }).catch(() => {
+      globalActivities.report({
+        kind: 'workbench-operation-failed',
+        operation: 'menu-command'
+      });
     });
-  }, [actions.openProject, i18n, notify, openProjectRoot, presentProjectOpenOutcome]);
+  }, [actions.openProject, globalActivities, openProjectRoot, presentProjectOpenOutcome]);
   const handleTitleBarWindowCommand = useCallback((command: 'minimize' | 'toggle-maximize' | 'close') => {
     const shell = getDebruteShellApi();
     if (!shell) {
@@ -1142,8 +1157,11 @@ function WorkbenchProjectGenerationApp({
         setNativeWindowState(state);
         reconcileCurrentWorkbenchViewportLayout();
       }
-    }).catch((error) => notify(i18n.t('shell.notifications.windowCommandFailed', { message: errorMessage(error) })));
-  }, [i18n, notify, reconcileCurrentWorkbenchViewportLayout]);
+    }).catch(() => globalActivities.report({
+      kind: 'workbench-operation-failed',
+      operation: 'window-command'
+    }));
+  }, [globalActivities, reconcileCurrentWorkbenchViewportLayout]);
 
   const minimapButtonRect = canvasMinimapButtonRect(workbenchViewportRect);
   const minimapPanelPlacement = placeCanvasMinimapPanel({
@@ -1196,10 +1214,13 @@ function WorkbenchProjectGenerationApp({
     if (!activeCanvasId) {
       return;
     }
-    void actions.resetCanvasNodeLayouts(activeCanvasId, { all: true }).catch((error) => {
-      notify(i18n.t('shell.notifications.resetCanvasLayoutFailed', { message: errorMessage(error) }));
+    void actions.resetCanvasNodeLayouts(activeCanvasId, { all: true }).catch(() => {
+      projectActivities.report({
+        kind: 'canvas-operation-failed',
+        operation: 'reset-layout'
+      });
     });
-  }, [actions, activeCanvasId, i18n, notify]);
+  }, [actions, activeCanvasId, projectActivities]);
   const readyPhotoshop = globalProjection.photoshop.status === 'ready'
     ? globalProjection.photoshop.value
     : undefined;
@@ -1240,10 +1261,6 @@ function WorkbenchProjectGenerationApp({
       target: input.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot')
     }))
   ), [i18n]);
-  const contextMenuCommandErrorLabels = useMemo(() => ({
-    copyPathFailed: i18n.t('shell.notifications.copyPathFailed'),
-    resetAutoLayoutFailed: i18n.t('shell.notifications.resetAutoLayoutFailed')
-  }), [i18n]);
   const projectPathCommandRouter = useMemo(() => explorerController
     ? createProjectPathCommandRouter({
     commandIntake: projectPathCommandIntake,
@@ -1259,26 +1276,13 @@ function WorkbenchProjectGenerationApp({
       activeCanvasRuntime,
       fileClipboard,
       explorerCommands: explorerController,
-      notify,
-      startNotification,
-      photoshopLabels: {
-        sending: (path, documentTitle) => i18n.t('shell.notifications.sendingToPhotoshop', {
-          path,
-          document: documentTitle
-        }),
-        sent: (path, documentTitle) => i18n.t('shell.notifications.sentToPhotoshopDocument', {
-          path,
-          document: documentTitle
-        }),
-        failed: (message) => i18n.t('shell.notifications.sendToPhotoshopFailed', { message })
-      },
+      activities: projectActivities,
       closeContextMenu: closeWorkbenchContextMenu,
       openInspectorPanel,
       confirmPermanentDelete,
       confirmTrash,
       getProjectSnapshot: getAcceptedProjectSnapshot,
       confirmMoveOverwrite,
-      errorLabels: contextMenuCommandErrorLabels
     }
     })
     : undefined, [
@@ -1287,17 +1291,14 @@ function WorkbenchProjectGenerationApp({
     closeWorkbenchContextMenu,
     confirmMoveOverwrite,
     confirmTrash,
-    contextMenuCommandErrorLabels,
     confirmPermanentDelete,
     fileClipboard,
     getAcceptedProjectSnapshot,
     explorerController,
-    notify,
+    projectActivities,
     openProjectPathTerminalPanel,
     openInspectorPanel,
     readyPhotoshop,
-    startNotification,
-    i18n,
     projectPathCommandEffects,
     projectPathCommandIntake
   ]);
@@ -1346,6 +1347,7 @@ function WorkbenchProjectGenerationApp({
         <WorkbenchIconProvider>
           <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
             <WorkbenchTitleBar
+              {...titleBarActivityProps}
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
               {...(titleBarUpdateVersion ? {
@@ -1356,7 +1358,12 @@ function WorkbenchProjectGenerationApp({
               onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
               onWindowCommand={handleTitleBarWindowCommand}
             />
-            <div className="boot-screen boot-screen--with-titlebar" role="alert" data-testid="workbench-connection-ended">
+            <WorkbenchActivitySurfaces
+              activities={api.activities}
+              activityBellRef={activityBellRef}
+              interactionBlocked
+            />
+            <div className="boot-screen boot-screen--with-titlebar boot-screen--blocking" role="alert" data-testid="workbench-connection-ended">
               <strong>Debrute Runtime connection ended.</strong>
               <span>{connectionEnded.message}</span>
               <span>Refresh this page to start a new Workbench connection.</span>
@@ -1373,6 +1380,7 @@ function WorkbenchProjectGenerationApp({
         <WorkbenchIconProvider>
           <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
             <WorkbenchTitleBar
+              {...titleBarActivityProps}
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
               {...(titleBarUpdateVersion ? {
@@ -1382,6 +1390,11 @@ function WorkbenchProjectGenerationApp({
               onCommand={handleTitleBarCommand}
               onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
               onWindowCommand={handleTitleBarWindowCommand}
+            />
+            <WorkbenchActivitySurfaces
+              activities={api.activities}
+              activityBellRef={activityBellRef}
+              interactionBlocked={false}
             />
             <div className="boot-screen boot-screen--with-titlebar">
               <Loader2 className="spin" size={22} />
@@ -1402,13 +1415,19 @@ function WorkbenchProjectGenerationApp({
         <WorkbenchIconProvider>
           <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
             <WorkbenchTitleBar
+              {...titleBarActivityProps}
               state={effectiveTitleBarState}
               nativeWindowState={nativeWindowState}
               onCommand={handleTitleBarCommand}
               onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
               onWindowCommand={handleTitleBarWindowCommand}
             />
-            <div className="boot-screen boot-screen--with-titlebar" role="status" aria-live="polite" data-testid="workbench-product-update-blocking">
+            <WorkbenchActivitySurfaces
+              activities={api.activities}
+              activityBellRef={activityBellRef}
+              interactionBlocked
+            />
+            <div className="boot-screen boot-screen--with-titlebar boot-screen--blocking" role="status" aria-live="polite" data-testid="workbench-product-update-blocking">
               <Loader2 className="spin" size={22} />
               <strong>{message}</strong>
               <span>{i18n.t('shell.productUpdate.doNotClose')}</span>
@@ -1452,7 +1471,7 @@ function WorkbenchProjectGenerationApp({
             getSnapshot={getAcceptedProjectSnapshot}
             activeCanvasRuntime={activeCanvasRuntime}
             centerProjectFileInCanvas={centerActiveCanvasProjectFile}
-            notify={notify}
+            activities={projectActivities}
             i18n={i18n}
             onController={setExplorerController}
           />
@@ -1462,6 +1481,7 @@ function WorkbenchProjectGenerationApp({
       <WorkbenchIconProvider>
         <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
           <WorkbenchTitleBar
+            {...titleBarActivityProps}
             state={effectiveTitleBarState}
             nativeWindowState={nativeWindowState}
             {...(titleBarUpdateVersion ? {
@@ -1471,6 +1491,11 @@ function WorkbenchProjectGenerationApp({
             onCommand={handleTitleBarCommand}
             onCaptureBehaviorOwner={() => focusCommandRouter.captureOwner()}
             onWindowCommand={handleTitleBarWindowCommand}
+          />
+          <WorkbenchActivitySurfaces
+            activities={api.activities}
+            activityBellRef={activityBellRef}
+            interactionBlocked={projectPresentationBlocked}
           />
           {isProjectOpening && acceptedProject ? (
             <div
@@ -1509,7 +1534,10 @@ function WorkbenchProjectGenerationApp({
                 <strong>{i18n.t('canvas.registry.needsRepair')}</strong>
                 <span>{registryInvalid.message}</span>
                 <Button
-                  onClick={() => { void actions.repairCanvasIndex().catch((error) => notify(i18n.t('shell.notifications.canvasRegistryRepairFailed', { message: errorMessage(error) }))); }}
+                  onClick={() => { void actions.repairCanvasIndex().catch(() => projectActivities.report({
+                    kind: 'canvas-operation-failed',
+                    operation: 'repair-registry'
+                  })); }}
                 >
                   {i18n.t('canvas.registry.autoRepair')}
                 </Button>
@@ -1566,10 +1594,18 @@ function WorkbenchProjectGenerationApp({
                 canvases={canvasCards}
                 activeCanvasId={activeCanvasId}
                 onActiveCanvasChange={setActiveCanvasId}
-                onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.createCanvasFailed', { message: errorMessage(error) })))}
-                onRenameCanvas={(input) => actions.renameCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.renameCanvasFailed', { message: errorMessage(error) })))}
-                onDeleteCanvas={(input) => actions.deleteCanvas(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.deleteCanvasFailed', { message: errorMessage(error) })))}
-                onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch((error) => notify(i18n.t('shell.notifications.reorderCanvasesFailed', { message: errorMessage(error) })))}
+                onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch(() => projectActivities.report({
+                  kind: 'canvas-operation-failed', operation: 'create'
+                }))}
+                onRenameCanvas={(input) => actions.renameCanvas(input).then(() => undefined).catch(() => projectActivities.report({
+                  kind: 'canvas-operation-failed', operation: 'rename'
+                }))}
+                onDeleteCanvas={(input) => actions.deleteCanvas(input).then(() => undefined).catch(() => projectActivities.report({
+                  kind: 'canvas-operation-failed', operation: 'delete'
+                }))}
+                onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch(() => projectActivities.report({
+                  kind: 'canvas-operation-failed', operation: 'reorder'
+                }))}
               />
             ) : null}
             {Object.values(textEditorWindows).some((windowState) => windowState.open) ? (

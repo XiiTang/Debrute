@@ -43,6 +43,12 @@ the package-manager process; a later Workbench observes the current in-flight
 state through the global settings snapshot and subsequent settings changes.
 Product Quit still terminates the owned child process.
 
+Runtime also creates one indeterminate Integration Activity task before
+install, update, or uninstall execution and settles that same record afterward.
+Every connected Workbench sees the task; its structured card identifies only
+the catalog Integration and operation. Bounded command output and diagnostics
+remain in Integration Settings or Runtime logs and never enter Activity text.
+
 The UI disables all integration actions and rescanning while an operation is in
 flight. Runtime events publish the running and settled settings views. After an
 attempt completes, the runtime performs a fresh status scan; expected failures

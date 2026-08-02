@@ -10,7 +10,6 @@ import type {
   WorkbenchApiClient
 } from '@debrute/app-protocol';
 import type { EventProjection, SettingsResource } from '../../types.js';
-import type { WorkbenchI18n } from '../i18n/index.js';
 import type {
   WorkbenchGlobalProjection,
   WorkbenchGlobalProjectionState
@@ -53,8 +52,6 @@ interface CanvasTextAppearanceSaveQueue {
 export interface WorkbenchSettingsControllerInput {
   api: WorkbenchApiClient;
   globalProjection: WorkbenchGlobalProjection;
-  notify(message: string): void;
-  getCurrentI18n(): WorkbenchI18n;
 }
 
 export function useWorkbenchSettingsController(
@@ -170,26 +167,11 @@ export function useWorkbenchSettingsController(
     },
     revealModelApiKey: async (modelId) => (await input.api.revealModelApiKey(modelId)).apiKey,
     rescanIntegrations,
-    runIntegrationOperation: async (operationInput) => {
-      const result = await input.api.integrationsRunOperation(operationInput);
-      if (!result.ok) {
-        const i18n = input.getCurrentI18n();
-        const diagnostic = result.diagnostic?.stderrTail
-          ?? result.diagnostic?.stdoutTail
-          ?? result.diagnostic?.errorKind
-          ?? i18n.t('settings.integrations.unknownOperationFailure');
-        input.notify(i18n.t('settings.integrations.operationFailedNotification', {
-          operation: i18n.t(integrationOperationLabelKey(result.operation)),
-          integration: result.integrationId,
-          message: diagnostic
-        }));
-      }
-      return result;
-    }
+    runIntegrationOperation: async (operationInput) => (
+      input.api.integrationsRunOperation(operationInput)
+    )
   }), [
     input.api,
-    input.getCurrentI18n,
-    input.notify,
     rescanIntegrations,
     saveCanvasTextAppearance
   ]);
@@ -260,12 +242,4 @@ function sameCanvasTextAppearance(left: CanvasTextAppearance, right: CanvasTextA
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function integrationOperationLabelKey(
-  operation: 'install' | 'update' | 'uninstall'
-): 'settings.integrations.install' | 'settings.integrations.update' | 'settings.integrations.uninstall' {
-  if (operation === 'install') return 'settings.integrations.install';
-  if (operation === 'update') return 'settings.integrations.update';
-  return 'settings.integrations.uninstall';
 }

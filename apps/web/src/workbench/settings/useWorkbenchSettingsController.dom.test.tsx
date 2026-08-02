@@ -6,14 +6,13 @@ import type {
   DebruteGlobalSettingsView,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
-import { createI18n } from '../i18n/index.js';
 import { createWorkbenchGlobalProjection } from '../services/WorkbenchGlobalProjection.js';
 import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
 } from './useWorkbenchSettingsController.js';
 
-describe('useWorkbenchSettingsController Canvas Text Appearance saves', { tags: ['settings'] }, () => {
+describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   it('presents changes immediately while serializing and coalescing saves', async () => {
     const saves: Array<ReturnType<typeof deferred<{ ok: true }>>> = [];
     const globalSettingsSave = vi.fn(() => {
@@ -180,10 +179,44 @@ describe('useWorkbenchSettingsController Canvas Text Appearance saves', { tags: 
     expectCanvasFontSize(rendered.current, 12);
     await rendered.unmount();
   });
+
+  it('returns Integration diagnostics while Runtime owns Activity reporting', async () => {
+    const integrationsRunOperation = vi.fn(async () => ({
+      ok: false,
+      integrationId: 'imagemagick' as const,
+      operation: 'install' as const,
+      diagnostic: {
+        errorKind: 'nonzero_exit' as const,
+        stderrTail: 'secret raw command output'
+      }
+    }));
+    const rendered = await renderController(
+      vi.fn(async () => ({ ok: true as const })),
+      { integrationsRunOperation }
+    );
+
+    let result;
+    await act(async () => {
+      result = await rendered.current.actions.runIntegrationOperation({
+        integrationId: 'imagemagick',
+        operation: 'install'
+      });
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      integrationId: 'imagemagick',
+      operation: 'install'
+    }));
+    await rendered.unmount();
+  });
 });
 
 async function renderController(
-  globalSettingsSave: WorkbenchApiClient['globalSettingsSave']
+  globalSettingsSave: WorkbenchApiClient['globalSettingsSave'],
+  options: {
+    integrationsRunOperation?: WorkbenchApiClient['integrationsRunOperation'];
+  } = {}
 ): Promise<{
   readonly current: WorkbenchSettingsController;
   projection: ReturnType<typeof createWorkbenchGlobalProjection>;
@@ -199,7 +232,7 @@ async function renderController(
   const api = {
     globalSettingsSave,
     integrationsRescan: vi.fn(async () => ({ ok: true as const })),
-    integrationsRunOperation: vi.fn(),
+    integrationsRunOperation: options.integrationsRunOperation ?? vi.fn(),
     checkProductUpdate: vi.fn(),
     applyProductUpdate: vi.fn(),
     revealModelApiKey: vi.fn()
@@ -212,9 +245,7 @@ async function renderController(
   function Probe(): null {
     current = useWorkbenchSettingsController({
       api,
-      globalProjection: projection,
-      notify: () => undefined,
-      getCurrentI18n: () => createI18n('en')
+      globalProjection: projection
     });
     return null;
   }

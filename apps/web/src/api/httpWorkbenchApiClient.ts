@@ -1,4 +1,5 @@
 import type {
+  WorkbenchActivityNoticeInput,
   AddProjectPathToCanvasMapInput,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewSourceResponse,
@@ -35,8 +36,10 @@ import type {
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
 import {
+  decodeWorkbenchActivityFrame,
   decodeWorkbenchEvent,
   decodeWorkbenchProjectConnectionFrame,
+  isRecognizedWorkbenchActivityFrame,
   isRecognizedWorkbenchEventFrame,
   isRecognizedWorkbenchProjectConnectionFrame
 } from '@debrute/app-protocol';
@@ -44,6 +47,10 @@ import type { CanvasFeedbackDocument } from '@debrute/canvas-core';
 import { readJsonSseStream } from './streamingSse.js';
 import type { TerminalHubClient } from './terminalHubClient.js';
 import { getDebruteShellApi } from './shellApi.js';
+import {
+  createWorkbenchActivities,
+  type WorkbenchActivities
+} from '../workbench/services/WorkbenchActivities.js';
 import {
   createWorkbenchGlobalProjection,
   type WorkbenchGlobalEvent,
@@ -69,6 +76,7 @@ interface RevisionedProjectCommandResult {
 }
 
 export interface HttpWorkbenchApiClient extends WorkbenchApiClient {
+  readonly activities: WorkbenchActivities;
   readonly globalProjection: WorkbenchGlobalProjection;
   readonly projectProjection: WorkbenchProjectProjection;
   bootstrapGlobalSettings(): Promise<WorkbenchGlobalSettingsBootstrap>;
@@ -209,6 +217,13 @@ export function createHttpWorkbenchApiClient(options: {
     }
     return response.json() as Promise<T>;
   };
+  const activities = createWorkbenchActivities({
+    dismiss: (id) => request<{ ok: true }>(
+      'DELETE',
+      `/api/activities/${encodeURIComponent(id)}`
+    ),
+    clearTerminal: () => request<{ ok: true; cleared: number }>('DELETE', '/api/activities')
+  });
 
   const projectRequestControllers = new Set<AbortController>();
   let connectionAbort: AbortController | undefined;
@@ -437,6 +452,7 @@ export function createHttpWorkbenchApiClient(options: {
     let readySettled = false;
     const requestedProjectId = requestedProjectIdFromLocation();
     let globalSynchronized = false;
+    let activitySynchronized = false;
     let projectSynchronized = requestedProjectId === undefined;
     const ready = new Promise<void>((resolve, reject) => {
       resolveReady = resolve;
@@ -444,7 +460,7 @@ export function createHttpWorkbenchApiClient(options: {
     });
     connectionReady = ready;
     const settleReady = (): void => {
-      if (!readySettled && globalSynchronized && projectSynchronized) {
+      if (!readySettled && globalSynchronized && activitySynchronized && projectSynchronized) {
         readySettled = true;
         resolveReady();
       }
@@ -489,6 +505,18 @@ export function createHttpWorkbenchApiClient(options: {
             });
             settleReady();
             return;
+          }
+          const activityFrame = decodeWorkbenchActivityFrame(value);
+          if (activityFrame) {
+            activities.acceptFrame(activityFrame);
+            if (activityFrame.type === 'activity.snapshot') {
+              activitySynchronized = true;
+              settleReady();
+            }
+            return;
+          }
+          if (isRecognizedWorkbenchActivityFrame(value)) {
+            throw new Error(`Runtime sent an invalid ${value.type} Activity frame.`);
           }
           const projectConnectionFrame = decodeWorkbenchProjectConnectionFrame(value);
           if (projectConnectionFrame) {
@@ -573,9 +601,21 @@ export function createHttpWorkbenchApiClient(options: {
   };
 
   return {
+    activities,
     globalProjection,
     projectProjection,
     bootstrapGlobalSettings,
+    reportActivityNotice: (input) => isProjectScopedActivityNotice(input)
+      ? requestForCurrentProject<{ activityId: string }>('POST', '/activities/notices', input)
+      : request<{ activityId: string }>('POST', '/api/activities/notices', input),
+    dismissActivity: (activityId) => request<{ ok: true }>(
+      'DELETE',
+      `/api/activities/${encodeURIComponent(activityId)}`
+    ),
+    clearTerminalActivities: () => request<{ ok: true; cleared: number }>(
+      'DELETE',
+      '/api/activities'
+    ),
     sendProjectFileToPhotoshop: (input) => requestForCurrentProject<SendProjectFileToPhotoshopResult>(
       'POST',
       '/photoshop/send',
@@ -806,6 +846,7 @@ export function createHttpWorkbenchApiClient(options: {
       pendingInitialEvents.length = 0;
       unbindTerminalProject();
       terminalHub?.dispose();
+      activities.dispose();
       connectionCredential = undefined;
       const error = new Error('Workbench API client was disposed.');
       projectProjection.endConnection(error);
@@ -817,6 +858,14 @@ export function createHttpWorkbenchApiClient(options: {
       boundProjectWaiters.clear();
     }
   };
+}
+
+function isProjectScopedActivityNotice(input: WorkbenchActivityNoticeInput): boolean {
+  return input.kind === 'project-opened'
+    || input.kind === 'project-view-state-reset'
+    || input.kind === 'project-operation-failed'
+    || input.kind === 'canvas-operation-failed'
+    || input.kind === 'explorer-operation-failed';
 }
 
 function isConnectionOpenedFrame(value: unknown): value is {

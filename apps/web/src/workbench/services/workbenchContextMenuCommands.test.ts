@@ -50,7 +50,7 @@ describe('workbench context menu commands', () => {
     });
   });
 
-  it('reports a Runtime system clipboard failure without attempting a Web clipboard fallback', async () => {
+  it('reports a concise Runtime system clipboard failure without attempting a Web clipboard fallback', async () => {
     const notify = vi.fn();
     run({
       command: 'copy-relative-path',
@@ -63,7 +63,10 @@ describe('workbench context menu commands', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('native clipboard unavailable'));
+    expect(notify).toHaveBeenCalledWith({
+      kind: 'canvas-operation-failed',
+      operation: 'copy-path'
+    });
   });
 
   it('uses the invocation entry for the one terminal and system reveal', () => {
@@ -208,7 +211,7 @@ function run(overrides: {
   resetCanvasNodeLayouts?: Parameters<typeof runProjectPathCommand>[0]['resetCanvasNodeLayouts'];
   fileClipboard?: Parameters<typeof runProjectPathCommand>[0]['fileClipboard'];
   getProjectSnapshot?: Parameters<typeof runProjectPathCommand>[0]['getProjectSnapshot'];
-  notify?: Parameters<typeof runProjectPathCommand>[0]['notify'];
+  notify?: (input: Parameters<Parameters<typeof runProjectPathCommand>[0]['activities']['report']>[0]) => void;
 }): void {
   const noop = () => undefined;
   runProjectPathCommand({
@@ -239,16 +242,15 @@ function run(overrides: {
       ...overrides.explorerCommands
     },
     copyProjectPathsToSystemClipboard: overrides.copyProjectPathsToSystemClipboard ?? (async () => ({ ok: true })),
-    notify: overrides.notify ?? noop,
-    startNotification: () => noop,
-    photoshopLabels: { sending: () => '', sent: () => '', failed: () => '' },
+    activities: {
+      report: (input) => (overrides.notify ?? noop)(input)
+    },
     closeContextMenu: noop,
     openInspectorPanel: noop,
     confirmTrash: overrides.confirmTrash ?? (() => true),
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),
     getProjectSnapshot: overrides.getProjectSnapshot ?? (() => undefined),
-    confirmMoveOverwrite: () => true,
-    errorLabels: { copyPathFailed: '', resetAutoLayoutFailed: '' }
+    confirmMoveOverwrite: () => true
   });
 }
 

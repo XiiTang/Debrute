@@ -4,6 +4,7 @@ export { DiscardChangesIcon } from './DiscardChangesIcon.js';
 export {
   AlertCircle,
   AlertTriangle,
+  Bell,
   AudioLines,
   Boxes,
   Cable,

@@ -210,6 +210,10 @@ fn runtime_shutdown_closes_a_live_workbench_stream_before_http_join() {
         events.next_of_type("photoshop.state.changed")["type"],
         "photoshop.state.changed"
     );
+    assert_eq!(
+        events.next_of_type("activity.snapshot")["type"],
+        "activity.snapshot"
+    );
 
     runtime.services().close_workbench_connection_admission();
     runtime.server.stop_accepting();
@@ -299,6 +303,103 @@ fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
     assert_eq!(bound["type"], "project.bound");
     assert_eq!(bound["project"]["projectId"], project.id);
     assert_eq!(bound["workingCopies"], json!({"text": {}, "feedback": {}}));
+}
+
+#[test]
+fn activity_stream_is_runtime_global_keeps_history_and_clears_terminal_records_for_every_workbench()
+{
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("activity-stream");
+    let client = test_client();
+    let (first_cookie, first_credential, mut first_events) =
+        open_unbound_connection(&client, &runtime);
+    assert_eq!(
+        first_events.next_of_type("activity.snapshot"),
+        json!({
+            "type": "activity.snapshot",
+            "activityRevision": 0,
+            "records": []
+        })
+    );
+    open_project(
+        &client,
+        &runtime,
+        &project,
+        &first_cookie,
+        &first_credential,
+    );
+    assert_eq!(
+        first_events.next_of_type("project.bound")["project"]["projectId"],
+        project.id
+    );
+
+    let (second_cookie, second_credential, mut second_events) =
+        open_unbound_connection(&client, &runtime);
+    assert_eq!(
+        second_events.next_of_type("activity.snapshot")["records"],
+        json!([])
+    );
+
+    let report = client
+        .post(format!(
+            "{}/api/projects/{}/activities/notices",
+            runtime.origin(),
+            project.id
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &first_cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &first_credential)
+        .json(&json!({
+            "kind": "canvas-operation-failed",
+            "operation": "save-layout"
+        }))
+        .send()
+        .expect("Project Activity report should complete");
+    assert_eq!(report.status().as_u16(), 200);
+    let activity_id = report.json::<Value>().expect("Activity report JSON")["activityId"]
+        .as_str()
+        .expect("Activity id")
+        .to_owned();
+
+    for event in [
+        first_events.next_of_type("activity.upsert"),
+        second_events.next_of_type("activity.upsert"),
+    ] {
+        assert_eq!(event["record"]["id"], activity_id);
+        assert_eq!(event["record"]["source"], "canvas");
+        assert_eq!(event["record"]["project"]["projectId"], project.id);
+        assert_eq!(event["record"]["project"]["projectName"], "activity-stream");
+        assert_eq!(
+            event["record"]["message"]["kind"],
+            "canvas-operation-failed"
+        );
+    }
+
+    let (_third_cookie, _third_credential, mut third_events) =
+        open_unbound_connection(&client, &runtime);
+    let history = third_events.next_of_type("activity.snapshot");
+    assert_eq!(history["records"].as_array().map(Vec::len), Some(1));
+    assert_eq!(history["records"][0]["id"], activity_id);
+
+    let clear = client
+        .delete(format!("{}/api/activities", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &second_cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &second_credential)
+        .send()
+        .expect("Activity clear should complete");
+    assert_eq!(clear.status().as_u16(), 200);
+    assert_eq!(
+        clear.json::<Value>().expect("Activity clear JSON"),
+        json!({ "ok": true, "cleared": 1 })
+    );
+    for event in [
+        first_events.next_of_type("activity.remove"),
+        second_events.next_of_type("activity.remove"),
+        third_events.next_of_type("activity.remove"),
+    ] {
+        assert_eq!(event["activityIds"], json!([activity_id]));
+    }
 }
 
 #[test]

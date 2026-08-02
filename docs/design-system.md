@@ -388,8 +388,9 @@ background without a page, card, or full-viewport surface. Content is centered
 within the main viewport below the title-bar hit area. A retained Project that
 has become read-only because it was preempted or because the Runtime connection
 ended keeps its last Canvas visible. A solid, non-dismissible dialog blocks the
-Canvas, floating bars, and panels without dimming or covering the Canvas; the
-title bar remains available.
+Canvas, floating bars, panels, title bar, and Activity surfaces without dimming or
+covering the Canvas. The blocker is the highest shell layer and freezes every
+surface beneath it.
 
 ## Surface Application Matrix
 
@@ -400,13 +401,14 @@ title bar remains available.
 | Menus and overlays | Opaque paper surface and 4px hard underlayer; no perimeter line | Commands, placement, keyboard behavior, and item density |
 | Buttons, fields, tabs | Solid block or small fixed cut mask with 2px offset underlayer; no perimeter or active underline | Control height, label wrapping, and hit target |
 | Tags, chips, status labels | Cut-paper label or rectangular underlayer; no capsule | Text, state meaning, and footprint |
+| Activity Cards | Compact opaque rounded card with restrained grain; status, source, optional Project, and relative time above a complete wrapping message; only active tasks add a real determinate or indeterminate progress line | One identical card in the upper-right eight-second Floating Stack and scrollable Activity Center; Runtime-global records, active-task protection, terminal clear, and no unread or severity variants |
+| Validation | Inline semantic text within the owning form or action surface | Field or operation ownership, correction context, and persistence |
 | Explorer, Settings, Inspector | Restrained grain and geometry at row scale | Information architecture and row geometry |
 | Project Open | Centered title, status, error context, and action directly over the Canvas background | Opening replaces the entry with progress; content contains no page, card, or mascot |
 | Canvas viewport | Neutral audited field and exact grid; no grain | Content judgment, Canvas semantics, handles, feedback colors |
 | Canvas chrome | Brand panels, bars, menus, and cut controls | Canvas geometry and media presentation |
 | Terminal viewport | Warm-neutral field, coordinated high-contrast ANSI semantics, and precise mono typography | ANSI role distinctions; no texture, rough masks, ornament, or geometry changes |
 | Terminal chrome | Panel-colored tab bar with the active tab exactly matching the Terminal viewport | Sessions, status, emulator geometry, and motion |
-| Toasts and validation | Cut opaque surface plus semantic icon, label, and filled state | Message ownership and duration |
 
 ## Host Applications
 
@@ -447,7 +449,7 @@ Features do not use another feature's CSS classes. Reuse moves into `ui` only wh
 
 ## Canvas Exceptions
 
-Canvas may own zoom-scaled handles and hit targets, media preview sizing, editor geometry, annotation colors, node layout, and overlay placement. The terminal emulator may own emulator theme colors. These exceptions do not create alternate buttons, fields, cards, menus, status components, notifications, or panel shells.
+Canvas may own zoom-scaled handles and hit targets, media preview sizing, editor geometry, annotation colors, node layout, and overlay placement. The terminal emulator may own emulator theme colors. These exceptions do not create alternate buttons, fields, cards, menus, status components, Activity cards, or panel shells.
 
 Canvas feedback bars use the shared floating-bar container and shared controls. Their size is derived from the visible fixed-size actions, creator, and saved-item row rather than media-specific width buckets. The creator is a compact cut-paper field; saved feedback items use the shared cut-paper label geometry rather than capsules. A persistent feedback frame is one pointer-transparent, theme-aware presence border. Feedback kinds remain visible in the editing bar and media annotations, not as segmented frame colors.
 

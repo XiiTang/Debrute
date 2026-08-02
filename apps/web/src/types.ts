@@ -41,7 +41,6 @@ export interface WorkbenchState {
   canvasFeedback: CanvasFeedbackDocument | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   textEditorWindows: Record<string, FloatingTextEditorWindowState>;
-  notifications: string[];
 }
 
 interface ProjectOpenState {

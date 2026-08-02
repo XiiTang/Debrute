@@ -29,6 +29,10 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
+    activity::{
+        ActivityChange, ActivityEvent, ActivityMessage, ActivityNoticeReport, ActivityProgress,
+        ActivityTaskStatus,
+    },
     global::{GlobalRuntimeChange, GlobalRuntimeEvent},
     project::{ProjectChange, ProjectStreamItem},
 };
@@ -207,6 +211,23 @@ pub(super) async fn workbench_connection(
         "revision": global_revision,
         "state": services.photoshop().state()
     }));
+    let mut activity_subscription = services.subscribe_activity();
+    let activity_snapshot = services.activity().sync_snapshot();
+    if sender
+        .try_send(json!({
+            "type": "activity.snapshot",
+            "activityRevision": activity_snapshot.revision,
+            "records": activity_snapshot.records
+        }))
+        .is_err()
+    {
+        services.request_workbench_connection_close(context.credential.clone());
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "workbench_connection_unavailable",
+            "Workbench connection closed during Activity bootstrap.",
+        );
+    }
     let global_sender = sender.clone();
     let global_services = Arc::clone(&services);
     let global_credential = context.credential.clone();
@@ -226,6 +247,35 @@ pub(super) async fn workbench_connection(
                     | tokio::sync::broadcast::error::RecvError::Closed,
                 ) => {
                     global_services.request_workbench_connection_close(global_credential.clone());
+                    return;
+                }
+            }
+        }
+    });
+    let activity_sender = sender.clone();
+    let activity_services = Arc::clone(&services);
+    let activity_credential = context.credential.clone();
+    let activity_revision = activity_snapshot.revision;
+    tokio::spawn(async move {
+        loop {
+            match activity_subscription.recv().await {
+                Ok(event) if event.revision > activity_revision => {
+                    if activity_sender
+                        .try_send(activity_event_value(event))
+                        .is_err()
+                    {
+                        activity_services
+                            .request_workbench_connection_close(activity_credential.clone());
+                        return;
+                    }
+                }
+                Ok(_) => {}
+                Err(
+                    tokio::sync::broadcast::error::RecvError::Lagged(_)
+                    | tokio::sync::broadcast::error::RecvError::Closed,
+                ) => {
+                    activity_services
+                        .request_workbench_connection_close(activity_credential.clone());
                     return;
                 }
             }
@@ -282,6 +332,9 @@ impl Drop for WorkbenchConnectionGuard {
 
 pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
     Router::new()
+        .route("/activities", delete(clear_terminal_activities))
+        .route("/activities/{activity_id}", delete(dismiss_activity))
+        .route("/activities/notices", post(report_global_activity_notice))
         .route("/workbench/recent-projects", delete(clear_recent_projects))
         .route("/settings/global", patch(global_settings_patch))
         .route(
@@ -305,6 +358,10 @@ pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
 
 fn project_domain_router() -> Router<WorkbenchRouterState> {
     Router::new()
+        .route(
+            "/projects/{project_id}/activities/notices",
+            post(report_project_activity_notice),
+        )
         .route(
             "/projects/{project_id}/working-copies/text/{*path}",
             put(text_working_copy).delete(text_working_copy),
@@ -443,6 +500,72 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             "/projects/{project_id}/terminals/ws",
             get(super::project_routes::terminal_websocket),
         )
+}
+
+async fn report_global_activity_notice(
+    State(state): State<WorkbenchRouterState>,
+    request: Request,
+) -> Response {
+    let report: ActivityNoticeReport = match json_body(request).await {
+        Ok(report) => report,
+        Err(response) => return response,
+    };
+    if report.is_project_scoped() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "activity_scope_invalid",
+            "Project Activity notices require a current Project scope.",
+        );
+    }
+    let record = state.services.activity().publish_notice(None, report);
+    Json(json!({ "activityId": record.id })).into_response()
+}
+
+async fn report_project_activity_notice(
+    State(state): State<WorkbenchRouterState>,
+    Extension(scope): Extension<ProjectAuthorization>,
+    request: Request,
+) -> Response {
+    let report: ActivityNoticeReport = match json_body(request).await {
+        Ok(report) => report,
+        Err(response) => return response,
+    };
+    if !report.is_project_scoped() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "activity_scope_invalid",
+            "Global Activity notices cannot claim a Project scope.",
+        );
+    }
+    let project = match state.services.project_activity_context(&scope.project_id) {
+        Ok(project) => project,
+        Err(error) => return service_error_response(error),
+    };
+    let record = state
+        .services
+        .activity()
+        .publish_notice(Some(project), report);
+    Json(json!({ "activityId": record.id })).into_response()
+}
+
+async fn dismiss_activity(
+    State(state): State<WorkbenchRouterState>,
+    Path(activity_id): Path<String>,
+) -> Response {
+    if state.services.activity().dismiss_terminal(&activity_id) {
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        error_response(
+            StatusCode::CONFLICT,
+            "activity_not_clearable",
+            "Activity is missing or still in progress.",
+        )
+    }
+}
+
+async fn clear_terminal_activities(State(state): State<WorkbenchRouterState>) -> Response {
+    let cleared = state.services.activity().clear_terminal();
+    Json(json!({ "ok": true, "cleared": cleared })).into_response()
 }
 
 async fn text_working_copy(
@@ -778,7 +901,19 @@ async fn photoshop_send(
         Ok(body) => body,
         Err(response) => return response,
     };
-    match state
+    let project = match state.services.project_activity_context(&scope.project_id) {
+        Ok(project) => project,
+        Err(error) => return service_error_response(error),
+    };
+    let activity = state.services.activity().start_task(
+        Some(project),
+        ActivityMessage::PhotoshopSend {
+            project_relative_path: input.project_relative_path.clone(),
+            document_title: None,
+        },
+        ActivityProgress::Indeterminate,
+    );
+    let result = state
         .services
         .photoshop()
         .send_project_file(
@@ -787,8 +922,18 @@ async fn photoshop_send(
             &input.plugin_session_id,
             input.document_id,
         )
-        .await
-    {
+        .await;
+    let status = if result.is_ok() {
+        ActivityTaskStatus::Succeeded
+    } else {
+        ActivityTaskStatus::Failed
+    };
+    let _ = state.services.activity().update_task(
+        &activity.id,
+        status,
+        ActivityProgress::Indeterminate,
+    );
+    match result {
         Ok(result) => Json(result).into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_photoshop(error)),
     }
@@ -974,6 +1119,21 @@ fn global_event_value(event: GlobalRuntimeEvent) -> Value {
             "type": "product.changed",
             "revision": event.revision,
             "product": product
+        }),
+    }
+}
+
+fn activity_event_value(event: ActivityEvent) -> Value {
+    match event.change {
+        ActivityChange::Upsert { record } => json!({
+            "type": "activity.upsert",
+            "activityRevision": event.revision,
+            "record": record
+        }),
+        ActivityChange::Remove { activity_ids } => json!({
+            "type": "activity.remove",
+            "activityRevision": event.revision,
+            "activityIds": activity_ids
         }),
     }
 }

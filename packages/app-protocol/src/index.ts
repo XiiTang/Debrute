@@ -782,6 +782,260 @@ export interface SendProjectFileToPhotoshopResult {
   fileName: string;
 }
 
+export type ActivitySource =
+  | 'project'
+  | 'canvas'
+  | 'explorer'
+  | 'model-request'
+  | 'photoshop'
+  | 'workbench'
+  | 'update'
+  | 'integration';
+
+export interface ActivityProjectContext {
+  projectId: string;
+  projectName: string;
+}
+
+export type ProjectActivityOperation = 'open';
+export type CanvasActivityOperation =
+  | 'feedback-unavailable'
+  | 'feedback-save'
+  | 'save-text-viewport'
+  | 'save-layout'
+  | 'save-video-playback'
+  | 'add-to-canvas-map'
+  | 'repair-registry'
+  | 'create'
+  | 'rename'
+  | 'delete'
+  | 'reorder'
+  | 'reset-auto-layout'
+  | 'reset-layout'
+  | 'copy-path';
+export type ExplorerActivityOperation =
+  | 'load-directory'
+  | 'copy'
+  | 'move'
+  | 'import'
+  | 'copy-path'
+  | 'reveal'
+  | 'delete'
+  | 'paste';
+export type WorkbenchActivityOperation = 'window-state' | 'window-command' | 'menu-command';
+export type IntegrationActivityOperation = 'install' | 'update' | 'uninstall';
+
+export type WorkbenchActivityNoticeInput =
+  | { kind: 'project-opened' }
+  | { kind: 'project-view-state-reset' }
+  | { kind: 'project-operation-failed'; operation: ProjectActivityOperation }
+  | { kind: 'canvas-operation-failed'; operation: CanvasActivityOperation }
+  | { kind: 'explorer-operation-failed'; operation: ExplorerActivityOperation }
+  | { kind: 'workbench-operation-failed'; operation: WorkbenchActivityOperation }
+  | { kind: 'update-install-failed' };
+
+export type ActivityMessage =
+  | WorkbenchActivityNoticeInput
+  | { kind: 'model-request'; modelKind: 'image' | 'video' | 'tts' | 'music' | 'sound-effect'; itemCount: number }
+  | { kind: 'photoshop-send'; projectRelativePath: string; documentTitle?: string }
+  | { kind: 'integration-operation'; integrationId: string; operation: IntegrationActivityOperation };
+
+export type ActivityProgress =
+  | { type: 'indeterminate' }
+  | { type: 'determinate'; completed: number; total: number };
+
+export type ActivityTaskStatus = 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+
+interface ActivityRecordBase {
+  id: string;
+  source: ActivitySource;
+  project?: ActivityProjectContext;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ActivityRecord = ActivityRecordBase & (
+  | { type: 'notice'; message: WorkbenchActivityNoticeInput }
+  | {
+      type: 'task';
+      status: ActivityTaskStatus;
+      progress: ActivityProgress;
+      message: Exclude<ActivityMessage, WorkbenchActivityNoticeInput>;
+    }
+);
+
+export type WorkbenchActivityFrame =
+  | { type: 'activity.snapshot'; activityRevision: number; records: ActivityRecord[] }
+  | { type: 'activity.upsert'; activityRevision: number; record: ActivityRecord }
+  | { type: 'activity.remove'; activityRevision: number; activityIds: string[] };
+
+const PROJECT_ACTIVITY_OPERATIONS = new Set<ProjectActivityOperation>(['open']);
+const CANVAS_ACTIVITY_OPERATIONS = new Set<CanvasActivityOperation>([
+  'feedback-unavailable',
+  'feedback-save',
+  'save-text-viewport',
+  'save-layout',
+  'save-video-playback',
+  'add-to-canvas-map',
+  'repair-registry',
+  'create',
+  'rename',
+  'delete',
+  'reorder',
+  'reset-auto-layout',
+  'reset-layout',
+  'copy-path'
+]);
+const EXPLORER_ACTIVITY_OPERATIONS = new Set<ExplorerActivityOperation>([
+  'load-directory', 'copy', 'move', 'import', 'copy-path', 'reveal', 'delete', 'paste'
+]);
+const WORKBENCH_ACTIVITY_OPERATIONS = new Set<WorkbenchActivityOperation>([
+  'window-state', 'window-command', 'menu-command'
+]);
+const INTEGRATION_ACTIVITY_OPERATIONS = new Set<IntegrationActivityOperation>([
+  'install', 'update', 'uninstall'
+]);
+const ACTIVITY_TASK_STATUSES = new Set<ActivityTaskStatus>([
+  'running', 'cancelling', 'succeeded', 'failed', 'cancelled'
+]);
+
+function isActivityProjectContext(value: unknown): value is ActivityProjectContext {
+  return isProtocolObject(value)
+    && hasExactKeys(value, ['projectId', 'projectName'])
+    && typeof value.projectId === 'string'
+    && value.projectId.length > 0
+    && typeof value.projectName === 'string'
+    && value.projectName.length > 0;
+}
+
+function isActivityMessage(value: unknown): value is ActivityMessage {
+  if (!isProtocolObject(value) || typeof value.kind !== 'string') return false;
+  switch (value.kind) {
+    case 'project-opened':
+    case 'project-view-state-reset':
+    case 'update-install-failed':
+      return hasExactKeys(value, ['kind']);
+    case 'project-operation-failed':
+      return hasExactKeys(value, ['kind', 'operation'])
+        && PROJECT_ACTIVITY_OPERATIONS.has(value.operation as ProjectActivityOperation);
+    case 'canvas-operation-failed':
+      return hasExactKeys(value, ['kind', 'operation'])
+        && CANVAS_ACTIVITY_OPERATIONS.has(value.operation as CanvasActivityOperation);
+    case 'explorer-operation-failed':
+      return hasExactKeys(value, ['kind', 'operation'])
+        && EXPLORER_ACTIVITY_OPERATIONS.has(value.operation as ExplorerActivityOperation);
+    case 'workbench-operation-failed':
+      return hasExactKeys(value, ['kind', 'operation'])
+        && WORKBENCH_ACTIVITY_OPERATIONS.has(value.operation as WorkbenchActivityOperation);
+    case 'model-request':
+      return hasExactKeys(value, ['kind', 'modelKind', 'itemCount'])
+        && ['image', 'video', 'tts', 'music', 'sound-effect'].includes(String(value.modelKind))
+        && isNonNegativeInteger(value.itemCount)
+        && Number(value.itemCount) > 0;
+    case 'photoshop-send':
+      return hasExactKeys(value, ['kind', 'projectRelativePath'], ['documentTitle'])
+        && typeof value.projectRelativePath === 'string'
+        && (value.documentTitle === undefined || typeof value.documentTitle === 'string');
+    case 'integration-operation':
+      return hasExactKeys(value, ['kind', 'integrationId', 'operation'])
+        && typeof value.integrationId === 'string'
+        && value.integrationId.length > 0
+        && INTEGRATION_ACTIVITY_OPERATIONS.has(value.operation as IntegrationActivityOperation);
+    default:
+      return false;
+  }
+}
+
+function isActivityProgress(value: unknown): value is ActivityProgress {
+  if (!isProtocolObject(value) || typeof value.type !== 'string') return false;
+  if (value.type === 'indeterminate') return hasExactKeys(value, ['type']);
+  return value.type === 'determinate'
+    && hasExactKeys(value, ['type', 'completed', 'total'])
+    && isNonNegativeInteger(value.completed)
+    && isNonNegativeInteger(value.total)
+    && Number(value.total) > 0
+    && Number(value.completed) <= Number(value.total);
+}
+
+function activitySourceForMessage(message: ActivityMessage): ActivitySource {
+  switch (message.kind) {
+    case 'project-opened':
+    case 'project-view-state-reset':
+    case 'project-operation-failed': return 'project';
+    case 'canvas-operation-failed': return 'canvas';
+    case 'explorer-operation-failed': return 'explorer';
+    case 'workbench-operation-failed': return 'workbench';
+    case 'update-install-failed': return 'update';
+    case 'model-request': return 'model-request';
+    case 'photoshop-send': return 'photoshop';
+    case 'integration-operation': return 'integration';
+  }
+}
+
+function isActivityRecord(value: unknown): value is ActivityRecord {
+  if (!isProtocolObject(value)
+    || typeof value.id !== 'string'
+    || value.id.length === 0
+    || typeof value.source !== 'string'
+    || typeof value.createdAt !== 'string'
+    || typeof value.updatedAt !== 'string'
+    || (value.project !== undefined && !isActivityProjectContext(value.project))
+    || !isActivityMessage(value.message)
+    || activitySourceForMessage(value.message) !== value.source
+  ) {
+    return false;
+  }
+  const projectRequired = ['project', 'canvas', 'explorer', 'model-request', 'photoshop']
+    .includes(value.source);
+  if (projectRequired !== (value.project !== undefined)) return false;
+  if (value.type === 'notice') {
+    return !['model-request', 'photoshop-send', 'integration-operation'].includes(value.message.kind)
+      && hasExactKeys(value, ['id', 'source', 'createdAt', 'updatedAt', 'type', 'message'], ['project']);
+  }
+  return value.type === 'task'
+    && ['model-request', 'photoshop-send', 'integration-operation'].includes(value.message.kind)
+    && ACTIVITY_TASK_STATUSES.has(value.status as ActivityTaskStatus)
+    && isActivityProgress(value.progress)
+    && hasExactKeys(
+      value,
+      ['id', 'source', 'createdAt', 'updatedAt', 'type', 'status', 'progress', 'message'],
+      ['project']
+    );
+}
+
+export function isRecognizedWorkbenchActivityFrame(
+  value: unknown
+): value is Record<string, unknown> & { type: WorkbenchActivityFrame['type'] } {
+  return isProtocolObject(value)
+    && typeof value.type === 'string'
+    && ['activity.snapshot', 'activity.upsert', 'activity.remove'].includes(value.type);
+}
+
+export function decodeWorkbenchActivityFrame(value: unknown): WorkbenchActivityFrame | undefined {
+  if (!isRecognizedWorkbenchActivityFrame(value)
+    || !isNonNegativeInteger(value.activityRevision)
+  ) return undefined;
+  if (value.type === 'activity.snapshot') {
+    return hasExactKeys(value, ['type', 'activityRevision', 'records'])
+      && Array.isArray(value.records)
+      && value.records.every(isActivityRecord)
+      ? value as unknown as WorkbenchActivityFrame
+      : undefined;
+  }
+  if (value.type === 'activity.upsert') {
+    return hasExactKeys(value, ['type', 'activityRevision', 'record'])
+      && isActivityRecord(value.record)
+      ? value as unknown as WorkbenchActivityFrame
+      : undefined;
+  }
+  return hasExactKeys(value, ['type', 'activityRevision', 'activityIds'])
+    && Array.isArray(value.activityIds)
+    && value.activityIds.every((id) => typeof id === 'string' && id.length > 0)
+    && new Set(value.activityIds).size === value.activityIds.length
+    ? value as unknown as WorkbenchActivityFrame
+    : undefined;
+}
+
 interface WorkbenchFileWatchEvent {
   projectRelativePath: string;
 }
@@ -1282,6 +1536,16 @@ function isProtocolObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = []
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  return required.every((key) => Object.hasOwn(value, key))
+    && Object.keys(value).every((key) => allowed.has(key));
+}
+
 function isPhotoshopStateView(value: unknown): value is PhotoshopStateView {
   return isProtocolObject(value)
     && Object.keys(value).length === 1
@@ -1310,6 +1574,9 @@ function isNonNegativeInteger(value: unknown): value is number {
 }
 
 export interface WorkbenchApiClient {
+  reportActivityNotice(input: WorkbenchActivityNoticeInput): Promise<{ activityId: string }>;
+  dismissActivity(activityId: string): Promise<{ ok: true }>;
+  clearTerminalActivities(): Promise<{ ok: true; cleared: number }>;
   sendProjectFileToPhotoshop(input: SendProjectFileToPhotoshopInput): Promise<SendProjectFileToPhotoshopResult>;
   openProject(target: WorkbenchProjectTarget): Promise<WorkbenchProjectOpenOutcome>;
   chooseProjectRoot(): Promise<string | undefined>;

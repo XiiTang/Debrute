@@ -56,8 +56,8 @@ installed by the ordinary ordered Project event, and failure changes nothing.
 At most one Marks mutation for the Project is in flight. All single- and
 multi-selection Mark buttons are disabled during it. Workbench ignores another
 selection during that request, never retargets the captured paths, never queues
-or retries it, and shows one global `Feedback not saved` notification on
-failure.
+or retries it, and publishes one Runtime-global Canvas failure notice to
+Activity on failure.
 
 A Feedback Item contains a non-empty comment and is one of:
 

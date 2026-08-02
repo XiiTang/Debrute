@@ -61,6 +61,7 @@ const settings = <path fillRule="evenodd" d="m8.3 1 .4 2.1c.5-.1.9-.1 1.3-.1s.8 
 
 const AlertCircle = makeIcon('alert-circle', <path fillRule="evenodd" d="M10 1a9 9 0 1 1 0 18 9 9 0 0 1 0-18ZM9 5v7h2V5H9Zm0 9v2h2v-2H9Z"/>);
 const AlertTriangle = makeIcon('alert-triangle', alertTriangle);
+const Bell = makeIcon('bell', <path fillRule="evenodd" d="M10 1a6 6 0 0 1 6 6v4l3 4H1l3-4V7a6 6 0 0 1 6-6Zm-3 16h6a3 3 0 0 1-6 0Z"/>);
 const AudioLines = makeIcon('audio-lines', <path d="M2 7h2v6H2V7Zm4-3h2v12H6V4Zm4 2h2v8h-2V6Zm4-5h2v18h-2V1Zm4 7h2v4h-2V8Z"/>);
 const Boxes = makeIcon('boxes', <path d="m10 1 5 2.8v5.6L10 12 5 9.4V3.8L10 1ZM4 10l5 2.8v5.6L4 16V10Zm12 0v6l-5 2.4v-5.6l5-2.8Z"/>);
 const Cable = makeIcon('cable', <path d="M3 1h5v4H6v4h8V5h-2V1h5v6h-1v3c0 .7-.3 1.2-1 1.6V15h2v4h-6v-4h2v-3H7c-2 0-3-1-3-3V7H3V1Z"/>);
@@ -117,6 +118,7 @@ const X = makeIcon('x', <path d="m3 1 7 7 7-7 2 2-7 7 7 7-2 2-7-7-7 7-2-2 7-7-7-
 export const DEBRUTE_CUTOUT_ICONS = {
   AlertCircle,
   AlertTriangle,
+  Bell,
   AudioLines,
   Boxes,
   Cable,

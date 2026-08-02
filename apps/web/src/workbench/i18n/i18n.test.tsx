@@ -11,10 +11,10 @@ describe('Workbench i18n', () => {
   });
 
   it('interpolates parameters', () => {
-    expect(createI18n('zh-CN').t('shell.notifications.projectOpened', { name: 'Demo' })).toBe('已打开项目：Demo');
-    expect(createI18n('en').t('shell.notifications.projectViewStateReset', { name: 'Demo' }))
+    expect(createI18n('zh-CN').t('shell.activities.message.projectOpened', { project: 'Demo' })).toBe('已打开项目：Demo');
+    expect(createI18n('en').t('shell.activities.message.projectViewStateReset', { project: 'Demo' }))
       .toBe('Saved view state for Demo was invalid and has been reset.');
-    expect(createI18n('zh-CN').t('shell.notifications.projectViewStateReset', { name: 'Demo' }))
+    expect(createI18n('zh-CN').t('shell.activities.message.projectViewStateReset', { project: 'Demo' }))
       .toBe('Demo 的已保存视图状态无效，已重置。');
   });
 
@@ -39,8 +39,8 @@ describe('Workbench i18n', () => {
   });
 
   it('throws for missing interpolation parameters', () => {
-    expect(() => createI18n('en').t('shell.notifications.projectOpened')).toThrow(
-      '[debrute:i18n] Missing parameter "name" for shell.notifications.projectOpened.'
+    expect(() => createI18n('en').t('shell.activities.message.projectOpened')).toThrow(
+      '[debrute:i18n] Missing parameter "project" for shell.activities.message.projectOpened.'
     );
   });
 

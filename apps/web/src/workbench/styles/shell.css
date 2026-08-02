@@ -133,7 +133,7 @@
 .workbench-canvas-dialog-layer {
   position: fixed;
   inset: var(--db-titlebar-height) 0 0;
-  z-index: calc(var(--db-z-overlays) + 1);
+  z-index: var(--db-z-blocking);
   display: grid;
   place-items: center;
   padding: var(--db-space-5);
@@ -150,20 +150,248 @@
   color: var(--db-text-muted);
 }
 
-.db-notification-stack {
+.db-activity-surfaces {
   position: fixed;
-  right: 14px;
-  bottom: 18px;
-  z-index: var(--db-z-toasts);
-  width: 280px;
-  display: grid;
-  gap: var(--db-space-2);
+  inset: 0;
+  z-index: var(--db-z-activities);
   pointer-events: none;
 }
 
-.db-notification-row {
-  padding: var(--db-space-4);
+.db-activity-floating-stack,
+.db-activity-center {
+  position: fixed;
+  top: var(--db-activity-anchor-top);
+  right: var(--db-activity-anchor-right);
+  width: min(380px, calc(100vw - 16px));
+  pointer-events: auto;
+}
+
+.db-activity-floating-stack {
+  display: grid;
+  gap: var(--db-space-3);
+}
+
+.db-activity-card.db-card {
+  gap: var(--db-space-3);
+  padding: 12px 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--db-radius-activity);
+  background: var(--db-surface-1);
+  box-shadow: var(--db-shadow-floating);
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.db-activity-card__heading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--db-space-3);
+}
+
+.db-activity-card__metadata,
+.db-activity-card__message,
+.db-activity-center__empty,
+.db-activity-center__header h2,
+.db-activity-group h3 {
+  margin: 0;
+}
+
+.db-activity-card__metadata {
+  min-width: 0;
+  color: var(--db-text-muted);
+  font-size: var(--db-font-xs);
+  line-height: 1.35;
+}
+
+.db-activity-card__status {
+  color: var(--db-text);
+  font-weight: 700;
+}
+
+.db-activity-card--running .db-activity-card__status,
+.db-activity-card--cancelling .db-activity-card__status {
+  color: var(--db-info);
+}
+
+.db-activity-card--failed .db-activity-card__status {
+  color: var(--db-danger);
+}
+
+.db-activity-card--succeeded .db-activity-card__status {
+  color: var(--db-info);
+}
+
+.db-activity-card__trailing {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--db-space-1);
+}
+
+.db-activity-card__trailing time {
+  color: var(--db-text-subtle);
+  font-size: var(--db-font-xs);
+  white-space: nowrap;
+}
+
+.db-activity-card__dismiss {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: -4px -6px -4px 0;
+  color: var(--db-text-muted);
+}
+
+.db-activity-card__message {
+  overflow-wrap: anywhere;
+  color: var(--db-text);
   font-size: var(--db-font-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.db-activity-card__progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--db-space-3);
+}
+
+.db-activity-card__progress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--db-radius-full);
+  background: color-mix(in srgb, var(--db-info) 22%, transparent);
+}
+
+.db-activity-card__progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--db-info);
+}
+
+.db-activity-card__progress--determinate span {
+  width: var(--db-activity-progress);
+}
+
+.db-activity-card__progress--indeterminate span {
+  width: 42%;
+  animation: db-activity-progress 1.35s ease-in-out infinite;
+}
+
+.db-activity-card__progress-value {
+  color: var(--db-text-muted);
+  font-size: var(--db-font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.db-activity-center {
+  max-height: min(560px, calc(100vh - var(--db-activity-anchor-top) - 8px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--db-radius-activity);
+  background: var(--db-surface-1);
+  box-shadow: var(--db-shadow-menu);
+}
+
+.db-activity-center__header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--db-space-4);
+  padding: 7px 8px 7px 14px;
+  background: var(--db-surface-2);
+}
+
+.db-activity-center__header h2 {
+  color: var(--db-text);
+  font-size: var(--db-font-md);
+  font-weight: 650;
+}
+
+.db-activity-center__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--db-space-2);
+}
+
+.db-activity-center__clear {
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--db-info);
+  font: inherit;
+  font-size: var(--db-font-xs);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.db-activity-center__clear:hover:not(:disabled),
+.db-activity-center__clear:focus-visible {
+  color: var(--db-text);
+}
+
+.db-activity-center__clear:disabled {
+  color: var(--db-text-subtle);
+  cursor: default;
+}
+
+.db-activity-center__body {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: var(--db-space-5);
+  padding: var(--db-space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.db-activity-center__empty {
+  padding: 28px 12px;
+  color: var(--db-text-muted);
+  font-size: var(--db-font-sm);
+  text-align: center;
+}
+
+.db-activity-group {
+  display: grid;
+  gap: var(--db-space-2);
+}
+
+.db-activity-group h3 {
+  padding: 0 2px;
+  color: var(--db-text-muted);
+  font-size: var(--db-font-xs);
+  font-weight: 650;
+}
+
+.db-activity-group__cards {
+  display: grid;
+  gap: var(--db-space-3);
+}
+
+@keyframes db-activity-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .db-activity-card__progress--indeterminate span {
+    width: 100%;
+    animation: none;
+  }
 }
 
 .floating-dock {
@@ -373,6 +601,16 @@
 .boot-screen--with-titlebar {
   box-sizing: border-box;
   padding-block-start: var(--db-titlebar-height);
+}
+
+.boot-screen--blocking {
+  position: fixed;
+  inset: 0;
+  z-index: var(--db-z-blocking);
+  box-sizing: border-box;
+  height: auto;
+  background: var(--db-canvas-field);
+  background-size: var(--db-canvas-grid-size);
 }
 
 .empty-editor {

@@ -8,26 +8,19 @@ import { I18nProvider } from '../i18n/index.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import {
   useWorkbenchSettingsController,
-  type WorkbenchSettingsController,
-  type WorkbenchSettingsControllerInput
+  type WorkbenchSettingsController
 } from './useWorkbenchSettingsController.js';
 
 export function WorkbenchSettingsFeatureHost({
   api,
-  notify,
-  getCurrentI18n,
   onController
 }: {
   api: HttpWorkbenchApiClient;
-  notify(message: string): void;
-  getCurrentI18n: WorkbenchSettingsControllerInput['getCurrentI18n'];
   onController(controller: WorkbenchSettingsController): void;
 }): null {
   const controller = useWorkbenchSettingsController({
     api,
-    globalProjection: api.globalProjection,
-    notify,
-    getCurrentI18n
+    globalProjection: api.globalProjection
   });
   useLayoutEffect(() => {
     onController(controller);

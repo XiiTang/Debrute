@@ -11,6 +11,7 @@ import type {
   AcceptedProjectPathCommandScope,
   ProjectPathCommandIntake
 } from './projectPathCommandIntake.js';
+import { scopeWorkbenchActivityNoticeReporter } from './WorkbenchActivities.js';
 
 type ProjectPathCommandMenuContext = Omit<
   Parameters<typeof buildWorkbenchContextMenuItems>[0],
@@ -65,21 +66,13 @@ export function createProjectPathCommandRouter(input: {
         input.commandContext.closeContextMenu();
         return;
       }
+      const activities = scopeWorkbenchActivityNoticeReporter(
+        input.commandContext.activities,
+        () => scope.isCurrent()
+      );
       runProjectPathCommand({
         ...input.commandContext,
-        notify: (message) => {
-          if (scope.isCurrent()) {
-            input.commandContext.notify(message);
-          }
-        },
-        startNotification: (message) => {
-          const update = input.commandContext.startNotification(message);
-          return (nextMessage) => {
-            if (scope.isCurrent()) {
-              update(nextMessage);
-            }
-          };
-        },
+        activities,
         getProjectSnapshot: () => scope.isCurrent()
           ? input.commandContext.getProjectSnapshot()
           : undefined,

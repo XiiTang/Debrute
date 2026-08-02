@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronRight, Maximize2, Minus, Square, X } from '../ui/index.js';
+import { Bell, ChevronRight, Maximize2, Minus, Square, X } from '../ui/index.js';
 import type { WorkbenchMenuId, WorkbenchMenuItem, WorkbenchTitleBarState } from './workbenchTitleBarState';
 import { IconButton, Menu } from '../ui/index.js';
 import {
@@ -18,9 +18,13 @@ export interface WorkbenchTitleBarProps {
   state: WorkbenchTitleBarState;
   nativeWindowState: { maximized: boolean } | undefined;
   updateVersion?: string;
+  activityCenterOpen: boolean;
+  activityBellRef: React.Ref<HTMLButtonElement>;
   onCommand(item: WorkbenchMenuCommandItem, owner?: WorkbenchBehaviorOwner): void;
   onCaptureBehaviorOwner?(): WorkbenchBehaviorOwner;
   onInstallProductUpdate?(): void;
+  onToggleActivityCenter(): void;
+  onCloseActivityCenter(): void;
   onWindowCommand(command: 'minimize' | 'toggle-maximize' | 'close'): void;
 }
 
@@ -28,9 +32,13 @@ export function WorkbenchTitleBar({
   state,
   nativeWindowState,
   updateVersion,
+  activityCenterOpen,
+  activityBellRef,
   onCommand,
   onCaptureBehaviorOwner,
   onInstallProductUpdate,
+  onToggleActivityCenter,
+  onCloseActivityCenter,
   onWindowCommand
 }: WorkbenchTitleBarProps): React.ReactElement {
   const i18n = useI18n();
@@ -47,7 +55,8 @@ export function WorkbenchTitleBar({
       return;
     }
     const closeOnPointerDown = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) {
         return;
       }
       capturedBehaviorOwnerRef.current = undefined;
@@ -85,12 +94,13 @@ export function WorkbenchTitleBar({
   };
 
   return (
-    <header
-      ref={rootRef}
-      className={titleBarClassName(state)}
-      data-testid="workbench-titlebar"
-      onKeyDown={handleTitleBarKeyDown}
-    >
+    <>
+      <header
+        ref={rootRef}
+        className={titleBarClassName(state)}
+        data-testid="workbench-titlebar"
+        onKeyDown={handleTitleBarKeyDown}
+      >
       <div className="workbench-titlebar__drag-region" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
       <div className="workbench-titlebar__left">
         {state.presentation.showWebMenus ? (
@@ -114,6 +124,7 @@ export function WorkbenchTitleBar({
                   }
                 }}
                 onClick={(event) => {
+                  onCloseActivityCenter();
                   if (event.detail === 0 && !openMenu) {
                     capturedBehaviorOwnerRef.current = onCaptureBehaviorOwner?.();
                   }
@@ -152,6 +163,27 @@ export function WorkbenchTitleBar({
             {i18n.t('shell.titleBar.installUpdate', { version: updateVersion })}
           </button>
         ) : null}
+        <div
+          className="workbench-titlebar__activity-trigger"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <IconButton
+            ref={activityBellRef}
+            data-workbench-activity-bell
+            variant="titlebar"
+            size="sm"
+            label={i18n.t('shell.titleBar.activity')}
+            icon={<Bell />}
+            pressed={activityCenterOpen}
+            aria-haspopup="dialog"
+            aria-expanded={activityCenterOpen}
+            aria-controls="workbench-activity-center"
+            onClick={() => {
+              closeCurrentMenu(false);
+              onToggleActivityCenter();
+            }}
+          />
+        </div>
         {state.presentation.showWindowControls ? (
           <div className="workbench-titlebar__window-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <IconButton variant="titlebar" size="window" label={i18n.t('shell.titleBar.minimizeWindow')} icon={<Minus />} onClick={() => onWindowCommand('minimize')} />
@@ -167,8 +199,13 @@ export function WorkbenchTitleBar({
           </div>
         ) : null}
       </div>
+      </header>
       {currentMenu ? (
-        <div className="workbench-titlebar__menu-popover" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <div
+          className="workbench-titlebar__menu-popover"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onKeyDown={handleTitleBarKeyDown}
+        >
           <Menu
             id={`workbench-titlebar-menu-${currentMenu.id}`}
             ref={menuRef}
@@ -194,7 +231,7 @@ export function WorkbenchTitleBar({
           </Menu>
         </div>
       ) : null}
-    </header>
+    </>
   );
 }
 

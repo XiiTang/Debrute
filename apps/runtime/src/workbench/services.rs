@@ -20,6 +20,10 @@ use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
+    activity::{
+        ActivityEvent, ActivityMessage, ActivityProgress, ActivityProjectContext, ActivityService,
+        ActivityTaskStatus, IntegrationActivityOperation, ModelRequestKind,
+    },
     cli::{CliResult, CliStreamEvent},
     control::{DesktopOpenResult, RuntimeControlState, WorkbenchRoute},
     executable_path::resolve_executable,
@@ -29,7 +33,10 @@ use crate::{
         ModelCatalog,
     },
     integrations::{IntegrationOperation, Platform},
-    model_operation::ModelOperationService,
+    model_operation::{
+        ModelKind, ModelOperationExecution, ModelOperationService, ModelOperationSnapshot,
+        OperationState,
+    },
     photoshop::PhotoshopIntegration,
     project::{
         CanvasFeedbackArtifacts, GeneratedAssetMetadataService, MediaToolPaths,
@@ -161,6 +168,8 @@ pub struct WorkbenchRuntimeServices {
     connections: Arc<WorkbenchConnectionRegistry>,
     connection_closer: WorkbenchConnectionCloser,
     global_events: broadcast::Sender<GlobalRuntimeEvent>,
+    activity: Arc<ActivityService>,
+    activity_events: broadcast::Sender<ActivityEvent>,
     working_copies: WorkingCopyStore,
 }
 
@@ -281,6 +290,28 @@ impl WorkbenchRuntimeServices {
             Arc::clone(&generated_assets),
         ));
         let model_operations = Arc::new(ModelOperationService::new(Arc::clone(&generation)));
+        let activity = Arc::new(ActivityService::new());
+        let (activity_events, _) = broadcast::channel(GLOBAL_EVENT_CAPACITY);
+        let activity_event_sender = activity_events.clone();
+        if !activity.install_observer(Arc::new(move |event| {
+            let _ = activity_event_sender.send(event);
+        })) {
+            return Err(RuntimeHttpServiceError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "activity_observer_unavailable",
+                "Runtime Activity observer is already installed.",
+            ));
+        }
+        let model_activity = Arc::clone(&activity);
+        if !model_operations.install_observer(Arc::new(move |snapshot| {
+            publish_model_operation_activity(&model_activity, &snapshot);
+        })) {
+            return Err(RuntimeHttpServiceError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "model_operation_observer_unavailable",
+                "Model Operation observer is already installed.",
+            ));
+        }
         let callback_global = Arc::clone(&global);
         let photoshop = Arc::new(PhotoshopIntegration::new(
             runtime_state.instance_id(),
@@ -343,6 +374,8 @@ impl WorkbenchRuntimeServices {
             connections,
             connection_closer,
             global_events,
+            activity,
+            activity_events,
             working_copies: WorkingCopyStore::new(&debrute_home),
         });
         let (recent_projects, theme_preference) = services
@@ -371,6 +404,11 @@ impl WorkbenchRuntimeServices {
     }
 
     #[must_use]
+    pub fn activity(&self) -> &Arc<ActivityService> {
+        &self.activity
+    }
+
+    #[must_use]
     pub fn models(&self) -> &Arc<ModelCatalog> {
         &self.models
     }
@@ -378,6 +416,21 @@ impl WorkbenchRuntimeServices {
     #[must_use]
     pub fn projects(&self) -> &ProjectSessionRegistry {
         &self.projects
+    }
+
+    pub fn project_activity_context(
+        &self,
+        project_id: &str,
+    ) -> Result<ActivityProjectContext, RuntimeHttpServiceError> {
+        let summary = self
+            .projects
+            .get(project_id)
+            .and_then(|session| session.summary())
+            .map_err(RuntimeHttpServiceError::from_project)?;
+        Ok(ActivityProjectContext {
+            project_id: summary.project_id,
+            project_name: summary.project_name,
+        })
     }
 
     #[must_use]
@@ -956,6 +1009,11 @@ impl WorkbenchRuntimeServices {
         self.global_events.subscribe()
     }
 
+    #[must_use]
+    pub fn subscribe_activity(&self) -> broadcast::Receiver<ActivityEvent> {
+        self.activity_events.subscribe()
+    }
+
     pub fn discover_project(&self, project_root: &str) -> Result<String, RuntimeHttpServiceError> {
         let opened = self
             .projects
@@ -971,10 +1029,19 @@ impl WorkbenchRuntimeServices {
         integration_id: &str,
         operation: &str,
     ) -> Result<Value, RuntimeHttpServiceError> {
-        let operation = match operation {
-            "install" => IntegrationOperation::Install,
-            "update" => IntegrationOperation::Update,
-            "uninstall" => IntegrationOperation::Uninstall,
+        let (operation, activity_operation) = match operation {
+            "install" => (
+                IntegrationOperation::Install,
+                IntegrationActivityOperation::Install,
+            ),
+            "update" => (
+                IntegrationOperation::Update,
+                IntegrationActivityOperation::Update,
+            ),
+            "uninstall" => (
+                IntegrationOperation::Uninstall,
+                IntegrationActivityOperation::Uninstall,
+            ),
             _ => {
                 return Err(RuntimeHttpServiceError::new(
                     StatusCode::BAD_REQUEST,
@@ -983,12 +1050,75 @@ impl WorkbenchRuntimeServices {
                 ));
             }
         };
-        serde_json::to_value(
-            self.global
-                .integrations_run_operation(integration_id, operation),
-        )
-        .map_err(|error| RuntimeHttpServiceError::serialization(&error))
+        let activity = self.activity.start_task(
+            None,
+            ActivityMessage::IntegrationOperation {
+                integration_id: integration_id.to_owned(),
+                operation: activity_operation,
+            },
+            ActivityProgress::Indeterminate,
+        );
+        let result = self
+            .global
+            .integrations_run_operation(integration_id, operation);
+        let status = if result.ok {
+            ActivityTaskStatus::Succeeded
+        } else {
+            ActivityTaskStatus::Failed
+        };
+        let _ = self
+            .activity
+            .update_task(&activity.id, status, ActivityProgress::Indeterminate);
+        serde_json::to_value(result).map_err(|error| RuntimeHttpServiceError::serialization(&error))
     }
+}
+
+fn publish_model_operation_activity(activity: &ActivityService, snapshot: &ModelOperationSnapshot) {
+    let status = match snapshot.state {
+        OperationState::Queued | OperationState::Running => ActivityTaskStatus::Running,
+        OperationState::Cancelling => ActivityTaskStatus::Cancelling,
+        OperationState::Succeeded => ActivityTaskStatus::Succeeded,
+        OperationState::Failed => ActivityTaskStatus::Failed,
+        OperationState::Cancelled => ActivityTaskStatus::Cancelled,
+    };
+    let (item_count, mut progress) = match &snapshot.execution {
+        ModelOperationExecution::Single { .. } => (1, ActivityProgress::Indeterminate),
+        ModelOperationExecution::Batch {
+            item_count,
+            succeeded,
+            failed,
+            ..
+        } => (
+            *item_count,
+            ActivityProgress::Determinate {
+                completed: succeeded + failed,
+                total: *item_count,
+            },
+        ),
+    };
+    let model_kind = match snapshot.model_kind {
+        ModelKind::Image => ModelRequestKind::Image,
+        ModelKind::Video => ModelRequestKind::Video,
+        ModelKind::Tts => ModelRequestKind::Tts,
+        ModelKind::Music => ModelRequestKind::Music,
+        ModelKind::SoundEffect => ModelRequestKind::SoundEffect,
+    };
+    if status == ActivityTaskStatus::Cancelling {
+        progress = ActivityProgress::Indeterminate;
+    }
+    let _ = activity.upsert_task(
+        format!("model-operation:{}", snapshot.id),
+        Some(ActivityProjectContext {
+            project_id: snapshot.project_id.clone(),
+            project_name: snapshot.project_name.clone(),
+        }),
+        ActivityMessage::ModelRequest {
+            model_kind,
+            item_count,
+        },
+        status,
+        progress,
+    );
 }
 
 impl Drop for WorkbenchRuntimeServices {
@@ -1240,7 +1370,14 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::json;
 
-    use super::RuntimeHttpServiceError;
+    use crate::{
+        activity::{ActivityPayload, ActivityProgress, ActivityService, ActivityTaskStatus},
+        model_operation::{
+            ModelKind, ModelOperationExecution, ModelOperationSnapshot, OperationState,
+        },
+    };
+
+    use super::{RuntimeHttpServiceError, publish_model_operation_activity};
 
     #[test]
     fn oversized_project_text_maps_to_typed_public_details() {
@@ -1261,5 +1398,67 @@ mod tests {
             error.details,
             Some(json!({ "actualBytes": 1_048_577, "maxBytes": 1_048_576 }))
         );
+    }
+
+    #[test]
+    fn model_operation_activity_uses_real_batch_progress_and_indeterminate_cancelling() {
+        let activity = ActivityService::new();
+        let snapshot = |state, succeeded, failed| ModelOperationSnapshot {
+            id: "operation-1".to_owned(),
+            model_kind: ModelKind::Video,
+            project_root: "/tmp/project".to_owned(),
+            project_id: "project-1".to_owned(),
+            project_name: "Project One".to_owned(),
+            state,
+            accepted_at: "2026-08-02T00:00:00Z".to_owned(),
+            execution: ModelOperationExecution::Batch {
+                item_count: 4,
+                concurrency: 2,
+                timeout_seconds: 60,
+                active: 1,
+                succeeded,
+                failed,
+            },
+            log: None,
+        };
+
+        publish_model_operation_activity(&activity, &snapshot(OperationState::Running, 1, 0));
+        let running = activity.sync_snapshot().records.remove(0);
+        assert!(matches!(
+            running.payload,
+            ActivityPayload::Task {
+                status: ActivityTaskStatus::Running,
+                progress: ActivityProgress::Determinate {
+                    completed: 1,
+                    total: 4
+                },
+                ..
+            }
+        ));
+
+        publish_model_operation_activity(&activity, &snapshot(OperationState::Cancelling, 2, 0));
+        let cancelling = activity.sync_snapshot().records.remove(0);
+        assert!(matches!(
+            cancelling.payload,
+            ActivityPayload::Task {
+                status: ActivityTaskStatus::Cancelling,
+                progress: ActivityProgress::Indeterminate,
+                ..
+            }
+        ));
+
+        publish_model_operation_activity(&activity, &snapshot(OperationState::Succeeded, 3, 1));
+        let succeeded = activity.sync_snapshot().records.remove(0);
+        assert!(matches!(
+            succeeded.payload,
+            ActivityPayload::Task {
+                status: ActivityTaskStatus::Succeeded,
+                progress: ActivityProgress::Determinate {
+                    completed: 4,
+                    total: 4
+                },
+                ..
+            }
+        ));
     }
 }

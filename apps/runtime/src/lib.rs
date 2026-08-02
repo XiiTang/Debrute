@@ -1,5 +1,6 @@
 //! Debrute's native Runtime process and its narrow native Control Channel.
 
+pub mod activity;
 pub mod cli;
 pub mod control;
 mod executable_path;

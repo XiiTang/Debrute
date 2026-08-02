@@ -1270,6 +1270,8 @@ mod operation_record_tests {
             id: "operation-1".to_owned(),
             model_kind: ModelKind::Image,
             project_root: "/project".to_owned(),
+            project_id: "project-1".to_owned(),
+            project_name: "Project One".to_owned(),
             state,
             accepted_at: "2026-07-20T00:00:00Z".to_owned(),
             execution,

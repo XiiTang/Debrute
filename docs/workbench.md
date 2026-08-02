@@ -228,7 +228,9 @@ instead of being decoded or normalized into another id.
 ## Shell, Layers, And Floating Windows
 
 The shell is Canvas-first. The layer token order is Canvas, floating bars,
-floating panels, title bar, notifications, overlays, and title-bar menus.
+floating panels, title bar, Activity, overlays, title-bar menus, and the
+blocking surface. The blocking surface is the one highest layer and freezes all
+interaction beneath it without mutating the Runtime Activity ledger.
 Ordinary panel stacking inside the panel layer is controlled by
 `workbenchWindowOrder.ts`; floating text editors participate in the same
 back-to-front ordering.
@@ -247,7 +249,7 @@ over this background, centered below the title-bar hit area. The initial failure
 remains visible below the corresponding Project action until another attempt
 begins. During a browser bound A-to-B open, A's last accepted presentation
 remains visible with an opening state and no new Project Path Command admission;
-failed preparation restores A and reports a non-blocking notification. Selector
+failed preparation restores A and reports a non-blocking Activity. Selector
 cancel, a repeated open ignored while another attempt is active, and a
 superseded attempt report no error.
 The shared appearance does not create a Canvas domain object or admit Canvas
@@ -255,13 +257,14 @@ interaction before a real Canvas projection exists. The Not Found page is not a
 Workbench shell and keeps its independent error presentation.
 
 When a bound Project is preempted or its Runtime connection ends, the last
-accepted Canvas remains visible. A solid, non-dismissible dialog sits on a
-transparent blocking layer below the title bar. The Canvas, floating bars, and
-panels are inert, Canvas-owned global input is disabled, and transient Canvas
-menus are closed while the dialog is present; the title bar remains available
-for opening another Project or closing the window. If detached **Open Here**
-fails, the Workbench remains detached and presents the failure beside that
-dialog action.
+accepted Canvas remains visible. A solid, non-dismissible dialog sits on the
+transparent highest blocking layer. The Canvas, floating bars, panels, title
+bar, Activity surfaces, and their global input are frozen beneath it; transient
+Canvas menus are closed. The blocker does not dismiss Activity records. New
+Activity events still enter the Runtime ledger but do not float beneath the
+blocker and are never replayed after it leaves. If detached **Open Here** fails,
+the Workbench remains detached and
+presents the failure beside that dialog action.
 
 The floating dock controls exactly four panel kinds: Explorer, Inspector,
 Settings, and Terminal. `WorkbenchFloatingPanelShell` is their single frame. It
@@ -317,6 +320,67 @@ presentation flags. Workbench does not store a second mutable title-bar model,
 keep refs that duplicate those inputs, or rebuild it through a separate refresh
 path. A recent-Projects event updates its one projection and normal rendering
 derives the corresponding menu immediately.
+
+The right side orders an available Product Update action, the always-present
+Activity bell, and native window controls. The bell has no dot, count, unread
+state, or task spinner. Its Activity Center and application menus are mutually
+exclusive: opening either closes the other.
+
+### Activity
+
+Runtime owns one independent in-memory Activity stream with its own revision,
+snapshot, and ordered events. Records live for exactly the current Runtime
+instance, have no persistence or capacity limit, and are never partitioned by
+Workbench or Project binding. Every Workbench therefore projects the same
+records and global clear operations; only whether its Activity Center is open
+is local to that Workbench.
+
+Activity has two record forms. A `notice` is terminal when created. A `task`
+uses only `running`, `cancelling`, `succeeded`, `failed`, or `cancelled` and is
+updated in place from start to terminal result. Runtime's internal Model
+Operation `queued` handoff is presented as running rather than creating a
+user-visible queue state. Structured closed message kinds and typed arguments
+identify the fixed sources Project, Canvas, Explorer, Model Request, Photoshop,
+Workbench, Update, and Integration. Runtime is the authority but is not a
+displayed source. Project-scoped records capture stable Project id plus a name
+snapshot and never capture an originating Workbench. Arbitrary frontend text,
+raw errors, logs, HTTP bodies, commands, and stdout/stderr cannot enter the
+stream; Workbench localizes each structured record using its current locale, so
+existing records retranslate when the locale changes.
+
+Every Activity Card uses one layout in both presentations. Its header shows
+`<status> · <source> · <project>` where Project is applicable, with relative
+time and a terminal clear action on the right; the full wrapping message is
+below. An active task has no clear action. It shows `completed / total` and a
+determinate bar only when Runtime owns real totals, otherwise an indeterminate
+bar. Cancelling is indeterminate. Notices and terminal tasks show no progress.
+
+- The Floating Stack is anchored below the bell at the upper right and holds at
+  most three cards. A newly created notice or task floats in every currently
+  connected Workbench for one fixed eight-second interval. Ordinary task
+  progress updates do not re-float it; the active-to-terminal transition
+  re-floats that same record for a fresh eight seconds. Opening the Center,
+  pressing Escape, or expiry removes only floating presentation. A Workbench
+  joining later receives history in its Center but never replays old floats.
+- The Activity Center is a bounded-height, scrollable view over the complete
+  Runtime ledger. Active tasks appear first ordered by start time; terminal
+  notices and tasks follow by their creation or terminal time. Progress updates
+  do not reorder an active card. Its fixed header owns **Clear All** and close.
+  **Clear All** globally removes terminal Activity records only and stays
+  disabled while only active tasks remain. A terminal card's close action
+  globally removes that one record. Neither operation cancels work or removes
+  Model Operation history, generated files, logs, Project state, or another
+  owning feature's result.
+
+There is no severity, read/unread state, red dot, deduplication, separate Toast
+model, operating-system notification, or Project-change reset. Starting a
+Model Operation from either CLI or Workbench creates a Model Request task;
+Debrute-to-Photoshop transfer and Integration install/update/uninstall create
+their own tasks. Project, Canvas, Explorer, Workbench, and Update failures use
+terminal notices. Product Update itself is not an Activity task because a
+successful update replaces the owning Runtime.
+
+### Platform And Menu Ownership
 
 The Workbench build contains one closed `darwin` or `win32` platform constant
 selected by the native Product build. Web-owned shell code defines and
@@ -471,8 +535,9 @@ is at most 256 MiB, the shared Explorer/Canvas context menu adds **Send to
 Photoshop**. A bounded keyboard-accessible submenu lists every live Photoshop
 Document, including equal titles, and each row owns the exact plugin-session
 and Document identity. Selection closes the menu and sends immediately; there
-is no dialog, remembered target, or Photoshop Settings page. One notification
-is updated in place from sending to its terminal result.
+is no dialog, remembered target, or Photoshop Settings page. Runtime creates
+one Photoshop Activity task and updates that same record in place from sending
+to its terminal result.
 
 Browser target selection and detached Desktop **Open Here** enter the Project
 binding lifecycle. While the selector is open, the current binding remains
@@ -496,9 +561,12 @@ retarget, retry, roll back, or imply cancellation of that command. Accepting the
 new binding may abort a remaining Web-side wait, but transport abort is not
 Runtime cancellation. Project-local Explorer, selection, inline-edit, and Canvas
 presentation state lives beneath the generation-keyed subtree and retires with
-the old generation. Only a completion that can escape into shared clipboard,
-Canvas navigation, or global-notification state performs a narrow current-scope
-check through its accepted command scope. This Web capability is in-memory,
+the old generation. A completion that can escape into shared clipboard or
+Canvas navigation performs a narrow current-scope check through its accepted
+command scope. Activity records remain Runtime-global across binding
+replacement; a stale Web callback cannot publish a new Project notice after its
+captured generation retires, while Runtime-owned task completion updates the
+already-authoritative record. This Web capability is in-memory,
 unforgeable by ordinary callers, and contains only Project identity and binding
 generation checks; it is not a queue, Runtime lease, cancellation token, retry,
 or rollback mechanism. The Project binding lifecycle owns admission state and

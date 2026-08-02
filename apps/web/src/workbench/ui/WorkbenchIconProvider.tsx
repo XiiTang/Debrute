@@ -6,6 +6,7 @@ export type { CutoutIcon, CutoutIconProps } from './icons.js';
 export const {
   AlertCircle,
   AlertTriangle,
+  Bell,
   AudioLines,
   Boxes,
   Cable,

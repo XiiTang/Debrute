@@ -61,6 +61,7 @@ Workbench listener, and one bounded-pool Photoshop gateway.
 - [Photoshop Transfers Use Explicit Live Targets](./0063-photoshop-transfers-use-explicit-live-targets.md)
 - [Photoshop Connections Use Ephemeral Runtime Sessions](./0064-photoshop-connections-use-ephemeral-runtime-sessions.md)
 - [Photoshop Gateway Uses A Bounded Loopback Port Pool](./0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md)
+- [Runtime Owns One Global Activity Stream](./0066-runtime-owns-one-global-activity-stream.md)
 - [Unexpected Runtime Panics Fail The Process](./0056-unexpected-runtime-panics-fail-the-process.md)
 - [Model API Key Reveal Is Explicit And Transient](./0057-model-api-key-reveal-is-explicit-and-transient.md)
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  ExplorerActivityOperation,
   ProjectPathEntry,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectSessionSnapshot
@@ -10,6 +11,7 @@ import type { WorkbenchI18n } from '../i18n';
 import type { ProjectPathCommandEffects } from '../services/projectPathCommandEffects.js';
 import type { AcceptedProjectPathCommandScope } from '../services/projectPathCommandIntake.js';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
+import type { WorkbenchActivityNoticeReporter } from '../services/WorkbenchActivities.js';
 import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './projectTreeEditing';
 import { createProjectTreeExternalDropPlan } from './projectTreeExternalDrop';
 import {
@@ -25,7 +27,6 @@ import {
   clearClipboardAfterPaste,
   externalDropPlanHasConflict,
   nearestExistingParentSelection,
-  notificationMessageForFileCommandError,
   projectTreeSelectionFromPaths,
   reconcileCutClipboardWithProjectEntries,
   singleFileBatchResultPath
@@ -80,7 +81,7 @@ export interface ProjectExplorerControllerInput {
   getSnapshot(): WorkbenchProjectSessionSnapshot | undefined;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
   centerProjectFileInCanvas(projectRelativePath: string): void;
-  notify(message: string): void;
+  activities: WorkbenchActivityNoticeReporter;
   i18n: WorkbenchI18n;
 }
 
@@ -94,6 +95,9 @@ export function useProjectExplorerController(
   const editIntentTokenRef = useRef(0);
   const pendingCreateParentLoadRef = useRef<PendingCreateParentLoad | undefined>(undefined);
   const acceptedSnapshot = input.getSnapshot();
+  const reportExplorerFailure = useCallback((operation: ExplorerActivityOperation) => {
+    input.activities.report({ kind: 'explorer-operation-failed', operation });
+  }, [input.activities]);
 
   useEffect(() => {
     if (!acceptedSnapshot) {
@@ -131,14 +135,11 @@ export function useProjectExplorerController(
       }
     } catch (error) {
       if (scope.isCurrent()) {
-        input.notify(notificationMessageForFileCommandError(
-          input.i18n.t('shell.notifications.loadProjectDirectoryFailed'),
-          error
-        ));
+        reportExplorerFailure('load-directory');
       }
       throw error;
     }
-  }, [commandEffects, input.i18n, input.notify]);
+  }, [commandEffects, reportExplorerFailure]);
 
   const loadDirectory = useCallback((
     scope: AcceptedProjectPathCommandScope,
@@ -354,21 +355,21 @@ export function useProjectExplorerController(
           ? clearClipboardAfterPaste(current)
           : current);
       }
-    }).catch((error) => {
+    }).catch(() => {
       if (scope.isCurrent()) {
-        input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.pasteFailed'), error));
+        reportExplorerFailure('paste');
       }
     });
-  }, [copyPaths, input.i18n, input.notify, movePaths]);
+  }, [copyPaths, movePaths, reportExplorerFailure]);
 
   const revealEntry = useCallback((scope: AcceptedProjectPathCommandScope, entry: ProjectPathEntry) => {
     const request = commandEffects.revealProjectPathInSystemFileManager(scope, entry);
-    void request?.catch((error) => {
+    void request?.catch(() => {
       if (scope.isCurrent()) {
-        input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.revealFailed'), error));
+        reportExplorerFailure('reveal');
       }
     });
-  }, [commandEffects, input.i18n, input.notify]);
+  }, [commandEffects, reportExplorerFailure]);
 
   const applyDeletedEntries = useCallback((
     entries: ProjectPathEntry[],
@@ -418,12 +419,12 @@ export function useProjectExplorerController(
         return;
       }
       applyDeletedEntries(entries, acceptedSnapshot);
-    }).catch((error) => {
+    }).catch(() => {
       if (scope.isCurrent()) {
-        input.notify(notificationMessageForFileCommandError(input.i18n.t('shell.notifications.deleteFailed'), error));
+        reportExplorerFailure('delete');
       }
     });
-  }, [applyDeletedEntries, commandEffects, input.getSnapshot, input.i18n, input.notify]);
+  }, [applyDeletedEntries, commandEffects, input.getSnapshot, reportExplorerFailure]);
 
   const trashEntries = useCallback((scope: AcceptedProjectPathCommandScope, entries: ProjectPathEntry[]) => {
     deleteEntries(scope, entries, false);
@@ -442,9 +443,9 @@ export function useProjectExplorerController(
       void copyPaths({
         entries: dropInput.entries,
         targetDirectoryProjectRelativePath: dropInput.targetDirectoryProjectRelativePath
-      }, scope).catch((error) => {
+      }, scope).catch(() => {
         if (scope.isCurrent()) {
-          input.notify(input.i18n.t('shell.notifications.copyFailed', { message: errorMessage(error) }));
+          reportExplorerFailure('copy');
         }
       });
       return;
@@ -467,12 +468,12 @@ export function useProjectExplorerController(
       entries: dropInput.entries,
       targetDirectoryProjectRelativePath: dropInput.targetDirectoryProjectRelativePath,
       ...(overwrite ? { overwrite: true } : {})
-    }, scope).catch((error) => {
+    }, scope).catch(() => {
       if (scope.isCurrent()) {
-        input.notify(input.i18n.t('shell.notifications.moveFailed', { message: errorMessage(error) }));
+        reportExplorerFailure('move');
       }
     });
-  }, [copyPaths, input.getSnapshot, input.i18n, input.notify, movePaths]);
+  }, [copyPaths, input.getSnapshot, input.i18n, movePaths, reportExplorerFailure]);
 
   const handleExternalDrop = useCallback((scope: AcceptedProjectPathCommandScope, dropInput: {
     dataTransfer: DataTransfer;
@@ -517,12 +518,12 @@ export function useProjectExplorerController(
       }
       const result = await request;
       applyBatchResult(result, scope);
-    }).catch((error) => {
+    }).catch(() => {
       if (scope.isCurrent()) {
-        input.notify(input.i18n.t('shell.notifications.importFailed', { message: errorMessage(error) }));
+        reportExplorerFailure('import');
       }
     });
-  }, [applyBatchResult, commandEffects, input.getSnapshot, input.i18n, input.notify]);
+  }, [applyBatchResult, commandEffects, input.getSnapshot, input.i18n, reportExplorerFailure]);
 
   return useMemo(() => ({
     selection,

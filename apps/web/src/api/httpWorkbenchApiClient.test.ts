@@ -140,6 +140,49 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('projects Runtime Activity events and routes structured reports by scope', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    await client.openProject({ projectRoot: '/tmp/project' });
+
+    harness.emit({
+      type: 'activity.upsert',
+      activityRevision: 1,
+      record: {
+        id: 'activity-1',
+        source: 'canvas',
+        project: { projectId: 'project-1', projectName: 'project-1' },
+        createdAt: '2026-08-02T00:00:00.000Z',
+        updatedAt: '2026-08-02T00:00:00.000Z',
+        type: 'notice',
+        message: { kind: 'canvas-operation-failed', operation: 'save-layout' }
+      }
+    });
+    await vi.waitFor(() => expect(client.activities.getSnapshot().records).toHaveLength(1));
+    expect(client.activities.getSnapshot().floatingRecordIds).toEqual(['activity-1']);
+
+    await client.reportActivityNotice({
+      kind: 'canvas-operation-failed',
+      operation: 'save-layout'
+    });
+    await client.reportActivityNotice({ kind: 'update-install-failed' });
+    await client.dismissActivity('activity-1');
+    await client.clearTerminalActivities();
+
+    const activityCalls = harness.calls.slice(-4);
+    expect(activityCalls.map((call) => [call.init?.method, call.path])).toEqual([
+      ['POST', '/api/projects/project-1/activities/notices'],
+      ['POST', '/api/activities/notices'],
+      ['DELETE', '/api/activities/activity-1'],
+      ['DELETE', '/api/activities']
+    ]);
+    expect(JSON.parse(String(activityCalls[0]?.init?.body))).toEqual({
+      kind: 'canvas-operation-failed',
+      operation: 'save-layout'
+    });
+    client.dispose();
+  });
+
   it('replaces a bound Project directly without prepare, commit, or unload requests', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
@@ -402,6 +445,11 @@ function createHarness(globalRevision = 1) {
             state: { sessions: [] }
           }));
           controller.enqueue(sse(encoder, { type: 'product.changed', revision: 1, product: null }));
+          controller.enqueue(sse(encoder, {
+            type: 'activity.snapshot',
+            activityRevision: 0,
+            records: []
+          }));
         }
       });
       return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
@@ -450,6 +498,15 @@ function createHarness(globalRevision = 1) {
     }
     if (path === '/api/runtime/product/update/check') {
       return Response.json({ ok: true });
+    }
+    if (path.endsWith('/activities/notices')) {
+      return Response.json({ activityId: 'reported-activity' });
+    }
+    if (path === '/api/activities/activity-1') {
+      return Response.json({ ok: true });
+    }
+    if (path === '/api/activities') {
+      return Response.json({ ok: true, cleared: 1 });
     }
     if (path === '/api/projects/project-1/canvases') {
       return Response.json({

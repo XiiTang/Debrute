@@ -13,6 +13,15 @@ without creating child Operations. An Artifact Pointer identifies a
 Project-relative committed output and may carry display metadata; it does not
 contain file bytes or an absolute path.
 
+Each accepted Model Operation is also projected into the Runtime-global
+Activity stream and updated in place through its terminal state. The Activity
+Card source label is **Model Request** for user-facing brevity; this presentation
+label does not rename the authoritative Model Operation or turn an individual
+Batch Item into an Operation. Single progress is indeterminate. Batch progress
+uses the real settled Item count over total Item count. Cancelling is
+indeterminate, and the internal `queued` handoff is presented as running rather
+than exposing a queue state that Runtime does not otherwise provide.
+
 Before acceptance, Runtime reads one Global configuration snapshot and creates
 one immutable Accepted Model Binding for each unique Model ID in the Operation.
 Repeated requests for the same Model share that binding. Every binding and
