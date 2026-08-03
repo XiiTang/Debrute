@@ -9,10 +9,7 @@ import type {
   CanvasTextPreviewCaptureTarget
 } from './CanvasTextPreviewCapture.js';
 import type { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure.js';
-import type {
-  CanvasPreviewResourceRequest,
-  CanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler.js';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
 import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
 import {
   CanvasTextPreviewProvider,
@@ -125,242 +122,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(readProjectTextFile).not.toHaveBeenCalled();
     expect(fontEnvironmentMock.prepareCoverage).not.toHaveBeenCalled();
     expect(laneMock.props?.target).toBeUndefined();
-  });
-
-  it('does not present a cached source resolved from different rendered geometry', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('stretched.md', 0, 0);
-    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
-
-    await renderProvider({
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: renderedNode
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await flushWork();
-
-    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
-      'data-preview-presented'
-    )).toBe('false');
-  });
-
-  it('does not present a retained edit-mode source after rendered geometry changes', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('retained-resize.md', 0, 0);
-    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
-    const input = {
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-    };
-
-    await renderProvider({
-      ...input,
-      nodes: [stableNode],
-      consumerNode: stableNode,
-      pendingReport: { kind: 'ready', node: stableNode }
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await waitFor(() => harness.publicationQueue.length === 1);
-    await act(async () => harness.publicationQueue.shift()!.run());
-    await flushWork();
-
-    await renderProvider({
-      ...input,
-      nodes: [renderedNode],
-      consumerNode: renderedNode,
-      activeInlineTextPath: renderedNode.projectRelativePath
-    });
-    await flushWork();
-
-    expect(harness.readCanvasTextPreviewSources).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
-      'data-preview-presented'
-    )).toBe('false');
-  });
-
-  it('continues presenting a cached source when only rendered position changes', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('moved.md', 0, 0);
-    const renderedNode = { ...stableNode, x: 800, y: 1200 };
-
-    await renderProvider({
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: renderedNode
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await flushWork();
-
-    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
-      'data-preview-presented'
-    )).toBe('true');
-  });
-
-  it('invalidates a presented source as soon as the resolved style identity changes', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('restyled.md', 0, 0);
-    const input = {
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: stableNode,
-      pendingReport: { kind: 'ready' as const, node: stableNode },
-      styleDependencyKey: 'original'
-    };
-
-    await renderProvider(input);
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue.shift()!.run());
-    await waitFor(() => harness.publicationQueue.length === 1);
-    await act(async () => harness.publicationQueue.shift()!.run());
-    await flushWork();
-
-    const styleKeyResolution = deferred<string>();
-    styleKeyMock.key.mockImplementationOnce(() => styleKeyResolution.promise);
-    const fingerprintDigest = deferred<ArrayBuffer>();
-    const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(() => fingerprintDigest.promise);
-    try {
-      await renderProvider({
-        ...input,
-        styleDependencyKey: 'restyled'
-      });
-      await waitFor(() => styleKeyMock.key.mock.calls.length === 2);
-      expect(container.querySelector('[data-preview-presented]')?.getAttribute(
-        'data-preview-presented'
-      )).toBe('true');
-
-      await act(async () => {
-        styleKeyResolution.resolve('sha256:restyled');
-        await Promise.resolve();
-      });
-      await waitFor(() => digest.mock.calls.length === 1);
-
-      expect(container.querySelector('[data-preview-presented]')?.getAttribute(
-        'data-preview-presented'
-      )).toBe('false');
-    } finally {
-      await act(async () => {
-        styleKeyResolution.resolve('sha256:restyled');
-        fingerprintDigest.resolve(new Uint8Array(32).buffer);
-        await Promise.resolve();
-      });
-      digest.mockRestore();
-    }
-  });
-
-  it('does not present a variant error resolved from different rendered geometry', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('stretched-error.md', 0, 0);
-    const renderedNode = { ...stableNode, height: stableNode.height * 2 };
-
-    await renderProvider({
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: renderedNode,
-      pendingReport: { kind: 'failure', node: stableNode, sourceNode: stableNode }
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await waitFor(() => container.querySelector('[data-failure-node-error]')?.getAttribute(
-      'data-failure-node-error'
-    ) !== '');
-
-    expect(container.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('');
-  });
-
-  it('ignores a pending failure reported from different rendered geometry', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('stale-event.md', 0, 0);
-    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
-
-    await renderProvider({
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: stableNode,
-      pendingReport: { kind: 'failure', node: renderedNode, sourceNode: stableNode }
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await flushWork();
-    await flushWork();
-
-    expect(container.querySelector('[data-preview-presented]')?.getAttribute('data-preview-presented')).toBe('true');
-    expect(container.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('');
-  });
-
-  it('ignores pending readiness reported from different rendered geometry', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('stale-ready.md', 0, 0);
-    const renderedNode = { ...stableNode, height: stableNode.height * 2 };
-
-    await renderProvider({
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: stableNode,
-      pendingReport: { kind: 'ready', node: renderedNode, sourceNode: stableNode }
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await flushWork();
-    await flushWork();
-
-    expect(harness.publicationQueue).toEqual([]);
-  });
-
-  it('ignores a visible failure reported from different rendered geometry', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('stale-visible-error.md', 0, 0);
-    const renderedNode = { ...stableNode, width: stableNode.width * 2 };
-
-    await renderProvider({
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: stableNode,
-      pendingReport: { kind: 'ready', node: stableNode },
-      visibleReport: { kind: 'failure', node: renderedNode }
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await waitFor(() => harness.publicationQueue.length === 1);
-    await act(async () => harness.publicationQueue.shift()!.run());
-    await flushWork();
-    await flushWork();
-
-    expect(container.querySelector('[data-preview-presented]')?.getAttribute('data-preview-presented')).toBe('true');
-    expect(container.querySelector('[data-preview-error]')?.getAttribute('data-preview-error')).toBe('');
-  });
-
-  it('ignores visible commitment reported from different rendered geometry', async () => {
-    const harness = availablePreviewHarness();
-    const stableNode = textNode('stale-visible-commit.md', 0, 0);
-    const renderedNode = { ...stableNode, height: stableNode.height * 2 };
-
-    await renderProvider({
-      nodes: [stableNode],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: stableNode,
-      pendingReport: { kind: 'ready', node: stableNode },
-      visibleReport: { kind: 'committed', node: renderedNode }
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue[0]!.run());
-    await waitFor(() => harness.publicationQueue.length === 1);
-    await act(async () => harness.publicationQueue.shift()!.run());
-    await flushWork();
-    await flushWork();
-
-    expect(harness.publicationQueue).toEqual([]);
   });
 
   it('admits offscreen targets and uses viewport only to order canonical work', async () => {
@@ -498,69 +259,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     expect(laneMock.history).toEqual(['a.md', 'b.md']);
   });
 
-  it('publishes 200 cached presentations without scheduling no-op state updates', async () => {
-    const publicationQueue: Array<{
-      isCurrent(): boolean;
-      run(): void | Promise<void>;
-    }> = [];
-    const scheduler = immediateScheduler({
-      enqueue: (request) => publicationQueue.push(request)
-    });
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const nodes = Array.from({ length: 200 }, (_, index) => (
-      textNode(`cached-${String(index).padStart(3, '0')}.md`, index % 20 * 5000, Math.floor(index / 20) * 3400)
-    ));
-    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
-      sources: Object.fromEntries(request.sources.map((source) => [
-        source.projectRelativePath,
-        { ...source, status: 'available' as const }
-      ]))
-    }));
-
-    await renderProvider({
-      nodes,
-      actions: actionsFixture({ readCanvasTextPreviewSources }),
-      previewResourceScheduler: scheduler
-    });
-    await waitFor(() => publicationQueue.length === nodes.length);
-    for (const work of publicationQueue.splice(0)) {
-      expect(work.isCurrent()).toBe(true);
-      await act(async () => work.run());
-    }
-    await flushWork();
-
-    expect(consoleError.mock.calls.some(([message]) => (
-      String(message).includes('Maximum update depth exceeded')
-    ))).toBe(false);
-  });
-
-  it('notifies only the text node whose preview presentation changes', async () => {
-    const harness = availablePreviewHarness();
-    const first = textNode('first.md', 0, 0);
-    const second = textNode('second.md', 0, 1000);
-    const renders = new Map<string, number>();
-    await renderProvider({
-      nodes: [first, second],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      children: (
-        <>
-          <TextPreviewRenderCountProbe node={first} renders={renders} />
-          <TextPreviewRenderCountProbe node={second} renders={renders} />
-        </>
-      )
-    });
-    await waitFor(() => harness.mountQueue.length === 2);
-    renders.clear();
-
-    const firstRequest = harness.mountQueue.find((request) => request.nodeId === first.projectRelativePath);
-    await act(async () => firstRequest?.run());
-    await flushWork();
-
-    expect(renders.get(first.projectRelativePath)).toBeGreaterThan(0);
-    expect(renders.get(second.projectRelativePath) ?? 0).toBe(0);
-  });
-
   it('does not commit the stable text preview provider when Canvas interaction changes', async () => {
     const scheduler = immediateScheduler();
     const node = textNode('failed.md', 0, 0);
@@ -615,7 +313,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       consumerNode: node,
       children: (
         <>
-          <RuntimePresentationProbe node={node} />
+          <RuntimeSnapshotProbe node={node} />
           <TextRuntimeCapture onRuntime={(value) => { runtime = value; }} />
         </>
       )
@@ -631,40 +329,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
 
     await act(async () => runtime?.retryPreview(node.projectRelativePath));
     await waitFor(() => readCanvasTextPreviewSources.mock.calls.length === 2);
-    await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
-      'data-preview-error'
-    ) === '');
-  });
-
-  it('restarts availability checking when Retry follows a cached variant failure', async () => {
-    const harness = availablePreviewHarness();
-    const node = textNode('variant-retry.md', 0, 0);
-    let runtime: ReturnType<typeof useCanvasTextPreviewRuntime> | undefined;
-    await renderProvider({
-      nodes: [node],
-      actions: harness.actions,
-      previewResourceScheduler: harness.scheduler,
-      consumerNode: node,
-      pendingReport: { kind: 'failure', node },
-      children: (
-        <>
-          <RuntimePresentationProbe
-            node={node}
-            pendingReport={{ kind: 'failure', node }}
-          />
-          <TextRuntimeCapture onRuntime={(value) => { runtime = value; }} />
-        </>
-      )
-    });
-    await waitFor(() => harness.mountQueue.length === 1);
-    await act(async () => harness.mountQueue.shift()!.run());
-    await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
-      'data-preview-error'
-    ) === 'stale variant failed');
-    expect(harness.readCanvasTextPreviewSources).toHaveBeenCalledTimes(1);
-
-    await act(async () => runtime?.retryPreview(node.projectRelativePath));
-    await waitFor(() => harness.readCanvasTextPreviewSources.mock.calls.length === 2);
     await waitFor(() => container.querySelector('[data-preview-error]')?.getAttribute(
       'data-preview-error'
     ) === '');
@@ -693,9 +357,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     visibleRect?: { x: number; y: number; width: number; height: number };
     previewResourceScheduler?: CanvasPreviewResourceScheduler;
     consumerNode?: ProjectedCanvasNode | undefined;
-    pendingReport?: PendingPreviewReport | undefined;
-    visibleReport?: VisiblePreviewReport | undefined;
-    styleDependencyKey?: string | undefined;
     children?: React.ReactNode;
     onRender?: React.ProfilerOnRenderCallback | undefined;
   }): Promise<void> {
@@ -720,18 +381,12 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
             activeInlineTextPath={input.activeInlineTextPath}
             textFileBuffers={buffers}
             actions={input.actions}
-            resourceZoom={0.1}
-            devicePixelRatio={2}
             previewOrder={previewOrder}
-            styleDependencyKey={input.styleDependencyKey ?? 'test'}
+            styleDependencyKey="test"
             previewResourceScheduler={scheduler}
           >
             {input.children ?? (input.consumerNode ? (
-              <RuntimePresentationProbe
-                node={input.consumerNode}
-                pendingReport={input.pendingReport}
-                visibleReport={input.visibleReport}
-              />
+              <RuntimeSnapshotProbe node={input.consumerNode} />
             ) : <div />)}
           </CanvasTextPreviewProvider>
         </CanvasTextRenderProfileGate>
@@ -760,18 +415,6 @@ function TextRuntimeCapture({
   return <div />;
 }
 
-function TextPreviewRenderCountProbe({
-  node,
-  renders
-}: {
-  node: ProjectedCanvasNode;
-  renders: Map<string, number>;
-}): React.ReactElement {
-  useCanvasTextPreviewNode(node);
-  renders.set(node.projectRelativePath, (renders.get(node.projectRelativePath) ?? 0) + 1);
-  return <div />;
-}
-
 function previewOrderSource(input: {
   visibleRect: { x: number; y: number; width: number; height: number };
 }): CanvasPreviewOrderSource {
@@ -781,54 +424,12 @@ function previewOrderSource(input: {
   };
 }
 
-type PendingPreviewReport = {
-  kind: 'failure' | 'ready';
-  node: ProjectedCanvasNode;
-  sourceNode?: ProjectedCanvasNode | undefined;
-};
-
-type VisiblePreviewReport = {
-  kind: 'committed' | 'failure';
-  node: ProjectedCanvasNode;
-};
-
-function RuntimePresentationProbe({ node, pendingReport, visibleReport }: {
-  node: ProjectedCanvasNode;
-  pendingReport?: PendingPreviewReport | undefined;
-  visibleReport?: VisiblePreviewReport | undefined;
-}): React.ReactElement {
-  const runtime = useCanvasTextPreviewRuntime();
-  const { presentation, previewError } = useCanvasTextPreviewNode(node);
-  const pendingNode = pendingReport?.sourceNode ?? node;
-  const pendingSnapshot = useCanvasTextPreviewNode(pendingNode);
-  const pendingPresentation = pendingReport ? pendingSnapshot.presentation : undefined;
-  React.useEffect(() => {
-    if (!pendingReport || !pendingPresentation?.pending) {
-      return;
-    }
-    if (pendingReport.kind === 'failure') {
-      runtime.reportPendingFailure(pendingReport.node, pendingPresentation.pending, new Error('stale variant failed'));
-    } else {
-      runtime.reportPendingReady(pendingReport.node, pendingPresentation.pending);
-    }
-  }, [pendingPresentation?.pending, pendingReport, runtime]);
-  React.useEffect(() => {
-    if (!visibleReport || !presentation.visible) {
-      return;
-    }
-    if (visibleReport.kind === 'failure') {
-      runtime.reportVisibleFailure(visibleReport.node, presentation.visible, new Error('stale visible failed'));
-    } else {
-      runtime.reportVisibleCommitted(visibleReport.node, presentation.visible);
-    }
-  }, [presentation.visible, runtime, visibleReport]);
+function RuntimeSnapshotProbe({ node }: { node: ProjectedCanvasNode }): React.ReactElement {
+  const { request, previewError } = useCanvasTextPreviewNode(node);
   return (
     <div
-      data-preview-presented={Boolean(presentation.visible || presentation.pending)}
+      data-preview-presented={Boolean(request.variantTarget)}
       data-preview-error={previewError ?? ''}
-      data-failure-node-error={pendingReport?.kind === 'failure'
-        ? pendingSnapshot.previewError ?? ''
-        : ''}
     />
   );
 }
@@ -890,7 +491,7 @@ function actionsFixture(overrides: Partial<WorkbenchActions> = {}): WorkbenchAct
     }),
     saveCanvasTextPreviewSource: async (request) => ({
       ok: true,
-      source: { projectRelativePath: request.projectRelativePath, fingerprint: request.fingerprint, status: 'available' }
+      source: { projectRelativePath: request.projectRelativePath, targetIdentity: request.targetIdentity, status: 'available' }
     }),
     ...overrides
   } as WorkbenchActions;
@@ -923,27 +524,6 @@ function immediateScheduler(overrides: Partial<CanvasPreviewResourceScheduler> =
     },
     dispose: () => undefined,
     ...overrides
-  };
-}
-
-function availablePreviewHarness() {
-  const mountQueue: CanvasPreviewResourceRequest[] = [];
-  const publicationQueue: CanvasPreviewResourceRequest[] = [];
-  const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
-    sources: Object.fromEntries(request.sources.map((source) => [
-      source.projectRelativePath,
-      { ...source, status: 'available' as const }
-    ]))
-  }));
-  return {
-    actions: actionsFixture({ readCanvasTextPreviewSources }),
-    mountQueue,
-    publicationQueue,
-    readCanvasTextPreviewSources,
-    scheduler: immediateScheduler({
-      enqueue: (request) => mountQueue.push(request),
-      enqueuePublication: (request) => publicationQueue.push(request)
-    })
   };
 }
 

@@ -103,83 +103,70 @@ transforms independent from preview-resolution churn. The short camera-idle
 threshold answers only whether interaction is still in progress; it does not
 authorize an immediate quality replacement.
 
-## Node-Local Image Lifecycle
+## Shared Raster Preview Presentation
 
-Each mounted image node owns its source revision, retry key, loaded image, next
-image, and local error. Canvas Surface provides shared resolution inputs, the
-performance monitor, and the preview-resource scheduler. Canvas Editor Runtime
-remains the authority for camera and drag state; the scheduler caches only the
-read-only interaction projection needed to prioritize preview work. That
-projection is not copied into every image provider value. An image node reads
-it only when its desired source actually changes or queued work runs, so pan
-and drag state edges do not rerun every image resource effect.
+Image, text, and video use one mounted Workbench presentation module. Each
+media adapter supplies only a Raster Preview Request:
 
-The first eligible image enters the shared scheduler like any other preview
-start. Once an image is loaded, camera movement retains it and suppresses
-replacement quality work until interaction ends. Culling never controls image
-production. A different desired preview becomes a hidden next image while the
-loaded image stays visible. A matching browser load event promotes the next
-image only after a paint opportunity; stale load events are ignored. A failed
-replacement leaves the loaded image intact, retry affects one node, and a
-source-revision change resets only that node.
+- a Preview Continuity Key for the complete pixels that may remain visible;
+- the owner-scoped Preview Target Identity and optional Canonical Preview
+  Source Identity;
+- the canonical source width; and
+- a pure URL factory for an exact requested width.
 
-The direct-source tier uses the same loaded/next handoff and revision identity
-as derived variants; reaching source width never replaces the visible image
-before the original can be painted. Leaving and re-entering the viewport does
-not recreate the image resource or flash a placeholder. Node
-deletion naturally releases its local state. There is no production-wide image
-asset runtime, loading-plan store, or decoded-image budget acting as the source
-of truth.
+The shared module alone combines node display width, settled resource zoom,
+device pixel ratio, and canonical source width into the stepped requested
+width. It derives the Preview Variant Identity, submits current starts to the
+shared scheduler, owns visible, pending, failure, and retry state, and
+coalesces repeated zoom changes by media kind and Project path.
+
+A pending variant is a real mounted `<img>`, not an off-DOM `Image` object or a
+preliminary fetch. Its `load` event, or cached `complete` state with positive
+intrinsic width, begins `decode()`. The decoded element is promoted only when
+its continuity key, variant key, retry attempt, and DOM membership are still
+current. The same keyed DOM element becomes visible; it is not loaded again.
+When a visible variant already exists, it remains mounted until the scheduler
+publishes the decoded replacement. An initial decoded variant may publish
+immediately because there is no visible content to preserve.
+
+A continuity change synchronously excludes every older layer from rendering.
+Width-only changes preserve the current visible layer. Load or decode failure
+keeps a valid visible layer, records one typed local failure, and waits for an
+explicit node retry. There is no automatic retry, fixed settle timeout,
+double-animation-frame promotion delay, or media-specific presentation
+reducer. Text may request a layout-effect DOM-commit acknowledgement for its
+editor handoff; that acknowledgement does not claim that a browser paint
+occurred and schedules no animation frame.
+
+Canonical source production remains media-specific. Images use revision-bound
+Project bytes, Text retains its latest-wins content and serialized CodeMirror
+capture lane, and Video retains Probe and Ensure frame-source discovery.
+Those producers expose current source readiness and typed source errors to the
+shared presentation request instead of owning width or DOM handoff state.
 
 ## Shared Preview Scheduling
 
-Image, video, and Canvas text-preview producers share one scheduler for deferred
-resource starts. Image handoffs and Canvas text-preview promotion and commit
-phases use the same scheduler for result publication. The scheduler controls
-when work may enter a frame; it does not own resource or presentation state.
-Canvas text previews keep their separate serialized capture lane described in
-[`text-files.md`](./text-files.md).
+The scheduler has two coalesced phases: resource start and decoded-result
+publication. Both are keyed by media kind and node identity, newest work wins,
+and current identity is rechecked immediately before execution. Starts pause
+while camera movement or node dragging is active. Once idle, eligible work is
+ordered by squared distance from viewport center, publications win only an
+equal-distance tie, and at most three operations enter one animation frame.
+The scheduler limits admission time; it does not own canonical producer work,
+DOM elements, decode promises, failures, or visible presentation state.
 
-The scheduler:
+Initial requests and quality replacements use the same start phase. A decoded
+replacement uses the publication phase; an initial result does not consume a
+publication slot because no older visible layer exists. Resource zoom remains
+fixed during camera motion, so intermediate width requests coalesce without a
+post-idle timer. Culling changes shell display only and never changes preview
+membership or canonical-source work.
 
-- coalesces queued request starts and queued result publications independently
-  by preview kind and node identity, with the newest work in each phase winning;
-- pauses deferred starts while camera movement or node dragging is active;
-- starts current queued work on the next animation frame after
-  interaction becomes idle;
-- shares a three-operation animation-frame budget across eligible request starts
-  and image or text result publications;
-- orders all eligible operations by squared distance from the viewport center
-  to the nearest point of the node rectangle, prefers publication over start
-  only at equal distance, and then breaks ties by exact Project path; and
-- rechecks current identity immediately before either operation.
-
-The camera-idle boundary is the only time gate. Resource zoom remains fixed
-while the camera moves, and queued starts coalesce by node, so intermediate
-image, video, or text-preview tiers are already suppressed without a second
-post-idle timer.
-Once idle, current starts and ready publications share the next-frame budget.
-Publications enter React as low-priority transitions so new input can preempt
-them. Stale work is discarded; distance changes order only, so the scheduler
-still completes the current preview set even when the camera never visits every
-node.
-
-Text and video preview producers observe interaction imperatively. A moving
-transition updates their gate and capture-lane frame scheduling without
-publishing a React provider snapshot. An idle transition reruns provider work
-only when that provider still owns pending work; a stable completed Canvas does
-not commit either provider merely because camera state changed.
-
-Source revision changes, explicit retries, already-loaded identities, and
-not-eligible transitions remain immediate node-owned state changes. Initial
-image loads and later quality replacements start from the shared frame budget
-after interaction becomes idle. Scheduled request starts are discarded only
-when stale, not because their node is offscreen.
-
-Text and video preview Runtime contexts expose stable command surfaces and
-path-local external-store subscriptions. A presentation, error, or source
-change for one path therefore rerenders that node shell without broadcasting a
-new provider value to every mounted text or video node.
+Text and video producer registries observe interaction imperatively and rerun
+only while producer work remains. Their Runtime contexts expose stable command
+surfaces and path-local snapshots containing the shared presentation request
+and source error. A source change for one path therefore rerenders only that
+node shell.
 
 ## Local Image Preview Service And Cache
 
@@ -370,7 +357,7 @@ Image-preview cache identity has four levels:
         preview-w<width>.<jpg|png>
 ```
 
-The source key combines a readable encoded path prefix with a stable hash so
+The source-path cache key combines a readable encoded path prefix with a stable hash so
 long or similar paths remain distinct. The direct-source tier has no entry in
 this cache. Derived-variant cache hits must be regular non-symlink files.
 Project open and refresh reconcile the cache against current visible,
@@ -386,8 +373,8 @@ TTL, or background cleanup timer. Image caches retain requested quantized-width
 variants only for the current visible source and file revision under the exact
 current engine path.
 Text caches resolve only the exact requested source identity for each Canvas and
-Project path; superseded fingerprint directories do not participate in current
-lookup. Video caches retain the current video revision and the source identity
+Project path; superseded target-identity directories do not participate in current
+lookup. Video caches retain the current source revision and the source identity
 implied by its persisted Playback Position; superseded frame identities do not
 participate in current lookup. Current-identity width variants remain reusable
 across zoom changes, displays, and sessions. This policy does not add a

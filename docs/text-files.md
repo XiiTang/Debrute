@@ -188,9 +188,9 @@ retained presentation synchronously before it can become visible.
 
 ## Preview Identity
 
-A Canvas text-preview target is identified by the Canvas ID, project-relative
-path, and a SHA-256 visual fingerprint. The fingerprint includes every current
-pixel-affecting input owned by the pipeline:
+A Canvas text-preview resource key is scoped by Canvas ID and project-relative
+path around a SHA-256 Preview Target Identity. The target identity includes every
+current pixel-affecting input owned by the pipeline:
 
 - the `Canvas Text Preview Source Version`, which changes with the browser
   capture contract;
@@ -223,7 +223,7 @@ Cache paths are therefore:
 
 ```text
 .debrute/cache/canvas-text-previews/
-  <canvas-id>/<source-path-key>/<fingerprint-key>/
+  <canvas-id>/<source-path-key>/<target-identity-key>/
     source.png
     raster-engine-v<version>/
       preview-w<width>.png
@@ -235,14 +235,14 @@ no Raster Preview Pool slot.
 The cache tree is not Project-visible. A project-visible `.debrute` text file,
 including a Canvas Map or Canvas JSON document, remains eligible as a source;
 the hidden derived cache cannot recursively become one. Runtime reads and writes
-only the exact requested fingerprint and Raster Engine path; neither lookup nor
-save enumerates sibling fingerprint or engine-version directories. No byte
+only the exact requested target identity and Raster Engine path; neither lookup
+nor save enumerates sibling target-identity or engine-version directories. No byte
 quota, LRU, or TTL applies to width variants.
 
 ## Capture Pipeline
 
 `CanvasTextPreviewRuntime` owns one real-time task registry keyed by Canvas ID
-and project-relative path; the current fingerprint is the task version. Every
+and project-relative path; the current target identity is the task version. Every
 stable missing-or-stale target is admitted, including offscreen nodes. The same
 path is latest-wins: new input replaces pending work, invalidates a running target,
 and makes any stale read, capture,
@@ -262,7 +262,7 @@ leaves edit mode it joins the live registry immediately if work remains, or
 starts the next work epoch if the registry was empty.
 
 Runtime projects the exact full-file SHA-256 revision and Debrute text language.
-Workbench therefore computes fingerprints before loading saved file bodies and
+Workbench therefore computes target identities before loading saved file bodies and
 checks all canonical-source availability first. A matching `source.png` cache
 hit performs no content read, font work, or DOM capture. Dirty editor content is
 UTF-8 encoded once to obtain its byte length and SHA-256 digest. For a missing
@@ -343,8 +343,9 @@ pixel ratio, and stepped raster scale model as image previews. Canonical source
 admission and current-width variant production are viewport-independent. The
 nearest current node is scheduled first, but all current variants are admitted.
 Text variant mounts use the shared
-image/video/text resource-start scheduler; promotion and visible commit use its
-publication queue.
+image/video/text resource-start scheduler. A decoded replacement uses the same
+publication queue as image and video; an initial decoded preview publishes
+immediately because it has no visible predecessor.
 
 Typed failures remain visible and do not retry automatically. A node-local
 Retry clears only the current target's failure and restarts source availability
@@ -354,14 +355,14 @@ presentation is ready.
 Presentation uses mounted visible and pending `<img>` layers. A pending variant
 is mounted once, and that DOM image owns network loading, error, and readiness.
 Its `load` event, or a cached `complete` image with a positive intrinsic width,
-is the readiness authority. The handoff does not call `decode()` again after
-that signal: the image is already mounted, and treating a redundant decode
-rejection as a permanent preview failure can discard a valid image under memory
-pressure. It is promoted only if it is still the current source and DOM element;
-there is no preliminary `fetch(...).blob()` request. The prior visible image
-remains mounted throughout, including hidden retention beneath the selected
-editor. Mounting, promotion, and visible commit run on idle scheduler frames.
-Stale work is discarded by runtime epoch, target key, and source key.
+begins `decode()`. It is promoted only if its Preview Continuity Key, Preview
+Variant Identity, retry attempt, and DOM membership are still current; there is
+no preliminary `fetch(...).blob()` request or off-DOM image preload. The prior
+visible image remains mounted throughout, including hidden retention beneath
+the selected editor. Text waits only for the promoted image's React DOM commit
+before releasing a retiring editor. It uses no fixed timeout or animation-frame
+paint proxy. Stale producer work is discarded by runtime epoch and target key;
+stale presentation work is discarded by continuity and variant identity.
 
 Viewport culling changes only shell display. It does not suppress canonical
 source work, current-width variant work, mounted handoff, or committed preview
@@ -377,7 +378,8 @@ visible instead of becoming an empty success state.
 
 Development/test performance counters record availability, coverage collection,
 subset duration and linear-memory peak, capture readiness, DOM snapshot, raster,
-upload, pending readiness, publication, and failure boundaries. See
+upload, and producer failures. Shared raster counters record request, mounted
+pending DOM, decode, publication, presentation failure, and retry boundaries. See
 [`canvas-rendering.md`](./canvas-rendering.md) for the shared
 resource scheduler and diagnostic capture surface.
 

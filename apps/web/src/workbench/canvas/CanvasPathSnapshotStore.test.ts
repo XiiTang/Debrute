@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   canvasChangedRecordPaths,
+  canvasRecordsMatchingTargetKeys,
+  canvasRecordValuesEqual,
   createCanvasPathSnapshotStore
 } from './CanvasPathSnapshotStore.js';
 
@@ -40,6 +42,22 @@ describe('CanvasPathSnapshotStore', () => {
       { retained, removed: { value: 2 }, changed: { value: 3 } },
       { retained, added: { value: 4 }, changed: { value: 5 } }
     ).sort()).toEqual(['added', 'changed', 'removed']);
+  });
+
+  it('compares record values and filters them by current target keys', () => {
+    const retained = { targetKey: 'target-a', value: 1 };
+    expect(canvasRecordValuesEqual(
+      { a: retained },
+      { a: retained }
+    )).toBe(true);
+    expect(canvasRecordValuesEqual(
+      { a: retained },
+      { a: { ...retained } }
+    )).toBe(false);
+    expect(canvasRecordsMatchingTargetKeys(
+      { a: retained, b: { targetKey: 'stale-b', value: 2 } },
+      new Map([['a', 'target-a'], ['b', 'target-b']])
+    )).toEqual({ a: retained });
   });
 
   it('retains falsy snapshots while another listener still observes the same node', () => {

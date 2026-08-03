@@ -2,22 +2,28 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import {
+  canvasPreviewContinuityKey,
+  canvasPreviewTargetIdentityFromDigest,
+  type ProjectedCanvasNode
+} from '@debrute/canvas-core';
 import { EditorView } from '@codemirror/view';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import {
-  CanvasImageNodePreview,
   CanvasNodeContent,
   canvasTextBufferEnsureKey,
   type CanvasNodeContentProps
 } from './CanvasNodeContent';
-import type { CanvasImageNodeAssetHookState } from './CanvasImageNodeAssetContext';
+import { CanvasTextPreviewProvider } from './CanvasTextPreviewRuntime';
+import { CanvasVideoPreviewProvider } from './CanvasVideoPreviewRuntime';
 import {
-  CanvasTextPreviewProvider,
-  type CanvasTextPreviewSource
-} from './CanvasTextPreviewRuntime';
+  CanvasRasterPreviewEnvironmentProvider,
+  type CanvasRasterPreviewRequest
+} from './CanvasRasterPreviewPresentation';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
+import * as CanvasTextEditorRuntime from './CanvasTextEditorRuntime.js';
+import * as TextEditorLanguages from './textEditorCodeMirrorLanguages.js';
 import { I18nProvider } from '../i18n';
 
 vi.mock('./CanvasTextRenderProfileContext.js', async () => {
@@ -48,8 +54,8 @@ vi.mock('./CanvasTextPreviewStyleKey', () => ({
 
 const previewResourceInteraction = { cameraState: 'idle' as const, pointerInteractionActive: false };
 const previewResourceScheduler: CanvasPreviewResourceScheduler = {
-  enqueue: () => undefined,
-  enqueuePublication: () => undefined,
+  enqueue: (request) => request.run(),
+  enqueuePublication: (request) => request.run(),
   cancel: () => undefined,
   setInteractionState: () => undefined,
   getInteractionState: () => previewResourceInteraction,
@@ -66,19 +72,32 @@ const previewOrder: CanvasPreviewOrderSource = {
 function TestProviders({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <I18nProvider locale="en">
-      <CanvasTextPreviewProvider
-        canvasId="canvas-test"
-        nodes={[]}
-        textFileBuffers={{}}
-        actions={actionsFixture()}
-        resourceZoom={1}
-        devicePixelRatio={1}
-        previewOrder={previewOrder}
-        styleDependencyKey="test"
-        previewResourceScheduler={previewResourceScheduler}
-      >
-        {children}
-      </CanvasTextPreviewProvider>
+      <CanvasRasterPreviewEnvironmentProvider value={{
+        resourceZoom: 1,
+        devicePixelRatio: 1,
+        previewResourceScheduler
+      }}>
+        <CanvasVideoPreviewProvider
+          canvasId="canvas-test"
+          nodes={[]}
+          activeVideoPaths={new Set()}
+          actions={actionsFixture()}
+          previewOrder={previewOrder}
+          previewResourceScheduler={previewResourceScheduler}
+        >
+          <CanvasTextPreviewProvider
+            canvasId="canvas-test"
+            nodes={[]}
+            textFileBuffers={{}}
+            actions={actionsFixture()}
+            previewOrder={previewOrder}
+            styleDependencyKey="test"
+            previewResourceScheduler={previewResourceScheduler}
+          >
+            {children}
+          </CanvasTextPreviewProvider>
+        </CanvasVideoPreviewProvider>
+      </CanvasRasterPreviewEnvironmentProvider>
     </I18nProvider>
   );
 }
@@ -108,74 +127,6 @@ const canvasNodeContentPropsWithoutVideoRegistry: CanvasNodeContentProps = {
   onTitlePointerUp: () => undefined
 };
 void canvasNodeContentPropsWithoutVideoRegistry;
-
-describe('CanvasImageNodePreview', () => {
-  it('keeps the visible image mounted while the next image preloads off-DOM', () => {
-    const html = renderImagePreview({
-      kind: 'image',
-      visible: { src: '/preview/low.jpg', loadKey: 'low', previewWidth: 256 },
-      next: { src: '/preview/high.jpg', loadKey: 'high', previewWidth: 1024 },
-      retry: () => undefined,
-      resolveNext: () => undefined,
-      rejectNext: () => undefined
-    });
-
-    expect(html).toContain('src="/preview/low.jpg"');
-    expect(html).toContain('data-canvas-image-layer="visible"');
-    expect(html).toContain('data-preview-width="256"');
-    expect(html).not.toContain('src="/preview/high.jpg"');
-    expect(html).not.toContain('data-canvas-image-layer="next"');
-  });
-
-  it('renders only the visible layer when pan-back state already has the same loaded URL', () => {
-    const html = renderImagePreview({
-      kind: 'image',
-      visible: { src: '/preview/loaded.jpg', loadKey: 'loaded', previewWidth: 512 },
-      retry: () => undefined,
-      resolveNext: () => undefined,
-      rejectNext: () => undefined
-    });
-
-    expect(html).toContain('src="/preview/loaded.jpg"');
-    expect(html).toContain('data-canvas-image-layer="visible"');
-    expect(html).not.toContain('data-canvas-image-layer="next"');
-    expect(html).not.toContain('class="canvas-node-image-reserved"');
-    expect(html).not.toContain('class="db-canvas-node-placeholder"');
-  });
-
-  it('reserves the first pending image slot without flashing a placeholder', () => {
-    const html = renderImagePreview({
-      kind: 'image',
-      next: { src: '/preview/first.jpg', loadKey: 'first', previewWidth: 512 },
-      retry: () => undefined,
-      resolveNext: () => undefined,
-      rejectNext: () => undefined
-    });
-
-    expect(html).toContain('class="canvas-node-image-reserved"');
-    expect(html).not.toContain('src="/preview/first.jpg"');
-    expect(html).not.toContain('data-canvas-image-layer="next"');
-    expect(html).not.toContain('data-canvas-image-layer="visible"');
-    expect(html).not.toContain('class="db-canvas-node-placeholder"');
-  });
-
-  it('keeps visible image markup when next load error exists', () => {
-    const html = renderImagePreview({
-      kind: 'image',
-      visible: { src: '/preview/low.jpg', loadKey: 'low', previewWidth: 256 },
-      error: { loadKey: 'high', message: 'Unable to load flow/cover.png.' },
-      retry: () => undefined,
-      resolveNext: () => undefined,
-      rejectNext: () => undefined
-    });
-
-    expect(html).toContain('src="/preview/low.jpg"');
-    expect(html).toContain('Unable to load flow/cover.png.');
-    expect(html).toContain('db-button');
-    expect(html).toContain('canvas-node-error-presentation');
-    expect(html).not.toContain('class="db-canvas-node-placeholder"');
-  });
-});
 
 describe('CanvasNodeContent', () => {
   it('renders the project root directory with a non-empty label', () => {
@@ -334,10 +285,6 @@ describe('CanvasNodeContent', () => {
                 selected={false}
                 actions={actionsFixture()}
                 textBuffer={undefined}
-                videoPreview={{
-                  src: 'http://127.0.0.1:17321/api/projects/p/canvas-video-preview/media%2Fclip.mp4.jpg',
-                  previewWidth: 320
-                }}
                 onVideoPlayerMounted={() => undefined}
                 onVideoPlayingChange={() => undefined}
                 onRegisterVideoTarget={() => undefined}
@@ -371,44 +318,21 @@ describe('CanvasNodeContent', () => {
       const host = document.createElement('div');
       document.body.appendChild(host);
       const view = new EditorView({ parent: host });
+      const decodeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'decode');
+      Object.defineProperty(HTMLImageElement.prototype, 'decode', {
+        configurable: true,
+        value: vi.fn(async () => undefined)
+      });
 
       return () => {
         view.destroy();
         host.remove();
+        if (decodeDescriptor) {
+          Object.defineProperty(HTMLImageElement.prototype, 'decode', decodeDescriptor);
+        } else {
+          Reflect.deleteProperty(HTMLImageElement.prototype, 'decode');
+        }
       };
-    });
-
-    it('renders inactive available text nodes as preview images', () => {
-      const html = renderStaticWithI18n(
-        <CanvasNodeContent
-          node={textNode('flow/readme.md', 'rev-a')}
-          selected={false}
-          actions={actionsFixture()}
-          textBuffer={undefined}
-          textPreview={{
-            projectRelativePath: 'flow/readme.md',
-            sourceKey: 'canvas-1\u001fflow/readme.md\u001ffp\u001f700',
-            src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
-            previewWidth: 700,
-            fingerprint: 'fp'
-          }}
-          onVideoPlayerMounted={() => undefined}
-          onVideoPlayingChange={() => undefined}
-          onRegisterVideoTarget={() => undefined}
-          onUpdateVideoPlaybackTime={() => undefined}
-          onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
-        />
-      );
-
-      expect(html).toContain('class="canvas-text-preview-image canvas-text-preview-image--visible"');
-      expect(html).toContain('data-preview-width="700"');
-      expect(html).not.toContain('data-canvas-text-editor="true"');
-      expect(html).not.toContain('data-editor-engine="codemirror"');
-      expect(html).not.toContain('Loading');
     });
 
     it('uses the first inactive text preview click as the mounted editor caret request', async () => {
@@ -435,7 +359,7 @@ describe('CanvasNodeContent', () => {
                 selected={selected}
                 actions={actionsFixture()}
                 textBuffer={textBuffer('flow/readme.md', 'rev-a')}
-                textPreview={textPreviewSource(700)}
+                textPreviewRequest={textPreviewRequest()}
                 onVideoPlayerMounted={() => undefined}
                 onVideoPlayingChange={() => undefined}
                 onRegisterVideoTarget={() => undefined}
@@ -482,99 +406,70 @@ describe('CanvasNodeContent', () => {
       }
     });
 
-    it('removes the old fingerprint as soon as the current source is unresolved', async () => {
-      const container = document.createElement('div');
-      document.body.appendChild(container);
-      const root = createRoot(container);
-      const firstPreview = textPreviewSource(320, 'sha256:old');
-
-      try {
-        await renderTextPreviewNode(root, firstPreview);
-
-        expect(textPreviewImage(container)?.getAttribute('src')).toBe(firstPreview.src);
-
-        await renderTextPreviewNode(root, undefined);
-
-        expect(textPreviewImage(container)).toBeNull();
-        expect(container.querySelector('.canvas-text-preview-empty')).not.toBeNull();
-      } finally {
-        await act(async () => {
-          root.unmount();
-        });
-        container.remove();
-      }
-    });
-
-    it('keeps the just-blurred editor visible until the exact current preview is visibly committed', async () => {
-      const container = document.createElement('div');
-      document.body.appendChild(container);
-      const root = createRoot(container);
-      const exactPreview = textPreviewSource(640, 'sha256:new-scroll');
-
-      try {
-        await renderTextPreviewNode(root, undefined, { selected: true });
-
-        expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
-        expect(textPreviewImage(container)).toBeNull();
-
-        await renderTextPreviewNode(root, undefined);
-
-        expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
-        expect(textPreviewImage(container)).toBeNull();
-        expect(container.querySelector('.canvas-text-preview-empty')).not.toBeNull();
-
-        await renderTextPreviewNode(root, exactPreview);
-
-        expect(container.querySelector('[data-canvas-text-editor="true"]')).not.toBeNull();
-        expect(textPreviewImage(container)?.getAttribute('src')).toBe(exactPreview.src);
-        const editorHost = container.querySelector('[data-canvas-text-editor="true"]');
-        const previewLayers = container.querySelector('.canvas-text-preview-layers');
-        expect(Boolean((editorHost?.compareDocumentPosition(previewLayers!) ?? 0)
-          & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-
-        await renderTextPreviewNode(root, exactPreview, {
-          textPreviewCommittedSourceKey: exactPreview.sourceKey
-        });
-
-        expect(container.querySelector('[data-canvas-text-editor="true"]')).toBeNull();
-      } finally {
-        await act(async () => {
-          root.unmount();
-        });
-        container.remove();
-      }
-    });
-
-    it('reuses the exact committed preview image before another animation frame when editing ends unchanged', async () => {
-      const container = document.createElement('div');
-      document.body.appendChild(container);
-      const root = createRoot(container);
-      const exactPreview = textPreviewSource(640, 'sha256:unchanged');
+    it('keeps the preview visible until the selected editor layout is ready', async () => {
       const frameCallbacks: FrameRequestCallback[] = [];
       const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
+      const ensureVisibleSyntaxReady = vi.spyOn(
+        CanvasTextEditorRuntime,
+        'canvasTextEditorEnsureVisibleSyntaxReady'
+      ).mockReturnValue(false);
+      const posAtCoords = vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue(3);
+      vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({
+        left: 144,
+        right: 144,
+        top: 88,
+        bottom: 104
+      });
+      vi.spyOn(EditorView.prototype, 'defaultLineHeight', 'get').mockReturnValue(18);
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const preview = textPreviewRequest();
+      const renderNode = (selected: boolean) => renderTextPreviewNode(root, preview, { selected });
 
       try {
-        await renderTextPreviewNode(root, exactPreview, {
-          selected: true,
-          textPreviewCommittedSourceKey: exactPreview.sourceKey
+        await renderNode(false);
+        await act(async () => {
+          container.querySelector<HTMLElement>('.canvas-text-body')?.dispatchEvent(new PointerEvent('pointerdown', {
+            bubbles: true,
+            clientX: 144,
+            clientY: 96
+          }));
         });
 
-        const retainedImage = textPreviewImage(container);
-        expect(retainedImage).not.toBeNull();
-        expect(container.querySelector('.canvas-text-preview-layers')?.getAttribute(
-          'data-canvas-text-preview-hidden'
-        )).toBe('true');
+        await renderNode(true);
+        const preparingEditor = await waitForElement<HTMLElement>(container, '.canvas-text-editor');
 
-        await renderTextPreviewNode(root, exactPreview, {
-          textPreviewCommittedSourceKey: exactPreview.sourceKey
-        });
-
-        expect(textPreviewImage(container)).toBe(retainedImage);
-        expect(container.querySelector('.canvas-text-preview-layers')?.getAttribute(
-          'data-canvas-text-preview-hidden'
+        expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
+          'data-canvas-raster-preview-hidden'
         )).toBe('false');
-        expect(container.querySelector('[data-canvas-text-editor="true"]')).toBeNull();
-        expect(frameCallbacks.length).toBeGreaterThan(0);
+        expect(preparingEditor.getAttribute('data-editor-published')).toBe('false');
+        expect(preparingEditor.hasAttribute('inert')).toBe(true);
+        expect(posAtCoords).not.toHaveBeenCalled();
+
+        await act(async () => {
+          container.querySelector<HTMLElement>('.canvas-text-body')?.dispatchEvent(new PointerEvent('pointerdown', {
+            bubbles: true,
+            clientX: 180,
+            clientY: 120
+          }));
+        });
+        expect(posAtCoords).not.toHaveBeenCalled();
+
+        ensureVisibleSyntaxReady.mockReturnValue(true);
+        await act(async () => {
+          flushAnimationFrames(frameCallbacks);
+        });
+
+        expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
+          'data-canvas-raster-preview-hidden'
+        )).toBe('true');
+        expect(preparingEditor.getAttribute('data-editor-published')).toBe('true');
+        expect(preparingEditor.hasAttribute('inert')).toBe(false);
+        expect(posAtCoords).toHaveBeenCalledWith({ x: 144, y: 96 });
+        await act(async () => {
+          flushAnimationFrames(frameCallbacks);
+        });
       } finally {
         await act(async () => root.unmount());
         container.remove();
@@ -582,99 +477,124 @@ describe('CanvasNodeContent', () => {
       }
     });
 
-    it('does not replace the editor with a preview for the previous scroll viewport', async () => {
+    it('discards an unpublished editor when selection leaves before layout is ready', async () => {
+      const frameCallbacks: FrameRequestCallback[] = [];
+      const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
+      const ensureVisibleSyntaxReady = vi.spyOn(
+        CanvasTextEditorRuntime,
+        'canvasTextEditorEnsureVisibleSyntaxReady'
+      ).mockReturnValue(false);
+      const posAtCoords = vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue(3);
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
-      const previousPreview = textPreviewSource(640, 'sha256:previous-scroll');
-      const currentPreview = textPreviewSource(640, 'sha256:current-scroll');
-      const onUpdateTextViewport = vi.fn();
+      const preview = textPreviewRequest();
+      const renderNode = (selected: boolean) => renderTextPreviewNode(root, preview, { selected });
 
       try {
-        await renderTextPreviewNode(root, previousPreview, {
-          selected: true,
-          onUpdateTextViewport
-        });
-        const editor = container.querySelector('.cm-editor');
-        const scroller = container.querySelector<HTMLElement>('.cm-scroller');
-        expect(editor).not.toBeNull();
-        expect(scroller).not.toBeNull();
-        if (!scroller) {
-          throw new Error('Expected CodeMirror scroller.');
-        }
-        scroller.scrollTop = 96;
-        scroller.scrollLeft = 12;
+        await renderNode(false);
         await act(async () => {
-          scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+          container.querySelector<HTMLElement>('.canvas-text-body')?.dispatchEvent(new PointerEvent('pointerdown', {
+            bubbles: true,
+            clientX: 144,
+            clientY: 96
+          }));
+        });
+        await renderNode(true);
+        await waitForElement(container, '.canvas-text-editor');
+
+        await renderNode(false);
+
+        expect(container.querySelector('.canvas-text-editor')).toBeNull();
+        expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
+          'data-canvas-raster-preview-hidden'
+        )).toBe('false');
+
+        ensureVisibleSyntaxReady.mockReturnValue(true);
+        await act(async () => {
+          flushAnimationFrames(frameCallbacks);
         });
 
-        await renderTextPreviewNode(root, previousPreview, {
-          selected: false,
-          onUpdateTextViewport
+        expect(container.querySelector('.canvas-text-editor')).toBeNull();
+        expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
+          'data-canvas-raster-preview-hidden'
+        )).toBe('false');
+        expect(posAtCoords).not.toHaveBeenCalled();
+
+        await renderNode(true);
+        await waitForElement(container, '.canvas-text-editor');
+        await act(async () => {
+          flushAnimationFrames(frameCallbacks);
         });
 
-        expect(container.querySelector('.cm-editor')).toBe(editor);
-        expect(onUpdateTextViewport).toHaveBeenLastCalledWith(
-          'flow/readme.md',
-          { scrollTop: 96, scrollLeft: 12 }
-        );
-
-        await renderTextPreviewNode(root, undefined, {
-          selected: false,
-          node: {
-            ...textNode('flow/readme.md', 'rev-a'),
-            textViewport: { scrollTop: 96, scrollLeft: 12 }
-          },
-          onUpdateTextViewport
-        });
-        expect(container.querySelector('.cm-editor')).toBe(editor);
-
-        await renderTextPreviewNode(root, currentPreview, {
-          selected: false,
-          textPreviewCommittedSourceKey: currentPreview.sourceKey,
-          node: {
-            ...textNode('flow/readme.md', 'rev-a'),
-            textViewport: { scrollTop: 96, scrollLeft: 12 }
-          },
-          onUpdateTextViewport
-        });
-
-        expect(container.querySelector('.cm-editor')).toBeNull();
-        expect(textPreviewImage(container)?.src).toContain('sha256:current-scroll');
+        expect(posAtCoords).not.toHaveBeenCalled();
       } finally {
-        await act(async () => {
-          root.unmount();
-        });
+        await act(async () => root.unmount());
+        container.remove();
+        restoreAnimationFrame();
+      }
+    });
+
+    it('keeps the preview visible under an explicit editor activation failure', async () => {
+      const failure = new Error('language chunk unavailable');
+      vi.spyOn(
+        TextEditorLanguages,
+        'loadCodeMirrorLanguageExtensionForProjectTextLanguage'
+      ).mockRejectedValue(failure);
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const preview = textPreviewRequest();
+
+      try {
+        await expectEditorActivationFailure(root, container, preview, failure.message);
+      } finally {
+        await act(async () => root.unmount());
         container.remove();
       }
     });
 
-    it('mounts the pending DOM preview while retaining the editor during handoff', async () => {
+    it('keeps the preview visible when initial editor layout throws', async () => {
+      const failure = new Error('editor viewport layout failed');
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const destroyEditor = vi.spyOn(EditorView.prototype, 'destroy');
+      vi.spyOn(
+        CanvasTextEditorRuntime,
+        'canvasTextEditorApplyInitialScroll'
+      ).mockImplementation(() => {
+        throw failure;
+      });
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
-      const pending = textPreviewSource(640, 'sha256:pending');
+      const preview = textPreviewRequest();
 
       try {
-        await renderTextPreviewNode(root, undefined, { selected: true });
-        const editor = container.querySelector('.cm-editor');
-        expect(editor).not.toBeNull();
-
-        await renderTextPreviewNode(root, undefined, { selected: false, pendingTextPreview: pending });
-
-        expect(container.querySelector('.cm-editor')).toBe(editor);
-        expect(container.querySelector<HTMLImageElement>(
-          'img[data-canvas-text-preview-layer="pending"]'
-        )?.getAttribute('src')).toBe(pending.src);
-
-        await renderTextPreviewNode(root, undefined, { selected: true, pendingTextPreview: pending });
-
-        expect(container.querySelector('.cm-editor')).toBe(editor);
-        expect(container.querySelector('img[data-canvas-text-preview-layer="pending"]')).toBeNull();
+        await expectEditorActivationFailure(root, container, preview, failure.message);
+        expect(destroyEditor).toHaveBeenCalledOnce();
       } finally {
-        await act(async () => {
-          root.unmount();
-        });
+        await act(async () => root.unmount());
+        container.remove();
+      }
+    });
+
+    it('keeps the preview visible when visible syntax preparation throws', async () => {
+      const failure = new Error('visible syntax preparation failed');
+      vi.spyOn(
+        CanvasTextEditorRuntime,
+        'canvasTextEditorEnsureVisibleSyntaxReady'
+      ).mockImplementation(() => {
+        throw failure;
+      });
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const preview = textPreviewRequest();
+
+      try {
+        await expectEditorActivationFailure(root, container, preview, failure.message);
+      } finally {
+        await act(async () => root.unmount());
         container.remove();
       }
     });
@@ -727,37 +647,6 @@ describe('CanvasNodeContent', () => {
       expect(html).toContain('Text Preview Error');
       expect(html).not.toContain('canvas-text-preview-empty');
       expect(html).not.toContain('data-canvas-text-editor="true"');
-    });
-
-    it('renders selected text nodes as live editors while keeping their current preview hidden', () => {
-      const html = renderStaticWithI18n(
-        <CanvasNodeContent
-          node={textNode('flow/readme.md', 'rev-a')}
-          selected
-          actions={actionsFixture()}
-          textBuffer={textBuffer('flow/readme.md', 'rev-a')}
-          textPreview={{
-            projectRelativePath: 'flow/readme.md',
-            sourceKey: 'canvas-1\u001fflow/readme.md\u001ffp\u001f700',
-            src: '/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=fp&w=700',
-            previewWidth: 700,
-            fingerprint: 'fp'
-          }}
-          onVideoPlayerMounted={() => undefined}
-          onVideoPlayingChange={() => undefined}
-          onRegisterVideoTarget={() => undefined}
-          onUpdateVideoPlaybackTime={() => undefined}
-          onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
-        />
-      );
-
-      expect(html).toContain('data-editor-engine="codemirror"');
-      expect(html).toContain('canvas-text-preview-image');
-      expect(html).toContain('data-canvas-text-preview-hidden="true"');
     });
 
     it('opens the selected text editor at the persisted text viewport position', async () => {
@@ -1227,11 +1116,9 @@ function textBuffer(path: string, revision: string): TextFileBuffer {
 
 async function renderTextPreviewNode(
   root: Root,
-  textPreview: CanvasTextPreviewSource | undefined,
+  textPreviewRequest: CanvasRasterPreviewRequest | undefined,
   options?: {
     selected?: boolean | undefined;
-    pendingTextPreview?: CanvasTextPreviewSource | undefined;
-    textPreviewCommittedSourceKey?: string | undefined;
     textPreviewError?: string | undefined;
     node?: ProjectedCanvasNode | undefined;
     onUpdateTextViewport?: CanvasNodeContentProps['onUpdateTextViewport'] | undefined;
@@ -1245,9 +1132,7 @@ async function renderTextPreviewNode(
           selected={options?.selected ?? false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
-          textPreview={textPreview}
-          pendingTextPreview={options?.pendingTextPreview}
-          textPreviewCommittedSourceKey={options?.textPreviewCommittedSourceKey}
+          textPreviewRequest={textPreviewRequest}
           textPreviewError={options?.textPreviewError}
           onVideoPlayerMounted={() => undefined}
           onVideoPlayingChange={() => undefined}
@@ -1262,22 +1147,55 @@ async function renderTextPreviewNode(
       </TestProviders>
     );
   });
+  const pending = document.querySelector<HTMLImageElement>(
+    'img[data-canvas-raster-preview-layer="pending"]'
+  );
+  if (pending) {
+    await act(async () => pending.dispatchEvent(new Event('load')));
+    await act(async () => undefined);
+  }
 }
 
-function textPreviewSource(previewWidth: number, fingerprint = 'sha256:preview'): CanvasTextPreviewSource & { fingerprint: string } {
+async function expectEditorActivationFailure(
+  root: Root,
+  container: HTMLElement,
+  preview: CanvasRasterPreviewRequest,
+  message: string
+): Promise<void> {
+  await renderTextPreviewNode(root, preview, { selected: false });
+  await renderTextPreviewNode(root, preview, { selected: true });
+  const overlay = await waitForElement<HTMLElement>(container, '.canvas-text-message--overlay');
+
+  expect(overlay.textContent).toContain(message);
+  expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
+    'data-canvas-raster-preview-hidden'
+  )).toBe('false');
+  expect(container.querySelector('[data-canvas-text-editor="true"]')).toBeNull();
+}
+
+function textPreviewRequest(
+  targetIdentityDigest = 'sha256:preview'
+): CanvasRasterPreviewRequest {
+  const targetIdentity = canvasPreviewTargetIdentityFromDigest(targetIdentityDigest);
   return {
-    projectRelativePath: 'flow/readme.md',
-    sourceKey: `canvas-1\u001fflow/readme.md\u001f${fingerprint}\u001f${previewWidth}`,
-    src: `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&fingerprint=${fingerprint}&w=${previewWidth}`,
-    previewWidth,
-    fingerprint
+    continuityKey: canvasPreviewContinuityKey({
+      mediaKind: 'text',
+      projectId: 'p',
+      canvasId: 'canvas-1',
+      projectRelativePath: 'flow/readme.md',
+      continuityIdentity: targetIdentity
+    }),
+    variantTarget: {
+      mediaKind: 'text',
+      projectId: 'p',
+      canvasId: 'canvas-1',
+      projectRelativePath: 'flow/readme.md',
+      targetIdentity,
+      sourceWidth: 700,
+      srcForWidth: (width) => `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&targetIdentity=${targetIdentity}&w=${width}`
+    }
   };
 }
-
-function textPreviewImage(container: HTMLElement): HTMLImageElement | null {
-  return container.querySelector('img.canvas-text-preview-image');
-}
-
 
 function installAnimationFrameQueue(frameCallbacks: FrameRequestCallback[]): () => void {
   const originalRequestAnimationFrame = window.requestAnimationFrame;
@@ -1328,15 +1246,6 @@ async function waitForElement<T extends Element>(
     });
   }
   throw new Error(`Expected ${selector}.`);
-}
-
-function renderImagePreview(imageState: CanvasImageNodeAssetHookState): string {
-  return renderStaticWithI18n(
-    <CanvasImageNodePreview
-      node={imageNode('flow/cover.png', 'rev-a')}
-      imageState={imageState}
-    />
-  );
 }
 
 function actionsFixture(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {

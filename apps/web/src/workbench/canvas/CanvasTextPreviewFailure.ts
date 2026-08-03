@@ -11,12 +11,23 @@ export type CanvasTextPreviewFailureStage =
 export interface CanvasTextPreviewFailureFields {
   canvasId: string;
   projectRelativePath: string;
-  fingerprint: string;
+  targetIdentity: CanvasPreviewTargetIdentity;
   cssWidth?: number | undefined;
   cssHeight?: number | undefined;
   sourcePixelWidth?: number | undefined;
   sourcePixelHeight?: number | undefined;
   durationMs?: number | undefined;
+}
+
+export function canvasTextPreviewFailureFieldsForTarget(input: Pick<
+  CanvasTextPreviewFailureFields,
+  'canvasId' | 'projectRelativePath' | 'targetIdentity'
+>): CanvasTextPreviewFailureFields {
+  return {
+    canvasId: input.canvasId,
+    projectRelativePath: input.projectRelativePath,
+    targetIdentity: input.targetIdentity
+  };
 }
 
 const DEFAULT_MESSAGES: Record<CanvasTextPreviewFailureStage, string> = {
@@ -65,3 +76,4 @@ export function canvasTextPreviewFailureFromUnknown(
   }
   return new CanvasTextPreviewFailure(stage, fields, DEFAULT_MESSAGES[stage]);
 }
+import type { CanvasPreviewTargetIdentity } from '@debrute/canvas-core';

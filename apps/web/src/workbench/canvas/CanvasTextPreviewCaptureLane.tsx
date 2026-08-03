@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
   captureCanvasTextPreviewSource,
+  canvasTextPreviewTargetKey,
   type CanvasTextPreviewCaptureResult,
   type CanvasTextPreviewCaptureTarget
 } from './CanvasTextPreviewCapture.js';
 import {
   CanvasTextPreviewFailure,
-  canvasTextPreviewFailureFromUnknown,
-  type CanvasTextPreviewFailureFields
+  canvasTextPreviewFailureFieldsForTarget,
+  canvasTextPreviewFailureFromUnknown
 } from './CanvasTextPreviewFailure.js';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
@@ -79,7 +80,7 @@ export function CanvasTextPreviewCaptureLane({
   onRasterizedRef.current = onRasterized;
   onFailureRef.current = onFailure;
   perfMonitorRef.current = perfMonitor;
-  const targetKey = target ? canvasTextPreviewLaneTargetKey(target) : undefined;
+  const targetKey = target ? canvasTextPreviewTargetKey(target) : undefined;
 
   const record = useCallback((
     name: CanvasPerfCounterName,
@@ -93,7 +94,7 @@ export function CanvasTextPreviewCaptureLane({
       name,
       detail: {
         projectRelativePath: targetValue.projectRelativePath,
-        fingerprint: targetValue.fingerprint,
+        targetIdentity: targetValue.targetIdentity,
         ...detail
       }
     });
@@ -118,7 +119,7 @@ export function CanvasTextPreviewCaptureLane({
     job.phase = 'complete';
     const failure = error instanceof CanvasTextPreviewFailure
       ? error
-      : canvasTextPreviewFailureFromUnknown(stage, failureFieldsForTarget(job.target), error);
+      : canvasTextPreviewFailureFromUnknown(stage, canvasTextPreviewFailureFieldsForTarget(job.target), error);
     onFailureRef.current(job.target, failure);
   }, []);
 
@@ -182,7 +183,7 @@ export function CanvasTextPreviewCaptureLane({
     void captureCanvasTextPreviewSource({
         captureRoot: element,
         target: job.target,
-        fields: failureFieldsForTarget(job.target),
+        fields: canvasTextPreviewFailureFieldsForTarget(job.target),
         preparedFont: job.preparedFont,
         signal: job.abortController.signal,
         isInteractionActive: () => interactionActiveRef.current
@@ -359,18 +360,6 @@ function firstVisibleElement(
     }
   }
   return undefined;
-}
-
-function failureFieldsForTarget(target: CanvasTextPreviewCaptureTarget): CanvasTextPreviewFailureFields {
-  return {
-    canvasId: target.canvasId,
-    projectRelativePath: target.projectRelativePath,
-    fingerprint: target.fingerprint
-  };
-}
-
-function canvasTextPreviewLaneTargetKey(target: CanvasTextPreviewCaptureTarget): string {
-  return `${target.canvasId}\u001f${target.projectRelativePath}\u001f${target.fingerprint}`;
 }
 
 function isAbortError(error: unknown): boolean {

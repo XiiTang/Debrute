@@ -9,7 +9,7 @@ export type CanvasPerfEventSource =
   | 'CanvasSurface'
   | 'CanvasStageRuntime'
   | 'CanvasRenderCoordinator'
-  | 'CanvasImageNodeAsset'
+  | 'CanvasRasterPreviewPresentation'
   | 'CanvasTextPreviewRuntime'
   | 'CanvasPreviewResourceScheduler'
   | 'CanvasRenderLifecycle'
@@ -29,23 +29,19 @@ export type CanvasPerfCounterName =
   | 'render-snapshot-reuse'
   | 'viewport-cull-queued'
   | 'viewport-idle-publish'
-  | 'image-node-url-resolve'
-  | 'image-node-url-unchanged'
-  | 'image-node-url-unavailable'
-  | 'image-node-next-load-start'
-  | 'image-node-next-load-resolve'
-  | 'image-node-next-load-reject'
-  | 'image-node-handoff-promote'
-  | 'image-node-upgrade-skip-moving'
-  | 'image-node-source-reset'
-  | 'image-node-retry'
+  | 'raster-preview-requested'
+  | 'raster-preview-pending-mounted'
+  | 'raster-preview-decoded'
+  | 'raster-preview-published'
+  | 'raster-preview-failed'
+  | 'raster-preview-retried'
   | 'text-preview-source-check-requested'
   | 'text-preview-source-check-paused'
   | 'text-preview-source-availability-resolved'
   | 'text-preview-work-epoch-started'
   | 'text-preview-work-epoch-completed'
   | 'text-preview-registry-state'
-  | 'text-preview-target-fingerprint-computed'
+  | 'text-preview-target-identity-computed'
   | 'text-preview-content-read-started'
   | 'text-preview-content-read-completed'
   | 'text-preview-font-coverage-collected'
@@ -55,8 +51,6 @@ export type CanvasPerfCounterName =
   | 'text-preview-raster-completed'
   | 'text-preview-source-upload-started'
   | 'text-preview-source-upload-completed'
-  | 'text-preview-pending-ready'
-  | 'text-preview-published'
   | 'text-preview-failed'
   | 'preview-resource-queued'
   | 'preview-resource-coalesced'
@@ -110,7 +104,7 @@ export interface CanvasPerfFrameInput {
   renderSnapshotBuildCount: number;
   renderSnapshotReuseCount: number;
   stageWriteCount: number;
-  imageNodeWorkCount: number;
+  rasterPreviewWorkCount: number;
 }
 
 export interface CanvasPerfSessionStartInput {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { canvasPreviewTargetIdentityFromDigest } from '@debrute/canvas-core';
 import {
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_BYTES,
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_TARGETS,
@@ -17,21 +18,23 @@ describe('CanvasTextPreviewTaskRegistry', { tags: ['canvas-text'] }, () => {
       previous,
       targets: [target('a.md', 'new'), target('b.md', 'b')],
       sourceAvailability: {
-        'a.md': { fingerprint: 'new', available: false },
-        'b.md': { fingerprint: 'b', available: true }
+        'a.md': { targetIdentity: canvasPreviewTargetIdentityFromDigest('new'), available: false },
+        'b.md': { targetIdentity: canvasPreviewTargetIdentityFromDigest('b'), available: true }
       }
     });
 
     expect([...next.keys()]).toEqual(['a.md']);
-    expect(next.get('a.md')).toMatchObject({ fingerprint: 'new', state: 'needs-content' });
+    expect(next.get('a.md')).toMatchObject({ targetIdentity: 'new', state: 'needs-content' });
   });
 
-  it('retains current work for an unchanged fingerprint', () => {
+  it('retains current work for an unchanged target identity', () => {
     const current = task('a.md', 'same', 'ready');
     const next = reconcileCanvasTextPreviewTasks({
       previous: new Map([['a.md', current]]),
       targets: [target('a.md', 'same')],
-      sourceAvailability: { 'a.md': { fingerprint: 'same', available: false } }
+      sourceAvailability: {
+        'a.md': { targetIdentity: canvasPreviewTargetIdentityFromDigest('same'), available: false }
+      }
     });
 
     expect(next.get('a.md')).toBe(current);
@@ -73,12 +76,13 @@ describe('CanvasTextPreviewTaskRegistry', { tags: ['canvas-text'] }, () => {
   });
 });
 
-function target(projectRelativePath: string, fingerprint: string) {
+function target(projectRelativePath: string, targetIdentity: string) {
   return {
+    projectId: 'project-1',
     canvasId: 'canvas-1',
     projectRelativePath,
-    fingerprint,
-    contentDigest: `sha256:${fingerprint}`,
+    targetIdentity: canvasPreviewTargetIdentityFromDigest(targetIdentity),
+    contentDigest: `sha256:${targetIdentity}`,
     estimatedBytes: 1,
     language: 'markdown' as const,
     wordWrap: false,
@@ -95,8 +99,8 @@ function target(projectRelativePath: string, fingerprint: string) {
 
 function task(
   projectRelativePath: string,
-  fingerprint: string,
+  targetIdentity: string,
   state: CanvasTextPreviewTask['state']
 ): CanvasTextPreviewTask {
-  return { ...target(projectRelativePath, fingerprint), state };
+  return { ...target(projectRelativePath, targetIdentity), state };
 }

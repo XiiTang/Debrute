@@ -87,7 +87,7 @@ pub struct CanvasImagePreviewSourceInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanvasTextPreviewSourceTarget {
     pub project_relative_path: String,
-    pub fingerprint: String,
+    pub target_identity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -464,7 +464,7 @@ impl ProjectPreviewService {
                         target.project_relative_path.clone(),
                     ),
                     ("canvas_id".to_owned(), canvas_id.to_owned()),
-                    ("fingerprint".to_owned(), target.fingerprint.clone()),
+                    ("target_identity".to_owned(), target.target_identity.clone()),
                 ],
             )
         })?;
@@ -651,7 +651,10 @@ fn text_preview_base_project_path(
     Ok(format!(
         ".debrute/cache/canvas-text-previews/{canvas_id}/{}/{}",
         project_relative_path_cache_key(&relative)?,
-        safe_cache_segment(&target.fingerprint, "Canvas text preview fingerprint")?
+        safe_cache_segment(
+            &target.target_identity,
+            "Canvas text preview target identity"
+        )?
     ))
 }
 
@@ -1148,7 +1151,7 @@ mod tests {
         );
         let target = CanvasTextPreviewSourceTarget {
             project_relative_path: "notes/title.md".to_owned(),
-            fingerprint: "style:one".to_owned(),
+            target_identity: "style:one".to_owned(),
         };
         service
             .save_text_preview_source(&root, "canvas-1", &target, &root.join("assets/source.png"))
@@ -1185,7 +1188,7 @@ mod tests {
         );
         let target = CanvasTextPreviewSourceTarget {
             project_relative_path: "notes/title.md".to_owned(),
-            fingerprint: "style:direct".to_owned(),
+            target_identity: "style:direct".to_owned(),
         };
         service
             .save_text_preview_source(&root, "canvas-1", &target, &root.join("assets/source.png"))

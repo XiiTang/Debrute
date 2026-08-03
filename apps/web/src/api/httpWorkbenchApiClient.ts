@@ -966,7 +966,7 @@ function canvasTextPreviewSourceFormData(input: SaveCanvasTextPreviewSourceInput
   formData.append('metadata', JSON.stringify({
     canvasId: input.canvasId,
     projectRelativePath: input.projectRelativePath,
-    fingerprint: input.fingerprint
+    targetIdentity: input.targetIdentity
   }));
   formData.append('source', input.sourcePng, 'source.png');
   return formData;

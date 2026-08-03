@@ -1,4 +1,10 @@
 import type { ProjectTextLanguageId } from '@debrute/app-protocol';
+import {
+  canvasPreviewTargetKey,
+  canvasPreviewTargetIdentityFromDigest,
+  type CanvasPreviewTargetIdentity,
+  type CanvasPreviewTargetKey
+} from '@debrute/canvas-core';
 import type { CanvasTextPreparedFont } from './CanvasTextRenderProfile.js';
 import {
   canvasTextPreviewFailureFromUnknown,
@@ -154,6 +160,7 @@ export interface CanvasTextPreviewSourceSize {
 }
 
 export interface CanvasTextPreviewCandidate extends CanvasTextPreviewSourceSize {
+  projectId: string;
   canvasId: string;
   projectRelativePath: string;
   contentDigest: string;
@@ -168,11 +175,21 @@ export interface CanvasTextPreviewCandidate extends CanvasTextPreviewSourceSize 
 }
 
 export interface CanvasTextPreviewTarget extends CanvasTextPreviewCandidate {
-  fingerprint: string;
+  targetIdentity: CanvasPreviewTargetIdentity;
 }
 
 export interface CanvasTextPreviewCaptureTarget extends CanvasTextPreviewTarget {
   content: string;
+}
+
+export function canvasTextPreviewTargetKey(target: CanvasTextPreviewTarget): CanvasPreviewTargetKey {
+  return canvasPreviewTargetKey({
+    mediaKind: 'text',
+    projectId: target.projectId,
+    canvasId: target.canvasId,
+    projectRelativePath: target.projectRelativePath,
+    targetIdentity: target.targetIdentity
+  });
 }
 
 export interface CanvasTextPreviewCaptureResult {
@@ -326,7 +343,7 @@ export async function captureCanvasTextPreviewSource(input: {
   }
 }
 
-export async function canvasTextPreviewFingerprint(input: {
+export async function canvasTextPreviewTargetIdentity(input: {
   contentDigest: string;
   language: ProjectTextLanguageId;
   wordWrap: boolean;
@@ -339,7 +356,7 @@ export async function canvasTextPreviewFingerprint(input: {
   sourcePixelHeight: number;
   sourceScale: number;
   rasterEnvironmentIdentity?: CanvasTextRasterEnvironmentIdentity | undefined;
-}): Promise<string> {
+}): Promise<CanvasPreviewTargetIdentity> {
   const payload = JSON.stringify({
     renderPolicyVersion: CANVAS_TEXT_PREVIEW_RENDER_POLICY_VERSION,
     rasterEnvironmentIdentity: input.rasterEnvironmentIdentity
@@ -357,7 +374,9 @@ export async function canvasTextPreviewFingerprint(input: {
     sourceScale: input.sourceScale
   });
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
-  return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  return canvasPreviewTargetIdentityFromDigest(
+    `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+  );
 }
 
 export function canvasTextRasterEnvironmentIdentity(): CanvasTextRasterEnvironmentIdentity {

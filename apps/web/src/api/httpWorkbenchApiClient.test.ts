@@ -189,7 +189,7 @@ describe('Runtime Workbench connection', () => {
     await client.openProject({ projectRoot: '/tmp/project' });
     const target = {
       projectRelativePath: 'media/clip.mp4',
-      videoRevision: 'sha256:video',
+      sourceRevision: 'sha256:video',
       frameTimeMs: 1_500
     };
 
@@ -200,7 +200,7 @@ describe('Runtime Workbench connection', () => {
     await expect(client.ensureCanvasVideoPreviewSource({
       canvasId: 'canvas-1',
       target,
-      sourceKey: 'frame-key'
+      canonicalSourceIdentity: 'frame-key'
     })).resolves.toEqual({ status: 'source-changed' });
 
     const [probe, ensure] = harness.calls.slice(-2);
@@ -210,7 +210,7 @@ describe('Runtime Workbench connection', () => {
     expect(JSON.parse(String(ensure?.init?.body))).toEqual({
       canvasId: 'canvas-1',
       target,
-      sourceKey: 'frame-key'
+      canonicalSourceIdentity: 'frame-key'
     });
     client.dispose();
   });

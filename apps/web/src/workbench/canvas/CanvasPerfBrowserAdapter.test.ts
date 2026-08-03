@@ -161,7 +161,7 @@ describe('CanvasPerfBrowserAdapter', () => {
       renderSnapshotBuildCount: 0,
       renderSnapshotReuseCount: 0,
       stageWriteCount: 0,
-      imageNodeWorkCount: 0
+      rasterPreviewWorkCount: 0
     });
 
     expect(mark).not.toHaveBeenCalled();

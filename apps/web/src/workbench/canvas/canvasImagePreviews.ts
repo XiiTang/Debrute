@@ -1,24 +1,18 @@
-import { canvasRawFileProjectId } from './canvasRawFileUrls';
-
 export interface CanvasImageSource {
   src: string;
   previewWidth: number;
 }
 
-export interface CanvasLoadedImage extends CanvasImageSource {
-  loadKey: string;
-}
-
 export function canvasImageSource(input: {
+  projectId: string;
   projectRelativePath: string;
-  fileUrl: string;
-  revision: string;
+  sourceRevision: string;
   previewWidth: number;
 }): CanvasImageSource {
   const src = canvasImagePreviewUrl(
-    input.fileUrl,
+    input.projectId,
     input.projectRelativePath,
-    input.revision,
+    input.sourceRevision,
     input.previewWidth
   );
   return {
@@ -27,11 +21,10 @@ export function canvasImageSource(input: {
   };
 }
 
-function canvasImagePreviewUrl(fileUrl: string, projectRelativePath: string, revision: string, width: number): string {
-  const projectId = canvasRawFileProjectId(fileUrl);
+function canvasImagePreviewUrl(projectId: string, projectRelativePath: string, revision: string, width: number): string {
   const params = new URLSearchParams({
     path: projectRelativePath,
-    v: revision,
+    sourceRevision: revision,
     w: String(width)
   });
   return `/api/projects/${projectId}/canvas-image-preview?${params.toString()}`;

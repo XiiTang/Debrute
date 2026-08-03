@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { CanvasTextEditor } from './CanvasTextEditor';
-import { canvasTextEditorApplyFocusRequest } from './CanvasTextEditorRuntime';
+import * as CanvasTextEditorRuntime from './CanvasTextEditorRuntime.js';
 import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
 import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
@@ -80,7 +80,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
     const focus = vi.fn();
     const dispatch = vi.fn();
 
-    canvasTextEditorApplyFocusRequest({
+    CanvasTextEditorRuntime.canvasTextEditorApplyFocusRequest({
       state,
       documentTop: 0,
       defaultLineHeight: 18,
@@ -203,6 +203,59 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
       await act(async () => {
         root.unmount();
       });
+      container.remove();
+      restoreAnimationFrame();
+    }
+  });
+
+  it('reports an asynchronous initial viewport layout failure', async () => {
+    const frameCallbacks: Array<FrameRequestCallback | undefined> = [];
+    const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
+    const failure = new Error('initial viewport frame failed');
+    let applyCount = 0;
+    vi.spyOn(CanvasTextEditorRuntime, 'canvasTextEditorApplyInitialScroll').mockImplementation(() => {
+      applyCount += 1;
+      if (applyCount === 2) {
+        throw failure;
+      }
+    });
+    const onLayoutFailure = vi.fn();
+    const onLayoutReady = vi.fn();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(withRenderProfile(
+          <CanvasTextEditor
+            value="# Notes"
+            language="markdown"
+            wordWrap={false}
+            visible
+            published={false}
+            initialScrollTop={72}
+            initialScrollLeft={9}
+            onChange={() => undefined}
+            onSave={() => undefined}
+            onToggleWordWrap={() => undefined}
+            onLayoutReady={onLayoutReady}
+            onLayoutFailure={onLayoutFailure}
+          />
+        ));
+      });
+
+      expect(onLayoutFailure).not.toHaveBeenCalled();
+
+      await act(async () => {
+        flushAnimationFrames(frameCallbacks);
+      });
+
+      expect(onLayoutFailure).toHaveBeenCalledOnce();
+      expect(onLayoutFailure).toHaveBeenCalledWith(failure);
+      expect(onLayoutReady).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
       container.remove();
       restoreAnimationFrame();
     }

@@ -126,37 +126,37 @@ describe('CanvasPerfMonitor', () => {
       sessionId: drag,
       sessionTypes: ['camera-pan'],
       timestamp: 10,
-      source: 'CanvasImageNodeAsset',
-      name: 'image-node-handoff-promote'
+      source: 'CanvasRasterPreviewPresentation',
+      name: 'raster-preview-published'
     });
 
     const dragSummary = monitor.endSession({ sessionId: drag, timestamp: 20, source: 'CanvasSurface' });
     const cameraSummary = monitor.endSession({ sessionId: camera, timestamp: 30, source: 'CanvasSurface' });
 
-    expect(dragSummary?.counters).toEqual({ 'image-node-handoff-promote': 1 });
-    expect(cameraSummary?.counters).toEqual({ 'image-node-handoff-promote': 1 });
+    expect(dragSummary?.counters).toEqual({ 'raster-preview-published': 1 });
+    expect(cameraSummary?.counters).toEqual({ 'raster-preview-published': 1 });
   });
 
-  it('records image node asset counters in totals and summaries', () => {
+  it('records shared raster presentation counters in totals and summaries', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionId = monitor.startSession({ type: 'camera-pan', timestamp: 0, source: 'CanvasSurface' });
 
-    monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasImageNodeAsset', name: 'image-node-url-resolve' });
-    monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasImageNodeAsset', name: 'image-node-next-load-start' });
-    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasImageNodeAsset', name: 'image-node-next-load-resolve' });
-    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasImageNodeAsset', name: 'image-node-handoff-promote' });
-    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasImageNodeAsset', name: 'image-node-upgrade-skip-moving' });
+    monitor.recordCounter({ sessionId, timestamp: 1, source: 'CanvasRasterPreviewPresentation', name: 'raster-preview-requested' });
+    monitor.recordCounter({ sessionId, timestamp: 2, source: 'CanvasRasterPreviewPresentation', name: 'raster-preview-pending-mounted' });
+    monitor.recordCounter({ sessionId, timestamp: 3, source: 'CanvasRasterPreviewPresentation', name: 'raster-preview-decoded' });
+    monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasRasterPreviewPresentation', name: 'raster-preview-published' });
+    monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasRasterPreviewPresentation', name: 'raster-preview-failed' });
     monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasPreviewResourceScheduler', name: 'preview-resource-queued' });
     monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasPreviewResourceScheduler', name: 'preview-resource-started' });
 
     const summary = monitor.endSession({ sessionId, timestamp: 10, source: 'CanvasSurface' });
 
     expect(monitor.getCounterTotals()).toEqual({
-      'image-node-url-resolve': 1,
-      'image-node-next-load-start': 1,
-      'image-node-next-load-resolve': 1,
-      'image-node-handoff-promote': 1,
-      'image-node-upgrade-skip-moving': 1,
+      'raster-preview-requested': 1,
+      'raster-preview-pending-mounted': 1,
+      'raster-preview-decoded': 1,
+      'raster-preview-published': 1,
+      'raster-preview-failed': 1,
       'preview-resource-queued': 1,
       'preview-resource-started': 1
     });
@@ -173,9 +173,7 @@ describe('CanvasPerfMonitor', () => {
     monitor.recordCounter({ sessionId, timestamp: 4, source: 'CanvasTextPreviewRuntime', name: 'text-preview-dom-snapshot-completed' });
     monitor.recordCounter({ sessionId, timestamp: 5, source: 'CanvasTextPreviewRuntime', name: 'text-preview-raster-completed' });
     monitor.recordCounter({ sessionId, timestamp: 6, source: 'CanvasTextPreviewRuntime', name: 'text-preview-source-upload-completed' });
-    monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasTextPreviewRuntime', name: 'text-preview-pending-ready' });
-    monitor.recordCounter({ sessionId, timestamp: 8, source: 'CanvasTextPreviewRuntime', name: 'text-preview-published' });
-    monitor.recordCounter({ sessionId, timestamp: 9, source: 'CanvasTextPreviewRuntime', name: 'text-preview-failed' });
+    monitor.recordCounter({ sessionId, timestamp: 7, source: 'CanvasTextPreviewRuntime', name: 'text-preview-failed' });
 
     const summary = monitor.endSession({ sessionId, timestamp: 11, source: 'CanvasSurface' });
 
@@ -186,8 +184,6 @@ describe('CanvasPerfMonitor', () => {
       'text-preview-dom-snapshot-completed': 1,
       'text-preview-raster-completed': 1,
       'text-preview-source-upload-completed': 1,
-      'text-preview-pending-ready': 1,
-      'text-preview-published': 1,
       'text-preview-failed': 1
     });
     expect(summary?.counters).toEqual(monitor.getCounterTotals());
@@ -250,7 +246,7 @@ function frame(
     renderSnapshotBuildCount: 0,
     renderSnapshotReuseCount: 0,
     stageWriteCount: 0,
-    imageNodeWorkCount: 0,
+    rasterPreviewWorkCount: 0,
     ...overrides
   };
 }

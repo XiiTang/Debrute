@@ -98,15 +98,13 @@ const STAGE_WRITE_COUNTERS = [
   'stage-edge-visibility-write'
 ] as const satisfies readonly CanvasPerfCounterName[];
 
-const IMAGE_NODE_WORK_COUNTERS = [
-  'image-node-url-resolve',
-  'image-node-next-load-start',
-  'image-node-next-load-resolve',
-  'image-node-next-load-reject',
-  'image-node-handoff-promote',
-  'image-node-upgrade-skip-moving',
-  'image-node-source-reset',
-  'image-node-retry'
+const RASTER_PREVIEW_WORK_COUNTERS = [
+  'raster-preview-requested',
+  'raster-preview-pending-mounted',
+  'raster-preview-decoded',
+  'raster-preview-published',
+  'raster-preview-failed',
+  'raster-preview-retried'
 ] as const satisfies readonly CanvasPerfCounterName[];
 
 export function syncCanvasPerfSessionState(input: {
@@ -250,7 +248,7 @@ export function recordCanvasPerfFrame(input: {
     renderSnapshotBuildCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-build'),
     renderSnapshotReuseCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-reuse'),
     stageWriteCount: counterDeltaSum(counterTotals, session.counterTotals, STAGE_WRITE_COUNTERS),
-    imageNodeWorkCount: counterDeltaSum(counterTotals, session.counterTotals, IMAGE_NODE_WORK_COUNTERS)
+    rasterPreviewWorkCount: counterDeltaSum(counterTotals, session.counterTotals, RASTER_PREVIEW_WORK_COUNTERS)
   });
   session.counterTotals = counterTotals;
 }
@@ -328,11 +326,13 @@ function canvasImageLayerDebugCounts(surfaceElement: HTMLElement | null): Debrut
     previewSources: 0,
     rawSources: 0
   };
-  for (const image of surfaceElement?.querySelectorAll<HTMLImageElement>('[data-canvas-image-layer]') ?? []) {
-    const layer = image.getAttribute('data-canvas-image-layer');
+  for (const image of surfaceElement?.querySelectorAll<HTMLImageElement>(
+    '[data-canvas-raster-preview-kind="image"]'
+  ) ?? []) {
+    const layer = image.getAttribute('data-canvas-raster-preview-layer');
     if (layer === 'visible') {
       counts.visible += 1;
-    } else if (layer === 'next') {
+    } else if (layer === 'pending') {
       counts.next += 1;
     }
     const src = image.getAttribute('src') ?? '';

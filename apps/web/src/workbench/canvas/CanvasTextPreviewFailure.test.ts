@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { canvasPreviewTargetIdentityFromDigest } from '@debrute/canvas-core';
 import {
   CanvasTextPreviewFailure,
   canvasTextPreviewFailureFromUnknown
@@ -7,7 +8,7 @@ import {
 const fields = {
   canvasId: 'canvas-1',
   projectRelativePath: 'references/art/api/12_cma_1993.143.json',
-  fingerprint: 'sha256:current'
+  targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:current')
 };
 
 describe('CanvasTextPreviewFailure', { tags: ['canvas-text'] }, () => {

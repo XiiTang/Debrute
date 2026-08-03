@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { canvasPreviewCanonicalSourceIdentity } from '@debrute/canvas-core';
 import {
   CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS,
   canvasVideoPreviewProbeWindow,
@@ -11,11 +12,15 @@ import {
 } from './CanvasVideoPreviewTaskRegistry';
 
 describe('Canvas Video Preview task registry', { tags: ['canvas-video'] }, () => {
-  it('keeps the current target and replaces the same path when its fingerprint changes', () => {
+  it('keeps the current target and replaces the same path when its identity changes', () => {
     const current = target('media/a.mp4', 1_000);
     const previous = new Map<string, CanvasVideoPreviewTask>([[
       current.projectRelativePath,
-      { ...current, state: 'needs-source', sourceKey: 'source-a' }
+      {
+        ...current,
+        state: 'needs-source',
+        canonicalSourceIdentity: canvasPreviewCanonicalSourceIdentity('source-a')
+      }
     ]]);
 
     expect(reconcileCanvasVideoPreviewTasks({
@@ -74,9 +79,10 @@ describe('Canvas Video Preview task registry', { tags: ['canvas-video'] }, () =>
 
 function target(projectRelativePath: string, frameTimeMs: number): CanvasVideoPreviewTarget {
   return {
+    projectId: 'project-1',
     canvasId: 'canvas-1',
     projectRelativePath,
-    videoRevision: 'revision-1',
+    sourceRevision: 'revision-1',
     frameTimeMs
   };
 }

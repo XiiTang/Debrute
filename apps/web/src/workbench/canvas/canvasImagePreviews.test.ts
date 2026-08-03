@@ -1,100 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import { canvasImageNodeSourceInputForNode, canvasImageNodeSourceRequest } from './CanvasImageNodeAsset';
-import {
-  canvasImageSource as canvasImageSourceFromRequest,
-  type CanvasImageSource
-} from './canvasImagePreviews';
+import { canvasImageRasterPreviewRequestForNode } from './canvasImagePreviewTarget';
 
-describe('canvas image preview URLs', () => {
-  it('uses dynamic preview URLs without falling back to original files by screen width', () => {
-    const node = nodeFixture('flow/cover.png', 2400, 'image/png');
+describe('canvas image preview target', () => {
+  it('provides canonical source width and width-specific Runtime URLs', () => {
+    const request = canvasImageRasterPreviewRequestForNode(
+      nodeFixture('flow/cover art.png', 2400, 'image/png')
+    );
 
-    expect(imageSourceForNode({
-      node,
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toEqual({ src: previewUrl('flow/cover.png', 300), previewWidth: 300 });
-
-    expect(imageSourceForNode({
-      node,
-      resourceZoom: 1,
-      devicePixelRatio: 1
-    })).toEqual({ src: previewUrl('flow/cover.png', 2400), previewWidth: 2400 });
+    expect(request.variantTarget?.sourceWidth).toBe(2400);
+    expect(request.variantTarget?.srcForWidth(600)).toBe(
+      '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?path=flow%2Fcover+art.png&sourceRevision=rev&w=600'
+    );
   });
 
-  it('returns source metadata with the chosen dynamic preview width', () => {
-    expect(imageSourceForNode({
-      node: nodeFixture('flow/cover.png', 2400, 'image/png'),
-      resourceZoom: 0.2,
-      devicePixelRatio: 1
-    })).toEqual({
-      src: previewUrl('flow/cover.png', 600),
-      previewWidth: 600
-    });
-  });
-
-  it('does not return raw Canvas image URLs for unsupported image nodes', () => {
-    expect(imageSourceForNode({
-      node: nodeFixture('flow/animated.gif', 1000, 'image/gif'),
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toBeUndefined();
-
-    expect(imageSourceForNode({
-      node: { ...nodeFixture('flow/movie.mp4', 1000, 'video/mp4'), mediaKind: 'video' },
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toBeUndefined();
-
-    expect(imageSourceForNode({
-      node: nodeFixture('flow/animated.webp', 1000, 'image/webp', false),
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toBeUndefined();
-  });
-
-  it('scales dynamic previews below source width and caps them at source width', () => {
-    const node = nodeFixture('flow/small.png', 1200, 'image/png', true, 300);
-
-    expect(imageSourceForNode({
-      node,
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toEqual({ src: previewUrl('flow/small.png', 150), previewWidth: 150 });
-
-    expect(imageSourceForNode({
-      node,
-      resourceZoom: 2,
-      devicePixelRatio: 2
-    })).toEqual({ src: previewUrl('flow/small.png', 300), previewWidth: 300 });
-  });
-
-  it('keeps preview URLs limited to path, revision, and dynamic width', () => {
-    expect(imageSourceForNode({
-      node: nodeFixture('flow/cover art.png', 1000, 'image/png'),
-      resourceZoom: 0.2,
-      devicePixelRatio: 1
-    })).toEqual({
-      src: '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?path=flow%2Fcover+art.png&v=rev&w=250',
-      previewWidth: 250
-    });
+  it('does not create raster targets for unsupported image nodes', () => {
+    expect(canvasImageRasterPreviewRequestForNode(
+      nodeFixture('flow/animated.gif', 1000, 'image/gif')
+    )).toEqual({});
+    expect(canvasImageRasterPreviewRequestForNode({
+      ...nodeFixture('flow/movie.mp4', 1000, 'video/mp4'),
+      mediaKind: 'video'
+    })).toEqual({});
+    expect(canvasImageRasterPreviewRequestForNode(
+      nodeFixture('flow/animated.webp', 1000, 'image/webp', false)
+    )).toEqual({});
   });
 
   it('rejects raw-file URLs outside the exact Runtime response shape', () => {
     const path = '阿咕/阿咕-形象总览.png';
-    expect(() => imageSourceForNode({
-      node: nodeFixture(path, 5120, 'image/png', true, 5120, `https://elsewhere.invalid${rawUrl(path)}`),
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
-    expect(() => imageSourceForNode({
-      node: nodeFixture(path, 5120, 'image/png', true, 5120, `${rawUrl(path)}&ignored=test-token`),
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
+    expect(() => canvasImageRasterPreviewRequestForNode(
+      nodeFixture(path, 5120, 'image/png', true, 5120, `https://elsewhere.invalid${rawUrl(path)}`)
+    )).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
+    expect(() => canvasImageRasterPreviewRequestForNode(
+      nodeFixture(path, 5120, 'image/png', true, 5120, `${rawUrl(path)}&ignored=test-token`)
+    )).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
   });
-
 });
 
 function nodeFixture(
@@ -131,36 +72,6 @@ function rawUrl(path: string): string {
   return `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${encodedPath}?v=rev`;
 }
 
-function previewUrl(path: string, width: number): string {
-  const params = new URLSearchParams({
-    path,
-    v: 'rev',
-    w: String(width)
-  });
-  return `/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?${params.toString()}`;
-}
-
 function isStillRasterMimeType(mimeType: string): boolean {
   return mimeType === 'image/png' || mimeType === 'image/jpeg' || mimeType === 'image/webp';
-}
-
-function imageSourceForNode(input: {
-  node: ProjectedCanvasNode;
-  resourceZoom: number;
-  devicePixelRatio: number;
-}): CanvasImageSource | undefined {
-  const request = canvasImageNodeSourceRequest({
-    source: canvasImageNodeSourceInputForNode(input.node),
-    resourceZoom: input.resourceZoom,
-    devicePixelRatio: input.devicePixelRatio
-  });
-  if (request.kind === 'not-eligible') {
-    return undefined;
-  }
-  return canvasImageSourceFromRequest({
-    projectRelativePath: request.projectRelativePath,
-    fileUrl: request.fileUrl,
-    revision: request.revision,
-    previewWidth: request.previewWidth
-  });
 }

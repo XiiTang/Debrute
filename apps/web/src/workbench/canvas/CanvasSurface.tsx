@@ -17,7 +17,10 @@ import {
   type CanvasFeedbackNodeBarTarget
 } from '../shell/floatingBars';
 import { cameraForCanvasContent } from './CanvasCameraBounds';
-import { CanvasImageNodeAssetProvider, type CanvasImageNodeAssetContextValue } from './CanvasImageNodeAssetContext';
+import {
+  CanvasRasterPreviewEnvironmentProvider,
+  type CanvasRasterPreviewEnvironment
+} from './CanvasRasterPreviewPresentation';
 import { createCanvasVideoHotkeyController } from './CanvasVideoHotkeyController';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
@@ -35,9 +38,8 @@ import {
 import {
   CanvasVideoPreviewProvider,
   useCanvasVideoPreviewNode,
-  useCanvasVideoPreviewRuntime
+  type CanvasVideoPreviewNodeSnapshot
 } from './CanvasVideoPreviewRuntime.js';
-import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge } from './CanvasPerfDebugBridge';
@@ -314,11 +316,11 @@ function CanvasSurfaceRuntime({
     runtime.manualLayout.getPresentation().layoutOverrides
   ), [runtime]);
   const canvasPerfDebugContextRef = useRef<CanvasPerfDebugSnapshotContext | undefined>(undefined);
-  const imageNodeAssetContext = useMemo<CanvasImageNodeAssetContextValue>(() => ({
+  const rasterPreviewEnvironment = useMemo<CanvasRasterPreviewEnvironment>(() => ({
     resourceZoom,
     devicePixelRatio,
-    perfMonitor: instrumentationMonitor,
-    previewResourceScheduler
+    previewResourceScheduler,
+    perfMonitor: instrumentationMonitor
   }), [devicePixelRatio, instrumentationMonitor, previewResourceScheduler, resourceZoom]);
 
   selectionRef.current = selection;
@@ -1026,30 +1028,26 @@ function CanvasSurfaceRuntime({
             stageRuntime={stageRuntime}
           />
         ))}
-        <CanvasVideoPreviewProvider
-          canvasId={canvas.id}
-          nodes={projectedNodes}
-          activeVideoPaths={activeVideoPaths}
-          actions={actions}
-          resourceZoom={resourceZoom}
-          devicePixelRatio={devicePixelRatio}
-          previewOrder={renderLifecycle}
-          previewResourceScheduler={previewResourceScheduler}
-        >
-          <CanvasTextPreviewProvider
+        <CanvasRasterPreviewEnvironmentProvider value={rasterPreviewEnvironment}>
+          <CanvasVideoPreviewProvider
             canvasId={canvas.id}
             nodes={projectedNodes}
-            activeInlineTextPath={activeInlineTextPath}
-            textFileBuffers={textFileBuffers}
+            activeVideoPaths={activeVideoPaths}
             actions={actions}
-            resourceZoom={resourceZoom}
-            devicePixelRatio={devicePixelRatio}
             previewOrder={renderLifecycle}
-            styleDependencyKey={textPreviewStyleDependencyKey}
-            perfMonitor={instrumentationMonitor}
             previewResourceScheduler={previewResourceScheduler}
           >
-            <CanvasImageNodeAssetProvider value={imageNodeAssetContext}>
+            <CanvasTextPreviewProvider
+              canvasId={canvas.id}
+              nodes={projectedNodes}
+              activeInlineTextPath={activeInlineTextPath}
+              textFileBuffers={textFileBuffers}
+              actions={actions}
+              previewOrder={renderLifecycle}
+              styleDependencyKey={textPreviewStyleDependencyKey}
+              perfMonitor={instrumentationMonitor}
+              previewResourceScheduler={previewResourceScheduler}
+            >
               {renderedNodes.map((node) => (
                 <CanvasSurfaceNodeShell
                   key={node.projectRelativePath}
@@ -1099,9 +1097,9 @@ function CanvasSurfaceRuntime({
                   onUpdateTextViewport={handleUpdateTextViewport}
                 />
               ))}
-            </CanvasImageNodeAssetProvider>
-          </CanvasTextPreviewProvider>
-        </CanvasVideoPreviewProvider>
+            </CanvasTextPreviewProvider>
+          </CanvasVideoPreviewProvider>
+        </CanvasRasterPreviewEnvironmentProvider>
       </div>
       <CanvasSelectionMarqueeOverlay
         interaction={pointerInteraction}
@@ -1212,36 +1210,23 @@ function CanvasSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.React
 }
 
 function CanvasTextSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.ReactElement {
-  const { presentation, previewError } = useCanvasTextPreviewNode(props.node);
+  const { request, previewError } = useCanvasTextPreviewNode(props.node);
   return (
     <CanvasSurfaceNodeShellBase
       {...props}
-      textPreviewPresentation={presentation}
+      textPreviewRequest={request}
       textPreviewError={previewError}
     />
   );
 }
 
 function CanvasVideoSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.ReactElement {
-  const { preview, previewError } = useCanvasVideoPreviewNode(props.node);
-  const { reportPreviewError, retryPreview } = useCanvasVideoPreviewRuntime();
-  const reportVideoPreviewError = useCallback((
-    projectRelativePath: string,
-    source: CanvasVideoPreviewSource,
-    message: string
-  ) => {
-    reportPreviewError({ projectRelativePath, preview: source, message });
-  }, [reportPreviewError]);
-  const retryVideoPreview = useCallback(() => {
-    retryPreview(props.node.projectRelativePath);
-  }, [props.node.projectRelativePath, retryPreview]);
+  const { request, previewError } = useCanvasVideoPreviewNode(props.node);
   return (
     <CanvasSurfaceNodeShellBase
       {...props}
-      videoPreview={preview}
+      videoPreviewRequest={request}
       videoPreviewError={previewError}
-      onVideoPreviewError={reportVideoPreviewError}
-      onVideoPreviewRetry={retryVideoPreview}
     />
   );
 }
@@ -1276,19 +1261,15 @@ function CanvasSurfaceNodeShellBase({
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
   onUpdateTextViewport,
-  textPreviewPresentation,
+  textPreviewRequest,
   textPreviewError,
-  videoPreview,
+  videoPreviewRequest,
   videoPreviewError,
-  onVideoPreviewError,
-  onVideoPreviewRetry
 }: CanvasSurfaceNodeShellProps & {
-  textPreviewPresentation?: CanvasTextPreviewNodeSnapshot['presentation'] | undefined;
+  textPreviewRequest?: CanvasTextPreviewNodeSnapshot['request'] | undefined;
   textPreviewError?: string | undefined;
-  videoPreview?: CanvasVideoPreviewSource | undefined;
+  videoPreviewRequest?: CanvasVideoPreviewNodeSnapshot['request'] | undefined;
   videoPreviewError?: string | undefined;
-  onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
-  onVideoPreviewRetry?: (() => void) | undefined;
 }): React.ReactElement {
   return (
     <CanvasNodeShell
@@ -1302,11 +1283,9 @@ function CanvasSurfaceNodeShellBase({
       stageRuntime={stageRuntime}
       actions={actions}
       textBuffer={textBuffer}
-      textPreview={textPreviewPresentation?.visible}
-      pendingTextPreview={textPreviewPresentation?.pending}
-      textPreviewCommittedSourceKey={textPreviewPresentation?.visibleCommittedSourceKey}
+      textPreviewRequest={textPreviewRequest}
       textPreviewError={textPreviewError}
-      videoPreview={videoPreview}
+      videoPreviewRequest={videoPreviewRequest}
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
       feedbackEntry={feedbackEntry}
@@ -1327,8 +1306,6 @@ function CanvasSurfaceNodeShellBase({
       onRegisterVideoTarget={onRegisterVideoTarget}
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}
-      onVideoPreviewError={onVideoPreviewError}
-      onVideoPreviewRetry={onVideoPreviewRetry}
     />
   );
 }

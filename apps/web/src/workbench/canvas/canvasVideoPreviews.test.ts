@@ -1,100 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import {
-  canvasVideoPreviewSource,
-  canvasVideoPreviewWidthForNode
-} from './canvasVideoPreviews';
+import { canvasPreviewCanonicalSourceIdentity } from '@debrute/canvas-core';
+import { canvasVideoRasterPreviewRequest } from './CanvasVideoPreviewRuntime';
+import type { CanvasVideoPreviewTarget } from './CanvasVideoPreviewTaskRegistry.js';
 
 describe('canvas video preview URLs', { tags: ['canvas-video'] }, () => {
-  it('calculates preview width with the shared raster width ladder', () => {
-    expect(canvasVideoPreviewWidthForNode({
-      nodeDisplayWidth: 1200,
-      sourceWidth: 1200,
-      resourceZoom: 0.1,
-      devicePixelRatio: 2
-    })).toBe(300);
-  });
-
-  it('builds video preview URLs from raw file URLs and explicit canvas id', () => {
-    const source = canvasVideoPreviewSource({
-      canvasId: 'canvas-1',
-      node: videoNode('media/clip.mp4', 'rev-video'),
-      sourceKey: 'frame-v1--ms-0',
-      sourceWidth: 1200,
-      frameTimeMs: 0,
-      resourceZoom: 0.1,
-      devicePixelRatio: 2
+  it('builds video preview URLs from one owner-scoped target', () => {
+    const canonicalSourceIdentity = canvasPreviewCanonicalSourceIdentity('frame-v1--ms-0');
+    const request = canvasVideoRasterPreviewRequest({
+      target: videoTarget(),
+      canonicalSource: { canonicalSourceIdentity, sourceWidth: 1200 }
     });
 
-    expect(source).toEqual({
-      previewWidth: 300,
-      src: '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&videoRevision=rev-video&frameTimeMs=0&sourceKey=frame-v1--ms-0&w=300'
-    });
-  });
-
-  it('rejects absolute raw-file URLs', () => {
-    expect(() => canvasVideoPreviewSource({
-      canvasId: 'canvas-1',
-      node: videoNode(
-        'media/clip.mp4',
-        'rev-video',
-        `http://127.0.0.1:17321${rawUrl('media/clip.mp4')}`
-      ),
-      sourceKey: 'frame-v1--ms-0',
-      sourceWidth: 1200,
-      frameTimeMs: 0,
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
-  });
-
-  it('returns undefined for unavailable video nodes', () => {
-    expect(canvasVideoPreviewSource({
-      canvasId: 'canvas-1',
-      node: {
-        ...videoNode('media/clip.mp4'),
-        availability: { state: 'missing', message: 'missing' }
-      },
-      sourceKey: 'source',
-      sourceWidth: 1200,
-      frameTimeMs: 0,
-      resourceZoom: 0.1,
-      devicePixelRatio: 1
-    })).toBeUndefined();
+    expect(request.variantTarget?.sourceWidth).toBe(1200);
+    expect(request.variantTarget?.canonicalSourceIdentity).toBe(canonicalSourceIdentity);
+    expect(request.variantTarget?.srcForWidth(300)).toBe(
+      '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&sourceRevision=rev-video&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
+    );
   });
 });
 
-function videoNode(
-  path: string,
-  revision = 'rev-video',
-  fileUrl = rawUrl(path)
-): ProjectedCanvasNode {
+function videoTarget(): CanvasVideoPreviewTarget {
   return {
-    projectRelativePath: path,
-    nodeKind: 'file',
-    mediaKind: 'video',
-    x: 0,
-    y: 0,
-    width: 1200,
-    height: 675,
-    z: 0,
-    availability: {
-      state: 'available',
-      size: 100,
-      mimeType: 'video/mp4',
-      fileUrl,
-      revision
-    },
-    videoPresentation: {
-      kind: 'video',
-      width: 640,
-      height: 360,
-      textTracks: []
-    }
+    projectId: '123e4567-e89b-42d3-a456-426614174000',
+    canvasId: 'canvas-1',
+    projectRelativePath: 'media/clip.mp4',
+    sourceRevision: 'rev-video',
+    frameTimeMs: 0
   };
-}
-
-function rawUrl(path: string): string {
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-  return `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${encodedPath}?v=rev-video`;
 }

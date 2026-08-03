@@ -36,21 +36,39 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(() => renderToStaticMarkup(<VideoRuntimeConsumer />)).toThrow('CanvasVideoPreviewProvider is required.');
   });
 
-  it('targets inactive available videos with integer millisecond frame identity', () => {
+  it('targets available videos with integer millisecond frame identity', () => {
     expect(canvasVideoPreviewTargetsForNodes({
       canvasId: 'canvas-1',
       nodes: [
         videoNode('media/a.mp4', 'rev-a', 4_250),
         videoNode('media/b.mp4', 'rev-b'),
         { ...videoNode('media/c.mp4', 'rev-c'), availability: { state: 'missing', message: 'missing' } }
-      ],
-      activeVideoPaths: new Set(['media/b.mp4'])
+      ]
     })).toEqual([{
+      projectId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'media/a.mp4',
-      videoRevision: 'rev-a',
+      sourceRevision: 'rev-a',
       frameTimeMs: 4_250
+    }, {
+      projectId: 'p',
+      canvasId: 'canvas-1',
+      projectRelativePath: 'media/b.mp4',
+      sourceRevision: 'rev-b',
+      frameTimeMs: 0
     }]);
+  });
+
+  it('rejects a video target whose raw-file URL is outside the Runtime contract', () => {
+    expect(() => canvasVideoPreviewTargetsForNodes({
+      canvasId: 'canvas-1',
+      nodes: [videoNode(
+        'media/a.mp4',
+        'rev-a',
+        0,
+        'http://127.0.0.1:17321/api/projects/p/files/raw/media/a.mp4?v=rev-a'
+      )]
+    })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
   });
 
   it('keeps pending Probe work paused during interaction and resumes it afterward', async () => {
@@ -95,7 +113,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(probe).toHaveBeenCalledTimes(1);
     expect(probe.mock.calls[0]?.[0].targets).toEqual([{
       projectRelativePath: 'media/a.mp4',
-      videoRevision: 'rev-a2',
+      sourceRevision: 'rev-a2',
       frameTimeMs: 0
     }]);
   });
@@ -113,7 +131,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
 
     expect(ensure).not.toHaveBeenCalled();
     expect(previewSrc()).toBe(
-      '/api/projects/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&videoRevision=rev-a&frameTimeMs=0&sourceKey=frame-v1--ms-0&w=300'
+      '/api/projects/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&sourceRevision=rev-a&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
     );
   });
 
@@ -121,7 +139,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     const node = videoNode('media/a.mp4', 'rev-a', 2_500);
     const ensure = vi.fn<WorkbenchActions['ensureCanvasVideoPreviewSource']>(async () => ({
       status: 'ready' as const,
-      sourceKey: 'frame-v1--ms-2500',
+      canonicalSourceIdentity: 'frame-v1--ms-2500',
       sourceWidth: 1920
     }));
     await renderVideoPreviewProvider({
@@ -140,19 +158,19 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
       canvasId: 'canvas-1',
       target: {
         projectRelativePath: 'media/a.mp4',
-        videoRevision: 'rev-a',
+        sourceRevision: 'rev-a',
         frameTimeMs: 2_500
       },
-      sourceKey: 'frame-v1--ms-2500'
+      canonicalSourceIdentity: 'frame-v1--ms-2500'
     });
     expect(previewSrc()).toContain('frameTimeMs=2500');
-    expect(previewSrc()).toContain('sourceKey=frame-v1--ms-2500');
+    expect(previewSrc()).toContain('canonicalSourceIdentity=frame-v1--ms-2500');
   });
 
   it('allows the next Probe window to overlap the single in-flight Ensure', async () => {
     const nodes = Array.from({ length: 11 }, (_, index) => videoNode(`media/${index}.mp4`, `rev-${index}`));
     const secondProbe = deferred<ReturnType<typeof readyProbeResponse>>();
-    const ensureResult = deferred<{ status: 'ready'; sourceKey: string; sourceWidth: number }>();
+    const ensureResult = deferred<{ status: 'ready'; canonicalSourceIdentity: string; sourceWidth: number }>();
     let probeCount = 0;
     const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>(async (input) => (
       (probeCount += 1) === 1 ? needsSourceProbeResponse(input) : secondProbe.promise
@@ -179,7 +197,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     await act(async () => secondProbe.resolve(readyProbeResponse(probe.mock.calls[1]![0])));
     await act(async () => ensureResult.resolve({
       status: 'ready',
-      sourceKey: ensure.mock.calls[0]![0].sourceKey,
+      canonicalSourceIdentity: ensure.mock.calls[0]![0].canonicalSourceIdentity,
       sourceWidth: 1920
     }));
   });
@@ -213,7 +231,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(probe).toHaveBeenCalledTimes(2);
     expect(probe.mock.calls[1]?.[0].targets).toEqual([{
       projectRelativePath: 'media/a.mp4',
-      videoRevision: 'rev-a2',
+      sourceRevision: 'rev-a2',
       frameTimeMs: 0
     }]);
   });
@@ -238,17 +256,17 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(probe).toHaveBeenCalledTimes(2);
     expect(probe.mock.calls[1]?.[0].targets).toEqual([{
       projectRelativePath: 'media/a.mp4',
-      videoRevision: 'rev-a2',
+      sourceRevision: 'rev-a2',
       frameTimeMs: 0
     }]);
-    expect(previewSrc()).toContain('videoRevision=rev-a2');
+    expect(previewSrc()).toContain('sourceRevision=rev-a2');
   });
 
   it('cancels Ensure when its exact target identity becomes stale', async () => {
-    const firstEnsure = deferred<{ status: 'ready'; sourceKey: string; sourceWidth: number }>();
+    const firstEnsure = deferred<{ status: 'ready'; canonicalSourceIdentity: string; sourceWidth: number }>();
     let ensureSignal: AbortSignal | undefined;
     const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>(async (input) => (
-      input.targets[0]?.videoRevision === 'rev-a'
+      input.targets[0]?.sourceRevision === 'rev-a'
         ? needsSourceProbeResponse(input)
         : readyProbeResponse(input)
     ));
@@ -271,7 +289,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
 
     expect(ensureSignal?.aborted).toBe(true);
     await flushEffects();
-    expect(previewSrc()).toContain('videoRevision=rev-a2');
+    expect(previewSrc()).toContain('sourceRevision=rev-a2');
   });
 
   it('does not dispatch stale needs-source work when identity changes as interaction ends', async () => {
@@ -303,7 +321,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
 
     expect(ensure).not.toHaveBeenCalled();
     expect(probe).toHaveBeenCalledTimes(2);
-    expect(probe.mock.calls[1]?.[0].targets[0]?.videoRevision).toBe('rev-a2');
+    expect(probe.mock.calls[1]?.[0].targets[0]?.sourceRevision).toBe('rev-a2');
   });
 
   it('returns source-changed Ensure results to needs-probe', async () => {
@@ -323,7 +341,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     await flushEffects();
 
     expect(probe).toHaveBeenCalledTimes(2);
-    expect(previewSrc()).toContain('sourceKey=frame-v1--ms-0');
+    expect(previewSrc()).toContain('canonicalSourceIdentity=frame-v1--ms-0');
   });
 
   it('does not auto-retry a failed Probe and explicit node Retry restarts needs-probe', async () => {
@@ -357,21 +375,9 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     await flushEffects();
     expect(probe).toHaveBeenCalledTimes(2);
     expect(previewError()).toBeUndefined();
-    expect(previewSrc()).toContain('sourceKey=frame-v1--ms-0');
+    expect(previewSrc()).toContain('canonicalSourceIdentity=frame-v1--ms-0');
   });
 
-  it('reports image variant failures only for the current published source', async () => {
-    const node = videoNode('media/a.mp4', 'rev-a');
-    await renderVideoPreviewProvider({
-      nodes: [node],
-      actions: actionsWith(),
-      children: <PreviewImageFailureProbe node={node} />
-    });
-
-    await flushEffects();
-
-    expect(previewError()).toBe('Video preview image failed to load.');
-  });
 });
 
 function VideoRuntimeConsumer(): React.ReactElement {
@@ -413,8 +419,6 @@ async function renderVideoPreviewProvider(input: {
         nodes={nodes}
         activeVideoPaths={new Set()}
         actions={input.actions}
-        resourceZoom={0.1}
-        devicePixelRatio={2}
         previewOrder={previewOrderSource()}
         previewResourceScheduler={scheduler}
       >
@@ -431,30 +435,11 @@ async function renderVideoPreviewProvider(input: {
 }
 
 function PreviewProbe({ node }: { node: ProjectedCanvasNode }): React.ReactElement {
-  const { preview, previewError: error } = useCanvasVideoPreviewNode(node);
+  const { request, previewError: error } = useCanvasVideoPreviewNode(node);
+  const previewSrc = request.variantTarget?.srcForWidth(300);
   return (
     <div data-preview-path={node.projectRelativePath}>
-      {preview ? <span data-preview-src={preview.src} /> : null}
-      {error ? <span data-preview-error={error} /> : null}
-    </div>
-  );
-}
-
-function PreviewImageFailureProbe({ node }: { node: ProjectedCanvasNode }): React.ReactElement {
-  const runtime = useCanvasVideoPreviewRuntime();
-  const { preview, previewError: error } = useCanvasVideoPreviewNode(node);
-  React.useEffect(() => {
-    if (preview) {
-      runtime.reportPreviewError({
-        projectRelativePath: node.projectRelativePath,
-        preview,
-        message: 'Video preview image failed to load.'
-      });
-    }
-  }, [node.projectRelativePath, preview, runtime]);
-  return (
-    <div>
-      {preview ? <span data-preview-src={preview.src} /> : null}
+      {previewSrc ? <span data-preview-src={previewSrc} /> : null}
       {error ? <span data-preview-error={error} /> : null}
     </div>
   );
@@ -465,7 +450,7 @@ function actionsWith(overrides: Partial<WorkbenchActions> = {}): WorkbenchAction
     probeCanvasVideoPreviewSources: async (input) => readyProbeResponse(input),
     ensureCanvasVideoPreviewSource: async (input) => ({
       status: 'ready',
-      sourceKey: input.sourceKey,
+      canonicalSourceIdentity: input.canonicalSourceIdentity,
       sourceWidth: 1920
     }),
     ...overrides
@@ -477,7 +462,7 @@ function readyProbeResponse(input: CanvasVideoPreviewProbeRequest) {
     sources: Object.fromEntries(input.targets.map((target) => [target.projectRelativePath, {
       ...target,
       status: 'ready' as const,
-      sourceKey: `frame-v1--ms-${target.frameTimeMs}`,
+      canonicalSourceIdentity: `frame-v1--ms-${target.frameTimeMs}`,
       sourceWidth: 1200
     }]))
   };
@@ -488,7 +473,7 @@ function needsSourceProbeResponse(input: CanvasVideoPreviewProbeRequest) {
     sources: Object.fromEntries(input.targets.map((target) => [target.projectRelativePath, {
       ...target,
       status: 'needs-source' as const,
-      sourceKey: `frame-v1--ms-${target.frameTimeMs}`
+      canonicalSourceIdentity: `frame-v1--ms-${target.frameTimeMs}`
     }]))
   };
 }
@@ -532,7 +517,12 @@ function previewOrderSource(): CanvasPreviewOrderSource {
   };
 }
 
-function videoNode(projectRelativePath: string, revision: string, currentTimeMs = 0): ProjectedCanvasNode {
+function videoNode(
+  projectRelativePath: string,
+  revision: string,
+  currentTimeMs = 0,
+  fileUrl = `/api/projects/p/files/raw/${projectRelativePath}?v=${revision}`
+): ProjectedCanvasNode {
   return {
     projectRelativePath,
     nodeKind: 'file',
@@ -546,7 +536,7 @@ function videoNode(projectRelativePath: string, revision: string, currentTimeMs 
       state: 'available',
       size: 100,
       mimeType: 'video/mp4',
-      fileUrl: `/api/projects/p/files/raw/${projectRelativePath}?v=${revision}`,
+      fileUrl,
       revision
     },
     videoPresentation: {

@@ -63,32 +63,37 @@ Focused text inputs and media controls keep their native keyboard behavior.
 The preview-to-player handoff keeps the current preview visible until the
 player has displayable data and any persisted initial seek has completed. The
 player-to-preview handoff keeps the player visible until the target image has
-loaded, decoded, and crossed the paint handoff gate. Both layers may coexist
-briefly while switching, but only one is visible and successful settled states
-retain only the target layer. Source path, raw URL, revision, or availability
-changes reset node-local handoff state so stale media cannot satisfy readiness.
+loaded, decoded, and been published by the shared raster presentation module.
+Both layers may coexist while switching, but only one is visible. The decoded
+preview DOM remains mounted and is hidden while the player is visible, so a
+later switch can reuse it without another load. Source path, raw URL, revision,
+or availability changes replace the Preview Continuity Key, making every stale
+layer ineligible immediately.
 
 ## Video Preview Sources
 
 Every video preview is the frame at the exact persisted Playback Position,
-including zero milliseconds. Runtime owns an opaque source key that binds the
-Canvas Video Preview Source Version to the target frame. Workbench stores,
-compares, and returns that key without parsing or deriving it.
+including zero milliseconds. Runtime owns the opaque Canonical Preview Source
+Identity that binds the Canvas Video Preview Source Version to the target frame.
+Workbench stores, compares, and returns that identity without parsing or deriving
+it.
 
 Workbench owns one latest-wins Video Preview registry per mounted Canvas. The
-registry is keyed by Project path, and the target identity comprises Canvas ID,
-Project path, video revision, and frame time in milliseconds. Active players
-have no preview target. Each task moves through `needs-probe`, `probing`,
+registry is keyed by Canvas ID and Project path, while the Preview Target
+Identity comprises the Source Revision and frame time in milliseconds. Runtime's
+opaque Canonical Preview Source Identity completes producer policy. Active
+players retain any current preview target and mounted DOM for continuity, while
+new Probe or Ensure work is admitted only for inactive players. Each task moves through `needs-probe`, `probing`,
 `needs-source`, `ensuring`, or `failed`; Runtime-confirmed canonical readiness
 removes the task instead of introducing a completed state.
 
 Runtime exposes two source operations. Probe accepts one rolling window of at
 most ten targets and returns exactly one Project-path-keyed result per target: ready,
 needs-source, or failed. Probe does not extract a frame. Ensure accepts one
-target and its exact Probe-owned source key, and returns ready, source-changed,
-or failed. One registry has at most one Probe window and one Ensure request in
-flight. A source-changed result returns the target to Probe. There is no
-automatic retry; the node-local Retry action restarts the current target at
+target and its exact Probe-owned Canonical Preview Source Identity, and returns
+ready, source-changed, or failed. One registry has at most one Probe window and
+one Ensure request in flight. A source-changed result returns the target to
+Probe. There is no automatic retry; the node-local Retry action restarts the current target at
 Probe.
 
 One invalid target does not cancel a Probe window; its stale result is rejected
@@ -98,13 +103,14 @@ Camera movement and priority changes do not cancel in-flight work. Whole
 Project, Canvas, provider, or connection invalidation cancels its scoped
 requests.
 
-Cache identity includes Canvas ID, Project path key, video revision, and source
-key. The source directory contains one extracted JPEG; width-specific JPEG
-variants add the same Raster Preview Engine Version used by image and text:
+Cache identity includes Canvas ID, Project path key, Source Revision, and
+Canonical Preview Source Identity. The source directory contains one extracted
+JPEG; width-specific JPEG variants add the same Raster Preview Engine Version
+used by image and text:
 
 ```text
 .debrute/cache/canvas-video-previews/
-  <canvas>/<path-key>/<revision>/<source-key>/
+  <canvas>/<path-key>/<source-revision>/<canonical-source-identity>/
     source.jpg
     raster-engine-v<version>/
       preview-w<width>.jpg
@@ -120,7 +126,7 @@ service as image and text. Video contributes its JPEG output policy and
 source-current validator; it does not own separate width validation, locking,
 resize, cache-publication, or response-file logic.
 Cache paths are derived state and are excluded from Project-visible content.
-Superseded video revisions and source identities do not participate in current
+Superseded source revisions and source identities do not participate in current
 lookup. Under the current source identity Runtime reads and writes only the
 exact current Raster Engine path; it neither enumerates nor removes sibling
 engine-version directories. It retains requested width variants without a byte
@@ -143,8 +149,9 @@ revisioned URL.
 
 ## Error Ownership
 
-Missing or unreadable source media is node availability. Probe, Ensure,
-variant, and preview-image failures are preview errors.
+Missing or unreadable source media is node availability. Probe and Ensure are
+Video producer errors; variant load and decode failures are shared raster
+presentation errors.
 Browser loading, play, and initial-seek failures are player errors. During a
 handoff, failure leaves the current visible layer intact and places the target
 layer's error above it. Preview Retry restarts that node at Probe, while Player
@@ -166,7 +173,8 @@ presentation and are not multiplied by that text scale.
   `packages/canvas-core/src/`.
 - Raw revisioned media and range responses:
   `apps/runtime/src/workbench/project_routes.rs`.
-- Player, hotkeys, preview runtime, node-local handoff, audio presentation, and
-  media feedback overlays: `apps/web/src/workbench/canvas/`.
+- Player, hotkeys, Video canonical-source runtime, shared raster presentation,
+  audio presentation, and media feedback overlays:
+  `apps/web/src/workbench/canvas/`.
 - Browser-free coverage: colocated Canvas tests and
   `apps/runtime/src/project/tests.rs`.

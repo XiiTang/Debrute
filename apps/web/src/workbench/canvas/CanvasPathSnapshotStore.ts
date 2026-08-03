@@ -78,3 +78,22 @@ export function canvasChangedRecordPaths<Value>(
   const paths = new Set([...Object.keys(previous), ...Object.keys(next)]);
   return [...paths].filter((path) => previous[path] !== next[path]);
 }
+
+export function canvasRecordValuesEqual<Value>(
+  left: Readonly<Record<string, Value>>,
+  right: Readonly<Record<string, Value>>,
+  equals: (leftValue: Value, rightValue: Value) => boolean = Object.is
+): boolean {
+  const leftEntries = Object.entries(left);
+  return leftEntries.length === Object.keys(right).length
+    && leftEntries.every(([key, value]) => key in right && equals(value, right[key]!));
+}
+
+export function canvasRecordsMatchingTargetKeys<Value extends { readonly targetKey: string }>(
+  current: Readonly<Record<string, Value>>,
+  currentTargetKeys: ReadonlyMap<string, string>
+): Record<string, Value> {
+  return Object.fromEntries(Object.entries(current).filter(([path, value]) => (
+    currentTargetKeys.get(path) === value.targetKey
+  )));
+}

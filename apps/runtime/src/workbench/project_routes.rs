@@ -861,7 +861,7 @@ pub(super) async fn image_preview(
         Ok(path) => path,
         Err(response) => return response,
     };
-    let revision = match required_query_value(&query, "v") {
+    let revision = match required_query_value(&query, "sourceRevision") {
         Ok(revision) => revision,
         Err(response) => return response,
     };
@@ -894,7 +894,7 @@ pub(super) async fn text_preview_source_save(
     struct Metadata {
         canvas_id: String,
         project_relative_path: String,
-        fingerprint: String,
+        target_identity: String,
     }
     let parts = match read_multipart(request).await {
         Ok(parts) => parts,
@@ -920,7 +920,7 @@ pub(super) async fn text_preview_source_save(
     };
     let target = CanvasTextPreviewSourceTarget {
         project_relative_path: metadata.project_relative_path,
-        fingerprint: metadata.fingerprint,
+        target_identity: metadata.target_identity,
     };
     match runtime.previews().save_text_preview_source(
         session.root(),
@@ -932,7 +932,7 @@ pub(super) async fn text_preview_source_save(
             "ok": true,
             "source": {
                 "projectRelativePath": target.project_relative_path,
-                "fingerprint": target.fingerprint,
+                "targetIdentity": target.target_identity,
                 "status": "available"
             }
         }))
@@ -950,7 +950,7 @@ pub(super) async fn text_preview_sources(
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Target {
         project_relative_path: String,
-        fingerprint: String,
+        target_identity: String,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -972,7 +972,7 @@ pub(super) async fn text_preview_sources(
         .into_iter()
         .map(|target| CanvasTextPreviewSourceTarget {
             project_relative_path: target.project_relative_path,
-            fingerprint: target.fingerprint,
+            target_identity: target.target_identity,
         })
         .collect::<Vec<_>>();
     let sources = runtime
@@ -983,7 +983,7 @@ pub(super) async fn text_preview_sources(
         .map(|(path, source)| {
             let mut value = json!({
                 "projectRelativePath": source.target.project_relative_path,
-                "fingerprint": source.target.fingerprint,
+                "targetIdentity": source.target.target_identity,
             });
             match source.status {
                 CanvasTextPreviewSourceStatus::Available => value["status"] = json!("available"),
@@ -1013,8 +1013,8 @@ pub(super) async fn text_preview(
         Ok(path) => path.to_owned(),
         Err(response) => return response,
     };
-    let fingerprint = match required_query_value(&query, "fingerprint") {
-        Ok(fingerprint) => fingerprint.to_owned(),
+    let target_identity = match required_query_value(&query, "targetIdentity") {
+        Ok(target_identity) => target_identity.to_owned(),
         Err(response) => return response,
     };
     let canvas_id = match required_query_value(&query, "canvasId") {
@@ -1023,7 +1023,7 @@ pub(super) async fn text_preview(
     };
     let target = CanvasTextPreviewSourceTarget {
         project_relative_path,
-        fingerprint,
+        target_identity,
     };
     let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
@@ -1057,7 +1057,7 @@ pub(super) async fn video_preview_probe(
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Target {
         project_relative_path: String,
-        video_revision: String,
+        source_revision: String,
         frame_time_ms: u64,
     }
     #[derive(Deserialize)]
@@ -1100,7 +1100,7 @@ pub(super) async fn video_preview_probe(
         .into_iter()
         .map(|target| CanvasVideoPreviewTarget {
             project_relative_path: target.project_relative_path,
-            video_revision: target.video_revision,
+            source_revision: target.source_revision,
             frame_time_ms: target.frame_time_ms,
         })
         .collect::<Vec<_>>();
@@ -1123,21 +1123,23 @@ pub(super) async fn video_preview_probe(
         .map(|(path, source)| {
             let mut value = json!({
                 "projectRelativePath": source.target.project_relative_path,
-                "videoRevision": source.target.video_revision,
+                "sourceRevision": source.target.source_revision,
                 "frameTimeMs": source.target.frame_time_ms,
             });
             match source.status {
                 CanvasVideoPreviewProbeStatus::Ready {
-                    source_key,
+                    canonical_source_identity,
                     source_width,
                 } => {
                     value["status"] = json!("ready");
-                    value["sourceKey"] = json!(source_key);
+                    value["canonicalSourceIdentity"] = json!(canonical_source_identity);
                     value["sourceWidth"] = json!(source_width);
                 }
-                CanvasVideoPreviewProbeStatus::NeedsSource { source_key } => {
+                CanvasVideoPreviewProbeStatus::NeedsSource {
+                    canonical_source_identity,
+                } => {
                     value["status"] = json!("needs-source");
-                    value["sourceKey"] = json!(source_key);
+                    value["canonicalSourceIdentity"] = json!(canonical_source_identity);
                 }
                 CanvasVideoPreviewProbeStatus::Failed { message } => {
                     value["status"] = json!("failed");
@@ -1159,7 +1161,7 @@ pub(super) async fn video_preview_ensure(
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Target {
         project_relative_path: String,
-        video_revision: String,
+        source_revision: String,
         frame_time_ms: u64,
     }
     #[derive(Deserialize)]
@@ -1167,7 +1169,7 @@ pub(super) async fn video_preview_ensure(
     struct Input {
         canvas_id: String,
         target: Target,
-        source_key: String,
+        canonical_source_identity: String,
     }
     let input: Input = match json_body(request).await {
         Ok(input) => input,
@@ -1183,7 +1185,7 @@ pub(super) async fn video_preview_ensure(
     };
     let target = CanvasVideoPreviewTarget {
         project_relative_path: input.target.project_relative_path,
-        video_revision: input.target.video_revision,
+        source_revision: input.target.source_revision,
         frame_time_ms: input.target.frame_time_ms,
     };
     let previews = Arc::clone(runtime.previews());
@@ -1193,7 +1195,7 @@ pub(super) async fn video_preview_ensure(
             &project_root,
             &input.canvas_id,
             &target,
-            &input.source_key,
+            &input.canonical_source_identity,
             cancellation,
         )
     })
@@ -1204,11 +1206,11 @@ pub(super) async fn video_preview_ensure(
     };
     Json(match result {
         CanvasVideoPreviewEnsureStatus::Ready {
-            source_key,
+            canonical_source_identity,
             source_width,
         } => json!({
             "status": "ready",
-            "sourceKey": source_key,
+            "canonicalSourceIdentity": canonical_source_identity,
             "sourceWidth": source_width,
         }),
         CanvasVideoPreviewEnsureStatus::SourceChanged => json!({
@@ -1248,7 +1250,7 @@ pub(super) async fn video_preview(
         Ok(path) => path.to_owned(),
         Err(response) => return response,
     };
-    let video_revision = match required_query_value(&query, "videoRevision") {
+    let source_revision = match required_query_value(&query, "sourceRevision") {
         Ok(revision) => revision.to_owned(),
         Err(response) => return response,
     };
@@ -1256,13 +1258,13 @@ pub(super) async fn video_preview(
         Ok(canvas_id) => canvas_id.to_owned(),
         Err(response) => return response,
     };
-    let source_key = match required_query_value(&query, "sourceKey") {
-        Ok(source_key) => source_key.to_owned(),
+    let canonical_source_identity = match required_query_value(&query, "canonicalSourceIdentity") {
+        Ok(canonical_source_identity) => canonical_source_identity.to_owned(),
         Err(response) => return response,
     };
     let target = CanvasVideoPreviewTarget {
         project_relative_path,
-        video_revision,
+        source_revision,
         frame_time_ms,
     };
     let runtime = Arc::clone(&state.services);
@@ -1280,7 +1282,7 @@ pub(super) async fn video_preview(
                 &project_root,
                 &canvas_id,
                 &target,
-                &source_key,
+                &canonical_source_identity,
                 width,
                 cancellation,
             )

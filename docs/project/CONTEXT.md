@@ -16,6 +16,13 @@ A normalized path relative to the Project root used to identify a file or
 directory without exposing an absolute host path across product boundaries.
 _Avoid_: File URL, absolute path
 
+**Source Revision**:
+The Runtime-confirmed content identity of the exact bytes currently stored at
+one Project Path. It is used to reject stale reads, writes, and derived-resource
+requests; it does not include Canvas geometry, presentation, or rendering
+policy.
+_Avoid_: Preview Target Identity, modification time
+
 **Project Path Command**:
 A user operation directed at the Project root or one or more Project Paths,
 with the same meaning whether invoked from Explorer, Canvas, or the keyboard.

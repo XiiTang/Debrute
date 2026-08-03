@@ -99,18 +99,26 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const profile = profileWithPreparation(Promise.reject(new Error('broken font asset')));
+    const failure = new Error('broken font asset');
+    const profile = profileWithPreparation(Promise.reject(failure));
+    const onError = vi.fn();
 
     try {
       await act(async () => {
         root.render(
-          <CanvasTextRenderProfileGate profile={profile} pending={<span>loading</span>}>
+          <CanvasTextRenderProfileGate
+            profile={profile}
+            pending={<span>loading</span>}
+            onError={onError}
+          >
             <ProfileProbe />
           </CanvasTextRenderProfileGate>
         );
       });
       expect(container.querySelector('[role="alert"]')?.textContent).toContain('broken font asset');
       expect(container.textContent).not.toContain('12px');
+      expect(onError).toHaveBeenCalledOnce();
+      expect(onError).toHaveBeenCalledWith(failure);
     } finally {
       await act(async () => root.unmount());
       container.remove();
@@ -162,11 +170,16 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
       '18px'
     );
     environmentMock.activeProfile = initial;
+    const onError = vi.fn();
 
     try {
       await act(async () => {
         root.render(
-          <CanvasTextRenderProfileGate profile={replacement} pending={<span>loading</span>}>
+          <CanvasTextRenderProfileGate
+            profile={replacement}
+            pending={<span>loading</span>}
+            onError={onError}
+          >
             <ProfileProbe />
           </CanvasTextRenderProfileGate>
         );
@@ -174,6 +187,44 @@ describe('CanvasTextRenderProfileGate', { tags: ['canvas-text'] }, () => {
 
       expect(container.textContent).toBe('12px');
       expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('keeps children pending until the exact requested profile is ready when required', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const preparation = deferred<void>();
+    const initial = profileWithPreparation(Promise.resolve(), '12px');
+    const replacement = profileWithPreparation(preparation.promise, '18px');
+    environmentMock.activeProfile = initial;
+    const onReady = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <CanvasTextRenderProfileGate
+            profile={replacement}
+            pending={<span>loading</span>}
+            requireExactProfile
+            onReady={onReady}
+          >
+            <ProfileProbe />
+          </CanvasTextRenderProfileGate>
+        );
+      });
+
+      expect(container.textContent).toBe('loading');
+      expect(onReady).not.toHaveBeenCalled();
+
+      await act(async () => preparation.resolve());
+
+      expect(container.textContent).toBe('18px');
+      expect(onReady).toHaveBeenCalledOnce();
     } finally {
       await act(async () => root.unmount());
       container.remove();

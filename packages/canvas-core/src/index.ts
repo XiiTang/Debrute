@@ -1,4 +1,22 @@
 export { canvasRasterPreviewWidth } from './canvasRasterPreviews.js';
+export {
+  canvasPreviewContinuityKey,
+  type CanvasPreviewContinuityKey
+} from './canvasPreviewContinuity.js';
+export {
+  canvasPreviewCanonicalSourceIdentity,
+  canvasPreviewTargetIdentity,
+  canvasPreviewTargetIdentityFromDigest,
+  canvasPreviewTargetKey,
+  canvasPreviewVariantIdentity,
+  canvasPreviewVariantKey,
+  type CanvasPreviewCanonicalSourceIdentity,
+  type CanvasPreviewOwner,
+  type CanvasPreviewTargetIdentity,
+  type CanvasPreviewTargetKey,
+  type CanvasPreviewVariantIdentity,
+  type CanvasPreviewVariantKey
+} from './canvasPreviewIdentities.js';
 
 export type CanvasNodeKind = 'directory' | 'file';
 export type CanvasMediaKind = 'image' | 'video' | 'audio' | 'text' | 'unknown';

@@ -1,4 +1,5 @@
 import React, { act } from 'react';
+import { canvasPreviewTargetIdentityFromDigest } from '@debrute/canvas-core';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -8,7 +9,7 @@ import {
 import { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure';
 import type {
   CanvasTextPreviewCaptureTarget,
-  CanvasTextPreviewCaptureResult,
+  CanvasTextPreviewCaptureResult
 } from './CanvasTextPreviewCapture';
 import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 
@@ -22,7 +23,8 @@ const mocks = vi.hoisted(() => ({
   captureSource: vi.fn()
 }));
 
-vi.mock('./CanvasTextPreviewCapture', () => ({
+vi.mock('./CanvasTextPreviewCapture', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./CanvasTextPreviewCapture')>(),
   captureCanvasTextPreviewSource: mocks.captureSource
 }));
 
@@ -281,6 +283,7 @@ function createInteractionSource(initiallyActive: boolean): React.ComponentProps
 
 function targetFixture(projectRelativePath = 'notes/a.md'): CanvasTextPreviewCaptureTarget {
   return {
+    projectId: 'project-1',
     canvasId: 'canvas-1',
     projectRelativePath,
     content: 'content',
@@ -296,7 +299,7 @@ function targetFixture(projectRelativePath = 'notes/a.md'): CanvasTextPreviewCap
     sourcePixelWidth: 1280,
     sourcePixelHeight: 640,
     sourceScale: 4,
-    fingerprint: `sha256:${projectRelativePath}`
+    targetIdentity: canvasPreviewTargetIdentityFromDigest(`sha256:${projectRelativePath}`)
   };
 }
 
@@ -320,7 +323,7 @@ function failureFields() {
   return {
     canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
-    fingerprint: 'sha256:notes/a.md'
+    targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:notes/a.md')
   };
 }
 

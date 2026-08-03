@@ -620,15 +620,15 @@ fn passive_media_routes_reject_missing_or_empty_identity_values() {
     for path in [
         format!("/api/projects/{}/files/raw/image.png", project.id),
         format!(
-            "/api/projects/{}/canvas-image-preview?w=64&path=&v=revision",
+            "/api/projects/{}/canvas-image-preview?w=64&path=&sourceRevision=revision",
             project.id
         ),
         format!(
-            "/api/projects/{}/canvas-text-preview?w=64&path=image.png&fingerprint=fingerprint",
+            "/api/projects/{}/canvas-text-preview?w=64&path=image.png&targetIdentity=target",
             project.id
         ),
         format!(
-            "/api/projects/{}/canvas-video-preview?w=64&frameTimeMs=0&path=image.png&videoRevision=revision&canvasId=canvas-1",
+            "/api/projects/{}/canvas-video-preview?w=64&frameTimeMs=0&path=image.png&sourceRevision=revision&canvasId=canvas-1",
             project.id
         ),
     ] {
@@ -658,7 +658,7 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
 
     let response = client
         .get(format!(
-            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&v={revision}",
+            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&sourceRevision={revision}",
             runtime.origin(),
             project.id
         ))
@@ -676,7 +676,7 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
 
     let stale = client
         .get(format!(
-            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&v=stale",
+            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&sourceRevision=stale",
             runtime.origin(),
             project.id
         ))
@@ -1324,7 +1324,7 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
     fs::create_dir_all(project_root.join("media")).expect("media directory should be created");
     let video = project_root.join("media/clip.mp4");
     fs::write(&video, b"video").expect("video fixture should be written");
-    let video_revision = media_revision(&video);
+    let source_revision = media_revision(&video);
     let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
@@ -1342,7 +1342,7 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
             "canvasId": "canvas-1",
             "targets": [{
                 "projectRelativePath": "media/clip.mp4",
-                "videoRevision": video_revision,
+                "sourceRevision": source_revision,
                 "frameTimeMs": 0
             }]
         }))
@@ -1360,7 +1360,7 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
     );
     assert_eq!(body["sources"]["media/clip.mp4"]["status"], "needs-source");
     assert_eq!(
-        body["sources"]["media/clip.mp4"]["sourceKey"],
+        body["sources"]["media/clip.mp4"]["canonicalSourceIdentity"],
         "frame-v1--ms-0"
     );
 
@@ -1377,10 +1377,10 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
             "canvasId": "canvas-1",
             "target": {
                 "projectRelativePath": "media/clip.mp4",
-                "videoRevision": video_revision,
+                "sourceRevision": source_revision,
                 "frameTimeMs": 0
             },
-            "sourceKey": "stale-source-key"
+            "canonicalSourceIdentity": "stale-source-key"
         }))
         .send()
         .expect("video preview Ensure request should complete");

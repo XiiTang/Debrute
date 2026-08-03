@@ -30,29 +30,13 @@ export interface CanvasTextEditorScrollPosition {
   scrollLeft: number;
 }
 
-export function CanvasTextEditor({
-  value,
-  language,
-  wordWrap,
-  readOnly,
-  visible,
-  focusRequest,
-  initialScrollTop,
-  initialScrollLeft,
-  onChange,
-  onSave,
-  onToggleWordWrap,
-  onFocusRequestConsumed,
-  onScrollPositionCommit,
-  onReadOnlyTransition,
-  onLayoutReady,
-  fontPurpose = 'interactive'
-}: {
+export interface CanvasTextEditorProps {
   value: string;
   language: ProjectTextLanguageId;
   wordWrap: boolean;
   readOnly?: boolean;
   visible?: boolean | undefined;
+  published?: boolean | undefined;
   focusRequest?: CanvasTextEditorFocusRequest | undefined;
   initialScrollTop?: number | undefined;
   initialScrollLeft?: number | undefined;
@@ -63,8 +47,30 @@ export function CanvasTextEditor({
   onScrollPositionCommit?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onReadOnlyTransition?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onLayoutReady?: (() => void) | undefined;
+  onLayoutFailure?: ((error: Error) => void) | undefined;
   fontPurpose?: 'interactive' | 'preview' | undefined;
-}): React.ReactElement {
+}
+
+export function CanvasTextEditor({
+  value,
+  language,
+  wordWrap,
+  readOnly,
+  visible,
+  published = true,
+  focusRequest,
+  initialScrollTop,
+  initialScrollLeft,
+  onChange,
+  onSave,
+  onToggleWordWrap,
+  onFocusRequestConsumed,
+  onScrollPositionCommit,
+  onReadOnlyTransition,
+  onLayoutReady,
+  onLayoutFailure,
+  fontPurpose = 'interactive'
+}: CanvasTextEditorProps): React.ReactElement {
   const renderProfile = useCanvasTextRenderProfile();
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
@@ -75,11 +81,15 @@ export function CanvasTextEditor({
     view: EditorView;
   } | undefined>(undefined);
   const onLayoutReadyRef = React.useRef(onLayoutReady);
+  const onLayoutFailureRef = React.useRef(onLayoutFailure);
+  const onFocusRequestConsumedRef = React.useRef(onFocusRequestConsumed);
   const onScrollPositionCommitRef = React.useRef(onScrollPositionCommit);
+  const layoutFailedRef = React.useRef(false);
   const commitObservedScrollPositionRef = React.useRef<(
     () => CanvasTextEditorScrollPosition
   ) | undefined>(undefined);
   const previousReadOnlyRef = React.useRef(Boolean(readOnly));
+  const previousPublishedRef = React.useRef(published);
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
     onSave,
@@ -109,6 +119,37 @@ export function CanvasTextEditor({
   }, [onLayoutReady]);
 
   React.useEffect(() => {
+    onLayoutFailureRef.current = onLayoutFailure;
+  }, [onLayoutFailure]);
+
+  const reportLayoutFailure = React.useCallback((reason: unknown) => {
+    if (layoutFailedRef.current) {
+      return;
+    }
+    layoutFailedRef.current = true;
+    onLayoutFailureRef.current?.(errorFromUnknown(reason));
+  }, []);
+
+  onFocusRequestConsumedRef.current = onFocusRequestConsumed;
+
+  const applyFocusRequest = React.useCallback((
+    view: EditorView,
+    request: CanvasTextEditorFocusRequest
+  ) => {
+    const consumedFocusRequest = consumedFocusRequestRef.current;
+    if (consumedFocusRequest?.requestId === request.requestId && consumedFocusRequest.view === view) {
+      return;
+    }
+    consumedFocusRequestRef.current = {
+      requestId: request.requestId,
+      view
+    };
+    canvasTextEditorApplyFocusRequest(view, request);
+    setPointerFocus(true);
+    onFocusRequestConsumedRef.current?.(request.requestId);
+  }, []);
+
+  React.useEffect(() => {
     onScrollPositionCommitRef.current = onScrollPositionCommit;
   }, [onScrollPositionCommit]);
 
@@ -136,10 +177,17 @@ export function CanvasTextEditor({
       scrollTop: initialScrollTop,
       scrollLeft: initialScrollLeft
     };
-    canvasTextEditorApplyInitialScroll(view, {
-      scrollTop: initialScrollPosition.scrollTop,
-      scrollLeft: initialScrollPosition.scrollLeft
-    });
+    try {
+      canvasTextEditorApplyInitialScroll(view, {
+        scrollTop: initialScrollPosition.scrollTop,
+        scrollLeft: initialScrollPosition.scrollLeft
+      });
+    } catch (reason) {
+      layoutFailedRef.current = true;
+      view.destroy();
+      viewRef.current = null;
+      throw reason;
+    }
     const readScrollPosition = (): CanvasTextEditorScrollPosition => ({
       scrollTop: view.scrollDOM.scrollTop,
       scrollLeft: view.scrollDOM.scrollLeft
@@ -179,11 +227,15 @@ export function CanvasTextEditor({
     if ((initialScrollPosition.scrollTop ?? 0) !== 0 || (initialScrollPosition.scrollLeft ?? 0) !== 0) {
       initialScrollFrame = window.requestAnimationFrame(() => {
         initialScrollFrame = undefined;
-        canvasTextEditorApplyInitialScroll(view, {
-          scrollTop: initialScrollPosition.scrollTop,
-          scrollLeft: initialScrollPosition.scrollLeft
-        });
-        observeScrollPosition();
+        try {
+          canvasTextEditorApplyInitialScroll(view, {
+            scrollTop: initialScrollPosition.scrollTop,
+            scrollLeft: initialScrollPosition.scrollLeft
+          });
+          observeScrollPosition();
+        } catch (reason) {
+          reportLayoutFailure(reason);
+        }
       });
     }
 
@@ -199,7 +251,7 @@ export function CanvasTextEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, []);
+  }, [reportLayoutFailure]);
 
   React.useEffect(() => {
     const view = viewRef.current;
@@ -215,14 +267,18 @@ export function CanvasTextEditor({
       });
     };
     const notifyWhenSyntaxReady = () => {
-      if (cancelled) {
+      if (cancelled || layoutFailedRef.current) {
         return;
       }
-      if (!canvasTextEditorEnsureVisibleSyntaxReady(view)) {
-        scheduleFrame(notifyWhenSyntaxReady);
-        return;
+      try {
+        if (!canvasTextEditorEnsureVisibleSyntaxReady(view)) {
+          scheduleFrame(notifyWhenSyntaxReady);
+          return;
+        }
+        onLayoutReadyRef.current?.();
+      } catch (reason) {
+        reportLayoutFailure(reason);
       }
-      onLayoutReadyRef.current?.();
     };
     if ((initialScrollTop ?? 0) === 0 && (initialScrollLeft ?? 0) === 0) {
       queueMicrotask(notifyWhenSyntaxReady);
@@ -240,7 +296,7 @@ export function CanvasTextEditor({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [initialScrollLeft, initialScrollTop, language, readyLanguage, visible]);
+  }, [initialScrollLeft, initialScrollTop, language, readyLanguage, reportLayoutFailure, visible]);
 
   React.useEffect(() => {
     const view = viewRef.current;
@@ -254,7 +310,7 @@ export function CanvasTextEditor({
   React.useEffect(() => {
     const view = viewRef.current;
     const request = focusRequest;
-    if (!view || !request) {
+    if (!view || !request || !published) {
       return;
     }
     let cancelled = false;
@@ -262,23 +318,30 @@ export function CanvasTextEditor({
       if (cancelled || viewRef.current !== view) {
         return;
       }
-      const consumedFocusRequest = consumedFocusRequestRef.current;
-      if (consumedFocusRequest?.requestId === request.requestId && consumedFocusRequest.view === view) {
-        return;
+      try {
+        applyFocusRequest(view, request);
+      } catch (reason) {
+        reportLayoutFailure(reason);
       }
-      consumedFocusRequestRef.current = {
-        requestId: request.requestId,
-        view
-      };
-      canvasTextEditorApplyFocusRequest(view, request);
-      setPointerFocus(true);
-      onFocusRequestConsumed?.(request.requestId);
     });
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frame);
     };
-  }, [focusRequest, onFocusRequestConsumed]);
+  }, [applyFocusRequest, focusRequest, published, reportLayoutFailure]);
+
+  React.useLayoutEffect(() => {
+    const wasPublished = previousPublishedRef.current;
+    previousPublishedRef.current = published;
+    const view = viewRef.current;
+    if (!wasPublished && published && view && focusRequest) {
+      try {
+        applyFocusRequest(view, focusRequest);
+      } catch (reason) {
+        reportLayoutFailure(reason);
+      }
+    }
+  }, [applyFocusRequest, focusRequest, published, reportLayoutFailure]);
 
   React.useEffect(() => {
     const view = viewRef.current;
@@ -288,17 +351,28 @@ export function CanvasTextEditor({
     }
     let cancelled = false;
     setReadyLanguage(undefined);
-    void loadCodeMirrorLanguageExtensionForProjectTextLanguage(language).then((extension) => {
-      if (cancelled || viewRef.current !== view) {
-        return;
+    void loadCodeMirrorLanguageExtensionForProjectTextLanguage(language).then(
+      (extension) => {
+        if (cancelled || viewRef.current !== view) {
+          return;
+        }
+        try {
+          view.dispatch({ effects: compartments.language.reconfigure(extension) });
+          setReadyLanguage(language);
+        } catch (reason) {
+          reportLayoutFailure(reason);
+        }
+      },
+      (reason: unknown) => {
+        if (!cancelled && viewRef.current === view) {
+          reportLayoutFailure(reason);
+        }
       }
-      view.dispatch({ effects: compartments.language.reconfigure(extension) });
-      setReadyLanguage(language);
-    });
+    );
     return () => {
       cancelled = true;
     };
-  }, [language]);
+  }, [language, reportLayoutFailure]);
 
   React.useEffect(() => {
     const view = viewRef.current;
@@ -335,8 +409,10 @@ export function CanvasTextEditor({
       data-canvas-text-editor="true"
       data-editor-engine="codemirror"
       data-editor-mode={readOnly ? 'handoff' : 'edit'}
+      data-editor-published={published ? 'true' : 'false'}
       data-word-wrap={wordWrap ? 'on' : 'off'}
       data-pointer-focus={!readOnly && pointerFocus ? 'true' : 'false'}
+      inert={!published}
       className={`canvas-text-editor canvas-text-editor--${readOnly ? 'handoff' : 'edit'}`}
       style={(fontPurpose === 'preview'
         ? renderProfile.previewEditorStyle
@@ -348,4 +424,8 @@ export function CanvasTextEditor({
       }}
     />
   );
+}
+
+function errorFromUnknown(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }

@@ -4,6 +4,10 @@ interface CanvasPreviewSpatialTask extends CanvasRect {
   readonly projectRelativePath: string;
 }
 
+interface CanvasPreviewOwnedItem {
+  readonly projectRelativePath: string;
+}
+
 export function orderCanvasPreviewTasks<T extends CanvasPreviewSpatialTask>(
   tasks: readonly T[],
   visibleRect: CanvasRect
@@ -15,6 +19,18 @@ export function orderCanvasPreviewTasks<T extends CanvasPreviewSpatialTask>(
         || compareCanvasPreviewPaths(left.task.projectRelativePath, right.task.projectRelativePath)
     ))
     .map(({ task }) => task);
+}
+
+export function orderCanvasPreviewItemsByNode<T extends CanvasPreviewOwnedItem>(input: {
+  items: readonly T[];
+  nodesByPath: ReadonlyMap<string, CanvasPreviewSpatialTask>;
+  visibleRect: CanvasRect;
+}): T[] {
+  const spatial = input.items.flatMap((item) => {
+    const node = input.nodesByPath.get(item.projectRelativePath);
+    return node ? [{ item, ...node }] : [];
+  });
+  return orderCanvasPreviewTasks(spatial, input.visibleRect).map(({ item }) => item);
 }
 
 export function compareCanvasPreviewPaths(left: string, right: string): number {

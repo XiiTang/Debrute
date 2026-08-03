@@ -1,9 +1,18 @@
+import {
+  canvasPreviewTargetIdentity,
+  canvasPreviewTargetKey,
+  type CanvasPreviewCanonicalSourceIdentity,
+  type CanvasPreviewTargetIdentity,
+  type CanvasPreviewTargetKey
+} from '@debrute/canvas-core';
+
 export const CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS = 10;
 
 export interface CanvasVideoPreviewTarget {
+  readonly projectId: string;
   readonly canvasId: string;
   readonly projectRelativePath: string;
-  readonly videoRevision: string;
+  readonly sourceRevision: string;
   readonly frameTimeMs: number;
 }
 
@@ -15,27 +24,44 @@ export interface CanvasVideoPreviewFailure {
 type CanvasVideoPreviewTaskState =
   | { readonly state: 'needs-probe' }
   | { readonly state: 'probing' }
-  | { readonly state: 'needs-source'; readonly sourceKey: string }
-  | { readonly state: 'ensuring'; readonly sourceKey: string }
+  | {
+      readonly state: 'needs-source';
+      readonly canonicalSourceIdentity: CanvasPreviewCanonicalSourceIdentity;
+    }
+  | {
+      readonly state: 'ensuring';
+      readonly canonicalSourceIdentity: CanvasPreviewCanonicalSourceIdentity;
+    }
   | { readonly state: 'failed'; readonly failure: CanvasVideoPreviewFailure };
 
 export type CanvasVideoPreviewTask = CanvasVideoPreviewTarget & CanvasVideoPreviewTaskState;
 
 export type CanvasVideoPreviewTaskUpdate = CanvasVideoPreviewTaskState;
 
-export function canvasVideoPreviewTargetKey(target: CanvasVideoPreviewTarget): string {
-  return [
-    target.canvasId,
-    target.projectRelativePath,
-    target.videoRevision,
-    String(target.frameTimeMs)
-  ].join('\u001f');
+export function canvasVideoPreviewTargetIdentity(
+  target: Pick<CanvasVideoPreviewTarget, 'sourceRevision' | 'frameTimeMs'>
+): CanvasPreviewTargetIdentity {
+  return canvasPreviewTargetIdentity([
+    'video',
+    target.sourceRevision,
+    target.frameTimeMs
+  ]);
+}
+
+export function canvasVideoPreviewTargetKey(target: CanvasVideoPreviewTarget): CanvasPreviewTargetKey {
+  return canvasPreviewTargetKey({
+    mediaKind: 'video',
+    projectId: target.projectId,
+    canvasId: target.canvasId,
+    projectRelativePath: target.projectRelativePath,
+    targetIdentity: canvasVideoPreviewTargetIdentity(target)
+  });
 }
 
 export function reconcileCanvasVideoPreviewTasks(input: {
   readonly previous: ReadonlyMap<string, CanvasVideoPreviewTask>;
   readonly targets: readonly CanvasVideoPreviewTarget[];
-  readonly readyTargetKeys: ReadonlySet<string>;
+  readonly readyTargetKeys: ReadonlySet<CanvasPreviewTargetKey>;
 }): Map<string, CanvasVideoPreviewTask> {
   const next = new Map<string, CanvasVideoPreviewTask>();
   for (const target of input.targets) {

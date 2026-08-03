@@ -12,7 +12,6 @@ import type { CanvasFeedbackBarTarget } from '../shell/floatingBars.js';
 import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
-import { preloadCanvasImageForHandoff, scheduleCanvasImageHandoffAfterPaint } from './CanvasMediaHandoff';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import { areCanvasNodeShellPropsEqual, type CanvasNodeShellProps } from './CanvasNodeShell';
@@ -761,7 +760,7 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('data-canvas-node-path="flow/notes/offscreen.md"');
     expect(html).toContain('canvas-text-node');
-    expect(html).toContain('canvas-text-preview-empty');
+    expect(html).toContain('canvas-raster-preview-layers');
     expect(html).not.toContain('data-editor-mode="edit"');
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
@@ -786,7 +785,7 @@ describe('CanvasSurface', () => {
     }));
 
     expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(0);
-    expect(html.match(/canvas-text-preview-empty/g) ?? []).toHaveLength(2);
+    expect(html.match(/canvas-raster-preview-layers/g) ?? []).toHaveLength(2);
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
@@ -849,7 +848,7 @@ describe('CanvasSurface', () => {
     }));
 
     expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(0);
-    expect(html.match(/canvas-text-preview-empty/g) ?? []).toHaveLength(2);
+    expect(html.match(/canvas-raster-preview-layers/g) ?? []).toHaveLength(2);
     expect(html.match(/canvas-node-shell[^\"]*selected/g) ?? []).toHaveLength(2);
   });
 
@@ -1257,7 +1256,9 @@ describe('CanvasSurface', () => {
           await Promise.resolve();
         });
       }
-      const previewImage = container.querySelector<HTMLImageElement>('img.canvas-text-preview-image');
+      const previewImage = container.querySelector<HTMLImageElement>(
+        'img[data-canvas-raster-preview-kind="text"]'
+      );
 
       expect(readCanvasTextPreviewSources).toHaveBeenCalledWith({
         canvasId: canvas.id,
@@ -1833,59 +1834,6 @@ describe('CanvasSurface', () => {
     }
   });
 
-  it('resolves a loaded next image only after a paint opportunity', () => {
-    const frameCallbacks: FrameRequestCallback[] = [];
-    const resolve = vi.fn();
-
-    scheduleCanvasImageHandoffAfterPaint(resolve, {
-      requestFrame: (callback) => {
-        frameCallbacks.push(callback);
-        return frameCallbacks.length;
-      },
-      cancelFrame: () => undefined
-    });
-
-    expect(resolve).not.toHaveBeenCalled();
-    frameCallbacks.shift()?.(16);
-    expect(resolve).not.toHaveBeenCalled();
-    frameCallbacks.shift()?.(32);
-    expect(resolve).toHaveBeenCalledTimes(1);
-  });
-
-  it('preloads next images off-DOM before scheduling handoff', async () => {
-    const image = fakePreloadImage();
-    const frameCallbacks: FrameRequestCallback[] = [];
-    const resolveLoaded = vi.fn();
-    const rejectLoaded = vi.fn();
-
-    preloadCanvasImageForHandoff({
-      image: { src: '/preview/high.jpg', loadKey: 'next', previewWidth: 2100 },
-      resolveLoaded,
-      rejectLoaded,
-      createImage: () => image.element as HTMLImageElement,
-      scheduler: {
-        requestFrame: (callback) => {
-          frameCallbacks.push(callback);
-          return frameCallbacks.length;
-        },
-        cancelFrame: () => undefined
-      }
-    });
-
-    expect(image.element.decoding).toBe('async');
-    expect(image.element.src).toBe('/preview/high.jpg');
-    image.element.naturalWidth = 2100;
-    image.emit('load');
-    await Promise.resolve();
-
-    expect(resolveLoaded).not.toHaveBeenCalled();
-    frameCallbacks.shift()?.(16);
-    expect(resolveLoaded).not.toHaveBeenCalled();
-    frameCallbacks.shift()?.(32);
-    expect(resolveLoaded).toHaveBeenCalledWith('next');
-    expect(rejectLoaded).not.toHaveBeenCalled();
-  });
-
   it('does not wait for Canvas settings before rendering the Canvas shell', () => {
     const canvas = createCanvasDocument({ id: 'settings-loading-canvas' });
     const projection: CanvasProjection = {
@@ -2140,7 +2088,11 @@ describe('CanvasSurface', () => {
     monitor.recordCounter({ timestamp: 5, source: 'CanvasRenderCoordinator', name: 'render-snapshot-build' });
     monitor.recordCounter({ timestamp: 6, source: 'CanvasRenderCoordinator', name: 'render-snapshot-reuse' });
     monitor.recordCounter({ timestamp: 7, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
-    monitor.recordCounter({ timestamp: 8, source: 'CanvasImageNodeAsset', name: 'image-node-url-resolve' });
+    monitor.recordCounter({
+      timestamp: 8,
+      source: 'CanvasRasterPreviewPresentation',
+      name: 'raster-preview-requested'
+    });
     reactCommitCountRef.current = 1;
     recordCanvasPerfFrame({
       perfMonitor: monitor,
@@ -2181,7 +2133,7 @@ describe('CanvasSurface', () => {
       renderSnapshotBuildCount: 1,
       renderSnapshotReuseCount: 1,
       stageWriteCount: 1,
-      imageNodeWorkCount: 1
+      rasterPreviewWorkCount: 1
     });
   });
 
@@ -2224,7 +2176,7 @@ describe('CanvasSurface', () => {
       cameraState: 'moving',
       reactCommitCount: 0,
       renderSnapshotBuildCount: 0,
-      imageNodeWorkCount: 0
+      rasterPreviewWorkCount: 0
     });
   });
 
@@ -2533,14 +2485,14 @@ function textBufferFixture(path: string, content: string, revision: string): Tex
 
 function canvasTextPreviewSourceAvailabilityResponse(input: { sources: Array<{
   projectRelativePath: string;
-  fingerprint: string;
-}> }): { sources: Record<string, { projectRelativePath: string; fingerprint: string; status: 'available' }> } {
+  targetIdentity: string;
+}> }): { sources: Record<string, { projectRelativePath: string; targetIdentity: string; status: 'available' }> } {
   return {
     sources: Object.fromEntries(input.sources.map((item) => [
       item.projectRelativePath,
       {
         projectRelativePath: item.projectRelativePath,
-        fingerprint: item.fingerprint,
+        targetIdentity: item.targetIdentity,
         status: 'available'
       }
     ]))
@@ -2598,6 +2550,16 @@ function installAnimationFrame(): () => void {
 async function settleCanvasImageHandoff(): Promise<void> {
   for (let frame = 0; frame < 4; frame += 1) {
     await act(async () => {
+      const pending = document.querySelector<HTMLImageElement>(
+        'img[data-canvas-raster-preview-layer="pending"]'
+      );
+      if (pending) {
+        Object.defineProperty(pending, 'decode', {
+          configurable: true,
+          value: async () => undefined
+        });
+        pending.dispatchEvent(new Event('load'));
+      }
       await Promise.resolve();
       await vi.advanceTimersByTimeAsync(20);
     });
@@ -2605,7 +2567,9 @@ async function settleCanvasImageHandoff(): Promise<void> {
 }
 
 function canvasVisibleImagePreviewWidth(container: HTMLElement): string | null {
-  const image = container.querySelector<HTMLImageElement>('img[data-canvas-image-layer="visible"]');
+  const image = container.querySelector<HTMLImageElement>(
+    'img[data-canvas-raster-preview-layer="visible"]'
+  );
   return image ? new URL(image.src).searchParams.get('w') : null;
 }
 
@@ -2778,37 +2742,6 @@ function projectTreeDragDataTransfer(entries: Array<{ kind: 'file' | 'directory'
   };
 }
 
-function fakePreloadImage(): {
-  element: FakePreloadImageElement;
-  emit: (type: 'load' | 'error') => void;
-} {
-  const listeners = new Map<string, Set<EventListener>>();
-  const element = {
-    complete: false,
-    naturalWidth: 0,
-    decoding: 'auto',
-    src: '',
-    decode: vi.fn(async () => undefined),
-    addEventListener: (type: string, listener: EventListener) => {
-      const current = listeners.get(type) ?? new Set<EventListener>();
-      current.add(listener);
-      listeners.set(type, current);
-    },
-    removeEventListener: (type: string, listener: EventListener) => {
-      listeners.get(type)?.delete(listener);
-    }
-  } as unknown as FakePreloadImageElement;
-  return {
-    element,
-    emit: (type) => {
-      element.complete = true;
-      for (const listener of listeners.get(type) ?? []) {
-        listener(new Event(type));
-      }
-    }
-  };
-}
-
 function deferred<T>(): {
   promise: Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;
@@ -2822,8 +2755,3 @@ function deferred<T>(): {
   });
   return { promise, resolve, reject };
 }
-
-type FakePreloadImageElement = Omit<HTMLImageElement, 'complete' | 'naturalWidth'> & {
-  complete: boolean;
-  naturalWidth: number;
-};

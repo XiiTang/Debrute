@@ -6,8 +6,7 @@ import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import { CanvasFeedbackFrame, canvasFeedbackEntryHasFeedback } from './CanvasFeedbackFrame';
 import { CanvasNodeContent } from './CanvasNodeContent';
 import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
-import type { CanvasTextPreviewSource } from './CanvasTextPreviewRuntime';
-import type { CanvasVideoPreviewSource } from './canvasVideoPreviews';
+import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import { canvasTextPresentationGeometry } from './CanvasTextPresentationGeometry.js';
 
@@ -24,11 +23,9 @@ export interface CanvasNodeShellProps {
   stageRuntime: CanvasStageRuntime;
   actions: WorkbenchActions;
   textBuffer: TextFileBuffer | undefined;
-  textPreview?: CanvasTextPreviewSource | undefined;
-  pendingTextPreview?: CanvasTextPreviewSource | undefined;
-  textPreviewCommittedSourceKey?: string | undefined;
+  textPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   textPreviewError?: string | undefined;
-  videoPreview?: CanvasVideoPreviewSource | undefined;
+  videoPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
@@ -52,8 +49,6 @@ export interface CanvasNodeShellProps {
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
-  onVideoPreviewError?: ((projectRelativePath: string, preview: CanvasVideoPreviewSource, message: string) => void) | undefined;
-  onVideoPreviewRetry?: (() => void) | undefined;
 }
 
 function CanvasNodeShellComponent({
@@ -67,11 +62,9 @@ function CanvasNodeShellComponent({
   stageRuntime,
   actions,
   textBuffer,
-  textPreview,
-  pendingTextPreview,
-  textPreviewCommittedSourceKey,
+  textPreviewRequest,
   textPreviewError,
-  videoPreview,
+  videoPreviewRequest,
   videoPreviewError,
   forceVideoPlayerMounted,
   feedbackEntry,
@@ -92,8 +85,6 @@ function CanvasNodeShellComponent({
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
   onUpdateTextViewport,
-  onVideoPreviewError,
-  onVideoPreviewRetry
 }: CanvasNodeShellProps): React.ReactElement {
   const elementRef = useRef<HTMLDivElement | null>(null);
 
@@ -137,11 +128,9 @@ function CanvasNodeShellComponent({
       selected={node.mediaKind === 'text' ? textEditorActive : selected}
       actions={actions}
       textBuffer={textBuffer}
-      textPreview={textPreview}
-      pendingTextPreview={pendingTextPreview}
-      textPreviewCommittedSourceKey={textPreviewCommittedSourceKey}
+      textPreviewRequest={textPreviewRequest}
       textPreviewError={textPreviewError}
-      videoPreview={videoPreview}
+      videoPreviewRequest={videoPreviewRequest}
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
       feedbackEntry={feedbackEntry}
@@ -156,8 +145,6 @@ function CanvasNodeShellComponent({
       onRegisterVideoTarget={onRegisterVideoTarget}
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}
-      onVideoPreviewError={onVideoPreviewError}
-      onVideoPreviewRetry={onVideoPreviewRetry}
       onSelectNode={() => onSelectNode(node)}
       onTitlePointerDown={(event) => onPointerDown(node, event)}
     />
@@ -222,11 +209,9 @@ export function areCanvasNodeShellPropsEqual(
     && previous.stageRuntime === next.stageRuntime
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)
     && previous.textBuffer === next.textBuffer
-    && previous.textPreview === next.textPreview
-    && previous.pendingTextPreview === next.pendingTextPreview
-    && previous.textPreviewCommittedSourceKey === next.textPreviewCommittedSourceKey
+    && previous.textPreviewRequest === next.textPreviewRequest
     && previous.textPreviewError === next.textPreviewError
-    && previous.videoPreview === next.videoPreview
+    && previous.videoPreviewRequest === next.videoPreviewRequest
     && previous.videoPreviewError === next.videoPreviewError
     && previous.forceVideoPlayerMounted === next.forceVideoPlayerMounted
     && previous.feedbackEntry === next.feedbackEntry
@@ -246,9 +231,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.onVideoPlayingChange === next.onVideoPlayingChange
     && previous.onRegisterVideoTarget === next.onRegisterVideoTarget
     && previous.onUpdateVideoPlaybackTime === next.onUpdateVideoPlaybackTime
-    && previous.onUpdateTextViewport === next.onUpdateTextViewport
-    && previous.onVideoPreviewError === next.onVideoPreviewError
-    && previous.onVideoPreviewRetry === next.onVideoPreviewRetry;
+    && previous.onUpdateTextViewport === next.onUpdateTextViewport;
 }
 
 function usesFixedNodePresentation(node: ProjectedCanvasNode): boolean {

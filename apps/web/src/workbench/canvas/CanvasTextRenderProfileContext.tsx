@@ -28,12 +28,16 @@ export function CanvasTextRenderProfileProvider({
 export function CanvasTextRenderProfileGate({
   profile,
   pending,
+  requireExactProfile = false,
   onReady,
+  onError,
   children
 }: {
   profile: CanvasTextRenderProfile;
   pending: React.ReactNode;
+  requireExactProfile?: boolean | undefined;
   onReady?: (() => void) | undefined;
+  onError?: ((error: Error) => void) | undefined;
   children: React.ReactNode;
 }): React.ReactElement {
   const fontEnvironment = useCanvasTextProjectFontEnvironment();
@@ -42,7 +46,9 @@ export function CanvasTextRenderProfileGate({
     ? inherited.profile
     : fontEnvironment.activeInteractiveProfile;
   const requestedProfileRef = React.useRef(profile);
+  const onErrorRef = React.useRef(onError);
   requestedProfileRef.current = profile;
+  onErrorRef.current = onError;
   const [state, setState] = React.useState<{
     requestedIdentity: string;
     active?: CanvasTextRenderProfile | undefined;
@@ -94,7 +100,12 @@ export function CanvasTextRenderProfileGate({
       onReady?.();
     }
   }, [currentState.active?.identity, currentState.error, onReady, profile.identity]);
-  if (currentState?.error && !currentState.active) {
+  React.useLayoutEffect(() => {
+    if (currentState.error && (requireExactProfile || !currentState.active)) {
+      onErrorRef.current?.(currentState.error);
+    }
+  }, [currentState.active, currentState.error, requireExactProfile]);
+  if (currentState.error && !currentState.active) {
     return (
       <main className="boot-screen" role="alert" data-testid="canvas-text-render-profile-error">
         <strong>Canvas text rendering is unavailable.</strong>
@@ -102,7 +113,8 @@ export function CanvasTextRenderProfileGate({
       </main>
     );
   }
-  if (!currentState?.active) {
+  if (!currentState.active
+    || (requireExactProfile && currentState.active.identity !== profile.identity)) {
     return <>{pending}</>;
   }
   return (

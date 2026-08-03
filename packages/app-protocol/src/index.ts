@@ -277,7 +277,7 @@ export interface WorkbenchProjectTextFileWriteResult extends RevisionedProjectRe
 
 interface CanvasTextPreviewSourceTarget {
   projectRelativePath: string;
-  fingerprint: string;
+  targetIdentity: string;
 }
 
 type CanvasTextPreviewSourceAvailabilityView = CanvasTextPreviewSourceTarget & (
@@ -307,19 +307,19 @@ export interface CanvasTextPreviewSourceAvailabilityResponse {
 
 export interface CanvasVideoPreviewTarget {
   projectRelativePath: string;
-  videoRevision: string;
+  sourceRevision: string;
   frameTimeMs: number;
 }
 
 export type CanvasVideoPreviewProbeView = CanvasVideoPreviewTarget & (
   | {
       status: 'ready';
-      sourceKey: string;
+      canonicalSourceIdentity: string;
       sourceWidth: number;
     }
   | {
       status: 'needs-source';
-      sourceKey: string;
+      canonicalSourceIdentity: string;
     }
   | {
       status: 'failed';
@@ -339,11 +339,11 @@ export interface CanvasVideoPreviewProbeResponse {
 export interface CanvasVideoPreviewEnsureRequest {
   canvasId: string;
   target: CanvasVideoPreviewTarget;
-  sourceKey: string;
+  canonicalSourceIdentity: string;
 }
 
 export type CanvasVideoPreviewEnsureResponse =
-  | { status: 'ready'; sourceKey: string; sourceWidth: number }
+  | { status: 'ready'; canonicalSourceIdentity: string; sourceWidth: number }
   | { status: 'source-changed' }
   | { status: 'failed'; message: string };
 

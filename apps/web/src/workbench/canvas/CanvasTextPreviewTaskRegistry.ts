@@ -1,3 +1,4 @@
+import type { CanvasPreviewTargetIdentity } from '@debrute/canvas-core';
 import type { CanvasTextPreviewTarget } from './CanvasTextPreviewCapture.js';
 
 export const CANVAS_TEXT_PREVIEW_CONTENT_MAX_TARGETS = 10;
@@ -23,7 +24,7 @@ export interface CanvasTextPreviewTask extends CanvasTextPreviewTarget {
 }
 
 interface CanvasTextPreviewAvailability {
-  readonly fingerprint: string;
+  readonly targetIdentity: CanvasPreviewTargetIdentity;
   readonly available: boolean;
 }
 
@@ -35,12 +36,12 @@ export function reconcileCanvasTextPreviewTasks(input: {
   const next = new Map<string, CanvasTextPreviewTask>();
   for (const target of input.targets) {
     const availability = input.sourceAvailability[target.projectRelativePath];
-    if (availability?.fingerprint === target.fingerprint && availability.available) {
+    if (availability?.targetIdentity === target.targetIdentity && availability.available) {
       continue;
     }
     const existing = input.previous.get(target.projectRelativePath);
-    if (existing?.fingerprint === target.fingerprint) {
-      next.set(target.projectRelativePath, availability?.fingerprint === target.fingerprint
+    if (existing?.targetIdentity === target.targetIdentity) {
+      next.set(target.projectRelativePath, availability?.targetIdentity === target.targetIdentity
         && !availability.available
         && existing.state === 'checking'
         ? { ...existing, state: 'needs-content' }
@@ -49,7 +50,7 @@ export function reconcileCanvasTextPreviewTasks(input: {
     }
     next.set(target.projectRelativePath, {
       ...target,
-      state: availability?.fingerprint === target.fingerprint ? 'needs-content' : 'checking'
+      state: availability?.targetIdentity === target.targetIdentity ? 'needs-content' : 'checking'
     });
   }
   return next;

@@ -143,6 +143,39 @@ an index from authoritative Project and Canvas state. It has no public identity,
 history, or Operation lifecycle and may be cancelled, coalesced, or superseded.
 _Avoid_: Runtime Operation, user task, source data
 
+**Preview Target Identity**:
+The media-specific identity of one exact canonical preview requested from
+current Project and Canvas state before raster-width selection. It includes the
+Source Revision when the target uses saved Project bytes, or a content digest
+for uncommitted text, plus every target input that can change the requested
+pixels. It does not include the Project ID, Canvas ID, or Project Path that owns
+a resource; those scope resource keys.
+_Avoid_: Source Revision, resource key, cache path
+
+**Canonical Preview Source Identity**:
+The producer-owned identity of the exact canonical raster source materialized
+for one Preview Target Identity. It is distinct only when producer policy cannot
+be known completely at target-selection time, such as Runtime video frame
+extraction; image Source Revision and text Preview Target Identity already
+determine their canonical sources.
+_Avoid_: Preview Target Identity, Source Revision, source URL
+
+**Preview Variant Identity**:
+The identity of one displayable raster derived from a Preview Target Identity,
+the producer's Canonical Preview Source Identity when distinct, and one exact
+requested width. Changing ownership does not change this identity; changing
+width or producer policy does.
+_Avoid_: Preview Target Identity, source URL, retry key
+
+**Preview Continuity Key**:
+The owner-scoped identity of pixels that may remain visible while another
+Preview Variant width loads. It contains the complete pixel identity but not
+requested width or retry attempt. Image uses its Source Revision, Text uses its
+Preview Target Identity, and Video adds its Canonical Preview Source Identity.
+Changing width preserves continuity; changing any pixel-producing input does
+not.
+_Avoid_: Preview Variant Identity, source URL, load key
+
 **Feedback Mark**:
 A selected categorical review signal that applies to one Project Path target as a
 whole. One atomic Mark command may set or clear it across an exact path

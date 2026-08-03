@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { canvasPreviewTargetIdentityFromDigest } from '@debrute/canvas-core';
 import {
   captureCanvasTextPreviewSource,
-  canvasTextPreviewFingerprint,
+  canvasTextPreviewTargetIdentity,
   canvasTextPreviewSourceSize,
   canvasTextRasterEnvironmentIdentity,
   type CanvasTextPreviewCaptureTarget,
@@ -171,12 +172,12 @@ describe('CanvasTextPreviewCapture', { tags: ['canvas-text'] }, () => {
   });
 
   it('hashes adaptive source dimensions and every pixel-affecting target input', async () => {
-    const first = await canvasTextPreviewFingerprint(candidateFixture());
-    const second = await canvasTextPreviewFingerprint({
+    const first = await canvasTextPreviewTargetIdentity(candidateFixture());
+    const second = await canvasTextPreviewTargetIdentity({
       ...candidateFixture(),
       wordWrap: false
     });
-    const resized = await canvasTextPreviewFingerprint({
+    const resized = await canvasTextPreviewTargetIdentity({
       ...candidateFixture(),
       sourcePixelWidth: 1279
     });
@@ -194,14 +195,14 @@ describe('CanvasTextPreviewCapture', { tags: ['canvas-text'] }, () => {
       engineContractVersion: 'chromium-raster-v1',
       systemFallbackPolicyVersion: 'canvas-text-system-fallback-v1'
     });
-    const first = await canvasTextPreviewFingerprint({
+    const first = await canvasTextPreviewTargetIdentity({
       ...candidateFixture(),
       rasterEnvironmentIdentity: {
         ...canvasTextRasterEnvironmentIdentity(),
         systemFallbackPolicyVersion: 'fallback-v1'
       }
     });
-    const second = await canvasTextPreviewFingerprint({
+    const second = await canvasTextPreviewTargetIdentity({
       ...candidateFixture(),
       rasterEnvironmentIdentity: {
         ...canvasTextRasterEnvironmentIdentity(),
@@ -284,12 +285,13 @@ function targetFixture(): CanvasTextPreviewCaptureTarget {
   return {
     ...candidateFixture(),
     content: 'content',
-    fingerprint: 'sha256:target'
+    targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:target')
   };
 }
 
-function candidateFixture(): Omit<CanvasTextPreviewTarget, 'fingerprint'> {
+function candidateFixture(): Omit<CanvasTextPreviewTarget, 'targetIdentity'> {
   return {
+    projectId: 'project-1',
     canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
     contentDigest: 'sha256:content',
@@ -311,7 +313,7 @@ function failureFields() {
   return {
     canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
-    fingerprint: 'sha256:target'
+    targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:target')
   };
 }
 

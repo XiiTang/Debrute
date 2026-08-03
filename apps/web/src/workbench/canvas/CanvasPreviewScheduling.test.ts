@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canvasPreviewDistanceSquared,
   compareCanvasPreviewPaths,
+  orderCanvasPreviewItemsByNode,
   orderCanvasPreviewTasks
 } from './CanvasPreviewScheduling.js';
 
@@ -32,6 +33,23 @@ describe('CanvasPreviewScheduling', { tags: ['canvas-text', 'canvas-video'] }, (
     expect(orderCanvasPreviewTasks(tasks, visibleRect).map((item) => item.projectRelativePath)).toEqual([
       'a.md',
       'z.md'
+    ]);
+  });
+
+  it('orders owner records through their matching Canvas nodes and drops missing nodes', () => {
+    const items = [
+      { projectRelativePath: 'far.md', state: 'far' },
+      { projectRelativePath: 'missing.md', state: 'missing' },
+      { projectRelativePath: 'near.md', state: 'near' }
+    ];
+    const nodesByPath = new Map([
+      ['far.md', task('far.md', 200, 40)],
+      ['near.md', task('near.md', 70, 40)]
+    ]);
+
+    expect(orderCanvasPreviewItemsByNode({ items, nodesByPath, visibleRect })).toEqual([
+      items[2],
+      items[0]
     ]);
   });
 
