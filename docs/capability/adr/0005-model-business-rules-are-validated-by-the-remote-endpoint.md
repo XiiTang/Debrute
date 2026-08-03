@@ -1,24 +1,26 @@
 # Model Business Rules Are Validated by the Remote Endpoint
 
 Runtime validates the parts of a Model Request that Debrute owns: the Debrute
-Model exists and is configured; arguments are safe JSON structures; known
-arguments use shapes the exact adapter can transform; Project paths, media
-references, and public URLs are safe; request and generated-resource limits are
-respected; Catalog defaults are materialized; and the Operation, Batch, timeout,
-and output-target envelope is valid. Runtime's `required` check tests only
-whether a field is present; it does not reinterpret `null` or a blank string as
-omission. The remote model endpoint validates parameter-name support and content
-constraints once a field is present, including text length, numeric ranges,
-current enum values, dimension pairing and divisibility, cross-field
-combinations, and options that depend on the model, account, or plan.
+Model exists and is configured; arguments form a valid Debrute request envelope;
+Project paths, media references, and public URLs are safe; request and
+generated-resource limits are respected; Catalog defaults are materialized; and
+the Operation, Batch, timeout, and output-target envelope is valid. The remote
+model endpoint validates its provider schema and business contract, including
+required fields, JSON types and nested shapes, parameter-name support, text
+length, numeric ranges, current enum values, dimension pairing and divisibility,
+cross-field combinations, and options that depend on the model, account, or
+plan.
 
-For each catalog-exposed argument, Runtime validates the JSON type and nested
-shape that its exact adapter can process without coercion or loss. Those stable
-structural checks include scalar versus array or object and the supported child
-field shapes. Runtime does not enforce provider enum membership, numeric
-ranges, minimum container cardinality, non-emptiness, or cross-field rules; a
-structurally valid known argument reaches the remote endpoint unchanged for
-those decisions. Debrute-owned upper resource limits remain local safety
+Runtime does not execute the Catalog's generic `required`, type, union, enum,
+range, cardinality, or nested-shape declarations as admission rules. If caller
+JSON can reach the intended upstream location safely and losslessly, the exact
+adapter sends it unchanged, including a missing field, explicit `null`, an
+unexpected JSON type, an unknown field, or a provider-invalid combination.
+Local adapter rejection remains valid only when continuing would require
+Debrute to guess, coerce, overwrite, or discard data—for example when a value
+must become a URL path or query parameter, controls Debrute-owned response
+decoding, supplies a Project resource transformation, or collides with an
+adapter-injected field. Debrute-owned upper resource limits remain local safety
 boundaries.
 
 Those local boundaries distinguish one materialized input from the complete
@@ -41,15 +43,17 @@ downloads use this input contract and do not consume Generated Asset download
 accounting. Generated Assets retain their independent 256 MiB per-asset and
 512 MiB per Model Operation limits.
 
-The Catalog is not a parameter-name allowlist. After the adapter removes and
-transforms the known fields it owns, remaining structurally safe arguments are
+The Catalog is descriptive documentation, not an executable provider-schema
+gate or parameter-name allowlist. After the adapter removes and transforms the
+known fields it owns, remaining safely serializable arguments are
 forwarded at that Model's documented request location so the remote endpoint can
 accept a newly supported field or return its current authoritative error. Known
-arguments still reach the remote endpoint without local range, enum, or
-cross-field rejection. Runtime does not coerce a wrong JSON type into a
-supported one or guess how an unknown field changes response transport; if the
-remote endpoint accepts such a request but returns an unsupported response
-shape, the exact adapter reports that response error.
+arguments still reach the remote endpoint without local required, type, nested,
+range, enum, or cross-field rejection whenever the mapping is lossless. Runtime
+does not coerce a wrong JSON type into a supported one or guess how an unknown
+field changes response transport; if the remote endpoint accepts such a request
+but returns an unsupported response shape, the exact adapter reports that
+response error.
 
 The Catalog and Agent manual list the understood, recommended argument surface.
 They do not enumerate fields a Model does not use and do not add negative

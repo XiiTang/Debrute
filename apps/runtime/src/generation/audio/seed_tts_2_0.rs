@@ -12,27 +12,13 @@ use crate::{
 };
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult, GenerationError> {
-    let mut req_params = context.arguments.clone();
-    let text = req_params.remove("text").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "doubao-seed-tts-2-0 requires text.",
-        )
-    })?;
-    let speaker = req_params.remove("speaker").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "doubao-seed-tts-2-0 requires speaker.",
-        )
-    })?;
+    let req_params = context.arguments.clone();
     let requested_format = req_params
         .get("audio_params")
         .and_then(Value::as_object)
         .and_then(|audio| audio.get("format"))
         .and_then(Value::as_str)
         .map(str::to_owned);
-    req_params.insert("text".to_owned(), text);
-    req_params.insert("speaker".to_owned(), speaker);
     let body = json!({"req_params": req_params});
     let url = join_url(&context.model.base_url, "tts/unidirectional")?;
     let headers = BTreeMap::from([

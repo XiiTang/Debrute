@@ -10,17 +10,22 @@ use crate::generation::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult, GenerationError> {
     let mut body = context.arguments.clone();
-    if !body.contains_key("voice_setting") {
+    let output_format = match body.get("output_format") {
+        Some(Value::String(value)) => value.clone(),
+        Some(_) => {
+            return Err(GenerationError::new(
+                "generation_argument_invalid",
+                "minimax-speech-2-8-hd output_format must be a string because it controls response decoding.",
+            ));
+        }
+        None => "hex".to_owned(),
+    };
+    if body.contains_key("model") {
         return Err(GenerationError::new(
-            "generation_argument_invalid",
-            "minimax-speech-2-8-hd requires voice_setting.",
+            "generation_argument_collision",
+            "minimax-speech-2-8-hd arguments.model conflicts with the configured request model ID.",
         ));
     }
-    let output_format = body
-        .get("output_format")
-        .and_then(Value::as_str)
-        .unwrap_or("hex")
-        .to_owned();
     body.insert(
         "model".to_owned(),
         Value::String(context.model.request_model_id.clone()),

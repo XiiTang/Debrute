@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::{AudioResult, audio_payload};
 use crate::{
     generation::{
-        common::{ExecutionContext, decode_base64, join_url},
+        common::{ExecutionContext, decode_base64, is_string_array, join_url},
         types::{GenerationError, HttpBody, HttpMethod},
     },
     project::{CanvasMediaKind, project_media_kind_from_content_type},
@@ -13,36 +13,50 @@ use crate::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult, GenerationError> {
     let mut arguments = context.arguments.clone();
-    let prompt = arguments.remove("prompt").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "google-lyria-3-clip-preview requires prompt.",
-        )
-    })?;
-    let mut input = vec![json!({"type": "text", "text": prompt})];
+    let prompt = arguments.remove("prompt");
+    let mut input = Vec::new();
+    if let Some(prompt) = prompt {
+        input.push(json!({"type": "text", "text": prompt}));
+    }
     if let Some(images) = arguments.remove("image") {
-        let images = images.as_array().ok_or_else(|| {
-            GenerationError::new(
-                "generation_argument_invalid",
-                "google-lyria-3-clip-preview image must be an array of strings.",
-            )
-        })?;
-        for image in images {
-            let source = image.as_str().ok_or_else(|| {
-                GenerationError::new(
-                    "generation_argument_invalid",
-                    "google-lyria-3-clip-preview image values must be strings.",
-                )
-            })?;
-            input.push(resolve_image(context, source)?);
+        if is_string_array(&images) {
+            for image in images
+                .as_array()
+                .expect("Lyria image references were inspected as a string array")
+            {
+                let source = image
+                    .as_str()
+                    .expect("Lyria image reference was inspected as a string");
+                input.push(resolve_image(context, source)?);
+            }
+        } else {
+            arguments.insert("image".to_owned(), images);
         }
     }
     let mut body = arguments;
+    for field in ["model", "store"] {
+        if body.contains_key(field) {
+            return Err(GenerationError::new(
+                "generation_argument_collision",
+                format!(
+                    "google-lyria-3-clip-preview arguments.{field} conflicts with Debrute request framing."
+                ),
+            ));
+        }
+    }
+    if !input.is_empty() && body.contains_key("input") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "google-lyria-3-clip-preview cannot combine flattened prompt or image with arguments.input.",
+        ));
+    }
     body.insert(
         "model".to_owned(),
         Value::String(context.model.request_model_id.clone()),
     );
-    body.insert("input".to_owned(), Value::Array(input));
+    if !input.is_empty() {
+        body.insert("input".to_owned(), Value::Array(input));
+    }
     body.insert("store".to_owned(), Value::Bool(false));
     let body = Value::Object(body);
     let url = join_url(&context.model.base_url, "interactions")?;

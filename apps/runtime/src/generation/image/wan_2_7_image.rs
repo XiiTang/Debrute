@@ -2,47 +2,38 @@ use serde_json::{Value, json};
 
 use super::{ImageResult, download_images};
 use crate::generation::{
-    common::{ExecutionContext, authorization, join_url},
+    common::{ExecutionContext, authorization, is_string_array, join_url},
     types::{GenerationError, HttpBody, HttpMethod},
 };
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult, GenerationError> {
     let mut parameters = context.arguments.clone();
-    let prompt = parameters.remove("prompt").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "wan2.7-image requires prompt.",
-        )
-    })?;
-    let images = parameters.remove("image").map_or_else(
-        || Ok(Vec::new()),
-        |value| {
-            value
-                .as_array()
-                .ok_or_else(|| {
-                    GenerationError::new(
-                        "generation_argument_invalid",
-                        "wan2.7-image image must be an array of strings.",
-                    )
-                })?
-                .iter()
-                .map(|value| {
-                    let source = value.as_str().ok_or_else(|| {
-                        GenerationError::new(
-                            "generation_argument_invalid",
-                            "wan2.7-image image values must be strings.",
-                        )
-                    })?;
-                    let reference = context.resolve_media_reference(source)?;
-                    reference
-                        .into_reference_string(context)
-                        .map(|image| json!({"image": image}))
-                })
-                .collect::<Result<Vec<_>, _>>()
-        },
-    )?;
+    let prompt = parameters.remove("prompt");
+    let images = match parameters.remove("image") {
+        Some(value) if is_string_array(&value) => value
+            .as_array()
+            .expect("Wan image references were inspected as a string array")
+            .iter()
+            .map(|value| {
+                let source = value
+                    .as_str()
+                    .expect("Wan image reference was inspected as a string");
+                let reference = context.resolve_media_reference(source)?;
+                reference
+                    .into_reference_string(context)
+                    .map(|image| json!({"image": image}))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(value) => {
+            parameters.insert("image".to_owned(), value);
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
     let mut message_parts = images;
-    message_parts.push(json!({"text": prompt}));
+    if let Some(prompt) = prompt {
+        message_parts.push(json!({"text": prompt}));
+    }
     let body = json!({
         "model": context.model.request_model_id,
         "input": {"messages": [{"role": "user", "content": message_parts}]},

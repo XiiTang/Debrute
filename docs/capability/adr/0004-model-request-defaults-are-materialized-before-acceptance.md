@@ -2,17 +2,19 @@
 
 Each optional Model Request argument that has a Debrute default declares that
 value in its Debrute Model catalog schema. Runtime materializes omitted defaults
-before validating and accepting a Single or Batch Model Request, so the
+before accepting a Single or Batch Model Request, so the
 canonical request retained by the Model Operation, consumed by the exact model
 adapter, and recorded in redacted Model Run provenance has one complete shape.
 This was chosen over provider-owned defaults and adapter-local insertion so
 Agent documentation, validation, execution, observation, and provenance cannot
 silently disagree. Explicit Agent values are never replaced, and default
-materialization is not a retry or failure fallback. A required argument cannot
-be omitted; an optional argument without a default remains absent. Explicit
-`null` never means omission and never activates a default. A model schema may
-accept `null` only when that model's official contract gives it a distinct
-meaning; otherwise Runtime rejects it like any other unsupported value.
+materialization is not a retry or failure fallback. An optional argument without
+a default remains absent. Explicit `null` never means omission and never
+activates a default; it is retained like every other explicit JSON value and,
+when the exact adapter can place it without coercion or loss, is forwarded for
+the remote endpoint to accept or reject. Catalog `required`, type, enum, range,
+and nested-shape declarations describe the provider contract for callers; they
+do not turn default materialization into provider-schema admission.
 
 A declared default always exists in the canonical request. Materialization is
 recursive and creates a missing object path when a descendant property declares

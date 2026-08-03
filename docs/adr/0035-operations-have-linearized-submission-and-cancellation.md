@@ -58,12 +58,16 @@ replaced. Once accepted, Operation lifetime is independent of its initiating
 connection and is never replayed after Runtime loss.
 
 Canceling queued work completes immediately. Canceling running work first
-enters `cancelling` and reaches `cancelled` only after cleanup succeeds; cleanup
-failure produces a redacted `failed` result. Already committed Batch Items stay
-committed and do not prevent cancellation of the remaining work. An Item inside
-its short noninterruptible commit section may finish before execution drains,
-but no later Item starts or commits. For a Single, artifact commit and the
-transition to `succeeded` are one linearized completion, so cancellation races
-only with the Operation's terminal transition. This gives acceptance, user
-cancellation, external side effects, and Project commits one observable order
-without exposing an Item-level cancellation race protocol.
+enters `cancelling` and reaches `cancelled` only after Debrute-owned execution
+and cleanup stop; failure of that local cleanup produces a redacted `failed`
+result. An exact adapter may also make one bounded best-effort provider
+cancellation request when the provider and observed remote state permit it.
+Failure, rejection, or timeout of that remote attempt is ignored and never
+turns accepted local cancellation into failure. Already committed Batch Items
+stay committed and do not prevent cancellation of the remaining work. An Item
+inside its short noninterruptible commit section may finish before execution
+drains, but no later Item starts or commits. For a Single, artifact commit and
+the transition to `succeeded` are one linearized completion, so cancellation
+races only with the Operation's terminal transition. This gives acceptance,
+user cancellation, external side effects, and Project commits one observable
+order without exposing an Item-level cancellation race protocol.

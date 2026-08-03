@@ -10,19 +10,13 @@ use crate::generation::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult, GenerationError> {
     let mut arguments = context.arguments.clone();
-    let text = arguments.remove("text").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "dashscope-qwen3-tts-flash requires text.",
-        )
-    })?;
-    let voice = arguments.remove("voice").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "dashscope-qwen3-tts-flash requires voice.",
-        )
-    })?;
-    let mut input = Map::from_iter([("text".to_owned(), text), ("voice".to_owned(), voice)]);
+    let mut input = Map::new();
+    if let Some(text) = arguments.remove("text") {
+        input.insert("text".to_owned(), text);
+    }
+    if let Some(voice) = arguments.remove("voice") {
+        input.insert("voice".to_owned(), voice);
+    }
     if let Some(language_type) = arguments.remove("language_type") {
         input.insert("language_type".to_owned(), language_type);
     }

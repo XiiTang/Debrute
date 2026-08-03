@@ -236,6 +236,20 @@ fn source_for(model_id: &str) -> Option<DocSource> {
                 "../../../../assets/model-docs/snapshots/video/volcengine-ark/seedance-2-mini.md"
             ),
         )),
+        "minimax-h3" => Some(model_doc_at(
+            "model-docs/snapshots/video/minimax/h3.md",
+            &[
+                "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+                "https://platform.minimax.io/docs/api-reference/video-generation-v2-query",
+                "https://platform.minimax.io/docs/api-reference/video-generation-v2-delete",
+                "https://platform.minimax.io/docs/guides/video-generation",
+                "https://platform.minimax.io/docs/guides/rate-limits",
+                "https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create",
+                "https://huggingface.co/MiniMaxAI/MiniMax-H3",
+            ],
+            "2026-08-04",
+            include_str!("../../../../assets/model-docs/snapshots/video/minimax/h3.md"),
+        )),
         "openai-gpt-4o-mini-tts" => Some(model_doc(
             "model-docs/snapshots/audio/openai/gpt-4o-mini-tts.md",
             &[

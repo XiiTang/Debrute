@@ -147,8 +147,10 @@ pub(crate) struct ModelExecution {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HttpMethod {
+    Delete,
     Get,
     Post,
+    Put,
 }
 
 #[derive(Debug, Clone)]

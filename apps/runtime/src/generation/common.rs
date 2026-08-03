@@ -30,6 +30,8 @@ pub(crate) const MAX_MODEL_REQUEST_BYTES: usize = 256 * 1024 * 1024;
 const MAX_MODEL_RUN_RESPONSE_LOGS: usize = 64;
 const MAX_MODEL_RUN_RESPONSE_LOG_BYTES: usize = 2 * 1024 * 1024;
 const MAX_AGENT_REMOTE_ERROR_BYTES: usize = 8 * 1024;
+const MAX_REMOTE_CANCELLATION_RESPONSE_BYTES: usize = 64 * 1024;
+const REMOTE_CANCELLATION_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_GENERATED_IMAGE_DIMENSION: u32 = 50_000;
 const MAX_GENERATED_IMAGE_ALLOCATION: u64 = 64 * 1024 * 1024;
 
@@ -348,6 +350,37 @@ impl<'a> ExecutionContext<'a> {
         Ok(response)
     }
 
+    pub(crate) fn best_effort_remote_cancellation(
+        &self,
+        method: HttpMethod,
+        url: String,
+        headers: BTreeMap<String, String>,
+        body: HttpBody,
+    ) {
+        let Ok(body) = PreparedHttpBody::try_from(body) else {
+            return;
+        };
+        if validate_request_size(&body, self.limits.model_request_bytes).is_err() {
+            return;
+        }
+        let cancellation = GenerationCancellation::default();
+        let Ok(deadline) = GenerationDeadline::after(REMOTE_CANCELLATION_TIMEOUT) else {
+            return;
+        };
+        let _ = self.transport.execute(
+            ModelHttpRequest {
+                method,
+                url,
+                headers,
+                body,
+                maximum_response_bytes: MAX_REMOTE_CANCELLATION_RESPONSE_BYTES,
+                target_policy: HttpTargetPolicy::ModelEndpoint,
+            },
+            &cancellation,
+            deadline,
+        );
+    }
+
     pub(crate) fn resolve_media_reference(
         &mut self,
         reference: &str,
@@ -608,38 +641,6 @@ pub(crate) fn execute_result(
     })
 }
 
-pub(crate) fn validate_arguments(
-    model_id: &str,
-    schema: &Value,
-    arguments: &Map<String, Value>,
-) -> Result<(), GenerationError> {
-    let properties = schema
-        .get("properties")
-        .and_then(Value::as_object)
-        .ok_or_else(|| {
-            GenerationError::new(
-                "model_catalog_invalid",
-                format!("Model {model_id} has no arguments properties."),
-            )
-        })?;
-    if let Some(required) = schema.get("required").and_then(Value::as_array) {
-        for key in required.iter().filter_map(Value::as_str) {
-            if !arguments.contains_key(key) {
-                return Err(GenerationError::new(
-                    "generation_argument_invalid",
-                    format!("Model {model_id} requires argument: {key}."),
-                ));
-            }
-        }
-    }
-    for (key, value) in arguments {
-        if let Some(property_schema) = properties.get(key) {
-            validate_argument_schema(model_id, key, value, property_schema)?;
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn materialize_argument_defaults(
     model_id: &str,
     schema: &Value,
@@ -711,99 +712,17 @@ fn materialize_nested_defaults(
     Ok(())
 }
 
-fn validate_argument_schema(
-    model_id: &str,
-    path: &str,
-    value: &Value,
-    schema: &Value,
-) -> Result<(), GenerationError> {
-    if let Some(branches) = schema.get("anyOf").and_then(Value::as_array)
-        && !branches
-            .iter()
-            .any(|branch| validate_argument_schema(model_id, path, value, branch).is_ok())
-    {
-        return invalid_argument(model_id, path, "does not match any supported shape");
-    }
-    if let Some(branches) = schema.get("oneOf").and_then(Value::as_array)
-        && !branches
-            .iter()
-            .any(|branch| validate_argument_schema(model_id, path, value, branch).is_ok())
-    {
-        return invalid_argument(model_id, path, "does not match any supported shape");
-    }
-    let type_matches = |kind: &str| match kind {
-        "null" => value.is_null(),
-        "string" => value.is_string(),
-        "boolean" => value.is_boolean(),
-        "number" => value.is_number(),
-        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-        "array" => value.is_array(),
-        "object" => value.is_object(),
-        _ => false,
-    };
-    let valid = match schema.get("type") {
-        Some(Value::String(kind)) => type_matches(kind),
-        Some(Value::Array(kinds)) => kinds.iter().filter_map(Value::as_str).any(type_matches),
-        None => true,
-        _ => false,
-    };
-    if !valid {
-        return invalid_argument(model_id, path, "has the wrong type");
-    }
-    validate_nested_constraint(model_id, path, value, schema)?;
-    Ok(())
-}
-
-fn validate_nested_constraint(
-    model_id: &str,
-    path: &str,
-    value: &Value,
-    schema: &Value,
-) -> Result<(), GenerationError> {
-    if let Some(items) = value.as_array()
-        && let Some(item_schema) = schema.get("items")
-    {
-        for (index, item) in items.iter().enumerate() {
-            validate_argument_schema(model_id, &format!("{path}[{index}]"), item, item_schema)?;
-        }
-    }
-    if let Some(object) = value.as_object() {
-        if let Some(required) = schema.get("required").and_then(Value::as_array) {
-            for key in required.iter().filter_map(Value::as_str) {
-                if !object.contains_key(key) {
-                    return invalid_argument(model_id, &format!("{path}.{key}"), "is required");
-                }
-            }
-        }
-        let properties = schema.get("properties").and_then(Value::as_object);
-        if let Some(properties) = properties {
-            for (key, child) in object {
-                if let Some(child_schema) = properties.get(key) {
-                    validate_argument_schema(
-                        model_id,
-                        &format!("{path}.{key}"),
-                        child,
-                        child_schema,
-                    )?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn invalid_argument<T>(model_id: &str, path: &str, reason: &str) -> Result<T, GenerationError> {
-    Err(GenerationError::new(
-        "generation_argument_invalid",
-        format!("Generation argument {path} {reason} for {model_id}."),
-    ))
-}
-
 pub(crate) fn authorization(api_key: &str) -> BTreeMap<String, String> {
     BTreeMap::from([
         ("authorization".to_owned(), format!("Bearer {api_key}")),
         ("content-type".to_owned(), "application/json".to_owned()),
     ])
+}
+
+pub(crate) fn is_string_array(value: &Value) -> bool {
+    value
+        .as_array()
+        .is_some_and(|items| items.iter().all(Value::is_string))
 }
 
 pub(crate) fn join_url(base: &str, suffix: &str) -> Result<String, GenerationError> {
@@ -1253,62 +1172,6 @@ mod tests {
 
     use super::*;
     use crate::project::{GeneratedArtifactRole, GeneratedAssetMetadataLookup};
-
-    #[test]
-    fn recursive_catalog_validation_checks_known_shapes_only() {
-        let schema = serde_json::json!({
-            "type": "object",
-            "properties": {
-                "single": {"type": "string"},
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "anyOf": [
-                            {"type": "string"},
-                            {
-                                "type": "object",
-                                "properties": {"url": {"type": "string", "pattern": "^https://"}},
-                                "required": ["url"],
-                                "additionalProperties": false
-                            }
-                        ]
-                    }
-                }
-            },
-            "additionalProperties": false
-        });
-        assert!(
-            validate_arguments(
-                "fixture",
-                &schema,
-                &Map::from_iter([("single".to_owned(), serde_json::json!(["wrong"]))]),
-            )
-            .is_err()
-        );
-        validate_arguments(
-            "fixture",
-            &schema,
-            &Map::from_iter([
-                (
-                    "items".to_owned(),
-                    serde_json::json!([{"url":"file:///private", "extra": true}]),
-                ),
-                (
-                    "unknown".to_owned(),
-                    serde_json::json!({"sent": "to provider"}),
-                ),
-            ]),
-        )
-        .unwrap();
-        assert!(
-            validate_arguments(
-                "fixture",
-                &schema,
-                &Map::from_iter([("items".to_owned(), serde_json::json!([{"url": 42}]),)]),
-            )
-            .is_err()
-        );
-    }
 
     #[test]
     fn catalog_defaults_materialize_recursively_without_replacing_explicit_values() {

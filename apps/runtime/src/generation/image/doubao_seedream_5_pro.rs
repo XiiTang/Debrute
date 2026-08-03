@@ -2,7 +2,10 @@ use serde_json::{Value, json};
 
 use super::{ImageResult, download_images, image_payload};
 use crate::generation::{
-    common::{ExecutionContext, authorization, decode_base64, join_url, mime_from_path_or_bytes},
+    common::{
+        ExecutionContext, authorization, decode_base64, is_string_array, join_url,
+        mime_from_path_or_bytes,
+    },
     types::{GenerationError, HttpBody, HttpMethod},
 };
 
@@ -10,11 +13,14 @@ const MODEL_ID: &str = "doubao-seedream-5-0-pro-260628";
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult, GenerationError> {
     let mut body = context.arguments.clone();
+    reject_model_collision(&body)?;
     if let Some(images) = body.remove("image") {
-        body.insert(
-            "image".to_owned(),
-            resolve_image_references(context, &images)?,
-        );
+        let images = if is_string_array(&images) {
+            resolve_image_references(context, &images)?
+        } else {
+            images
+        };
+        body.insert("image".to_owned(), images);
     }
     let response_format = body
         .get("response_format")
@@ -110,26 +116,31 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult,
     })
 }
 
+fn reject_model_collision(body: &serde_json::Map<String, Value>) -> Result<(), GenerationError> {
+    if body.contains_key("model") {
+        Err(GenerationError::new(
+            "generation_argument_collision",
+            format!("{MODEL_ID} arguments.model conflicts with the configured request model ID."),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn resolve_image_references(
     context: &mut ExecutionContext<'_>,
     images: &Value,
 ) -> Result<Value, GenerationError> {
-    let images = images.as_array().ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            format!("{MODEL_ID} image must be an array of strings."),
-        )
-    })?;
+    let images = images
+        .as_array()
+        .expect("Seedream image references were inspected as a string array");
     Ok(Value::Array(
         images
             .iter()
             .map(|image| {
-                let source = image.as_str().ok_or_else(|| {
-                    GenerationError::new(
-                        "generation_argument_invalid",
-                        format!("{MODEL_ID} image values must be strings."),
-                    )
-                })?;
+                let source = image
+                    .as_str()
+                    .expect("Seedream image reference was inspected as a string");
                 let reference = context.resolve_media_reference(source)?;
                 reference.into_reference_string(context).map(Value::String)
             })

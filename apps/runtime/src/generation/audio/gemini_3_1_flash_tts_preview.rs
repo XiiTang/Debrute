@@ -10,33 +10,52 @@ use crate::generation::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult, GenerationError> {
     let mut arguments = context.arguments.clone();
-    let text = arguments.remove("text").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "gemini-3-1-flash-tts-preview requires text.",
-        )
-    })?;
-    let speech_config = arguments.remove("speech_config").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "gemini-3-1-flash-tts-preview requires speech_config.",
-        )
-    })?;
-    let mut generation_config = Map::from_iter([("speech_config".to_owned(), speech_config)]);
+    let text = arguments.remove("text");
+    let speech_config = arguments.remove("speech_config");
+    let mut generation_config = Map::new();
+    if let Some(speech_config) = speech_config {
+        generation_config.insert("speech_config".to_owned(), speech_config);
+    }
     if let Some(language) = arguments.remove("language") {
         generation_config.insert("language".to_owned(), language);
     }
     let mut body = arguments;
+    for field in ["model", "response_format", "store"] {
+        if body.contains_key(field) {
+            return Err(GenerationError::new(
+                "generation_argument_collision",
+                format!(
+                    "gemini-3-1-flash-tts-preview arguments.{field} conflicts with Debrute request framing."
+                ),
+            ));
+        }
+    }
+    if text.is_some() && body.contains_key("input") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "gemini-3-1-flash-tts-preview cannot map both text and input.",
+        ));
+    }
+    if !generation_config.is_empty() && body.contains_key("generation_config") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "gemini-3-1-flash-tts-preview cannot merge flattened speech_config or language with generation_config.",
+        ));
+    }
     body.insert(
         "model".to_owned(),
         Value::String(context.model.request_model_id.clone()),
     );
-    body.insert("input".to_owned(), text);
+    if let Some(text) = text {
+        body.insert("input".to_owned(), text);
+    }
     body.insert("response_format".to_owned(), json!({"type": "audio"}));
-    body.insert(
-        "generation_config".to_owned(),
-        Value::Object(generation_config),
-    );
+    if !generation_config.is_empty() {
+        body.insert(
+            "generation_config".to_owned(),
+            Value::Object(generation_config),
+        );
+    }
     body.insert("store".to_owned(), Value::Bool(false));
     let body = Value::Object(body);
     let url = join_url(&context.model.base_url, "interactions")?;

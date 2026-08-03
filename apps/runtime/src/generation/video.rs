@@ -10,6 +10,7 @@ use super::{
     types::{GeneratedPayload, GenerationError, ModelExecution},
 };
 
+mod minimax_h3;
 mod seedance_2;
 mod seedance_2_fast;
 mod seedance_2_mini;
@@ -32,6 +33,7 @@ type VideoAdapter = for<'a> fn(&mut ExecutionContext<'a>) -> Result<VideoResult,
 
 fn adapter_for(model: &str) -> Option<VideoAdapter> {
     match model {
+        "minimax-h3" => Some(minimax_h3::execute),
         "doubao-seedance-2-0-260128" => Some(seedance_2::execute),
         "doubao-seedance-2-0-fast-260128" => Some(seedance_2_fast::execute),
         "doubao-seedance-2-0-mini-260615" => Some(seedance_2_mini::execute),

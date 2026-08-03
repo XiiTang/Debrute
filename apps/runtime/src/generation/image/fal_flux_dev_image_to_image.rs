@@ -11,17 +11,23 @@ use crate::generation::{
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult, GenerationError> {
     let mut body = context.arguments.clone();
     if let Some(image) = body.remove("image_url") {
-        let source = image.as_str().ok_or_else(|| {
-            GenerationError::new(
-                "generation_argument_invalid",
-                "fal-ai/flux/dev/image-to-image image_url must be a string.",
-            )
-        })?;
-        let reference = context.resolve_media_reference(source)?;
-        body.insert(
-            "image_url".to_owned(),
-            Value::String(reference.into_reference_string(context)?),
-        );
+        if let Some(source) = image.as_str() {
+            if source.starts_with("http://")
+                || source.starts_with("https://")
+                || source.starts_with("data:")
+                || context.project_root.join(source).is_file()
+            {
+                let reference = context.resolve_media_reference(source)?;
+                body.insert(
+                    "image_url".to_owned(),
+                    Value::String(reference.into_reference_string(context)?),
+                );
+            } else {
+                body.insert("image_url".to_owned(), image);
+            }
+        } else {
+            body.insert("image_url".to_owned(), image);
+        }
     }
     let url = join_url(&context.model.base_url, &context.model.request_model_id)?;
     let headers = BTreeMap::from([

@@ -16,10 +16,12 @@ failed Outcomes. Already committed Item outputs and Outcomes are never rolled
 back.
 
 After local work and cleanup stop, the Operation becomes `cancelled`. That
-state does not claim that an
-upstream model service lacking a cancellation API stopped its remote work or
-reversed a charge. Runtime adds neither a `partially_succeeded` lifecycle state
-nor a `batch_items_failed` Operation failure.
+state does not claim that an upstream model service stopped its remote work or
+reversed a charge. Where an exact model contract permits it, Runtime makes one
+bounded best-effort provider cancellation attempt; lack of such an API or any
+failure, rejection, timeout, or race in the attempt does not change the local
+result. Runtime adds neither a `partially_succeeded` lifecycle state nor a
+`batch_items_failed` Operation failure.
 
 CLI process status follows the Operation lifecycle, so a succeeded batch exits
 successfully and callers inspect the typed counts or Item Outcomes when results

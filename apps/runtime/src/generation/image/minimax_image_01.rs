@@ -2,17 +2,28 @@ use serde_json::{Value, json};
 
 use super::{ImageResult, download_images, image_payload};
 use crate::generation::{
-    common::{ExecutionContext, authorization, decode_base64, join_url, mime_from_path_or_bytes},
+    common::{
+        ExecutionContext, authorization, decode_base64, is_string_array, join_url,
+        mime_from_path_or_bytes,
+    },
     types::{GenerationError, HttpBody, HttpMethod},
 };
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult, GenerationError> {
     let mut body = context.arguments.clone();
+    if body.contains_key("model") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "image-01 arguments.model conflicts with the configured request model ID.",
+        ));
+    }
     if let Some(references) = body.remove("subject_reference") {
-        body.insert(
-            "subject_reference".to_owned(),
-            resolve_subject_references(context, &references)?,
-        );
+        let references = if is_string_array(&references) {
+            resolve_subject_references(context, &references)?
+        } else {
+            references
+        };
+        body.insert("subject_reference".to_owned(), references);
     }
     let response_format = body
         .get("response_format")
@@ -68,22 +79,16 @@ fn resolve_subject_references(
     context: &mut ExecutionContext<'_>,
     references: &Value,
 ) -> Result<Value, GenerationError> {
-    let references = references.as_array().ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "image-01 subject_reference must be an array of strings.",
-        )
-    })?;
+    let references = references
+        .as_array()
+        .expect("MiniMax subject references were inspected as a string array");
     Ok(Value::Array(
         references
             .iter()
             .map(|reference| {
-                let source = reference.as_str().ok_or_else(|| {
-                    GenerationError::new(
-                        "generation_argument_invalid",
-                        "image-01 subject_reference values must be strings.",
-                    )
-                })?;
+                let source = reference
+                    .as_str()
+                    .expect("MiniMax subject reference was inspected as a string");
                 let reference = context.resolve_media_reference(source)?;
                 Ok(json!({
                     "type": "character",

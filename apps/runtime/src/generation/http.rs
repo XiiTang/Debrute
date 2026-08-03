@@ -149,8 +149,10 @@ async fn execute_once(
         .build()
         .map_err(|error| GenerationError::new("model_request_failed", error.to_string()))?;
     let method = match request.method {
+        HttpMethod::Delete => reqwest::Method::DELETE,
         HttpMethod::Get => reqwest::Method::GET,
         HttpMethod::Post => reqwest::Method::POST,
+        HttpMethod::Put => reqwest::Method::PUT,
     };
     let request_headers = outbound_headers(&request)?;
     let outbound = client.request(method, url).headers(request_headers);

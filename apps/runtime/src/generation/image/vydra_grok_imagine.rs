@@ -8,6 +8,12 @@ use crate::generation::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult, GenerationError> {
     let mut body = context.arguments.clone();
+    if body.contains_key("model") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "grok-imagine arguments.model conflicts with Debrute request framing.",
+        ));
+    }
     body.insert(
         "model".to_owned(),
         Value::String("text-to-image".to_owned()),

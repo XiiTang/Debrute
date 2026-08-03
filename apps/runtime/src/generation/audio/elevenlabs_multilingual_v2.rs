@@ -22,9 +22,22 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult,
                 "elevenlabs-multilingual-v2 requires voice_id.",
             )
         })?;
-    let output_format = body
-        .remove("output_format")
-        .and_then(|value| value.as_str().map(str::to_owned));
+    let output_format = match body.remove("output_format") {
+        Some(Value::String(value)) => Some(value),
+        Some(_) => {
+            return Err(GenerationError::new(
+                "generation_argument_invalid",
+                "elevenlabs-multilingual-v2 output_format must be a string for query mapping.",
+            ));
+        }
+        None => None,
+    };
+    if body.contains_key("model_id") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "elevenlabs-multilingual-v2 arguments.model_id conflicts with the configured request model ID.",
+        ));
+    }
     body.insert(
         "model_id".to_owned(),
         Value::String(context.model.request_model_id.clone()),

@@ -27,7 +27,8 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
         &context.model.base_url,
         &format!("contents/generations/tasks/{task_id}"),
     )?;
-    loop {
+    let mut remotely_cancellable = true;
+    let result = (|| loop {
         let poll = context.json(
             HttpMethod::Get,
             poll_url.clone(),
@@ -36,6 +37,7 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
         )?;
         match poll.get("status").and_then(Value::as_str) {
             Some("succeeded") => {
+                remotely_cancellable = false;
                 let video_url = exact_video_url(&poll)?;
                 let mut payloads = vec![download_video_artifact(
                     context,
@@ -69,7 +71,11 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
                     }),
                 });
             }
-            Some("queued" | "running") => {
+            Some("queued") => {
+                context.sleep(POLL_INTERVAL)?;
+            }
+            Some("running") => {
+                remotely_cancellable = false;
                 context.sleep(POLL_INTERVAL)?;
             }
             Some("failed") => {
@@ -98,17 +104,34 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
                 ));
             }
         }
+    })();
+    finish_poll(context, poll_url, remotely_cancellable, result)
+}
+
+fn finish_poll(
+    context: &ExecutionContext<'_>,
+    poll_url: String,
+    remotely_cancellable: bool,
+    result: Result<VideoResult, GenerationError>,
+) -> Result<VideoResult, GenerationError> {
+    if result
+        .as_ref()
+        .is_err_and(|error| error.code() == "generation_cancelled")
+        && remotely_cancellable
+    {
+        context.best_effort_remote_cancellation(
+            HttpMethod::Delete,
+            poll_url,
+            authorization(&context.model.api_key),
+            HttpBody::Empty,
+        );
     }
+    result
 }
 
 fn request_body(context: &mut ExecutionContext<'_>) -> Result<Value, GenerationError> {
     let mut arguments = context.arguments.clone();
-    let prompt = arguments.remove("prompt").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "doubao-seedance-2-0-260128 requires prompt.",
-        )
-    })?;
+    let prompt = arguments.remove("prompt");
     let intent = arguments
         .remove("intent")
         .and_then(|value| value.as_str().map(str::to_owned))
@@ -136,7 +159,10 @@ fn request_body(context: &mut ExecutionContext<'_>) -> Result<Value, GenerationE
         .map(|(index, reference)| normalize_reference(context, reference, index))
         .collect::<Result<Vec<_>, _>>()?;
     validate_intent(&intent, &references)?;
-    let mut message_parts = vec![json!({"type": "text", "text": prompt})];
+    let mut message_parts = Vec::new();
+    if let Some(prompt) = prompt {
+        message_parts.push(json!({"type": "text", "text": prompt}));
+    }
     for (index, reference) in references.iter().enumerate() {
         let role = reference_role(&intent, &reference.media_type, index);
         message_parts.push(match reference.media_type.as_str() {
@@ -151,6 +177,16 @@ fn request_body(context: &mut ExecutionContext<'_>) -> Result<Value, GenerationE
             }
             _ => unreachable!("validated Seedance 2.0 reference type"),
         });
+    }
+    for field in ["content", "model"] {
+        if arguments.contains_key(field) {
+            return Err(GenerationError::new(
+                "generation_argument_collision",
+                format!(
+                    "doubao-seedance-2-0-260128 arguments.{field} conflicts with Debrute request mapping."
+                ),
+            ));
+        }
     }
     arguments.insert("content".to_owned(), Value::Array(message_parts));
     arguments.insert(
@@ -179,11 +215,10 @@ fn normalize_reference(
     let source = reference
         .get("source")
         .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             GenerationError::new(
                 "generation_argument_invalid",
-                format!("doubao-seedance-2-0-260128 references[{index}].source must be non-empty."),
+                format!("doubao-seedance-2-0-260128 references[{index}].source must be a string for request mapping."),
             )
         })?;
     let media_type = reference
@@ -250,42 +285,22 @@ fn validate_reference_kind(
 
 fn validate_intent(intent: &str, references: &[VideoReference]) -> Result<(), GenerationError> {
     let valid = match intent {
-        "generate" => {
-            references.len() <= 2 && references.iter().all(|item| item.media_type == "image")
-        }
-        "reference" => {
-            !references.is_empty()
-                && references
-                    .iter()
-                    .all(|item| matches!(item.media_type.as_str(), "image" | "video" | "audio"))
-        }
-        "audio_driven" => {
-            references
-                .iter()
-                .filter(|item| item.media_type == "audio")
-                .count()
-                == 1
-                && references
-                    .iter()
-                    .filter(|item| matches!(item.media_type.as_str(), "image" | "video"))
-                    .count()
-                    <= 1
-                && references
-                    .iter()
-                    .all(|item| matches!(item.media_type.as_str(), "image" | "video" | "audio"))
-        }
-        "extend" => {
-            !references.is_empty() && references.iter().all(|item| item.media_type == "video")
-        }
-        "edit" => !references.is_empty(),
+        "generate" => references.iter().all(|item| item.media_type == "image"),
+        "reference" | "audio_driven" => references
+            .iter()
+            .all(|item| matches!(item.media_type.as_str(), "image" | "video" | "audio")),
+        "extend" => references.iter().all(|item| item.media_type == "video"),
+        "edit" => true,
         _ => false,
     };
     if valid {
         Ok(())
     } else {
         Err(GenerationError::new(
-            "video_reference_count_invalid",
-            format!("doubao-seedance-2-0-260128 references are invalid for intent {intent}."),
+            "generation_argument_invalid",
+            format!(
+                "doubao-seedance-2-0-260128 cannot map the supplied reference types for intent {intent}."
+            ),
         ))
     }
 }

@@ -43,7 +43,7 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     );
     assert!(initial.chrome.recent_projects.is_empty());
     assert_eq!(initial.models.image.len(), 13);
-    assert_eq!(initial.models.video.len(), 3);
+    assert_eq!(initial.models.video.len(), 4);
     assert_eq!(initial.models.audio.len(), 16);
 
     for index in 0..14 {
@@ -408,7 +408,7 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
 fn bundled_catalog_keeps_image_video_tts_music_and_sound_effect_as_closed_families() {
     let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
     assert_eq!(catalog.images().len(), 13);
-    assert_eq!(catalog.videos().len(), 3);
+    assert_eq!(catalog.videos().len(), 4);
     assert_eq!(
         catalog
             .audio()
@@ -439,6 +439,7 @@ fn bundled_catalog_keeps_image_video_tts_music_and_sound_effect_as_closed_famili
     assert!(catalog.contains_image("qwen-image-2.0-2026-03-03"));
     assert!(catalog.contains_video("doubao-seedance-2-0-260128"));
     assert!(catalog.contains_video("doubao-seedance-2-0-mini-260615"));
+    assert!(catalog.contains_video("minimax-h3"));
     assert!(catalog.contains_audio("openai-gpt-4o-mini-tts"));
     assert!(!catalog.contains_audio("gpt-image-2"));
     let image = catalog

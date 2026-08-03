@@ -57,10 +57,13 @@ parameter names. Debrute does not invent a universal image-input schema or ask
 callers to construct an upstream Seedance content array. Official documentation
 snapshots and deterministic mocked tests are the admission evidence for a
 supported catalog entry; source code from unrelated wrappers is not authority.
-Catalog schemas describe and type-check the fields Debrute knows; they are not a
-local allowlist. An unlisted parameter is forwarded by that exact Model adapter
-to the remote endpoint instead of being rejected merely because its name is
-new. The remote endpoint remains the authority on whether it supports the field.
+Catalog schemas describe the fields Debrute knows; Runtime does not execute
+their provider `required`, type, nested-shape, enum, range, cardinality, or
+cross-field rules as local admission. They are also not an allowlist. Missing,
+explicit `null`, malformed, and unlisted values are forwarded by that exact
+Model adapter whenever they can reach the intended upstream position safely and
+without coercion, guessing, overwriting, or loss. The remote endpoint remains
+the authority on whether it supports the request.
 
 An argument schema may declare a Model-owned default. Runtime recursively
 materializes each such value before acceptance and executes the retained
@@ -118,6 +121,13 @@ override changes the endpoint used by that Debrute Model and its configured key;
 it is an explicit per-model setting, not an origin-preserving provider
 credential abstraction.
 
+`minimax-h3` defaults to the global `https://api.minimax.io` contract. A user of
+the China platform explicitly overrides it with `https://api.minimaxi.com` and
+configures that regional account's key. Debrute neither treats the origins as
+failover peers nor filters forwarded fields by origin; for example, the
+China-documented `aigc_watermark` field may be supplied as an unlisted argument
+and the selected endpoint decides whether to accept it.
+
 An Accepted Model Binding keeps the effective base URL, request model ID, API
 key, and Model Kind together for the lifetime in which its accepted Operation
 can use them. Settings changes affect only later Operations; stopping pending
@@ -161,17 +171,35 @@ constraints.
 
 ## Video Generation
 
-Video requests use Debrute-native `prompt`, `intent`, and `references`. The
-selected model normalizer validates media types, counts, and intent, then builds
-the exact upstream request internally. Project-local image and audio references
-may become supported data URLs. A Project-local video reference requires the
-runtime upload-service boundary; safe public `http(s)` and `asset://` references
-can already be upstream-reachable.
+Every video Model owns its request language. The three Seedance adapters expose
+Debrute `prompt`, `intent`, and ordered `references`, then perform only the
+structural transformation needed to build that exact Ark `content` request.
+They reject an intent or reference shape only when no unique, lossless mapping
+exists; provider reference counts, non-emptiness, and combinations are left to
+Ark. Supported Project-local image and audio references may become data URLs. A
+Seedance Project-local video reference still requires a model-reachable upload
+boundary; safe public `http(s)` and `asset://` references can already be
+upstream-reachable.
+
+`minimax-h3` instead exposes the MiniMax Direct Generation fields `content`,
+`resolution`, `duration`, `ratio`, and `callback_url` without a Seedance
+intermediate language or generation defaults. Its native `image_url.url`,
+`video_url.url`, and `audio_url.url` values preserve HTTP(S), data, and
+`mm_file://` references. An existing recognizable Project-relative media file
+in one of those same fields becomes a data URL; another string remains unchanged
+for MiniMax to judge. `callback_url` belongs to a public notification service
+owned by the caller, not to input upload or output download. Debrute forwards it
+but still polls the task itself.
 
 Task submission, polling, response parsing, primary video download, and optional
 last-frame download belong to the exact video integration. The runtime does not
 change intent, drop references, downgrade output, switch models, or fall back to
 another request shape when validation or execution fails.
+
+H3 success downloads `task.content.url` and commits exactly one `PrimaryVideo`.
+Its cataloged generated-audio capability records MiniMax's product description;
+Runtime does not inspect for an embedded audio track, extract audio, or make
+track presence a success condition.
 
 ## Audio Generation
 
@@ -188,9 +216,12 @@ and sound-effect semantics. Shared code is limited to model-agnostic HTTP,
 encoding, media detection, and Project artifact utilities.
 
 There is no generic `models audio` or `request audio` command. Kind mismatch,
-missing key, unknown model, missing required arguments, and known fields with a
-JSON shape the adapter cannot consume fail before the remote request. Unknown
-parameter names and provider business values are sent to the remote endpoint.
+missing key, and unknown model fail before the remote request. Provider-required
+fields, provider JSON types, unknown parameter names, and business values are
+sent to the remote endpoint whenever the exact adapter can place them without
+loss. A local adapter error remains only when the value must control a
+Debrute-owned URL path, query, response decoder, Project-media transform, or
+other mapping that cannot proceed without guessing or discarding caller data.
 
 Each audio adapter owns its documented endpoint, request, response, and task
 polling fields; the executor does not guess JSON paths or try a generic parser
@@ -224,6 +255,17 @@ bounds active Model execution, including task polling and Artifact download. It
 does not bound queued Operation time or the short non-interruptible output
 commit.
 
+Accepted Operation cancellation remains authoritative for Debrute: it stops
+unstarted Batch Items and cooperatively aborts local polling, downloads, and
+later commits. Exact adapters also make one separately bounded, best-effort
+remote cancellation attempt when their provider and last observed remote state
+permit it: H3 and Seedance use DELETE before running is observed, and the two
+FAL Stable Audio adapters use their trusted `cancel_url`. The remote request has
+a fresh token, a five-second deadline, no retry, and no follow-up poll. Missing
+support, a state race, rejection, timeout, or network failure is ignored, so
+local `cancelled` never promises that provider computation stopped, a remote
+record was deleted, or billing was reversed.
+
 All five Model Kinds support Single and Batch through the same strict JSONL
 input. Batch concurrency defaults to one and belongs only to that Operation;
 Runtime has no global count-based Model Run capacity or waiting room. Every Item
@@ -243,13 +285,14 @@ leave partial state and is not recovered on Project open.
 
 Before acceptance, unknown or unconfigured models use `model_unavailable` and
 Debrute-owned structural or safety failures use `invalid_input`. Unknown
-parameter names are not an acceptance failure. After acceptance, task, timeout,
-request, unsafe remote input, download, and filesystem causes become one bounded
-redacted log on the failed Operation or Batch Item. A non-success HTTP response
-retains its status and useful remote JSON or text error; model business errors
-retain the remote code, message, and trace identifier when the exact response
-contract supplies them. Runtime does not hide an upstream failure by switching
-Model ID, endpoint, key, format, or adapter.
+parameter names, missing provider-required fields, and provider-invalid values
+are not acceptance failures. After acceptance, task, timeout, request, unsafe
+remote input, download, and filesystem causes become one bounded redacted log
+on the failed Operation or Batch Item. A non-success HTTP response retains its
+status and useful remote JSON or text error; model business errors retain the
+remote code, message, and trace identifier when the exact response contract
+supplies them. Runtime does not hide an upstream failure by switching Model ID,
+endpoint, key, format, or adapter.
 
 ## Secret Redaction
 

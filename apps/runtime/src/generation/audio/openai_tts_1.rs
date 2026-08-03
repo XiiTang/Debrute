@@ -10,26 +10,35 @@ use crate::generation::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult, GenerationError> {
     let mut body = context.arguments.clone();
-    let text = body.remove("text").ok_or_else(|| {
-        GenerationError::new("generation_argument_invalid", "openai-tts-1 requires text.")
-    })?;
-    let voice = body.remove("voice").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "openai-tts-1 requires voice.",
-        )
-    })?;
-    let requested_format = body
-        .remove("format")
-        .and_then(|value| value.as_str().map(str::to_owned));
-    body.insert("input".to_owned(), text);
-    body.insert("voice".to_owned(), voice);
+    let text = body.remove("text");
+    let requested_format = optional_string(&mut body, "format")?;
+    if let Some(text) = text
+        && body.insert("input".to_owned(), text).is_some()
+    {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "openai-tts-1 cannot map both text and input.",
+        ));
+    }
+    if body.contains_key("model") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "openai-tts-1 arguments.model conflicts with the configured request model ID.",
+        ));
+    }
     body.insert(
         "model".to_owned(),
         Value::String(context.model.request_model_id.clone()),
     );
-    if let Some(format) = &requested_format {
-        body.insert("response_format".to_owned(), Value::String(format.clone()));
+    if let Some(format) = &requested_format
+        && body
+            .insert("response_format".to_owned(), Value::String(format.clone()))
+            .is_some()
+    {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "openai-tts-1 cannot map both format and response_format.",
+        ));
     }
     let url = join_url(&context.model.base_url, "audio/speech")?;
     let response = context.bytes(
@@ -49,6 +58,22 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult,
             )
         })?;
     single_audio_result(response.body, &mime, context, &url, &Value::Object(body))
+}
+
+fn optional_string(
+    body: &mut serde_json::Map<String, Value>,
+    name: &str,
+) -> Result<Option<String>, GenerationError> {
+    body.remove(name)
+        .map(|value| {
+            value.as_str().map(str::to_owned).ok_or_else(|| {
+                GenerationError::new(
+                    "generation_argument_invalid",
+                    format!("openai-tts-1 {name} must be a string for request mapping."),
+                )
+            })
+        })
+        .transpose()
 }
 
 fn format_mime(format: &str) -> Option<String> {

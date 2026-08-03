@@ -28,47 +28,29 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult,
     let request_id = exact_string(&submit, "request_id")?;
     let status_url = exact_string(&submit, "status_url")?;
     assert_same_origin(&context.model.base_url, &status_url)?;
-    let result = loop {
-        let status = context.json(
-            HttpMethod::Get,
-            status_url.clone(),
-            headers.clone(),
-            HttpBody::Empty,
-        )?;
-        match status.get("status").and_then(Value::as_str) {
-            Some("IN_QUEUE" | "IN_PROGRESS") => context.sleep(POLL_INTERVAL)?,
-            Some("COMPLETED") => {
-                if let Some(error) = status
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.is_empty())
-                {
-                    return Err(GenerationError::new(
-                        "generation_task_failed",
-                        format!("fal Stable Audio 3 Small SFX task failed: {error}"),
-                    ));
-                }
-                let response_url = exact_string(&status, "response_url")?;
-                assert_same_origin(&context.model.base_url, &response_url)?;
-                break context.json(
-                    HttpMethod::Get,
-                    response_url,
+    let cancel_url = submit
+        .get("cancel_url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .filter(|value| assert_same_origin(&context.model.base_url, value).is_ok())
+        .map(str::to_owned);
+    let mut remotely_cancellable = cancel_url.is_some();
+    let poll_result = poll_task(context, &status_url, &headers, &mut remotely_cancellable);
+    let result = match poll_result {
+        Ok(result) => result,
+        Err(error) => {
+            if error.code() == "generation_cancelled"
+                && remotely_cancellable
+                && let Some(cancel_url) = cancel_url
+            {
+                context.best_effort_remote_cancellation(
+                    HttpMethod::Put,
+                    cancel_url,
                     headers.clone(),
                     HttpBody::Empty,
-                )?;
+                );
             }
-            Some(status) => {
-                return Err(GenerationError::new(
-                    "model_response_invalid",
-                    format!("fal Stable Audio 3 Small SFX task returned status {status}."),
-                ));
-            }
-            None => {
-                return Err(GenerationError::new(
-                    "model_response_invalid",
-                    "fal Stable Audio 3 Small SFX status omitted status.",
-                ));
-            }
+            return Err(error);
         }
     };
     let audio_url = result
@@ -105,6 +87,58 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult,
             "requestId": request_id,
         }),
     })
+}
+
+fn poll_task(
+    context: &mut ExecutionContext<'_>,
+    status_url: &str,
+    headers: &BTreeMap<String, String>,
+    remotely_cancellable: &mut bool,
+) -> Result<Value, GenerationError> {
+    loop {
+        let status = context.json(
+            HttpMethod::Get,
+            status_url.to_owned(),
+            headers.clone(),
+            HttpBody::Empty,
+        )?;
+        match status.get("status").and_then(Value::as_str) {
+            Some("IN_QUEUE" | "IN_PROGRESS") => context.sleep(POLL_INTERVAL)?,
+            Some("COMPLETED") => {
+                *remotely_cancellable = false;
+                if let Some(error) = status
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                {
+                    return Err(GenerationError::new(
+                        "generation_task_failed",
+                        format!("fal Stable Audio 3 Small SFX task failed: {error}"),
+                    ));
+                }
+                let response_url = exact_string(&status, "response_url")?;
+                assert_same_origin(&context.model.base_url, &response_url)?;
+                return context.json(
+                    HttpMethod::Get,
+                    response_url,
+                    headers.clone(),
+                    HttpBody::Empty,
+                );
+            }
+            Some(status) => {
+                return Err(GenerationError::new(
+                    "model_response_invalid",
+                    format!("fal Stable Audio 3 Small SFX task returned status {status}."),
+                ));
+            }
+            None => {
+                return Err(GenerationError::new(
+                    "model_response_invalid",
+                    "fal Stable Audio 3 Small SFX status omitted status.",
+                ));
+            }
+        }
+    }
 }
 
 fn exact_string(value: &Value, key: &str) -> Result<String, GenerationError> {

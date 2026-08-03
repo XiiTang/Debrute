@@ -6,19 +6,14 @@ use crate::project::{CanvasMediaKind, project_media_kind_from_content_type};
 
 use super::{ImageResult, image_payload};
 use crate::generation::{
-    common::{ExecutionContext, decode_base64, join_url, mime_from_path_or_bytes},
+    common::{ExecutionContext, decode_base64, is_string_array, join_url, mime_from_path_or_bytes},
     types::{GenerationError, HttpBody, HttpMethod},
 };
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult, GenerationError> {
     let mut arguments = context.arguments.clone();
-    let prompt = arguments.remove("prompt").ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "gemini-3.1-flash-image requires prompt.",
-        )
-    })?;
-    let images = resolve_images(context, arguments.remove("image"))?;
+    let prompt = arguments.remove("prompt");
+    let images = resolve_images(context, &mut arguments)?;
     let delivery = arguments
         .remove("delivery")
         .and_then(|value| value.as_str().map(str::to_owned))
@@ -29,7 +24,10 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult,
             )
         })?;
 
-    let mut input = vec![json!({"type": "text", "text": prompt})];
+    let mut input = Vec::new();
+    if let Some(prompt) = prompt {
+        input.push(json!({"type": "text", "text": prompt}));
+    }
     input.extend(images);
 
     let mut response_format = Map::from_iter([
@@ -43,11 +41,29 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult,
         response_format.insert("image_size".to_owned(), image_size);
     }
     let mut body = arguments;
+    for field in ["model", "response_format", "store"] {
+        if body.contains_key(field) {
+            return Err(GenerationError::new(
+                "generation_argument_collision",
+                format!(
+                    "gemini-3.1-flash-image arguments.{field} conflicts with Debrute request framing."
+                ),
+            ));
+        }
+    }
+    if !input.is_empty() && body.contains_key("input") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "gemini-3.1-flash-image cannot combine flattened prompt or image with arguments.input.",
+        ));
+    }
     body.insert(
         "model".to_owned(),
         Value::String(context.model.request_model_id.clone()),
     );
-    body.insert("input".to_owned(), Value::Array(input));
+    if !input.is_empty() {
+        body.insert("input".to_owned(), Value::Array(input));
+    }
     body.insert("response_format".to_owned(), Value::Object(response_format));
     body.insert("store".to_owned(), Value::Bool(false));
     let body = Value::Object(body);
@@ -79,34 +95,34 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult,
 
 fn resolve_images(
     context: &mut ExecutionContext<'_>,
-    value: Option<Value>,
+    arguments: &mut Map<String, Value>,
 ) -> Result<Vec<Value>, GenerationError> {
-    let Some(value) = value else {
+    let Some(value) = arguments.remove("image") else {
         return Ok(Vec::new());
     };
+    if !is_string_array(&value) {
+        arguments.insert("image".to_owned(), value);
+        return Ok(Vec::new());
+    }
     value
         .as_array()
-        .ok_or_else(|| {
-            GenerationError::new(
-                "generation_argument_invalid",
-                "gemini-3.1-flash-image image must be an array of strings.",
-            )
-        })?
+        .expect("Gemini image references were inspected as a string array")
         .iter()
-        .map(|value| resolve_image(context, value))
+        .map(|value| {
+            resolve_image(
+                context,
+                value
+                    .as_str()
+                    .expect("Gemini image reference was inspected as a string"),
+            )
+        })
         .collect()
 }
 
 fn resolve_image(
     context: &mut ExecutionContext<'_>,
-    value: &Value,
+    source: &str,
 ) -> Result<Value, GenerationError> {
-    let source = value.as_str().ok_or_else(|| {
-        GenerationError::new(
-            "generation_argument_invalid",
-            "gemini-3.1-flash-image image values must be strings.",
-        )
-    })?;
     let resolved = context.resolve_media_reference(source)?;
     if resolved.is_public_url() {
         let uri = resolved.into_reference_string(context)?;

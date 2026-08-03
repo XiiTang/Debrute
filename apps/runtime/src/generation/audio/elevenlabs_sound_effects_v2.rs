@@ -10,15 +10,22 @@ use crate::generation::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<AudioResult, GenerationError> {
     let mut body = context.arguments.clone();
-    if !body.contains_key("text") {
+    let output_format = match body.remove("output_format") {
+        Some(Value::String(value)) => Some(value),
+        Some(_) => {
+            return Err(GenerationError::new(
+                "generation_argument_invalid",
+                "elevenlabs-sound-effects output_format must be a string for query mapping.",
+            ));
+        }
+        None => None,
+    };
+    if body.contains_key("model_id") {
         return Err(GenerationError::new(
-            "generation_argument_invalid",
-            "elevenlabs-sound-effects requires text.",
+            "generation_argument_collision",
+            "elevenlabs-sound-effects arguments.model_id conflicts with the configured request model ID.",
         ));
     }
-    let output_format = body
-        .remove("output_format")
-        .and_then(|value| value.as_str().map(str::to_owned));
     body.insert(
         "model_id".to_owned(),
         Value::String(context.model.request_model_id.clone()),

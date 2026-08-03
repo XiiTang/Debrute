@@ -13,7 +13,7 @@ use super::{
     audio,
     common::{
         ExecutionContext, StagedModelExecution, commit_staged_execution,
-        materialize_argument_defaults, stage_execution, validate_arguments,
+        materialize_argument_defaults, stage_execution,
     },
     http::NativeModelHttpTransport,
     image,
@@ -95,8 +95,6 @@ impl ModelOperationExecutor for GenerationService {
             &mut request.arguments,
         )
         .map_err(|error| ModelRunError::validation("invalid_input", error.message()))?;
-        validate_arguments(&binding.model.model_id, &binding.schema, &request.arguments)
-            .map_err(|error| ModelRunError::validation("invalid_input", error.message()))?;
         Ok(())
     }
 
@@ -299,8 +297,11 @@ mod tests {
     use std::{
         collections::VecDeque,
         path::{Path, PathBuf},
-        sync::{Arc, Condvar, Mutex},
-        time::Duration,
+        sync::{
+            Arc, Condvar, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::{Duration, Instant},
     };
 
     use serde_json::{Map, Value, json};
@@ -325,11 +326,36 @@ mod tests {
         requests: Mutex<Vec<ModelHttpRequest>>,
     }
 
+    struct CancellingFixtureTransport {
+        responses: Mutex<VecDeque<ModelHttpResponse>>,
+        requests: Mutex<Vec<ModelHttpRequest>>,
+        cancel_on_request: usize,
+        cancel_after_response: bool,
+    }
+
     struct BlockingFixtureTransport {
         responses: Mutex<VecDeque<ModelHttpResponse>>,
         requests: Mutex<Vec<ModelHttpRequest>>,
         first_started: (Mutex<bool>, Condvar),
         release_first: (Mutex<bool>, Condvar),
+    }
+
+    enum RemoteCleanupFixtureOutcome {
+        Response(ModelHttpResponse),
+        NetworkFailure,
+        AwaitDeadline,
+    }
+
+    struct RemoteCleanupFixtureTransport {
+        requests: Mutex<Vec<ModelHttpRequest>>,
+        outcome: RemoteCleanupFixtureOutcome,
+        cleanup_elapsed: Mutex<Option<Duration>>,
+    }
+
+    struct BatchRemoteCancellationTransport {
+        requests: Mutex<Vec<ModelHttpRequest>>,
+        submitted: AtomicUsize,
+        polls_started: (Mutex<usize>, Condvar),
     }
 
     struct AcceptedBindingFixture {
@@ -499,6 +525,41 @@ mod tests {
         }
     }
 
+    impl ModelHttpTransport for CancellingFixtureTransport {
+        fn execute(
+            &self,
+            request: ModelHttpRequest,
+            cancellation: &GenerationCancellation,
+            deadline: GenerationDeadline,
+        ) -> Result<ModelHttpResponse, GenerationError> {
+            deadline.remaining(cancellation)?;
+            let request_number = {
+                let mut requests = self.requests.lock().expect("fixture requests");
+                requests.push(request);
+                requests.len()
+            };
+            if request_number == self.cancel_on_request && !self.cancel_after_response {
+                cancellation.cancel();
+                return Err(deadline.remaining(cancellation).unwrap_err());
+            }
+            let response = self
+                .responses
+                .lock()
+                .expect("fixture responses")
+                .pop_front()
+                .ok_or_else(|| {
+                    GenerationError::new(
+                        "fixture_exhausted",
+                        "Generation fixture response queue is empty.",
+                    )
+                })?;
+            if request_number == self.cancel_on_request {
+                cancellation.cancel();
+            }
+            Ok(response)
+        }
+    }
+
     impl ModelHttpTransport for BlockingFixtureTransport {
         fn execute(
             &self,
@@ -537,6 +598,109 @@ mod tests {
         }
     }
 
+    impl ModelHttpTransport for RemoteCleanupFixtureTransport {
+        fn execute(
+            &self,
+            request: ModelHttpRequest,
+            cancellation: &GenerationCancellation,
+            deadline: GenerationDeadline,
+        ) -> Result<ModelHttpResponse, GenerationError> {
+            deadline.remaining(cancellation)?;
+            let request_number = {
+                let mut requests = self.requests.lock().expect("fixture requests");
+                requests.push(request);
+                requests.len()
+            };
+            match request_number {
+                1 => Ok(fixture_json(&json!({"task_id": "cleanup-outcome-task"}))),
+                2 => {
+                    cancellation.cancel();
+                    Err(deadline.remaining(cancellation).unwrap_err())
+                }
+                3 => {
+                    let started = Instant::now();
+                    let result = match &self.outcome {
+                        RemoteCleanupFixtureOutcome::Response(response) => Ok(response.clone()),
+                        RemoteCleanupFixtureOutcome::NetworkFailure => Err(GenerationError::new(
+                            "fixture_network_failed",
+                            "Fixture network failure.",
+                        )),
+                        RemoteCleanupFixtureOutcome::AwaitDeadline => loop {
+                            match deadline.remaining(cancellation) {
+                                Ok(remaining) => {
+                                    std::thread::sleep(remaining.min(Duration::from_millis(25)));
+                                }
+                                Err(error) => break Err(error),
+                            }
+                        },
+                    };
+                    *self.cleanup_elapsed.lock().expect("cleanup elapsed") =
+                        Some(started.elapsed());
+                    result
+                }
+                _ => Err(GenerationError::new(
+                    "fixture_unexpected_request",
+                    "Remote cleanup fixture received an unexpected request.",
+                )),
+            }
+        }
+    }
+
+    impl BatchRemoteCancellationTransport {
+        fn wait_for_polls(&self, expected: usize) {
+            let (polls_started, changed) = &self.polls_started;
+            let polls_started = polls_started.lock().expect("poll start count");
+            let (polls_started, _) = changed
+                .wait_timeout_while(polls_started, Duration::from_secs(2), |count| {
+                    *count < expected
+                })
+                .expect("poll start wait");
+            assert_eq!(*polls_started, expected, "active polls did not start");
+        }
+    }
+
+    impl ModelHttpTransport for BatchRemoteCancellationTransport {
+        fn execute(
+            &self,
+            request: ModelHttpRequest,
+            cancellation: &GenerationCancellation,
+            deadline: GenerationDeadline,
+        ) -> Result<ModelHttpResponse, GenerationError> {
+            deadline.remaining(cancellation)?;
+            let method = request.method;
+            self.requests
+                .lock()
+                .expect("fixture requests")
+                .push(request);
+            match method {
+                HttpMethod::Post => {
+                    let task = self.submitted.fetch_add(1, Ordering::AcqRel);
+                    Ok(fixture_json(
+                        &json!({"task_id": format!("batch-task-{task}")}),
+                    ))
+                }
+                HttpMethod::Get => {
+                    let (polls_started, changed) = &self.polls_started;
+                    *polls_started.lock().expect("poll start count") += 1;
+                    changed.notify_all();
+                    loop {
+                        let remaining = deadline.remaining(cancellation)?;
+                        std::thread::sleep(remaining.min(Duration::from_millis(10)));
+                    }
+                }
+                HttpMethod::Delete => Ok(ModelHttpResponse {
+                    status: 204,
+                    headers: std::collections::BTreeMap::new(),
+                    body: Vec::new(),
+                }),
+                HttpMethod::Put => Err(GenerationError::new(
+                    "fixture_unexpected_request",
+                    "H3 Batch cleanup must use DELETE.",
+                )),
+            }
+        }
+    }
+
     fn fixture_json(value: &Value) -> ModelHttpResponse {
         ModelHttpResponse {
             status: 200,
@@ -556,6 +720,20 @@ mod tests {
                 mime.to_owned(),
             )]),
             body: bytes.to_vec(),
+        }
+    }
+
+    fn fixture_remote_error() -> ModelHttpResponse {
+        ModelHttpResponse {
+            status: 400,
+            headers: std::collections::BTreeMap::from([(
+                "content-type".to_owned(),
+                "application/json".to_owned(),
+            )]),
+            body: serde_json::to_vec(&json!({
+                "error": {"message": "provider validation owns this request"}
+            }))
+            .unwrap(),
         }
     }
 
@@ -670,6 +848,207 @@ mod tests {
         (execution.unwrap(), requests)
     }
 
+    fn execute_cancelling_fixture(
+        kind: ModelKind,
+        model_id: &str,
+        arguments: &Map<String, Value>,
+        responses: Vec<ModelHttpResponse>,
+        cancel_on_request: usize,
+    ) -> (
+        Result<ModelExecution, GenerationError>,
+        Vec<ModelHttpRequest>,
+        usize,
+    ) {
+        execute_cancellation_fixture(
+            kind,
+            model_id,
+            arguments,
+            responses,
+            cancel_on_request,
+            false,
+        )
+    }
+
+    fn execute_cancelling_after_response_fixture(
+        kind: ModelKind,
+        model_id: &str,
+        arguments: &Map<String, Value>,
+        responses: Vec<ModelHttpResponse>,
+        cancel_on_request: usize,
+    ) -> (
+        Result<ModelExecution, GenerationError>,
+        Vec<ModelHttpRequest>,
+        usize,
+    ) {
+        execute_cancellation_fixture(
+            kind,
+            model_id,
+            arguments,
+            responses,
+            cancel_on_request,
+            true,
+        )
+    }
+
+    fn execute_cancellation_fixture(
+        kind: ModelKind,
+        model_id: &str,
+        arguments: &Map<String, Value>,
+        responses: Vec<ModelHttpResponse>,
+        cancel_on_request: usize,
+        cancel_after_response: bool,
+    ) -> (
+        Result<ModelExecution, GenerationError>,
+        Vec<ModelHttpRequest>,
+        usize,
+    ) {
+        let catalog = ModelCatalog::bundled().unwrap();
+        let request_model_id = match kind {
+            ModelKind::Image => catalog
+                .images()
+                .iter()
+                .find(|entry| entry.debrute_model_id == model_id)
+                .map(|entry| entry.default_request_model_id.clone()),
+            ModelKind::Video => catalog
+                .videos()
+                .iter()
+                .find(|entry| entry.debrute_model_id == model_id)
+                .map(|entry| entry.default_request_model_id.clone()),
+            ModelKind::Tts | ModelKind::Music | ModelKind::SoundEffect => catalog
+                .audio()
+                .iter()
+                .find(|entry| entry.debrute_model_id == model_id)
+                .map(|entry| entry.default_request_model_id.clone()),
+        }
+        .unwrap_or_else(|| model_id.to_owned());
+        let model = ResolvedGenerationModel {
+            kind,
+            model_id: model_id.to_owned(),
+            request_model_id,
+            base_url: "https://model.example/v1".to_owned(),
+            api_key: "live-secret".to_owned(),
+        };
+        let transport = CancellingFixtureTransport {
+            responses: Mutex::new(VecDeque::from(responses)),
+            requests: Mutex::new(Vec::new()),
+            cancel_on_request,
+            cancel_after_response,
+        };
+        let cancellation = GenerationCancellation::default();
+        let context = ExecutionContext::new(
+            &model,
+            arguments,
+            Path::new("."),
+            &cancellation,
+            &transport,
+            GenerationDeadline::after(Duration::from_secs(5)).unwrap(),
+        )
+        .unwrap();
+        let execution = execute_model(kind, context);
+        let requests = transport.requests.into_inner().unwrap();
+        let remaining = transport.responses.into_inner().unwrap().len();
+        (execution, requests, remaining)
+    }
+
+    fn execute_remote_cleanup_outcome_fixture(
+        outcome: RemoteCleanupFixtureOutcome,
+    ) -> (
+        Result<ModelExecution, GenerationError>,
+        Vec<ModelHttpRequest>,
+        Duration,
+    ) {
+        let model = ResolvedGenerationModel {
+            kind: ModelKind::Video,
+            model_id: "minimax-h3".to_owned(),
+            request_model_id: "MiniMax-H3".to_owned(),
+            base_url: "https://model.example/v1".to_owned(),
+            api_key: "live-secret".to_owned(),
+        };
+        let transport = RemoteCleanupFixtureTransport {
+            requests: Mutex::new(Vec::new()),
+            outcome,
+            cleanup_elapsed: Mutex::new(None),
+        };
+        let cancellation = GenerationCancellation::default();
+        let arguments = Map::new();
+        let context = ExecutionContext::new(
+            &model,
+            &arguments,
+            Path::new("."),
+            &cancellation,
+            &transport,
+            GenerationDeadline::after(Duration::from_secs(30)).unwrap(),
+        )
+        .unwrap();
+        let execution = execute_model(ModelKind::Video, context);
+        let requests = transport.requests.into_inner().unwrap();
+        let cleanup_elapsed = transport
+            .cleanup_elapsed
+            .into_inner()
+            .unwrap()
+            .expect("cleanup request must execute");
+        (execution, requests, cleanup_elapsed)
+    }
+
+    fn batch_remote_cancellation_fixture() -> (
+        PathBuf,
+        Arc<BatchRemoteCancellationTransport>,
+        Arc<ModelOperationService<GenerationService>>,
+    ) {
+        let root = std::env::temp_dir().join(format!(
+            "debrute-generation-batch-cancel-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let project = root.join("project");
+        std::fs::create_dir_all(project.join(".debrute")).unwrap();
+        std::fs::write(
+            project.join(".debrute/project.json"),
+            serde_json::to_vec(&json!({
+                "project": {
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "name": "Fixture",
+                    "createdAt": "2026-01-01T00:00:00.000Z",
+                    "updatedAt": "2026-01-01T00:00:00.000Z"
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let catalog = Arc::new(ModelCatalog::bundled().unwrap());
+        let global_config = Arc::new(GlobalConfigStore::new(root.join("home")));
+        global_config
+            .patch(
+                &json!({
+                    "modelSetting": {
+                        "modelId": "minimax-h3",
+                        "setting": {
+                            "baseUrlOverride": "https://model.example/v1",
+                            "requestModelIdOverride": "MiniMax-H3",
+                            "apiKey": "batch-secret"
+                        }
+                    }
+                }),
+                &catalog,
+            )
+            .unwrap();
+        let transport = Arc::new(BatchRemoteCancellationTransport {
+            requests: Mutex::new(Vec::new()),
+            submitted: AtomicUsize::new(0),
+            polls_started: (Mutex::new(0), Condvar::new()),
+        });
+        let executor = Arc::new(GenerationService {
+            catalog,
+            global_config,
+            metadata: Arc::new(GeneratedAssetMetadataService::new()),
+            transport: transport.clone(),
+        });
+        (
+            root,
+            transport,
+            Arc::new(ModelOperationService::new(executor)),
+        )
+    }
+
     #[test]
     fn every_catalog_model_resolves_to_its_peer_kind_and_media_adapter() {
         let catalog = ModelCatalog::bundled().unwrap();
@@ -781,8 +1160,6 @@ mod tests {
                 Map::from_iter([("prompt".to_owned(), expected.get("prompt").unwrap().clone())]);
 
             materialize_argument_defaults(model_id, &schema, &mut arguments).unwrap();
-            validate_arguments(model_id, &schema, &arguments).unwrap();
-
             assert_eq!(Value::Object(arguments), expected, "{model_id}");
         }
     }
@@ -883,6 +1260,252 @@ mod tests {
     }
 
     #[test]
+    fn provider_schema_does_not_gate_operation_acceptance() {
+        let mut fixture = AcceptedBindingFixture::new();
+        fixture.request.arguments = Map::from_iter([
+            ("n".to_owned(), Value::Null),
+            (
+                "future_parameter".to_owned(),
+                json!({"nested": ["remote owns this"]}),
+            ),
+        ]);
+        let accepted = fixture
+            .operations
+            .submit(SubmitModelOperation {
+                project_root: fixture.project(),
+                shape: ExecutionShape::Single,
+                requests: vec![fixture.request.clone()],
+                concurrency: None,
+                timeout_seconds: Some(60),
+                replace: false,
+            })
+            .expect("provider-required and typed fields must not gate acceptance");
+
+        fixture.transport.wait_for_first_request();
+        {
+            let requests = fixture.transport.requests.lock().expect("fixture requests");
+            let HttpBody::Json(body) = &requests[0].body else {
+                panic!("expected JSON model request");
+            };
+            assert!(body.get("prompt").is_none());
+            assert_eq!(body.get("n"), Some(&Value::Null));
+            assert_eq!(
+                body.get("future_parameter"),
+                Some(&json!({"nested": ["remote owns this"]}))
+            );
+        }
+        fixture.transport.release_first_request();
+
+        let terminal = fixture
+            .operations
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap()
+            .unwrap();
+        assert!(terminal.state.is_terminal());
+        assert_eq!(fixture.request_count(), 1);
+    }
+
+    #[test]
+    fn provider_schema_keywords_are_descriptive_at_the_validation_boundary() {
+        let fixture = AcceptedBindingFixture::new();
+        let service = GenerationService {
+            catalog: Arc::clone(&fixture.catalog),
+            global_config: Arc::clone(&fixture.global_config),
+            metadata: Arc::new(GeneratedAssetMetadataService::new()),
+            transport: fixture.transport.clone(),
+        };
+        let binding = AcceptedModelBinding {
+            model: ResolvedGenerationModel {
+                kind: ModelKind::Image,
+                model_id: "schema-fixture".to_owned(),
+                request_model_id: "schema-fixture".to_owned(),
+                base_url: "https://model.example/v1".to_owned(),
+                api_key: "fixture-secret".to_owned(),
+            },
+            schema: json!({
+                "type": "object",
+                "required": ["required_value"],
+                "properties": {
+                    "typed": {"type": "string"},
+                    "nested": {
+                        "type": "object",
+                        "required": ["child"],
+                        "properties": {"child": {"type": "integer"}}
+                    },
+                    "any_value": {
+                        "anyOf": [{"type": "string"}, {"type": "integer"}]
+                    },
+                    "one_value": {
+                        "oneOf": [{"type": "string"}, {"type": "integer"}]
+                    },
+                    "defaulted": {"type": "string", "default": "convenience"}
+                },
+                "additionalProperties": false
+            }),
+        };
+
+        for (name, arguments) in [
+            ("top-level required", Map::new()),
+            (
+                "top-level type",
+                Map::from_iter([("typed".to_owned(), json!({"provider": "shape"}))]),
+            ),
+            (
+                "nested required",
+                Map::from_iter([("nested".to_owned(), json!({}))]),
+            ),
+            (
+                "nested type",
+                Map::from_iter([("nested".to_owned(), json!({"child": "remote"}))]),
+            ),
+            (
+                "anyOf",
+                Map::from_iter([("any_value".to_owned(), json!(["remote"]))]),
+            ),
+            (
+                "oneOf",
+                Map::from_iter([("one_value".to_owned(), json!({"remote": true}))]),
+            ),
+        ] {
+            let original = arguments.clone();
+            let mut request = ModelRequest {
+                model: "schema-fixture".to_owned(),
+                arguments,
+                output: None,
+            };
+            service
+                .validate_request(&binding, &mut request)
+                .unwrap_or_else(|error| panic!("{name} must remain provider-owned: {error}"));
+            assert_eq!(
+                request.arguments.get("defaulted"),
+                Some(&json!("convenience")),
+                "{name} must still receive a missing Debrute default"
+            );
+            for (key, value) in original {
+                assert_eq!(
+                    request.arguments.get(&key),
+                    Some(&value),
+                    "{name} must remain unchanged"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_image_adapter_submits_provider_validation_inputs() {
+        for (model_id, arguments) in [
+            (
+                "doubao-seedream-5-0-lite-260128",
+                Map::from_iter([("response_format".to_owned(), json!("url"))]),
+            ),
+            (
+                "doubao-seedream-5-0-pro-260628",
+                Map::from_iter([("response_format".to_owned(), json!("url"))]),
+            ),
+            ("fal-ai/flux/dev", Map::new()),
+            ("fal-ai/flux/dev/image-to-image", Map::new()),
+            (
+                "gemini-3.1-flash-image",
+                Map::from_iter([("delivery".to_owned(), json!("inline"))]),
+            ),
+            (
+                "gemini-3-pro-image",
+                Map::from_iter([("delivery".to_owned(), json!("inline"))]),
+            ),
+            ("gpt-image-1", Map::new()),
+            ("gpt-image-2", Map::new()),
+            ("grok-imagine", Map::new()),
+            (
+                "image-01",
+                Map::from_iter([("response_format".to_owned(), json!("url"))]),
+            ),
+            ("qwen-image-2.0-pro-2026-06-22", Map::new()),
+            ("qwen-image-2.0-2026-03-03", Map::new()),
+            ("wan2.7-image", Map::new()),
+        ] {
+            assert_first_request_reaches_provider(ModelKind::Image, model_id, &arguments);
+        }
+    }
+
+    #[test]
+    fn every_video_adapter_submits_provider_validation_inputs() {
+        for (model_id, arguments) in [
+            (
+                "doubao-seedance-2-0-260128",
+                Map::from_iter([("intent".to_owned(), json!("generate"))]),
+            ),
+            (
+                "doubao-seedance-2-0-fast-260128",
+                Map::from_iter([("intent".to_owned(), json!("generate"))]),
+            ),
+            (
+                "doubao-seedance-2-0-mini-260615",
+                Map::from_iter([("intent".to_owned(), json!("generate"))]),
+            ),
+            ("minimax-h3", Map::new()),
+        ] {
+            assert_first_request_reaches_provider(ModelKind::Video, model_id, &arguments);
+        }
+    }
+
+    #[test]
+    fn every_audio_adapter_submits_provider_validation_inputs() {
+        for (kind, model_id, arguments) in [
+            (ModelKind::Tts, "dashscope-qwen3-tts-flash", Map::new()),
+            (ModelKind::Tts, "doubao-seed-tts-2-0", Map::new()),
+            (
+                ModelKind::Tts,
+                "elevenlabs-multilingual-v2",
+                Map::from_iter([("voice_id".to_owned(), json!("voice"))]),
+            ),
+            (ModelKind::Music, "elevenlabs-music", Map::new()),
+            (
+                ModelKind::SoundEffect,
+                "elevenlabs-sound-effects",
+                Map::new(),
+            ),
+            (
+                ModelKind::Tts,
+                "elevenlabs-v3-tts",
+                Map::from_iter([("voice_id".to_owned(), json!("voice"))]),
+            ),
+            (
+                ModelKind::SoundEffect,
+                "fal-stable-audio-3-small-sfx",
+                Map::new(),
+            ),
+            (
+                ModelKind::Music,
+                "fal-stable-audio-text-to-audio",
+                Map::new(),
+            ),
+            (ModelKind::Tts, "gemini-3-1-flash-tts-preview", Map::new()),
+            (ModelKind::Music, "google-lyria-3-clip-preview", Map::new()),
+            (ModelKind::Music, "google-lyria-3-pro-preview", Map::new()),
+            (ModelKind::Music, "minimax-music-3-0", Map::new()),
+            (ModelKind::Tts, "minimax-speech-2-8-hd", Map::new()),
+            (ModelKind::Tts, "openai-gpt-4o-mini-tts", Map::new()),
+            (ModelKind::Tts, "openai-tts-1", Map::new()),
+            (ModelKind::Tts, "openai-tts-1-hd", Map::new()),
+        ] {
+            assert_first_request_reaches_provider(kind, model_id, &arguments);
+        }
+    }
+
+    fn assert_first_request_reaches_provider(
+        kind: ModelKind,
+        model_id: &str,
+        arguments: &Map<String, Value>,
+    ) {
+        let (result, requests, remaining) =
+            execute_fixture(kind, model_id, arguments, vec![fixture_remote_error()]);
+        let error = result.expect_err("provider fixture must reject the request");
+        assert_ne!(error.code(), "generation_argument_invalid", "{model_id}");
+        assert_eq!(requests.len(), 1, "{model_id} did not reach the provider");
+        assert_eq!(remaining, 0, "{model_id} did not consume the response");
+    }
+
+    #[test]
     fn all_five_peer_generation_fixtures_use_exact_adapters() {
         let (image, image_requests) = run_fixture(
             ModelKind::Image,
@@ -951,48 +1574,6 @@ mod tests {
             GeneratedArtifactRole::SoundEffectAudio
         );
         assert!(effect_requests[0].url.ends_with("/sound-generation"));
-    }
-
-    #[test]
-    fn doubao_tts_nested_audio_schema_checks_type_not_provider_values() {
-        let catalog = ModelCatalog::bundled().unwrap();
-        let schema = &catalog
-            .audio()
-            .iter()
-            .find(|entry| entry.debrute_model_id == "doubao-seed-tts-2-0")
-            .unwrap()
-            .arguments_schema;
-        validate_arguments(
-            "doubao-seed-tts-2-0",
-            schema,
-            &Map::from_iter([
-                ("text".to_owned(), json!("hello")),
-                ("speaker".to_owned(), json!("speaker")),
-            ]),
-        )
-        .unwrap();
-        for sample_rate in [json!(-1), json!(12_345), json!(96_000)] {
-            let arguments = Map::from_iter([
-                ("text".to_owned(), json!("hello")),
-                ("speaker".to_owned(), json!("speaker")),
-                (
-                    "audio_params".to_owned(),
-                    json!({"sample_rate": sample_rate}),
-                ),
-            ]);
-            validate_arguments("doubao-seed-tts-2-0", schema, &arguments).unwrap();
-        }
-        for sample_rate in [json!(22_050.5), json!("24000"), Value::Null] {
-            let arguments = Map::from_iter([
-                ("text".to_owned(), json!("hello")),
-                ("speaker".to_owned(), json!("speaker")),
-                (
-                    "audio_params".to_owned(),
-                    json!({"sample_rate": sample_rate}),
-                ),
-            ]);
-            assert!(validate_arguments("doubao-seed-tts-2-0", schema, &arguments).is_err());
-        }
     }
 
     #[test]
@@ -2440,6 +3021,28 @@ mod tests {
             edit_body.get("image_url"),
             Some(&json!("data:image/png;base64,iVBORw0KGgo="))
         );
+
+        let (_, provider_shape_requests) = run_fixture(
+            ModelKind::Image,
+            "fal-ai/flux/dev/image-to-image",
+            &Map::from_iter([(
+                "image_url".to_owned(),
+                json!({"future_provider_reference": true}),
+            )]),
+            vec![
+                fixture_json(&json!({
+                    "images": [{"url": "https://media.example/flux-provider-shape"}]
+                })),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\n"),
+            ],
+        );
+        let HttpBody::Json(provider_shape_body) = &provider_shape_requests[0].body else {
+            panic!("Fal provider-shape request must be JSON");
+        };
+        assert_eq!(
+            provider_shape_body.get("image_url"),
+            Some(&json!({"future_provider_reference": true}))
+        );
     }
 
     #[test]
@@ -2526,6 +3129,808 @@ mod tests {
         );
         assert!(fast_body.get("intent").is_none());
         assert!(fast_body.get("references").is_none());
+    }
+
+    #[test]
+    fn minimax_h3_uses_the_native_v2_contract_and_one_video_artifact() {
+        let (execution, requests) = run_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::from_iter([
+                (
+                    "content".to_owned(),
+                    json!([{
+                        "type": "text",
+                        "text": "A quiet coastal basketball scene",
+                        "future_child": true
+                    }]),
+                ),
+                ("resolution".to_owned(), json!("2K")),
+                ("duration".to_owned(), json!(5)),
+                ("ratio".to_owned(), json!("16:9")),
+                (
+                    "callback_url".to_owned(),
+                    json!("https://callback.example/h3"),
+                ),
+                ("aigc_watermark".to_owned(), json!(true)),
+            ]),
+            vec![
+                fixture_json(&json!({"task_id": "h3/task?segment"})),
+                fixture_json(&json!({
+                    "request_id": "h3-query-request",
+                    "task": {
+                        "id": "h3/task?segment",
+                        "status": "succeeded",
+                        "content": {"url": "https://media.example/h3.mp4"}
+                    }
+                })),
+                fixture_media("video/mp4", b"h3-video"),
+            ],
+        );
+
+        assert_eq!(execution.payloads.len(), 1);
+        assert_eq!(
+            execution.payloads[0].role,
+            GeneratedArtifactRole::PrimaryVideo
+        );
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0].method, HttpMethod::Post);
+        assert_eq!(
+            requests[0].url,
+            "https://model.example/v1/v2/video_generation"
+        );
+        let HttpBody::Json(body) = &requests[0].body else {
+            panic!("MiniMax H3 create request must be JSON");
+        };
+        assert_eq!(body.get("model"), Some(&json!("MiniMax-H3")));
+        assert_eq!(body.get("aigc_watermark"), Some(&json!(true)));
+        assert_eq!(body.pointer("/content/0/future_child"), Some(&json!(true)));
+        assert_eq!(
+            requests[1].url,
+            "https://model.example/v1/v2/query/video_generation/h3%2Ftask%3Fsegment"
+        );
+        assert_eq!(requests[2].url, "https://media.example/h3.mp4");
+    }
+
+    #[test]
+    fn minimax_h3_only_transforms_recognized_existing_project_media() {
+        let project_root = std::env::temp_dir().join(format!(
+            "debrute-minimax-h3-project-media-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&project_root).unwrap();
+        std::fs::write(
+            project_root.join("reference.png"),
+            b"\x89PNG\r\n\x1a\nproject-image",
+        )
+        .unwrap();
+
+        let (execution, requests, remaining) = execute_fixture_with_project_root_and_limits(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::from_iter([(
+                "content".to_owned(),
+                json!([
+                    {"type": "image_url", "image_url": {"url": "reference.png"}},
+                    {"type": "video_url", "video_url": {"url": "https://media.example/input.mp4"}},
+                    {"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,AQID"}},
+                    {"type": "image_url", "image_url": {"url": "mm_file://official-reference"}},
+                    {"type": "video_url", "video_url": {"url": "provider-owned-reference"}}
+                ]),
+            )]),
+            vec![
+                fixture_json(&json!({"task_id": "h3-project-task"})),
+                fixture_json(&json!({
+                    "task": {
+                        "status": "succeeded",
+                        "content": {"url": "https://media.example/h3-project.mp4"}
+                    }
+                })),
+                fixture_media("video/mp4", b"h3-project-video"),
+            ],
+            &project_root,
+            ModelRequestResourceLimits::default(),
+        );
+
+        std::fs::remove_dir_all(&project_root).unwrap();
+        assert!(execution.is_ok());
+        assert_eq!(remaining, 0);
+        let HttpBody::Json(body) = &requests[0].body else {
+            panic!("MiniMax H3 project media request must be JSON");
+        };
+        assert!(
+            body.pointer("/content/0/image_url/url")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.starts_with("data:image/png;base64,"))
+        );
+        assert_eq!(
+            body.pointer("/content/1/video_url/url"),
+            Some(&json!("https://media.example/input.mp4"))
+        );
+        assert_eq!(
+            body.pointer("/content/2/audio_url/url"),
+            Some(&json!("data:audio/mpeg;base64,AQID"))
+        );
+        assert_eq!(
+            body.pointer("/content/3/image_url/url"),
+            Some(&json!("mm_file://official-reference"))
+        );
+        assert_eq!(
+            body.pointer("/content/4/video_url/url"),
+            Some(&json!("provider-owned-reference"))
+        );
+    }
+
+    #[test]
+    fn minimax_h3_uses_an_explicit_china_base_url_without_changing_its_contract() {
+        let model = ResolvedGenerationModel {
+            kind: ModelKind::Video,
+            model_id: "minimax-h3".to_owned(),
+            request_model_id: "MiniMax-H3".to_owned(),
+            base_url: "https://api.minimaxi.com".to_owned(),
+            api_key: "china-secret".to_owned(),
+        };
+        let transport = FixtureTransport {
+            responses: Mutex::new(VecDeque::from([
+                fixture_json(&json!({"task_id": "china-task"})),
+                fixture_json(&json!({
+                    "task": {
+                        "status": "succeeded",
+                        "content": {"url": "https://media.example/china-h3.mp4"}
+                    }
+                })),
+                fixture_media("video/mp4", b"china-h3-video"),
+            ])),
+            requests: Mutex::new(Vec::new()),
+        };
+        let cancellation = GenerationCancellation::default();
+        let arguments = Map::from_iter([
+            ("content".to_owned(), Value::Null),
+            ("resolution".to_owned(), json!(42)),
+            ("duration".to_owned(), json!("provider-decides")),
+            ("ratio".to_owned(), json!(["invalid-shape"])),
+            ("callback_url".to_owned(), json!(false)),
+            ("aigc_watermark".to_owned(), json!(true)),
+        ]);
+        let context = ExecutionContext::new(
+            &model,
+            &arguments,
+            Path::new("."),
+            &cancellation,
+            &transport,
+            GenerationDeadline::after(Duration::from_secs(5)).unwrap(),
+        )
+        .unwrap();
+
+        let execution = execute_model(ModelKind::Video, context).unwrap();
+        let requests = transport.requests.into_inner().unwrap();
+        assert_eq!(execution.payloads.len(), 1);
+        assert_eq!(
+            requests[0].url,
+            "https://api.minimaxi.com/v2/video_generation"
+        );
+        assert_eq!(
+            requests[1].url,
+            "https://api.minimaxi.com/v2/query/video_generation/china-task"
+        );
+        let HttpBody::Json(body) = &requests[0].body else {
+            panic!("MiniMax H3 China request must be JSON");
+        };
+        assert_eq!(body.get("model"), Some(&json!("MiniMax-H3")));
+        assert_eq!(body.get("content"), Some(&Value::Null));
+        assert_eq!(body.get("resolution"), Some(&json!(42)));
+        assert_eq!(body.get("duration"), Some(&json!("provider-decides")));
+        assert_eq!(body.get("ratio"), Some(&json!(["invalid-shape"])));
+        assert_eq!(body.get("callback_url"), Some(&json!(false)));
+        assert_eq!(body.get("aigc_watermark"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn minimax_h3_preserves_remote_task_failure_details_and_rejects_unknown_states() {
+        let (failed, failed_requests, failed_remaining) = execute_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::new(),
+            vec![
+                fixture_json(&json!({"task_id": "failed-task"})),
+                fixture_json(&json!({
+                    "request_id": "request-42",
+                    "task": {
+                        "status": "failed",
+                        "error": {"code": "1026", "message": "sensitive content"}
+                    }
+                })),
+            ],
+        );
+        let failed = failed.unwrap_err();
+        assert_eq!(failed.code(), "generation_task_failed");
+        assert!(failed.message().contains("1026"));
+        assert!(failed.message().contains("sensitive content"));
+        assert!(failed.message().contains("request-42"));
+        assert_eq!(failed_requests.len(), 2);
+        assert_eq!(failed_remaining, 0);
+
+        for (poll, expected_code) in [
+            (
+                json!({"task": {"status": "cancelled"}}),
+                "generation_task_failed",
+            ),
+            (
+                json!({"task": {"status": "future-state"}}),
+                "model_response_invalid",
+            ),
+            (
+                json!({"task": {"status": "succeeded"}}),
+                "model_response_invalid",
+            ),
+            (json!({"task": {}}), "model_response_invalid"),
+        ] {
+            let (result, requests, remaining) = execute_fixture(
+                ModelKind::Video,
+                "minimax-h3",
+                &Map::new(),
+                vec![
+                    fixture_json(&json!({"task_id": "terminal-task"})),
+                    fixture_json(&poll),
+                ],
+            );
+            assert_eq!(result.unwrap_err().code(), expected_code);
+            assert_eq!(requests.len(), 2);
+            assert_eq!(remaining, 0);
+        }
+
+        let (missing_id, requests, remaining) = execute_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::new(),
+            vec![fixture_json(&json!({}))],
+        );
+        assert_eq!(missing_id.unwrap_err().code(), "model_response_invalid");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(remaining, 0);
+
+        let (collision, requests, remaining) = execute_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::from_iter([("model".to_owned(), json!("caller-model"))]),
+            Vec::new(),
+        );
+        assert_eq!(
+            collision.unwrap_err().code(),
+            "generation_argument_collision"
+        );
+        assert!(requests.is_empty());
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn minimax_h3_preserves_query_and_download_transport_failures() {
+        let (query, query_requests, query_remaining) = execute_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::new(),
+            vec![
+                fixture_json(&json!({"task_id": "query-error-task"})),
+                fixture_remote_error(),
+            ],
+        );
+        assert!(query.is_err());
+        assert_eq!(query_requests.len(), 2);
+        assert_eq!(query_remaining, 0);
+
+        let (download, download_requests, download_remaining) = execute_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::new(),
+            vec![
+                fixture_json(&json!({"task_id": "download-error-task"})),
+                fixture_json(&json!({
+                    "task": {
+                        "status": "succeeded",
+                        "content": {"url": "https://media.example/download-error.mp4"}
+                    }
+                })),
+                fixture_remote_error(),
+            ],
+        );
+        assert!(download.is_err());
+        assert_eq!(download_requests.len(), 3);
+        assert_eq!(download_remaining, 0);
+    }
+
+    #[test]
+    fn exact_adapters_forward_provider_validation_inputs_instead_of_requiring_them_locally() {
+        let (_, audio_requests) = run_fixture(
+            ModelKind::Tts,
+            "openai-tts-1",
+            &Map::from_iter([
+                ("voice".to_owned(), json!({"id": "provider-voice"})),
+                ("future_audio_field".to_owned(), Value::Null),
+            ]),
+            vec![fixture_media("audio/mpeg", b"ID3")],
+        );
+        let HttpBody::Json(audio_body) = &audio_requests[0].body else {
+            panic!("OpenAI TTS request must be JSON");
+        };
+        assert!(audio_body.get("input").is_none());
+        assert_eq!(
+            audio_body.get("voice"),
+            Some(&json!({"id": "provider-voice"}))
+        );
+        assert_eq!(audio_body.get("future_audio_field"), Some(&Value::Null));
+
+        let (_, image_requests) = run_fixture(
+            ModelKind::Image,
+            "qwen-image-2.0-2026-03-03",
+            &Map::from_iter([("future_image_field".to_owned(), Value::Null)]),
+            vec![
+                fixture_json(&json!({
+                    "output": {"choices": [{"message": {"content": [
+                        {"image": "https://media.example/qwen-forwarding.png"}
+                    ]}}]}
+                })),
+                fixture_media("image/png", b"\x89PNG\r\n\x1a\n"),
+            ],
+        );
+        let HttpBody::Json(image_body) = &image_requests[0].body else {
+            panic!("Qwen image request must be JSON");
+        };
+        assert_eq!(
+            image_body.pointer("/input/messages/0/content"),
+            Some(&json!([]))
+        );
+        assert_eq!(
+            image_body.pointer("/parameters/future_image_field"),
+            Some(&Value::Null)
+        );
+
+        let (_, video_requests) = run_fixture(
+            ModelKind::Video,
+            "doubao-seedance-2-0-260128",
+            &Map::from_iter([
+                ("intent".to_owned(), json!("generate")),
+                ("future_video_field".to_owned(), Value::Null),
+            ]),
+            vec![
+                fixture_json(&json!({"id": "forwarding-task"})),
+                fixture_json(&json!({
+                    "status": "succeeded",
+                    "content": {"video_url": "https://media.example/forwarding.mp4"}
+                })),
+                fixture_media("video/mp4", b"forwarding-video"),
+            ],
+        );
+        let HttpBody::Json(video_body) = &video_requests[0].body else {
+            panic!("Seedance request must be JSON");
+        };
+        assert_eq!(video_body.get("content"), Some(&json!([])));
+        assert_eq!(video_body.get("future_video_field"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn unrecognized_optional_media_shapes_remain_at_their_upstream_location() {
+        let provider_shape = json!({"provider_owned": true});
+        for model_id in [
+            "doubao-seedream-5-0-lite-260128",
+            "doubao-seedream-5-0-pro-260628",
+        ] {
+            let body = first_rejected_json_body(
+                ModelKind::Image,
+                model_id,
+                &Map::from_iter([
+                    ("response_format".to_owned(), json!("url")),
+                    ("image".to_owned(), provider_shape.clone()),
+                ]),
+            );
+            assert_eq!(body.get("image"), Some(&provider_shape), "{model_id}");
+        }
+        for model_id in [
+            "qwen-image-2.0-pro-2026-06-22",
+            "qwen-image-2.0-2026-03-03",
+            "wan2.7-image",
+        ] {
+            let body = first_rejected_json_body(
+                ModelKind::Image,
+                model_id,
+                &Map::from_iter([("image".to_owned(), provider_shape.clone())]),
+            );
+            assert_eq!(
+                body.pointer("/parameters/image"),
+                Some(&provider_shape),
+                "{model_id}"
+            );
+        }
+        for model_id in ["gemini-3.1-flash-image", "gemini-3-pro-image"] {
+            let body = first_rejected_json_body(
+                ModelKind::Image,
+                model_id,
+                &Map::from_iter([
+                    ("delivery".to_owned(), json!("inline")),
+                    ("image".to_owned(), provider_shape.clone()),
+                ]),
+            );
+            assert_eq!(body.get("image"), Some(&provider_shape), "{model_id}");
+        }
+        let minimax = first_rejected_json_body(
+            ModelKind::Image,
+            "image-01",
+            &Map::from_iter([
+                ("response_format".to_owned(), json!("url")),
+                ("subject_reference".to_owned(), provider_shape.clone()),
+            ]),
+        );
+        assert_eq!(minimax.get("subject_reference"), Some(&provider_shape));
+        for model_id in ["google-lyria-3-clip-preview", "google-lyria-3-pro-preview"] {
+            let body = first_rejected_json_body(
+                ModelKind::Music,
+                model_id,
+                &Map::from_iter([("image".to_owned(), provider_shape.clone())]),
+            );
+            assert_eq!(body.get("image"), Some(&provider_shape), "{model_id}");
+        }
+    }
+
+    fn first_rejected_json_body(
+        kind: ModelKind,
+        model_id: &str,
+        arguments: &Map<String, Value>,
+    ) -> Value {
+        let (_, requests, _) =
+            execute_fixture(kind, model_id, arguments, vec![fixture_remote_error()]);
+        let HttpBody::Json(body) = &requests[0].body else {
+            panic!("{model_id} request must be JSON");
+        };
+        Value::clone(body)
+    }
+
+    #[test]
+    fn cancellable_exact_models_keep_local_cancellation_authoritative_and_try_remote_cleanup() {
+        let ignored_cleanup_response = ModelHttpResponse {
+            status: 503,
+            headers: std::collections::BTreeMap::new(),
+            body: b"remote cleanup failed".to_vec(),
+        };
+
+        let (h3, h3_requests, h3_remaining) = execute_cancelling_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::from_iter([("content".to_owned(), json!([]))]),
+            vec![
+                fixture_json(&json!({"task_id": "h3-cancel-task"})),
+                ignored_cleanup_response.clone(),
+            ],
+            2,
+        );
+        assert_eq!(h3.unwrap_err().code(), "generation_cancelled");
+        assert_eq!(h3_remaining, 0);
+        assert_eq!(
+            h3_requests
+                .iter()
+                .map(|request| request.method)
+                .collect::<Vec<_>>(),
+            vec![HttpMethod::Post, HttpMethod::Get, HttpMethod::Delete]
+        );
+        assert!(
+            h3_requests[2]
+                .url
+                .ends_with("/v2/video_generation/h3-cancel-task")
+        );
+
+        for model_id in [
+            "doubao-seedance-2-0-260128",
+            "doubao-seedance-2-0-fast-260128",
+            "doubao-seedance-2-0-mini-260615",
+        ] {
+            let (result, requests, remaining) = execute_cancelling_fixture(
+                ModelKind::Video,
+                model_id,
+                &Map::from_iter([("intent".to_owned(), json!("generate"))]),
+                vec![
+                    fixture_json(&json!({"id": "seedance-cancel-task"})),
+                    ignored_cleanup_response.clone(),
+                ],
+                2,
+            );
+            assert_eq!(result.unwrap_err().code(), "generation_cancelled");
+            assert_eq!(remaining, 0);
+            assert_eq!(
+                requests
+                    .iter()
+                    .map(|request| request.method)
+                    .collect::<Vec<_>>(),
+                vec![HttpMethod::Post, HttpMethod::Get, HttpMethod::Delete],
+                "{model_id} must preserve local cancellation while attempting DELETE"
+            );
+            assert!(
+                requests[2]
+                    .url
+                    .ends_with("/contents/generations/tasks/seedance-cancel-task")
+            );
+        }
+
+        for (kind, model_id) in [
+            (ModelKind::Music, "fal-stable-audio-text-to-audio"),
+            (ModelKind::SoundEffect, "fal-stable-audio-3-small-sfx"),
+        ] {
+            let (result, requests, remaining) = execute_cancelling_fixture(
+                kind,
+                model_id,
+                &Map::new(),
+                vec![
+                    fixture_json(&json!({
+                        "request_id": "fal-cancel-task",
+                        "status_url": "https://model.example/v1/status/fal-cancel-task",
+                        "cancel_url": "https://model.example/v1/cancel/fal-cancel-task"
+                    })),
+                    ignored_cleanup_response.clone(),
+                ],
+                2,
+            );
+            assert_eq!(result.unwrap_err().code(), "generation_cancelled");
+            assert_eq!(remaining, 0);
+            assert_eq!(
+                requests
+                    .iter()
+                    .map(|request| request.method)
+                    .collect::<Vec<_>>(),
+                vec![HttpMethod::Post, HttpMethod::Get, HttpMethod::Put],
+                "{model_id} must preserve local cancellation while attempting PUT"
+            );
+            assert_eq!(
+                requests[2].url,
+                "https://model.example/v1/cancel/fal-cancel-task"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_cleanup_outcomes_never_override_local_cancellation() {
+        for (name, outcome) in [
+            (
+                "success",
+                RemoteCleanupFixtureOutcome::Response(ModelHttpResponse {
+                    status: 204,
+                    headers: std::collections::BTreeMap::new(),
+                    body: Vec::new(),
+                }),
+            ),
+            (
+                "client error",
+                RemoteCleanupFixtureOutcome::Response(ModelHttpResponse {
+                    status: 400,
+                    headers: std::collections::BTreeMap::new(),
+                    body: b"not-json".to_vec(),
+                }),
+            ),
+            (
+                "server error",
+                RemoteCleanupFixtureOutcome::Response(ModelHttpResponse {
+                    status: 503,
+                    headers: std::collections::BTreeMap::new(),
+                    body: b"not-json".to_vec(),
+                }),
+            ),
+            (
+                "network failure",
+                RemoteCleanupFixtureOutcome::NetworkFailure,
+            ),
+        ] {
+            let (result, requests, elapsed) = execute_remote_cleanup_outcome_fixture(outcome);
+            assert_eq!(result.unwrap_err().code(), "generation_cancelled", "{name}");
+            assert_eq!(
+                requests
+                    .iter()
+                    .map(|request| request.method)
+                    .collect::<Vec<_>>(),
+                vec![HttpMethod::Post, HttpMethod::Get, HttpMethod::Delete],
+                "{name}"
+            );
+            assert!(
+                elapsed < Duration::from_secs(1),
+                "{name} unexpectedly delayed local cancellation"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_cleanup_uses_an_independent_fixed_five_second_deadline() {
+        let (result, requests, elapsed) =
+            execute_remote_cleanup_outcome_fixture(RemoteCleanupFixtureOutcome::AwaitDeadline);
+        assert_eq!(result.unwrap_err().code(), "generation_cancelled");
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.method)
+                .collect::<Vec<_>>(),
+            vec![HttpMethod::Post, HttpMethod::Get, HttpMethod::Delete]
+        );
+        assert!(
+            elapsed >= Duration::from_millis(4_900),
+            "cleanup deadline elapsed too early: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(6),
+            "cleanup deadline exceeded its fixed bound: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn batch_cancellation_stops_new_items_and_cleans_each_active_remote_task_once() {
+        let (root, transport, operations) = batch_remote_cancellation_fixture();
+        let request = ModelRequest {
+            model: "minimax-h3".to_owned(),
+            arguments: Map::new(),
+            output: None,
+        };
+        let accepted = operations
+            .submit(SubmitModelOperation {
+                project_root: root.join("project"),
+                shape: ExecutionShape::Batch,
+                requests: vec![request.clone(), request.clone(), request],
+                concurrency: Some(2),
+                timeout_seconds: Some(60),
+                replace: false,
+            })
+            .unwrap();
+
+        transport.wait_for_polls(2);
+        assert_eq!(
+            operations.cancel(&accepted.id).unwrap().state,
+            OperationState::Cancelling
+        );
+        let terminal = operations
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal.state, OperationState::Cancelled);
+
+        let requests = transport.requests.lock().expect("fixture requests");
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.method == HttpMethod::Post)
+                .count(),
+            2,
+            "the third Batch Item must never be submitted"
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.method == HttpMethod::Get)
+                .count(),
+            2
+        );
+        let mut cleanup_urls = requests
+            .iter()
+            .filter(|request| request.method == HttpMethod::Delete)
+            .map(|request| request.url.clone())
+            .collect::<Vec<_>>();
+        cleanup_urls.sort();
+        assert_eq!(cleanup_urls.len(), 2);
+        cleanup_urls.dedup();
+        assert_eq!(
+            cleanup_urls.len(),
+            2,
+            "each active remote task must receive at most one cleanup attempt"
+        );
+        drop(requests);
+
+        operations.shutdown();
+        drop(operations);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn remote_cancellation_is_not_guessed_without_a_trusted_handle() {
+        let (h3, h3_requests, h3_remaining) = execute_cancelling_fixture(
+            ModelKind::Video,
+            "minimax-h3",
+            &Map::new(),
+            vec![fixture_json(&json!({"task_id": "unseen-task"}))],
+            1,
+        );
+        assert_eq!(h3.unwrap_err().code(), "generation_cancelled");
+        assert_eq!(h3_requests.len(), 1);
+        assert_eq!(h3_requests[0].method, HttpMethod::Post);
+        assert_eq!(h3_remaining, 1);
+
+        let (fal, fal_requests, fal_remaining) = execute_cancelling_fixture(
+            ModelKind::Music,
+            "fal-stable-audio-text-to-audio",
+            &Map::new(),
+            vec![fixture_json(&json!({
+                "request_id": "fal-untrusted-cancel",
+                "status_url": "https://model.example/v1/status/fal-untrusted-cancel",
+                "cancel_url": "https://untrusted.example/cancel/fal-untrusted-cancel"
+            }))],
+            2,
+        );
+        assert_eq!(fal.unwrap_err().code(), "generation_cancelled");
+        assert_eq!(
+            fal_requests
+                .iter()
+                .map(|request| request.method)
+                .collect::<Vec<_>>(),
+            vec![HttpMethod::Post, HttpMethod::Get]
+        );
+        assert_eq!(fal_remaining, 0);
+    }
+
+    #[test]
+    fn remote_cancellation_respects_the_last_observed_provider_state() {
+        for model_id in [
+            "minimax-h3",
+            "doubao-seedance-2-0-260128",
+            "doubao-seedance-2-0-fast-260128",
+            "doubao-seedance-2-0-mini-260615",
+        ] {
+            let arguments = if model_id == "minimax-h3" {
+                Map::new()
+            } else {
+                Map::from_iter([("intent".to_owned(), json!("generate"))])
+            };
+            let create = if model_id == "minimax-h3" {
+                json!({"task_id": "state-task"})
+            } else {
+                json!({"id": "state-task"})
+            };
+            for (status, should_delete) in [("queued", true), ("running", false)] {
+                let poll = if model_id == "minimax-h3" {
+                    json!({"task": {"status": status}})
+                } else {
+                    json!({"status": status})
+                };
+                let (result, requests, remaining) = execute_cancelling_after_response_fixture(
+                    ModelKind::Video,
+                    model_id,
+                    &arguments,
+                    vec![fixture_json(&create), fixture_json(&poll)],
+                    2,
+                );
+                assert_eq!(result.unwrap_err().code(), "generation_cancelled");
+                assert_eq!(remaining, 0);
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|request| request.method == HttpMethod::Delete)
+                        .count(),
+                    usize::from(should_delete),
+                    "{model_id} must use DELETE only before running is observed"
+                );
+            }
+        }
+
+        for (kind, model_id) in [
+            (ModelKind::Music, "fal-stable-audio-text-to-audio"),
+            (ModelKind::SoundEffect, "fal-stable-audio-3-small-sfx"),
+        ] {
+            for status in ["IN_QUEUE", "IN_PROGRESS"] {
+                let (result, requests, remaining) = execute_cancelling_after_response_fixture(
+                    kind,
+                    model_id,
+                    &Map::new(),
+                    vec![
+                        fixture_json(&json!({
+                            "request_id": "fal-state-task",
+                            "status_url": "https://model.example/v1/status/fal-state-task",
+                            "cancel_url": "https://model.example/v1/cancel/fal-state-task"
+                        })),
+                        fixture_json(&json!({"status": status})),
+                    ],
+                    2,
+                );
+                assert_eq!(result.unwrap_err().code(), "generation_cancelled");
+                assert_eq!(remaining, 0);
+                assert_eq!(
+                    requests
+                        .iter()
+                        .map(|request| request.method)
+                        .collect::<Vec<_>>(),
+                    vec![HttpMethod::Post, HttpMethod::Get, HttpMethod::Put],
+                    "{model_id} must signal cancellation from {status}"
+                );
+            }
+        }
     }
 
     #[test]

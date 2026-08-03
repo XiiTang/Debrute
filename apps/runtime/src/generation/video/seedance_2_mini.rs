@@ -28,8 +28,8 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
         &context.model.base_url,
         &format!("contents/generations/tasks/{task_id}"),
     )?;
-
-    loop {
+    let mut remotely_cancellable = true;
+    let result = (|| loop {
         let poll = context.json(
             HttpMethod::Get,
             poll_url.clone(),
@@ -38,6 +38,7 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
         )?;
         match poll.get("status").and_then(Value::as_str) {
             Some("succeeded") => {
+                remotely_cancellable = false;
                 let video_url = exact_video_url(&poll)?;
                 let mut payloads = vec![download_video_artifact(
                     context,
@@ -71,7 +72,11 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
                     }),
                 });
             }
-            Some("queued" | "running") => {
+            Some("queued") => {
+                context.sleep(POLL_INTERVAL)?;
+            }
+            Some("running") => {
+                remotely_cancellable = false;
                 context.sleep(POLL_INTERVAL)?;
             }
             Some("failed") => {
@@ -100,12 +105,34 @@ pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<VideoResult,
                 ));
             }
         }
+    })();
+    finish_poll(context, poll_url, remotely_cancellable, result)
+}
+
+fn finish_poll(
+    context: &ExecutionContext<'_>,
+    poll_url: String,
+    remotely_cancellable: bool,
+    result: Result<VideoResult, GenerationError>,
+) -> Result<VideoResult, GenerationError> {
+    if result
+        .as_ref()
+        .is_err_and(|error| error.code() == "generation_cancelled")
+        && remotely_cancellable
+    {
+        context.best_effort_remote_cancellation(
+            HttpMethod::Delete,
+            poll_url,
+            authorization(&context.model.api_key),
+            HttpBody::Empty,
+        );
     }
+    result
 }
 
 fn request_body(context: &mut ExecutionContext<'_>) -> Result<Value, GenerationError> {
     let mut arguments = context.arguments.clone();
-    let prompt = required_string(&mut arguments, "prompt")?;
+    let prompt = arguments.remove("prompt");
     let intent = required_string(&mut arguments, "intent")?;
     validate_intent(&intent)?;
     let references = arguments
@@ -126,7 +153,10 @@ fn request_body(context: &mut ExecutionContext<'_>) -> Result<Value, GenerationE
         .map(|(index, reference)| normalize_reference(context, reference, index))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut content_items = vec![json!({"type": "text", "text": prompt})];
+    let mut content_items = Vec::new();
+    if let Some(prompt) = prompt {
+        content_items.push(json!({"type": "text", "text": prompt}));
+    }
     for (index, reference) in references.iter().enumerate() {
         let role = reference_role(&intent, &reference.media_type, index);
         content_items.push(match reference.media_type.as_str() {
@@ -143,6 +173,14 @@ fn request_body(context: &mut ExecutionContext<'_>) -> Result<Value, GenerationE
         });
     }
 
+    for field in ["content", "model"] {
+        if arguments.contains_key(field) {
+            return Err(GenerationError::new(
+                "generation_argument_collision",
+                format!("{MODEL_ID} arguments.{field} conflicts with Debrute request mapping."),
+            ));
+        }
+    }
     arguments.insert("content".to_owned(), Value::Array(content_items));
     arguments.insert(
         "model".to_owned(),

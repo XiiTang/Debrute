@@ -13,6 +13,18 @@ use crate::generation::{
 
 pub(super) fn execute(context: &mut ExecutionContext<'_>) -> Result<ImageResult, GenerationError> {
     let mut arguments = context.arguments.clone();
+    if arguments.contains_key("model") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "gpt-image-2 arguments.model conflicts with the configured request model ID.",
+        ));
+    }
+    if arguments.contains_key("image") && arguments.contains_key("images") {
+        return Err(GenerationError::new(
+            "generation_argument_collision",
+            "gpt-image-2 cannot map both image and images.",
+        ));
+    }
     let image_present = arguments.contains_key("image");
     let mask_present = arguments.contains_key("mask");
     let images = resolve_images(context, arguments.remove("image"))?;
