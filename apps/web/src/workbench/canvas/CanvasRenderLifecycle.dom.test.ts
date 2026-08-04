@@ -33,15 +33,15 @@ describe('CanvasRenderLifecycle', () => {
       ]
     });
 
-    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['far', 'near']);
-    const sceneBeforePan = fixture.lifecycle.getSnapshot();
+    expect([...fixture.runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['far', 'near']);
+    const sceneBeforePan = fixture.runtime.scene.getRenderSnapshot();
     const listener = vi.fn();
-    const unsubscribe = fixture.lifecycle.subscribe(listener);
+    const unsubscribe = fixture.runtime.scene.subscribeRenderSnapshot(listener);
 
     fixture.runtime.camera.setCamera({ x: -5000, y: 0, z: 1 });
     fixture.frames[0]?.(0);
 
-    expect(fixture.lifecycle.getSnapshot()).toBe(sceneBeforePan);
+    expect(fixture.runtime.scene.getRenderSnapshot()).toBe(sceneBeforePan);
     expect(listener).not.toHaveBeenCalled();
     expect(fixture.lifecycle.previewDistanceSquaredForNode('near'))
       .toBeLessThan(fixture.lifecycle.previewDistanceSquaredForNode('far'));
@@ -68,7 +68,7 @@ describe('CanvasRenderLifecycle', () => {
 
     expect(near.style.display).toBe('none');
     expect(far.style.display).toBe('block');
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.size).toBe(2);
+    expect(fixture.runtime.scene.getRenderSnapshot().nodesByPath.size).toBe(2);
 
     unregisterFar();
     unregisterNear();
@@ -104,13 +104,18 @@ describe('CanvasRenderLifecycle', () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 
-  it('publishes Manual Layout geometry and keeps all nodes mounted', () => {
+  it('writes Manual Layout geometry directly without publishing a new React snapshot', () => {
     const fixture = createFixture({
       nodes: [
         directoryNode('back', 0, 0, 0),
         directoryNode('front', 20, 0, 1)
       ]
     });
+    const back = document.createElement('div');
+    const unregisterBack = fixture.stageRuntime.registerNodeShell('back', back);
+    const sceneBeforeMove = fixture.runtime.scene.getRenderSnapshot();
+    const listener = vi.fn();
+    const unsubscribe = fixture.runtime.scene.subscribeRenderSnapshot(listener);
 
     fixture.runtime.input.beginNodeMove({
       pointerId: 2,
@@ -122,21 +127,27 @@ describe('CanvasRenderLifecycle', () => {
       screenPoint: { x: 5, y: 0 }
     });
 
-    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['back', 'front']);
-    expect(fixture.lifecycle.getSnapshot().nodesByPath.get('back')?.x).toBe(5);
-    expect(fixture.lifecycle.getSnapshot().nodeZIndexByPath.get('back')).toBe(1);
+    expect([...fixture.runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['back', 'front']);
+    expect(fixture.runtime.scene.getRenderSnapshot()).toBe(sceneBeforeMove);
+    expect(fixture.runtime.scene.getRenderSnapshot().nodesByPath.get('back')?.x).toBe(0);
+    expect(back.style.transform).toBe('translate(5px, 0px)');
+    expect(back.style.zIndex).toBe('2');
+    expect(listener).not.toHaveBeenCalled();
+
+    unsubscribe();
+    unregisterBack();
   });
 
   it('invalidates queued viewport work when the Projection changes', () => {
     const fixture = createFixture({ nodes: [directoryNode('old', 0, 0, 1)] });
 
     fixture.runtime.camera.setCamera({ x: -20, y: 0, z: 1 });
-    fixture.lifecycle.acceptProjection(projection([directoryNode('new', 0, 0, 1)]));
+    fixture.runtime.acceptProjection(projection([directoryNode('new', 0, 0, 1)]));
 
     expect(fixture.canceledFrames).toEqual([1]);
-    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['new']);
+    expect([...fixture.runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['new']);
     fixture.frames[0]?.(0);
-    expect([...fixture.lifecycle.getSnapshot().nodesByPath.keys()]).toEqual(['new']);
+    expect([...fixture.runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['new']);
   });
 
   it('records viewport culling and idle publication without rebuilding the scene', () => {
@@ -186,7 +197,6 @@ function createFixture(input: {
   });
   const stageRuntime = createCanvasStageRuntime();
   const lifecycle = createCanvasRenderLifecycle({
-    projection: initialProjection,
     runtime,
     stageRuntime,
     perfMonitor: input.perfMonitor,
@@ -196,7 +206,7 @@ function createFixture(input: {
     },
     cancelFrame: (handle) => canceledFrames.push(handle)
   });
-  const unsubscribe = lifecycle.subscribe(() => undefined);
+  const detachLifecycle = lifecycle.attach();
   let disposed = false;
   const fixture: CanvasRenderLifecycleFixture = {
     runtime,
@@ -209,7 +219,7 @@ function createFixture(input: {
         return;
       }
       disposed = true;
-      unsubscribe();
+      detachLifecycle();
       stageRuntime.dispose();
       runtime.dispose();
       fixtures.delete(fixture);

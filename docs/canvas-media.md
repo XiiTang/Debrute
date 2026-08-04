@@ -48,16 +48,18 @@ one-shot play requests remain transient browser or Workbench state.
 ## Inactive Preview And Active Player
 
 An inactive available video settles to one derived preview image and no player.
-A selected, explicitly requested, or playing video settles to one real player.
-A shortcut aimed at a selected inactive video first requests that player's
-mount. A playing video remains mounted if selection changes; a paused inactive
-video returns to its preview.
+A content-active, explicitly requested, or playing video settles to one real
+player. A shortcut aimed at the content-active inactive video first requests
+that player's mount. A playing video remains mounted if Canvas Node Selection
+changes; a paused content-inactive video returns to its preview.
 
-Clicking an inactive preview selects the node, mounts the player, and issues one
-play request. Inside the mounted player, media-chrome owns pointer gestures and
-controls while Debrute keeps keyboard ownership at the selected-Canvas-node
-boundary. The centralized shortcuts cover play/pause, small or large seek,
-mute, captions, playback-rate adjustment, fullscreen, and picture-in-picture.
+Pressing an inactive preview does not select or play it. Pointer release within
+that same preview selects the node, mounts the player, and issues one play
+request; release outside it does nothing. Inside the mounted player,
+media-chrome owns pointer gestures and controls while Debrute keeps keyboard
+ownership at the content-active Canvas Node boundary. The centralized shortcuts cover
+play/pause, small or large seek, mute, captions, playback-rate adjustment,
+fullscreen, and picture-in-picture.
 Focused text inputs and media controls keep their native keyboard behavior.
 
 The preview-to-player handoff keeps the current preview visible until the

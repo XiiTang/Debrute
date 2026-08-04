@@ -17,49 +17,65 @@ their shared scheduling, culling, and diagnostic boundaries only.
 Camera movement is not a React geometry loop. `CanvasEditorRuntime` publishes
 the live camera and `CanvasStageRuntime` writes the stage transform directly.
 Each mounted `CanvasSurface` has one `CanvasRenderLifecycle` bound to its
-`CanvasEditorRuntime`. The lifecycle owns the current accepted Canvas
-Projection, its `CanvasRenderCoordinator`, the stable full-scene render
-snapshot, culling synchronization, preview-order publication, render-related
-Runtime subscriptions, and at most one pending animation-frame cull. React
-reads the scene snapshot through
-an external-store subscription; it does not coordinate the underlying input
-lifetimes.
+`CanvasEditorRuntime`. Runtime owns the accepted Canvas Projection and one
+`CanvasScenePresentation`, which composes every current Projected Canvas node,
+the node spatial index, one routing group per structure-edge source, and the
+edge-group spatial index. All routing groups are paths in one shared SVG; each
+group retains its member edge IDs and target paths. React reads the stable
+full-scene render snapshot directly from Runtime through an external-store
+subscription.
 
-`CanvasRenderCoordinator` composes every current Projected Canvas node and
-every routed edge into that scene. Manual Layout Draft geometry and stack order
-replace their projected values, and connected edges are rerouted from the same
-draft geometry. Camera, surface size, selection, and viewport position never
-change React scene membership. Projection and Manual Layout changes publish a
-new scene; ordinary camera movement retains the exact same scene snapshot.
+An accepted Projection replaces React membership once. During a live Manual
+Layout Draft, Runtime derives the presentation once and the Scene updates only
+the changed node layouts, routing groups, and spatial-index entries. The
+`CanvasRenderLifecycle` consumes that one delta, writes it through
+`CanvasStageRuntime`, synchronizes culling, publishes preview order, and owns at
+most one pending animation-frame cull. Camera, surface size, selection, pointer
+geometry, and viewport position retain the exact same React scene snapshot.
 
 Moving camera events update the stage transform immediately and coalesce one
-exact-viewport query onto the next animation frame. `CanvasCullingController`
-keeps culling cost bounded by current scene complexity rather than the canvas
-area covered by a low-zoom viewport. Repeating synchronization with the same
-scene, camera, and surface does not repeat geometric work, while
-`CanvasStageRuntime` writes only changed node-shell and edge-layer `display`
+exact-viewport query onto the next animation frame. Node bounds and edge-group
+bounds have separate spatial indexes; candidates come from those indexes and
+edge groups receive an exact segment-intersection check. Cost therefore follows
+the query result plus visibility deltas rather than scanning every mounted node
+and edge on each camera or pointer event. Repeating synchronization with the
+same scene, camera, and surface does not repeat geometric work, while
+`CanvasStageRuntime` writes only changed node-shell and edge-group `display`
 values. Selected and active move/resize nodes remain display-visible when they
 are outside the viewport, but retention-only changes do not repeat geometric
-work or alter preview scheduling identity. These direct DOM
-writes do not publish a React scene snapshot and do not remove node-local preview
-state. This culling state is a rendering decision, not Canvas Document visibility.
+work or alter preview scheduling identity. These direct DOM writes do not
+publish a React scene snapshot and do not remove node-local preview state. This
+culling state is a rendering decision, not Canvas Document visibility.
+
+While the camera state is moving, one transparent Surface-sized hit-test
+blocker sits above the world stage. It gives a stationary pointer one stable DOM
+target while transformed nodes move beneath it, so the browser cannot generate
+node-to-node hover transitions from presentation motion. The same direct DOM
+camera subscription first gates semantic interaction and then reveals the
+blocker. On idle it first hides the blocker and then performs exactly one
+semantic hit-test at the last pointer position. It owns no selection, Feedback,
+or preview state and it is not an active hit target while the camera is idle.
 
 When camera movement becomes idle, the lifecycle ensures that the final camera
 has been synchronized and publishes its viewport rectangle for preview-resource
 ordering without repeating already completed culling work. Producers order all
 current work by squared distance from the viewport center to the nearest point
 of each node rectangle, with Project path as the exact tie-breaker. The viewport
-never admits, cancels, or delays required preview production. Projection,
-surface-size, and Manual Layout changes publish the corresponding current scene
-and preview order immediately. Detaching the last scene subscriber removes the
-Runtime subscriptions and cancels pending work, so a callback from an older
-mounted lifetime cannot publish later.
+never admits, cancels, or delays required preview production. Projection and
+surface-size changes publish the corresponding current scene and preview order
+immediately. Live Manual Layout geometry is presented directly while preview
+ordering remains stable; the final preview order publishes after the pointer
+interaction ends. The mounted lifecycle attaches only in React's commit phase;
+detaching it removes its Runtime and Scene subscriptions and cancels pending
+work, so a callback from an older mounted lifetime cannot publish later.
 
 There is no Canvas mount virtualization, retained virtual rectangle, overscan,
-or node-type retention exception. All current node shells and edge layers remain
-mounted until their Canvas membership ends. The exact viewport controls direct
-DOM culling; its center controls preview distance ordering without creating an
-inside/outside tier.
+node-count cap, zoom debounce threshold, or node-type retention exception. All
+current node shells and source routing-group paths remain mounted until their
+Canvas membership ends. The exact viewport controls direct DOM culling; its
+center controls preview distance ordering without creating an inside/outside
+tier. Debrute does not switch to Canvas/WebGL or a reduced-detail renderer at a
+particular shape count.
 
 ## Image Preview Source Selection
 

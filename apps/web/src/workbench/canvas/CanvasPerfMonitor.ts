@@ -8,7 +8,6 @@ export type CanvasPerfSessionType =
 export type CanvasPerfEventSource =
   | 'CanvasSurface'
   | 'CanvasStageRuntime'
-  | 'CanvasRenderCoordinator'
   | 'CanvasRasterPreviewPresentation'
   | 'CanvasTextPreviewRuntime'
   | 'CanvasPreviewResourceScheduler'
@@ -25,6 +24,8 @@ export type CanvasPerfCounterName =
   | 'stage-node-visibility-noop'
   | 'stage-edge-visibility-write'
   | 'stage-edge-visibility-noop'
+  | 'stage-edge-geometry-write'
+  | 'stage-edge-geometry-noop'
   | 'render-snapshot-build'
   | 'render-snapshot-reuse'
   | 'viewport-cull-queued'

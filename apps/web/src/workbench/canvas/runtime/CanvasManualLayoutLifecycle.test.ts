@@ -173,7 +173,34 @@ describe('Canvas Manual Layout lifecycle', () => {
     await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 0));
 
     expect(submitManualLayout).not.toHaveBeenCalled();
-    expect(lifecycle.getPresentation()).toEqual({ layoutOverrides: [], stackOrder: undefined });
+    expect(lifecycle.getPresentation()).toEqual({
+      layoutOverrides: [],
+      stackOrder: undefined,
+      raisedNodeProjectRelativePaths: []
+    });
+  });
+
+  it('keeps a raised multi-selection in its effective stack order', () => {
+    const lifecycle = createCanvasManualLayoutLifecycle({
+      canvasId: 'canvas-1',
+      initialProjection: projection(
+        node('b.png', 0, 0),
+        node('a.png', 20, 1)
+      ),
+      submitManualLayout: async () => undefined
+    });
+    const interaction = moveState('a.png', 20, 40);
+    interaction.origins.push({
+      projectRelativePath: 'b.png',
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 120
+    });
+
+    lifecycle.setActiveInteraction(interaction);
+
+    expect(lifecycle.getPresentation().raisedNodeProjectRelativePaths).toEqual(['b.png', 'a.png']);
   });
 
   it('raises an active move group together while preserving its internal order', () => {
@@ -193,10 +220,6 @@ describe('Canvas Manual Layout lifecycle', () => {
     lifecycle.setActiveInteraction(move);
 
     expect(lifecycle.getPresentation().stackOrder).toEqual(['a.png', 'c.png', 'b.png', 'd.png']);
-    expect(lifecycle.getPresentedNodes()
-      .sort((left, right) => left.z - right.z)
-      .map((candidate) => candidate.projectRelativePath))
-      .toEqual(['a.png', 'c.png', 'b.png', 'd.png']);
   });
 
   it('keeps a stack-only resize optimistic until the Projection confirms its order', async () => {

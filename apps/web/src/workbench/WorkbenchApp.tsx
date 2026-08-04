@@ -6,7 +6,6 @@ import type {
   ProjectPathEntry,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { HttpWorkbenchApiClient } from '../api/httpWorkbenchApiClient.js';
 import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
@@ -512,12 +511,8 @@ function WorkbenchProjectGenerationApp({
   const [activeCanvasId, setActiveCanvasId] = useState<string | undefined>(
     initialProjectPresentation.activeCanvasId
   );
-  const [activeCanvasRuntime, setActiveCanvasRuntime] = useState<CanvasEditorRuntime>();
+  const [mountedCanvasRuntime, setMountedCanvasRuntime] = useState<CanvasEditorRuntime>();
   const focusCommandRouterRef = useRef<WorkbenchFocusCommandRouter | undefined>(undefined);
-  const [activeCanvasCurrentNodes, setActiveCanvasCurrentNodes] = useState<{
-    canvasId: string;
-    nodes: ProjectedCanvasNode[];
-  }>();
   const canvasRuntimeScopeKey = projectProjection.generation;
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(
     initialProjectPresentation.floatingPanels
@@ -557,6 +552,9 @@ function WorkbenchProjectGenerationApp({
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
   const activeCanvas = getCanvasById(snapshot, activeCanvasId);
+  const activeCanvasRuntime = mountedCanvasRuntime?.canvasId === activeCanvas?.id
+    ? mountedCanvasRuntime
+    : undefined;
   const activeProjection = activeCanvas
     ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
     : undefined;
@@ -600,6 +598,11 @@ function WorkbenchProjectGenerationApp({
     }
   }, [floatingPanels.panels.explorer.open, requestExplorerFeature]);
   const fileClipboard = explorerController?.fileClipboard;
+  const activeCanvasCutPaths = useMemo(() => (
+    fileClipboard?.operation === 'cut'
+      ? fileClipboard.entries.map((entry) => entry.projectRelativePath)
+      : []
+  ), [fileClipboard]);
   const inlineProjectTreeEdit = explorerController?.inlineEdit;
 
   const notifyCanvasFeedbackUnavailable = useCallback((_message: string) => {
@@ -994,23 +997,6 @@ function WorkbenchProjectGenerationApp({
     setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity('inspector')));
   }, []);
 
-  const currentNodesForActiveCanvas = activeCanvasCurrentNodes?.canvasId === activeCanvas?.id
-    ? activeCanvasCurrentNodes
-    : undefined;
-  const activeCanvasMinimapNodes = currentNodesForActiveCanvas
-    ? currentNodesForActiveCanvas.nodes
-    : undefined;
-  const handleActiveCanvasCurrentNodesChange = useCallback((
-    canvasId: string,
-    nodes: ProjectedCanvasNode[] | undefined
-  ) => {
-    setActiveCanvasCurrentNodes((current) => {
-      if (!nodes) {
-        return current?.canvasId === canvasId ? undefined : current;
-      }
-      return { canvasId, nodes };
-    });
-  }, []);
   const effectiveTitleBarState = useMemo(() => buildWorkbenchTitleBarState({
     platform: productPlatform,
     host: getDebruteShellApi() ? 'desktop' : 'web',
@@ -1441,18 +1427,22 @@ function WorkbenchProjectGenerationApp({
 
   const canvasEditor = (
     <CanvasEditor
-      canvasId={activeCanvasId}
-      state={state}
+      canvas={activeCanvas}
+      projection={activeProjection}
+      hasProject={Boolean(snapshot)}
+      projectOpenAttemptedPath={projectOpenAttemptedPath}
+      projectOpenError={projectOpenError}
+      projectOpening={isProjectOpening}
       actions={actions}
+      textFileBuffers={textFileBuffers}
+      canvasFeedback={feedbackInteraction.feedback}
+      textPreviewStyleDependencyKey={presentationController.resolvedTheme}
       runtimeScopeKey={canvasRuntimeScopeKey}
       minimapOpen={canvasMinimapOpen}
       productPlatform={productPlatform}
-      cutPaths={fileClipboard?.operation === 'cut'
-        ? fileClipboard.entries.map((entry) => entry.projectRelativePath)
-        : []}
-      onCurrentNodesChange={handleActiveCanvasCurrentNodesChange}
+      cutPaths={activeCanvasCutPaths}
       feedbackInteraction={feedbackInteraction.canvas}
-      onRuntimeChange={setActiveCanvasRuntime}
+      onRuntimeChange={setMountedCanvasRuntime}
       onOpenContextMenu={openWorkbenchContextMenu}
       interactionBlocked={projectPresentationBlocked}
     />
@@ -1572,7 +1562,6 @@ function WorkbenchProjectGenerationApp({
             />
             <CanvasMinimapBar
               canvas={activeCanvas}
-              nodes={activeCanvasMinimapNodes}
               runtime={activeCanvasRuntime}
               overlayRuntime={canvasOverlayRuntime}
               open={canvasMinimapOpen}

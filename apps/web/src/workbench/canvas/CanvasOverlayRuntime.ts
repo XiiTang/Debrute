@@ -6,15 +6,21 @@ export interface CanvasOverlayRuntime {
   setMinimapViewport(rect: CanvasRect): void;
   bindFeedbackBar(element: HTMLElement): () => void;
   setFeedbackBarPlacement(rect: FloatingBarPlacement): void;
+  suspendFeedbackBarPlacement(): void;
+  resumeFeedbackBarPlacement(): void;
+  resumeFeedbackBarPlacementAfterNextUpdate(): void;
   clearFeedbackBarPlacement(): void;
   dispose(): void;
 }
+
+type FeedbackBarPlacementState = 'active' | 'suspended' | 'resume-after-update';
 
 export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
   let minimapViewport: SVGRectElement | undefined;
   let feedbackBar: HTMLElement | undefined;
   let currentMinimapRect: CanvasRect | undefined;
   let currentFeedbackRect: FloatingBarPlacement | undefined;
+  let feedbackBarPlacementState: FeedbackBarPlacementState = 'active';
   let lastMinimapRect = '';
   let lastFeedbackRect = '';
 
@@ -48,9 +54,13 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
       feedbackBar = element;
       lastFeedbackRect = '';
       if (currentFeedbackRect) {
-        showFeedbackBar(element);
         writeFeedbackBarPlacement(element, currentFeedbackRect);
         lastFeedbackRect = rectSignature(currentFeedbackRect);
+        if (feedbackBarPlacementState !== 'active') {
+          suspendFeedbackBar(element);
+        } else {
+          showFeedbackBar(element);
+        }
       } else {
         hideFeedbackBar(element);
       }
@@ -62,19 +72,55 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
     },
     setFeedbackBarPlacement(rect) {
       currentFeedbackRect = rect;
+      if (feedbackBarPlacementState === 'suspended') {
+        return;
+      }
+      if (feedbackBarPlacementState === 'resume-after-update') {
+        feedbackBarPlacementState = 'active';
+      }
       if (!feedbackBar) {
         return;
       }
       const signature = rectSignature(rect);
-      if (signature === lastFeedbackRect) {
+      if (signature !== lastFeedbackRect) {
+        lastFeedbackRect = signature;
+        writeFeedbackBarPlacement(feedbackBar, rect);
+      }
+      showFeedbackBar(feedbackBar);
+    },
+    suspendFeedbackBarPlacement() {
+      if (feedbackBarPlacementState === 'suspended') {
         return;
       }
-      lastFeedbackRect = signature;
+      feedbackBarPlacementState = 'suspended';
+      if (feedbackBar && currentFeedbackRect) {
+        suspendFeedbackBar(feedbackBar);
+      }
+    },
+    resumeFeedbackBarPlacement() {
+      if (feedbackBarPlacementState === 'active') {
+        return;
+      }
+      feedbackBarPlacementState = 'active';
+      if (!feedbackBar || !currentFeedbackRect) {
+        return;
+      }
+      const signature = rectSignature(currentFeedbackRect);
+      if (signature !== lastFeedbackRect) {
+        lastFeedbackRect = signature;
+        writeFeedbackBarPlacement(feedbackBar, currentFeedbackRect);
+      }
       showFeedbackBar(feedbackBar);
-      writeFeedbackBarPlacement(feedbackBar, rect);
+    },
+    resumeFeedbackBarPlacementAfterNextUpdate() {
+      if (feedbackBarPlacementState === 'active') {
+        return;
+      }
+      feedbackBarPlacementState = 'resume-after-update';
     },
     clearFeedbackBarPlacement() {
       currentFeedbackRect = undefined;
+      feedbackBarPlacementState = 'active';
       if (!feedbackBar) {
         return;
       }
@@ -91,6 +137,7 @@ export function createCanvasOverlayRuntime(): CanvasOverlayRuntime {
       feedbackBar = undefined;
       currentMinimapRect = undefined;
       currentFeedbackRect = undefined;
+      feedbackBarPlacementState = 'active';
       lastMinimapRect = '';
       lastFeedbackRect = '';
     }
@@ -122,9 +169,22 @@ function writeFeedbackBarPlacement(element: HTMLElement, rect: FloatingBarPlacem
 }
 
 function showFeedbackBar(element: HTMLElement): void {
+  element.inert = false;
   element.style.visibility = 'visible';
+  element.style.removeProperty('opacity');
+  element.style.removeProperty('pointer-events');
+}
+
+function suspendFeedbackBar(element: HTMLElement): void {
+  element.inert = true;
+  element.style.visibility = 'visible';
+  element.style.opacity = '0';
+  element.style.pointerEvents = 'none';
 }
 
 function hideFeedbackBar(element: HTMLElement): void {
+  element.inert = true;
   element.style.visibility = 'hidden';
+  element.style.removeProperty('opacity');
+  element.style.removeProperty('pointer-events');
 }

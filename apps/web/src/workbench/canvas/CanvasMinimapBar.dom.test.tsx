@@ -2,13 +2,14 @@ import type { ReactElement } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
 import { CanvasMinimapBar, formatCanvasMinimapZoomLabel } from './CanvasMinimapBar';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import type { CanvasCamera } from './runtime/canvasCamera';
+import { CANVAS_CAMERA_IDLE_MS } from './runtime/canvasCamera.js';
 import type { CanvasSelection } from './runtime/canvasSelection.js';
 import { CANVAS_MINIMAP_PANEL_SIZE, canvasMinimapButtonRect, placeCanvasMinimapPanel } from '../shell/floatingBars';
 import { I18nProvider } from '../i18n';
@@ -42,7 +43,6 @@ describe('CanvasMinimapBar', () => {
     const html = renderStaticWithI18n(
       <CanvasMinimapBar
         canvas={undefined}
-        nodes={undefined}
         runtime={undefined}
         overlayRuntime={createCanvasOverlayRuntime()}
         open={false}
@@ -78,12 +78,11 @@ describe('CanvasMinimapBar', () => {
       buttonRect: canvasMinimapButtonRect({ x: 0, y: 0, width: 1000, height: 700 }),
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 }
     });
-    const runtime = runtimeFixture();
+    const runtime = runtimeFixture(projection);
 
     const html = renderStaticWithI18n(
       <CanvasMinimapBar
         canvas={canvas}
-        nodes={projection.nodes}
         runtime={runtime}
         overlayRuntime={createCanvasOverlayRuntime()}
         open={true}
@@ -113,8 +112,10 @@ describe('CanvasMinimapBar', () => {
     const canvas = createCanvasDocument({ id: 'minimap-draft-canvas' });
     const durableNode = nodeFixture('flow/a.png', 0, 0);
     const runtime = createRuntime({
+      canvasId: canvas.id,
       camera: { x: 0, y: 0, z: 1 },
-      selection: { kind: 'nodes', projectRelativePaths: [durableNode.projectRelativePath] }
+      selection: { kind: 'nodes', projectRelativePaths: [durableNode.projectRelativePath] },
+      nodes: [{ ...durableNode, width: 300, height: 160 }]
     });
     runtime.bindSurface({
       surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
@@ -123,7 +124,6 @@ describe('CanvasMinimapBar', () => {
     const html = renderStaticWithI18n(
       <CanvasMinimapBar
         canvas={canvas}
-        nodes={[{ ...durableNode, width: 300, height: 160 }]}
         runtime={runtime}
         overlayRuntime={createCanvasOverlayRuntime()}
         open={true}
@@ -141,14 +141,14 @@ describe('CanvasMinimapBar', () => {
 
   it('updates the zoom label when the canvas camera changes', async () => {
     const canvas = createCanvasDocument({ id: 'minimap-live-zoom-canvas' });
-    const runtime = runtimeFixture();
+    const nodes = [
+      nodeFixture('flow/a.png', 0, 0),
+      nodeFixture('flow/selected.png', 800, 400)
+    ];
+    const runtime = runtimeFixture({ canvasId: canvas.id, nodes, edges: [], diagnostics: [] });
 
     await withRenderedMinimap({
       canvas,
-      nodes: [
-        nodeFixture('flow/a.png', 0, 0),
-        nodeFixture('flow/selected.png', 800, 400)
-      ],
       runtime
     }, async ({ container }) => {
       expect(readButtonZoomLabel(container)).toBe('50%');
@@ -161,6 +161,163 @@ describe('CanvasMinimapBar', () => {
       expect(readButtonZoomLabel(container)).toBe('9.99');
       expect(container.querySelector('[data-testid="canvas-minimap-zoom"]')).toBeNull();
     });
+  });
+
+  it('does not read or copy presented nodes after camera movement while closed', async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvasDocument({ id: 'minimap-closed-canvas' });
+    const projection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/a.png', 0, 0)],
+      edges: [],
+      diagnostics: []
+    } satisfies CanvasProjection;
+    const runtime = runtimeFixture(projection);
+    const getPresentedNodes = vi.spyOn(runtime.scene, 'getPresentedNodes');
+
+    try {
+      await withRenderedMinimap({ canvas, runtime, open: false }, async () => {
+        getPresentedNodes.mockClear();
+        await act(async () => {
+          runtime.camera.setCamera({ x: -200, y: 0, z: 0.5 });
+          vi.advanceTimersByTime(CANVAS_CAMERA_IDLE_MS);
+        });
+        expect(getPresentedNodes).not.toHaveBeenCalled();
+      });
+    } finally {
+      runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects a Runtime owned by a different Canvas', () => {
+    const canvas = createCanvasDocument({ id: 'current-canvas' });
+    const runtime = createRuntime({
+      canvasId: 'stale-canvas',
+      camera: { x: 0, y: 0, z: 1 },
+      selection: undefined,
+      nodes: [nodeFixture('flow/a.png', 0, 0)]
+    });
+    runtime.bindSurface({
+      surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
+    });
+    const getPresentedNodes = vi.spyOn(runtime.scene, 'getPresentedNodes');
+
+    const html = renderStaticWithI18n(
+      <CanvasMinimapBar
+        canvas={canvas}
+        runtime={runtime}
+        overlayRuntime={createCanvasOverlayRuntime()}
+        open={true}
+        onOpenChange={() => undefined}
+        panelPlacement={panelPlacementFixture}
+      />
+    );
+
+    expect(html).toContain('disabled=""');
+    expect(html).not.toContain('data-testid="canvas-minimap-panel"');
+    expect(html).not.toContain('data-testid="canvas-minimap-button-zoom"');
+    expect(getPresentedNodes).not.toHaveBeenCalled();
+    runtime.dispose();
+  });
+
+  it('coalesces open Minimap selection updates to one render per frame', async () => {
+    const canvas = createCanvasDocument({ id: 'minimap-selection-frame-canvas' });
+    const nodes = [
+      nodeFixture('flow/a.png', 0, 0),
+      nodeFixture('flow/b.png', 300, 0),
+      nodeFixture('flow/c.png', 600, 0)
+    ];
+    const runtime = createCanvasEditorRuntime({
+      canvasId: canvas.id,
+      initialProjection: { canvasId: canvas.id, nodes, edges: [], diagnostics: [] },
+      submitManualLayout: async () => undefined,
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+    });
+    runtime.bindSurface({
+      surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
+    });
+    let pendingFrame: FrameRequestCallback | undefined;
+    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        pendingFrame = callback;
+        return 1;
+      });
+    const cancelAnimationFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+    try {
+      await withRenderedMinimap({ canvas, runtime }, async ({ container }) => {
+        expect(container.querySelector('[data-minimap-node-path="flow/a.png"]')?.classList.contains('selected')).toBe(true);
+
+        await act(async () => {
+          runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.png'] });
+          runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/c.png'] });
+        });
+
+        expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+        expect(container.querySelector('[data-minimap-node-path="flow/a.png"]')?.classList.contains('selected')).toBe(true);
+        await act(async () => {
+          pendingFrame?.(0);
+        });
+        expect(container.querySelector('[data-minimap-node-path="flow/c.png"]')?.classList.contains('selected')).toBe(true);
+      });
+    } finally {
+      runtime.dispose();
+      requestAnimationFrame.mockRestore();
+      cancelAnimationFrame.mockRestore();
+    }
+  });
+
+  it('coalesces live Scene geometry to one local Minimap render per frame', async () => {
+    const canvas = createCanvasDocument({ id: 'minimap-presentation-frame-canvas' });
+    const nodes = [
+      nodeFixture('flow/a.png', 0, 0),
+      nodeFixture('flow/b.png', 300, 0),
+      nodeFixture('flow/c.png', 600, 0)
+    ];
+    const runtime = createCanvasEditorRuntime({
+      canvasId: canvas.id,
+      initialProjection: { canvasId: canvas.id, nodes, edges: [], diagnostics: [] },
+      submitManualLayout: async () => undefined
+    });
+    runtime.bindSurface({
+      surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
+    });
+    let pendingFrame: FrameRequestCallback | undefined;
+    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        pendingFrame = callback;
+        return 1;
+      });
+    const cancelAnimationFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+    try {
+      await withRenderedMinimap({ canvas, runtime }, async ({ container }) => {
+        const before = container.querySelector('[data-minimap-node-path="flow/b.png"]')?.getAttribute('x');
+
+        await act(async () => {
+          runtime.input.beginNodeMove({
+            pointerId: 1,
+            projectRelativePath: 'flow/b.png',
+            screenPoint: { x: 0, y: 0 }
+          });
+          runtime.input.updatePointerInteraction({ pointerId: 1, screenPoint: { x: 25, y: 0 } });
+          runtime.input.updatePointerInteraction({ pointerId: 1, screenPoint: { x: 50, y: 0 } });
+        });
+
+        expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+        expect(container.querySelector('[data-minimap-node-path="flow/b.png"]')?.getAttribute('x')).toBe(before);
+        await act(async () => {
+          pendingFrame?.(0);
+        });
+        expect(container.querySelector('[data-minimap-node-path="flow/b.png"]')?.getAttribute('x')).not.toBe(before);
+      });
+    } finally {
+      runtime.input.cancelPointerInteraction(1);
+      runtime.dispose();
+      requestAnimationFrame.mockRestore();
+      cancelAnimationFrame.mockRestore();
+    }
   });
 });
 
@@ -189,10 +346,12 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
   };
 }
 
-function runtimeFixture(): CanvasEditorRuntime {
+function runtimeFixture(projection?: CanvasProjection): CanvasEditorRuntime {
   const runtime = createRuntime({
+    canvasId: projection?.canvasId,
     camera: { x: -100, y: -50, z: 0.5 },
-    selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.png'] }
+    selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.png'] },
+    nodes: projection?.nodes
   });
   runtime.bindSurface({
     surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
@@ -201,16 +360,18 @@ function runtimeFixture(): CanvasEditorRuntime {
 }
 
 function createRuntime(input: {
+  canvasId?: string | undefined;
   camera: CanvasCamera;
-  selection: CanvasSelection;
+  selection: CanvasSelection | undefined;
+  nodes?: CanvasProjection['nodes'] | undefined;
 }): CanvasEditorRuntime {
   return createCanvasEditorRuntime({
-    canvasId: 'minimap-canvas',
+    canvasId: input.canvasId ?? 'minimap-canvas',
     initialProjection: {
-      canvasId: 'minimap-canvas',
-      nodes: input.selection.kind === 'nodes'
+      canvasId: input.canvasId ?? 'minimap-canvas',
+      nodes: input.nodes ?? (input.selection?.kind === 'nodes'
         ? input.selection.projectRelativePaths.map((path) => nodeFixture(path, 0, 0))
-        : [],
+        : []),
       edges: [],
       diagnostics: []
     },
@@ -223,8 +384,8 @@ function createRuntime(input: {
 async function withRenderedMinimap(
   input: {
     canvas: ReturnType<typeof createCanvasDocument>;
-    nodes: CanvasProjection['nodes'];
     runtime: CanvasEditorRuntime;
+    open?: boolean | undefined;
   },
   callback: (input: { container: HTMLDivElement; root: Root }) => Promise<void>
 ): Promise<void> {
@@ -237,10 +398,9 @@ async function withRenderedMinimap(
         <I18nProvider locale="en">
           <CanvasMinimapBar
             canvas={input.canvas}
-            nodes={input.nodes}
             runtime={input.runtime}
             overlayRuntime={createCanvasOverlayRuntime()}
-            open={true}
+            open={input.open ?? true}
             onOpenChange={() => undefined}
             panelPlacement={panelPlacementFixture}
           />

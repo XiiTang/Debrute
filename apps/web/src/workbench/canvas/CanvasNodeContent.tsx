@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
-import type { TextFileBuffer, WorkbenchActions } from '../../types';
+import type { TextFileBuffer } from '../../types';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
+import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
+import type { CanvasSceneActions } from './CanvasSceneActions.js';
 import { canvasImageRasterPreviewRequestForNode } from './canvasImagePreviewTarget';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
@@ -55,14 +57,15 @@ class CanvasTextEditorActivationBoundary extends React.Component<{
 
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
-  selected: boolean;
-  actions: WorkbenchActions;
+  contentInteractionActive: boolean;
+  actions: CanvasSceneActions;
   textBuffer: TextFileBuffer | undefined;
   textPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   textPreviewError?: string | undefined;
   videoPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
+  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
@@ -78,15 +81,11 @@ export interface CanvasNodeContentProps {
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
-  onSelectNode: () => void;
-  onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
-  onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
-  onTitlePointerUp?: ((event: React.PointerEvent<Element>) => void) | undefined;
 }
 
 export function CanvasNodeContent({
   node,
-  selected,
+  contentInteractionActive,
   actions,
   textBuffer,
   textPreviewRequest,
@@ -94,6 +93,7 @@ export function CanvasNodeContent({
   videoPreviewRequest,
   videoPreviewError,
   forceVideoPlayerMounted = false,
+  previewActivationRequest,
   feedbackEntry,
   activeFeedbackItemId,
   localFeedbackMode,
@@ -105,11 +105,7 @@ export function CanvasNodeContent({
   onVideoPlayingChange,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
-  onUpdateTextViewport,
-  onSelectNode,
-  onTitlePointerDown,
-  onTitlePointerMove,
-  onTitlePointerUp
+  onUpdateTextViewport
 }: CanvasNodeContentProps): React.ReactElement {
   const i18n = useI18n();
   const [mediaError, setMediaError] = useState<string>();
@@ -119,7 +115,7 @@ export function CanvasNodeContent({
   const textBufferEnsureKey = canvasTextBufferEnsureKey(
     node,
     textBuffer,
-    selected
+    contentInteractionActive
   );
   const mediaSrc = node.mediaKind === 'image'
     ? undefined
@@ -169,14 +165,11 @@ export function CanvasNodeContent({
         node={node}
         buffer={textBuffer}
         problem={problem}
-        selected={selected}
+        active={contentInteractionActive}
         actions={actions}
         textPreviewRequest={textPreviewRequest}
         textPreviewError={textPreviewError}
-        onSelectNode={onSelectNode}
-        onTitlePointerDown={onTitlePointerDown}
-        onTitlePointerMove={onTitlePointerMove}
-        onTitlePointerUp={onTitlePointerUp}
+        previewActivationRequest={previewActivationRequest}
         onUpdateTextViewport={onUpdateTextViewport}
         i18n={i18n}
       />
@@ -187,11 +180,11 @@ export function CanvasNodeContent({
     return (
       <CanvasVideoNodeContent
         node={node}
-        selected={selected}
+        contentInteractionActive={contentInteractionActive}
         videoPreviewRequest={videoPreviewRequest}
         videoPreviewError={videoPreviewError}
         forcePlayerMounted={forceVideoPlayerMounted}
-        onSelectNode={onSelectNode}
+        previewActivationRequest={previewActivationRequest}
         onPlayerMounted={onVideoPlayerMounted}
         onPlayingChange={onVideoPlayingChange}
         onRegisterVideoTarget={onRegisterVideoTarget}
@@ -201,9 +194,6 @@ export function CanvasNodeContent({
         localFeedbackMode={localFeedbackMode}
         localFeedbackRegions={localFeedbackRegions}
         activeFeedbackMomentTimeSeconds={activeFeedbackMomentTimeSeconds}
-        onTitlePointerDown={onTitlePointerDown}
-        onTitlePointerMove={onTitlePointerMove}
-        onTitlePointerUp={onTitlePointerUp}
         onLocalFeedbackDraft={(input) => onLocalFeedbackDraft?.(input)}
         onFeedbackItemActivate={(itemId) => onFeedbackItemActivate?.(node.projectRelativePath, itemId)}
       />
@@ -217,7 +207,10 @@ export function CanvasNodeContent({
   return (
     <>
       {canRenderMediaPreview ? (
-        <div className="canvas-node-preview">
+        <div
+          className="canvas-node-preview"
+          data-canvas-node-zone={node.mediaKind === 'audio' ? contentInteractionActive ? 'passive' : 'activate' : undefined}
+        >
           {node.mediaKind === 'image' ? (
             <>
               <CanvasImageNodeContent node={node} />
@@ -239,6 +232,8 @@ export function CanvasNodeContent({
               controls
               preload="none"
               src={mediaSrc}
+              inert={!contentInteractionActive}
+              data-canvas-interaction-island={contentInteractionActive ? 'true' : undefined}
               onError={() => setMediaError(i18n.t('canvas.node.unableToLoad', { path: node.projectRelativePath }))}
             />
           )}
@@ -254,7 +249,6 @@ export function CanvasNodeContent({
                 className="db-canvas-node-retry"
                 size="xs"
                 iconStart={<RefreshCw size={12} />}
-                onPointerDown={(event) => event.stopPropagation()}
                 onClick={retryMediaLoad}
               >
                 {i18n.t('canvas.node.retry')}
@@ -264,7 +258,7 @@ export function CanvasNodeContent({
         </div>
       )}
       {node.mediaKind === 'audio' ? (
-        <div className="db-canvas-node-caption">
+        <div className="db-canvas-node-caption" data-canvas-node-zone="move">
           <span>{nodeDisplayName(node.projectRelativePath, i18n)}</span>
         </div>
       ) : null}
@@ -380,7 +374,6 @@ function CanvasImagePlaceholder({
           className="db-canvas-node-retry"
           size="xs"
           iconStart={<RefreshCw size={12} />}
-          onPointerDown={(event) => event.stopPropagation()}
           onClick={onRetry}
         >
           {i18n.t('canvas.node.retry')}
@@ -394,28 +387,22 @@ function CanvasTextNodeContent({
   node,
   buffer,
   problem,
-  selected,
+  active,
   actions,
   textPreviewRequest,
   textPreviewError,
-  onSelectNode,
-  onTitlePointerDown,
-  onTitlePointerMove,
-  onTitlePointerUp,
+  previewActivationRequest,
   onUpdateTextViewport,
   i18n
 }: {
   node: ProjectedCanvasNode;
   buffer: TextFileBuffer | undefined;
   problem: { title: string; message: string } | undefined;
-  selected: boolean;
-  actions: WorkbenchActions;
+  active: boolean;
+  actions: CanvasSceneActions;
   textPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   textPreviewError?: string | undefined;
-  onSelectNode: () => void;
-  onTitlePointerDown: (event: React.PointerEvent<Element>) => void;
-  onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
-  onTitlePointerUp?: ((event: React.PointerEvent<Element>) => void) | undefined;
+  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
@@ -424,7 +411,6 @@ function CanvasTextNodeContent({
   const retryTextPreviewSource = useCallback(() => {
     retryPreview(node.projectRelativePath);
   }, [node.projectRelativePath, retryPreview]);
-  const active = selected;
   const activeRef = useRef(active);
   useLayoutEffect(() => {
     activeRef.current = active;
@@ -432,7 +418,7 @@ function CanvasTextNodeContent({
   const [visibleTextLayer, setVisibleTextLayer] = useState<'editor' | 'preview'>('preview');
   const [handoffViewport, setHandoffViewport] = useState<CanvasTextViewportState>();
   const [editorActivationError, setEditorActivationError] = useState<Error>();
-  const nextFocusRequestIdRef = useRef(0);
+  const lastActivationRequestIdRef = useRef<number | undefined>(undefined);
   const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
   const textRasterPreview = useCanvasRasterPreviewPresentation({
     request: textPreviewRequest ?? {},
@@ -475,6 +461,30 @@ function CanvasTextNodeContent({
     ?? (visibleTextLayer === 'preview' ? textPreviewBlockingProblem : undefined);
   const overlayProblem = editorActivationOverlayProblem ?? textPreviewOverlayProblem;
   const status = textBufferStatus(buffer, problem ?? editorActivationProblem ?? textPreviewProblem, active, i18n);
+  useEffect(() => {
+    if (
+      previewActivationRequest?.mediaKind !== 'text'
+      || previewActivationRequest.projectRelativePath !== node.projectRelativePath
+      || !active
+      || bodyProblem
+      || buffer?.error
+      || lastActivationRequestIdRef.current === previewActivationRequest.requestId
+    ) {
+      return;
+    }
+    lastActivationRequestIdRef.current = previewActivationRequest.requestId;
+    setFocusRequest({
+      requestId: previewActivationRequest.requestId,
+      clientX: previewActivationRequest.clientX,
+      clientY: previewActivationRequest.clientY
+    });
+  }, [
+    active,
+    bodyProblem,
+    buffer?.error,
+    node.projectRelativePath,
+    previewActivationRequest
+  ]);
   const geometry = canvasTextPresentationGeometry(node);
   const bodyRef = useCallback((element: HTMLDivElement | null) => {
     if (!element || !import.meta.env.DEV) {
@@ -494,22 +504,6 @@ function CanvasTextNodeContent({
     };
     assertGeometry();
   }, [geometry.contentCssHeight, geometry.contentCssWidth, node.projectRelativePath]);
-  const selectSelf = () => {
-    if (!selected) {
-      onSelectNode();
-    }
-  };
-  const focusRequestForPointerEvent = (event: React.PointerEvent<Element>): CanvasTextEditorFocusRequest | undefined => {
-    if (selected || bodyProblem || buffer?.error) {
-      return undefined;
-    }
-    nextFocusRequestIdRef.current += 1;
-    return {
-      requestId: nextFocusRequestIdRef.current,
-      clientX: event.clientX,
-      clientY: event.clientY
-    };
-  };
   const commitTextViewport = useCallback((viewport: CanvasTextViewportState) => {
     const current = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
     if (current.scrollTop === viewport.scrollTop && current.scrollLeft === viewport.scrollLeft) {
@@ -572,7 +566,6 @@ function CanvasTextNodeContent({
               title={i18n.t('canvas.node.save')}
               disabled={!buffer || !buffer.dirty || buffer.saving}
               icon={<Save size={13} />}
-              onPointerDown={(event) => event.stopPropagation()}
               onClick={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
             />
             <IconButton
@@ -581,40 +574,22 @@ function CanvasTextNodeContent({
               variant="danger"
               disabled={!buffer || !buffer.dirty || buffer.saving}
               icon={<DiscardChangesIcon size={13} />}
-              onPointerDown={(event) => event.stopPropagation()}
               onClick={() => void actions.discardTextFileBuffer(node.projectRelativePath)}
             />
             <IconButton
               label={i18n.t('canvas.node.openLargeEditorForFile', { path: node.projectRelativePath })}
               title={i18n.t('canvas.node.openLargeEditor')}
               icon={<Maximize2 size={13} />}
-              onPointerDown={(event) => event.stopPropagation()}
               onClick={() => actions.openTextEditorWindow(node.projectRelativePath)}
             />
           </>
         )}
-        onPointerDown={onTitlePointerDown}
-        onPointerMove={onTitlePointerMove}
-        onPointerUp={onTitlePointerUp}
       />
       <div
         ref={bodyRef}
         className={bodyProblem ? 'canvas-text-body problem' : 'canvas-text-body'}
         data-canvas-local-wheel="focus"
-        onPointerDown={(event) => {
-          event.stopPropagation();
-          const request = focusRequestForPointerEvent(event);
-          if (request) {
-            setFocusRequest(request);
-          }
-          selectSelf();
-        }}
-        onPointerUp={(event) => {
-          event.stopPropagation();
-        }}
-        onClick={(event) => {
-          event.stopPropagation();
-        }}
+        data-canvas-node-zone={active ? 'passive' : 'activate'}
       >
         {bodyProblem ? (
           <div className="canvas-text-message">
@@ -626,7 +601,6 @@ function CanvasTextNodeContent({
                 className="db-canvas-node-retry"
                 size="xs"
                 iconStart={<RefreshCw size={12} />}
-                onPointerDown={(event) => event.stopPropagation()}
                 onClick={retryCurrentTextPreview}
               >
                 {i18n.t('canvas.node.retry')}
@@ -685,7 +659,6 @@ function CanvasTextNodeContent({
                     className="db-canvas-node-retry"
                     size="xs"
                     iconStart={<RefreshCw size={12} />}
-                    onPointerDown={(event) => event.stopPropagation()}
                     onClick={retryCurrentTextPreview}
                   >
                     {i18n.t('canvas.node.retry')}

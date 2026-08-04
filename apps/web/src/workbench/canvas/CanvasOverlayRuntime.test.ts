@@ -65,6 +65,7 @@ describe('CanvasOverlayRuntime', () => {
     runtime.clearFeedbackBarPlacement();
     runtime.bindFeedbackBar(element as unknown as HTMLElement);
 
+    expect(element.inert).toBe(true);
     expect(element.style.visibility).toBe('hidden');
 
     runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
@@ -77,6 +78,100 @@ describe('CanvasOverlayRuntime', () => {
     expect(element.style.height).toBe('');
     expect(element.style.transform).toBe('');
     expect(element.style.visibility).toBe('hidden');
+  });
+
+  it('keeps the latest feedback placement hidden while transient feedback is suspended', () => {
+    const runtime = createCanvasOverlayRuntime();
+    const element = fakeElement();
+
+    runtime.bindFeedbackBar(element as unknown as HTMLElement);
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
+
+    runtime.suspendFeedbackBarPlacement();
+    expect(element.inert).toBe(true);
+    expect(element.style.visibility).toBe('visible');
+    expect(element.style.opacity).toBe('0');
+    expect(element.style.pointerEvents).toBe('none');
+
+    runtime.setFeedbackBarPlacement({ x: 30, y: 40, width: 260, height: 144, placement: 'above' });
+    expect(element.style.visibility).toBe('visible');
+    expect(element.style.opacity).toBe('0');
+    expect(element.style.pointerEvents).toBe('none');
+
+    runtime.resumeFeedbackBarPlacement();
+    expect(element.style.left).toBe('30px');
+    expect(element.style.top).toBe('184px');
+    expect(element.style.width).toBe('260px');
+    expect(element.style.transform).toBe('translateY(-100%)');
+    expect(element.inert).toBe(false);
+    expect(element.style.visibility).toBe('visible');
+    expect(element.style.opacity).toBe('');
+    expect(element.style.pointerEvents).toBe('');
+  });
+
+  it('does not restore a suspended feedback placement after it is cleared', () => {
+    const runtime = createCanvasOverlayRuntime();
+    const element = fakeElement();
+
+    runtime.bindFeedbackBar(element as unknown as HTMLElement);
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
+    runtime.suspendFeedbackBarPlacement();
+    runtime.clearFeedbackBarPlacement();
+    runtime.resumeFeedbackBarPlacement();
+
+    expect(element.style.left).toBe('');
+    expect(element.style.top).toBe('');
+    expect(element.style.width).toBe('');
+    expect(element.style.visibility).toBe('hidden');
+  });
+
+  it('waits for the reconciled feedback placement before restoring a suspended Bar', () => {
+    const runtime = createCanvasOverlayRuntime();
+    const element = fakeElement();
+
+    runtime.bindFeedbackBar(element as unknown as HTMLElement);
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
+    runtime.suspendFeedbackBarPlacement();
+    runtime.resumeFeedbackBarPlacementAfterNextUpdate();
+
+    expect(element.style.visibility).toBe('visible');
+    expect(element.style.opacity).toBe('0');
+    expect(element.style.pointerEvents).toBe('none');
+
+    runtime.setFeedbackBarPlacement({ x: 400, y: 500, width: 280, height: 160, placement: 'above' });
+
+    expect(element.style.left).toBe('400px');
+    expect(element.style.top).toBe('660px');
+    expect(element.style.width).toBe('280px');
+    expect(element.style.transform).toBe('translateY(-100%)');
+    expect(element.style.visibility).toBe('visible');
+    expect(element.style.opacity).toBe('');
+    expect(element.style.pointerEvents).toBe('');
+  });
+
+  it('keeps a second Camera movement suspended while a reconciled placement is pending', () => {
+    const runtime = createCanvasOverlayRuntime();
+    const element = fakeElement();
+
+    runtime.bindFeedbackBar(element as unknown as HTMLElement);
+    runtime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
+    runtime.suspendFeedbackBarPlacement();
+    runtime.resumeFeedbackBarPlacementAfterNextUpdate();
+
+    runtime.suspendFeedbackBarPlacement();
+    runtime.setFeedbackBarPlacement({ x: 400, y: 500, width: 280, height: 160, placement: 'above' });
+
+    expect(element.inert).toBe(true);
+    expect(element.style.opacity).toBe('0');
+    expect(element.style.pointerEvents).toBe('none');
+
+    runtime.resumeFeedbackBarPlacement();
+
+    expect(element.style.left).toBe('400px');
+    expect(element.style.top).toBe('660px');
+    expect(element.inert).toBe(false);
+    expect(element.style.opacity).toBe('');
+    expect(element.style.pointerEvents).toBe('');
   });
 });
 
@@ -96,6 +191,7 @@ function fakeSvgRectElement(): {
 }
 
 function fakeElement(): {
+  inert: boolean;
   style: {
     left: string;
     top: string;
@@ -103,10 +199,13 @@ function fakeElement(): {
     height: string;
     transform: string;
     visibility: string;
+    opacity: string;
+    pointerEvents: string;
     removeProperty(name: string): void;
   };
 } {
   return {
+    inert: false,
     style: {
       left: '',
       top: '',
@@ -114,8 +213,23 @@ function fakeElement(): {
       height: '',
       transform: '',
       visibility: '',
+      opacity: '',
+      pointerEvents: '',
       removeProperty(name) {
-        if (name === 'left' || name === 'top' || name === 'width' || name === 'height' || name === 'transform' || name === 'visibility') {
+        if (
+          name === 'left'
+          || name === 'top'
+          || name === 'width'
+          || name === 'height'
+          || name === 'transform'
+          || name === 'visibility'
+          || name === 'opacity'
+          || name === 'pointer-events'
+        ) {
+          if (name === 'pointer-events') {
+            this.pointerEvents = '';
+            return;
+          }
           this[name] = '';
         }
       }

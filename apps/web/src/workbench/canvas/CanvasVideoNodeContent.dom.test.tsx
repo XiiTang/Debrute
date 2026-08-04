@@ -62,8 +62,6 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
     {
       node,
       initialTimeMs,
-      onPointerInside,
-      onFocusInside,
       onError,
       onPlayingChange,
       onPlaybackBoundary,
@@ -73,8 +71,6 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
     }: {
       node: ProjectedCanvasNode;
       initialTimeMs: number;
-      onPointerInside: () => void;
-      onFocusInside: () => void;
       onError: (message: string) => void;
       onPlayingChange: (playing: boolean) => void;
       onPlaybackBoundary: (currentTimeMs: number) => void;
@@ -99,8 +95,6 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
         data-path={node.projectRelativePath}
         data-initial-time={initialTimeMs}
         data-play-request-id={playRequest?.requestId}
-        onPointerDown={onPointerInside}
-        onFocus={onFocusInside}
       >
         <video src={node.availability.state === 'available' ? node.availability.fileUrl : undefined} />
         <button type="button" data-testid="mock-video-error" onClick={() => onError(formatPlayError(node.projectRelativePath))}>
@@ -181,8 +175,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected
-              onSelectNode={() => undefined}
+              contentInteractionActive
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -207,9 +200,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       <I18nProvider locale="en">
         <CanvasVideoNodeContent
           node={videoNode()}
-          selected={false}
+          contentInteractionActive={false}
           videoPreviewRequest={previewSource()}
-          onSelectNode={() => undefined}
           onRegisterVideoTarget={() => undefined}
           onUpdatePlaybackTime={() => undefined}
         />
@@ -219,14 +211,13 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     expect(html.indexOf('db-canvas-node-titlebar')).toBeLessThan(html.indexOf('canvas-video-player-shell'));
   });
 
-  it('mounts the real player with the persisted timestamp when selected', () => {
+  it('mounts the real player with the persisted timestamp when content-active', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <CanvasVideoNodeContent
           node={videoNode({ currentTimeMs: 4_500 })}
-          selected
+          contentInteractionActive
           videoPreviewRequest={previewSource()}
-          onSelectNode={() => undefined}
           onRegisterVideoTarget={() => undefined}
           onUpdatePlaybackTime={() => undefined}
         />
@@ -243,9 +234,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       <I18nProvider locale="en">
         <CanvasVideoNodeContent
           node={videoNode()}
-          selected={false}
+          contentInteractionActive={false}
           videoPreviewError="preview frame is unavailable"
-          onSelectNode={() => undefined}
           onRegisterVideoTarget={() => undefined}
           onUpdatePlaybackTime={() => undefined}
         />
@@ -259,21 +249,18 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     expect(html).not.toContain('data-testid="video-player-adapter"');
   });
 
-  it('passes a one-shot play request when the inactive preview click mounts the player', async () => {
+  it('passes one play request when pointerup activation selects the inactive preview', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const onSelectNode = vi.fn();
-
     try {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={onSelectNode}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -281,14 +268,32 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
         );
       });
 
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
+      expect(container.querySelector('.canvas-video-player-shell')?.getAttribute('data-canvas-node-zone')).toBe('activate');
+
       await act(async () => {
-        container.querySelector<HTMLImageElement>('img.canvas-raster-preview-image')?.dispatchEvent(new PointerEvent('pointerdown', {
-          bubbles: true
-        }));
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive
+              videoPreviewRequest={previewSource()}
+              previewActivationRequest={{
+                requestId: 17,
+                projectRelativePath: 'media/clip.mp4',
+                mediaKind: 'video',
+                clientX: 120,
+                clientY: 80
+              }}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
       });
 
-      expect(onSelectNode).toHaveBeenCalledTimes(1);
-      expect(container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute('data-play-request-id')).toBe('1');
+      expect(container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute('data-play-request-id')).toBe('17');
+      expect(container.querySelector('[data-canvas-video-layer="player"]')?.getAttribute('data-canvas-interaction-island')).toBe('true');
     } finally {
       await act(async () => {
         root.unmount();
@@ -308,9 +313,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -328,9 +332,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected
+              contentInteractionActive
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -366,9 +369,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -386,9 +388,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected
+              contentInteractionActive
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -404,9 +405,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -435,9 +435,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -455,9 +454,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected
+              contentInteractionActive
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -489,9 +487,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ revision: 'rev-a' })}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -509,9 +506,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ revision: 'rev-a' })}
-              selected
+              contentInteractionActive
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -526,9 +522,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ revision: 'rev-b' })}
-              selected
+              contentInteractionActive
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -559,8 +554,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
               message: 'File is missing.'
             }
           }}
-          selected={false}
-          onSelectNode={() => undefined}
+          contentInteractionActive={false}
           onRegisterVideoTarget={() => undefined}
           onUpdatePlaybackTime={() => undefined}
         />
@@ -579,9 +573,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       <I18nProvider locale="en">
         <CanvasVideoNodeContent
           node={node}
-          selected={false}
+          contentInteractionActive={false}
           videoPreviewRequest={previewSource()}
-          onSelectNode={() => undefined}
           onRegisterVideoTarget={() => undefined}
           onUpdatePlaybackTime={() => undefined}
         />
@@ -600,8 +593,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ revision: 'rev-a' })}
-              selected
-              onSelectNode={() => undefined}
+              contentInteractionActive
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -618,8 +610,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ revision: 'rev-b' })}
-              selected
-              onSelectNode={() => undefined}
+              contentInteractionActive
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -649,8 +640,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected
-              onSelectNode={() => undefined}
+              contentInteractionActive
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={onUpdatePlaybackTime}
             />
@@ -673,9 +663,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ currentTimeMs: 4_250 })}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={onUpdatePlaybackTime}
             />
@@ -693,7 +682,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('keeps the player mounted after ended playback while selected', async () => {
+  it('keeps the player mounted after ended playback while content-active', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -705,9 +694,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ currentTimeMs: 4_250 })}
-              selected
+              contentInteractionActive
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={onUpdatePlaybackTime}
             />
@@ -741,8 +729,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected
-              onSelectNode={() => undefined}
+              contentInteractionActive
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -758,9 +745,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode()}
-              selected={false}
+              contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -770,6 +756,10 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
 
       expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
       expect(videoPreviewIsVisible(container)).toBe(false);
+      const playerLayer = container.querySelector('[data-canvas-video-layer="player"]');
+      expect(playerLayer?.hasAttribute('data-canvas-interaction-island')).toBe(false);
+      expect(playerLayer?.hasAttribute('inert')).toBe(true);
+      expect(container.querySelector('.canvas-video-player-shell')?.getAttribute('data-canvas-node-zone')).toBe('activate');
     } finally {
       await act(async () => {
         root.unmount();
@@ -789,9 +779,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ currentTimeMs: 4_250 })}
-              selected
+              contentInteractionActive
               feedbackEntry={videoFeedbackEntry()}
-              onSelectNode={() => undefined}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -826,8 +815,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ revision: 'rev-a' })}
-              selected
-              onSelectNode={() => undefined}
+              contentInteractionActive
               onPlayingChange={onPlayingChange}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
@@ -845,8 +833,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           <I18nProvider locale="en">
             <CanvasVideoNodeContent
               node={videoNode({ revision: 'rev-b' })}
-              selected
-              onSelectNode={() => undefined}
+              contentInteractionActive
               onPlayingChange={onPlayingChange}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}

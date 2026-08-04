@@ -82,7 +82,8 @@ export interface CanvasFeedbackCanvasBinding {
   localSpatialItems: readonly CanvasFeedbackComposition[];
   suppressedSpatialItemIds: ReadonlySet<string>;
   focusedCapsuleId: string | undefined;
-  currentTargetProjectRelativePath: string | undefined;
+  getCurrentTargetProjectRelativePath(): string | undefined;
+  suspendHoverTarget(): void;
   handleTargetChange(target: CanvasFeedbackBarTarget | undefined): void;
   invalidateTarget(projectRelativePath: string): void;
   handleDraft(draft: CanvasLocalFeedbackDraft): void;
@@ -542,8 +543,34 @@ export function useCanvasFeedbackInteraction(input: {
     }, FEEDBACK_BAR_DISMISS_DELAY_MS);
   }, [clearTarget, clearTargetTimer]);
 
+  const getCurrentTargetProjectRelativePath = useCallback(() => (
+    targetRef.current?.kind === 'node'
+      ? targetRef.current.projectRelativePath
+      : undefined
+  ), []);
+
+  const suspendHoverTarget = useCallback(() => {
+    clearTargetTimer();
+    if (focusedCapsuleIdRef.current || targetRef.current?.kind !== 'node') {
+      return;
+    }
+    input.overlayRuntime.suspendFeedbackBarPlacement();
+  }, [clearTargetTimer, input.overlayRuntime]);
+
   const handleTargetChange = useCallback((nextTarget: CanvasFeedbackBarTarget | undefined) => {
     clearTargetTimer();
+    if (nextTarget?.kind === 'selection') {
+      input.overlayRuntime.resumeFeedbackBarPlacement();
+    } else if (nextTarget?.kind === 'node') {
+      if (
+        targetRef.current?.kind === 'node'
+        && targetRef.current.projectRelativePath === nextTarget.projectRelativePath
+      ) {
+        input.overlayRuntime.resumeFeedbackBarPlacement();
+      } else {
+        input.overlayRuntime.resumeFeedbackBarPlacementAfterNextUpdate();
+      }
+    }
     if (nextTarget?.kind === 'selection') {
       focusDeferredTargetRef.current = undefined;
       targetEpochRef.current += 1;
@@ -750,9 +777,8 @@ export function useCanvasFeedbackInteraction(input: {
     localSpatialItems,
     suppressedSpatialItemIds,
     focusedCapsuleId,
-    currentTargetProjectRelativePath: target?.kind === 'node'
-      ? target.projectRelativePath
-      : undefined,
+    getCurrentTargetProjectRelativePath,
+    suspendHoverTarget,
     handleTargetChange,
     invalidateTarget,
     handleDraft,
@@ -760,12 +786,13 @@ export function useCanvasFeedbackInteraction(input: {
   }), [
     activateCapsule,
     focusedCapsuleId,
+    getCurrentTargetProjectRelativePath,
     handleDraft,
     handleTargetChange,
     invalidateTarget,
     localMode,
     localSpatialItems,
-    target,
+    suspendHoverTarget,
     composition,
     suppressedSpatialItemIds
   ]);

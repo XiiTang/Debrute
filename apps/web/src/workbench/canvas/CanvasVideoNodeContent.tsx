@@ -11,6 +11,7 @@ import { useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime.js';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
+import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
 
 const CanvasVideoPlayerAdapter = React.lazy(async () => {
   const module = await import('./CanvasVideoPlayerAdapter.js');
@@ -21,11 +22,11 @@ type CanvasVideoVisibleLayer = 'preview' | 'player';
 
 export interface CanvasVideoNodeContentProps {
   node: ProjectedCanvasNode;
-  selected: boolean;
+  contentInteractionActive: boolean;
   videoPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   videoPreviewError?: string | undefined;
   forcePlayerMounted?: boolean | undefined;
-  onSelectNode: () => void;
+  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
   onPlayerMounted?: ((projectRelativePath: string) => void) | undefined;
   onPlayingChange?: ((projectRelativePath: string, playing: boolean) => void) | undefined;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
@@ -35,9 +36,6 @@ export interface CanvasVideoNodeContentProps {
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
   localFeedbackRegions?: readonly CanvasMediaFeedbackDraftRegion[] | undefined;
   activeFeedbackMomentTimeSeconds?: number | undefined;
-  onTitlePointerDown?: ((event: React.PointerEvent<Element>) => void) | undefined;
-  onTitlePointerMove?: ((event: React.PointerEvent<Element>) => void) | undefined;
-  onTitlePointerUp?: ((event: React.PointerEvent<Element>) => void) | undefined;
   onLocalFeedbackDraft?: ((input: {
     projectRelativePath: string;
     geometry: CanvasFeedbackGeometry;
@@ -47,11 +45,11 @@ export interface CanvasVideoNodeContentProps {
 
 export function CanvasVideoNodeContent({
   node,
-  selected,
+  contentInteractionActive,
   videoPreviewRequest,
   videoPreviewError,
   forcePlayerMounted = false,
-  onSelectNode,
+  previewActivationRequest,
   onPlayerMounted,
   onPlayingChange,
   onRegisterVideoTarget,
@@ -61,9 +59,6 @@ export function CanvasVideoNodeContent({
   localFeedbackMode,
   localFeedbackRegions,
   activeFeedbackMomentTimeSeconds,
-  onTitlePointerDown,
-  onTitlePointerMove,
-  onTitlePointerUp,
   onLocalFeedbackDraft,
   onFeedbackItemActivate
 }: CanvasVideoNodeContentProps): React.ReactElement {
@@ -75,21 +70,21 @@ export function CanvasVideoNodeContent({
   const playerSourceIdentity = node.availability.state === 'available'
     ? `${node.projectRelativePath}\u001f${node.availability.fileUrl}\u001f${node.availability.revision}`
     : `${node.projectRelativePath}\u001f${node.availability.state}`;
-  const initialVisibleLayer: CanvasVideoVisibleLayer = selected || forcePlayerMounted ? 'player' : 'preview';
+  const initialVisibleLayer: CanvasVideoVisibleLayer = contentInteractionActive || forcePlayerMounted ? 'player' : 'preview';
   const [visibleLayer, setVisibleLayer] = useState<CanvasVideoVisibleLayer>(initialVisibleLayer);
   const [playerMounted, setPlayerMounted] = useState(() => initialVisibleLayer === 'player');
   const playerShellRef = useRef<HTMLDivElement | null>(null);
   const [playerShellSize, setPlayerShellSize] = useState<CanvasVideoFrameSize>();
-  const targetLayer: CanvasVideoVisibleLayer = selected || forcePlayerMounted || playing ? 'player' : 'preview';
+  const targetLayer: CanvasVideoVisibleLayer = contentInteractionActive || forcePlayerMounted || playing ? 'player' : 'preview';
   const targetLayerRef = useRef(targetLayer);
   const sourceResetLayerRef = useRef<CanvasVideoVisibleLayer>(initialVisibleLayer);
-  const nextPlayRequestIdRef = useRef(0);
+  const lastActivationRequestIdRef = useRef<number | undefined>(undefined);
   const [playRequest, setPlayRequest] = useState<CanvasVideoPlayRequest>();
   const playingRef = useRef(false);
   const previousPlayerSourceIdentityRef = useRef(playerSourceIdentity);
 
   targetLayerRef.current = targetLayer;
-  sourceResetLayerRef.current = selected || forcePlayerMounted ? 'player' : 'preview';
+  sourceResetLayerRef.current = contentInteractionActive || forcePlayerMounted ? 'player' : 'preview';
 
   const register = useCallback((target: CanvasVideoPlayerHandle | null) => {
     onRegisterVideoTarget(node.projectRelativePath, target ?? undefined);
@@ -139,17 +134,19 @@ export function CanvasVideoNodeContent({
     return () => resizeObserver.disconnect();
   }, []);
 
-  const mountPlayer = useCallback(() => {
+  useEffect(() => {
+    if (
+      previewActivationRequest?.mediaKind !== 'video'
+      || previewActivationRequest.projectRelativePath !== node.projectRelativePath
+      || !contentInteractionActive
+      || lastActivationRequestIdRef.current === previewActivationRequest.requestId
+    ) {
+      return;
+    }
+    lastActivationRequestIdRef.current = previewActivationRequest.requestId;
+    setPlayRequest({ requestId: previewActivationRequest.requestId });
     setPlayerMounted(true);
-    onSelectNode();
-  }, [onSelectNode]);
-  const requestPlaybackFromPreview = useCallback((event: React.PointerEvent<HTMLImageElement>) => {
-    event.stopPropagation();
-    nextPlayRequestIdRef.current += 1;
-    setPlayRequest({ requestId: nextPlayRequestIdRef.current });
-    setPlayerMounted(true);
-    onSelectNode();
-  }, [onSelectNode]);
+  }, [contentInteractionActive, node.projectRelativePath, previewActivationRequest]);
   const handlePlayingChange = useCallback((nextPlaying: boolean) => {
     playingRef.current = nextPlaying;
     setPlaying(nextPlaying);
@@ -177,8 +174,7 @@ export function CanvasVideoNodeContent({
     hidden: visibleLayer === 'player',
     sourceFailure: videoPreviewError
       ? { stage: 'source', error: new Error(videoPreviewError), retry: retryVideoPreviewSource }
-      : undefined,
-    onPointerDown: requestPlaybackFromPreview
+      : undefined
   });
   const previewProblem = videoPreviewError
     ?? (rasterPreview.failure
@@ -217,9 +213,6 @@ export function CanvasVideoNodeContent({
     <CanvasNodeTitleBar
       icon={<Video size={13} />}
       title={node.projectRelativePath.split('/').pop() ?? node.projectRelativePath}
-      onPointerDown={onTitlePointerDown}
-      onPointerMove={onTitlePointerMove}
-      onPointerUp={onTitlePointerUp}
     />
   );
 
@@ -256,7 +249,11 @@ export function CanvasVideoNodeContent({
   return (
     <section className="canvas-video-node">
       {titleBar}
-      <div ref={playerShellRef} className="canvas-video-player-shell">
+      <div
+        ref={playerShellRef}
+        className="canvas-video-player-shell"
+        data-canvas-node-zone={contentInteractionActive ? 'passive' : 'activate'}
+      >
         {error ? (
           <CanvasNodeErrorPresentation
             message={error}
@@ -276,6 +273,8 @@ export function CanvasVideoNodeContent({
               ? 'canvas-video-layer'
               : 'canvas-video-layer canvas-video-layer--hidden'}
             data-canvas-video-layer="player"
+            inert={!contentInteractionActive}
+            data-canvas-interaction-island={contentInteractionActive ? 'true' : undefined}
           >
             <React.Suspense fallback={<div className="db-canvas-node-placeholder" aria-busy="true" />}>
               <CanvasVideoPlayerAdapter
@@ -284,8 +283,6 @@ export function CanvasVideoNodeContent({
                 node={node}
                 initialTimeMs={initialTimeMs}
                 playRequest={playRequest}
-                onPointerInside={mountPlayer}
-                onFocusInside={mountPlayer}
                 formatPlayError={formatVideoPlayError}
                 formatSeekError={formatVideoSeekError}
                 onError={setError}

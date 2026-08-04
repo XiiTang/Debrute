@@ -1,8 +1,9 @@
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import type { CanvasRenderCoordinatorSnapshot } from './CanvasRenderCoordinator.js';
-import { queryCanvasViewport, type CanvasEdgeSegment } from './canvasViewport.js';
+import type { CanvasSceneSnapshot } from './CanvasScenePresentation.js';
 import type { CanvasCamera } from './runtime/canvasCamera.js';
-import { normalizedSurfaceSize } from './runtime/canvasCoordinateSystem.js';
+import {
+  normalizedSurfaceSize,
+  visibleCanvasRectForCamera
+} from './runtime/canvasCoordinateSystem.js';
 import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry.js';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime.js';
 
@@ -13,13 +14,13 @@ export interface CanvasCullingCounts {
 }
 
 interface CanvasCullingController {
-  acceptScene(scene: CanvasRenderCoordinatorSnapshot): void;
+  acceptScene(scene: CanvasSceneSnapshot): void;
+  invalidateGeometry(): void;
   sync(input: {
     camera: CanvasCamera;
     surfaceSize: CanvasSize | undefined;
     displayRetainedNodePaths: ReadonlySet<string>;
   }): CanvasRect;
-  isNodeInViewport(path: string): boolean;
   getCounts(): CanvasCullingCounts;
 }
 
@@ -27,24 +28,23 @@ interface CachedCanvasGeometry {
   readonly camera: CanvasCamera;
   readonly surfaceSize: CanvasSize;
   readonly visibleNodePaths: ReadonlySet<string>;
-  readonly visibleEdgeIds: ReadonlySet<string>;
+  readonly visibleEdgeGroupIds: ReadonlySet<string>;
   readonly visibleRect: CanvasRect;
 }
 
 export function createCanvasCullingController(input: {
-  stageRuntime: Pick<CanvasStageRuntime, 'setNodeVisible' | 'setEdgeVisible'>;
+  stageRuntime: Pick<CanvasStageRuntime, 'setNodeVisible' | 'setEdgeGroupVisible'>;
+  queryNodePaths: (rect: CanvasRect) => readonly string[];
+  queryEdgeGroupIds: (rect: CanvasRect) => readonly string[];
 }): CanvasCullingController {
-  let scene: CanvasRenderCoordinatorSnapshot = {
+  let scene: CanvasSceneSnapshot = {
     nodesByPath: new Map(),
-    nodeZIndexByPath: new Map(),
-    edges: []
+    edgeGroups: []
   };
-  let sceneNodes = [...scene.nodesByPath.values()];
   let sceneChanged = true;
   let cachedGeometry: CachedCanvasGeometry | undefined;
-  let inViewportNodePaths: ReadonlySet<string> = new Set();
   let displayVisibleNodePaths = new Set<string>();
-  let visibleEdgeIds: ReadonlySet<string> = new Set();
+  let visibleEdgeGroupIds: ReadonlySet<string> = new Set();
   let counts: CanvasCullingCounts = {
     displayVisibleNodeCount: 0,
     culledNodeCount: 0,
@@ -57,8 +57,10 @@ export function createCanvasCullingController(input: {
         return;
       }
       scene = nextScene;
-      sceneNodes = [...scene.nodesByPath.values()];
       sceneChanged = true;
+      cachedGeometry = undefined;
+    },
+    invalidateGeometry() {
       cachedGeometry = undefined;
     },
     sync(syncInput) {
@@ -68,10 +70,10 @@ export function createCanvasCullingController(input: {
         && sameSurfaceSize(cachedGeometry.surfaceSize, surfaceSize)
         ? cachedGeometry
         : geometryForViewport({
-          nodes: sceneNodes,
-          edges: scene.edges,
           camera: syncInput.camera,
-          surfaceSize
+          surfaceSize,
+          queryNodePaths: input.queryNodePaths,
+          queryEdgeGroupIds: input.queryEdgeGroupIds
         });
       cachedGeometry = geometry;
       const nextInViewportNodePaths = geometry.visibleNodePaths;
@@ -81,14 +83,14 @@ export function createCanvasCullingController(input: {
           nextDisplayVisibleNodePaths.add(path);
         }
       }
-      const nextVisibleEdgeIds = geometry.visibleEdgeIds;
+      const nextVisibleEdgeGroupIds = geometry.visibleEdgeGroupIds;
 
       if (sceneChanged) {
         for (const path of scene.nodesByPath.keys()) {
           input.stageRuntime.setNodeVisible(path, nextDisplayVisibleNodePaths.has(path));
         }
-        for (const edge of scene.edges) {
-          input.stageRuntime.setEdgeVisible(edge.id, nextVisibleEdgeIds.has(edge.id));
+        for (const group of scene.edgeGroups) {
+          input.stageRuntime.setEdgeGroupVisible(group.id, nextVisibleEdgeGroupIds.has(group.id));
         }
       } else {
         writeVisibilityDelta(
@@ -97,46 +99,42 @@ export function createCanvasCullingController(input: {
           input.stageRuntime.setNodeVisible
         );
         writeVisibilityDelta(
-          visibleEdgeIds,
-          nextVisibleEdgeIds,
-          input.stageRuntime.setEdgeVisible
+          visibleEdgeGroupIds,
+          nextVisibleEdgeGroupIds,
+          input.stageRuntime.setEdgeGroupVisible
         );
       }
 
       sceneChanged = false;
-      inViewportNodePaths = nextInViewportNodePaths;
       displayVisibleNodePaths = nextDisplayVisibleNodePaths;
-      visibleEdgeIds = nextVisibleEdgeIds;
+      visibleEdgeGroupIds = nextVisibleEdgeGroupIds;
       counts = {
         displayVisibleNodeCount: displayVisibleNodePaths.size,
         culledNodeCount: Math.max(0, scene.nodesByPath.size - displayVisibleNodePaths.size),
-        visibleEdgeCount: visibleEdgeIds.size
+        visibleEdgeCount: visibleEdgeGroupIds.size
       };
       return geometry.visibleRect;
     },
-    isNodeInViewport: (path) => inViewportNodePaths.has(path),
     getCounts: () => counts
   };
 }
 
 function geometryForViewport(input: {
-  nodes: readonly ProjectedCanvasNode[];
-  edges: readonly CanvasEdgeSegment[];
   camera: CanvasCamera;
   surfaceSize: CanvasSize;
+  queryNodePaths: (rect: CanvasRect) => readonly string[];
+  queryEdgeGroupIds: (rect: CanvasRect) => readonly string[];
 }): CachedCanvasGeometry {
-  const query = queryCanvasViewport({
-    nodes: input.nodes,
-    edges: input.edges,
+  const visibleRect = visibleCanvasRectForCamera({
     camera: input.camera,
     surfaceSize: input.surfaceSize
   });
   return {
     camera: input.camera,
     surfaceSize: input.surfaceSize,
-    visibleNodePaths: query.visibleNodePaths,
-    visibleEdgeIds: query.visibleEdgeIds,
-    visibleRect: query.visibleRect
+    visibleNodePaths: new Set(input.queryNodePaths(visibleRect)),
+    visibleEdgeGroupIds: new Set(input.queryEdgeGroupIds(visibleRect)),
+    visibleRect
   };
 }
 

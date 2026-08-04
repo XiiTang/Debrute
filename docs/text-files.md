@@ -144,12 +144,14 @@ authoritative cross-window projection; a rejected write restores the latest
 Runtime-confirmed appearance. There is no apply action, restore-default action,
 custom font input, font import, or temporary preview editor.
 
-For an inline Canvas text node, only a unique single-node selection owns the live
-editor. Multi-selection does not. DOM focus is an input detail rather than the
-ownership source. A first pointer selection carries its coordinates into the
-new editor; the runtime resolves a collapsed caret against the measured position
-or the matching visible line block. Text bodies keep Canvas wheel routing until
-focus enters the editor, after which scrolling stays local.
+For an inline Canvas text node, explicit Content Interaction owns the live
+editor. Canvas Node Selection alone does not. DOM focus is an input detail
+rather than the ownership source. Pressing an inactive preview does not select
+or activate it. Pointer release within the same preview commits the node
+selection, activates its content, and carries those release coordinates into
+the new editor; the runtime resolves a collapsed caret against the measured
+position or the matching visible line block. Text bodies keep Canvas wheel
+routing until focus enters the editor, after which scrolling stays local.
 
 Floating text editor windows use the same editor and buffer but are independent
 of inline Canvas selection and Canvas preview handoff.
@@ -303,7 +305,7 @@ movement or node dragging. Readiness, DOM snapshot slices, image decode, draw,
 and PNG encoding run only for that current job; inactive nodes remain `<img>`
 presentations rather than retaining CodeMirror DOM or loading an editor buffer.
 The title chrome and mounted preview are valid without a `TextFileBuffer`; only
-selection requests the live editor body. The lane incrementally
+Content Interaction requests the live editor body. The lane incrementally
 rebuilds the current CodeMirror DOM from shallow element clones and text nodes,
 copying an explicit allowlist of pixel-affecting computed styles over eligible
 animation frames with a source-defined slice target. It removes cursor,
@@ -359,7 +361,7 @@ begins `decode()`. It is promoted only if its Preview Continuity Key, Preview
 Variant Identity, retry attempt, and DOM membership are still current; there is
 no preliminary `fetch(...).blob()` request or off-DOM image preload. The prior
 visible image remains mounted throughout, including hidden retention beneath
-the selected editor. Text waits only for the promoted image's React DOM commit
+the content-active editor. Text waits only for the promoted image's React DOM commit
 before releasing a retiring editor. It uses no fixed timeout or animation-frame
 paint proxy. Stale producer work is discarded by runtime epoch and target key;
 stale presentation work is discarded by continuity and variant identity.

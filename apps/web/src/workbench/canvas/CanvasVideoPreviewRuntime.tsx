@@ -17,7 +17,7 @@ import {
   type CanvasPreviewTargetKey,
   type ProjectedCanvasNode
 } from '@debrute/canvas-core';
-import type { WorkbenchActions } from '../../types.js';
+import type { CanvasSceneActions } from './CanvasSceneActions.js';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
 import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
 import {
@@ -109,7 +109,7 @@ export function CanvasVideoPreviewProvider({
   canvasId: string;
   nodes: ProjectedCanvasNode[];
   activeVideoPaths: ReadonlySet<string>;
-  actions: WorkbenchActions;
+  actions: CanvasSceneActions;
   previewOrder: CanvasPreviewOrderSource;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
   children: React.ReactNode;

@@ -87,6 +87,7 @@ export function CanvasMediaFeedbackLayer({
     <div
       className={mode ? 'canvas-media-feedback-layer editing' : 'canvas-media-feedback-layer'}
       data-canvas-media-feedback-layer="true"
+      data-canvas-node-zone="feedback"
       onPointerDown={mode ? beginDraft : stopCanvasFeedbackPointerEvent}
       onPointerMove={mode ? updateDraft : stopCanvasFeedbackPointerEvent}
       onPointerUp={mode ? finishDraft : stopCanvasFeedbackPointerEvent}

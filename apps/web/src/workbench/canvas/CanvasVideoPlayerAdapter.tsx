@@ -37,8 +37,6 @@ export interface CanvasVideoPlayerAdapterProps {
   node: ProjectedCanvasNode;
   initialTimeMs: number;
   playRequest?: CanvasVideoPlayRequest | undefined;
-  onPointerInside: () => void;
-  onFocusInside: () => void;
   formatPlayError: (projectRelativePath: string) => string;
   formatSeekError: (projectRelativePath: string, seconds: number) => string;
   onError: (message: string) => void;
@@ -52,8 +50,6 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   node,
   initialTimeMs,
   playRequest,
-  onPointerInside,
-  onFocusInside,
   formatPlayError,
   formatSeekError,
   onError,
@@ -241,14 +237,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   }), [onPlayingChange, publishPlaybackBoundary]);
 
   return (
-    <div
-      className="canvas-video-player"
-      onPointerDown={(event) => {
-        event.stopPropagation();
-        onPointerInside();
-      }}
-      onFocusCapture={onFocusInside}
-    >
+    <div className="canvas-video-player">
       <MediaController noHotkeys>
         <video
           ref={videoRef}

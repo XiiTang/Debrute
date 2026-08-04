@@ -87,6 +87,96 @@ describe('CanvasFeedbackInteraction', () => {
     await probe.unmount();
   });
 
+  it('keeps a transient Node Bar suspended until a different target placement is available', async () => {
+    const overlayRuntime = createCanvasOverlayRuntime();
+    const suspendFeedbackBarPlacement = vi.spyOn(overlayRuntime, 'suspendFeedbackBarPlacement');
+    const resumeFeedbackBarPlacement = vi.spyOn(overlayRuntime, 'resumeFeedbackBarPlacement');
+    const resumeFeedbackBarPlacementAfterNextUpdate = vi.spyOn(
+      overlayRuntime,
+      'resumeFeedbackBarPlacementAfterNextUpdate'
+    );
+    const feedbackBar = document.createElement('div');
+    const releaseFeedbackBar = overlayRuntime.bindFeedbackBar(feedbackBar);
+    const probe = await renderInteraction(apiFixture(), { overlayRuntime });
+    const initialBinding = probe.current.canvas;
+
+    await act(async () => {
+      probe.current.handleTargetChange(feedbackTarget('image.png'));
+    });
+    expect(probe.current.canvas).toBe(initialBinding);
+    expect(probe.current.canvas.getCurrentTargetProjectRelativePath()).toBe('image.png');
+    overlayRuntime.setFeedbackBarPlacement({ x: 10, y: 20, width: 240, height: 124, placement: 'below' });
+    resumeFeedbackBarPlacement.mockClear();
+    resumeFeedbackBarPlacementAfterNextUpdate.mockClear();
+
+    await act(async () => {
+      probe.current.canvas.suspendHoverTarget();
+    });
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
+    expect(probe.current.canvas).toBe(initialBinding);
+    expect(suspendFeedbackBarPlacement).toHaveBeenCalledTimes(1);
+    expect(feedbackBar.inert).toBe(true);
+    expect(feedbackBar.style.visibility).toBe('visible');
+    expect(feedbackBar.style.opacity).toBe('0');
+    expect(feedbackBar.style.pointerEvents).toBe('none');
+
+    await act(async () => {
+      probe.current.handleTargetChange(feedbackTarget('second.png'));
+    });
+    expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('second.png');
+    expect(probe.current.canvas).toBe(initialBinding);
+    expect(resumeFeedbackBarPlacement).not.toHaveBeenCalled();
+    expect(resumeFeedbackBarPlacementAfterNextUpdate).toHaveBeenCalledTimes(1);
+    expect(feedbackBar.style.visibility).toBe('visible');
+    expect(feedbackBar.style.opacity).toBe('0');
+    expect(feedbackBar.style.pointerEvents).toBe('none');
+
+    overlayRuntime.setFeedbackBarPlacement({ x: 400, y: 500, width: 280, height: 160, placement: 'above' });
+    expect(feedbackBar.style.left).toBe('400px');
+    expect(feedbackBar.inert).toBe(false);
+    expect(feedbackBar.style.visibility).toBe('visible');
+    expect(feedbackBar.style.opacity).toBe('');
+    expect(feedbackBar.style.pointerEvents).toBe('');
+
+    releaseFeedbackBar();
+    await probe.unmount();
+  });
+
+  it('restores a suspended Node Bar immediately when reconciliation keeps the same target', async () => {
+    const overlayRuntime = createCanvasOverlayRuntime();
+    const resumeFeedbackBarPlacement = vi.spyOn(overlayRuntime, 'resumeFeedbackBarPlacement');
+    const probe = await renderInteraction(apiFixture(), { overlayRuntime });
+
+    await act(async () => {
+      probe.current.handleTargetChange(feedbackTarget('image.png'));
+      probe.current.canvas.suspendHoverTarget();
+      probe.current.handleTargetChange(feedbackTarget('image.png'));
+    });
+
+    expect(resumeFeedbackBarPlacement).toHaveBeenCalledTimes(1);
+    await probe.unmount();
+  });
+
+  it('does not suspend selection or focused Feedback Bars', async () => {
+    const overlayRuntime = createCanvasOverlayRuntime();
+    const suspendFeedbackBarPlacement = vi.spyOn(overlayRuntime, 'suspendFeedbackBarPlacement');
+    const probe = await renderInteraction(apiFixture(), { overlayRuntime });
+
+    await act(async () => {
+      probe.current.handleTargetChange(feedbackSelectionTarget(['image.png', 'second.png']));
+      probe.current.canvas.suspendHoverTarget();
+    });
+    expect(suspendFeedbackBarPlacement).not.toHaveBeenCalled();
+
+    await act(async () => {
+      probe.current.handleTargetChange(feedbackTarget('image.png'));
+      probe.current.focusCapsule('feedback-a');
+      probe.current.canvas.suspendHoverTarget();
+    });
+    expect(suspendFeedbackBarPlacement).not.toHaveBeenCalled();
+    await probe.unmount();
+  });
+
   it('lets a multi-selection replace a focused single-node Bar immediately', async () => {
     const probe = await renderPointInteraction(apiFixture());
 
@@ -752,6 +842,7 @@ function InteractionProbe({
 
 async function renderInteraction(api: WorkbenchApiClient, options: {
   notifySaveFailed?: ((message: string) => void) | undefined;
+  overlayRuntime?: ReturnType<typeof createCanvasOverlayRuntime> | undefined;
 } = {}): Promise<{
   readonly current: CanvasFeedbackInteraction;
   unmount(): Promise<void>;
@@ -759,7 +850,7 @@ async function renderInteraction(api: WorkbenchApiClient, options: {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const overlayRuntime = createCanvasOverlayRuntime();
+  const overlayRuntime = options.overlayRuntime ?? createCanvasOverlayRuntime();
   let current!: CanvasFeedbackInteraction;
   await act(async () => {
     root.render(

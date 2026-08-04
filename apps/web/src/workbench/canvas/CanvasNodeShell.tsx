@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
-import type { TextFileBuffer, WorkbenchActions } from '../../types';
+import type { TextFileBuffer } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import { CanvasFeedbackFrame, canvasFeedbackEntryHasFeedback } from './CanvasFeedbackFrame';
@@ -9,25 +9,26 @@ import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './
 import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import { canvasTextPresentationGeometry } from './CanvasTextPresentationGeometry.js';
+import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
+import type { CanvasSceneActions } from './CanvasSceneActions.js';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 
 export interface CanvasNodeShellProps {
   node: ProjectedCanvasNode;
-  selected: boolean;
   cut: boolean;
   showResizeHandles: boolean;
-  textEditorActive: boolean;
-  hovered: boolean;
+  contentInteractionActive: boolean;
   zIndex: number;
   stageRuntime: CanvasStageRuntime;
-  actions: WorkbenchActions;
+  actions: CanvasSceneActions;
   textBuffer: TextFileBuffer | undefined;
   textPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   textPreviewError?: string | undefined;
   videoPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
+  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
@@ -38,11 +39,6 @@ export interface CanvasNodeShellProps {
     geometry: CanvasFeedbackGeometry;
   }) => void) | undefined;
   onFeedbackItemActivate?: ((projectRelativePath: string, itemId: string) => void) | undefined;
-  onPointerDown: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
-  onPointerEnter: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
-  onPointerLeave: (node: ProjectedCanvasNode, event: React.PointerEvent<Element>) => void;
-  onContextMenu: (node: ProjectedCanvasNode, event: React.MouseEvent<Element>) => void;
-  onSelectNode: (node: ProjectedCanvasNode) => void;
   onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
@@ -53,11 +49,9 @@ export interface CanvasNodeShellProps {
 
 function CanvasNodeShellComponent({
   node,
-  selected,
   cut,
   showResizeHandles,
-  textEditorActive,
-  hovered,
+  contentInteractionActive,
   zIndex,
   stageRuntime,
   actions,
@@ -67,6 +61,7 @@ function CanvasNodeShellComponent({
   videoPreviewRequest,
   videoPreviewError,
   forceVideoPlayerMounted,
+  previewActivationRequest,
   feedbackEntry,
   activeFeedbackItemId,
   localFeedbackMode,
@@ -74,11 +69,6 @@ function CanvasNodeShellComponent({
   activeFeedbackMomentTimeSeconds,
   onLocalFeedbackDraft,
   onFeedbackItemActivate,
-  onPointerDown,
-  onPointerEnter,
-  onPointerLeave,
-  onContextMenu,
-  onSelectNode,
   onResizePointerDown,
   onVideoPlayerMounted,
   onVideoPlayingChange,
@@ -115,9 +105,7 @@ function CanvasNodeShellComponent({
     'canvas-node-shell',
     'db-canvas-node-frame',
     node.mediaKind,
-    selected ? 'selected' : '',
     cut ? 'canvas-cut-source' : '',
-    hovered ? 'hovered' : '',
     hasFeedback ? 'canvas-node-has-feedback' : '',
     node.nodeKind,
     usesFixedNodePresentation(node) ? 'fixed-presentation' : ''
@@ -125,7 +113,7 @@ function CanvasNodeShellComponent({
   const content = (
     <CanvasNodeContent
       node={node}
-      selected={node.mediaKind === 'text' ? textEditorActive : selected}
+      contentInteractionActive={contentInteractionActive}
       actions={actions}
       textBuffer={textBuffer}
       textPreviewRequest={textPreviewRequest}
@@ -133,6 +121,7 @@ function CanvasNodeShellComponent({
       videoPreviewRequest={videoPreviewRequest}
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
+      previewActivationRequest={previewActivationRequest}
       feedbackEntry={feedbackEntry}
       activeFeedbackItemId={activeFeedbackItemId}
       localFeedbackMode={localFeedbackMode}
@@ -145,8 +134,6 @@ function CanvasNodeShellComponent({
       onRegisterVideoTarget={onRegisterVideoTarget}
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}
-      onSelectNode={() => onSelectNode(node)}
-      onTitlePointerDown={(event) => onPointerDown(node, event)}
     />
   );
 
@@ -157,13 +144,12 @@ function CanvasNodeShellComponent({
       data-canvas-node-path={node.projectRelativePath}
       data-canvas-node-kind={node.nodeKind}
       data-canvas-media-kind={node.mediaKind}
+      data-canvas-node-default-zone={node.mediaKind === 'text' || node.mediaKind === 'video' || node.mediaKind === 'audio'
+        ? 'passive'
+        : 'move'}
       data-project-relative-path={node.projectRelativePath}
       className={className}
       style={{ left: 0, top: 0 } as React.CSSProperties}
-      onPointerDown={node.mediaKind === 'text' ? undefined : (event) => onPointerDown(node, event)}
-      onPointerEnter={(event) => onPointerEnter(node, event)}
-      onPointerLeave={(event) => onPointerLeave(node, event)}
-      onContextMenu={(event) => onContextMenu(node, event)}
     >
       {usesFixedNodePresentation(node)
         ? (
@@ -186,6 +172,7 @@ function CanvasNodeShellComponent({
           className={`canvas-node-resize ${handle}`}
           aria-label={`Resize node ${handle}`}
           title={`Resize ${handle}`}
+          data-canvas-node-zone="resize"
           onPointerDown={(event) => onResizePointerDown(node, handle, event)}
         />
       )) : null}
@@ -200,11 +187,9 @@ export function areCanvasNodeShellPropsEqual(
   next: CanvasNodeShellProps
 ): boolean {
   return previous.node === next.node
-    && previous.selected === next.selected
     && previous.cut === next.cut
     && previous.showResizeHandles === next.showResizeHandles
-    && previous.textEditorActive === next.textEditorActive
-    && previous.hovered === next.hovered
+    && previous.contentInteractionActive === next.contentInteractionActive
     && previous.zIndex === next.zIndex
     && previous.stageRuntime === next.stageRuntime
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)
@@ -214,6 +199,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.videoPreviewRequest === next.videoPreviewRequest
     && previous.videoPreviewError === next.videoPreviewError
     && previous.forceVideoPlayerMounted === next.forceVideoPlayerMounted
+    && previous.previewActivationRequest === next.previewActivationRequest
     && previous.feedbackEntry === next.feedbackEntry
     && previous.activeFeedbackItemId === next.activeFeedbackItemId
     && previous.localFeedbackMode === next.localFeedbackMode
@@ -221,11 +207,6 @@ export function areCanvasNodeShellPropsEqual(
     && previous.activeFeedbackMomentTimeSeconds === next.activeFeedbackMomentTimeSeconds
     && previous.onLocalFeedbackDraft === next.onLocalFeedbackDraft
     && previous.onFeedbackItemActivate === next.onFeedbackItemActivate
-    && previous.onPointerDown === next.onPointerDown
-    && previous.onPointerEnter === next.onPointerEnter
-    && previous.onPointerLeave === next.onPointerLeave
-    && previous.onContextMenu === next.onContextMenu
-    && previous.onSelectNode === next.onSelectNode
     && previous.onResizePointerDown === next.onResizePointerDown
     && previous.onVideoPlayerMounted === next.onVideoPlayerMounted
     && previous.onVideoPlayingChange === next.onVideoPlayingChange

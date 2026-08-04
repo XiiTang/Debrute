@@ -138,17 +138,3 @@ export function canvasStackOrderWithRaisedGroup(
     .filter((path) => !raised.has(path))
     .concat(order.filter((path) => raised.has(path)));
 }
-
-export function canvasNodesWithStackOrder(input: {
-  nodes: readonly ProjectedCanvasNode[];
-  stackOrder: CanvasNodeStackOrder | undefined;
-}): ProjectedCanvasNode[] {
-  if (!input.stackOrder) {
-    return [...input.nodes];
-  }
-  const zByPath = new Map(input.stackOrder.map((path, z) => [path, z]));
-  return input.nodes.map((node) => {
-    const z = zByPath.get(node.projectRelativePath);
-    return z === undefined || z === node.z ? node : { ...node, z };
-  });
-}

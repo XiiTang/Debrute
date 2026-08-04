@@ -53,7 +53,7 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
       configurable: true,
       value: vi.fn(async () => undefined)
     });
-    const renderNode = async (selected: boolean) => {
+    const renderNode = async (contentInteractionActive: boolean) => {
       await act(async () => {
         root.render(
           <I18nProvider locale="en">
@@ -64,7 +64,7 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
             }}>
               <CanvasNodeContent
                 node={textNode()}
-                selected={selected}
+                contentInteractionActive={contentInteractionActive}
                 actions={actionsFixture()}
                 textBuffer={textBuffer()}
                 textPreviewRequest={textPreviewRequest()}
@@ -73,8 +73,6 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={() => undefined}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
               />
             </CanvasRasterPreviewEnvironmentProvider>
           </I18nProvider>

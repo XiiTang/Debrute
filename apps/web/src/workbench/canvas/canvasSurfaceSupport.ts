@@ -25,8 +25,7 @@ import {
   type CanvasPerfMonitor,
   type CanvasPerfSessionId
 } from './CanvasPerfMonitor';
-import type { CanvasRenderCoordinatorSnapshot } from './CanvasRenderCoordinator';
-import type { CanvasSelection } from './runtime/canvasSelection';
+import type { CanvasSceneSnapshot } from './CanvasScenePresentation';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPreviewResourceInteractionState } from './CanvasPreviewResourceScheduler';
 import type { CanvasCullingCounts } from './CanvasCullingController.js';
@@ -86,7 +85,7 @@ export interface CanvasPerfDebugSnapshotContext {
   canvasId: string;
   runtime: Pick<CanvasEditorRuntime, 'getSnapshot'>;
   resourceZoom: number;
-  renderSnapshot: CanvasRenderCoordinatorSnapshot;
+  renderSnapshot: CanvasSceneSnapshot;
   renderLifecycle: Pick<CanvasRenderLifecycle, 'getCullingCounts'>;
   surfaceElement: HTMLElement | null;
 }
@@ -95,7 +94,8 @@ const STAGE_WRITE_COUNTERS = [
   'stage-camera-write',
   'stage-node-layout-write',
   'stage-node-visibility-write',
-  'stage-edge-visibility-write'
+  'stage-edge-visibility-write',
+  'stage-edge-geometry-write'
 ] as const satisfies readonly CanvasPerfCounterName[];
 
 const RASTER_PREVIEW_WORK_COUNTERS = [
@@ -212,7 +212,7 @@ export function recordCanvasPerfFrame(input: {
   perfMonitor: CanvasPerfMonitor | undefined;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
   cameraState: CanvasRuntimeSnapshot['cameraState'];
-  renderSnapshot: CanvasRenderCoordinatorSnapshot;
+  renderSnapshot: CanvasSceneSnapshot;
   cullingCounts: CanvasCullingCounts;
   reactCommitCountRef: { current: number };
 }): void {
@@ -291,7 +291,7 @@ function canvasPerfPointerInteractionSessionDetail(state: CanvasRuntimePointerIn
 
 export function canvasPerfFinalState(input: {
   snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
-  renderSnapshot: CanvasRenderCoordinatorSnapshot;
+  renderSnapshot: CanvasSceneSnapshot;
   cullingCounts: CanvasCullingCounts;
 }): CanvasPerfFinalState {
   return {
@@ -440,24 +440,15 @@ export function devicePixelRatioValue(): number {
   return window.devicePixelRatio;
 }
 
-export function selectedSingleVideoPath(selection: CanvasSelection | undefined, nodes: readonly ProjectedCanvasNode[]): string | undefined {
-  if (selection?.kind !== 'nodes' || selection.projectRelativePaths.length !== 1) {
-    return undefined;
-  }
-  const selectedPath = selection.projectRelativePaths[0]!;
-  const node = nodes.find((item) => item.projectRelativePath === selectedPath);
-  return node && isProjectedVideoNode(node) ? node.projectRelativePath : undefined;
-}
-
 export function canvasActiveVideoPaths(input: {
   nodes: readonly ProjectedCanvasNode[];
-  selectedProjectRelativePaths: readonly string[];
+  contentActiveProjectRelativePaths: readonly string[];
   playingVideoPaths: ReadonlySet<string>;
   requestedVideoPlayerPath: string | undefined;
 }): ReadonlySet<string> {
   const videoPaths = new Set(input.nodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
   const active = new Set<string>();
-  for (const projectRelativePath of input.selectedProjectRelativePaths) {
+  for (const projectRelativePath of input.contentActiveProjectRelativePaths) {
     if (videoPaths.has(projectRelativePath)) {
       active.add(projectRelativePath);
     }

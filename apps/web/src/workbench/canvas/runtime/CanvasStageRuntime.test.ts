@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createCanvasPerfMonitor, type CanvasPerfTraceEvent } from '../CanvasPerfMonitor';
 import { createCanvasStageRuntime } from './CanvasStageRuntime';
 
@@ -65,15 +65,59 @@ describe('CanvasStageRuntime', () => {
     expect(element.style.properties.get('display')).toBe('block');
   });
 
-  it('writes edge display state without changing React edge membership', () => {
+  it('moves controlled hover presentation directly between registered node shells', () => {
+    const runtime = createCanvasStageRuntime();
+    const first = fakeElement();
+    const second = fakeElement();
+
+    runtime.registerNodeShell('flow/a.png', first as unknown as HTMLElement);
+    runtime.registerNodeShell('flow/b.png', second as unknown as HTMLElement);
+
+    runtime.setHoveredNode('flow/a.png');
+    expect(first.attributes.get('data-canvas-hovered')).toBe('true');
+    expect(second.attributes.has('data-canvas-hovered')).toBe(false);
+
+    runtime.setHoveredNode('flow/b.png');
+    expect(first.attributes.has('data-canvas-hovered')).toBe(false);
+    expect(second.attributes.get('data-canvas-hovered')).toBe('true');
+
+    runtime.setHoveredNode(undefined);
+    expect(second.attributes.has('data-canvas-hovered')).toBe(false);
+  });
+
+  it('writes routed edge group geometry and display without changing React membership', () => {
     const runtime = createCanvasStageRuntime();
     const element = fakeElement();
 
-    runtime.registerEdgeLayer('edge-a-b', element as unknown as SVGSVGElement);
-    runtime.setEdgeVisible('edge-a-b', false);
-    runtime.setEdgeVisible('edge-a-b', true);
+    runtime.registerEdgeGroup('source', element as unknown as SVGPathElement);
+    runtime.setEdgeGroupGeometry('source', 'M 0 0 L 100 100');
+    runtime.setEdgeGroupVisible('source', false);
+    runtime.setEdgeGroupVisible('source', true);
 
+    expect(element.attributes.get('d')).toBe('M 0 0 L 100 100');
     expect(element.style.properties.get('display')).toBe('block');
+  });
+
+  it('applies selected attributes by set difference and notifies only old and new single selections', () => {
+    const runtime = createCanvasStageRuntime();
+    const first = fakeElement();
+    const second = fakeElement();
+    const firstListener = vi.fn();
+    const secondListener = vi.fn();
+    runtime.registerNodeShell('first', first as unknown as HTMLElement);
+    runtime.registerNodeShell('second', second as unknown as HTMLElement);
+    runtime.subscribeSingleSelectedNode('first', firstListener);
+    runtime.subscribeSingleSelectedNode('second', secondListener);
+
+    runtime.setSelectedNodePaths(new Set(['first']));
+    runtime.setSelectedNodePaths(new Set(['second']));
+
+    expect(first.attributes.has('data-canvas-selected')).toBe(false);
+    expect(second.attributes.get('data-canvas-selected')).toBe('true');
+    expect(firstListener).toHaveBeenCalledTimes(2);
+    expect(secondListener).toHaveBeenCalledTimes(1);
+    expect(runtime.isSingleSelectedNode('first')).toBe(false);
+    expect(runtime.isSingleSelectedNode('second')).toBe(true);
   });
 
   it('records camera write and no-op counters', () => {
@@ -110,9 +154,11 @@ describe('CanvasStageRuntime', () => {
     runtime.setNodeVisible('flow/a.png', false);
     runtime.setNodeVisible('flow/a.png', false);
     const edge = fakeElement();
-    runtime.registerEdgeLayer('edge-a-b', edge as unknown as SVGSVGElement);
-    runtime.setEdgeVisible('edge-a-b', false);
-    runtime.setEdgeVisible('edge-a-b', false);
+    runtime.registerEdgeGroup('edge-a-b', edge as unknown as SVGPathElement);
+    runtime.setEdgeGroupGeometry('edge-a-b', 'M 0 0 L 10 10');
+    runtime.setEdgeGroupGeometry('edge-a-b', 'M 0 0 L 10 10');
+    runtime.setEdgeGroupVisible('edge-a-b', false);
+    runtime.setEdgeGroupVisible('edge-a-b', false);
     monitor.endSession({ sessionId, timestamp: 20, source: 'CanvasSurface' });
 
     expect(monitor.getLastSession()?.counters).toMatchObject({
@@ -121,7 +167,9 @@ describe('CanvasStageRuntime', () => {
       'stage-node-visibility-write': 1,
       'stage-node-visibility-noop': 1,
       'stage-edge-visibility-write': 1,
-      'stage-edge-visibility-noop': 1
+      'stage-edge-visibility-noop': 1,
+      'stage-edge-geometry-write': 1,
+      'stage-edge-geometry-noop': 1
     });
   });
 });
@@ -133,6 +181,15 @@ function counterNames(events: readonly CanvasPerfTraceEvent[]): string[] {
 }
 
 function fakeElement(): {
+  classes: Set<string>;
+  attributes: Map<string, string>;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+  classList: {
+    add(name: string): void;
+    remove(name: string): void;
+    toggle(name: string, force?: boolean): boolean;
+  };
   style: {
     transform: string;
     writeCount: number;
@@ -141,7 +198,34 @@ function fakeElement(): {
   };
 } {
   let transformValue = '';
+  const classes = new Set<string>();
+  const attributes = new Map<string, string>();
   return {
+    classes,
+    attributes,
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
+    classList: {
+      add(name) {
+        classes.add(name);
+      },
+      remove(name) {
+        classes.delete(name);
+      },
+      toggle(name, force) {
+        const next = force ?? !classes.has(name);
+        if (next) {
+          classes.add(name);
+        } else {
+          classes.delete(name);
+        }
+        return next;
+      }
+    },
     style: {
       get transform() {
         return transformValue;

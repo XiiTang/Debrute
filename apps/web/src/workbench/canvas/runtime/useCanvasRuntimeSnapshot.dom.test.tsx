@@ -59,6 +59,7 @@ function runtimeSnapshot(
     camera: { x: 0, y: 0, z: 1 },
     cameraState: 'idle',
     selection: undefined,
+    contentInteractionProjectRelativePath: undefined,
     pointerInteraction,
     surfaceSize: undefined
   };

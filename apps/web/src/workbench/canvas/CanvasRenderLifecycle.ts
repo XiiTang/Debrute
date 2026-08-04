@@ -1,17 +1,12 @@
-import type { CanvasProjection } from '@debrute/canvas-core';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor.js';
 import {
-  createCanvasRenderCoordinator,
-  type CanvasRenderCoordinatorSnapshot,
-  type CanvasRenderCoordinatorUpdateInput
-} from './CanvasRenderCoordinator.js';
-import {
   createCanvasCullingController,
   type CanvasCullingCounts
 } from './CanvasCullingController.js';
+import type { CanvasScenePresentationUpdate } from './CanvasScenePresentation.js';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction,
@@ -28,18 +23,20 @@ export interface CanvasPreviewOrderSource {
 }
 
 export interface CanvasRenderLifecycle extends CanvasPreviewOrderSource {
-  acceptProjection(projection: CanvasProjection): void;
-  getSnapshot(): CanvasRenderCoordinatorSnapshot;
-  subscribe(listener: () => void): () => void;
+  attach(): () => void;
   previewDistanceSquaredForNode(path: string): number;
   getCullingCounts(): CanvasCullingCounts;
 }
 
 interface CanvasRenderLifecycleInput {
-  projection: CanvasProjection;
   runtime: CanvasEditorRuntime;
   stageRuntime: Pick<CanvasStageRuntime,
-    'setCamera' | 'setNodeVisible' | 'setEdgeVisible'>;
+    'setCamera'
+    | 'setNodeLayout'
+    | 'setNodeVisible'
+    | 'setEdgeGroupGeometry'
+    | 'setEdgeGroupVisible'
+    | 'setSelectedNodePaths'>;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
   requestFrame?: ((callback: FrameRequestCallback) => number) | undefined;
   cancelFrame?: ((handle: number) => void) | undefined;
@@ -48,22 +45,20 @@ interface CanvasRenderLifecycleInput {
 export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): CanvasRenderLifecycle {
   const requestFrame = input.requestFrame ?? window.requestAnimationFrame.bind(window);
   const cancelFrame = input.cancelFrame ?? window.cancelAnimationFrame.bind(window);
-  const coordinator = createCanvasRenderCoordinator({
-    projection: input.projection,
-    perfMonitor: input.perfMonitor
+  const culling = createCanvasCullingController({
+    stageRuntime: input.stageRuntime,
+    queryNodePaths: input.runtime.scene.queryNodePaths,
+    queryEdgeGroupIds: input.runtime.scene.queryEdgeGroupIds
   });
-  const culling = createCanvasCullingController({ stageRuntime: input.stageRuntime });
-  const listeners = new Set<() => void>();
   const previewOrderListeners = new Set<() => void>();
-  let scene = coordinator.update(renderInput(input.runtime));
   let previewOrderSnapshot: CanvasRect = { x: 0, y: 0, width: 0, height: 0 };
   let pendingFrame: number | undefined;
   let frameEpoch = 0;
-  let detachRuntime: (() => void) | undefined;
-  let acceptedProjection = input.projection;
-  culling.acceptScene(scene);
+  let activeSubscriptions: (() => void)[] | undefined;
 
-  const recordCounter = (name: 'viewport-cull-queued' | 'viewport-idle-publish'): void => {
+  const recordCounter = (
+    name: 'render-snapshot-build' | 'render-snapshot-reuse' | 'viewport-cull-queued' | 'viewport-idle-publish'
+  ): void => {
     input.perfMonitor?.recordCounter({
       sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
       timestamp: performance.now(),
@@ -90,10 +85,7 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
     displayRetainedNodePaths: displayRetainedNodePaths(runtimeSnapshot)
   });
 
-  const publishPreviewOrder = (
-    runtimeSnapshot: CanvasRuntimeSnapshot = input.runtime.getSnapshot()
-  ): void => {
-    const nextSnapshot = syncCulling(runtimeSnapshot);
+  const publishPreviewOrderSnapshot = (nextSnapshot: CanvasRect): void => {
     if (sameCanvasRect(previewOrderSnapshot, nextSnapshot)) {
       return;
     }
@@ -103,19 +95,27 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
     }
   };
 
-  const commitScene = (): void => {
+  const publishPreviewOrder = (
+    runtimeSnapshot: CanvasRuntimeSnapshot = input.runtime.getSnapshot()
+  ): void => publishPreviewOrderSnapshot(syncCulling(runtimeSnapshot));
+
+  const commitPresentation = (update: CanvasScenePresentationUpdate): void => {
     cancelPendingFrame();
-    const next = coordinator.update(renderInput(input.runtime));
-    if (next !== scene) {
-      scene = next;
-      culling.acceptScene(scene);
-      publishPreviewOrder(input.runtime.getSnapshot());
-      for (const listener of listeners) {
-        listener();
-      }
-      return;
+    for (const layout of update.nodeLayouts) {
+      input.stageRuntime.setNodeLayout(layout.projectRelativePath, layout);
     }
-    syncCulling();
+    for (const group of update.edgeGroups) {
+      input.stageRuntime.setEdgeGroupGeometry(group.id, group.path);
+    }
+    if (update.geometryChanged) {
+      culling.invalidateGeometry();
+    }
+    recordCounter('render-snapshot-reuse');
+    const runtimeSnapshot = input.runtime.getSnapshot();
+    const visibleRect = syncCulling(runtimeSnapshot);
+    if (runtimeSnapshot.pointerInteraction === undefined) {
+      publishPreviewOrderSnapshot(visibleRect);
+    }
   };
 
   const requestCullingSync = (): void => {
@@ -133,62 +133,66 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
     });
   };
 
-  const attachRuntime = (): void => {
-    if (detachRuntime) {
-      return;
-    }
-    const initialSnapshot = input.runtime.getSnapshot();
-    input.stageRuntime.setCamera(initialSnapshot.camera);
-    publishPreviewOrder(initialSnapshot);
-    const detach = [
-      input.runtime.subscribeCamera((camera) => {
-        input.stageRuntime.setCamera(camera);
-        requestCullingSync();
-      }),
-      input.runtime.subscribeCameraState((cameraState) => {
-        if (cameraState !== 'idle') {
+  return {
+    attach() {
+      if (activeSubscriptions) {
+        throw new Error('Canvas Render Lifecycle is already attached.');
+      }
+      culling.acceptScene(input.runtime.scene.getRenderSnapshot());
+      const initialSnapshot = input.runtime.getSnapshot();
+      input.stageRuntime.setCamera(initialSnapshot.camera);
+      input.stageRuntime.setSelectedNodePaths(
+        new Set(selectedNodeProjectRelativePaths(initialSnapshot.selection))
+      );
+      publishPreviewOrder(initialSnapshot);
+      recordCounter('render-snapshot-build');
+      const subscriptions = [
+        input.runtime.scene.subscribeRenderSnapshot(() => {
+          cancelPendingFrame();
+          culling.acceptScene(input.runtime.scene.getRenderSnapshot());
+          recordCounter('render-snapshot-build');
+          publishPreviewOrder(input.runtime.getSnapshot());
+        }),
+        input.runtime.scene.subscribePresentation(commitPresentation),
+        input.runtime.subscribeCamera((camera) => {
+          input.stageRuntime.setCamera(camera);
+          requestCullingSync();
+        }),
+        input.runtime.subscribeCameraState((cameraState) => {
+          if (cameraState !== 'idle') {
+            return;
+          }
+          recordCounter('viewport-idle-publish');
+          cancelPendingFrame();
+          publishPreviewOrder(input.runtime.getSnapshot());
+        }),
+        input.runtime.subscribeSelection((selection) => {
+          input.stageRuntime.setSelectedNodePaths(
+            new Set(selectedNodeProjectRelativePaths(selection))
+          );
+          syncCulling();
+        }),
+        input.runtime.subscribeSurfaceSize(() => {
+          cancelPendingFrame();
+          publishPreviewOrder(input.runtime.getSnapshot());
+        }),
+        input.runtime.subscribePointerInteraction((pointerInteraction) => {
+          if (pointerInteraction !== undefined) {
+            return;
+          }
+          publishPreviewOrder(input.runtime.getSnapshot());
+        })
+      ];
+      activeSubscriptions = subscriptions;
+      return () => {
+        if (activeSubscriptions !== subscriptions) {
           return;
         }
-        recordCounter('viewport-idle-publish');
         cancelPendingFrame();
-        publishPreviewOrder(input.runtime.getSnapshot());
-      }),
-      input.runtime.subscribeSelection(() => syncCulling()),
-      input.runtime.subscribeSurfaceSize(() => {
-        cancelPendingFrame();
-        publishPreviewOrder(input.runtime.getSnapshot());
-      }),
-      input.runtime.subscribePointerInteraction(commitScene),
-      input.runtime.manualLayout.subscribeRejection(commitScene)
-    ];
-    detachRuntime = () => {
-      cancelPendingFrame();
-      for (const unsubscribe of detach) {
-        unsubscribe();
-      }
-      detachRuntime = undefined;
-    };
-  };
-
-  return {
-    acceptProjection: (projection) => {
-      if (projection === acceptedProjection) {
-        return;
-      }
-      acceptedProjection = projection;
-      input.runtime.manualLayout.acceptProjection(projection);
-      coordinator.setProjection(projection);
-      commitScene();
-    },
-    getSnapshot: () => scene,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      attachRuntime();
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size === 0) {
-          detachRuntime?.();
+        for (const unsubscribe of subscriptions) {
+          unsubscribe();
         }
+        activeSubscriptions = undefined;
       };
     },
     getPreviewOrderSnapshot: () => previewOrderSnapshot,
@@ -197,18 +201,10 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       return () => previewOrderListeners.delete(listener);
     },
     previewDistanceSquaredForNode: (path) => {
-      const node = scene.nodesByPath.get(path);
+      const node = input.runtime.scene.getPresentedNodes().get(path);
       return node ? canvasPreviewDistanceSquared(node, previewOrderSnapshot) : Number.POSITIVE_INFINITY;
     },
     getCullingCounts: culling.getCounts
-  };
-}
-
-function renderInput(runtime: CanvasEditorRuntime): CanvasRenderCoordinatorUpdateInput {
-  const manualLayout = runtime.manualLayout.getPresentation();
-  return {
-    layoutOverrides: manualLayout.layoutOverrides,
-    stackOrder: manualLayout.stackOrder
   };
 }
 

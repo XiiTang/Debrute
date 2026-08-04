@@ -12,23 +12,23 @@ void hotkeyControllerInputWithMountRequest;
 void hotkeyControllerInputWithoutMountRequest;
 
 describe('CanvasVideoHotkeyController', { tags: ['canvas-video'] }, () => {
-  it('dispatches shortcuts only to the selected video target', () => {
-    const selected = videoHandle();
-    const unselected = videoHandle();
+  it('dispatches shortcuts only to the content-active video target', () => {
+    const contentActive = videoHandle();
+    const inactive = videoHandle();
     const controller = createController();
-    controller.register('media/selected.mp4', selected);
-    controller.register('media/unselected.mp4', unselected);
+    controller.register('media/selected.mp4', contentActive);
+    controller.register('media/unselected.mp4', inactive);
 
     const event = keyboardEvent(' ', {
-      selectedVideoPath: 'media/selected.mp4',
+      contentActiveVideoPath: 'media/selected.mp4',
       activeElement: document.body
     });
     const handled = controller.handleKeyDown(event);
 
     expect(handled).toBe(true);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
-    expect(selected.togglePlayback).toHaveBeenCalledTimes(1);
-    expect(unselected.togglePlayback).not.toHaveBeenCalled();
+    expect(contentActive.togglePlayback).toHaveBeenCalledTimes(1);
+    expect(inactive.togglePlayback).not.toHaveBeenCalled();
   });
 
   it('ignores shortcuts when focus is inside text input controls', () => {
@@ -40,7 +40,7 @@ describe('CanvasVideoHotkeyController', { tags: ['canvas-video'] }, () => {
 
     try {
       const handled = controller.handleKeyDown(keyboardEvent(' ', {
-        selectedVideoPath: 'media/selected.mp4',
+        contentActiveVideoPath: 'media/selected.mp4',
         activeElement: input
       }));
 
@@ -60,7 +60,7 @@ describe('CanvasVideoHotkeyController', { tags: ['canvas-video'] }, () => {
 
     try {
       const handled = controller.handleKeyDown(keyboardEvent(' ', {
-        selectedVideoPath: 'media/selected.mp4',
+        contentActiveVideoPath: 'media/selected.mp4',
         activeElement: control
       }));
 
@@ -81,7 +81,7 @@ describe('CanvasVideoHotkeyController', { tags: ['canvas-video'] }, () => {
 
     try {
       const handled = controller.handleKeyDown(keyboardEvent(' ', {
-        selectedVideoPath: 'media/selected.mp4',
+        contentActiveVideoPath: 'media/selected.mp4',
         activeElement: control
       }));
 
@@ -104,7 +104,7 @@ describe('CanvasVideoHotkeyController', { tags: ['canvas-video'] }, () => {
 
     try {
       const handled = controller.handleKeyDown(keyboardEvent(' ', {
-        selectedVideoPath: 'media/selected.mp4',
+        contentActiveVideoPath: 'media/selected.mp4',
         activeElement: icon
       }));
 
@@ -115,21 +115,21 @@ describe('CanvasVideoHotkeyController', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('ignores shortcuts without exactly one selected video target', () => {
+  it('ignores shortcuts without a content-active video target', () => {
     const target = videoHandle();
     const controller = createController();
     controller.register('media/selected.mp4', target);
 
-    expect(controller.handleKeyDown(keyboardEvent(' ', { selectedVideoPath: undefined, activeElement: document.body }))).toBe(false);
+    expect(controller.handleKeyDown(keyboardEvent(' ', { contentActiveVideoPath: undefined, activeElement: document.body }))).toBe(false);
     expect(target.togglePlayback).not.toHaveBeenCalled();
   });
 
-  it('requests target mounting when a selected inactive video receives a video shortcut', () => {
+  it('requests target mounting when a content-active inactive video receives a video shortcut', () => {
     const requestTargetMount = vi.fn();
     const controller = createCanvasVideoHotkeyController({ requestTargetMount });
 
     const event = keyboardEvent(' ', {
-      selectedVideoPath: 'media/selected.mp4',
+      contentActiveVideoPath: 'media/selected.mp4',
       activeElement: document.body
     });
 
@@ -143,7 +143,7 @@ describe('CanvasVideoHotkeyController', { tags: ['canvas-video'] }, () => {
     const controller = createCanvasVideoHotkeyController({ requestTargetMount });
 
     const event = keyboardEvent('Escape', {
-      selectedVideoPath: 'media/selected.mp4',
+      contentActiveVideoPath: 'media/selected.mp4',
       activeElement: document.body
     });
 
@@ -174,13 +174,13 @@ function videoHandle(): CanvasVideoPlayerHandle {
 
 function keyboardEvent(
   key: string,
-  input: { selectedVideoPath: string | undefined; activeElement: Element | null }
+  input: { contentActiveVideoPath: string | undefined; activeElement: Element | null }
 ) {
   return {
     key,
     shiftKey: false,
     preventDefault: vi.fn(),
-    selectedVideoPath: input.selectedVideoPath,
+    contentActiveVideoPath: input.contentActiveVideoPath,
     activeElement: input.activeElement
   };
 }

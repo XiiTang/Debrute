@@ -23,7 +23,6 @@ export function CanvasNodeErrorPresentation({
             className="db-canvas-node-retry"
             size="xs"
             iconStart={<RefreshCw size={12} />}
-            onPointerDown={(event) => event.stopPropagation()}
             onClick={onRetry}
           >
             {i18n.t('canvas.node.retry')}

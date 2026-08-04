@@ -1,199 +1,101 @@
 import type { ProjectedCanvasNode } from '@debrute/canvas-core';
 import { describe, expect, it, vi } from 'vitest';
 import { createCanvasCullingController } from './CanvasCullingController.js';
-import { createCanvasRenderCoordinator } from './CanvasRenderCoordinator.js';
+import type { CanvasSceneSnapshot } from './CanvasScenePresentation.js';
 
 describe('CanvasCullingController', () => {
-  it('keeps scene membership stable and writes only display deltas while panning', () => {
+  it('writes only visibility deltas while camera queries change', () => {
     const setNodeVisible = vi.fn();
-    const scene = canvasScene([
-      directoryNode('a', 0, 0),
-      directoryNode('b', 1000, 0),
-      directoryNode('c', 5000, 0)
-    ]);
+    let visible = ['a'];
     const controller = createCanvasCullingController({
-      stageRuntime: { setNodeVisible, setEdgeVisible: vi.fn() }
+      stageRuntime: { setNodeVisible, setEdgeGroupVisible: vi.fn() },
+      queryNodePaths: () => visible,
+      queryEdgeGroupIds: () => []
     });
-    controller.acceptScene(scene);
-    controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set()
-    });
-
+    controller.acceptScene(scene([node('a'), node('b')]));
+    controller.sync(syncInput());
     setNodeVisible.mockClear();
-    controller.sync({
-      camera: { x: -900, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set()
-    });
 
-    expect(scene.nodesByPath.size).toBe(3);
-    expect(setNodeVisible.mock.calls).toEqual([
-      ['a', false],
-      ['b', true]
-    ]);
-    expect(controller.isNodeInViewport('b')).toBe(true);
-    expect(controller.isNodeInViewport('c')).toBe(false);
+    visible = ['b'];
+    controller.sync(syncInput({ camera: { x: -100, y: 0, z: 1 } }));
+
+    expect(setNodeVisible.mock.calls).toEqual([['a', false], ['b', true]]);
   });
 
-  it('retains an offscreen interaction node for display without promoting its preview tier', () => {
+  it('invalidates changed geometry without treating it as new React scene membership', () => {
     const setNodeVisible = vi.fn();
+    let visible = ['a'];
     const controller = createCanvasCullingController({
-      stageRuntime: { setNodeVisible, setEdgeVisible: vi.fn() }
+      stageRuntime: { setNodeVisible, setEdgeGroupVisible: vi.fn() },
+      queryNodePaths: () => visible,
+      queryEdgeGroupIds: () => []
     });
-    controller.acceptScene(canvasScene([
-      directoryNode('selected', 5000, 0),
-      directoryNode('ordinary', 7000, 0)
-    ]));
-
-    controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set(['selected'])
-    });
-
-    expect(setNodeVisible.mock.calls).toEqual([
-      ['ordinary', false],
-      ['selected', true]
-    ]);
-    expect(controller.isNodeInViewport('selected')).toBe(false);
-    expect(controller.getCounts()).toEqual({
-      displayVisibleNodeCount: 1,
-      culledNodeCount: 1,
-      visibleEdgeCount: 0
-    });
-  });
-
-  it('ignores retained paths that are not members of the current scene', () => {
-    const setNodeVisible = vi.fn();
-    const controller = createCanvasCullingController({
-      stageRuntime: { setNodeVisible, setEdgeVisible: vi.fn() }
-    });
-    controller.acceptScene(canvasScene([directoryNode('node', 5000, 0)]));
-
-    controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set(['missing'])
-    });
-
-    expect(setNodeVisible).toHaveBeenCalledWith('node', false);
-    expect(controller.getCounts().displayVisibleNodeCount).toBe(0);
-  });
-
-  it('reuses the geometric viewport result for an identical scene and camera', () => {
-    const setNodeVisible = vi.fn();
-    const controller = createCanvasCullingController({
-      stageRuntime: { setNodeVisible, setEdgeVisible: vi.fn() }
-    });
-    controller.acceptScene(canvasScene([
-      directoryNode('near', 0, 0),
-      directoryNode('far', 5000, 0)
-    ]));
-    const input = {
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set<string>()
-    };
-    const first = controller.sync(input);
-
+    controller.acceptScene(scene([node('a'), node('b'), node('c')]));
+    controller.sync(syncInput());
     setNodeVisible.mockClear();
-    const second = controller.sync({
-      ...input,
-      displayRetainedNodePaths: new Set()
-    });
 
-    expect(second).toBe(first);
-    expect(setNodeVisible).not.toHaveBeenCalled();
+    visible = ['a', 'b'];
+    controller.invalidateGeometry();
+    controller.sync(syncInput());
+
+    expect(setNodeVisible.mock.calls).toEqual([['b', true]]);
   });
 
-  it('reuses viewport geometry when only display retention changes', () => {
+  it('retains selected and active offscreen nodes without promoting viewport membership', () => {
     const setNodeVisible = vi.fn();
     const controller = createCanvasCullingController({
-      stageRuntime: { setNodeVisible, setEdgeVisible: vi.fn() }
+      stageRuntime: { setNodeVisible, setEdgeGroupVisible: vi.fn() },
+      queryNodePaths: () => [],
+      queryEdgeGroupIds: () => []
     });
-    controller.acceptScene(canvasScene([directoryNode('selected', 5000, 0)]));
-    const first = controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set()
-    });
+    controller.acceptScene(scene([node('selected'), node('ordinary')]));
 
-    setNodeVisible.mockClear();
-    const retained = controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set(['selected'])
-    });
+    controller.sync(syncInput({ displayRetainedNodePaths: new Set(['selected']) }));
 
-    expect(retained).toBe(first);
-    expect(setNodeVisible).toHaveBeenCalledOnce();
-    expect(setNodeVisible).toHaveBeenCalledWith('selected', true);
-    expect(controller.isNodeInViewport('selected')).toBe(false);
+    expect(setNodeVisible.mock.calls).toEqual([['selected', true], ['ordinary', false]]);
   });
 
-  it('invalidates viewport geometry when the surface size changes', () => {
+  it('caches identical geometry queries and reapplies only retention deltas', () => {
+    const queryNodePaths = vi.fn(() => ['visible']);
     const setNodeVisible = vi.fn();
     const controller = createCanvasCullingController({
-      stageRuntime: { setNodeVisible, setEdgeVisible: vi.fn() }
+      stageRuntime: { setNodeVisible, setEdgeGroupVisible: vi.fn() },
+      queryNodePaths,
+      queryEdgeGroupIds: () => []
     });
-    controller.acceptScene(canvasScene([directoryNode('edge', 900, 0)]));
-    const narrow = controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set()
-    });
-
+    controller.acceptScene(scene([node('visible'), node('retained')]));
+    controller.sync(syncInput());
     setNodeVisible.mockClear();
-    const wide = controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 1000, height: 600 },
-      displayRetainedNodePaths: new Set()
-    });
 
-    expect(wide).not.toBe(narrow);
-    expect(setNodeVisible).toHaveBeenCalledWith('edge', true);
-  });
+    controller.sync(syncInput({ displayRetainedNodePaths: new Set(['retained']) }));
 
-  it('invalidates viewport geometry when the accepted scene changes', () => {
-    const setNodeVisible = vi.fn();
-    const controller = createCanvasCullingController({
-      stageRuntime: { setNodeVisible, setEdgeVisible: vi.fn() }
-    });
-    controller.acceptScene(canvasScene([directoryNode('old', 0, 0)]));
-    const oldScene = controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set()
-    });
-
-    setNodeVisible.mockClear();
-    controller.acceptScene(canvasScene([directoryNode('new', 5000, 0)]));
-    const newScene = controller.sync({
-      camera: { x: 0, y: 0, z: 1 },
-      surfaceSize: { width: 800, height: 600 },
-      displayRetainedNodePaths: new Set()
-    });
-
-    expect(newScene).not.toBe(oldScene);
-    expect(setNodeVisible).toHaveBeenCalledWith('new', false);
-    expect(controller.isNodeInViewport('old')).toBe(false);
+    expect(queryNodePaths).toHaveBeenCalledOnce();
+    expect(setNodeVisible.mock.calls).toEqual([['retained', true]]);
   });
 });
 
-function canvasScene(nodes: ProjectedCanvasNode[]) {
-  return createCanvasRenderCoordinator({
-    projection: { canvasId: 'canvas', nodes, edges: [], diagnostics: [] }
-  }).update({ layoutOverrides: [] });
+function syncInput(overrides: Partial<Parameters<ReturnType<typeof createCanvasCullingController>['sync']>[0]> = {}) {
+  return {
+    camera: { x: 0, y: 0, z: 1 },
+    surfaceSize: { width: 800, height: 600 },
+    displayRetainedNodePaths: new Set<string>(),
+    ...overrides
+  };
 }
 
-function directoryNode(path: string, x: number, y: number): ProjectedCanvasNode {
+function scene(nodes: ProjectedCanvasNode[]): CanvasSceneSnapshot {
+  return {
+    nodesByPath: new Map(nodes.map((value) => [value.projectRelativePath, value])),
+    edgeGroups: []
+  };
+}
+
+function node(projectRelativePath: string): ProjectedCanvasNode {
   return {
     nodeKind: 'directory',
-    projectRelativePath: path,
-    x,
-    y,
+    projectRelativePath,
+    x: 0,
+    y: 0,
     width: 100,
     height: 100,
     z: 0,

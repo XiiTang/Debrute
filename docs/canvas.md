@@ -166,9 +166,9 @@ an additive drag on an already selected node moves the group without removing
 that node.
 
 A Selection Marquee begins only from true Canvas blank space. Nodes, resize
-handles, text or media interaction surfaces, Feedback, floating bars, and the
-title bar retain their own pointer behavior; non-interactive Canvas edges count
-as blank space. The marquee activates after `4 CSS px` of screen-space movement
+handles, preview activation surfaces, real interaction islands, Feedback, and
+floating bars are not blank space. Non-interactive Canvas edges count as blank
+space. The marquee activates after `4 CSS px` of screen-space movement
 and selects every Canvas Node whose currently displayed rectangle intersects
 it, regardless of Stack Order, visual occlusion, or DOM culling. Its result is
 recomputed on every pointer move. Without a modifier it replaces the initial
@@ -193,6 +193,38 @@ restore the pointer-down selection and stop edge scrolling.
 Every selected node renders its own outline. A single selection retains its
 eight resize handles; a multi-selection exposes group move only, with no group
 bounds, resize, or rotation handles.
+
+### DOM interaction ownership
+
+`CanvasSurface` owns one semantic DOM interaction adapter. Each rectangular
+Canvas Node shell is the stable hit target and publishes its Project path, node
+kind, media kind, and default zone. Descendants do not infer Canvas behavior
+from their tag layout or local React handlers. They are either passive
+presentation, a node-move zone, a preview-activation zone, a resize handle, a
+Feedback surface, a real action such as a button, or an active interaction
+island. Node title bars and audio captions are move zones. True buttons retain
+button behavior. Content interaction is transient Runtime state separate from
+Canvas Node Selection. Only pointer release in the preview activation zone
+activates a text editor, video player, or audio control; selecting a shell
+through its title bar, marquee, context menu, or another selection command does
+not activate its content.
+
+Text, video, and audio preview activation is committed on pointer release only
+when press and release resolve to the same node and activation zone. Press does
+not select or activate the node. Text uses the release coordinates for precise
+caret placement. Video uses that release to select the node, activate its
+content, mount its player, and issue one play request. Audio uses it to select
+the node and activate its native controls. Selection may subsequently change
+without being used as the authority for content activation. Releasing outside
+that preview performs no activation. The contract adds no separate distance,
+timeout, or re-entry rule.
+
+Semantic hover is also owned by the Surface adapter and is presented through a
+node-shell data attribute; node-local CSS `:hover` and per-node enter/leave
+state are not interaction authority. The idle cursor is `default` over blank
+space and nodes. It becomes `grabbing` only after a node move crosses its
+activation threshold. `crosshair` is reserved for active Feedback pin and
+rectangle placement.
 
 Canvas shortcuts are routed by focus domain and the active interaction owner.
 An active marquee owns Escape even if focus moves during the gesture.
@@ -250,10 +282,12 @@ locally interactive media and text surfaces retain their own arrow-key
 behavior. Keyboard nudge and spatial keyboard navigation are outside this
 selection contract.
 
-Media shortcuts require the Canvas Node Selection to contain exactly one video
-node and the video behavior to own focus. A selection containing that video and
-any other node does not route Space or arrow keys to the video, and a context
-menu invocation target is never substituted for the current selection.
+Media shortcuts require one content-active video preview and focus owned by
+that video behavior. Selection alone never mounts a player or grants shortcut
+ownership. The Canvas Node Selection may subsequently change without revoking
+the already active preview; the focused content-active video remains the sole
+shortcut target. A context-menu invocation target is never substituted for
+content activation.
 
 Right-clicking a selected member preserves the Canvas Node Selection and opens
 a multi-selection menu. Right-clicking an unselected node first collapses to
@@ -362,8 +396,23 @@ order; the Project tree is not a layer panel.
 ## Workbench Interaction State
 
 `CanvasEditorRuntime` owns the live camera, camera activity state, selection,
-pointer interaction, surface measurement, and coordinate conversion. These are
-Workbench session state and are not persisted in Canvas JSON.
+content interaction, pointer interaction, surface measurement, spatial node
+index, and coordinate conversion. These are Workbench session state and are not
+persisted in Canvas JSON.
+
+Camera movement and an active pointer interaction gate semantic hover. A
+pending move or marquee has not crossed its threshold and does not gate it.
+Entering a gated phase clears the Stage hover instead of retargeting as
+transformed node DOM passes under a stationary pointer. Camera movement retains
+the transient node Feedback target in React state but suspends only that Bar's
+overlay presentation; multi-selection Bars and Bars with a focused Capsule stay
+visible. An active pointer interaction retains its existing target-loss
+lifecycle. Once the gate ends, the Surface performs one hit-test at the last
+pointer position and reconciles the final node. A same-node result restores the
+cached current placement immediately, a different node stays hidden until its
+new placement is written, and an empty result never restores the old Bar. This
+gate does not change content-interaction ownership or the existing preview and
+production-work scheduling policy.
 
 Wheel input pans by default and Ctrl/Cmd-wheel zooms around the pointer; native
 gesture input uses the same camera model. Canvas handles input on its surface
@@ -377,7 +426,9 @@ media-aware aspect-ratio rule.
 
 During move and resize, a Manual Layout Draft is the visual geometry and stack
 order. Node shells, connected edges, culling retention, overlays, and CSS
-stacking read that same draft.
+stacking read that same draft. Pointer updates change only the affected node
+records, their spatial-index entries, and routing groups connected to those
+nodes; they do not rebuild the full React node or edge collections.
 On pointer release, Workbench submits the draft immediately and keeps presenting
 it until the Canvas Projection confirms the same rectangles and relative stack
 order, or a target node disappears. A submitted draft is presentation state,
@@ -442,21 +493,27 @@ an empty value during public response construction.
 The minimap is derived from current node bounds, camera, surface size, and
 selection. Clicking or dragging its viewport recenters the existing camera
 without changing zoom. It is a navigation projection, not persisted Canvas
-state.
+state. The closed minimap does not subscribe to pointer geometry or receive a
+new full node array. While open, live Manual Layout geometry is published at
+most once per animation frame.
 
 ## Runtime And Rendering Ownership
 
-- `CanvasEditorRuntime` owns camera, coordinates, input, selection, and pointer interaction
-  state.
-- One `CanvasRenderLifecycle` per mounted `CanvasSurface` owns the accepted
-  Projection, render-related Runtime subscriptions, the stable full-scene
-  render snapshot, and coalesced viewport synchronization.
-- Its `CanvasRenderCoordinator` combines every current Projected node and edge
-  with Manual Layout Draft geometry and stack order. Camera movement does not
-  change React scene membership.
-- `CanvasStageRuntime` performs cached stage-camera, node-shell, and edge-layer
-  DOM writes. Exact-viewport culling changes `display` directly while keeping
-  all current nodes and edges mounted.
+- `CanvasEditorRuntime` owns camera, coordinates, input, selection, content
+  interaction, pointer interaction, accepted Projection, Manual Layout Draft
+  lifecycle, and `CanvasScenePresentation`.
+- `CanvasScenePresentation` owns the stable full-scene render snapshot, current
+  displayed nodes, source routing groups, and their spatial indexes. A Manual
+  Layout Draft produces one incremental presentation update; Camera and pointer
+  movement do not change React scene membership.
+- One `CanvasRenderLifecycle` per mounted `CanvasSurface` consumes those Scene
+  updates and owns render-related subscriptions plus coalesced viewport
+  synchronization.
+- `CanvasStageRuntime` performs cached stage-camera, node-shell, selection, and
+  edge-group DOM writes. Exact-viewport culling changes `display` directly while
+  keeping all current nodes and routing groups mounted. Selection attribute
+  deltas are direct DOM writes; only the old and new single-selection nodes are
+  notified to reconcile resize handles.
 - `CanvasOverlayRuntime` places screen-space overlays from Canvas geometry.
 - React composes controls and node content; it does not become the per-pointer
   geometry store.

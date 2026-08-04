@@ -43,10 +43,13 @@ import {
   unionCanvasNodeSelection
 } from './canvasSelection.js';
 import {
-  createCanvasManualLayoutLifecycle,
-  type CanvasManualLayoutPresentation
+  createCanvasManualLayoutLifecycle
 } from './CanvasManualLayoutLifecycle.js';
 import type { CanvasLayoutOverride } from '../canvasManualLayoutDraft.js';
+import {
+  createCanvasScenePresentation,
+  type CanvasRuntimeScene
+} from '../CanvasScenePresentation.js';
 
 export interface CanvasSurfaceElements {
   surface: HTMLElement;
@@ -56,6 +59,7 @@ export interface CanvasRuntimeSnapshot {
   camera: CanvasCamera;
   cameraState: CanvasCameraState;
   selection: CanvasSelection | undefined;
+  contentInteractionProjectRelativePath: string | undefined;
   pointerInteraction: CanvasRuntimePointerInteraction | undefined;
   surfaceSize: CanvasSize | undefined;
 }
@@ -112,26 +116,24 @@ export interface CanvasInputController {
   cancelPointerInteraction(pointerId: number): void;
 }
 
-export interface CanvasManualLayoutController {
-  getPresentation(): CanvasManualLayoutPresentation;
-  acceptProjection(projection: CanvasProjection): void;
-  subscribeRejection(listener: () => void): () => void;
-}
-
 export interface CanvasEditorRuntime {
+  readonly canvasId: string;
   readonly camera: CanvasCameraController;
   readonly coordinates: CanvasCoordinateSystem;
   readonly input: CanvasInputController;
-  readonly manualLayout: CanvasManualLayoutController;
+  readonly scene: CanvasRuntimeScene;
   subscribe(listener: (snapshot: CanvasRuntimeSnapshot) => void): () => void;
   subscribeCamera(listener: (camera: CanvasCamera) => void): () => void;
   subscribeCameraState(listener: (state: CanvasCameraState) => void): () => void;
   subscribeSelection(listener: (selection: CanvasSelection | undefined) => void): () => void;
+  subscribeContentInteraction(listener: (projectRelativePath: string | undefined) => void): () => void;
   subscribeSurfaceSize(listener: (size: CanvasSize | undefined) => void): () => void;
   subscribePointerInteraction(listener: (state: CanvasRuntimePointerInteraction | undefined) => void): () => void;
   getSnapshot(): CanvasRuntimeSnapshot;
   bindSurface(elements: CanvasSurfaceElements): () => void;
+  acceptProjection(projection: CanvasProjection): void;
   setSelection(selection: CanvasSelection | undefined): void;
+  setContentInteraction(projectRelativePath: string | undefined): void;
   dispose(): void;
 }
 
@@ -200,6 +202,7 @@ interface RuntimeState {
   camera: CanvasCamera;
   cameraState: CanvasCameraState;
   selection: CanvasSelection | undefined;
+  contentInteractionProjectRelativePath: string | undefined;
   pointerInteraction: CanvasRuntimePointerInteraction | undefined;
   surfaceSize: CanvasSize | undefined;
 }
@@ -224,14 +227,18 @@ export function createCanvasEditorRuntime(initial: {
   const cameraListeners = new Set<(camera: CanvasCamera) => void>();
   const cameraStateListeners = new Set<(state: CanvasCameraState) => void>();
   const selectionListeners = new Set<(selection: CanvasSelection | undefined) => void>();
+  const contentInteractionListeners = new Set<(projectRelativePath: string | undefined) => void>();
   const surfaceSizeListeners = new Set<(size: CanvasSize | undefined) => void>();
   const pointerInteractionListeners = new Set<(state: CanvasRuntimePointerInteraction | undefined) => void>();
-  const manualLayoutListeners = new Set<() => void>();
   const manualLayoutLifecycle = createCanvasManualLayoutLifecycle({
     canvasId: initial.canvasId,
     initialProjection: initial.initialProjection,
     submitManualLayout: initial.submitManualLayout
   });
+  const scenePresentation = createCanvasScenePresentation({
+    projection: initial.initialProjection
+  });
+  let acceptedProjection = initial.initialProjection;
   const state: RuntimeState = {
     camera: initial.camera ?? canvasCameraReset(),
     cameraState: 'idle',
@@ -239,6 +246,7 @@ export function createCanvasEditorRuntime(initial: {
       normalizeCanvasSelection(initial.selection),
       new Set(initial.initialProjection.nodes.map((node) => node.projectRelativePath))
     ),
+    contentInteractionProjectRelativePath: undefined,
     pointerInteraction: undefined,
     surfaceSize: undefined
   };
@@ -263,6 +271,7 @@ export function createCanvasEditorRuntime(initial: {
       camera: state.camera,
       cameraState: state.cameraState,
       selection: state.selection,
+      contentInteractionProjectRelativePath: state.contentInteractionProjectRelativePath,
       pointerInteraction: state.pointerInteraction,
       surfaceSize: state.surfaceSize
     };
@@ -286,6 +295,12 @@ export function createCanvasEditorRuntime(initial: {
   const flushSelectionListeners = (selection: CanvasSelection | undefined) => {
     for (const listener of selectionListeners) {
       listener(selection);
+    }
+  };
+
+  const flushContentInteractionListeners = (projectRelativePath: string | undefined) => {
+    for (const listener of contentInteractionListeners) {
+      listener(projectRelativePath);
     }
   };
 
@@ -335,10 +350,10 @@ export function createCanvasEditorRuntime(initial: {
     state.camera = camera;
     state.cameraState = 'moving';
     invalidateSnapshot();
+    flushCameraListeners(camera);
     if (previousCameraState !== 'moving') {
       flushCameraStateListeners('moving');
     }
-    flushCameraListeners(camera);
     scheduleIdle();
   };
 
@@ -408,6 +423,10 @@ export function createCanvasEditorRuntime(initial: {
     }
   };
 
+  const applyManualLayoutPresentation = () => {
+    scenePresentation.applyPresentation(manualLayoutLifecycle.getPresentation());
+  };
+
   const setPointerInteraction = (
     pointerInteraction: CanvasRuntimePointerInteraction | undefined,
     options: { notifySnapshot: boolean }
@@ -419,6 +438,7 @@ export function createCanvasEditorRuntime(initial: {
         : undefined
     );
     invalidateSnapshot();
+    applyManualLayoutPresentation();
     flushPointerInteractionListeners(pointerInteraction);
     syncMarqueeEdgeScroll(pointerInteraction);
     if (options.notifySnapshot) {
@@ -432,19 +452,11 @@ export function createCanvasEditorRuntime(initial: {
   ): boolean => getCanvasResizePreserveAspect(state.handle, modifiers, state.node);
 
   const presentedNode = (projectRelativePath: string): ProjectedCanvasNode => {
-    const node = manualLayoutLifecycle.getPresentedNodes().find((candidate) => (
-      candidate.projectRelativePath === projectRelativePath
-    ));
+    const node = scenePresentation.getPresentedNodes().get(projectRelativePath);
     if (!node) {
       throw new Error(`Canvas node ${projectRelativePath} is not present in ${initial.canvasId}.`);
     }
     return node;
-  };
-
-  const flushManualLayoutListeners = () => {
-    for (const listener of manualLayoutListeners) {
-      listener();
-    }
   };
 
   const commitSelection = (selection: CanvasSelection | undefined) => {
@@ -455,6 +467,19 @@ export function createCanvasEditorRuntime(initial: {
     state.selection = normalized;
     invalidateSnapshot();
     flushSelectionListeners(normalized);
+    notify();
+  };
+
+  const commitContentInteraction = (projectRelativePath: string | undefined) => {
+    const nextPath = projectRelativePath && scenePresentation.getPresentedNodes().has(projectRelativePath)
+      ? projectRelativePath
+      : undefined;
+    if (state.contentInteractionProjectRelativePath === nextPath) {
+      return;
+    }
+    state.contentInteractionProjectRelativePath = nextPath;
+    invalidateSnapshot();
+    flushContentInteractionListeners(nextPath);
     notify();
   };
 
@@ -510,9 +535,12 @@ export function createCanvasEditorRuntime(initial: {
     if (interaction.phase !== 'active' || !interaction.rect) {
       return interaction.initialSelection;
     }
-    const hitPaths = manualLayoutLifecycle.getPresentedNodes()
-      .filter((node) => rectsIntersect(interaction.rect!, node))
-      .map((node) => node.projectRelativePath);
+    const presentedNodes = scenePresentation.getPresentedNodes();
+    const hitPaths = scenePresentation.queryNodePaths(interaction.rect)
+      .filter((path) => {
+        const node = presentedNodes.get(path);
+        return node ? rectsIntersect(interaction.rect!, node) : false;
+      });
     return interaction.additive
       ? unionCanvasNodeSelection(interaction.initialSelection, hitPaths)
       : canvasNodeSelection(hitPaths);
@@ -666,43 +694,83 @@ export function createCanvasEditorRuntime(initial: {
 
   let detachWindowInput: () => void = () => undefined;
 
+  const acceptProjection = (projection: CanvasProjection): void => {
+    if (projection === acceptedProjection) {
+      return;
+    }
+    if (projection.canvasId !== initial.canvasId) {
+      throw new Error(`Canvas editor runtime for ${initial.canvasId} cannot accept Projection ${projection.canvasId}.`);
+    }
+    const currentPaths = new Set(projection.nodes.map((node) => node.projectRelativePath));
+    const previousPointerInteraction = state.pointerInteraction;
+    const previousSelection = state.selection;
+    const previousContentInteraction = state.contentInteractionProjectRelativePath;
+    let nextPointerInteraction = previousPointerInteraction;
+    let nextSelection = pruneCanvasSelection(previousSelection, currentPaths);
+    if (
+      previousPointerInteraction?.kind === 'move-node'
+      && previousPointerInteraction.origins.some((origin) => !currentPaths.has(origin.projectRelativePath))
+    ) {
+      nextPointerInteraction = undefined;
+      nextSelection = pruneCanvasSelection(previousPointerInteraction.initialSelection, currentPaths);
+    } else if (
+      previousPointerInteraction?.kind === 'resize-node'
+      && !currentPaths.has(previousPointerInteraction.node.projectRelativePath)
+    ) {
+      nextPointerInteraction = undefined;
+      nextSelection = pruneCanvasSelection(previousPointerInteraction.initialSelection, currentPaths);
+    } else if (previousPointerInteraction?.kind === 'selection-marquee') {
+      nextPointerInteraction = pointerInteractionWithPointer({
+        ...previousPointerInteraction,
+        initialSelection: pruneCanvasSelection(previousPointerInteraction.initialSelection, currentPaths)
+      }, previousPointerInteraction.currentScreen, undefined);
+    }
+    const nextContentInteraction = previousContentInteraction && currentPaths.has(previousContentInteraction)
+      ? previousContentInteraction
+      : undefined;
+
+    manualLayoutLifecycle.setActiveInteraction(
+      nextPointerInteraction?.kind !== 'selection-marquee' && nextPointerInteraction?.phase === 'active'
+        ? nextPointerInteraction
+        : undefined
+    );
+    manualLayoutLifecycle.acceptProjection(projection);
+    acceptedProjection = projection;
+    scenePresentation.setProjection(projection, manualLayoutLifecycle.getPresentation());
+    if (nextPointerInteraction?.kind === 'selection-marquee') {
+      nextSelection = marqueeSelection(nextPointerInteraction);
+    }
+
+    state.pointerInteraction = nextPointerInteraction;
+    state.selection = nextSelection;
+    state.contentInteractionProjectRelativePath = nextContentInteraction;
+    const pointerChanged = previousPointerInteraction !== nextPointerInteraction;
+    const selectionChanged = !sameCanvasSelection(previousSelection, nextSelection);
+    const contentInteractionChanged = previousContentInteraction !== nextContentInteraction;
+    if (pointerChanged || selectionChanged || contentInteractionChanged) {
+      invalidateSnapshot();
+    }
+    scenePresentation.publishRenderSnapshot();
+    if (pointerChanged) {
+      flushPointerInteractionListeners(nextPointerInteraction);
+      syncMarqueeEdgeScroll(nextPointerInteraction);
+    }
+    if (selectionChanged) {
+      flushSelectionListeners(nextSelection);
+    }
+    if (contentInteractionChanged) {
+      flushContentInteractionListeners(nextContentInteraction);
+    }
+    if (pointerChanged || selectionChanged || contentInteractionChanged) {
+      notify();
+    }
+  };
+
   const runtime: CanvasEditorRuntime = {
+    canvasId: initial.canvasId,
     camera: cameraController,
     coordinates,
-    manualLayout: {
-      getPresentation: () => manualLayoutLifecycle.getPresentation(),
-      acceptProjection: (projection) => {
-        manualLayoutLifecycle.acceptProjection(projection);
-        const currentPaths = new Set(projection.nodes.map((node) => node.projectRelativePath));
-        const active = state.pointerInteraction;
-        if (active?.kind === 'move-node' && active.origins.some((origin) => !currentPaths.has(origin.projectRelativePath))) {
-          setPointerInteraction(undefined, { notifySnapshot: true });
-          commitSelection(pruneCanvasSelection(active.initialSelection, currentPaths));
-          return;
-        }
-        if (active?.kind === 'resize-node' && !currentPaths.has(active.node.projectRelativePath)) {
-          setPointerInteraction(undefined, { notifySnapshot: true });
-          commitSelection(pruneCanvasSelection(active.initialSelection, currentPaths));
-          return;
-        }
-        if (active?.kind === 'selection-marquee') {
-          const next = pointerInteractionWithPointer({
-            ...active,
-            initialSelection: pruneCanvasSelection(active.initialSelection, currentPaths)
-          }, active.currentScreen, undefined);
-          setPointerInteraction(next, { notifySnapshot: false });
-          commitSelection(marqueeSelection(next as Extract<CanvasRuntimePointerInteraction, { kind: 'selection-marquee' }>));
-          return;
-        }
-        commitSelection(pruneCanvasSelection(state.selection, currentPaths));
-      },
-      subscribeRejection: (listener) => {
-        manualLayoutListeners.add(listener);
-        return () => {
-          manualLayoutListeners.delete(listener);
-        };
-      }
-    },
+    scene: scenePresentation,
     input: {
       screenToCanvasPoint: screenToCanvas,
       beginSelectionMarquee: (input) => {
@@ -744,7 +812,7 @@ export function createCanvasEditorRuntime(initial: {
           initialSelection,
           pressedProjectRelativePath: input.projectRelativePath,
           additive,
-          origins: manualLayoutLifecycle.getPresentedNodes().filter((node) => selectedPaths.has(node.projectRelativePath))
+          origins: [...selectedPaths].flatMap((path) => scenePresentation.getPresentedNodes().get(path) ?? [])
         }, { notifySnapshot: false });
       },
       beginNodeResize: (input) => {
@@ -815,7 +883,7 @@ export function createCanvasEditorRuntime(initial: {
         try {
           await submission;
         } catch (error) {
-          flushManualLayoutListeners();
+          applyManualLayoutPresentation();
           throw error;
         }
         return finished;
@@ -850,6 +918,12 @@ export function createCanvasEditorRuntime(initial: {
       selectionListeners.add(listener);
       return () => {
         selectionListeners.delete(listener);
+      };
+    },
+    subscribeContentInteraction: (listener) => {
+      contentInteractionListeners.add(listener);
+      return () => {
+        contentInteractionListeners.delete(listener);
       };
     },
     subscribeSurfaceSize: (listener) => {
@@ -906,10 +980,13 @@ export function createCanvasEditorRuntime(initial: {
         detachWindowInput = () => undefined;
       };
     },
+    acceptProjection,
     setSelection: commitSelection,
+    setContentInteraction: commitContentInteraction,
     dispose: () => {
       disposed = true;
       manualLayoutLifecycle.dispose();
+      scenePresentation.dispose();
       stopMarqueeEdgeScroll();
       clearIdleTimer();
       resizeObserver?.disconnect();
@@ -920,9 +997,9 @@ export function createCanvasEditorRuntime(initial: {
       cameraListeners.clear();
       cameraStateListeners.clear();
       selectionListeners.clear();
+      contentInteractionListeners.clear();
       surfaceSizeListeners.clear();
       pointerInteractionListeners.clear();
-      manualLayoutListeners.clear();
       boundElements = undefined;
     }
   };

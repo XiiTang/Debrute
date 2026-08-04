@@ -86,7 +86,18 @@ excludes player controls, the title bar, Canvas chrome, and letterboxing.
 
 ## Workbench Editing And Display
 
-Hovering one node opens the shared full floating Feedback Bar. Every Canvas
+Semantically hovering one node opens the shared full floating Feedback Bar.
+Camera movement clears the Stage hover but retains the transient node Bar target
+in React state. Canvas suspends only that Bar's overlay presentation while
+transformed nodes pass beneath the pointer; it does not suspend a multi-selection
+Bar or a Bar whose Capsule owns focus. At camera idle, one hit-test at the last
+pointer position reconciles the final target. The same node restores the cached
+current placement immediately, a different node remains hidden until the new
+placement is written, and an empty result leaves the old Bar hidden until its
+ordinary target-loss clear completes. An active Canvas pointer interaction
+retains the existing target-loss lifecycle. A pending pointer interaction still
+retains its hover target.
+Every Canvas
 Node, including directories and the Project root, gets the fixed Feedback Marks
 and a node-comment authoring affordance. Image files also get pin and rectangle
 tools. Video files get moment-comment, moment-pin, and moment-rectangle tools

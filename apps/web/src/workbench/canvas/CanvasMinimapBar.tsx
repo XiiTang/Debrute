@@ -1,6 +1,6 @@
 import React from 'react';
-import { Map } from '../ui/index.js';
-import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
+import { IconButton, Map } from '../ui/index.js';
+import type { CanvasDocument, ProjectedCanvasNode } from '@debrute/canvas-core';
 import { CANVAS_MINIMAP_PANEL_SIZE, type FloatingBarRect } from '../shell/floatingBars';
 import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';
 import type { CanvasMinimapDragState, CanvasSize } from './canvasMinimap';
@@ -15,14 +15,13 @@ import {
   type CanvasMinimapModel
 } from './canvasMinimap';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './runtime/CanvasEditorRuntime';
+import type { CanvasSceneSnapshot } from './CanvasScenePresentation.js';
 import { DEFAULT_CANVAS_CAMERA } from './runtime/canvasCamera';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
-import { IconButton } from '../ui/index.js';
 import { useI18n } from '../i18n';
 
 export function CanvasMinimapBar({
   canvas,
-  nodes,
   runtime,
   overlayRuntime,
   open,
@@ -31,7 +30,6 @@ export function CanvasMinimapBar({
   interactionBlocked = false
 }: {
   canvas: CanvasDocument | undefined;
-  nodes: CanvasProjection['nodes'] | undefined;
   runtime: CanvasEditorRuntime | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   open: boolean;
@@ -42,11 +40,14 @@ export function CanvasMinimapBar({
   const i18n = useI18n();
   const barRef = React.useRef<HTMLButtonElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
-  const runtimeSnapshot = useOptionalRuntimeSnapshot(runtime);
+  const matchingRuntime = runtime?.canvasId === canvas?.id ? runtime : undefined;
+  const runtimeView = useOptionalRuntimeView(matchingRuntime, open);
+  const runtimeSnapshot = runtimeView?.snapshot;
+  const nodes = runtimeView?.nodes;
   const modelCamera = runtimeSnapshot?.camera ?? DEFAULT_CANVAS_CAMERA;
-  const buttonIcon = runtime ? (
+  const buttonIcon = matchingRuntime ? (
     <CanvasMinimapZoomLabel
-      runtime={runtime}
+      runtime={matchingRuntime}
       className="canvas-minimap-button-zoom"
       testId="canvas-minimap-button-zoom"
     />
@@ -55,10 +56,9 @@ export function CanvasMinimapBar({
   );
   const enabled = Boolean(
     !interactionBlocked
-    && canvas
-    && nodes
-    && runtime
-    && hasValidMinimapNodes(nodes)
+    && matchingRuntime
+    && runtimeView
+    && hasValidMinimapNodes(runtimeView.scene.nodesByPath.values())
     && runtimeSnapshot?.surfaceSize
   );
   const staticModel = React.useMemo(() => (
@@ -135,12 +135,12 @@ export function CanvasMinimapBar({
         onDoubleClick={stopCanvasMinimapEvent}
         onContextMenu={stopCanvasMinimapEvent}
       />
-      {open && enabled && staticModel && initialViewport && runtime ? (
+      {open && enabled && staticModel && initialViewport && matchingRuntime ? (
         <CanvasMinimapPanel
           ref={panelRef}
           staticModel={staticModel}
           initialViewportRect={initialViewport.viewportRect}
-          runtime={runtime}
+          runtime={matchingRuntime}
           overlayRuntime={overlayRuntime}
           panelPlacement={panelPlacement}
           overviewLabel={i18n.t('canvas.minimap.overview')}
@@ -400,20 +400,77 @@ function requestCanvasMinimapPointerMoveCameraChange(input: {
   return true;
 }
 
-function useOptionalRuntimeSnapshot(runtime: CanvasEditorRuntime | undefined): CanvasRuntimeSnapshot | undefined {
-  return React.useSyncExternalStore(
-    runtime ? runtime.subscribe : emptySubscribe,
-    runtime ? runtime.getSnapshot : undefinedRuntimeSnapshot,
-    runtime ? runtime.getSnapshot : undefinedRuntimeSnapshot
-  );
+interface CanvasMinimapRuntimeView {
+  runtime: CanvasEditorRuntime;
+  snapshot: CanvasRuntimeSnapshot;
+  scene: CanvasSceneSnapshot;
+  nodes: ProjectedCanvasNode[] | undefined;
 }
 
-function emptySubscribe(): () => void {
-  return () => undefined;
+function useOptionalRuntimeView(
+  runtime: CanvasEditorRuntime | undefined,
+  open: boolean
+): CanvasMinimapRuntimeView | undefined {
+  const [view, setView] = React.useState<CanvasMinimapRuntimeView | undefined>(() => (
+    runtime ? readCanvasMinimapRuntimeView(runtime, open) : undefined
+  ));
+  React.useEffect(() => {
+    if (!runtime) {
+      setView(undefined);
+      return;
+    }
+    let pendingFrame: number | undefined;
+    const sync = (): void => setView(readCanvasMinimapRuntimeView(runtime, open));
+    const syncOnFrame = (): void => {
+      if (pendingFrame !== undefined) {
+        return;
+      }
+      pendingFrame = window.requestAnimationFrame(() => {
+        pendingFrame = undefined;
+        sync();
+      });
+    };
+    sync();
+    const unsubscribe = [
+      runtime.subscribeSurfaceSize(sync),
+      runtime.scene.subscribeRenderSnapshot(sync)
+    ];
+    if (open) {
+      unsubscribe.push(runtime.subscribeCameraState((state) => {
+        if (state === 'idle') {
+          syncOnFrame();
+        }
+      }));
+      unsubscribe.push(runtime.subscribeSelection(syncOnFrame));
+      unsubscribe.push(runtime.scene.subscribePresentation(syncOnFrame));
+    }
+    return () => {
+      for (const detach of unsubscribe) {
+        detach();
+      }
+      if (pendingFrame !== undefined) {
+        window.cancelAnimationFrame(pendingFrame);
+      }
+    };
+  }, [open, runtime]);
+  if (!runtime) {
+    return undefined;
+  }
+  return view?.runtime === runtime
+    ? view
+    : readCanvasMinimapRuntimeView(runtime, open);
 }
 
-function undefinedRuntimeSnapshot(): undefined {
-  return undefined;
+function readCanvasMinimapRuntimeView(
+  runtime: CanvasEditorRuntime,
+  includeNodes: boolean
+): CanvasMinimapRuntimeView {
+  return {
+    runtime,
+    snapshot: runtime.getSnapshot(),
+    scene: runtime.scene.getRenderSnapshot(),
+    nodes: includeNodes ? [...runtime.scene.getPresentedNodes().values()] : undefined
+  };
 }
 
 function stopCanvasMinimapEvent(event: Pick<React.SyntheticEvent, 'stopPropagation'>): void {

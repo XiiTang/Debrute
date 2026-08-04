@@ -10,7 +10,7 @@ export interface CanvasNodeLayout {
   z: number;
 }
 
-interface RegisteredCanvasDisplay<TElement extends HTMLElement | SVGSVGElement> {
+interface RegisteredCanvasDisplay<TElement extends HTMLElement | SVGPathElement> {
   element?: TElement;
   visible?: boolean;
   lastDisplay?: string;
@@ -24,16 +24,24 @@ interface RegisteredCanvasNode extends RegisteredCanvasDisplay<HTMLElement> {
   lastZIndex?: string;
 }
 
-type RegisteredCanvasEdge = RegisteredCanvasDisplay<SVGSVGElement>;
+interface RegisteredCanvasEdgeGroup extends RegisteredCanvasDisplay<SVGPathElement> {
+  path?: string;
+  lastPath?: string;
+}
 
 export interface CanvasStageRuntime {
   bindStage(stage: HTMLElement): () => void;
   setCamera(camera: CanvasCamera): void;
   registerNodeShell(path: string, element: HTMLElement): () => void;
-  registerEdgeLayer(id: string, element: SVGSVGElement): () => void;
+  setHoveredNode(path: string | undefined): void;
+  setSelectedNodePaths(paths: ReadonlySet<string>): void;
+  isSingleSelectedNode(path: string): boolean;
+  subscribeSingleSelectedNode(path: string, listener: () => void): () => void;
+  registerEdgeGroup(id: string, element: SVGPathElement): () => void;
+  setEdgeGroupGeometry(id: string, path: string): void;
   setNodeLayout(path: string, layout: CanvasNodeLayout): void;
   setNodeVisible(path: string, visible: boolean): void;
-  setEdgeVisible(id: string, visible: boolean): void;
+  setEdgeGroupVisible(id: string, visible: boolean): void;
   dispose(): void;
 }
 
@@ -43,12 +51,16 @@ export interface CanvasStageRuntimeInput {
 
 export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): CanvasStageRuntime {
   const nodes = new Map<string, RegisteredCanvasNode>();
-  const edges = new Map<string, RegisteredCanvasEdge>();
+  const edgeGroups = new Map<string, RegisteredCanvasEdgeGroup>();
+  const singleSelectionListeners = new Map<string, Set<() => void>>();
   let stage: HTMLElement | undefined;
   let camera: CanvasCamera | undefined;
   let lastCameraTransform: string | undefined;
   let lastZoom: string | undefined;
   let lastChromeScale: string | undefined;
+  let hoveredNodePath: string | undefined;
+  let selectedNodePaths: ReadonlySet<string> = new Set();
+  let singleSelectedNodePath: string | undefined;
 
   const recordCounter = (name: CanvasPerfCounterName) => {
     input.perfMonitor?.recordCounter({
@@ -128,6 +140,8 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
       if (record.visible !== undefined) {
         recordCounter(writeDisplay(record, record.visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
       }
+      writeNodeHovered(element, hoveredNodePath === path);
+      writeNodeSelected(element, selectedNodePaths.has(path));
       return () => {
         const current = nodes.get(path);
         if (current?.element === element) {
@@ -135,19 +149,98 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
         }
       };
     },
-    registerEdgeLayer: (id, element) => {
-      const record = edges.get(id) ?? {};
+    setHoveredNode: (path) => {
+      if (hoveredNodePath === path) {
+        return;
+      }
+      if (hoveredNodePath !== undefined) {
+        const previous = nodes.get(hoveredNodePath)?.element;
+        if (previous) {
+          writeNodeHovered(previous, false);
+        }
+      }
+      hoveredNodePath = path;
+      if (path !== undefined) {
+        const next = nodes.get(path)?.element;
+        if (next) {
+          writeNodeHovered(next, true);
+        }
+      }
+    },
+    setSelectedNodePaths: (paths) => {
+      const previousSingle = singleSelectedNodePath;
+      for (const path of selectedNodePaths) {
+        if (!paths.has(path)) {
+          const element = nodes.get(path)?.element;
+          if (element) {
+            writeNodeSelected(element, false);
+          }
+        }
+      }
+      for (const path of paths) {
+        if (!selectedNodePaths.has(path)) {
+          const element = nodes.get(path)?.element;
+          if (element) {
+            writeNodeSelected(element, true);
+          }
+        }
+      }
+      selectedNodePaths = new Set(paths);
+      singleSelectedNodePath = selectedNodePaths.size === 1
+        ? selectedNodePaths.values().next().value
+        : undefined;
+      if (previousSingle !== singleSelectedNodePath) {
+        for (const path of new Set([previousSingle, singleSelectedNodePath])) {
+          if (path === undefined) {
+            continue;
+          }
+          for (const listener of singleSelectionListeners.get(path) ?? []) {
+            listener();
+          }
+        }
+      }
+    },
+    isSingleSelectedNode: (path) => singleSelectedNodePath === path,
+    subscribeSingleSelectedNode: (path, listener) => {
+      const listeners = singleSelectionListeners.get(path) ?? new Set<() => void>();
+      listeners.add(listener);
+      singleSelectionListeners.set(path, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          singleSelectionListeners.delete(path);
+        }
+      };
+    },
+    registerEdgeGroup: (id, element) => {
+      const record = edgeGroups.get(id) ?? {};
       record.element = element;
-      edges.set(id, record);
+      edgeGroups.set(id, record);
+      if (record.path !== undefined) {
+        writeEdgeGroupPath(record, record.path);
+      }
       if (record.visible !== undefined) {
         recordCounter(writeDisplay(record, record.visible) ? 'stage-edge-visibility-write' : 'stage-edge-visibility-noop');
       }
       return () => {
-        const current = edges.get(id);
+        const current = edgeGroups.get(id);
         if (current?.element === element) {
-          edges.delete(id);
+          edgeGroups.delete(id);
         }
       };
+    },
+    setEdgeGroupGeometry: (id, path) => {
+      const group = edgeGroups.get(id);
+      if (!group) {
+        edgeGroups.set(id, { path });
+        return;
+      }
+      group.path = path;
+      recordCounter(
+        writeEdgeGroupPath(group, path)
+          ? 'stage-edge-geometry-write'
+          : 'stage-edge-geometry-noop'
+      );
     },
     setNodeLayout: (path, layout) => {
       const node = nodes.get(path);
@@ -166,10 +259,10 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
       node.visible = visible;
       recordCounter(writeDisplay(node, visible) ? 'stage-node-visibility-write' : 'stage-node-visibility-noop');
     },
-    setEdgeVisible: (id, visible) => {
-      const edge = edges.get(id);
+    setEdgeGroupVisible: (id, visible) => {
+      const edge = edgeGroups.get(id);
       if (!edge) {
-        edges.set(id, { visible });
+        edgeGroups.set(id, { visible });
         return;
       }
       edge.visible = visible;
@@ -177,9 +270,13 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
     },
     dispose: () => {
       nodes.clear();
-      edges.clear();
+      edgeGroups.clear();
+      singleSelectionListeners.clear();
       stage = undefined;
       camera = undefined;
+      hoveredNodePath = undefined;
+      selectedNodePaths = new Set();
+      singleSelectedNodePath = undefined;
     }
   };
 }
@@ -193,6 +290,31 @@ function writeNodeTransform(node: RegisteredCanvasNode, transform: string): bool
   }
   node.lastTransform = transform;
   node.element.style.transform = transform;
+  return true;
+}
+
+function writeNodeHovered(element: HTMLElement, hovered: boolean): void {
+  if (hovered) {
+    element.setAttribute('data-canvas-hovered', 'true');
+  } else {
+    element.removeAttribute('data-canvas-hovered');
+  }
+}
+
+function writeNodeSelected(element: HTMLElement, selected: boolean): void {
+  if (selected) {
+    element.setAttribute('data-canvas-selected', 'true');
+  } else {
+    element.removeAttribute('data-canvas-selected');
+  }
+}
+
+function writeEdgeGroupPath(group: RegisteredCanvasEdgeGroup, path: string): boolean {
+  if (!group.element || group.lastPath === path) {
+    return false;
+  }
+  group.lastPath = path;
+  group.element.setAttribute('d', path);
   return true;
 }
 
@@ -213,7 +335,7 @@ function writeStyleProperty(
   return true;
 }
 
-function writeDisplay<TElement extends HTMLElement | SVGSVGElement>(
+function writeDisplay<TElement extends HTMLElement | SVGPathElement>(
   record: RegisteredCanvasDisplay<TElement>,
   visible: boolean
 ): boolean {

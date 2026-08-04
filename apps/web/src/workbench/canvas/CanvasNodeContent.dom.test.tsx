@@ -118,13 +118,9 @@ function renderStaticWithI18n(element: React.ReactElement): string {
 // @ts-expect-error CanvasNodeContent requires the video target registry dependency.
 const canvasNodeContentPropsWithoutVideoRegistry: CanvasNodeContentProps = {
   node: directoryNode('type-check'),
-  selected: false,
+  contentInteractionActive: false,
   actions: actionsFixture(),
   textBuffer: undefined,
-  onSelectNode: () => undefined,
-  onTitlePointerDown: () => undefined,
-  onTitlePointerMove: () => undefined,
-  onTitlePointerUp: () => undefined
 };
 void canvasNodeContentPropsWithoutVideoRegistry;
 
@@ -133,7 +129,7 @@ describe('CanvasNodeContent', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={directoryNode('')}
-        selected
+        contentInteractionActive
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -141,10 +137,6 @@ describe('CanvasNodeContent', () => {
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
         onUpdateTextViewport={() => undefined}
-        onSelectNode={() => undefined}
-        onTitlePointerDown={() => undefined}
-        onTitlePointerMove={() => undefined}
-        onTitlePointerUp={() => undefined}
       />
     );
 
@@ -155,7 +147,7 @@ describe('CanvasNodeContent', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={directoryNode('references/archive')}
-        selected
+        contentInteractionActive
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -163,10 +155,6 @@ describe('CanvasNodeContent', () => {
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
         onUpdateTextViewport={() => undefined}
-        onSelectNode={() => undefined}
-        onTitlePointerDown={() => undefined}
-        onTitlePointerMove={() => undefined}
-        onTitlePointerUp={() => undefined}
       />
     );
 
@@ -185,7 +173,7 @@ describe('CanvasNodeContent', () => {
           height: 1000,
           layoutMode: 'manual'
         }}
-        selected
+        contentInteractionActive
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -193,10 +181,6 @@ describe('CanvasNodeContent', () => {
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
         onUpdateTextViewport={() => undefined}
-        onSelectNode={() => undefined}
-        onTitlePointerDown={() => undefined}
-        onTitlePointerMove={() => undefined}
-        onTitlePointerUp={() => undefined}
       />
     );
 
@@ -208,7 +192,7 @@ describe('CanvasNodeContent', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={unavailableDirectoryNode('references/archive', 'Unable to read references/archive.')}
-        selected
+        contentInteractionActive
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -216,10 +200,6 @@ describe('CanvasNodeContent', () => {
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
         onUpdateTextViewport={() => undefined}
-        onSelectNode={() => undefined}
-        onTitlePointerDown={() => undefined}
-        onTitlePointerMove={() => undefined}
-        onTitlePointerUp={() => undefined}
       />
     );
 
@@ -240,7 +220,7 @@ describe('CanvasNodeContent', () => {
             <TestProviders>
               <CanvasNodeContent
                 node={textNode('flow/readme.md', 'rev-a')}
-                selected
+                contentInteractionActive
                 actions={actionsFixture()}
                 textBuffer={textBuffer('flow/readme.md', 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -248,10 +228,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={() => undefined}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -270,19 +246,17 @@ describe('CanvasNodeContent', () => {
   });
 
   describe('Canvas video title chrome', { tags: ['canvas-video'] }, () => {
-    it('routes video title bar pointer events through the shared Canvas node title handlers', async () => {
+    it('marks the video title bar as the central Canvas move zone', async () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
-      const onTitlePointerDown = vi.fn();
-
       try {
         await act(async () => {
           root.render(
             <TestProviders>
               <CanvasNodeContent
                 node={videoNode('media/clip.mp4', 'rev-a')}
-                selected={false}
+                contentInteractionActive={false}
                 actions={actionsFixture()}
                 textBuffer={undefined}
                 onVideoPlayerMounted={() => undefined}
@@ -290,10 +264,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={() => undefined}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={onTitlePointerDown}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -301,9 +271,7 @@ describe('CanvasNodeContent', () => {
 
         const titleBar = container.querySelector<HTMLElement>('.db-canvas-node-titlebar');
         expect(titleBar).not.toBeNull();
-        titleBar?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
-
-        expect(onTitlePointerDown).toHaveBeenCalledTimes(1);
+        expect(titleBar?.getAttribute('data-canvas-node-zone')).toBe('move');
       } finally {
         await act(async () => {
           root.unmount();
@@ -335,7 +303,7 @@ describe('CanvasNodeContent', () => {
       };
     });
 
-    it('uses the first inactive text preview click as the mounted editor caret request', async () => {
+    it('uses the committed pointerup activation coordinates as the mounted editor caret request', async () => {
       const frameCallbacks: FrameRequestCallback[] = [];
       const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
       const posAtCoords = vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue(3);
@@ -349,26 +317,22 @@ describe('CanvasNodeContent', () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
-      const onSelectNode = vi.fn();
-      const renderNode = async (selected: boolean) => {
+      const renderNode = async (contentInteractionActive: boolean, activationRequest?: CanvasNodeContentProps['previewActivationRequest']) => {
         await act(async () => {
           root.render(
             <TestProviders>
               <CanvasNodeContent
                 node={textNode('flow/readme.md', 'rev-a')}
-                selected={selected}
+                contentInteractionActive={contentInteractionActive}
                 actions={actionsFixture()}
                 textBuffer={textBuffer('flow/readme.md', 'rev-a')}
                 textPreviewRequest={textPreviewRequest()}
+                previewActivationRequest={activationRequest}
                 onVideoPlayerMounted={() => undefined}
                 onVideoPlayingChange={() => undefined}
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={() => undefined}
-                onSelectNode={onSelectNode}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -378,18 +342,16 @@ describe('CanvasNodeContent', () => {
       try {
         await renderNode(false);
 
-        await act(async () => {
-          container.querySelector<HTMLElement>('.canvas-text-body')?.dispatchEvent(new PointerEvent('pointerdown', {
-            bubbles: true,
-            clientX: 144,
-            clientY: 96
-          }));
-        });
-
-        expect(onSelectNode).toHaveBeenCalledTimes(1);
+        expect(container.querySelector('.canvas-text-body')?.getAttribute('data-canvas-node-zone')).toBe('activate');
         expect(posAtCoords).not.toHaveBeenCalled();
 
-        await renderNode(true);
+        await renderNode(true, {
+          requestId: 11,
+          projectRelativePath: 'flow/readme.md',
+          mediaKind: 'text',
+          clientX: 144,
+          clientY: 96
+        });
         await waitForElement(container, '.canvas-text-editor');
 
         await act(async () => {
@@ -406,7 +368,7 @@ describe('CanvasNodeContent', () => {
       }
     });
 
-    it('keeps the preview visible until the selected editor layout is ready', async () => {
+    it('keeps the preview visible until the content-active editor layout is ready', async () => {
       const frameCallbacks: FrameRequestCallback[] = [];
       const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
       const ensureVisibleSyntaxReady = vi.spyOn(
@@ -425,19 +387,20 @@ describe('CanvasNodeContent', () => {
       document.body.appendChild(container);
       const root = createRoot(container);
       const preview = textPreviewRequest();
-      const renderNode = (selected: boolean) => renderTextPreviewNode(root, preview, { selected });
+      const renderNode = (
+        contentInteractionActive: boolean,
+        previewActivationRequest?: CanvasNodeContentProps['previewActivationRequest']
+      ) => renderTextPreviewNode(root, preview, { contentInteractionActive, previewActivationRequest });
 
       try {
         await renderNode(false);
-        await act(async () => {
-          container.querySelector<HTMLElement>('.canvas-text-body')?.dispatchEvent(new PointerEvent('pointerdown', {
-            bubbles: true,
-            clientX: 144,
-            clientY: 96
-          }));
+        await renderNode(true, {
+          requestId: 12,
+          projectRelativePath: 'flow/readme.md',
+          mediaKind: 'text',
+          clientX: 144,
+          clientY: 96
         });
-
-        await renderNode(true);
         const preparingEditor = await waitForElement<HTMLElement>(container, '.canvas-text-editor');
 
         expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
@@ -477,7 +440,7 @@ describe('CanvasNodeContent', () => {
       }
     });
 
-    it('discards an unpublished editor when selection leaves before layout is ready', async () => {
+    it('discards an unpublished editor when content interaction ends before layout is ready', async () => {
       const frameCallbacks: FrameRequestCallback[] = [];
       const restoreAnimationFrame = installAnimationFrameQueue(frameCallbacks);
       const ensureVisibleSyntaxReady = vi.spyOn(
@@ -489,7 +452,7 @@ describe('CanvasNodeContent', () => {
       document.body.appendChild(container);
       const root = createRoot(container);
       const preview = textPreviewRequest();
-      const renderNode = (selected: boolean) => renderTextPreviewNode(root, preview, { selected });
+      const renderNode = (contentInteractionActive: boolean) => renderTextPreviewNode(root, preview, { contentInteractionActive });
 
       try {
         await renderNode(false);
@@ -605,11 +568,11 @@ describe('CanvasNodeContent', () => {
       const root = createRoot(container);
 
       try {
-        await renderTextPreviewNode(root, undefined, { selected: true });
+        await renderTextPreviewNode(root, undefined, { contentInteractionActive: true });
         expect(container.querySelector('.cm-editor')).not.toBeNull();
 
         await renderTextPreviewNode(root, undefined, {
-          selected: false,
+          contentInteractionActive: false,
           textPreviewError: 'Canvas text preview raster failed.'
         });
 
@@ -627,7 +590,7 @@ describe('CanvasNodeContent', () => {
       const html = renderStaticWithI18n(
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
-          selected={false}
+          contentInteractionActive={false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreviewError="Canvas text preview source capture did not produce a PNG blob."
@@ -636,10 +599,6 @@ describe('CanvasNodeContent', () => {
           onRegisterVideoTarget={() => undefined}
           onUpdateVideoPlaybackTime={() => undefined}
           onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
         />
       );
 
@@ -649,7 +608,7 @@ describe('CanvasNodeContent', () => {
       expect(html).not.toContain('data-canvas-text-editor="true"');
     });
 
-    it('opens the selected text editor at the persisted text viewport position', async () => {
+    it('opens the content-active text editor at the persisted text viewport position', async () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
@@ -664,7 +623,7 @@ describe('CanvasNodeContent', () => {
             <TestProviders>
               <CanvasNodeContent
                 node={node}
-                selected
+                contentInteractionActive
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -672,10 +631,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={() => undefined}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -692,7 +647,7 @@ describe('CanvasNodeContent', () => {
       }
     });
 
-    it('commits the selected text editor scroll position when the editor blurs and unmounts without duplicates', async () => {
+    it('commits the content-active text editor scroll position when the editor blurs and unmounts without duplicates', async () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
@@ -705,7 +660,7 @@ describe('CanvasNodeContent', () => {
             <TestProviders>
               <CanvasNodeContent
                 node={node}
-                selected
+                contentInteractionActive
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -713,10 +668,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={onUpdateTextViewport}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -743,7 +694,7 @@ describe('CanvasNodeContent', () => {
             <TestProviders>
               <CanvasNodeContent
                 node={node}
-                selected={false}
+                contentInteractionActive={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -751,10 +702,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={onUpdateTextViewport}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -772,7 +719,7 @@ describe('CanvasNodeContent', () => {
             <TestProviders>
               <CanvasNodeContent
                 node={persistedNode}
-                selected
+                contentInteractionActive
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -780,10 +727,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={onUpdateTextViewport}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -807,7 +750,7 @@ describe('CanvasNodeContent', () => {
             <TestProviders>
               <CanvasNodeContent
                 node={persistedNode}
-                selected={false}
+                contentInteractionActive={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -815,10 +758,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={onUpdateTextViewport}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -834,19 +773,19 @@ describe('CanvasNodeContent', () => {
       }
     });
 
-    it('commits the selected text editor scroll position when selection ends before preview handoff', async () => {
+    it('commits the content-active text editor scroll position when content interaction ends before preview handoff', async () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
       const node = textNode('flow/readme.md', 'rev-a');
       const onUpdateTextViewport = vi.fn();
-      const renderNode = async (selected: boolean) => {
+      const renderNode = async (contentInteractionActive: boolean) => {
         await act(async () => {
           root.render(
             <TestProviders>
               <CanvasNodeContent
                 node={node}
-                selected={selected}
+                contentInteractionActive={contentInteractionActive}
                 actions={actionsFixture()}
                 textBuffer={textBuffer(node.projectRelativePath, 'rev-a')}
                 onVideoPlayerMounted={() => undefined}
@@ -854,10 +793,6 @@ describe('CanvasNodeContent', () => {
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={onUpdateTextViewport}
-                onSelectNode={() => undefined}
-                onTitlePointerDown={() => undefined}
-                onTitlePointerMove={() => undefined}
-                onTitlePointerUp={() => undefined}
               />
             </TestProviders>
           );
@@ -895,7 +830,7 @@ describe('CanvasNodeContent', () => {
       const html = renderStaticWithI18n(
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
-          selected={false}
+          contentInteractionActive={false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           onVideoPlayerMounted={() => undefined}
@@ -903,10 +838,6 @@ describe('CanvasNodeContent', () => {
           onRegisterVideoTarget={() => undefined}
           onUpdateVideoPlaybackTime={() => undefined}
           onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
         />
       );
 
@@ -915,21 +846,22 @@ describe('CanvasNodeContent', () => {
     });
   });
 
-  it('renders media captions through the shared Canvas node caption pattern', () => {
-    const html = renderStaticWithI18n(
+  it('makes audio controls an interaction island only after content activation', () => {
+    const audioNode = {
+      ...imageNode('audio/theme.mp3', 'rev-a'),
+      mediaKind: 'audio' as const,
+      availability: {
+        state: 'available' as const,
+        revision: 'rev-a',
+        size: 10_000,
+        mimeType: 'audio/mpeg',
+        fileUrl: '/api/projects/p/files/raw/audio/theme.mp3?v=rev-a'
+      }
+    };
+    const inactiveHtml = renderStaticWithI18n(
       <CanvasNodeContent
-        node={{
-          ...imageNode('audio/theme.mp3', 'rev-a'),
-          mediaKind: 'audio',
-          availability: {
-            state: 'available',
-            revision: 'rev-a',
-            size: 10_000,
-            mimeType: 'audio/mpeg',
-            fileUrl: '/api/projects/p/files/raw/audio/theme.mp3?v=rev-a'
-          }
-        }}
-        selected
+        node={audioNode}
+        contentInteractionActive={false}
         actions={actionsFixture()}
         textBuffer={undefined}
         onVideoPlayerMounted={() => undefined}
@@ -937,14 +869,29 @@ describe('CanvasNodeContent', () => {
         onRegisterVideoTarget={() => undefined}
         onUpdateVideoPlaybackTime={() => undefined}
         onUpdateTextViewport={() => undefined}
-        onSelectNode={() => undefined}
-        onTitlePointerDown={() => undefined}
-        onTitlePointerMove={() => undefined}
-        onTitlePointerUp={() => undefined}
+      />
+    );
+    const activeHtml = renderStaticWithI18n(
+      <CanvasNodeContent
+        node={audioNode}
+        contentInteractionActive
+        actions={actionsFixture()}
+        textBuffer={undefined}
+        onVideoPlayerMounted={() => undefined}
+        onVideoPlayingChange={() => undefined}
+        onRegisterVideoTarget={() => undefined}
+        onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
       />
     );
 
-    expect(html).toContain('db-canvas-node-caption');
+    expect(inactiveHtml).toContain('data-canvas-node-zone="activate"');
+    expect(inactiveHtml).not.toContain('data-canvas-interaction-island="true"');
+    expect(inactiveHtml).toContain('inert=""');
+    expect(activeHtml).toContain('data-canvas-node-zone="passive"');
+    expect(activeHtml).toContain('data-canvas-interaction-island="true"');
+    expect(activeHtml).not.toContain('inert=""');
+    expect(activeHtml).toContain('class="db-canvas-node-caption" data-canvas-node-zone="move"');
   });
 
   describe('Canvas text status', { tags: ['canvas-text'] }, () => {
@@ -952,7 +899,7 @@ describe('CanvasNodeContent', () => {
       const html = renderStaticWithI18n(
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
-          selected
+          contentInteractionActive
           actions={actionsFixture()}
           textBuffer={{ ...textBuffer('flow/readme.md', 'rev-a'), externalChange: true }}
           onVideoPlayerMounted={() => undefined}
@@ -960,10 +907,6 @@ describe('CanvasNodeContent', () => {
           onRegisterVideoTarget={() => undefined}
           onUpdateVideoPlaybackTime={() => undefined}
           onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
         />
       );
 
@@ -976,7 +919,7 @@ describe('CanvasNodeContent', () => {
       const html = renderStaticWithI18n(
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
-          selected
+          contentInteractionActive
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           onVideoPlayerMounted={() => undefined}
@@ -984,10 +927,6 @@ describe('CanvasNodeContent', () => {
           onRegisterVideoTarget={() => undefined}
           onUpdateVideoPlaybackTime={() => undefined}
           onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
         />
       );
 
@@ -1021,11 +960,11 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
     document.body.appendChild(container);
     const root = createRoot(container);
     const ensureTextFileBuffer = vi.fn(async () => undefined);
-    const renderNode = (selected: boolean) => (
+    const renderNode = (contentInteractionActive: boolean) => (
       <TestProviders>
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
-          selected={selected}
+          contentInteractionActive={contentInteractionActive}
           actions={actionsFixture({ ensureTextFileBuffer })}
           textBuffer={undefined}
           onVideoPlayerMounted={() => undefined}
@@ -1033,10 +972,6 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
           onRegisterVideoTarget={() => undefined}
           onUpdateVideoPlaybackTime={() => undefined}
           onUpdateTextViewport={() => undefined}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
         />
       </TestProviders>
     );
@@ -1118,8 +1053,9 @@ async function renderTextPreviewNode(
   root: Root,
   textPreviewRequest: CanvasRasterPreviewRequest | undefined,
   options?: {
-    selected?: boolean | undefined;
+    contentInteractionActive?: boolean | undefined;
     textPreviewError?: string | undefined;
+    previewActivationRequest?: CanvasNodeContentProps['previewActivationRequest'] | undefined;
     node?: ProjectedCanvasNode | undefined;
     onUpdateTextViewport?: CanvasNodeContentProps['onUpdateTextViewport'] | undefined;
   }
@@ -1129,20 +1065,17 @@ async function renderTextPreviewNode(
       <TestProviders>
         <CanvasNodeContent
           node={options?.node ?? textNode('flow/readme.md', 'rev-a')}
-          selected={options?.selected ?? false}
+          contentInteractionActive={options?.contentInteractionActive ?? false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreviewRequest={textPreviewRequest}
           textPreviewError={options?.textPreviewError}
+          previewActivationRequest={options?.previewActivationRequest}
           onVideoPlayerMounted={() => undefined}
           onVideoPlayingChange={() => undefined}
           onRegisterVideoTarget={() => undefined}
           onUpdateVideoPlaybackTime={() => undefined}
           onUpdateTextViewport={options?.onUpdateTextViewport ?? (() => undefined)}
-          onSelectNode={() => undefined}
-          onTitlePointerDown={() => undefined}
-          onTitlePointerMove={() => undefined}
-          onTitlePointerUp={() => undefined}
         />
       </TestProviders>
     );
@@ -1162,8 +1095,8 @@ async function expectEditorActivationFailure(
   preview: CanvasRasterPreviewRequest,
   message: string
 ): Promise<void> {
-  await renderTextPreviewNode(root, preview, { selected: false });
-  await renderTextPreviewNode(root, preview, { selected: true });
+  await renderTextPreviewNode(root, preview, { contentInteractionActive: false });
+  await renderTextPreviewNode(root, preview, { contentInteractionActive: true });
   const overlay = await waitForElement<HTMLElement>(container, '.canvas-text-message--overlay');
 
   expect(overlay.textContent).toContain(message);

@@ -17,6 +17,10 @@ const rangeGetClientRectsDescriptor = Object.getOwnPropertyDescriptor(
 );
 const resizeObserverDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver');
 const matchMediaDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'matchMedia');
+const elementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+const setPointerCaptureDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'setPointerCapture');
+const releasePointerCaptureDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'releasePointerCapture');
+const hasPointerCaptureDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'hasPointerCapture');
 
 globalWithActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,6 +55,26 @@ Object.defineProperty(globalThis, 'matchMedia', {
     dispatchEvent: () => false
   })
 });
+Object.defineProperty(document, 'elementFromPoint', {
+  configurable: true,
+  writable: true,
+  value: () => null
+});
+Object.defineProperty(Element.prototype, 'setPointerCapture', {
+  configurable: true,
+  writable: true,
+  value: () => undefined
+});
+Object.defineProperty(Element.prototype, 'releasePointerCapture', {
+  configurable: true,
+  writable: true,
+  value: () => undefined
+});
+Object.defineProperty(Element.prototype, 'hasPointerCapture', {
+  configurable: true,
+  writable: true,
+  value: () => false
+});
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -61,6 +85,10 @@ afterAll(() => {
   restoreDescriptor(Range.prototype, 'getClientRects', rangeGetClientRectsDescriptor);
   restoreDescriptor(globalThis, 'ResizeObserver', resizeObserverDescriptor);
   restoreDescriptor(globalThis, 'matchMedia', matchMediaDescriptor);
+  restoreDescriptor(document, 'elementFromPoint', elementFromPointDescriptor);
+  restoreDescriptor(Element.prototype, 'setPointerCapture', setPointerCaptureDescriptor);
+  restoreDescriptor(Element.prototype, 'releasePointerCapture', releasePointerCaptureDescriptor);
+  restoreDescriptor(Element.prototype, 'hasPointerCapture', hasPointerCaptureDescriptor);
   restoreDescriptor(globalWithActEnvironment, 'IS_REACT_ACT_ENVIRONMENT', actEnvironmentDescriptor);
 });
 

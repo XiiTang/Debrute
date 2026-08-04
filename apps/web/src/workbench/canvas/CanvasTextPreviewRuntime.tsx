@@ -17,7 +17,8 @@ import {
   type CanvasPreviewTargetKey,
   type ProjectedCanvasNode
 } from '@debrute/canvas-core';
-import type { TextFileBuffer, WorkbenchActions } from '../../types.js';
+import type { TextFileBuffer } from '../../types.js';
+import type { CanvasSceneActions } from './CanvasSceneActions.js';
 import {
   canvasTextPreviewTargetIdentity,
   canvasTextPreviewTargetKey,
@@ -175,7 +176,7 @@ export function CanvasTextPreviewProvider({
   nodes: ProjectedCanvasNode[];
   activeInlineTextPath?: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
-  actions: WorkbenchActions;
+  actions: CanvasSceneActions;
   previewOrder: CanvasPreviewOrderSource;
   styleDependencyKey: string;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;

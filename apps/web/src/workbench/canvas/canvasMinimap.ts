@@ -1,10 +1,10 @@
-import type { CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPoint, CanvasRect } from './runtime/canvasGeometry';
 import { finiteNumber, pointInRect, rectCenter } from './runtime/canvasGeometry';
 import type { CanvasSelection } from './runtime/canvasSelection';
 import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection.js';
-import { canvasVisibleRect } from './canvasViewport.js';
+import { visibleCanvasRectForCamera } from './runtime/canvasCoordinateSystem.js';
 
 export interface CanvasSize {
   width: number;
@@ -65,7 +65,7 @@ export function buildCanvasMinimapStaticModel(input: {
     return undefined;
   }
 
-  const visibleRect = canvasVisibleRect({
+  const visibleRect = visibleCanvasRectForCamera({
     camera: input.camera,
     surfaceSize: input.surfaceSize
   });
@@ -96,7 +96,7 @@ export function buildCanvasMinimapViewportModel(input: {
   if (!validCamera(input.camera) || !validSize(input.surfaceSize)) {
     return undefined;
   }
-  const visibleRect = canvasVisibleRect({
+  const visibleRect = visibleCanvasRectForCamera({
     camera: input.camera,
     surfaceSize: input.surfaceSize
   });
@@ -106,8 +106,13 @@ export function buildCanvasMinimapViewportModel(input: {
   };
 }
 
-export function hasValidMinimapNodes(nodes: CanvasProjection['nodes']): boolean {
-  return nodes.some(isValidMinimapNode);
+export function hasValidMinimapNodes(nodes: Iterable<ProjectedCanvasNode>): boolean {
+  for (const node of nodes) {
+    if (isValidMinimapNode(node)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function canvasPointToMinimapPoint(point: CanvasPoint, transform: CanvasMinimapTransform): CanvasPoint {

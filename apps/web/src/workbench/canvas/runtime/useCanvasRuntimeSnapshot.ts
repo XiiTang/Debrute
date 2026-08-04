@@ -11,6 +11,14 @@ export function useCanvasSelection(runtime: CanvasEditorRuntime): CanvasSelectio
   );
 }
 
+export function useCanvasContentInteraction(runtime: CanvasEditorRuntime): string | undefined {
+  return useSyncExternalStore(
+    runtime.subscribeContentInteraction,
+    () => runtime.getSnapshot().contentInteractionProjectRelativePath,
+    () => runtime.getSnapshot().contentInteractionProjectRelativePath
+  );
+}
+
 export function useCanvasSurfaceSize(runtime: CanvasEditorRuntime): CanvasSize | undefined {
   return useSyncExternalStore(
     runtime.subscribeSurfaceSize,

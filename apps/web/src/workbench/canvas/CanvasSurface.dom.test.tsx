@@ -7,11 +7,11 @@ import {
   type CanvasFeedbackDocument,
   type CanvasProjection
 } from '@debrute/canvas-core';
-import { buildWorkbenchTitleBarState } from '../shell/workbenchTitleBarState';
 import type { CanvasFeedbackBarTarget } from '../shell/floatingBars.js';
-import type { TextFileBuffer, WorkbenchActions, WorkbenchState } from '../../types';
+import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
+import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import { areCanvasNodeShellPropsEqual, type CanvasNodeShellProps } from './CanvasNodeShell';
@@ -37,7 +37,10 @@ import { createCanvasPerfMonitor } from './CanvasPerfMonitor';
 import { CANVAS_CAMERA_IDLE_MS, type CanvasCamera } from './runtime/canvasCamera';
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
-import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+import {
+  createCanvasEditorRuntime,
+  type CanvasRuntimePointerInteraction
+} from './runtime/CanvasEditorRuntime';
 import { I18nProvider as WorkbenchI18nProvider } from '../i18n/index.js';
 import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
 import { CanvasTextProjectFontEnvironmentProvider } from './font-subset/CanvasTextProjectFontEnvironment.js';
@@ -95,8 +98,16 @@ function createCanvasDocument(input: { id: string }): CanvasDocument {
 vi.mock('./CanvasVideoNodeContent', async () => {
   const ReactModule = await import('react');
   return {
-    CanvasVideoNodeContent: ({ node, onRegisterVideoTarget, onUpdatePlaybackTime }: {
+    CanvasVideoNodeContent: ({
+      node,
+      contentInteractionActive,
+      previewActivationRequest,
+      onRegisterVideoTarget,
+      onUpdatePlaybackTime
+    }: {
       node: CanvasProjection['nodes'][number];
+      contentInteractionActive: boolean;
+      previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
       onRegisterVideoTarget: (projectRelativePath: string, target: {
         togglePlayback: () => void;
         seekBy: (seconds: number) => void;
@@ -132,7 +143,17 @@ vi.mock('./CanvasVideoNodeContent', async () => {
         }
         return () => onRegisterVideoTarget(node.projectRelativePath, undefined);
       }, [node.projectRelativePath, onRegisterVideoTarget, onUpdatePlaybackTime]);
-      return <div data-testid="mock-video-node" tabIndex={0}>{node.projectRelativePath}</div>;
+      return (
+        <div
+          data-testid="mock-video-node"
+          data-canvas-node-zone={contentInteractionActive ? 'passive' : 'activate'}
+          data-canvas-interaction-island={contentInteractionActive ? 'true' : undefined}
+          data-play-request-id={previewActivationRequest?.requestId}
+          tabIndex={0}
+        >
+          {node.projectRelativePath}
+        </div>
+      );
     }
   };
 });
@@ -230,12 +251,153 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-canvas-entity="node"');
     expect(html).toContain('data-canvas-node-path="image-production/cover.png"');
     expect(html).toContain('db-canvas-node-frame');
-    expect(html).toContain('class="canvas-node-resize nw"');
-    expect(html.match(/class="canvas-node-resize /g) ?? []).toHaveLength(8);
     expect(html).not.toContain('Delete');
   });
 
-  it('outlines every selected node, hides multi-selection resize handles, and dims only exact Cut roots', () => {
+  it('covers Canvas node hit targets only while the camera is moving', async () => {
+    vi.useFakeTimers();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'camera-hit-test-blocker' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/cover.png', 0, 0)],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, { runtime }));
+      });
+      const blocker = container.querySelector<HTMLElement>('[data-canvas-hit-test-blocker="true"]');
+      expect(blocker?.classList.contains('hidden')).toBe(true);
+
+      await act(async () => {
+        runtime.camera.panBy({ x: 20, y: 10 });
+      });
+      expect(blocker?.classList.contains('hidden')).toBe(false);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CANVAS_CAMERA_IDLE_MS);
+      });
+      expect(blocker?.classList.contains('hidden')).toBe(true);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      runtime.dispose();
+      container.remove();
+      vi.useRealTimers();
+    }
+  });
+
+  it('freezes semantic hover and Feedback targeting until one camera-idle reconciliation', async () => {
+    vi.useFakeTimers();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'camera-hover-gate' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        nodeFixture('flow/a.png', 0, 0),
+        nodeFixture('flow/b.png', 240, 0)
+      ],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+    const targetChanges: Array<CanvasFeedbackBarTarget | undefined> = [];
+    const suspendHoverTarget = vi.fn();
+    const elementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              productPlatform="darwin"
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={feedbackDocument({})}
+              feedbackInteraction={feedbackInteractionFixture({
+                handleTargetChange: (target) => targetChanges.push(target),
+                suspendHoverTarget
+              })}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      const first = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/a.png"]')!;
+      const second = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/b.png"]')!;
+      Object.defineProperty(surfaceElement, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => new DOMRect(0, 0, 1280, 720)
+      });
+
+      await act(async () => {
+        first.dispatchEvent(pointerEvent('pointerover', { pointerId: 1, clientX: 20, clientY: 20 }));
+      });
+      expect(first.getAttribute('data-canvas-hovered')).toBe('true');
+      expect(targetChanges.at(-1)).toMatchObject({ kind: 'node', projectRelativePath: 'flow/a.png' });
+
+      await act(async () => {
+        runtime.camera.panBy({ x: 20, y: 0 });
+        second.dispatchEvent(pointerEvent('pointerover', { pointerId: 1, clientX: 20, clientY: 20 }));
+      });
+      expect(first.hasAttribute('data-canvas-hovered')).toBe(false);
+      expect(second.hasAttribute('data-canvas-hovered')).toBe(false);
+      expect(targetChanges.at(-1)).toMatchObject({ kind: 'node', projectRelativePath: 'flow/a.png' });
+      expect(suspendHoverTarget).toHaveBeenCalledTimes(1);
+
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: () => second
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CANVAS_CAMERA_IDLE_MS);
+      });
+      expect(second.getAttribute('data-canvas-hovered')).toBe('true');
+      expect(targetChanges.at(-1)).toMatchObject({ kind: 'node', projectRelativePath: 'flow/b.png' });
+
+      await act(async () => {
+        runtime.camera.panBy({ x: 20, y: 0 });
+      });
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: () => null
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CANVAS_CAMERA_IDLE_MS);
+      });
+      expect(second.hasAttribute('data-canvas-hovered')).toBe(false);
+      expect(targetChanges.at(-1)).toBeUndefined();
+      expect(suspendHoverTarget).toHaveBeenCalledTimes(2);
+    } finally {
+      if (elementFromPointDescriptor) {
+        Object.defineProperty(document, 'elementFromPoint', elementFromPointDescriptor);
+      } else {
+        Reflect.deleteProperty(document, 'elementFromPoint');
+      }
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+      vi.useRealTimers();
+    }
+  });
+
+  it('writes selection styling directly and rerenders handles only for the single selected node', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
     const canvas = createCanvasDocument({ id: 'multi-selection-presentation' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -248,14 +410,31 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png', 'flow/b.png'] },
-      cutPaths: ['flow/b.png']
-    }));
+    });
 
-    expect(html.match(/class="canvas-node-element[^"]* selected/g) ?? []).toHaveLength(2);
-    expect(html.match(/canvas-cut-source/g) ?? []).toHaveLength(1);
-    expect(html).not.toContain('class="canvas-node-resize ');
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, { runtime, cutPaths: ['flow/b.png'] }));
+      });
+
+      expect(container.querySelectorAll('.canvas-node-shell[data-canvas-selected="true"]')).toHaveLength(2);
+      expect(container.querySelectorAll('.canvas-cut-source')).toHaveLength(1);
+      expect(container.querySelectorAll('.canvas-node-resize')).toHaveLength(0);
+
+      await act(async () => {
+        runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+      });
+
+      expect(container.querySelectorAll('.canvas-node-shell[data-canvas-selected="true"]')).toHaveLength(1);
+      expect(container.querySelectorAll('[data-canvas-node-path="flow/a.png"] .canvas-node-resize')).toHaveLength(8);
+      expect(container.querySelectorAll('[data-canvas-node-path="flow/b.png"] .canvas-node-resize')).toHaveLength(0);
+    } finally {
+      await act(async () => root.unmount());
+      runtime.dispose();
+      container.remove();
+    }
   });
 
   it('owns true-blank pointer capture, renders the Runtime marquee, and restores selection on lost capture', async () => {
@@ -327,9 +506,20 @@ describe('CanvasSurface', () => {
         projectRelativePaths: ['flow/a.png']
       });
       expect(container.querySelector('[data-testid="canvas-selection-marquee"]')).toBeNull();
+      await act(async () => {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      });
 
       const nodeElement = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/a.png"]')!;
       nodeElement.setPointerCapture = vi.fn();
+      await act(async () => {
+        nodeElement.dispatchEvent(pointerEvent('pointerover', {
+          pointerId: 8,
+          clientX: 20,
+          clientY: 20
+        }));
+      });
+      expect(nodeElement.getAttribute('data-canvas-hovered')).toBe('true');
       await act(async () => {
         nodeElement.dispatchEvent(pointerEvent('pointerdown', {
           pointerId: 8,
@@ -338,8 +528,30 @@ describe('CanvasSurface', () => {
           clientY: 20
         }));
       });
-      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({ kind: 'move-node' });
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({ kind: 'move-node', phase: 'pending' });
+      expect(surfaceElement.getAttribute('data-canvas-cursor')).toBe('default');
+      expect(nodeElement.getAttribute('data-canvas-hovered')).toBe('true');
+      await act(async () => {
+        surfaceElement.dispatchEvent(pointerEvent('pointermove', {
+          pointerId: 8,
+          clientX: 22,
+          clientY: 22
+        }));
+      });
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({ kind: 'move-node', phase: 'pending' });
+      expect(nodeElement.getAttribute('data-canvas-hovered')).toBe('true');
+      await act(async () => {
+        nodeElement.dispatchEvent(pointerEvent('pointermove', {
+          pointerId: 8,
+          clientX: 50,
+          clientY: 50
+        }));
+      });
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({ kind: 'move-node', phase: 'active' });
+      expect(surfaceElement.getAttribute('data-canvas-cursor')).toBe('grabbing');
+      expect(nodeElement.hasAttribute('data-canvas-hovered')).toBe(false);
       await act(async () => runtime.input.cancelPointerInteraction(8));
+      expect(surfaceElement.getAttribute('data-canvas-cursor')).toBe('default');
 
       await act(async () => {
         surfaceElement.dispatchEvent(pointerEvent('pointerdown', {
@@ -372,6 +584,233 @@ describe('CanvasSurface', () => {
         kind: 'nodes',
         projectRelativePaths: ['flow/a.png']
       });
+    } finally {
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('performs one final hit-test only after an active node move ends', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'active-move-hit-test' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/a.png', 10, 10)],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+    const elementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, { runtime }));
+      });
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      const nodeElement = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/a.png"]')!;
+      surfaceElement.setPointerCapture = vi.fn();
+      surfaceElement.releasePointerCapture = vi.fn();
+      const elementFromPoint = vi.fn(() => nodeElement);
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: elementFromPoint
+      });
+
+      await act(async () => {
+        nodeElement.dispatchEvent(pointerEvent('pointerover', {
+          pointerId: 31,
+          clientX: 20,
+          clientY: 20
+        }));
+        nodeElement.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 31,
+          button: 0,
+          clientX: 20,
+          clientY: 20
+        }));
+        nodeElement.dispatchEvent(pointerEvent('pointermove', {
+          pointerId: 31,
+          clientX: 60,
+          clientY: 60
+        }));
+      });
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({
+        kind: 'move-node',
+        phase: 'active'
+      });
+      expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
+      expect(nodeElement.hasAttribute('data-canvas-hovered')).toBe(false);
+
+      await act(async () => {
+        nodeElement.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 31,
+          button: 0,
+          clientX: 60,
+          clientY: 60
+        }));
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+      });
+
+      expect(elementFromPoint).toHaveBeenCalledTimes(1);
+      expect(nodeElement.getAttribute('data-canvas-hovered')).toBe('true');
+    } finally {
+      if (elementFromPointDescriptor) {
+        Object.defineProperty(document, 'elementFromPoint', elementFromPointDescriptor);
+      } else {
+        Reflect.deleteProperty(document, 'elementFromPoint');
+      }
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('commits precise text preview activation only on pointerup inside the same preview', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'text-pointerup-activation' });
+    const node = textProjectionNode('flow/readme.md', 0, 0, 'rev-text-activation');
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [node],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              productPlatform="darwin"
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{
+                [node.projectRelativePath]: textBufferFixture(node.projectRelativePath, '# Readme', 'rev-text-activation')
+              }}
+              canvasFeedback={undefined}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      const textPreview = container.querySelector<HTMLElement>('.canvas-text-body')!;
+      surfaceElement.setPointerCapture = vi.fn();
+      surfaceElement.releasePointerCapture = vi.fn();
+
+      await act(async () => {
+        textPreview.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 21,
+          button: 0,
+          clientX: 110,
+          clientY: 140
+        }));
+      });
+      expect(runtime.getSnapshot().selection).toBeUndefined();
+
+      const finishPointerInteraction = deferred<CanvasRuntimePointerInteraction | undefined>();
+      vi.spyOn(runtime.input, 'finishPointerInteraction')
+        .mockReturnValueOnce(finishPointerInteraction.promise);
+      await act(async () => {
+        textPreview.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 21,
+          button: 0,
+          clientX: 112,
+          clientY: 142
+        }));
+        surfaceElement.dispatchEvent(pointerEvent('lostpointercapture', { pointerId: 21 }));
+        finishPointerInteraction.resolve(undefined);
+        await finishPointerInteraction.promise;
+        await Promise.resolve();
+      });
+      expect(runtime.getSnapshot().selection).toEqual({
+        kind: 'nodes',
+        projectRelativePaths: [node.projectRelativePath]
+      });
+      expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe(node.projectRelativePath);
+
+      await act(async () => {
+        runtime.setSelection(undefined);
+        runtime.setContentInteraction(undefined);
+      });
+      const restoredTextPreview = container.querySelector<HTMLElement>('.canvas-text-body')!;
+      await act(async () => {
+        restoredTextPreview.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 22,
+          button: 0,
+          clientX: 110,
+          clientY: 140
+        }));
+        surfaceElement.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 22,
+          button: 0,
+          clientX: 5,
+          clientY: 5
+        }));
+      });
+      expect(runtime.getSnapshot().selection).toBeUndefined();
+      expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
+    } finally {
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('commits one video play activation only when pointerup remains inside the inactive preview', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'video-pointerup-activation' });
+    const node = videoProjectionNode('media/clip.mp4', 0, 0);
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [node],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, { runtime }));
+      });
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      const videoPreview = container.querySelector<HTMLElement>('[data-testid="mock-video-node"]')!;
+      surfaceElement.setPointerCapture = vi.fn();
+      surfaceElement.releasePointerCapture = vi.fn();
+
+      await act(async () => {
+        videoPreview.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 23,
+          button: 0,
+          clientX: 120,
+          clientY: 160
+        }));
+      });
+      expect(runtime.getSnapshot().selection).toBeUndefined();
+
+      await act(async () => {
+        videoPreview.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 23,
+          button: 0,
+          clientX: 122,
+          clientY: 162
+        }));
+      });
+      expect(runtime.getSnapshot().selection).toEqual({
+        kind: 'nodes',
+        projectRelativePaths: [node.projectRelativePath]
+      });
+      expect(container.querySelector('[data-testid="mock-video-node"]')?.getAttribute('data-play-request-id')).toBe('1');
     } finally {
       runtime.dispose();
       await act(async () => root.unmount());
@@ -418,6 +857,14 @@ describe('CanvasSurface', () => {
         );
       });
       const selectedInvocation = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/b.png"]')!;
+      const nodeAction = document.createElement('button');
+      nodeAction.type = 'button';
+      selectedInvocation.append(nodeAction);
+      await act(async () => {
+        nodeAction.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      });
+      expect(onOpenContextMenu).not.toHaveBeenCalled();
+
       await act(async () => {
         selectedInvocation.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       });
@@ -765,7 +1212,7 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('renders visible canvas text nodes as inactive preview bodies by default', () => {
+  it('keeps selected-only canvas text nodes as inactive preview bodies', () => {
     const canvas = createCanvasDocument({ id: 'text-editor-canvas' });
     const projection: CanvasProjection = {
       canvasId: canvas.id,
@@ -778,6 +1225,7 @@ describe('CanvasSurface', () => {
     };
 
     const html = renderToStaticMarkup(surface(canvas, projection, {
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
       textFileBuffers: {
         'flow/a.md': textBufferFixture('flow/a.md', '# A', 'rev-a'),
         'flow/b.md': textBufferFixture('flow/b.md', '# B', 'rev-b')
@@ -789,7 +1237,7 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('loads selected text nodes as live editors and leaves inactive text as preview bodies', async () => {
+  it('loads only content-activated text as a live editor and leaves selected-only text as preview', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -808,6 +1256,7 @@ describe('CanvasSurface', () => {
       await act(async () => {
         root.render(surface(canvas, projection, {
           selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.md'] },
+          contentInteractionProjectRelativePath: 'flow/selected.md',
           textFileBuffers: {
             'flow/selected.md': textBufferFixture('flow/selected.md', '# Selected', 'rev-selected'),
             'flow/inactive.md': textBufferFixture('flow/inactive.md', '# Inactive', 'rev-inactive')
@@ -849,10 +1298,32 @@ describe('CanvasSurface', () => {
 
     expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(0);
     expect(html.match(/canvas-raster-preview-layers/g) ?? []).toHaveLength(2);
-    expect(html.match(/canvas-node-shell[^\"]*selected/g) ?? []).toHaveLength(2);
   });
 
-  it('routes video shortcuts to the selected video node only', async () => {
+  it('keeps multi-selected video and audio previews interaction-inactive', () => {
+    const canvas = createCanvasDocument({ id: 'multi-selected-media-canvas' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        videoProjectionNode('media/clip.mp4', 0, 0),
+        audioProjectionNode('media/theme.mp3', 700, 0)
+      ],
+      edges: [],
+      diagnostics: []
+    };
+
+    const html = renderToStaticMarkup(surface(canvas, projection, {
+      selection: {
+        kind: 'nodes',
+        projectRelativePaths: ['media/clip.mp4', 'media/theme.mp3']
+      }
+    }));
+
+    expect(html.match(/data-canvas-node-zone="activate"/g) ?? []).toHaveLength(2);
+    expect(html).not.toContain('data-canvas-interaction-island="true"');
+  });
+
+  it('does not route video shortcuts to a selected-only video node', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -889,11 +1360,64 @@ describe('CanvasSurface', () => {
       container.querySelector<HTMLElement>('[data-testid="mock-video-node"]')?.focus();
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
 
+      expect(videoTogglePlaybackSpy).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      videoTogglePlaybackSpy.mockClear();
+    }
+  });
+
+  it('routes video shortcuts only to the content-active video after Selection changes', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'content-active-video-hotkeys' });
+    const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [videoNode],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection, {
+      selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath] }
+    });
+    runtime.setContentInteraction(videoNode.projectRelativePath);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              productPlatform="darwin"
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={undefined}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        runtime.setSelection(undefined);
+      });
+      container.querySelector<HTMLElement>('[data-testid="mock-video-node"]')?.focus();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+
+      expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe(videoNode.projectRelativePath);
       expect(videoTogglePlaybackSpy).toHaveBeenCalledTimes(1);
     } finally {
       await act(async () => {
         root.unmount();
       });
+      runtime.dispose();
       container.remove();
       videoTogglePlaybackSpy.mockClear();
     }
@@ -914,6 +1438,7 @@ describe('CanvasSurface', () => {
     const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath ] }
     });
+    runtime.setContentInteraction(videoNode.projectRelativePath);
 
     try {
       await act(async () => {
@@ -1134,7 +1659,8 @@ describe('CanvasSurface', () => {
                 localSpatialItems: [],
                 suppressedSpatialItemIds: new Set(),
                 focusedCapsuleId: undefined,
-                currentTargetProjectRelativePath: undefined,
+                getCurrentTargetProjectRelativePath: () => undefined,
+                suspendHoverTarget: vi.fn(),
                 handleTargetChange: (target) => targetChanges.push(target),
                 invalidateTarget: vi.fn(),
                 handleDraft: vi.fn(),
@@ -1312,11 +1838,11 @@ describe('CanvasSurface', () => {
 
     const html = renderToStaticMarkup(surface(canvas, projection));
 
-    expect(html).toContain('data-canvas-edge-id="edge:both"');
-    expect(html).toContain('data-canvas-edge-id="edge:one-endpoint"');
-    expect(html).toContain('data-canvas-edge-id="edge:crossing"');
-    expect(html).toContain('data-canvas-edge-id="edge:outside"');
-    expect(html).toContain('<path');
+    expect(html).toContain('data-canvas-edge-ids="edge:both edge:one-endpoint"');
+    expect(html).toContain('data-canvas-edge-ids="edge:crossing"');
+    expect(html).toContain('data-canvas-edge-ids="edge:outside"');
+    expect(html.match(/<svg/g) ?? []).toHaveLength(1);
+    expect(html.match(/<path/g) ?? []).toHaveLength(3);
   });
 
   it('passes image feedback entries to image node markup without rendering feedback bars inside nodes', () => {
@@ -1685,7 +2211,8 @@ describe('CanvasSurface', () => {
                 localSpatialItems: [],
                 suppressedSpatialItemIds: new Set(),
                 focusedCapsuleId: undefined,
-                currentTargetProjectRelativePath: undefined,
+                getCurrentTargetProjectRelativePath: () => undefined,
+                suspendHoverTarget: vi.fn(),
                 handleTargetChange: (target) => targetChanges.push(target),
                 invalidateTarget: vi.fn(),
                 handleDraft: vi.fn(),
@@ -1731,6 +2258,71 @@ describe('CanvasSurface', () => {
       surfaceRect: { x: 10, y: 20, width: 900, height: 600 },
       camera: { x: 30, y: 40, z: 2 }
     });
+  });
+
+  it('publishes a changed multi-selection Feedback target without a Canvas React rerender', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'live-selection-feedback-target' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [
+        nodeFixture('flow/a.png', 0, 0),
+        nodeFixture('flow/b.png', 300, 100)
+      ],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+    const targetChanges: Array<CanvasFeedbackBarTarget | undefined> = [];
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasSurface
+              productPlatform="darwin"
+              canvas={canvas}
+              projection={projection}
+              runtime={runtime}
+              actions={actions}
+              textFileBuffers={{}}
+              canvasFeedback={feedbackDocument({})}
+              feedbackInteraction={feedbackInteractionFixture({
+                handleTargetChange: (target) => targetChanges.push(target)
+              })}
+              textPreviewStyleDependencyKey="dark"
+            />
+          </I18nProvider>
+        );
+      });
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      Object.defineProperty(surfaceElement, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => new DOMRect(0, 0, 1280, 720)
+      });
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, CANVAS_CAMERA_IDLE_MS + 10));
+      });
+
+      await act(async () => {
+        runtime.setSelection({
+          kind: 'nodes',
+          projectRelativePaths: ['flow/a.png', 'flow/b.png']
+        });
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      });
+
+      expect(targetChanges.at(-1)).toMatchObject({
+        kind: 'selection',
+        projectRelativePaths: ['flow/a.png', 'flow/b.png']
+      });
+    } finally {
+      await act(async () => root.unmount());
+      runtime.dispose();
+      container.remove();
+    }
   });
 
   it('does not eagerly render image src attributes before node-local image state publishes image state', () => {
@@ -1845,9 +2437,14 @@ describe('CanvasSurface', () => {
     const html = renderToStaticMarkup(
       <CanvasEditor
         productPlatform="darwin"
-        canvasId={canvas.id}
-        state={workbenchStateFixture(canvas, projection)}
+        canvas={canvas}
+        projection={projection}
+        hasProject
+        projectOpening={false}
         actions={actions}
+        textFileBuffers={{}}
+        canvasFeedback={undefined}
+        textPreviewStyleDependencyKey="dark"
       />
     );
 
@@ -1958,7 +2555,7 @@ describe('CanvasSurface', () => {
               canvasFeedback={feedbackDocument({})}
               feedbackInteraction={feedbackInteractionFixture({
                 focusedCapsuleId: 'feedback-a',
-                currentTargetProjectRelativePath: '',
+                getCurrentTargetProjectRelativePath: () => '',
                 invalidateTarget
               })}
               textPreviewStyleDependencyKey="dark"
@@ -1974,7 +2571,7 @@ describe('CanvasSurface', () => {
     }
   });
 
-  it('keeps image node shell props equal for unused action object changes but not event handler changes', () => {
+  it('keeps image node shell props equal for unused action object changes but not interaction inputs', () => {
     const props = nodeShellProps();
 
     expect(areCanvasNodeShellPropsEqual(props, {
@@ -1984,22 +2581,23 @@ describe('CanvasSurface', () => {
 
     expect(areCanvasNodeShellPropsEqual(props, {
       ...props,
-      onPointerDown: () => undefined,
-      onPointerEnter: () => undefined,
-      onPointerLeave: () => undefined,
-      onSelectNode: () => undefined,
-      onContextMenu: () => undefined,
       onResizePointerDown: () => undefined
     })).toBe(false);
 
     expect(areCanvasNodeShellPropsEqual(props, {
       ...props,
-      hovered: true
+      previewActivationRequest: {
+        requestId: 1,
+        projectRelativePath: props.node.projectRelativePath,
+        mediaKind: 'video',
+        clientX: 10,
+        clientY: 20
+      }
     })).toBe(false);
 
   });
 
-  it('tracks active video paths from selection, playback, and requested mounts', () => {
+  it('tracks active video paths from content activation, playback, and requested mounts', () => {
     const active = canvasActiveVideoPaths({
       nodes: [
         videoProjectionNode('media/selected.mp4', 0, 0),
@@ -2007,7 +2605,7 @@ describe('CanvasSurface', () => {
         videoProjectionNode('media/requested.mp4', 0, 800),
         nodeFixture('images/cover.png', 0, 1200)
       ],
-      selectedProjectRelativePaths: ['media/selected.mp4', 'images/cover.png'],
+      contentActiveProjectRelativePaths: ['media/selected.mp4', 'images/cover.png'],
       playingVideoPaths: new Set(['media/playing.mp4', 'media/missing.mp4']),
       requestedVideoPlayerPath: 'media/requested.mp4'
     });
@@ -2085,8 +2683,8 @@ describe('CanvasSurface', () => {
       snapshot: { cameraState: 'moving', camera: { x: 0, y: 0, z: 1 } },
       minimapOpen: false
     });
-    monitor.recordCounter({ timestamp: 5, source: 'CanvasRenderCoordinator', name: 'render-snapshot-build' });
-    monitor.recordCounter({ timestamp: 6, source: 'CanvasRenderCoordinator', name: 'render-snapshot-reuse' });
+    monitor.recordCounter({ timestamp: 5, source: 'CanvasRenderLifecycle', name: 'render-snapshot-build' });
+    monitor.recordCounter({ timestamp: 6, source: 'CanvasRenderLifecycle', name: 'render-snapshot-reuse' });
     monitor.recordCounter({ timestamp: 7, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
     monitor.recordCounter({
       timestamp: 8,
@@ -2103,8 +2701,7 @@ describe('CanvasSurface', () => {
           ['flow/a.png', nodeFixture('flow/a.png', 0, 0)],
           ['flow/b.png', nodeFixture('flow/b.png', 5000, 0)]
         ]),
-        nodeZIndexByPath: new Map(),
-        edges: []
+        edgeGroups: []
       },
       cullingCounts: {
         displayVisibleNodeCount: 1,
@@ -2160,8 +2757,7 @@ describe('CanvasSurface', () => {
         nodesByPath: new Map([
           ['flow/a.png', nodeFixture('flow/a.png', 0, 0)]
         ]),
-        nodeZIndexByPath: new Map(),
-        edges: []
+        edgeGroups: []
       },
       cullingCounts: {
         displayVisibleNodeCount: 1,
@@ -2212,8 +2808,7 @@ describe('CanvasSurface', () => {
       cameraState: 'idle',
       renderSnapshot: {
         nodesByPath: new Map([[activeNode.projectRelativePath, activeNode]]),
-        nodeZIndexByPath: new Map(),
-        edges: []
+        edgeGroups: []
       },
       cullingCounts: {
         displayVisibleNodeCount: 1,
@@ -2321,14 +2916,20 @@ function surface(
   projection: CanvasProjection,
   input: {
     selection?: CanvasSelection;
+    contentInteractionProjectRelativePath?: string;
     camera?: CanvasCamera;
     cutPaths?: readonly string[];
     textFileBuffers?: Parameters<typeof CanvasSurface>[0]['textFileBuffers'];
     canvasFeedback?: CanvasFeedbackDocument;
     feedbackInteraction?: CanvasFeedbackCanvasBinding;
+    runtime?: ReturnType<typeof createCanvasEditorRuntime>;
+    minimapOpen?: boolean;
   } = {}
 ): React.ReactElement {
-  const runtime = canvasRuntimeFixture(projection, input);
+  const runtime = input.runtime ?? canvasRuntimeFixture(projection, input);
+  if (input.contentInteractionProjectRelativePath !== undefined) {
+    runtime.setContentInteraction(input.contentInteractionProjectRelativePath);
+  }
   return (
     <I18nProvider locale="en">
       <CanvasSurface
@@ -2340,6 +2941,7 @@ function surface(
         textFileBuffers={input.textFileBuffers ?? {}}
         canvasFeedback={input.canvasFeedback}
         feedbackInteraction={input.feedbackInteraction}
+        minimapOpen={input.minimapOpen}
         cutPaths={input.cutPaths}
         textPreviewStyleDependencyKey="dark"
       />
@@ -2372,7 +2974,8 @@ function feedbackInteractionFixture(
     localSpatialItems: [],
     suppressedSpatialItemIds: new Set(),
     focusedCapsuleId: undefined,
-    currentTargetProjectRelativePath: undefined,
+    getCurrentTargetProjectRelativePath: () => undefined,
+    suspendHoverTarget: vi.fn(),
     handleTargetChange: vi.fn(),
     invalidateTarget: vi.fn(),
     handleDraft: vi.fn(),
@@ -2466,6 +3069,20 @@ function videoProjectionNode(path: string, x: number, y: number): CanvasProjecti
       width: 640,
       height: 360,
       textTracks: []
+    }
+  };
+}
+
+function audioProjectionNode(path: string, x: number, y: number): CanvasProjection['nodes'][number] {
+  return {
+    ...nodeFixture(path, x, y),
+    mediaKind: 'audio',
+    availability: {
+      state: 'available',
+      size: 100,
+      mimeType: 'audio/mpeg',
+      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      revision: 'rev'
     }
   };
 }
@@ -2592,20 +3209,13 @@ function largePreviewNodeFixture(path: string): CanvasProjection['nodes'][number
 function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeShellProps {
   return {
     node,
-    selected: false,
     cut: false,
     showResizeHandles: false,
-    textEditorActive: false,
-    hovered: false,
+    contentInteractionActive: false,
     zIndex: node.z,
     stageRuntime: createCanvasStageRuntime(),
     actions,
     textBuffer: undefined,
-    onPointerDown: () => undefined,
-    onPointerEnter: () => undefined,
-    onPointerLeave: () => undefined,
-    onSelectNode: () => undefined,
-    onContextMenu: () => undefined,
     onResizePointerDown: () => undefined,
     onVideoPlayerMounted: () => undefined,
     onVideoPlayingChange: () => undefined,
@@ -2638,53 +3248,6 @@ function feedbackDocument(entries: CanvasFeedbackDocument['entries']): CanvasFee
   return {
     updatedAt: '2026-05-26T12:00:00.000Z',
     entries
-  };
-}
-
-function workbenchStateFixture(
-  canvas: ReturnType<typeof createCanvasDocument>,
-  projection: CanvasProjection
-): WorkbenchState {
-  return {
-    snapshot: {
-      metadata: {
-        project: {
-          id: 'project',
-          name: 'Project',
-          createdAt: '2026-05-26T00:00:00.000Z',
-          updatedAt: '2026-05-26T00:00:00.000Z'
-        }
-      },
-      files: [],
-      canvases: [canvas],
-      projections: [projection],
-      diagnostics: [],
-      canvasRegistry: {
-        status: 'ready',
-        canvasOrder: [canvas.id]
-      },
-      health: {
-        projectName: 'Project',
-        canvasCount: 1,
-        diagnosticCounts: { errors: 0, warnings: 0 },
-        checkedAt: '2026-05-26T00:00:00.000Z'
-      }
-    },
-    titleBarState: buildWorkbenchTitleBarState({
-      platform: 'win32',
-      host: 'web', locale: 'en',
-      projectTitle: 'Project',
-      recentProjects: []
-    }),
-    projectOpen: {
-      opening: false
-    },
-    explorerSelection: { selectedPaths: [], focusedPath: null, anchorPath: null },
-    photoshop: { status: 'ready', value: { sessions: [] } },
-    resolvedTheme: 'dark',
-    canvasFeedback: undefined,
-    textFileBuffers: {},
-    textEditorWindows: {}
   };
 }
 

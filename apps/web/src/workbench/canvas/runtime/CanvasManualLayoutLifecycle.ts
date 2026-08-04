@@ -3,7 +3,6 @@ import {
   canvasManualLayoutDraftFromInteraction,
   canvasNodeStackOrder,
   canvasNodesWithLayoutOverrides,
-  canvasNodesWithStackOrder,
   canvasStackOrderWithRaisedGroup,
   type CanvasLayoutOverride,
   type CanvasManualLayoutDraft,
@@ -14,11 +13,11 @@ import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime.js';
 export interface CanvasManualLayoutPresentation {
   layoutOverrides: readonly CanvasLayoutOverride[];
   stackOrder: CanvasNodeStackOrder | undefined;
+  raisedNodeProjectRelativePaths: readonly string[];
 }
 
 export interface CanvasManualLayoutLifecycle {
   getPresentation(): CanvasManualLayoutPresentation;
-  getPresentedNodes(): ProjectedCanvasNode[];
   setActiveInteraction(interaction: CanvasRuntimeLayoutInteraction | undefined): void;
   submitFinishedInteraction(interaction: CanvasRuntimeLayoutInteraction): Promise<void>;
   acceptProjection(projection: CanvasProjection): void;
@@ -46,9 +45,15 @@ export function createCanvasManualLayoutLifecycle(input: {
   let submitted: SubmittedManualLayoutDraft[] = [];
   let nextSubmissionId = 1;
   let disposed = false;
+  let projectedStackOrder = canvasNodeStackOrder(projection.nodes);
+  let activeStackCache: {
+    base: readonly string[];
+    raisedKey: string;
+    value: string[];
+  } | undefined;
 
   const rebasePendingStackOrders = () => {
-    let order = canvasNodeStackOrder(projection.nodes);
+    let order = projectedStackOrder;
     for (const submission of submitted) {
       if (!submission.stackPending) {
         continue;
@@ -64,7 +69,6 @@ export function createCanvasManualLayoutLifecycle(input: {
         submission.stackPending = false;
       }
     }
-    const projectedStackOrder = canvasNodeStackOrder(projection.nodes);
     const confirmedStackSubmission = [...submitted]
       .reverse()
       .find((submission) => (
@@ -99,35 +103,37 @@ export function createCanvasManualLayoutLifecycle(input: {
         merged.set(layout.projectRelativePath, layout);
       }
     }
-    const projectedStackOrder = canvasNodeStackOrder(projection.nodes);
     const pendingStackOrder = [...submitted]
       .reverse()
       .find((submission) => submission.stackPending)
       ?.expectedStackOrder ?? projectedStackOrder;
-    const stackOrder = active
-      ? canvasStackOrderWithRaisedGroup(
-          pendingStackOrder,
-          active.nodeLayouts.map((layout) => layout.projectRelativePath)
-        )
-      : pendingStackOrder;
+    const activeRaisedPaths = active?.nodeLayouts.map((layout) => layout.projectRelativePath) ?? [];
+    const activeRaisedKey = activeRaisedPaths.join('\u001f');
+    let stackOrder = pendingStackOrder;
+    if (activeRaisedPaths.length > 0) {
+      if (activeStackCache?.base !== pendingStackOrder || activeStackCache.raisedKey !== activeRaisedKey) {
+        activeStackCache = {
+          base: pendingStackOrder,
+          raisedKey: activeRaisedKey,
+          value: canvasStackOrderWithRaisedGroup(pendingStackOrder, activeRaisedPaths)
+        };
+      }
+      stackOrder = activeStackCache.value;
+    }
+    const raisedPaths = new Set([
+      ...submitted.filter((submission) => submission.stackPending)
+        .flatMap((submission) => submission.raisedNodeProjectRelativePaths),
+      ...activeRaisedPaths
+    ]);
     return {
       layoutOverrides: [...merged.values()],
-      stackOrder: sameStackOrder(projectedStackOrder, stackOrder) ? undefined : stackOrder
+      stackOrder: sameStackOrder(projectedStackOrder, stackOrder) ? undefined : stackOrder,
+      raisedNodeProjectRelativePaths: stackOrder.filter((path) => raisedPaths.has(path))
     };
   };
 
   return {
     getPresentation: presentation,
-    getPresentedNodes() {
-      const current = presentation();
-      return canvasNodesWithStackOrder({
-        nodes: canvasNodesWithLayoutOverrides({
-          nodes: projection.nodes,
-          layoutOverrides: current.layoutOverrides
-        }),
-        stackOrder: current.stackOrder
-      });
-    },
     setActiveInteraction(interaction) {
       if (disposed) {
         return;
@@ -195,6 +201,8 @@ export function createCanvasManualLayoutLifecycle(input: {
         throw new Error(`Manual Layout lifecycle for ${input.canvasId} cannot accept Projection ${nextProjection.canvasId}.`);
       }
       projection = nextProjection;
+      projectedStackOrder = canvasNodeStackOrder(projection.nodes);
+      activeStackCache = undefined;
       const nodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
       confirmPendingStackOrders(nodesByPath);
       const confirmedSubmissionByPath = new Map<string, number>();

@@ -1,67 +1,59 @@
 import React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { Boxes } from '../ui/index.js';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
-import type { WorkbenchActions, WorkbenchState } from '../../types';
+import type {
+  CanvasDocument,
+  CanvasFeedbackDocument,
+  CanvasProjection
+} from '@debrute/canvas-core';
+import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import { getCanvasById } from '../services/canvasState';
 import { CanvasSurface } from './CanvasSurface';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
+import type { CanvasEditorActions, CanvasSceneActions } from './CanvasSceneActions.js';
 
 export function CanvasEditor({
-  canvasId,
-  state,
+  canvas,
+  projection,
+  hasProject,
+  projectOpenAttemptedPath,
+  projectOpenError,
+  projectOpening,
   actions,
+  textFileBuffers,
+  canvasFeedback,
+  textPreviewStyleDependencyKey,
   runtimeScopeKey,
   minimapOpen,
   productPlatform,
   cutPaths,
-  onCurrentNodesChange,
   feedbackInteraction,
   onRuntimeChange,
   onOpenContextMenu,
   interactionBlocked = false,
 }: {
-  canvasId: string | undefined;
-  state: WorkbenchState;
-  actions: WorkbenchActions;
+  canvas: CanvasDocument | undefined;
+  projection: CanvasProjection | undefined;
+  hasProject: boolean;
+  projectOpenAttemptedPath?: string | undefined;
+  projectOpenError?: string | undefined;
+  projectOpening: boolean;
+  actions: CanvasEditorActions;
+  textFileBuffers: Record<string, TextFileBuffer>;
+  canvasFeedback: CanvasFeedbackDocument | undefined;
+  textPreviewStyleDependencyKey: string;
   runtimeScopeKey?: number;
   minimapOpen?: boolean | undefined;
   productPlatform: DebruteProductPlatform;
   cutPaths?: readonly string[] | undefined;
-  onCurrentNodesChange?: ((canvasId: string, nodes: ProjectedCanvasNode[] | undefined) => void) | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
   interactionBlocked?: boolean | undefined;
 }): React.ReactElement {
-  const canvas = getCanvasById(state.snapshot, canvasId);
-  const projection = state.snapshot?.projections.find((item) => item.canvasId === canvas?.id);
-  const runtimeKey = canvas && projection
-    ? `${canvas.id}\u001f${projection.canvasId}\u001f${runtimeScopeKey ?? 0}`
-    : undefined;
-  const actionsRef = React.useRef(actions);
-  actionsRef.current = actions;
-  const runtimeInputRef = React.useRef<Parameters<typeof createCanvasEditorRuntime>[0] | undefined>(undefined);
-  runtimeInputRef.current = canvas && projection
-    ? {
-        canvasId: canvas.id,
-        initialProjection: projection,
-        submitManualLayout: (mutation) => actionsRef.current.updateCanvasNodeLayouts(canvas.id, {
-          interaction: mutation.interaction,
-          nodeLayouts: [...mutation.nodeLayouts]
-        })
-      }
-    : undefined;
-  const [runtimeState, setRuntimeState] = React.useState<{
-    key: string;
-    runtime: CanvasEditorRuntime;
-  }>();
-  const runtime = runtimeState && runtimeState.key === runtimeKey ? runtimeState.runtime : undefined;
-
   React.useEffect(() => {
     if (!canvas || !projection) {
       feedbackInteraction?.handleTargetChange(undefined);
@@ -69,14 +61,92 @@ export function CanvasEditor({
     }
   }, [canvas, feedbackInteraction, onRuntimeChange, projection]);
 
+  if (!canvas || !projection) {
+    return (
+      <EmptyCanvas
+        hasProject={hasProject}
+        attemptedPath={projectOpenAttemptedPath}
+        error={projectOpenError}
+        opening={projectOpening}
+        onOpenProject={actions.openProject}
+      />
+    );
+  }
+
+  return (
+    <CanvasScene
+      canvas={canvas}
+      projection={projection}
+      actions={actions}
+      textFileBuffers={textFileBuffers}
+      canvasFeedback={canvasFeedback}
+      textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
+      runtimeScopeKey={runtimeScopeKey}
+      minimapOpen={minimapOpen}
+      productPlatform={productPlatform}
+      cutPaths={cutPaths}
+      feedbackInteraction={feedbackInteraction}
+      onRuntimeChange={onRuntimeChange}
+      onOpenContextMenu={onOpenContextMenu}
+      interactionBlocked={interactionBlocked}
+    />
+  );
+}
+
+interface CanvasSceneProps {
+  canvas: CanvasDocument;
+  projection: CanvasProjection;
+  actions: CanvasSceneActions;
+  textFileBuffers: Record<string, TextFileBuffer>;
+  canvasFeedback: CanvasFeedbackDocument | undefined;
+  textPreviewStyleDependencyKey: string;
+  runtimeScopeKey?: number | undefined;
+  minimapOpen?: boolean | undefined;
+  productPlatform: DebruteProductPlatform;
+  cutPaths?: readonly string[] | undefined;
+  feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
+  onRuntimeChange?: ((runtime: CanvasEditorRuntime | undefined) => void) | undefined;
+  onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
+  interactionBlocked?: boolean | undefined;
+}
+
+const CanvasScene = React.memo(function CanvasScene({
+  canvas,
+  projection,
+  actions,
+  textFileBuffers,
+  canvasFeedback,
+  textPreviewStyleDependencyKey,
+  runtimeScopeKey,
+  minimapOpen,
+  productPlatform,
+  cutPaths,
+  feedbackInteraction,
+  onRuntimeChange,
+  onOpenContextMenu,
+  interactionBlocked = false
+}: CanvasSceneProps): React.ReactElement {
+  const runtimeKey = `${canvas.id}\u001f${projection.canvasId}\u001f${runtimeScopeKey ?? 0}`;
+  const actionsRef = React.useRef(actions);
+  actionsRef.current = actions;
+  const runtimeInput: Parameters<typeof createCanvasEditorRuntime>[0] = {
+    canvasId: canvas.id,
+    initialProjection: projection,
+    submitManualLayout: (mutation) => actionsRef.current.updateCanvasNodeLayouts(canvas.id, {
+      interaction: mutation.interaction,
+      nodeLayouts: [...mutation.nodeLayouts]
+    })
+  };
+  const runtimeInputRef = React.useRef(runtimeInput);
+  runtimeInputRef.current = runtimeInput;
+  const [runtimeState, setRuntimeState] = React.useState<{
+    key: string;
+    runtime: CanvasEditorRuntime;
+  }>();
+  const runtime = runtimeState && runtimeState.key === runtimeKey ? runtimeState.runtime : undefined;
+
   React.useEffect(() => {
-    const runtimeInput = runtimeInputRef.current;
-    if (!runtimeKey || !runtimeInput) {
-      setRuntimeState(undefined);
-      onRuntimeChange?.(undefined);
-      return;
-    }
-    const nextRuntime = createCanvasEditorRuntime(runtimeInput);
+    const nextRuntime = createCanvasEditorRuntime(runtimeInputRef.current);
     setRuntimeState({
       key: runtimeKey,
       runtime: nextRuntime
@@ -87,10 +157,6 @@ export function CanvasEditor({
       nextRuntime.dispose();
     };
   }, [onRuntimeChange, runtimeKey]);
-
-  if (!canvas || !projection) {
-    return <EmptyCanvas hasProject={Boolean(state.snapshot)} state={state} actions={actions} />;
-  }
 
   if (!runtime) {
     return <section className="canvas-shell" data-testid="canvas-runtime-loading" />;
@@ -103,38 +169,41 @@ export function CanvasEditor({
         projection={projection}
         runtime={runtime}
         actions={actions}
-        textFileBuffers={state.textFileBuffers}
-        canvasFeedback={state.canvasFeedback}
+        textFileBuffers={textFileBuffers}
+        canvasFeedback={canvasFeedback}
         feedbackInteraction={feedbackInteraction}
         minimapOpen={minimapOpen}
         productPlatform={productPlatform}
         cutPaths={cutPaths}
-        onCurrentNodesChange={onCurrentNodesChange}
         onOpenContextMenu={onOpenContextMenu}
         interactionBlocked={interactionBlocked}
-        textPreviewStyleDependencyKey={state.resolvedTheme}
+        textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
       />
     </section>
   );
-}
+});
 
 function EmptyCanvas({
   hasProject,
-  state,
-  actions
+  attemptedPath,
+  error,
+  opening,
+  onOpenProject
 }: {
   hasProject: boolean;
-  state: WorkbenchState;
-  actions: WorkbenchActions;
+  attemptedPath?: string | undefined;
+  error?: string | undefined;
+  opening: boolean;
+  onOpenProject(): Promise<void>;
 }): React.ReactElement {
   if (!hasProject) {
     return (
       <div className="empty-editor empty-project">
         <ProjectOpenPanel
-          attemptedPath={state.projectOpen.attemptedPath}
-          error={state.projectOpen.error}
-          opening={state.projectOpen.opening}
-          onOpenProject={() => { void actions.openProject(); }}
+          attemptedPath={attemptedPath}
+          error={error}
+          opening={opening}
+          onOpenProject={() => { void onOpenProject(); }}
         />
       </div>
     );

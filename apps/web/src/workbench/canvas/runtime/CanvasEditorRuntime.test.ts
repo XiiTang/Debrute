@@ -73,6 +73,25 @@ describe('CanvasEditorRuntime', () => {
     }
   });
 
+  it('publishes live Camera listeners before moving-state listeners', () => {
+    const runtime = createRuntime();
+    const publications: unknown[] = [];
+
+    runtime.subscribeCamera((camera) => publications.push([
+      'camera',
+      camera,
+      runtime.getSnapshot().cameraState
+    ]));
+    runtime.subscribeCameraState((state) => publications.push(['cameraState', state]));
+
+    runtime.camera.setCamera({ x: 10, y: 20, z: 1.5 });
+
+    expect(publications).toEqual([
+      ['camera', { x: 10, y: 20, z: 1.5 }, 'moving'],
+      ['cameraState', 'moving']
+    ]);
+  });
+
   it('notifies camera-state subscribers when camera movement starts and settles', () => {
     vi.useFakeTimers();
     const restoreWindow = installBrowserRuntime();
@@ -550,7 +569,7 @@ describe('CanvasEditorRuntime', () => {
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
 
-    runtime.manualLayout.acceptProjection({
+    runtime.acceptProjection({
       canvasId: 'canvas-1',
       nodes: [marqueeNode('flow/b.png', 150, 150)],
       edges: [],
@@ -561,6 +580,36 @@ describe('CanvasEditorRuntime', () => {
       kind: 'nodes',
       projectRelativePaths: ['flow/b.png']
     });
+  });
+
+  it('publishes one coherent scene when Projection replacement invalidates active state', () => {
+    const runtime = createRuntime();
+    runtime.setSelection({
+      kind: 'nodes',
+      projectRelativePaths: ['flow/a.png', 'flow/b.png']
+    });
+    runtime.setContentInteraction('flow/a.png');
+    runtime.input.beginNodeMove({
+      pointerId: 41,
+      projectRelativePath: 'flow/a.png',
+      screenPoint: { x: 0, y: 0 }
+    });
+    runtime.input.updatePointerInteraction({ pointerId: 41, screenPoint: { x: 20, y: 0 } });
+    const renderChanges: unknown[] = [];
+    const presentationChanges: unknown[] = [];
+    runtime.scene.subscribeRenderSnapshot(() => renderChanges.push(runtime.scene.getRenderSnapshot()));
+    runtime.scene.subscribePresentation((update) => presentationChanges.push(update));
+
+    runtime.acceptProjection(canvasProjection('flow/b.png', 30));
+
+    expect(renderChanges).toHaveLength(1);
+    expect(presentationChanges).toEqual([]);
+    expect(runtime.getSnapshot()).toMatchObject({
+      pointerInteraction: undefined,
+      contentInteractionProjectRelativePath: undefined,
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/b.png'] }
+    });
+    expect([...runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['flow/b.png']);
   });
 
   it('keeps node pointer interaction in the runtime snapshot', async () => {
@@ -690,10 +739,8 @@ describe('CanvasEditorRuntime', () => {
       kind: 'nodes',
       projectRelativePaths: ['flow/a.png']
     });
-    expect(runtime.manualLayout.getPresentation().layoutOverrides).toEqual([
-      { projectRelativePath: 'flow/a.png', x: 20, y: 35, width: 100, height: 80 },
-      { projectRelativePath: 'flow/b.png', x: 40, y: 55, width: 100, height: 80 }
-    ]);
+    expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({ x: 20, y: 35 });
+    expect(runtime.scene.getPresentedNodes().get('flow/b.png')).toMatchObject({ x: 40, y: 55 });
   });
 
   it('raises a selected move group only after the existing movement threshold activates it', () => {
@@ -717,18 +764,16 @@ describe('CanvasEditorRuntime', () => {
       projectRelativePath: 'b.png',
       screenPoint: { x: 0, y: 0 }
     });
-    expect(runtime.manualLayout.getPresentation().stackOrder).toBeUndefined();
+    expect(runtime.scene.getPresentedNodes().get('b.png')?.z).toBe(1);
+    expect(runtime.scene.getPresentedNodes().get('d.png')?.z).toBe(3);
 
     runtime.input.updatePointerInteraction({ pointerId: 20, screenPoint: { x: 5, y: 0 } });
-    expect(runtime.manualLayout.getPresentation().stackOrder).toEqual([
-      'a.png',
-      'c.png',
-      'b.png',
-      'd.png'
-    ]);
+    expect(runtime.scene.getPresentedNodes().get('b.png')?.z).toBe(4);
+    expect(runtime.scene.getPresentedNodes().get('d.png')?.z).toBe(5);
 
     runtime.input.cancelPointerInteraction(20);
-    expect(runtime.manualLayout.getPresentation().stackOrder).toBeUndefined();
+    expect(runtime.scene.getPresentedNodes().get('b.png')?.z).toBe(1);
+    expect(runtime.scene.getPresentedNodes().get('d.png')?.z).toBe(3);
   });
 
   it('raises only the resized node as soon as its handle is pressed', () => {
@@ -754,7 +799,7 @@ describe('CanvasEditorRuntime', () => {
       modifiers: noModifiers()
     });
 
-    expect(runtime.manualLayout.getPresentation().stackOrder).toEqual(['b.png', 'a.png']);
+    expect(runtime.scene.getPresentedNodes().get('a.png')?.z).toBe(2);
   });
 
   it('does not notify broad snapshot subscribers for pointer move drag previews', () => {
@@ -775,6 +820,36 @@ describe('CanvasEditorRuntime', () => {
 
     expect(updated).toBe(true);
     expect(snapshots).toEqual([]);
+  });
+
+  it('keeps the render snapshot stable while publishing current scene geometry', () => {
+    const runtime = createRuntime();
+    const renderSnapshot = runtime.scene.getRenderSnapshot();
+    const renderChanges: unknown[] = [];
+    const presentationChanges: unknown[] = [];
+    runtime.scene.subscribeRenderSnapshot(() => renderChanges.push(runtime.scene.getRenderSnapshot()));
+    runtime.scene.subscribePresentation((update) => presentationChanges.push(update));
+
+    runtime.input.beginNodeMove({
+      pointerId: 7,
+      screenPoint: { x: 0, y: 0 },
+      projectRelativePath: 'flow/a.png'
+    });
+    runtime.input.updatePointerInteraction({
+      pointerId: 7,
+      screenPoint: { x: 20, y: 30 }
+    });
+
+    expect(runtime.scene.getRenderSnapshot()).toBe(renderSnapshot);
+    expect(renderChanges).toEqual([]);
+    expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({
+      x: 30,
+      y: 50,
+      z: 2
+    });
+    expect(runtime.scene.queryNodePaths({ x: 25, y: 45, width: 110, height: 90 }))
+      .toContain('flow/a.png');
+    expect(presentationChanges).toHaveLength(1);
   });
 
   it('updates directory resize aspect behavior from live modifiers', () => {
@@ -826,14 +901,10 @@ describe('CanvasEditorRuntime', () => {
       projectRelativePath: 'flow/a.png',
       screenPoint: { x: 20, y: 0 }
     });
-    expect(runtime.manualLayout.getPresentation().layoutOverrides).toEqual([
-      { projectRelativePath: 'flow/a.png', x: 20, y: 0, width: 100, height: 80 }
-    ]);
+    expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({ x: 20, y: 0 });
 
     runtime.input.updatePointerInteraction({ pointerId: 2, screenPoint: { x: 25, y: 0 } });
-    expect(runtime.manualLayout.getPresentation().layoutOverrides).toEqual([
-      { projectRelativePath: 'flow/a.png', x: 25, y: 0, width: 100, height: 80 }
-    ]);
+    expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({ x: 25, y: 0 });
   });
 
   it('invalidates Manual Layout presentation when its Runtime submission rejects', async () => {
@@ -844,8 +915,8 @@ describe('CanvasEditorRuntime', () => {
       initialProjection: canvasProjection('flow/a.png', 0),
       submitManualLayout
     });
-    const rejections: boolean[] = [];
-    runtime.manualLayout.subscribeRejection(() => rejections.push(true));
+    const presentationUpdates: unknown[] = [];
+    runtime.scene.subscribePresentation((update) => presentationUpdates.push(update));
     runtime.input.beginNodeMove({
       pointerId: 1,
       projectRelativePath: 'flow/a.png',
@@ -855,12 +926,40 @@ describe('CanvasEditorRuntime', () => {
 
     const submission = runtime.input.finishPointerInteraction({ pointerId: 1 });
     expect(submitManualLayout).toHaveBeenCalledOnce();
-    expect(runtime.manualLayout.getPresentation().layoutOverrides).toHaveLength(1);
+    expect(runtime.scene.getPresentedNodes().get('flow/a.png')?.x).toBe(20);
+    const updatesBeforeRejection = presentationUpdates.length;
 
     request.reject(new Error('layout write failed'));
     await expect(submission).rejects.toThrow('layout write failed');
-    expect(rejections).toEqual([true]);
-    expect(runtime.manualLayout.getPresentation().layoutOverrides).toEqual([]);
+    expect(presentationUpdates).toHaveLength(updatesBeforeRejection + 1);
+    expect(runtime.scene.getPresentedNodes().get('flow/a.png')?.x).toBe(0);
+  });
+
+  it('owns content interaction independently from node selection', () => {
+    const runtime = createRuntime();
+    const changes: Array<string | undefined> = [];
+    runtime.subscribeContentInteraction((path) => changes.push(path));
+
+    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
+
+    runtime.setContentInteraction('flow/a.png');
+    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.png'] });
+
+    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe('flow/a.png');
+    expect(changes).toEqual(['flow/a.png']);
+  });
+
+  it('rejects missing content interaction paths and clears an active path removed by Projection', () => {
+    const runtime = createRuntime();
+
+    runtime.setContentInteraction('missing.png');
+    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
+
+    runtime.setContentInteraction('flow/a.png');
+    runtime.acceptProjection(canvasProjection('flow/b.png', 0));
+
+    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
   });
 });
 

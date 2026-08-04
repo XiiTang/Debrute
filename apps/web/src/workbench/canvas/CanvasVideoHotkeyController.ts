@@ -4,7 +4,7 @@ export interface CanvasVideoHotkeyEvent {
   key: string;
   shiftKey: boolean;
   preventDefault: () => void;
-  selectedVideoPath: string | undefined;
+  contentActiveVideoPath: string | undefined;
   activeElement: Element | null;
 }
 
@@ -29,15 +29,15 @@ export function createCanvasVideoHotkeyController(options: {
       if (shouldLetFocusedElementHandleKey(event.activeElement)) {
         return false;
       }
-      if (!event.selectedVideoPath) {
+      if (!event.contentActiveVideoPath) {
         return false;
       }
-      const target = targets.get(event.selectedVideoPath);
+      const target = targets.get(event.contentActiveVideoPath);
       if (!target) {
         if (!isVideoShortcutKey(event.key)) {
           return false;
         }
-        options.requestTargetMount(event.selectedVideoPath);
+        options.requestTargetMount(event.contentActiveVideoPath);
         event.preventDefault();
         return true;
       }

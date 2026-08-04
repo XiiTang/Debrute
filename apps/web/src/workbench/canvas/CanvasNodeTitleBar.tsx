@@ -5,26 +5,18 @@ export interface CanvasNodeTitleBarProps {
   title: string;
   status?: React.ReactNode | undefined;
   actions?: React.ReactNode | undefined;
-  onPointerDown?: ((event: React.PointerEvent<HTMLDivElement>) => void) | undefined;
-  onPointerMove?: ((event: React.PointerEvent<HTMLDivElement>) => void) | undefined;
-  onPointerUp?: ((event: React.PointerEvent<HTMLDivElement>) => void) | undefined;
 }
 
 export function CanvasNodeTitleBar({
   icon,
   title,
   status,
-  actions,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp
+  actions
 }: CanvasNodeTitleBarProps): React.ReactElement {
   return (
     <div
       className="db-canvas-node-titlebar"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
+      data-canvas-node-zone="move"
     >
       {icon}
       <strong>{title}</strong>
