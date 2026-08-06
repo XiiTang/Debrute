@@ -1,10 +1,7 @@
 import React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { Boxes } from '../ui/index.js';
-import type {
-  CanvasFeedbackDocument,
-  CanvasState
-} from '@debrute/app-protocol';
+import type { CanvasFeedbackDocument, CanvasState } from '@debrute/app-protocol';
 import type { CanvasProjection } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
@@ -15,15 +12,8 @@ import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
 import type { CanvasEditorActions, CanvasSceneActions } from './CanvasSceneActions.js';
 
-const EMPTY_CANVAS_STATE: CanvasState = {
-  expandedDirectories: [],
-  nodeStates: {},
-  occlusionOrder: []
-};
-
 export function CanvasEditor({
-  canvasState,
-  projection,
+  canvas,
   hasProject,
   projectOpenAttemptedPath,
   projectOpenError,
@@ -41,8 +31,7 @@ export function CanvasEditor({
   onOpenContextMenu,
   interactionBlocked = false,
 }: {
-  canvasState?: CanvasState | undefined;
-  projection: CanvasProjection | undefined;
+  canvas: { state: CanvasState; projection: CanvasProjection } | undefined;
   hasProject: boolean;
   projectOpenAttemptedPath?: string | undefined;
   projectOpenError?: string | undefined;
@@ -60,6 +49,7 @@ export function CanvasEditor({
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
   interactionBlocked?: boolean | undefined;
 }): React.ReactElement {
+  const projection = canvas?.projection;
   React.useEffect(() => {
     if (!projection) {
       feedbackInteraction?.handleTargetChange(undefined);
@@ -81,8 +71,8 @@ export function CanvasEditor({
 
   return (
     <CanvasScene
-      canvasState={canvasState ?? EMPTY_CANVAS_STATE}
-      projection={projection}
+      canvasState={canvas.state}
+      projection={canvas.projection}
       actions={actions}
       textFileBuffers={textFileBuffers}
       canvasFeedback={canvasFeedback}

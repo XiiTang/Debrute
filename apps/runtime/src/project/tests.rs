@@ -272,6 +272,93 @@ fn reset_canvas_returns_the_exact_persistence_failure() {
 }
 
 #[test]
+fn reset_canvas_persistence_failure_preserves_available_state() {
+    let (base, root, _) = fixture();
+    let home = base.join("available-reset-home");
+    let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
+    let mut service =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let patch = serde_json::from_value(serde_json::json!({
+        "nodeStateUpdates": [{
+            "projectRelativePath": "visible.txt",
+            "manualLayout": {"x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0}
+        }]
+    }))
+    .unwrap();
+    service.patch_canvas_state(&patch).unwrap();
+    let before = service.snapshot().clone();
+    let canvas_path =
+        crate::global::root_state_directory(&home, &canonical_root).join("canvas.json");
+    fs::remove_file(&canvas_path).unwrap();
+    fs::create_dir(&canvas_path).unwrap();
+
+    let error = service.reset_canvas().unwrap_err();
+
+    assert_eq!(error.code(), "canvas_workspace_persistence_failed");
+    assert_eq!(service.snapshot(), &before);
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn invalid_canvas_patch_leaves_all_project_state_unchanged() {
+    let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
+    let home = base.join("home");
+    let root = base.join("project");
+    fs::create_dir_all(root.join("assets")).unwrap();
+    fs::write(root.join("visible.txt"), "hello").unwrap();
+    let mut service =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let feedback = serde_json::from_value(serde_json::json!({
+        "operation": "set-mark",
+        "projectRelativePaths": ["visible.txt"],
+        "mark": "like",
+        "selected": true
+    }))
+    .unwrap();
+    service.update_canvas_feedback(&feedback).unwrap();
+    let before_snapshot = service.snapshot().clone();
+    let before_feedback = service.canvas_feedback().clone();
+
+    let patch = serde_json::from_value(serde_json::json!({
+        "expandedDirectories": ["assets"],
+        "nodeStateUpdates": [{
+            "projectRelativePath": "missing.txt",
+            "manualLayout": {"x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0}
+        }]
+    }))
+    .unwrap();
+    assert_eq!(
+        service.patch_canvas_state(&patch).unwrap_err().to_string(),
+        "Project path not found: missing.txt"
+    );
+
+    assert_eq!(service.snapshot(), &before_snapshot);
+    assert_eq!(service.canvas_feedback(), &before_feedback);
+    assert!(!service.is_loaded_watch_path("assets/new.txt"));
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn idempotent_canvas_patch_does_not_report_a_change() {
+    let (base, root, registry) = fixture();
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .unwrap();
+    let patch = serde_json::from_value(serde_json::json!({"expandedDirectories": []})).unwrap();
+    let before = opened.session.sync_snapshot().unwrap();
+
+    opened
+        .session
+        .execute(ProjectCommand::PatchCanvasState { patch })
+        .unwrap();
+
+    assert_eq!(opened.session.sync_snapshot().unwrap(), before);
+    drop(opened);
+    registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn confirmed_external_replacement_prunes_sparse_canvas_state() {
     let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
     let home = base.join("home");

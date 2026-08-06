@@ -97,6 +97,18 @@ pub(super) fn apply_canvas_state_patch(
     state: &CanvasState,
     patch: &CanvasStatePatch,
 ) -> Result<CanvasState, ProjectError> {
+    if patch
+        .node_state_updates
+        .as_ref()
+        .is_some_and(|updates| updates.iter().any(CanvasNodeStateUpdate::is_empty))
+        || (patch.expanded_directories.is_none()
+            && patch.occlusion_order.is_none()
+            && patch.node_state_updates.as_ref().is_none_or(Vec::is_empty))
+    {
+        return Err(ProjectError::Validation(
+            "Canvas patch must contain an explicit state change.".to_owned(),
+        ));
+    }
     let mut next = state.clone();
     if let Some(expanded) = &patch.expanded_directories {
         next.expanded_directories.clone_from(expanded);
@@ -125,6 +137,14 @@ pub(super) fn apply_canvas_state_patch(
     }
     validate_canvas_state(&next)?;
     Ok(normalize_canvas_state(next))
+}
+
+impl CanvasNodeStateUpdate {
+    fn is_empty(&self) -> bool {
+        self.manual_layout == CanvasPatchField::Unchanged
+            && self.video_playback == CanvasPatchField::Unchanged
+            && self.text_viewport == CanvasPatchField::Unchanged
+    }
 }
 
 #[must_use]
@@ -366,6 +386,44 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "Canvas occlusionOrder contains a duplicate path: cover.png"
+        );
+    }
+
+    #[test]
+    fn generic_patch_requires_an_explicit_change() {
+        let state = CanvasState::default();
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"nodeStateUpdates": []}),
+            serde_json::json!({
+                "nodeStateUpdates": [{"projectRelativePath": "note.txt"}]
+            }),
+        ] {
+            let patch = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                apply_canvas_state_patch(&state, &patch)
+                    .unwrap_err()
+                    .to_string(),
+                "Canvas patch must contain an explicit state change."
+            );
+        }
+    }
+
+    #[test]
+    fn generic_patch_accepts_explicit_empty_collections() {
+        let state = CanvasState {
+            expanded_directories: vec!["assets".to_owned()],
+            node_states: BTreeMap::new(),
+            occlusion_order: vec!["cover.png".to_owned()],
+        };
+        let patch = serde_json::from_value(serde_json::json!({
+            "expandedDirectories": [],
+            "occlusionOrder": []
+        }))
+        .unwrap();
+        assert_eq!(
+            apply_canvas_state_patch(&state, &patch).unwrap(),
+            CanvasState::default()
         );
     }
 

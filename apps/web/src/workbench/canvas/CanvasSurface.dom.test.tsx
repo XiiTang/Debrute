@@ -63,6 +63,12 @@ function I18nProvider({
   );
 }
 
+const emptyCanvasState: CanvasState = {
+  expandedDirectories: [],
+  nodeStates: {},
+  occlusionOrder: []
+};
+
 const {
   videoTogglePlaybackSpy,
   videoPauseAtSpy,
@@ -401,6 +407,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -534,6 +541,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -642,6 +650,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -756,6 +765,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -905,6 +915,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1017,6 +1028,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1374,6 +1386,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1418,6 +1431,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1467,6 +1481,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1492,6 +1507,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1549,6 +1565,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
@@ -1601,6 +1618,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
@@ -1655,6 +1673,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1762,6 +1781,7 @@ describe('CanvasSurface', () => {
             <I18nProvider locale="en">
               <CanvasSurface
                 productPlatform="darwin"
+                canvasState={emptyCanvasState}
                 projection={projection}
                 runtime={runtime}
                 actions={{
@@ -2174,6 +2194,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -2254,6 +2275,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -2354,6 +2376,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -2397,7 +2420,10 @@ describe('CanvasSurface', () => {
     const html = renderToStaticMarkup(
       <CanvasEditor
         productPlatform="darwin"
-        projection={projection}
+        canvas={{
+          state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
+          projection
+        }}
         hasProject
         projectOpening={false}
         actions={actions}
@@ -2442,6 +2468,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -2499,6 +2526,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
+              canvasState={emptyCanvasState}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -2886,7 +2914,7 @@ function surface(
     <I18nProvider locale="en">
       <CanvasSurface
         productPlatform="darwin"
-        canvasState={input.canvasState}
+        canvasState={input.canvasState ?? emptyCanvasState}
         projection={projection}
         runtime={runtime}
         actions={input.actions ?? actions}

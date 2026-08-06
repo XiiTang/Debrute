@@ -98,6 +98,9 @@ impl ProjectTree {
     fn reload_loaded_inner(&mut self) -> Result<ProjectTreeChange, ProjectError> {
         let mut change = ProjectTreeChange::default();
         for directory in self.loaded_directory_paths() {
+            if change.invalidates(&directory) {
+                continue;
+            }
             match list_project_directory(&self.root, &directory) {
                 Ok(children) => {
                     change.extend(self.replace_directory_entries(&directory, children)?);
@@ -135,9 +138,10 @@ impl ProjectTree {
         let mut blocked_roots = Vec::<String>::new();
         let mut change = ProjectTreeChange::default();
         for directory in directories {
-            if blocked_roots
-                .iter()
-                .any(|root| directory == *root || directory.starts_with(&format!("{root}/")))
+            if change.invalidates(&directory)
+                || blocked_roots
+                    .iter()
+                    .any(|root| super::project_path_is_same_or_descendant(&directory, root))
             {
                 continue;
             }
@@ -220,6 +224,9 @@ impl ProjectTree {
             .collect::<BTreeSet<_>>();
         let mut change = ProjectTreeChange::default();
         for directory in directories {
+            if change.invalidates(&directory) {
+                continue;
+            }
             match list_project_directory(&self.root, &directory) {
                 Ok(children) => {
                     change.extend(self.replace_directory_entries(&directory, children)?);
@@ -273,6 +280,9 @@ impl ProjectTree {
             .collect::<BTreeSet<_>>();
         let mut change = ProjectTreeChange::default();
         for directory in directories {
+            if change.invalidates(&directory) {
+                continue;
+            }
             match list_project_directory(&self.root, &directory) {
                 Ok(children) => {
                     change.extend(self.replace_directory_entries(&directory, children)?);
@@ -370,25 +380,22 @@ impl ProjectTree {
 
         let mut recreated = Vec::new();
         for (mut child, identity) in identified_children {
-            if child.kind == ProjectPathKind::Directory
-                && let Some(previous) = self.entries.get(&child.project_relative_path)
-                && previous.public.kind == ProjectPathKind::Directory
-                && matches!(
-                    previous.public.directory_state,
-                    Some(ProjectDirectoryState::Loaded | ProjectDirectoryState::Error)
-                )
-            {
-                child.directory_state = previous.public.directory_state;
-                child
-                    .directory_error
-                    .clone_from(&previous.public.directory_error);
-            }
-            if self
-                .entries
-                .get(&child.project_relative_path)
-                .is_some_and(|previous| previous.identity != identity)
-            {
+            let previous = self.entries.get(&child.project_relative_path).cloned();
+            let same_object = previous.as_ref().is_some_and(|previous| {
+                previous.identity == identity && previous.public.kind == child.kind
+            });
+            if same_object {
+                if child.kind == ProjectPathKind::Directory
+                    && let Some(previous) = &previous
+                {
+                    child.directory_state = previous.public.directory_state;
+                    child
+                        .directory_error
+                        .clone_from(&previous.public.directory_error);
+                }
+            } else if previous.is_some() {
                 recreated.push(child.project_relative_path.clone());
+                self.remove_path(&child.project_relative_path);
             }
             self.entries.insert(
                 child.project_relative_path.clone(),
@@ -490,5 +497,144 @@ impl ProjectTreeChange {
         self.confirmed_missing_paths
             .extend(other.confirmed_missing_paths);
         self.identity_reset_paths.extend(other.identity_reset_paths);
+    }
+
+    fn invalidates(&self, path: &str) -> bool {
+        self.confirmed_missing_paths
+            .iter()
+            .chain(&self.identity_reset_paths)
+            .any(|root| super::project_path_is_same_or_descendant(path, root))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use uuid::Uuid;
+
+    use super::*;
+
+    #[test]
+    fn replaced_directory_discards_descendants_and_stays_unloaded() {
+        let root = fixture_root();
+        fs::create_dir_all(root.join("assets/nested")).unwrap();
+        fs::write(root.join("assets/nested/old.txt"), "old").unwrap();
+        let mut tree = loaded_tree(&root, &["assets", "assets/nested"]);
+
+        fs::remove_dir_all(root.join("assets")).unwrap();
+        fs::create_dir(root.join("assets")).unwrap();
+        fs::write(root.join("assets/new.txt"), "new").unwrap();
+
+        let change = tree.reload_loaded().unwrap();
+
+        assert_eq!(change.identity_reset_paths, vec!["assets"]);
+        assert_eq!(
+            tree.entry("assets").unwrap().directory_state,
+            Some(ProjectDirectoryState::Unloaded)
+        );
+        assert!(tree.entry("assets/nested").is_none());
+        assert!(tree.entry("assets/nested/old.txt").is_none());
+        assert!(tree.entry("assets/new.txt").is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn same_directory_identity_retains_loaded_descendants() {
+        let root = fixture_root();
+        fs::create_dir_all(root.join("assets/nested")).unwrap();
+        fs::write(root.join("assets/nested/old.txt"), "old").unwrap();
+        let mut tree = loaded_tree(&root, &["assets", "assets/nested"]);
+
+        fs::write(root.join("assets/new.txt"), "new").unwrap();
+        tree.reload_loaded().unwrap();
+
+        assert_eq!(
+            tree.entry("assets").unwrap().directory_state,
+            Some(ProjectDirectoryState::Loaded)
+        );
+        assert_eq!(
+            tree.entry("assets/nested").unwrap().directory_state,
+            Some(ProjectDirectoryState::Loaded)
+        );
+        assert!(tree.entry("assets/nested/old.txt").is_some());
+        assert!(tree.entry("assets/new.txt").is_some());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn kind_change_discards_the_previous_subtree() {
+        let root = fixture_root();
+        fs::create_dir_all(root.join("entry/nested")).unwrap();
+        fs::write(root.join("entry/nested/old.txt"), "old").unwrap();
+        let mut tree = loaded_tree(&root, &["entry", "entry/nested"]);
+
+        fs::remove_dir_all(root.join("entry")).unwrap();
+        fs::write(root.join("entry"), "file").unwrap();
+        let change = tree.reload_loaded().unwrap();
+
+        assert_eq!(change.identity_reset_paths, vec!["entry"]);
+        assert_eq!(tree.entry("entry").unwrap().kind, ProjectPathKind::File);
+        assert!(tree.entry("entry/nested").is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_refresh_preserves_the_complete_tree() {
+        let root = fixture_root();
+        fs::create_dir(root.join("assets")).unwrap();
+        let mut tree = loaded_tree(&root, &["assets"]);
+        let before = tree.ordered_entries();
+
+        fs::remove_dir_all(&root).unwrap();
+        assert!(tree.reload_loaded().is_err());
+        assert_eq!(tree.ordered_entries(), before);
+    }
+
+    #[test]
+    fn runtime_rename_and_watcher_echo_keep_the_same_identity() {
+        let root = fixture_root();
+        fs::write(root.join("before.txt"), "content").unwrap();
+        let mut tree = loaded_tree(&root, &[]);
+        let before_identity = tree.entries["before.txt"].identity;
+        let before_kind = tree.entries["before.txt"].public.kind;
+
+        fs::rename(root.join("before.txt"), root.join("after.txt")).unwrap();
+        assert_eq!(
+            path_identity(&root, "after.txt").unwrap(),
+            Some(before_identity)
+        );
+        assert_eq!(before_kind, ProjectPathKind::File);
+        let committed = tree
+            .refresh_after_mutation(
+                &["after.txt".to_owned()],
+                &[("before.txt".to_owned(), "after.txt".to_owned())],
+            )
+            .unwrap();
+        let echoed = tree
+            .refresh_watched_paths(&[ProjectWatchPath {
+                project_relative_path: "after.txt".to_owned(),
+                resets_identity: true,
+            }])
+            .unwrap();
+
+        assert_eq!(committed.identity_reset_paths, Vec::<String>::new());
+        assert!(echoed.identity_reset_paths.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn fixture_root() -> PathBuf {
+        let root = std::env::temp_dir().join(format!("debrute-project-tree-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn loaded_tree(root: &Path, directories: &[&str]) -> ProjectTree {
+        let mut tree = ProjectTree::new(root.to_owned());
+        tree.load_directories(&[String::new()]).unwrap();
+        for directory in directories {
+            tree.load_directories(&[(*directory).to_owned()]).unwrap();
+        }
+        tree
     }
 }

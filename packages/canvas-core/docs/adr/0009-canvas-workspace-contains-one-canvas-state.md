@@ -35,7 +35,8 @@ Missing state creates the empty document above. Invalid, unreadable, or
 root-mismatched state remains unchanged and makes Canvas unavailable without
 blocking Project open. Runtime does not repair, migrate, salvage, or fall back
 to another shape. **Reset Canvas** atomically writes the empty state without a
-confirmation or backup; a write failure leaves Canvas unavailable.
+confirmation or backup; a write failure preserves the exact prior Canvas
+availability and state.
 
 The available Project snapshot publishes this document and one
 `canvasResources` view derived from it. Workbench derives scene geometry and

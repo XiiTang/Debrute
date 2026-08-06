@@ -5,6 +5,8 @@ import type { CanvasProjection } from './CanvasScene.js';
 import type { CanvasEditorActions } from './CanvasSceneActions.js';
 import { CanvasEditor } from './CanvasEditor.js';
 
+const canvasState = { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] };
+
 const { canvasSurfaceRenderSpy } = vi.hoisted(() => ({
   canvasSurfaceRenderSpy: vi.fn()
 }));
@@ -35,7 +37,7 @@ describe('CanvasEditor', () => {
       await act(async () => {
         root.render(
           <CanvasEditor
-            projection={projection}
+            canvas={{ state: canvasState, projection }}
             hasProject
             projectOpening={false}
             actions={actions}
@@ -52,7 +54,7 @@ describe('CanvasEditor', () => {
       await act(async () => {
         root.render(
           <CanvasEditor
-            projection={projection}
+            canvas={{ state: canvasState, projection }}
             hasProject
             projectOpenError="unrelated project-open presentation update"
             projectOpening={false}

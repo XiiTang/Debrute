@@ -113,8 +113,7 @@ and enforced by Rust and contract tests.
 - [Text Preview DOM Is The Visual Authority](../../packages/canvas-core/docs/adr/0006-text-preview-dom-is-the-visual-authority.md)
 - [Preview Maintenance Shares Presentation, Not Source Execution](../../packages/canvas-core/docs/adr/0007-preview-maintenance-shares-scheduling-not-execution.md)
 - [Project Tree Defines Canvas Membership](../../packages/canvas-core/docs/adr/0008-project-tree-defines-canvas-membership.md)
-- [Canvas Workspace Is Root-Scoped Global State (superseded)](../../packages/canvas-core/docs/adr/0009-canvas-workspace-is-root-scoped-global-state.md)
-- [Canvas Workspace Contains One Canvas State](../../packages/canvas-core/docs/adr/0010-canvas-workspace-contains-one-canvas-state.md)
+- [Canvas Workspace Contains One Canvas State](../../packages/canvas-core/docs/adr/0009-canvas-workspace-contains-one-canvas-state.md)
 
 ## Capability Decisions
 

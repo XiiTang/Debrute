@@ -7,7 +7,7 @@ Canvas state; Workbench owns scene geometry and interaction.
 The complete contracts are
 [Project Tree membership](../packages/canvas-core/docs/adr/0008-project-tree-defines-canvas-membership.md)
 and
-[single root-scoped Canvas state](../packages/canvas-core/docs/adr/0010-canvas-workspace-contains-one-canvas-state.md).
+[single root-scoped Canvas state](../packages/canvas-core/docs/adr/0009-canvas-workspace-contains-one-canvas-state.md).
 
 ## Runtime Authority
 

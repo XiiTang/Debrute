@@ -38,6 +38,15 @@ Rename or Move rewrites every matching Canvas path; moving a directory rewrites
 the prefix of all retained descendant state. Manual rectangles keep their
 absolute coordinates while hierarchy edges change.
 
+Each refresh enumerates into a Project Tree copy and publishes only after the
+complete refresh succeeds. A direct child at the same path retains loaded
+descendants only when both its filesystem identity and kind are unchanged. An
+identity or file/directory kind change removes that path and every indexed
+descendant, then inserts the current entry; a replacement directory begins
+`unloaded`. Remaining refresh work beneath the replaced path is obsolete and
+is skipped. External renames are observed as deletion plus addition; Runtime
+does not infer or migrate them by inode.
+
 ## Folder Disclosure
 
 Canvas persists an ordered-set value `expandedDirectories`. Default Canvas
@@ -149,14 +158,19 @@ Workbench sends every durable Canvas state change through one
 `patchCanvasState` command. A patch may replace Folder
 Disclosure or `occlusionOrder`, and may set or delete complete node-local
 Manual Layout, Playback Position, and Text Viewport values. Runtime validates
-current Project paths, normalizes the sparse result, writes the Canvas Workspace
-Document atomically, and publishes one complete Project snapshot. There are no
-separate Runtime commands for layout, reset, playback, text viewport,
-disclosure, reveal, selection raise, or scene projection.
+current Project paths against a staged Project Tree, normalizes the sparse
+result, writes the Canvas Workspace Document atomically, and publishes one
+complete Project snapshot. An empty patch, an empty `nodeStateUpdates`-only
+patch, or a node update containing only its path is invalid. Explicit empty
+Folder Disclosure and Occlusion Order arrays are valid clears. Repeating the
+current value is a valid no-op and publishes no revision. A failed validation
+discards the staged Project Tree and leaves Canvas and Feedback unchanged.
+There are no separate Runtime commands for layout, reset, playback, text
+viewport, disclosure, reveal, selection raise, or scene projection.
 
 Malformed, unreadable, or root-mismatched Canvas JSON remains unchanged but
 does not block Project open. Project Tree, editor, and terminal remain
 available while Canvas is unavailable. The user may explicitly reset the whole
 Canvas state to the empty default without confirmation or backup; failure to
-persist that reset leaves Canvas unavailable. Feedback loading keeps
-its separate Project-owned contract.
+persist that reset preserves the exact prior Canvas availability and state.
+Feedback loading keeps its separate Project-owned contract.

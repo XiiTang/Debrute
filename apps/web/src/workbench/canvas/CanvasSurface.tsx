@@ -92,11 +92,6 @@ import {
 } from './canvasSurfaceSupport';
 
 const EMPTY_FEEDBACK_ITEM_IDS: ReadonlySet<string> = new Set();
-const EMPTY_CANVAS_STATE: CanvasState = {
-  expandedDirectories: [],
-  nodeStates: {},
-  occlusionOrder: []
-};
 
 interface CanvasPreviewActivationCandidate {
   pointerId: number;
@@ -105,7 +100,7 @@ interface CanvasPreviewActivationCandidate {
 }
 
 interface CanvasSurfaceProps {
-  canvasState?: CanvasState | undefined;
+  canvasState: CanvasState;
   projection: CanvasProjection;
   runtime: CanvasEditorRuntime;
   actions: CanvasSceneActions;
@@ -121,7 +116,7 @@ interface CanvasSurfaceProps {
 }
 
 export function CanvasSurface({
-  canvasState = EMPTY_CANVAS_STATE,
+  canvasState,
   projection,
   runtime,
   actions,
@@ -179,7 +174,7 @@ export function CanvasSurface({
 }
 
 function CanvasSurfaceRuntime({
-  canvasState = EMPTY_CANVAS_STATE,
+  canvasState,
   projection,
   runtime,
   actions,

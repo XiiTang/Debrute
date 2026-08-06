@@ -584,9 +584,11 @@ impl ProjectService {
         let current = self.available_canvas_workspace()?.state.clone();
         let next = apply_canvas_state_patch(&current, patch)?;
         let directories = disclosed_directory_closure(&next);
-        let change = self.project_tree.load_directories(&directories)?;
+        let mut project_tree = self.project_tree.clone();
+        let change = project_tree.load_directories(&directories)?;
+        Self::validate_canvas_state_paths_in(&project_tree, &next)?;
+        self.project_tree = project_tree;
         let invalidated = self.apply_project_tree_change(&change)?;
-        self.validate_canvas_state_paths(&next)?;
         if next == current {
             if invalidated.is_empty() {
                 return Ok((self.snapshot.clone(), false));
@@ -602,12 +604,15 @@ impl ProjectService {
             .map(|snapshot| (snapshot, true))
     }
 
-    fn validate_canvas_state_paths(&self, state: &CanvasState) -> Result<(), ProjectError> {
+    fn validate_canvas_state_paths_in(
+        project_tree: &ProjectTree,
+        state: &CanvasState,
+    ) -> Result<(), ProjectError> {
         for directory in &state.expanded_directories {
-            self.require_project_directory(directory)?;
+            Self::require_project_directory_in(project_tree, directory)?;
         }
         for path in state.node_states.keys().chain(state.occlusion_order.iter()) {
-            self.require_project_path(path)?;
+            Self::require_project_path_in(project_tree, path)?;
         }
         Ok(())
     }
@@ -1059,13 +1064,16 @@ impl ProjectService {
         Ok(())
     }
 
-    fn require_project_directory(&self, path: &str) -> Result<(), ProjectError> {
+    fn require_project_directory_in(
+        project_tree: &ProjectTree,
+        path: &str,
+    ) -> Result<(), ProjectError> {
         let normalized = if path.is_empty() {
             String::new()
         } else {
             super::normalize_project_relative_path(path)?
         };
-        match self.project_tree.entry(&normalized) {
+        match project_tree.entry(&normalized) {
             Some(entry) if entry.kind == ProjectPathKind::Directory => Ok(()),
             _ => Err(ProjectError::Validation(format!(
                 "Project directory not found: {path}"
@@ -1073,8 +1081,8 @@ impl ProjectService {
         }
     }
 
-    fn require_project_path(&self, path: &str) -> Result<(), ProjectError> {
-        self.project_tree
+    fn require_project_path_in(project_tree: &ProjectTree, path: &str) -> Result<(), ProjectError> {
+        project_tree
             .entry(path)
             .map(|_| ())
             .ok_or_else(|| ProjectError::Validation(format!("Project path not found: {path}")))

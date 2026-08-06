@@ -580,6 +580,11 @@ function WorkbenchBoundProjectApp({
       : undefined
   ), [availableCanvasWorkspace, canonicalRoot, canvasState]);
   const canvasProjection = canvasScene?.projection;
+  const canvas = useMemo(() => (
+    canvasState && canvasProjection
+      ? { state: canvasState, projection: canvasProjection }
+      : undefined
+  ), [canvasProjection, canvasState]);
   const visibleCanvasPathsRef = useRef<Set<string> | undefined>(undefined);
   useEffect(() => {
     if (!canvasState || !canvasScene) {
@@ -1542,8 +1547,7 @@ function WorkbenchBoundProjectApp({
 
   const canvasEditor = (
     <CanvasEditor
-      canvasState={canvasState}
-      projection={canvasProjection}
+      canvas={canvas}
       hasProject={Boolean(snapshot)}
       projectOpenAttemptedPath={projectOpenAttemptedPath}
       projectOpenError={projectOpenError}
