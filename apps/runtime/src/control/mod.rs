@@ -11,7 +11,7 @@ mod server;
 mod writer;
 
 pub use client::{NativeControlClient, NativeControlClientError};
-pub use desktop::{DesktopOpenError, DesktopOpenResult};
+pub use desktop::DesktopOpenError;
 pub use frame::{
     FrameDecodeError, FrameEncodeError, MAX_CONTROL_FRAME_BYTES, encode_frame, encode_server_frame,
     read_frame, read_server_frame,

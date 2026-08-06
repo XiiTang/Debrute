@@ -74,6 +74,7 @@ export interface HttpWorkbenchApiClient extends WorkbenchApiClient {
   readonly activities: WorkbenchActivities;
   readonly globalProjection: WorkbenchGlobalProjection;
   readonly projectProjection: WorkbenchProjectProjection;
+  initialProjectRoot(): string | undefined;
   bootstrapGlobalSettings(): Promise<WorkbenchGlobalSettingsBootstrap>;
 }
 
@@ -123,6 +124,7 @@ export function createHttpWorkbenchApiClient(options: {
   let connectionCredential: string | undefined;
   let globalSettingsBootstrap: WorkbenchGlobalSettingsBootstrap | undefined;
   let globalSettingsBootstrapError: Error | undefined;
+  let desktopInitialProjectRoot: string | undefined;
   let projectRootSelection: Promise<string | undefined> | undefined;
   const globalSettingsBootstrapWaiters: Array<{
     resolve(value: WorkbenchGlobalSettingsBootstrap): void;
@@ -454,10 +456,10 @@ export function createHttpWorkbenchApiClient(options: {
     let resolveReady!: () => void;
     let rejectReady!: (error: unknown) => void;
     let readySettled = false;
-    const requestedProjectRoot = requestedProjectRootFromLocation();
+    let requestedProjectRoot: string | undefined;
     let globalSynchronized = false;
     let activitySynchronized = false;
-    let projectSynchronized = requestedProjectRoot === undefined;
+    let projectSynchronized = false;
     const ready = new Promise<void>((resolve, reject) => {
       resolveReady = resolve;
       rejectReady = reject;
@@ -472,7 +474,11 @@ export function createHttpWorkbenchApiClient(options: {
     void (async () => {
       try {
         const shell = getDebruteShellApi();
-        const desktopLaunchTicket = shell ? await shell.takeDesktopLaunchTicket() : undefined;
+        const launchContext = shell ? await shell.takeDesktopLaunchContext() : undefined;
+        desktopInitialProjectRoot = launchContext?.initialProjectRoot;
+        requestedProjectRoot = desktopInitialProjectRoot ?? requestedProjectRootFromLocation();
+        projectSynchronized = requestedProjectRoot === undefined;
+        const desktopLaunchTicket = launchContext?.desktopLaunchTicket;
         if (requestedProjectRoot) {
           startupTimeline.mark('project-open-requested');
         }
@@ -610,6 +616,7 @@ export function createHttpWorkbenchApiClient(options: {
     activities,
     globalProjection,
     projectProjection,
+    initialProjectRoot: () => desktopInitialProjectRoot,
     bootstrapGlobalSettings,
     reportActivityNotice: (input) => isProjectScopedActivityNotice(input)
       ? requestForCurrentProject<{ activityId: string }>('POST', '/activities/notices', input)

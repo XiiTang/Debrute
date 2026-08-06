@@ -209,6 +209,10 @@ pub enum ControlEvent {
         global_revision: u64,
         recent_project_roots: Vec<String>,
     },
+    DesktopProjectOpenRequested {
+        project_root: String,
+        preferred_window_key: Option<String>,
+    },
     DesktopWindowOpenRequested {
         window_key: String,
         route: WorkbenchRoute,

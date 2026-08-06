@@ -230,84 +230,52 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('presents a Project failure delivered by a native Desktop menu', async () => {
-    let projectOpenFailed: ((failure: {
-      projectRoot: string;
-      code: string;
-      message: string;
-    }) => void) | undefined;
+  it('presents a Project failure in the Desktop window selected for the request', async () => {
+    let projectOpenRequested: ((projectRoot: string) => void) | undefined;
     window.debruteShell = shellApiFixture({
-      onNativeProjectOpenFailed: (listener) => {
-        projectOpenFailed = listener;
-        return () => { projectOpenFailed = undefined; };
+      onNativeProjectOpenRequested: (listener) => {
+        projectOpenRequested = listener;
+        return () => { projectOpenRequested = undefined; };
       }
     });
-    const { container, root } = await renderWorkbenchApp('/');
-
-    await act(async () => {
-      projectOpenFailed?.({
-        projectRoot: '/projects/native-menu-unavailable',
-        code: 'project_invalid',
-        message: 'Native menu Project root is invalid.'
-      });
+    const { container, root } = await renderWorkbenchApp('/', {
+      openProject: vi.fn(async () => { throw new Error('Project root is invalid.'); })
     });
 
-    expect(container.textContent).toContain('/projects/native-menu-unavailable');
-    expect(container.textContent).toContain('Native menu Project root is invalid.');
-    await unmount(root, container);
-  });
-
-  it('presents a missing Project root reported by Desktop', async () => {
-    window.debruteShell = shellApiFixture({
-      executeNativeMenuCommand: async () => ({
-        result: 'project_open_failed',
-        failure: {
-          projectRoot: '/projects/missing',
-          code: 'project_not_found',
-          message: 'Project root does not exist.'
-        }
-      })
-    });
-    const { container, root } = await renderWorkbenchApp('/');
-
     await act(async () => {
-      requireButton(container, 'Open Project').click();
+      projectOpenRequested?.('/projects/native-menu-unavailable');
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain('/projects/missing');
-    expect(container.textContent).toContain('Project root does not exist.');
+    expect(container.textContent).toContain('/projects/native-menu-unavailable');
+    expect(container.textContent).toContain('Project root is invalid.');
     await unmount(root, container);
   });
 
   it('keeps the current Project visible when another Desktop Project cannot open', async () => {
-    let projectOpenFailed: ((failure: {
-      projectRoot: string;
-      code: string;
-      message: string;
-    }) => void) | undefined;
+    let projectOpenRequested: ((projectRoot: string) => void) | undefined;
     window.debruteShell = shellApiFixture({
-      onNativeProjectOpenFailed: (listener) => {
-        projectOpenFailed = listener;
-        return () => { projectOpenFailed = undefined; };
+      onNativeProjectOpenRequested: (listener) => {
+        projectOpenRequested = listener;
+        return () => { projectOpenRequested = undefined; };
       }
     });
-    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
-      openProject: vi.fn(async () => ({
+    const openProject = vi.fn()
+      .mockResolvedValueOnce({
         bindingId: 'project-1',
-      canonicalRoot: '/projects/project-1',
+        canonicalRoot: '/projects/project-1',
         projectRevision: 1,
         snapshot: snapshotFixture(),
         workingCopies: emptyWorkingCopies()
-      }))
+      })
+      .mockRejectedValueOnce(new Error('The other Project directory no longer exists.'));
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
+      openProject
     });
 
     await act(async () => {
-      projectOpenFailed?.({
-        projectRoot: '/projects/other-unavailable',
-        code: 'project_not_found',
-        message: 'The other Project directory no longer exists.'
-      });
+      projectOpenRequested?.('/projects/other-unavailable');
+      await Promise.resolve();
     });
 
     expect(container.querySelector('[data-testid="canvas-surface"]')).not.toBeNull();
@@ -686,6 +654,26 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
+  it('opens the Project carried by a Desktop launch context from the root route', async () => {
+    const openProject = vi.fn(async () => ({
+      bindingId: 'project-desktop',
+      canonicalRoot: '/projects/from-desktop',
+      projectRevision: 1,
+      snapshot: snapshotFixture('/projects/from-desktop'),
+      workingCopies: emptyWorkingCopies()
+    }));
+    const overrides = {
+      initialProjectRoot: () => '/projects/from-desktop',
+      openProject
+    } as unknown as Partial<WorkbenchApiClient>;
+
+    const { container, root } = await renderWorkbenchApp('/', overrides);
+
+    expect(openProject).toHaveBeenCalledWith({ projectRoot: '/projects/from-desktop' });
+    expect(container.textContent).toContain('Opened project: Demo');
+    await unmount(root, container);
+  });
+
   it('commits an opened project without waiting for Canvas feedback to load', async () => {
     const feedback = deferred<Awaited<ReturnType<WorkbenchApiClient['readCanvasFeedback']>>>();
     const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
@@ -960,6 +948,7 @@ function emptyWorkingCopies() {
 function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiClient {
   let nextActivityId = 0;
   return {
+    initialProjectRoot: () => undefined,
     reportActivityNotice: vi.fn(async (input: WorkbenchActivityNoticeInput) => {
       const activities = apiState.activities;
       if (!activities) throw new Error('Activity projection is unavailable.');
@@ -1163,10 +1152,10 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     toggleMaximizeNativeWindow: async () => ({ maximized: true }),
     closeNativeWindow: async () => ({ ok: true }),
     executeNativeMenuCommand: async () => ({ result: 'completed' }),
-    takeDesktopLaunchTicket: async () => undefined,
+    takeDesktopLaunchContext: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
     onNativeEditCommand: () => () => undefined,
-    onNativeProjectOpenFailed: () => () => undefined,
+    onNativeProjectOpenRequested: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
   };

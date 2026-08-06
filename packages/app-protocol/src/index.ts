@@ -18,8 +18,8 @@ export * from './photoshopPlugin.js';
 export { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute } from './workbenchRoute.js';
 export type {
   DebruteShellApi,
+  DesktopLaunchContext,
   NativeMenuCommandResult,
-  NativeProjectOpenFailure,
   NativeWindowState
 } from './desktopShell.js';
 export type { DebruteProductPlatform } from './productPlatform.js';

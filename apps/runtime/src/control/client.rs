@@ -121,6 +121,7 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
             ServerMessage::Event {
                 event:
                     ControlEvent::DesktopWindowOpenRequested { .. }
+                    | ControlEvent::DesktopProjectOpenRequested { .. }
                     | ControlEvent::DesktopRecentProjectsChanged { .. }
                     | ControlEvent::DesktopWindowFocusRequested { .. }
                     | ControlEvent::ProductExiting

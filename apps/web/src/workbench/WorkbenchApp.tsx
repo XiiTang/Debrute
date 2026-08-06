@@ -3,7 +3,6 @@ import { Loader2 } from './ui/index.js';
 import type {
   DebruteProductPlatform,
   DebruteWorkbenchRoute,
-  NativeProjectOpenFailure,
   ProjectPathEntry
 } from '@debrute/app-protocol';
 import {
@@ -201,7 +200,12 @@ export function WorkbenchApp({
   api: HttpWorkbenchApiClient;
   onCommitted?: () => void;
 }): React.ReactElement {
-  const initialRoute = useMemo(() => currentDebruteWorkbenchRoute(), []);
+  const initialRoute = useMemo<DebruteWorkbenchRoute>(() => {
+    const initialProjectRoot = api.initialProjectRoot();
+    return initialProjectRoot
+      ? { kind: 'project-open', projectRoot: initialProjectRoot }
+      : currentDebruteWorkbenchRoute();
+  }, [api]);
   if (initialRoute.kind === 'not-found') {
     return <WorkbenchNotFound onCommitted={onCommitted} />;
   }
@@ -1051,24 +1055,22 @@ function WorkbenchBoundProjectApp({
     }
   }, [api, enqueueCanvasOcclusionMutation, projectActivities]);
 
-  const presentProjectOpenFailure = useCallback((failure: Error | NativeProjectOpenFailure) => {
+  const presentProjectOpenFailure = useCallback((failure: Error, attemptedPath?: string) => {
     if (hasAcceptedProject) {
       projectActivities.report({
         kind: 'project-operation-failed',
         operation: 'open'
       });
     }
-    setProjectOpenPresentation(projectOpenPresentationFromFailure(failure, i18n));
+    setProjectOpenPresentation(projectOpenPresentationFromFailure(failure, i18n, attemptedPath));
   }, [hasAcceptedProject, i18n, projectActivities, setProjectOpenPresentation]);
 
-  useEffect(() => {
-    const shell = getDebruteShellApi();
-    return shell?.onNativeProjectOpenFailed(presentProjectOpenFailure);
-  }, [presentProjectOpenFailure]);
-
-  const presentProjectOpenOutcome = useCallback((outcome: ProjectBindingLifecycleOutcome) => {
+  const presentProjectOpenOutcome = useCallback((
+    outcome: ProjectBindingLifecycleOutcome,
+    attemptedPath?: string
+  ) => {
     if (outcome.outcome === 'failed') {
-      presentProjectOpenFailure(outcome.error);
+      presentProjectOpenFailure(outcome.error, attemptedPath);
     }
   }, [presentProjectOpenFailure]);
 
@@ -1077,12 +1079,8 @@ function WorkbenchBoundProjectApp({
     if (shell) {
       setProjectOpenPresentation({});
       try {
-        const result = await shell.executeNativeMenuCommand({ commandId: 'project.open-picker' });
-        if (result.result === 'project_open_failed') {
-          presentProjectOpenFailure(result.failure);
-        } else {
-          setProjectOpenPresentation({});
-        }
+        await shell.executeNativeMenuCommand({ commandId: 'project.open-picker' });
+        setProjectOpenPresentation({});
       } catch (error) {
         presentProjectOpenFailure(error instanceof Error ? error : new Error(String(error)));
       }
@@ -1105,6 +1103,12 @@ function WorkbenchBoundProjectApp({
     setProjectOpenPresentation({ attemptedPath: projectRoot });
     return projectBindingLifecycle.open({ projectRoot });
   }, [projectBindingLifecycle, setProjectOpenPresentation]);
+
+  useEffect(() => getDebruteShellApi()?.onNativeProjectOpenRequested((projectRoot) => {
+    void openProjectRoot(projectRoot).then((outcome) => {
+      presentProjectOpenOutcome(outcome, projectRoot);
+    });
+  }), [openProjectRoot, presentProjectOpenOutcome]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
     if (!projectPathCommandIntake.canAccept()) {
@@ -1248,10 +1252,6 @@ function WorkbenchBoundProjectApp({
       openProjectFromPicker: actions.openProject,
       openProjectRoot: async (projectRoot) => {
         presentProjectOpenOutcome(await openProjectRoot(projectRoot));
-      }
-    }).then((result) => {
-      if (result?.result === 'project_open_failed') {
-        presentProjectOpenFailure(result.failure);
       }
     }).catch(() => {
       globalActivities.report({
@@ -1990,12 +1990,11 @@ interface ProjectOpenPresentation {
 }
 
 function projectOpenPresentationFromFailure(
-  failure: Error | NativeProjectOpenFailure,
-  i18n: WorkbenchI18n
+  failure: Error,
+  i18n: WorkbenchI18n,
+  attemptedPath?: string
 ): ProjectOpenPresentation {
-  const projectRoot = failure instanceof Error
-    ? projectRootFromOpenError(failure)
-    : failure.projectRoot;
+  const projectRoot = projectRootFromOpenError(failure) ?? attemptedPath;
   return {
     ...(projectRoot ? { attemptedPath: projectRoot } : {}),
     error: i18n.t('projectOpen.openFailed', { message: failure.message })

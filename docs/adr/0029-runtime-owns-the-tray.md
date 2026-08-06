@@ -14,10 +14,10 @@ Windows; clicking the tray icon never chooses a frontend.
 exactly three submenus: **Desktop**, **Browser**, and **Copy URL**. Each repeats
 the same canonical Project-root labels in the same order and maps its item to
 the canonical root. The Recent menu is disabled when the projection is
-empty. Desktop activation follows the shared multi-window admission contract:
-focus the matching Project window, reuse one eligible truly empty window, or
-create a new window; it never replaces another Project. Browser activation
-opens the selected Project in a browser.
+empty. A tray Desktop activation has no native source, so Electron targets the
+only live window or creates one ordinary Workbench when there is no unique
+target. The selected Workbench opens the Project. Browser activation opens the
+selected Project in a browser.
 
 Root and Recent **Copy URL** actions only place the exact current Runtime-owned
 Workbench URL on the operating-system clipboard. They do not open or bind a

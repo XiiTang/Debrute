@@ -4,16 +4,14 @@ export interface NativeWindowState {
   maximized: boolean;
 }
 
-export interface NativeProjectOpenFailure {
-  projectRoot: string;
-  code: string;
-  message: string;
-}
-
 export type NativeMenuCommandResult =
   | { result: 'completed' }
-  | { result: 'cancelled' }
-  | { result: 'project_open_failed'; failure: NativeProjectOpenFailure };
+  | { result: 'cancelled' };
+
+export interface DesktopLaunchContext {
+  desktopLaunchTicket: string;
+  initialProjectRoot?: string;
+}
 
 export interface DebruteShellApi {
   getNativeWindowState(): Promise<NativeWindowState>;
@@ -21,9 +19,9 @@ export interface DebruteShellApi {
   toggleMaximizeNativeWindow(): Promise<NativeWindowState>;
   closeNativeWindow(): Promise<{ ok: true }>;
   executeNativeMenuCommand(input: NativeMenuCommand): Promise<NativeMenuCommandResult>;
-  takeDesktopLaunchTicket(): Promise<string | undefined>;
+  takeDesktopLaunchContext(): Promise<DesktopLaunchContext | undefined>;
   onNativeWindowStateChanged(listener: (state: NativeWindowState) => void): () => void;
   onNativeEditCommand(listener: (command: NativeEditCommandId) => void): () => void;
-  onNativeProjectOpenFailed(listener: (failure: NativeProjectOpenFailure) => void): () => void;
+  onNativeProjectOpenRequested(listener: (projectRoot: string) => void): () => void;
   getDroppedFilePath(file: File): string | undefined;
 }

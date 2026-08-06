@@ -211,10 +211,10 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     toggleMaximizeNativeWindow: async () => ({ maximized: true }),
     closeNativeWindow: async () => ({ ok: true }),
     executeNativeMenuCommand: async () => ({ result: 'completed' }),
-    takeDesktopLaunchTicket: async () => undefined,
+    takeDesktopLaunchContext: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
     onNativeEditCommand: () => () => undefined,
-    onNativeProjectOpenFailed: () => () => undefined,
+    onNativeProjectOpenRequested: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
   };

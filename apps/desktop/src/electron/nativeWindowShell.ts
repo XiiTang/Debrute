@@ -1,10 +1,10 @@
 import type {
   DebruteProductPlatform,
   DebruteShellApi,
+  DesktopLaunchContext,
   NativeMenuCommandResult,
   NativeEditCommandId,
   NativeMenuCommand,
-  NativeProjectOpenFailure,
   NativeWindowState
 } from '@debrute/app-protocol';
 
@@ -16,8 +16,8 @@ export const nativeWindowIpcChannels = {
   executeMenuCommand: 'debrute-shell:executeNativeMenuCommand',
   stateChanged: 'debrute-shell:nativeWindowStateChanged',
   editCommand: 'debrute-shell:nativeEditCommand',
-  projectOpenFailed: 'debrute-shell:nativeProjectOpenFailed',
-  takeDesktopLaunchTicket: 'debrute-shell:takeDesktopLaunchTicket'
+  projectOpenRequested: 'debrute-shell:nativeProjectOpenRequested',
+  takeDesktopLaunchContext: 'debrute-shell:takeDesktopLaunchContext'
 } as const;
 
 export type NativeWindowPreloadApi = Pick<
@@ -27,10 +27,10 @@ export type NativeWindowPreloadApi = Pick<
   | 'toggleMaximizeNativeWindow'
   | 'closeNativeWindow'
   | 'executeNativeMenuCommand'
-  | 'takeDesktopLaunchTicket'
+  | 'takeDesktopLaunchContext'
   | 'onNativeWindowStateChanged'
   | 'onNativeEditCommand'
-  | 'onNativeProjectOpenFailed'
+  | 'onNativeProjectOpenRequested'
 >;
 
 interface NativeWindowIpcInvoker {
@@ -77,7 +77,7 @@ export function createNativeWindowPreloadApi<Event>(
     toggleMaximizeNativeWindow: () => invoke<NativeWindowState>(ipcRenderer, nativeWindowIpcChannels.toggleMaximize),
     closeNativeWindow: () => invoke<{ ok: true }>(ipcRenderer, nativeWindowIpcChannels.close),
     executeNativeMenuCommand: (input) => invoke<NativeMenuCommandResult>(ipcRenderer, nativeWindowIpcChannels.executeMenuCommand, input),
-    takeDesktopLaunchTicket: () => invoke<string | undefined>(ipcRenderer, nativeWindowIpcChannels.takeDesktopLaunchTicket),
+    takeDesktopLaunchContext: () => invoke<DesktopLaunchContext | undefined>(ipcRenderer, nativeWindowIpcChannels.takeDesktopLaunchContext),
     onNativeWindowStateChanged: (listener) => {
       const wrapped = (_event: Event, state: unknown) => listener(state as NativeWindowState);
       ipcRenderer.on(nativeWindowIpcChannels.stateChanged, wrapped);
@@ -92,11 +92,11 @@ export function createNativeWindowPreloadApi<Event>(
         ipcRenderer.removeListener(nativeWindowIpcChannels.editCommand, wrapped);
       };
     },
-    onNativeProjectOpenFailed: (listener) => {
-      const wrapped = (_event: Event, failure: unknown) => listener(failure as NativeProjectOpenFailure);
-      ipcRenderer.on(nativeWindowIpcChannels.projectOpenFailed, wrapped);
+    onNativeProjectOpenRequested: (listener) => {
+      const wrapped = (_event: Event, projectRoot: unknown) => listener(projectRoot as string);
+      ipcRenderer.on(nativeWindowIpcChannels.projectOpenRequested, wrapped);
       return () => {
-        ipcRenderer.removeListener(nativeWindowIpcChannels.projectOpenFailed, wrapped);
+        ipcRenderer.removeListener(nativeWindowIpcChannels.projectOpenRequested, wrapped);
       };
     }
   };
@@ -106,7 +106,7 @@ export function registerNativeWindowIpc<Sender, Window extends NativeWindow>(inp
   ipcMain: NativeWindowIpcMain<Sender>;
   browserWindow: { fromWebContents(sender: Sender): Window | null };
   executeNativeMenuCommand(window: Window, command: NativeMenuCommand): Promise<NativeMenuCommandResult>;
-  takeDesktopLaunchTicket(window: Window): string | undefined;
+  takeDesktopLaunchContext(window: Window): DesktopLaunchContext | undefined;
 }): void {
   input.ipcMain.handle(nativeWindowIpcChannels.getState, (event) => (
     nativeWindowState(requireSenderWindow(input.browserWindow, event.sender))
@@ -135,8 +135,8 @@ export function registerNativeWindowIpc<Sender, Window extends NativeWindow>(inp
       command
     );
   });
-  input.ipcMain.handle(nativeWindowIpcChannels.takeDesktopLaunchTicket, (event) => (
-    input.takeDesktopLaunchTicket(requireSenderWindow(input.browserWindow, event.sender))
+  input.ipcMain.handle(nativeWindowIpcChannels.takeDesktopLaunchContext, (event) => (
+    input.takeDesktopLaunchContext(requireSenderWindow(input.browserWindow, event.sender))
   ));
 }
 

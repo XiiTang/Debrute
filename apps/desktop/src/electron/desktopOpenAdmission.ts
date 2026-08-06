@@ -32,24 +32,21 @@ export function createDesktopOpenAdmission<NativeIdentity, Result>(
       }
       return activateOpen(request);
     },
-    async start(explicitIntent: DesktopOpenIntent | undefined): Promise<Result[]> {
+    async start(explicitIntent: DesktopOpenIntent | undefined): Promise<void> {
       if (phase !== 'pending') {
         throw new Error('Desktop open admission has already started.');
       }
       phase = 'starting';
-      const results: Result[] = [];
-      const initialResult = await activateOpen(explicitIntent
+      await activateOpen(explicitIntent
         ? { intent: explicitIntent, preferredIdentity: undefined }
         : pending.shift() ?? {
             intent: { kind: 'new-window' },
             preferredIdentity: undefined
-          });
-      results.push(initialResult);
+        });
       while (pending.length > 0) {
-        results.push(await activateOpen(pending.shift()!));
+        await activateOpen(pending.shift()!);
       }
       phase = 'live';
-      return results;
     }
   };
 }

@@ -440,14 +440,13 @@ Workbench, Terminal, Transfer, Photoshop, or request-specific cleanup results.
 There is no idle retention, grace period, reservation worker, or fixed session
 cap.
 
-Desktop Project commands enter Runtime through native activation, not through
-the bound-connection replacement endpoint. Runtime focuses a Desktop window
-already routed to the target. Otherwise it may directly bind a live root-routed
-Desktop document which has never accepted a Project binding, preferring the
-eligible source window or, without a source, a sole eligible candidate. Zero or
-multiple candidates cause Runtime to open a new Project-routed window.
-Project-bound and detached documents are never reused. Root activation always
-opens a new root window. The replacement endpoint rejects Desktop connections.
+Desktop Project activation only forwards the raw root and optional source key
+to the Desktop host. Electron selects the live source, the sole live window for
+a source-free request, or one new ordinary Root Workbench when there is no
+unique target. Existing targets perform the normal bound-connection open or
+replacement; a new target submits the initial root with its first connection.
+Root activation always opens a new Root window. Project validation failure
+stays in the selected Workbench and does not select another target.
 
 Opening from an unbound Workbench and browser replacement from a bound
 Workbench are the binding operations. Target validation finishes before an

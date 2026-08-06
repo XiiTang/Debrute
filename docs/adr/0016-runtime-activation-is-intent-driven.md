@@ -21,27 +21,21 @@ Runtime has no default frontend, implicit frontend selection, or fallback from
 one frontend to another. It also has no pre-ready activation queue, intent id,
 deduplication cache, or cross-instance replay.
 
-Activation distinguishes lifecycle or routing rejection from a Project that
-could not be opened. The latter is a closed `project_open_failed` response
-containing the requested absolute Project root, the Runtime Project error code,
-and its message. Desktop transports those fields unchanged through its native
-command result; it does not collapse Project-root failures into
-`invalid_activation`. If the activating launcher has already entered Desktop
-host admission, a failed Project open rolls that admission back and retains no
-Desktop host or window topology.
+Browser Project activation validates the Project before opening its routed URL
+and returns `project_open_failed` when validation fails. Desktop Project
+activation does not preflight or bind a Project. If no Desktop host exists,
+Runtime launches Desktop with the raw requested root. If a host exists, Runtime
+forwards the raw root and optional source window key to that host once.
 
-Desktop Project activation first focuses an existing Desktop window already
-routed to the target. Otherwise Runtime may bind one live, root-routed Desktop
-document which has never accepted a Project binding: the initiating window when
-it is eligible, or the sole eligible empty window for an activation without a
-source window. A Project-bound or detached document is never reused, and an
-ambiguous set of empty windows causes Runtime to open a new Project-routed
-window. Browser ownership transfer and detached Desktop **Open Here** remain
-Workbench binding operations defined by
-[ADR 0033](./0033-workbench-session-lifetime-follows-its-container.md). Focus,
-empty-window binding, window creation, or ownership transfer is a direct
-outcome of the submitted intent, not a retry, second destination confirmation,
-or timeout fallback.
+Electron selects one target before Project opening begins: the live source, the
+only live window for a source-free request, or a new ordinary Workbench when no
+unique target exists. That Workbench performs the normal binding transaction.
+Failure remains in the selected Workbench; it does not trigger target selection,
+another window, or a native failure transport. Browser ownership transfer and
+detached Desktop **Open Here** remain Workbench binding operations defined by
+[ADR 0033](./0033-workbench-session-lifetime-follows-its-container.md).
+A new target completes its own initial binding. An existing target may focus a
+different Desktop Workbench that already owns the same Project.
 
 Invalid Feedback state fails Project opening. Invalid, unreadable, or
 root-mismatched Canvas state leaves Canvas unavailable without blocking the

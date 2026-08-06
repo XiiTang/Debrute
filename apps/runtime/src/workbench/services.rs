@@ -21,7 +21,7 @@ use crate::{
         ActivityTaskStatus, IntegrationActivityOperation, ModelRequestKind,
     },
     cli::{CliResult, CliStreamEvent},
-    control::{DesktopOpenResult, RuntimeControlState, WorkbenchRoute},
+    control::RuntimeControlState,
     executable_path::resolve_executable,
     global::{
         GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent, GlobalRuntimeService,
@@ -477,6 +477,35 @@ impl WorkbenchRuntimeServices {
         connection_credential: &str,
         project_root: &str,
     ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
+        self.bind_unbound_connection_project_root(
+            browser_session,
+            connection_credential,
+            project_root,
+            true,
+        )
+    }
+
+    pub fn bind_initial_connection_project_root(
+        &self,
+        browser_session: &str,
+        connection_credential: &str,
+        project_root: &str,
+    ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
+        self.bind_unbound_connection_project_root(
+            browser_session,
+            connection_credential,
+            project_root,
+            false,
+        )
+    }
+
+    fn bind_unbound_connection_project_root(
+        &self,
+        browser_session: &str,
+        connection_credential: &str,
+        project_root: &str,
+        focus_existing_desktop: bool,
+    ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
         let context = self
             .connections
             .authorize(browser_session, connection_credential)
@@ -494,7 +523,7 @@ impl WorkbenchRuntimeServices {
                 "OpenProject requires an unbound Workbench connection.",
             ));
         }
-        self.bind_opened_project(connection_credential, project_root)
+        self.bind_opened_project(connection_credential, project_root, focus_existing_desktop)
     }
 
     pub fn replace_connection_project_root(
@@ -513,13 +542,6 @@ impl WorkbenchRuntimeServices {
                     "Workbench connection is not live.",
                 )
             })?;
-        if context.desktop.is_some() {
-            return Err(RuntimeHttpServiceError::new(
-                StatusCode::CONFLICT,
-                "desktop_project_requires_activation",
-                "Desktop Project opens require native Desktop activation.",
-            ));
-        }
         let source_binding_id = context.binding_id.clone().ok_or_else(|| {
             RuntimeHttpServiceError::new(
                 StatusCode::CONFLICT,
@@ -567,6 +589,14 @@ impl WorkbenchRuntimeServices {
         else {
             unreachable!("already-bound replacement returned above")
         };
+        if let Some(binding) = context.desktop.as_ref() {
+            self.runtime_state.retarget_desktop_window(
+                binding,
+                crate::control::WorkbenchRoute::OpenProject {
+                    canonical_root: canonical_root.clone(),
+                },
+            );
+        }
         if let Some(binding) = preempted.and_then(|connection| connection.desktop) {
             self.runtime_state
                 .retarget_desktop_window(&binding, crate::control::WorkbenchRoute::Root);
@@ -630,63 +660,11 @@ impl WorkbenchRuntimeServices {
         }
     }
 
-    /// Focuses an existing Desktop owner or binds the selected true-empty
-    /// Desktop connection, opening a new Project-routed window when neither
-    /// destination exists.
-    ///
-    /// # Errors
-    ///
-    /// Returns a service error when Project binding, Desktop window creation,
-    /// or focusing the committed destination fails.
-    pub fn activate_desktop_project(
-        &self,
-        canonical_root: &str,
-        preferred_window_key: Option<&str>,
-    ) -> Result<DesktopOpenResult, RuntimeHttpServiceError> {
-        if self
-            .runtime_state
-            .focus_desktop_project_window(canonical_root)
-            .map_err(desktop_activation_error)?
-        {
-            return Ok(DesktopOpenResult::FocusedExisting);
-        }
-        let Some(connection) = self
-            .connections
-            .reusable_desktop_connection(preferred_window_key)
-        else {
-            return self
-                .runtime_state
-                .open_desktop_window(&WorkbenchRoute::OpenProject {
-                    canonical_root: canonical_root.to_owned(),
-                })
-                .map_err(desktop_activation_error);
-        };
-        let binding = connection.binding;
-        match self.bind_opened_project(&connection.credential, canonical_root)? {
-            WorkbenchProjectBindingOutcome::FocusedExistingDesktop { .. } => {
-                Ok(DesktopOpenResult::FocusedExisting)
-            }
-            WorkbenchProjectBindingOutcome::Bound(_) => {
-                let focused = self
-                    .runtime_state
-                    .focus_desktop_window(&binding)
-                    .map_err(desktop_activation_error)?;
-                if !focused {
-                    return Err(RuntimeHttpServiceError::new(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "desktop_window_focus_failed",
-                        "Runtime no longer owns the reused Desktop window.",
-                    ));
-                }
-                Ok(DesktopOpenResult::Opened)
-            }
-        }
-    }
-
     fn bind_opened_project(
         &self,
         connection_credential: &str,
         project_root: &str,
+        focus_existing_desktop: bool,
     ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
         let context = self
             .connections
@@ -702,7 +680,9 @@ impl WorkbenchRuntimeServices {
         let canonical_root = canonical_root_string(&opened.session);
         let binding_id = uuid::Uuid::new_v4().to_string();
         self.remember_recent_project(&opened.session)?;
-        if let Some(outcome) = self.desktop_existing_owner_outcome(&context, &canonical_root)? {
+        if focus_existing_desktop
+            && let Some(outcome) = self.desktop_existing_owner_outcome(&context, &canonical_root)?
+        {
             return Ok(outcome);
         }
         let prepared =
@@ -1097,14 +1077,6 @@ impl Drop for WorkbenchRuntimeServices {
         self.finish_workbench_connection_closer();
         self.shutdown_owned_work();
     }
-}
-
-fn desktop_activation_error(error: impl std::fmt::Display) -> RuntimeHttpServiceError {
-    RuntimeHttpServiceError::new(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "desktop_window_activation_failed",
-        error.to_string(),
-    )
 }
 
 fn canonical_root_string(session: &ProjectSession) -> String {

@@ -229,13 +229,12 @@ the diagnostic chain.
    initial loading shell as success. The same native window must accept the
    Project; no second window may be created.
 2. From that Project window, open a different Project through File > Open
-   Project or Open Recent. Desktop must create another window without replacing
-   the first. Opening either Project again must focus its existing window. A
-   second truly empty window may be reused only when it is the source of the
-   activation, or when a source-free activation has exactly one eligible empty
-   window. On macOS, the Dock **New Window** action must always create a fresh
-   root window. Repeat the different-Project check through Finder or a second-
-   instance argument on the applicable platform.
+   Project or Open Recent. The source window must remain the target and show the
+   new Project or its failure. A source-free activation targets the sole live
+   window; with zero or multiple live windows it creates one ordinary Workbench
+   carrying the initial Project. On macOS, the Dock **New Window** action must
+   always create a fresh Root window. Repeat the source-free check through
+   Finder or a second-instance argument on the applicable platform.
 3. Open the same stable Project route in a real browser. Web must take the
    Project, while the existing Desktop window stays open with its last
    confirmed presentation frozen, has no Project command authority, and exposes

@@ -2,12 +2,10 @@ import electron from 'electron';
 import { join } from 'node:path';
 
 import type {
-  ActivationIntent,
   ControlEvent,
   NativeEditCommandId,
   NativeMenuCommand,
-  NativeMenuCommandResult,
-  NativeProjectOpenFailure
+  NativeMenuCommandResult
 } from '@debrute/app-protocol';
 import type { RuntimeControlClient } from '@debrute/runtime-control-client';
 
@@ -16,6 +14,7 @@ import {
   buildDesktopDockMenu
 } from './desktopApplicationMenu.js';
 import { createDesktopOpenAdmission } from './desktopOpenAdmission.js';
+import { dispatchDesktopProjectOpen } from './desktopProjectOpen.js';
 import { requireDesktopPlatform } from './desktopPlatform.js';
 import { DesktopWindowHost } from './desktopWindowHost.js';
 import { DesktopProductQuit } from './desktopProductQuit.js';
@@ -144,8 +143,8 @@ async function startDesktop(): Promise<void> {
     ipcMain,
     browserWindow: BrowserWindow,
     executeNativeMenuCommand,
-    takeDesktopLaunchTicket: (browserWindow) => (
-      windowHost?.takeDesktopLaunchTicket(browserWindow)
+    takeDesktopLaunchContext: (browserWindow) => (
+      windowHost?.takeDesktopLaunchContext(browserWindow)
     )
   });
   const runtime = runtimeLaunchConfiguration();
@@ -197,14 +196,7 @@ async function startDesktop(): Promise<void> {
   }
   installApplicationMenu();
 
-  const startupResults = await desktopOpenAdmission.start(parseDesktopOpenIntent(process.argv));
-  for (const startupResult of startupResults) {
-    if (startupResult.result === 'project_open_failed') {
-      reportDesktopError(new Error(
-        `${startupResult.failure.code}: ${startupResult.failure.message}`
-      ));
-    }
-  }
+  await desktopOpenAdmission.start(parseDesktopOpenIntent(process.argv));
 }
 
 async function activateOpenIntent(
@@ -212,30 +204,33 @@ async function activateOpenIntent(
   intent: DesktopOpenIntent,
   preferredWindow?: Electron.BrowserWindow
 ): Promise<NativeMenuCommandResult> {
-  const activation: ActivationIntent = intent.kind === 'open-project-path'
-    ? { kind: 'open_project', project_root: intent.projectRoot, frontend: 'desktop' }
-    : { kind: 'open_desktop' };
-  const response = await activeHost.activate(activation, preferredWindow);
-  if (response.result === 'project_open_failed') {
-    return {
-      result: 'project_open_failed',
-      failure: {
-        projectRoot: response.failure.canonical_root,
-        code: response.failure.code,
-        message: response.failure.message
-      }
-    };
-  }
-  if (response.result === 'rejected') {
-    throw new Error(`Runtime rejected Desktop activation: ${response.code}`);
-  }
-  if (response.result !== 'activation') {
-    throw new Error(`Runtime returned an unexpected activation response: ${response.result}`);
+  if (intent.kind === 'new-window') {
+    await activeHost.openWindow();
+  } else {
+    await openDesktopProject(activeHost, intent.projectRoot, preferredWindow);
   }
   return { result: 'completed' };
 }
 
 function handleControlEvent(event: ControlEvent): void {
+  if (event.event === 'desktop_project_open_requested') {
+    const activeHost = windowHost;
+    if (!activeHost) {
+      return;
+    }
+    const preferredWindow = event.preferred_window_key
+      ? activeHost.identityForWindowKey(event.preferred_window_key)
+      : undefined;
+    if (event.preferred_window_key && !preferredWindow) {
+      return;
+    }
+    runDesktopOpenAction(openDesktopProject(
+      activeHost,
+      event.project_root,
+      preferredWindow
+    ));
+    return;
+  }
   if (event.event !== 'desktop_recent_projects_changed') {
     return;
   }
@@ -262,7 +257,7 @@ function installApplicationMenu(): void {
           runDesktopOpenAction(dispatchDesktopOpen(
             { kind: 'open-project-path', projectRoot },
             browserWindow
-          ), browserWindow);
+          ));
         }
       }));
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildDesktopApplicationMenu({
@@ -271,7 +266,7 @@ function installApplicationMenu(): void {
     newWindow: () => runDesktopAction(dispatchDesktopOpen({ kind: 'new-window' })),
     openProject: (window) => {
       const browserWindow = desktopBrowserWindow(window);
-      runDesktopOpenAction(chooseProject(browserWindow), browserWindow);
+      runDesktopOpenAction(chooseProject(browserWindow));
     },
     reloadWorkbench: (window) => {
       if (window instanceof BrowserWindow && !window.isDestroyed()) {
@@ -363,29 +358,29 @@ function runDesktopAction(action: Promise<unknown>): void {
 }
 
 function runDesktopOpenAction(
-  action: Promise<NativeMenuCommandResult | undefined>,
-  preferredWindow?: Electron.BrowserWindow
+  action: Promise<unknown>
 ): void {
-  void action.then((result) => {
-    if (result?.result !== 'project_open_failed') {
-      return;
-    }
-    const target = preferredWindow && !preferredWindow.isDestroyed()
-      ? preferredWindow
-      : BrowserWindow.getFocusedWindow() ?? undefined;
-    if (!target) {
-      reportDesktopError(new Error(`${result.failure.code}: ${result.failure.message}`));
-      return;
-    }
-    sendNativeProjectOpenFailure(target, result.failure);
-  }).catch(reportDesktopError);
+  void action.catch(reportDesktopError);
 }
 
-function sendNativeProjectOpenFailure(
-  window: Electron.BrowserWindow,
-  failure: NativeProjectOpenFailure
-): void {
-  window.webContents.send(nativeWindowIpcChannels.projectOpenFailed, failure);
+async function openDesktopProject(
+  activeHost: DesktopWindowHost<Electron.BrowserWindow, ElectronDesktopWindow>,
+  projectRoot: string,
+  preferredWindow?: Electron.BrowserWindow
+): Promise<void> {
+  await dispatchDesktopProjectOpen({
+    projectRoot,
+    preferredWindow,
+    isLiveWindow: (window) => activeHost.isLiveWindow(window),
+    singleLiveWindow: () => activeHost.singleLiveWindow(),
+    openWindow: (initialProjectRoot) => activeHost.openWindow(initialProjectRoot),
+    send: (window, requestedProjectRoot) => {
+      window.webContents.send(
+        nativeWindowIpcChannels.projectOpenRequested,
+        requestedProjectRoot
+      );
+    }
+  });
 }
 
 function dispatchDesktopOpen(

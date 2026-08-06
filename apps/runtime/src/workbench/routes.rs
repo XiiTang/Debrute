@@ -37,9 +37,9 @@ use crate::{
 };
 
 use super::{
-    DesktopConnectionAdmission, FeedbackWorkingCopy, ProductUpdateInitiator,
-    RuntimeHttpServiceError, TextWorkingCopy, WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService,
-    WorkbenchProjectBindingOutcome, WorkbenchRuntimeServices,
+    FeedbackWorkingCopy, ProductUpdateInitiator, RuntimeHttpServiceError, TextWorkingCopy,
+    WORKBENCH_SESSION_COOKIE, WorkbenchLaunchService, WorkbenchProjectBindingOutcome,
+    WorkbenchRuntimeServices,
     multipart::{MultipartLimits, read_multipart_limited},
     public_project_snapshot,
     routing::{
@@ -94,52 +94,49 @@ pub(super) async fn workbench_connection(
     if let Err(error) = services.ensure_accepting_workbench_connections() {
         return service_error_response(error);
     }
-    let (browser_session, desktop, requested_project_root) = if let Some(ticket) =
-        input.desktop_launch_ticket.as_deref()
-    {
-        let Some(consumption) = state.launch_service.consume_desktop_ticket(ticket) else {
-            return error_response(
-                StatusCode::FORBIDDEN,
-                "desktop_launch_ticket_invalid",
-                "Desktop launch ticket is invalid or already consumed.",
-            );
-        };
-        let reusable_empty = matches!(consumption.route, crate::control::WorkbenchRoute::Root);
-        let route_project_root = match consumption.route {
-            crate::control::WorkbenchRoute::Root => None,
-            crate::control::WorkbenchRoute::OpenProject { canonical_root } => Some(canonical_root),
-        };
-        if input.requested_project_root != route_project_root {
-            return error_response(
-                StatusCode::CONFLICT,
-                "desktop_launch_route_mismatch",
-                "Desktop launch route does not match the requested Project.",
-            );
-        }
-        (
-            consumption.browser_session,
-            Some(DesktopConnectionAdmission {
-                binding: consumption.desktop,
-                reusable_empty,
-            }),
-            route_project_root,
-        )
-    } else {
-        let browser_session = match browser_session_cookie(&headers) {
-            Ok(Some(session)) if services.connections().browser_session_is_live(session) => {
-                session.to_owned()
-            }
-            Ok(_) => WorkbenchLaunchService::create_browser_session(),
-            Err(()) => {
+    let (browser_session, desktop, requested_project_root) =
+        if let Some(ticket) = input.desktop_launch_ticket.as_deref() {
+            let Some(consumption) = state.launch_service.consume_desktop_ticket(ticket) else {
                 return error_response(
                     StatusCode::FORBIDDEN,
-                    "workbench_session_invalid",
-                    "Workbench session cookie is invalid.",
+                    "desktop_launch_ticket_invalid",
+                    "Desktop launch ticket is invalid or already consumed.",
                 );
-            }
+            };
+            let route_project_root = match consumption.route {
+                crate::control::WorkbenchRoute::Root => input.requested_project_root,
+                crate::control::WorkbenchRoute::OpenProject { canonical_root } => {
+                    if input.requested_project_root.as_deref() != Some(&canonical_root) {
+                        return error_response(
+                            StatusCode::CONFLICT,
+                            "desktop_launch_route_mismatch",
+                            "Desktop launch route does not match the requested Project.",
+                        );
+                    }
+                    Some(canonical_root)
+                }
+            };
+            (
+                consumption.browser_session,
+                Some(consumption.desktop),
+                route_project_root,
+            )
+        } else {
+            let browser_session = match browser_session_cookie(&headers) {
+                Ok(Some(session)) if services.connections().browser_session_is_live(session) => {
+                    session.to_owned()
+                }
+                Ok(_) => WorkbenchLaunchService::create_browser_session(),
+                Err(()) => {
+                    return error_response(
+                        StatusCode::FORBIDDEN,
+                        "workbench_session_invalid",
+                        "Workbench session cookie is invalid.",
+                    );
+                }
+            };
+            (browser_session, None, input.requested_project_root)
         };
-        (browser_session, None, input.requested_project_root)
-    };
     let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
     let Some((context, cancellation)) =
         services
@@ -284,7 +281,7 @@ pub(super) async fn workbench_connection(
         let project_browser_session = browser_session.clone();
         let project_credential = context.credential.clone();
         tokio::task::spawn_blocking(move || {
-            let result = project_services.bind_connection_project_root(
+            let result = project_services.bind_initial_connection_project_root(
                 &project_browser_session,
                 &project_credential,
                 &project_root,

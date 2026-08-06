@@ -24,15 +24,12 @@ commit. If a different Workbench owned the Project, that previous owner is
 displaced; the requesting destination does not ask for a second ownership
 confirmation.
 
-An ordinary Desktop Project open is a container activation, not a replacement
-on the initiating Workbench connection. Runtime focuses a Desktop window that
-already routes the target. Otherwise it may commit the existing Project binding
-transaction into an eligible empty Desktop document: root-routed, live, and
-never previously Project-bound during that document lifetime. It prefers the
-eligible initiating window; without one, it reuses only a sole unambiguous
-candidate. Runtime opens a new Project-routed BrowserWindow when no such window
-is selected. It leaves Project-bound and detached documents unchanged and
-rejects the replacement endpoint for Desktop connections.
+An ordinary Desktop Project open selects one container before Project binding.
+A live initiating window is the target. Without a source, Electron targets the
+only live window or creates one ordinary Workbench when there is no unique
+target. The selected Workbench performs the normal open or replacement binding
+transaction. A failure stays in that container and preserves its last accepted
+Project presentation; it does not cause another target or window to be chosen.
 
 A displaced page remains loaded with its last confirmed presentation frozen
 but has no Project command authority. It alone offers **Open Here**, which is an

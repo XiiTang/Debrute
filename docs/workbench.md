@@ -99,14 +99,13 @@ acquires its concrete target at that commit and may displace a different owner.
 The requesting destination does not show another ownership confirmation; the
 displaced Workbench becomes detached and offers **Open Here**.
 
-Ordinary Desktop opens do not replace the requesting Workbench. Native Desktop
-activation focuses an existing window for the same Project. Otherwise it may
-bind a live Desktop Workbench only when the current document started at Root and
-has never accepted a Project binding, preferring an eligible initiating window
-or a sole eligible empty window when no source exists. It opens a new window
-instead of reusing a Project-bound, detached, or ambiguous empty window. The
-Desktop connection is rejected by `/api/projects/replace`; only detached **Open
-Here** deliberately reacquires ownership in that same window.
+Ordinary Desktop opens select one target before binding. A live native source is
+the target; without one, Electron uses the sole live window or creates an
+ordinary Root Workbench when there is no unique target. Existing targets use
+the normal open or replacement endpoint, so a Project-bound or detached source
+may open the new Project in that same document. A new target carries the initial
+root in its first connection and completes its own binding. Failure preserves
+the selected target's last accepted Project.
 
 Only after `WorkbenchProjectProjection` accepts the complete `project.bound`
 baseline may the binding lifecycle commit the canonical Project URL. A failed
@@ -529,10 +528,9 @@ Workbench closes unsubmitted context menus and inline edits, then shows that the
 target Project is opening. Failed preparation reopens the unchanged binding's
 gate. An accepted `project.bound` retires the old gate and mounts fresh admission
 with the new generation. A second open in the same Workbench does not start
-another concurrent transport attempt. Ordinary Desktop selectors submit native
-activation instead. If the initiating document is a true empty-window candidate,
-Runtime commits the ordinary `project.bound` lifecycle there; otherwise its
-gate remains unchanged while Runtime focuses or opens the destination window.
+another concurrent transport attempt. Ordinary Desktop selectors first select
+their target through Electron; that target then enters this same lifecycle.
+Failure reopens its unchanged binding gate and does not choose another target.
 
 A command submitted before that boundary remains owned by its captured binding
 ID and binding generation. Runtime's Project binding lease lets the accepted

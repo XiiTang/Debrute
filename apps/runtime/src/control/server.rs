@@ -23,9 +23,9 @@ use crate::workbench::{
 
 use super::{
     ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
-    ControlRequest, ControlResponse, DesktopOpenError, DesktopOpenResult, FrameDecodeError,
-    HandshakeRejection, ProjectOpenFailure, RuntimeStatus, ServerHandshakeError, ServerMessage,
-    WorkbenchRoute, authorize_request,
+    ControlRequest, ControlResponse, DesktopOpenError, FrameDecodeError, HandshakeRejection,
+    ProjectOpenFailure, RuntimeStatus, ServerHandshakeError, ServerMessage, WorkbenchRoute,
+    authorize_request,
     desktop::{DesktopHostRegistrationError, DesktopWindowTopology},
     frame::is_connection_closed,
     handshake::read_handshake_request,
@@ -305,34 +305,39 @@ impl RuntimeControlState {
         Ok(())
     }
 
-    /// Opens or focuses one Desktop window through the current promoted host.
+    /// Opens one ordinary Desktop window through the current promoted host.
     ///
     /// # Errors
     ///
     /// Returns [`DesktopOpenError`] if Runtime is not Ready or no host can receive it.
-    pub fn open_desktop_window(
-        &self,
-        route: &WorkbenchRoute,
-    ) -> Result<DesktopOpenResult, DesktopOpenError> {
+    pub fn open_desktop_window(&self) -> Result<(), DesktopOpenError> {
         if self.status() != RuntimeStatus::Ready {
             return Err(DesktopOpenError::HostUnavailable);
         }
-        self.desktop.open(route)
+        self.desktop.open()
+    }
+
+    /// Sends one raw Project-open request to the promoted Desktop host.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DesktopOpenError`] if Runtime is not Ready or the host cannot
+    /// receive the request.
+    pub fn request_desktop_project_open(
+        &self,
+        project_root: &str,
+        preferred_window_key: Option<&str>,
+    ) -> Result<(), DesktopOpenError> {
+        if self.status() != RuntimeStatus::Ready {
+            return Err(DesktopOpenError::HostUnavailable);
+        }
+        self.desktop
+            .request_project_open(project_root, preferred_window_key)
     }
 
     #[must_use]
     pub fn has_desktop_host(&self) -> bool {
         self.desktop.has_host()
-    }
-
-    pub(crate) fn focus_desktop_project_window(
-        &self,
-        canonical_root: &str,
-    ) -> Result<bool, DesktopOpenError> {
-        if self.status() != RuntimeStatus::Ready {
-            return Err(DesktopOpenError::HostUnavailable);
-        }
-        self.desktop.focus_project(canonical_root)
     }
 
     pub(crate) fn retarget_desktop_window(

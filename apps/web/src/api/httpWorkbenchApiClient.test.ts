@@ -96,6 +96,28 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('uses the one-use Desktop launch context for the initial Project', async () => {
+    const harness = createHarness();
+    vi.stubGlobal('window', {
+      debruteShell: {
+        takeDesktopLaunchContext: async () => ({
+          desktopLaunchTicket: 'ticket-1',
+          initialProjectRoot: '/projects/from-desktop'
+        })
+      }
+    });
+    const client = createHttpWorkbenchApiClient();
+
+    await client.bootstrapGlobalSettings();
+
+    expect(client.initialProjectRoot()).toBe('/projects/from-desktop');
+    expect(JSON.parse(String(harness.calls[0]?.init?.body))).toEqual({
+      requestedProjectRoot: '/projects/from-desktop',
+      desktopLaunchTicket: 'ticket-1'
+    });
+    client.dispose();
+  });
+
   it('chooses a Project root without starting a Project binding', async () => {
     const harness = createHarness();
     const mark = vi.fn();

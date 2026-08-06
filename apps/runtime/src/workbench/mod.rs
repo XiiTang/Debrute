@@ -16,9 +16,8 @@ pub use authority::{WORKBENCH_SESSION_COOKIE, WorkbenchLaunchError, WorkbenchLau
 pub use connections::WORKBENCH_CONNECTION_HEADER;
 pub use connections::WorkbenchConnectionRegistry;
 pub(crate) use connections::{
-    DesktopConnectionAdmission, ProjectBindError, ProjectBindOutcome, ProjectBindingCommit,
-    ProjectBindingLease, WorkbenchConnectionCloser, WorkbenchConnectionContext,
-    WorkbenchConnectionDrainOutcome,
+    ProjectBindError, ProjectBindOutcome, ProjectBindingCommit, ProjectBindingLease,
+    WorkbenchConnectionCloser, WorkbenchConnectionContext, WorkbenchConnectionDrainOutcome,
 };
 pub use http::{WorkbenchHttpServer, WorkbenchHttpServerError};
 pub use services::{

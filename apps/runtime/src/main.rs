@@ -28,9 +28,9 @@ use debrute_runtime::{
     cli::RuntimeCliService,
     control::{
         ActivationFailure, ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY,
-        ClientRole, ControlErrorCode, ControlRequest, DesktopOpenError, DesktopOpenResult,
-        NativeControlClient, ProjectFrontend, ProjectOpenFailure, RuntimeActionError,
-        RuntimeActivationService, RuntimeControlState, WorkbenchRoute,
+        ClientRole, ControlErrorCode, ControlRequest, DesktopOpenError, NativeControlClient,
+        ProjectFrontend, ProjectOpenFailure, RuntimeActionError, RuntimeActivationService,
+        RuntimeControlState, WorkbenchRoute,
         endpoint::{
             ControlEndpointAdapter, ControlEndpointOwnerAdapter, EndpointClaim, EndpointError,
         },
@@ -972,32 +972,26 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
     ) -> Result<ActivationOutcome, ActivationFailure> {
         match intent {
             ActivationIntent::EnsureRuntime => Ok(ActivationOutcome::Ensured),
-            ActivationIntent::OpenDesktop => self
-                .open_desktop(&WorkbenchRoute::Root)
-                .map_err(ActivationFailure::from),
+            ActivationIntent::OpenDesktop => self.open_desktop().map_err(ActivationFailure::from),
             ActivationIntent::OpenBrowser => self
                 .open_browser(&WorkbenchRoute::Root)
                 .map_err(ActivationFailure::from),
             ActivationIntent::OpenProject {
                 project_root,
                 frontend,
-            } => {
-                let canonical_root = self
-                    .services
-                    .preflight_project_root(project_root)
-                    .map_err(|error| project_open_failure(project_root, error))?;
-                let target = WorkbenchRoute::OpenProject {
-                    canonical_root: canonical_root.clone(),
-                };
-                match frontend {
-                    ProjectFrontend::Desktop => {
-                        self.open_desktop_project(&target, preferred_desktop_window_key)
-                    }
-                    ProjectFrontend::Browser => {
-                        self.open_browser(&target).map_err(ActivationFailure::from)
-                    }
+            } => match frontend {
+                ProjectFrontend::Desktop => {
+                    self.open_desktop_project(project_root, preferred_desktop_window_key)
                 }
-            }
+                ProjectFrontend::Browser => {
+                    let canonical_root = self
+                        .services
+                        .preflight_project_root(project_root)
+                        .map_err(|error| project_open_failure(project_root, error))?;
+                    self.open_browser(&WorkbenchRoute::OpenProject { canonical_root })
+                        .map_err(ActivationFailure::from)
+                }
+            },
         }
     }
 }
@@ -1006,7 +1000,7 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
 impl PlatformRuntimeActivation {
     fn open_desktop_project(
         &self,
-        target: &WorkbenchRoute,
+        project_root: &str,
         preferred_window_key: Option<&str>,
     ) -> Result<ActivationOutcome, ActivationFailure> {
         let _launch = self
@@ -1014,43 +1008,31 @@ impl PlatformRuntimeActivation {
             .lock()
             .expect("Desktop launch lock poisoned");
         if !self.state.has_desktop_host() {
-            Self::launch_desktop_host(target).map_err(ActivationFailure::from)?;
+            Self::launch_desktop_host(Some(project_root)).map_err(ActivationFailure::from)?;
             return Ok(ActivationOutcome::Opened);
         }
-        let WorkbenchRoute::OpenProject { canonical_root } = target else {
-            return Err(ControlErrorCode::InvalidRoute.into());
-        };
-        self.services
-            .activate_desktop_project(canonical_root, preferred_window_key)
-            .map(|outcome| match outcome {
-                DesktopOpenResult::Opened => ActivationOutcome::Opened,
-                DesktopOpenResult::FocusedExisting => ActivationOutcome::FocusedExisting,
-            })
-            .map_err(|error| match error.code {
-                "desktop_window_activation_failed" | "desktop_window_focus_failed" => {
-                    ControlErrorCode::DesktopUnavailable.into()
-                }
-                _ => project_open_failure(canonical_root, error),
-            })
+        self.state
+            .request_desktop_project_open(project_root, preferred_window_key)
+            .map(|()| ActivationOutcome::Opened)
+            .map_err(|_| ControlErrorCode::DesktopUnavailable.into())
     }
 
-    fn open_desktop(&self, target: &WorkbenchRoute) -> Result<ActivationOutcome, ControlErrorCode> {
+    fn open_desktop(&self) -> Result<ActivationOutcome, ControlErrorCode> {
         let _launch = self
             .desktop_launch
             .lock()
             .expect("Desktop launch lock poisoned");
-        match self.state.open_desktop_window(target) {
+        match self.state.open_desktop_window() {
             Err(DesktopOpenError::HostUnavailable) => {
-                Self::launch_desktop_host(target)?;
+                Self::launch_desktop_host(None)?;
                 Ok(ActivationOutcome::Opened)
             }
-            Ok(DesktopOpenResult::FocusedExisting) => Ok(ActivationOutcome::FocusedExisting),
-            Ok(DesktopOpenResult::Opened) => Ok(ActivationOutcome::Opened),
+            Ok(()) => Ok(ActivationOutcome::Opened),
             Err(DesktopOpenError::Outbound(_)) => Err(ControlErrorCode::DesktopUnavailable),
         }
     }
 
-    fn launch_desktop_host(target: &WorkbenchRoute) -> Result<(), ControlErrorCode> {
+    fn launch_desktop_host(initial_project_root: Option<&str>) -> Result<(), ControlErrorCode> {
         let configured = if let Some(desktop) =
             desktop_host_from_environment().map_err(|_| ControlErrorCode::DesktopUnavailable)?
         {
@@ -1063,8 +1045,8 @@ impl PlatformRuntimeActivation {
         .ok_or(ControlErrorCode::DesktopUnavailable)?;
         let entrypoint = configured.executable;
         let mut arguments = configured.arguments;
-        if let WorkbenchRoute::OpenProject { canonical_root } = target {
-            arguments.push(format!("--debrute-project-root={canonical_root}"));
+        if let Some(project_root) = initial_project_root {
+            arguments.push(format!("--debrute-project-root={project_root}"));
         }
         Command::new(entrypoint)
             .args(&arguments)

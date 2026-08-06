@@ -2,6 +2,7 @@ import type {
   ActivationIntent,
   ControlEvent,
   ControlResponse,
+  DesktopLaunchContext,
   WorkbenchThemePreference
 } from '@debrute/app-protocol';
 
@@ -38,13 +39,22 @@ interface WindowRecord<NativeIdentity, Window extends DesktopHostedWindow<Native
   readonly windowKey: string;
   readonly window: Window;
   phase: 'opening' | 'live';
-  launchTicket: string | undefined;
+  launchContext: DesktopLaunchContext | undefined;
   focusRequested: boolean;
+  creation: PendingWindowCreation<NativeIdentity> | undefined;
   removeClosedListener: () => void;
 }
 
-interface PendingOpenRequest {
+interface PendingOpenRequest<NativeIdentity> {
   focusRequested: boolean;
+  initialProjectRoot: string | undefined;
+  creation: PendingWindowCreation<NativeIdentity> | undefined;
+}
+
+interface PendingWindowCreation<NativeIdentity> {
+  initialProjectRoot: string | undefined;
+  resolve(identity: NativeIdentity): void;
+  reject(error: unknown): void;
 }
 
 export class DesktopWindowHost<
@@ -56,7 +66,8 @@ export class DesktopWindowHost<
   private readonly quitDesktop: DesktopWindowHostServices<NativeIdentity, Window>['quitDesktop'];
   private readonly onError: DesktopWindowHostServices<NativeIdentity, Window>['onError'];
   private readonly records = new Map<string, WindowRecord<NativeIdentity, Window>>();
-  private readonly pendingOpenRequests = new Map<string, PendingOpenRequest>();
+  private readonly pendingOpenRequests = new Map<string, PendingOpenRequest<NativeIdentity>>();
+  private readonly pendingWindowCreations: Array<PendingWindowCreation<NativeIdentity>> = [];
   private readonly unsubscribeEvents: () => void;
   private operationChain = Promise.resolve();
   private shuttingDown = false;
@@ -70,27 +81,58 @@ export class DesktopWindowHost<
     this.unsubscribeEvents = this.control.onEvent((event) => this.receiveEvent(event));
   }
 
-  takeDesktopLaunchTicket(identity: NativeIdentity): string | undefined {
+  takeDesktopLaunchContext(identity: NativeIdentity): DesktopLaunchContext | undefined {
     const record = this.findRecord(identity);
-    const ticket = record?.launchTicket;
+    const context = record?.launchContext;
     if (record) {
-      record.launchTicket = undefined;
+      record.launchContext = undefined;
     }
-    return ticket;
+    return context;
   }
 
-  activate(
-    intent: ActivationIntent,
-    preferredIdentity?: NativeIdentity
-  ): Promise<ControlResponse> {
-    if (preferredIdentity === undefined) {
-      return this.control.activate(intent);
+  isLiveWindow(identity: NativeIdentity): boolean {
+    const record = this.findRecord(identity);
+    return record?.phase === 'live' && !record.window.isDestroyed();
+  }
+
+  singleLiveWindow(): NativeIdentity | undefined {
+    const live = [...this.records.values()].filter((record) => (
+      record.phase === 'live' && !record.window.isDestroyed()
+    ));
+    return live.length === 1 ? live[0]?.window.identity : undefined;
+  }
+
+  identityForWindowKey(windowKey: string): NativeIdentity | undefined {
+    const record = this.records.get(windowKey);
+    return record?.phase === 'live' && !record.window.isDestroyed()
+      ? record.window.identity
+      : undefined;
+  }
+
+  async openWindow(initialProjectRoot?: string): Promise<NativeIdentity> {
+    let resolve!: (identity: NativeIdentity) => void;
+    let reject!: (error: unknown) => void;
+    const opened = new Promise<NativeIdentity>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    const creation: PendingWindowCreation<NativeIdentity> = {
+      initialProjectRoot,
+      resolve,
+      reject
+    };
+    this.pendingWindowCreations.push(creation);
+    try {
+      requireResponse(await this.control.activate({ kind: 'open_desktop' }), 'activation');
+    } catch (error) {
+      const index = this.pendingWindowCreations.indexOf(creation);
+      if (index >= 0) {
+        this.pendingWindowCreations.splice(index, 1);
+        creation.reject(error);
+      }
+      throw error;
     }
-    const record = this.findRecord(preferredIdentity);
-    if (!record || record.window.isDestroyed()) {
-      return Promise.reject(new Error('Desktop activation source window is not hosted.'));
-    }
-    return this.control.activate(intent, record.windowKey);
+    return opened;
   }
 
   async reload(identity: NativeIdentity): Promise<void> {
@@ -110,7 +152,7 @@ export class DesktopWindowHost<
         if (this.shuttingDown || !this.isCurrent(record) || record.window.isDestroyed()) {
           return;
         }
-        record.launchTicket = launch.ticket;
+        record.launchContext = { desktopLaunchTicket: launch.ticket };
         installedTicket = launch.ticket;
         record.window.applyLaunchPresentation(launch.themePreference);
         await record.window.load(launch.url);
@@ -118,8 +160,8 @@ export class DesktopWindowHost<
         if (this.shuttingDown || !this.isCurrent(record)) {
           return;
         }
-        if (installedTicket && record.launchTicket === installedTicket) {
-          record.launchTicket = undefined;
+        if (installedTicket && record.launchContext?.desktopLaunchTicket === installedTicket) {
+          record.launchContext = undefined;
         }
         throw error;
       }
@@ -134,9 +176,14 @@ export class DesktopWindowHost<
       if (!this.shuttingDown
         && !this.records.has(event.window_key)
         && !this.pendingOpenRequests.has(event.window_key)) {
-        this.pendingOpenRequests.set(event.window_key, { focusRequested: false });
+        const creation = this.pendingWindowCreations.shift();
+        this.pendingOpenRequests.set(event.window_key, {
+          focusRequested: false,
+          initialProjectRoot: creation?.initialProjectRoot,
+          creation
+        });
       }
-      return this.enqueue(() => this.openWindow(event.window_key))
+      return this.enqueue(() => this.openRequestedWindow(event.window_key))
         .catch((error: unknown) => this.onError(error));
     }
     if (event.event === 'desktop_window_focus_requested') {
@@ -150,7 +197,7 @@ export class DesktopWindowHost<
     return result;
   }
 
-  private async openWindow(windowKey: string): Promise<void> {
+  private async openRequestedWindow(windowKey: string): Promise<void> {
     if (this.shuttingDown) {
       return;
     }
@@ -184,8 +231,14 @@ export class DesktopWindowHost<
         windowKey,
         window,
         phase: 'opening',
-        launchTicket: launch.ticket,
+        launchContext: {
+          desktopLaunchTicket: launch.ticket,
+          ...(pendingOpen?.initialProjectRoot
+            ? { initialProjectRoot: pendingOpen.initialProjectRoot }
+            : {})
+        },
         focusRequested,
+        creation: pendingOpen?.creation,
         removeClosedListener: () => undefined
       };
       this.records.set(windowKey, record);
@@ -204,9 +257,16 @@ export class DesktopWindowHost<
       if (record.focusRequested) {
         window.focus();
       }
+      record.creation?.resolve(window.identity);
+      record.creation = undefined;
     } catch (error) {
       if (this.shuttingDown || (record && !this.isCurrent(record))) {
         return;
+      }
+      const creation = record?.creation ?? this.pendingOpenRequests.get(windowKey)?.creation;
+      creation?.reject(error);
+      if (record) {
+        record.creation = undefined;
       }
       await this.handleOpenFailure(windowKey, record, error);
     }
@@ -317,7 +377,13 @@ export class DesktopWindowHost<
         this.forgetRecord(record, true);
       }
     }
+    for (const pending of this.pendingOpenRequests.values()) {
+      pending.creation?.reject(new Error('Debrute Desktop ended before its window opened.'));
+    }
     this.pendingOpenRequests.clear();
+    for (const creation of this.pendingWindowCreations.splice(0)) {
+      creation.reject(new Error('Debrute Desktop ended before its window opened.'));
+    }
     this.control.close();
     try {
       this.quitPromise = Promise.resolve(this.quitDesktop());
@@ -336,7 +402,9 @@ export class DesktopWindowHost<
     }
     this.records.delete(record.windowKey);
     this.pendingOpenRequests.delete(record.windowKey);
-    record.launchTicket = undefined;
+    record.launchContext = undefined;
+    record.creation?.reject(new Error('Debrute Desktop window closed before it opened.'));
+    record.creation = undefined;
     record.removeClosedListener();
     if (destroy && !record.window.isDestroyed()) {
       record.window.destroy();

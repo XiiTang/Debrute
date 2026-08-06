@@ -8,25 +8,28 @@ import {
 } from './desktopWindowHost.js';
 
 describe('DesktopWindowHost', () => {
-  it('keeps Runtime window keys inside the Host when activating from a native window', async () => {
+  it('gives a newly created ordinary window one launch context with its initial Project', async () => {
     const control = new FakeControl();
     const nativeWindow = new FakeWindow();
-    const host = createHost(control, [nativeWindow]);
-    await control.emit(openEvent('window-1'));
-    const intent: ActivationIntent = {
-      kind: 'open_project',
-      project_root: '/projects/alpha',
-      frontend: 'desktop'
+    let host!: DesktopWindowHost<object, FakeWindow>;
+    nativeWindow.onLoad = () => {
+      expect(host.takeDesktopLaunchContext(nativeWindow.identity)).toEqual({
+        desktopLaunchTicket: 'ticket-window-1-1',
+        initialProjectRoot: '/projects/missing'
+      });
+      expect(host.takeDesktopLaunchContext(nativeWindow.identity)).toBeUndefined();
     };
+    host = createHost(control, [nativeWindow]);
 
-    await host.activate(intent, nativeWindow.identity);
-    await expect(host.activate(intent, {})).rejects.toThrow(
-      'Desktop activation source window is not hosted.'
-    );
+    const opening = host.openWindow('/projects/missing');
+    await Promise.resolve();
+    await control.emit(openEvent('window-1'));
+    await opening;
 
-    expect(control.activations).toEqual([
-      { intent, preferredWindowKey: 'window-1' }
-    ]);
+    expect(control.activations).toEqual([{
+      intent: { kind: 'open_desktop' },
+      preferredWindowKey: undefined
+    }]);
   });
 
   it('makes the one-use launch ticket available to preload while the window loads', async () => {
@@ -35,8 +38,10 @@ describe('DesktopWindowHost', () => {
     let host!: DesktopWindowHost<object, FakeWindow>;
     nativeWindow.onLoad = () => {
       expect(nativeWindow.presentations).toEqual(['system']);
-      expect(host.takeDesktopLaunchTicket(nativeWindow.identity)).toBe('ticket-window-1-1');
-      expect(host.takeDesktopLaunchTicket(nativeWindow.identity)).toBeUndefined();
+      expect(host.takeDesktopLaunchContext(nativeWindow.identity)).toEqual({
+        desktopLaunchTicket: 'ticket-window-1-1'
+      });
+      expect(host.takeDesktopLaunchContext(nativeWindow.identity)).toBeUndefined();
     };
     host = new DesktopWindowHost({
       control,
@@ -72,7 +77,9 @@ describe('DesktopWindowHost', () => {
 
     expect(nativeWindow.shown).toBe(1);
     expect(nativeWindow.focused).toBe(1);
-    expect(host.takeDesktopLaunchTicket(nativeWindow.identity)).toBe('ticket-window-1-1');
+    expect(host.takeDesktopLaunchContext(nativeWindow.identity)).toEqual({
+      desktopLaunchTicket: 'ticket-window-1-1'
+    });
   });
 
   it('retains focus requested before the opening window has received its ticket', async () => {
@@ -181,7 +188,9 @@ describe('DesktopWindowHost', () => {
       'http://127.0.0.1:32125/',
       'http://127.0.0.1:32125/'
     ]);
-    expect(host.takeDesktopLaunchTicket(nativeWindow.identity)).toBe('ticket-window-1-3');
+    expect(host.takeDesktopLaunchContext(nativeWindow.identity)).toEqual({
+      desktopLaunchTicket: 'ticket-window-1-3'
+    });
   });
 
   it('keeps a live window after reload failure and allows a later manual reload', async () => {
@@ -194,7 +203,7 @@ describe('DesktopWindowHost', () => {
     await expect(host.reload(nativeWindow.identity)).rejects.toThrow('reload failed');
 
     expect(nativeWindow.destroyed).toBe(false);
-    expect(host.takeDesktopLaunchTicket(nativeWindow.identity)).toBeUndefined();
+    expect(host.takeDesktopLaunchContext(nativeWindow.identity)).toBeUndefined();
     await expect(host.reload(nativeWindow.identity)).resolves.toBeUndefined();
     expect(control.ticketRequests).toEqual(['window-1', 'window-1', 'window-1']);
   });

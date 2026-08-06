@@ -11,9 +11,11 @@ owner of the record joining that key to a BrowserWindow identity. It constructs
 the BrowserWindow hidden, inserts the record and close listener, stores the
 ticket in that record, applies the pre-render background, and only then loads
 the stable URL. Narrow preload IPC resolves the sender's real BrowserWindow
-through the Host and consumes the record's ticket once while the document is
-loading; the renderer includes it in the body of its POST SSE connection
-request. Runtime validates host, key, and route, consumes the ticket atomically,
+through the Host and consumes the record's launch context once while the
+document is loading. The context also contains an initial Project root when the
+window was created for a Project-open request. The renderer includes the ticket
+and optional root in the body of its POST SSE connection request. Runtime
+validates host and key, consumes the ticket atomically,
 creates an isolated browser session, and binds that connection to the window.
 
 The local record explicitly moves from `opening` to `live` after load succeeds.
@@ -43,20 +45,19 @@ invalidates all records, removes native listeners, destroys the windows, closes
 Control, and exits Desktop. Late ticket or load results from invalidated records
 have no authority to show windows, mutate topology, or surface another failure.
 
-Ordinary Desktop Project opens are Runtime activation commands. Runtime focuses
-an existing window for the same Project. Otherwise it directly binds the
-initiating BrowserWindow only when that live document was launched at Root and
-has never accepted a Project binding. An activation without a native source may
-reuse the sole such empty window; zero or multiple eligible windows opens a new
-Project-routed window. The Host resolves a native BrowserWindow to its opaque
-Runtime key for this preference, so Main does not mirror the key registry.
+Ordinary Desktop Project opens select one target in Electron before opening. A
+live source targets only itself. A source-free request targets the sole live
+window or creates a new ordinary Root window when there is no unique target.
+The Host resolves a Runtime source key to its BrowserWindow without exposing a
+second registry to Main.
 Startup arguments, native file-open events, second instances, menus, recent
-Projects, Jump Lists, and the Windows Web title bar use that one path. Explicit
-**New Window** activation always creates a new Root window. Desktop connections
-cannot invoke the browser Project-replacement endpoint.
+Projects, Jump Lists, and the Windows Web title bar use that one path. Existing
+targets receive one renderer Project-open event; new targets carry the initial
+root in their one-use launch context and complete their own binding. Explicit
+**New Window** activation always creates a new Root window.
 
 A browser preemption retargets the old Desktop window to Root in Runtime
 topology, but the renderer keeps its last Project presentation visible as a
-detached, frozen surface without Project command authority. That document is not an empty-window reuse
-candidate. An explicit **Open Here** action may preempt back in that same window.
+detached, frozen surface without Project command authority. An explicit **Open
+Here** action may preempt back in that same window.
 Closing the window removes its topology entry.

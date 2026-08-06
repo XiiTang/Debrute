@@ -44,16 +44,6 @@ pub struct WorkbenchConnectionRegistry {
     inner: Mutex<ConnectionRegistryInner>,
 }
 
-pub(crate) struct DesktopConnectionAdmission {
-    pub(crate) binding: DesktopLaunchBinding,
-    pub(crate) reusable_empty: bool,
-}
-
-pub(crate) struct ReusableDesktopConnection {
-    pub(crate) credential: String,
-    pub(crate) binding: DesktopLaunchBinding,
-}
-
 #[derive(Default)]
 struct ConnectionRegistryInner {
     records: HashMap<String, ConnectionRecord>,
@@ -68,7 +58,6 @@ struct ConnectionRecord {
     binding_generation: u64,
     command_gate: Arc<ConnectionCommandGate>,
     desktop: Option<DesktopLaunchBinding>,
-    reusable_desktop_empty: bool,
     events: mpsc::Sender<Value>,
     cancellation: Option<oneshot::Sender<()>>,
     project_cancellation: broadcast::Sender<()>,
@@ -236,22 +225,18 @@ impl WorkbenchConnectionRegistry {
     pub(crate) fn open(
         &self,
         browser_session: String,
-        desktop: Option<DesktopConnectionAdmission>,
+        desktop: Option<DesktopLaunchBinding>,
         events: mpsc::Sender<Value>,
     ) -> Option<(WorkbenchConnectionContext, oneshot::Receiver<()>)> {
         let credential = Uuid::new_v4().to_string();
         let (cancellation, cancelled) = oneshot::channel();
         let (project_cancellation, _) = broadcast::channel(1);
-        let (desktop_binding, reusable_desktop_empty) = desktop.map_or((None, false), |desktop| {
-            (Some(desktop.binding), desktop.reusable_empty)
-        });
         let record = ConnectionRecord {
             browser_session: browser_session.clone(),
             binding: None,
             binding_generation: 0,
             command_gate: Arc::new(ConnectionCommandGate::default()),
-            desktop: desktop_binding.clone(),
-            reusable_desktop_empty,
+            desktop: desktop.clone(),
             events,
             cancellation: Some(cancellation),
             project_cancellation,
@@ -274,7 +259,7 @@ impl WorkbenchConnectionRegistry {
                 binding_id: None,
                 canonical_root: None,
                 binding_generation: 0,
-                desktop: desktop_binding,
+                desktop,
             },
             cancelled,
         ))
@@ -340,45 +325,6 @@ impl WorkbenchConnectionRegistry {
                 .map(|binding| binding.canonical_root.clone()),
             binding_generation: record.binding_generation,
             desktop: record.desktop.clone(),
-        })
-    }
-
-    #[must_use]
-    pub(crate) fn reusable_desktop_connection(
-        &self,
-        preferred_window_key: Option<&str>,
-    ) -> Option<ReusableDesktopConnection> {
-        let inner = self.lock_inner();
-        let is_reusable = |record: &ConnectionRecord| {
-            !record.closing
-                && record.binding.is_none()
-                && record.reusable_desktop_empty
-                && !record.events.is_closed()
-        };
-        let selected = if let Some(window_key) = preferred_window_key {
-            inner.records.iter().find(|(_, record)| {
-                is_reusable(record)
-                    && record
-                        .desktop
-                        .as_ref()
-                        .is_some_and(|desktop| desktop.window_key == window_key)
-            })
-        } else {
-            let mut candidates = inner
-                .records
-                .iter()
-                .filter(|(_, record)| is_reusable(record));
-            let selected = candidates.next()?;
-            if candidates.next().is_some() {
-                return None;
-            }
-            Some(selected)
-        }?;
-        let (credential, record) = selected;
-        let binding = record.desktop.clone()?;
-        Some(ReusableDesktopConnection {
-            credential: credential.clone(),
-            binding,
         })
     }
 
@@ -604,7 +550,6 @@ impl WorkbenchConnectionRegistry {
         let _ = record.project_cancellation.send(());
         let generation = next_binding_generation(record.binding_generation);
         record.binding_generation = generation;
-        record.reusable_desktop_empty = false;
         record.binding = Some(ConnectionProjectBinding {
             binding_id,
             canonical_root,
@@ -1106,13 +1051,11 @@ mod tests {
     use serde_json::{Value, json};
     use tokio::sync::mpsc;
 
-    use crate::project::ProjectUse;
-    use crate::workbench::DesktopLaunchBinding;
-
     use super::{
-        DesktopConnectionAdmission, ProjectBindError, ProjectBindingCommit,
-        WorkbenchConnectionCloser, WorkbenchConnectionDrainOutcome, WorkbenchConnectionRegistry,
+        ProjectBindError, ProjectBindingCommit, WorkbenchConnectionCloser,
+        WorkbenchConnectionDrainOutcome, WorkbenchConnectionRegistry,
     };
+    use crate::project::ProjectUse;
 
     fn project_use(canonical_root: &str) -> ProjectUse {
         ProjectUse::detached_for_test(std::path::Path::new(canonical_root))
@@ -1125,90 +1068,6 @@ mod tests {
             project_use: project_use(canonical_root),
             bound_event: json!({"type": "project.bound"}),
         }
-    }
-
-    fn desktop(window_key: &str, reusable_empty: bool) -> DesktopConnectionAdmission {
-        DesktopConnectionAdmission {
-            binding: DesktopLaunchBinding {
-                desktop_host_id: "desktop-host".to_owned(),
-                window_key: window_key.to_owned(),
-            },
-            reusable_empty,
-        }
-    }
-
-    #[test]
-    fn reusable_desktop_selection_requires_an_unambiguous_true_empty_window() {
-        let registry = WorkbenchConnectionRegistry::new();
-        let (first_events, _first_receiver) = mpsc::channel::<Value>(4);
-        let (first, _first_closed) = registry
-            .open(
-                "desktop-1".to_owned(),
-                Some(desktop("window-1", true)),
-                first_events,
-            )
-            .expect("first Desktop connection should open");
-        let (second_events, _second_receiver) = mpsc::channel::<Value>(4);
-        let (second, _second_closed) = registry
-            .open(
-                "desktop-2".to_owned(),
-                Some(desktop("window-2", true)),
-                second_events,
-            )
-            .expect("second Desktop connection should open");
-
-        assert!(registry.reusable_desktop_connection(None).is_none());
-        assert_eq!(
-            registry
-                .reusable_desktop_connection(Some("window-2"))
-                .expect("the preferred empty window should be selected")
-                .credential,
-            second.credential
-        );
-
-        registry
-            .bind_project(&first.credential, 0, binding("project-a"))
-            .expect("first Desktop should bind the Project");
-        let (browser_events, _browser_receiver) = mpsc::channel::<Value>(4);
-        let (browser, _browser_closed) = registry
-            .open("browser".to_owned(), None, browser_events)
-            .expect("browser connection should open");
-        registry
-            .bind_project(&browser.credential, 0, binding("project-a"))
-            .expect("browser should preempt the Desktop owner");
-
-        assert!(
-            registry
-                .reusable_desktop_connection(Some("window-1"))
-                .is_none()
-        );
-        assert_eq!(
-            registry
-                .reusable_desktop_connection(None)
-                .expect("the sole remaining empty window should be selected")
-                .credential,
-            second.credential
-        );
-    }
-
-    #[test]
-    fn project_routed_desktop_connection_is_not_reusable_before_binding() {
-        let registry = WorkbenchConnectionRegistry::new();
-        let (events, _receiver) = mpsc::channel::<Value>(4);
-        registry
-            .open(
-                "desktop".to_owned(),
-                Some(desktop("window-1", false)),
-                events,
-            )
-            .expect("Project-routed Desktop connection should open");
-
-        assert!(
-            registry
-                .reusable_desktop_connection(Some("window-1"))
-                .is_none()
-        );
-        assert!(registry.reusable_desktop_connection(None).is_none());
     }
 
     #[test]

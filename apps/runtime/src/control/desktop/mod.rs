@@ -26,12 +26,6 @@ struct DesktopHost {
     sender: ControlSender,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DesktopOpenResult {
-    Opened,
-    FocusedExisting,
-}
-
 #[derive(Debug)]
 pub enum DesktopOpenError {
     HostUnavailable,
@@ -105,54 +99,46 @@ impl DesktopWindowTopology {
         }
     }
 
-    pub(super) fn open(
-        &self,
-        route: &WorkbenchRoute,
-    ) -> Result<DesktopOpenResult, DesktopOpenError> {
+    pub(super) fn open(&self) -> Result<(), DesktopOpenError> {
         let mut inner = self.lock_inner();
         let host = inner
             .host
             .clone()
             .ok_or(DesktopOpenError::HostUnavailable)?;
-        if let WorkbenchRoute::OpenProject { canonical_root } = route
-            && let Some(window_key) = project_window_key(&inner.windows, canonical_root)
-        {
-            host.sender
-                .send(ServerMessage::event(
-                    ControlEvent::DesktopWindowFocusRequested { window_key },
-                ))
-                .map_err(DesktopOpenError::Outbound)?;
-            return Ok(DesktopOpenResult::FocusedExisting);
-        }
         let window_key = Uuid::new_v4().to_string();
-        inner.windows.insert(window_key.clone(), route.clone());
+        inner
+            .windows
+            .insert(window_key.clone(), WorkbenchRoute::Root);
         if let Err(error) = host.sender.send(ServerMessage::event(
             ControlEvent::DesktopWindowOpenRequested {
                 window_key: window_key.clone(),
-                route: route.clone(),
+                route: WorkbenchRoute::Root,
             },
         )) {
             inner.windows.remove(&window_key);
             return Err(DesktopOpenError::Outbound(error));
         }
-        Ok(DesktopOpenResult::Opened)
+        Ok(())
     }
 
-    pub(super) fn focus_project(&self, canonical_root: &str) -> Result<bool, DesktopOpenError> {
+    pub(super) fn request_project_open(
+        &self,
+        project_root: &str,
+        preferred_window_key: Option<&str>,
+    ) -> Result<(), DesktopOpenError> {
         let inner = self.lock_inner();
         let host = inner
             .host
             .as_ref()
             .ok_or(DesktopOpenError::HostUnavailable)?;
-        let Some(window_key) = project_window_key(&inner.windows, canonical_root) else {
-            return Ok(false);
-        };
         host.sender
             .send(ServerMessage::event(
-                ControlEvent::DesktopWindowFocusRequested { window_key },
+                ControlEvent::DesktopProjectOpenRequested {
+                    project_root: project_root.to_owned(),
+                    preferred_window_key: preferred_window_key.map(str::to_owned),
+                },
             ))
-            .map_err(DesktopOpenError::Outbound)?;
-        Ok(true)
+            .map_err(DesktopOpenError::Outbound)
     }
 
     pub(super) fn create_launch_ticket(
@@ -241,16 +227,6 @@ impl DesktopWindowTopology {
     fn lock_inner(&self) -> MutexGuard<'_, DesktopTopologyInner> {
         self.inner.lock().expect("Desktop topology lock poisoned")
     }
-}
-
-fn project_window_key(
-    windows: &HashMap<String, WorkbenchRoute>,
-    canonical_root: &str,
-) -> Option<String> {
-    windows.iter().find_map(|(window_key, current)| {
-        matches!(current, WorkbenchRoute::OpenProject { canonical_root: current_root } if current_root == canonical_root)
-            .then(|| window_key.clone())
-    })
 }
 
 impl fmt::Display for DesktopOpenError {
