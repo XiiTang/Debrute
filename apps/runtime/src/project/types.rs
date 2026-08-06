@@ -370,7 +370,6 @@ pub struct ProjectEvent {
 pub enum ProjectPathOperationStatus {
     Ok,
     Skipped,
-    Quarantined,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -451,18 +451,6 @@ impl ProjectCapabilityFs {
         Ok(())
     }
 
-    pub(crate) fn rename_to_directory(
-        &self,
-        from: &str,
-        destination: &Dir,
-        destination_name: &str,
-    ) -> Result<(), ProjectError> {
-        let from = normalize_project_relative_path(from)?;
-        normalize_project_path_basename(destination_name)?;
-        self.root.rename(from, destination, destination_name)?;
-        Ok(())
-    }
-
     pub(crate) fn hard_link_to(
         &self,
         source: &str,

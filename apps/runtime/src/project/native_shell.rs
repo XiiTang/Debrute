@@ -16,8 +16,8 @@ use crate::{
 };
 
 use super::{
-    ProjectCapabilityFs, ProjectError, ProjectPathEntry, ProjectPathKind,
-    assert_project_tree_visible_path, resolve_no_symlink_existing_project_path,
+    ProjectError, ProjectPathEntry, ProjectPathKind, assert_project_tree_visible_path,
+    resolve_no_symlink_existing_project_path,
 };
 
 const NATIVE_SHELL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -118,23 +118,8 @@ impl ProjectNativeShellService {
         entries: &[ProjectPathEntry],
     ) -> Result<Vec<ProjectPathEntry>, ProjectError> {
         let resolved = top_level_resolved_entries(validate_entries(project_root, entries)?)?;
-        preflight_trash_staging(project_root, &resolved)?;
         for entry in &resolved {
-            let quarantined = QuarantinedEntry::claim(entry)?;
-            quarantined.revalidate()?;
-            if let Err(error) = self.run(trash_action(&quarantined.absolute), None) {
-                return Err(ProjectError::service_with_fields(
-                    "native_shell_trash_quarantined",
-                    format!(
-                        "Native trash failed after the Project entry was moved into its Runtime-owned staging directory: {error}"
-                    ),
-                    [(
-                        "quarantine_absolute_path".to_owned(),
-                        quarantined.absolute.to_string_lossy().into_owned(),
-                    )],
-                ));
-            }
-            quarantined.confirm_consumed()?;
+            self.run(trash_action(&entry.absolute), Some(entry))?;
         }
         Ok(resolved
             .into_iter()
@@ -223,184 +208,6 @@ fn decode_directory_picker_output(output: &str) -> Result<Option<PathBuf>, Proje
         )
     })?;
     Ok(Some(PathBuf::from(selected)))
-}
-
-fn preflight_trash_staging(
-    project_root: &Path,
-    entries: &[ResolvedEntry],
-) -> Result<(), ProjectError> {
-    if entries.is_empty() {
-        return Ok(());
-    }
-    let parent = project_root.parent().ok_or_else(|| {
-        ProjectError::service(
-            "native_shell_trash_staging_unavailable",
-            "A filesystem root cannot be used as the Project root for native trash.",
-        )
-    })?;
-    let parent_identity = debrute_native_fs::path_identity(parent)?;
-    if entries
-        .iter()
-        .any(|entry| entry.identity.volume != parent_identity.volume)
-    {
-        return Err(ProjectError::service(
-            "native_shell_trash_staging_unavailable",
-            "Every selected Project entry must share the writable Project-parent filesystem used for native-trash staging.",
-        ));
-    }
-    let parent_capability =
-        cap_std::fs::Dir::open_ambient_dir(parent, cap_std::ambient_authority())?;
-    let probe_name = format!(".debrute-native-trash-probe-{}", uuid::Uuid::new_v4());
-    parent_capability.create_dir(&probe_name).map_err(|error| {
-        ProjectError::service_with_fields(
-            "native_shell_trash_staging_unavailable",
-            format!("Native trash requires a writable Project parent: {error}"),
-            [(
-                "project_parent".to_owned(),
-                parent.to_string_lossy().into_owned(),
-            )],
-        )
-    })?;
-    parent_capability.remove_dir(&probe_name).map_err(|error| {
-        ProjectError::service_with_fields(
-            "native_shell_trash_staging_unavailable",
-            format!("Native trash staging preflight could not clean its probe: {error}"),
-            [(
-                "staging_probe".to_owned(),
-                parent.join(&probe_name).to_string_lossy().into_owned(),
-            )],
-        )
-    })?;
-    Ok(())
-}
-
-struct QuarantinedEntry {
-    absolute: PathBuf,
-    staging_directory: PathBuf,
-    staging_capability: Option<cap_std::fs::Dir>,
-    basename: String,
-    identity: debrute_native_fs::PathIdentity,
-    kind: ProjectPathKind,
-}
-
-impl QuarantinedEntry {
-    fn claim(entry: &ResolvedEntry) -> Result<Self, ProjectError> {
-        let basename = Path::new(&entry.relative)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                ProjectError::Validation("Native trash basename is invalid.".to_owned())
-            })?;
-        let parent = entry.project_root.parent().ok_or_else(|| {
-            ProjectError::service(
-                "native_shell_trash_staging_unavailable",
-                "A filesystem root cannot be used as the Project root for native trash.",
-            )
-        })?;
-        let parent_identity = debrute_native_fs::path_identity(parent)?;
-        if parent_identity.volume != entry.identity.volume {
-            return Err(ProjectError::service(
-                "native_shell_trash_staging_unavailable",
-                "Native trash requires a writable Project parent on the same filesystem; a filesystem or mounted-volume root cannot be used as the Project root for this action.",
-            ));
-        }
-        let staging_name = format!(".debrute-native-trash-{}", uuid::Uuid::new_v4());
-        let staging_directory = parent.join(&staging_name);
-        let parent_capability =
-            cap_std::fs::Dir::open_ambient_dir(parent, cap_std::ambient_authority())?;
-        parent_capability.create_dir(&staging_name).map_err(|error| {
-            ProjectError::service_with_fields(
-                "native_shell_trash_staging_unavailable",
-                format!(
-                    "Native trash requires a writable Project parent on the same filesystem: {error}"
-                ),
-                [("project_parent".to_owned(), parent.to_string_lossy().into_owned())],
-            )
-        })?;
-        let staging_capability = parent_capability.open_dir(&staging_name)?;
-        let project = ProjectCapabilityFs::open(&entry.project_root)?;
-        if let Err(error) =
-            project.rename_to_directory(&entry.relative, &staging_capability, basename)
-        {
-            let _ = parent_capability.remove_dir(&staging_name);
-            return Err(error);
-        }
-        let absolute = staging_directory.join(basename);
-        let staged = match entry.kind {
-            ProjectPathKind::File => staging_capability.open(basename)?.into_std(),
-            ProjectPathKind::Directory => staging_capability.open_dir(basename)?.into_std_file(),
-        };
-        let identity = debrute_native_fs::file_identity(&staged)?;
-        if identity != entry.identity {
-            return Err(ProjectError::service_with_fields(
-                "project_path_changed",
-                format!(
-                    "Project path changed while it was claimed for trash and remains staged: {}",
-                    entry.relative
-                ),
-                [(
-                    "quarantine_absolute_path".to_owned(),
-                    absolute.to_string_lossy().into_owned(),
-                )],
-            ));
-        }
-        Ok(Self {
-            absolute,
-            staging_directory,
-            staging_capability: Some(staging_capability),
-            basename: basename.to_owned(),
-            identity,
-            kind: entry.kind,
-        })
-    }
-
-    fn revalidate(&self) -> Result<(), ProjectError> {
-        let capability = self
-            .staging_capability
-            .as_ref()
-            .expect("trash staging capability must exist before revalidation");
-        let staged = match self.kind {
-            ProjectPathKind::File => capability.open(&self.basename)?.into_std(),
-            ProjectPathKind::Directory => capability.open_dir(&self.basename)?.into_std_file(),
-        };
-        if debrute_native_fs::file_identity(&staged)? == self.identity {
-            Ok(())
-        } else {
-            Err(ProjectError::service(
-                "project_path_changed",
-                format!(
-                    "Runtime native-trash staging changed before the system action: {}",
-                    self.absolute.display()
-                ),
-            ))
-        }
-    }
-
-    fn confirm_consumed(&self) -> Result<(), ProjectError> {
-        let capability = self
-            .staging_capability
-            .as_ref()
-            .expect("trash staging capability must exist before consumption confirmation");
-        match capability.symlink_metadata(&self.basename) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(ProjectError::Io(error)),
-            Ok(_) => Err(ProjectError::service_with_fields(
-                "native_shell_trash_not_consumed",
-                "The system trash action returned without consuming the staged Project entry.",
-                [(
-                    "quarantine_absolute_path".to_owned(),
-                    self.absolute.to_string_lossy().into_owned(),
-                )],
-            )),
-        }
-    }
-}
-
-impl Drop for QuarantinedEntry {
-    fn drop(&mut self) {
-        self.staging_capability.take();
-        let _ = fs::remove_dir(&self.staging_directory);
-    }
 }
 
 struct ResolvedEntry {
@@ -936,9 +743,8 @@ mod tests {
     }
 
     #[test]
-    fn trash_claim_survives_project_root_replacement_without_overwriting_rollback() {
+    fn native_trash_revalidates_and_targets_the_original_project_path() {
         let root = std::env::temp_dir().join(format!("debrute-native-shell-{}", Uuid::new_v4()));
-        let moved = root.with_extension("moved");
         fs::create_dir_all(root.join("folder")).unwrap();
         fs::write(root.join("folder/file.txt"), "fixture").unwrap();
         let entry = validate_entry(
@@ -950,23 +756,23 @@ mod tests {
             },
         )
         .unwrap();
-        let quarantined = QuarantinedEntry::claim(&entry).unwrap();
-        let staging_directory = quarantined.staging_directory.clone();
-        assert!(!root.join("folder/file.txt").exists());
-        assert!(!quarantined.absolute.starts_with(&root));
-        assert!(quarantined.absolute.is_file());
-        fs::rename(&root, &moved).unwrap();
-        fs::create_dir_all(root.join("folder")).unwrap();
+        let action = trash_action(&entry.absolute);
+        assert_eq!(
+            action.args.last().unwrap(),
+            &root.join("folder/file.txt").to_string_lossy()
+        );
+
+        fs::rename(
+            root.join("folder/file.txt"),
+            root.join("folder/original.txt"),
+        )
+        .unwrap();
         fs::write(root.join("folder/file.txt"), "replacement").unwrap();
         assert_eq!(
-            fs::read(root.join("folder/file.txt")).unwrap(),
-            b"replacement"
+            entry.revalidate().unwrap_err().code(),
+            "project_path_changed"
         );
-        assert_eq!(fs::read(&quarantined.absolute).unwrap(), b"fixture");
-        drop(quarantined);
-        fs::remove_dir_all(staging_directory).unwrap();
         fs::remove_dir_all(root).unwrap();
-        fs::remove_dir_all(moved).unwrap();
     }
 
     #[cfg(target_os = "macos")]

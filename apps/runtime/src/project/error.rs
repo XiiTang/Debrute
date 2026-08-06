@@ -70,11 +70,7 @@ impl ProjectError {
     pub(crate) fn leaves_mutation_outcome_uncertain(&self) -> bool {
         matches!(
             self.code(),
-            "project_file_operation_rollback_failed"
-                | "document_transaction_rollback_failed"
-                | "native_shell_trash_quarantined"
-                | "native_shell_trash_not_consumed"
-                | "native_shell_trash_rollback_failed"
+            "project_file_operation_rollback_failed" | "document_transaction_rollback_failed"
         )
     }
 }

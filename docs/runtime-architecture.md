@@ -487,8 +487,11 @@ secondary-state persistence also fails, it additionally publishes the Error
 diagnostic `project_path_state_persistence_failed`; ordinary refresh does not
 clear that diagnostic, while the next successful related path mutation does.
 Runtime writes no filesystem or Native Trash recovery journal, Canvas byte
-snapshot, expected output hash, or commit marker. Native Trash retains only
-immediate same-filesystem quarantine around the operating-system action.
+snapshot, expected output hash, or commit marker. Native Trash validates the
+complete top-level batch before any effect, revalidates each original Project
+path immediately before asking the operating system to trash it, and stops at
+the first failure without retry or rollback. Earlier successful items remain in
+the system Trash and later items are not attempted.
 
 ## Working Copies And Terminal Lifetime
 

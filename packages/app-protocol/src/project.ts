@@ -97,7 +97,7 @@ export interface NormalizedFileWatchEvent {
 
 export interface ProjectPathBatchItemResult extends ProjectPathEntry {
   sourceProjectRelativePath: string;
-  status: 'ok' | 'skipped' | 'quarantined';
+  status: 'ok' | 'skipped';
 }
 
 export interface ProjectPathBatchOperationResult {

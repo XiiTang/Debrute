@@ -82,13 +82,7 @@ export function reconcileCutClipboardWithProjectEntries(
 }
 
 export function batchResultSelectionPaths(results: WorkbenchProjectFileBatchOperationResult['results']): string[] {
-  return results
-    .filter((result) => (
-      result.status === 'ok'
-      || result.status === 'skipped'
-      || result.status === 'quarantined'
-    ))
-    .map((result) => result.projectRelativePath);
+  return results.map((result) => result.projectRelativePath);
 }
 
 export function nearestExistingParentSelection(
@@ -126,7 +120,7 @@ export function rewriteCanvasSelectionAfterPathChanges(
   changes: readonly {
     sourceProjectRelativePath: string;
     projectRelativePath: string;
-    status: 'ok' | 'skipped' | 'quarantined';
+    status: 'ok' | 'skipped';
   }[]
 ): CanvasSelection | undefined {
   if (selection?.kind !== 'nodes') {
