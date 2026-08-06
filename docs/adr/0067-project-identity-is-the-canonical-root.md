@@ -14,9 +14,9 @@ input paths independently of Project identity and Project Sessions.
 
 Input surfaces may accept relative paths when their working directory is
 defined. Runtime canonicalizes the existing directory before admitting work and
-uses only the canonical absolute value afterward. Desktop performs a read-only
-preflight before opening or focusing a window; the Workbench binding performs
-the full Project Session load.
+uses only the canonical absolute value afterward. Desktop forwards the raw
+requested root to one selected Workbench; that Workbench binding performs the
+Project path admission and full Project Session load.
 
 The only stable Project page route is:
 
@@ -54,8 +54,8 @@ use the parallel `~/.debrute/cache/roots/<rootKey>/` boundary.
 ## Failure
 
 Opening fails only for path/admission failures such as `project_not_found`, an
-unreadable root, or an invalid path kind. Desktop passes the canonical root,
-code, and message unchanged.
+unreadable root, or an invalid path kind. The selected Workbench presents that
+failure without choosing another Desktop target.
 
 Malformed Feedback state remains unchanged and fails the Project load or
 refresh. Malformed, unreadable, or root-mismatched Canvas state remains

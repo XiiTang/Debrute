@@ -425,16 +425,16 @@ impl ProjectCapabilityFs {
     ) -> Result<Vec<u8>, ProjectError> {
         let relative = normalize_project_relative_path(relative)?;
         let mut file = self.root.open(relative)?;
-        if file.metadata()?.len() > u64::try_from(max_bytes).unwrap_or(u64::MAX) {
+        let limit = max_bytes as u64;
+        if file.metadata()?.len() > limit {
             return Err(ProjectError::service(
                 "project_document_too_large",
                 format!("Project document exceeds {max_bytes} bytes."),
             ));
         }
-        let limit = u64::try_from(max_bytes).unwrap_or(u64::MAX);
         let mut bytes = Vec::new();
         std::io::Read::by_ref(&mut file)
-            .take(limit.saturating_add(1))
+            .take(limit + 1)
             .read_to_end(&mut bytes)?;
         if bytes.len() > max_bytes {
             return Err(ProjectError::service(
@@ -683,14 +683,12 @@ pub fn compare_project_tree_entries(left: &ProjectTreeEntry, right: &ProjectTree
         _ => {
             let left_name = left
                 .project_relative_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&left.project_relative_path);
+                .rsplit_once('/')
+                .map_or(left.project_relative_path.as_str(), |(_, name)| name);
             let right_name = right
                 .project_relative_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&right.project_relative_path);
+                .rsplit_once('/')
+                .map_or(right.project_relative_path.as_str(), |(_, name)| name);
             natural_name_cmp(left_name, right_name)
                 .then_with(|| left_name.cmp(right_name))
                 .then_with(|| left.project_relative_path.cmp(&right.project_relative_path))
@@ -710,7 +708,7 @@ pub(crate) fn natural_name_cmp(left: &str, right: &str) -> Ordering {
     let mut left = left_folded.chars().peekable();
     let mut right = right_folded.chars().peekable();
     loop {
-        match (left.peek(), right.peek()) {
+        match (left.peek().copied(), right.peek().copied()) {
             (None, None) => return Ordering::Equal,
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
@@ -730,11 +728,10 @@ pub(crate) fn natural_name_cmp(left: &str, right: &str) -> Ordering {
                     return order;
                 }
             }
-            (Some(_), Some(_)) => {
-                let order = left
-                    .next()
-                    .unwrap_or_default()
-                    .cmp(&right.next().unwrap_or_default());
+            (Some(a), Some(b)) => {
+                left.next();
+                right.next();
+                let order = a.cmp(&b);
                 if order != Ordering::Equal {
                     return order;
                 }

@@ -1,8 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { dispatchDesktopProjectOpen } from './desktopProjectOpen.js';
+import {
+  desktopProjectSourceWindow,
+  dispatchDesktopProjectOpen
+} from './desktopProjectOpen.js';
+
+class NativeWindow {
+  constructor(readonly destroyed: boolean) {}
+}
+
+class OtherWindow {}
 
 describe('Desktop Project open targeting', () => {
+  it('preserves a destroyed native Project source for the live-window check', () => {
+    const source = new NativeWindow(true);
+    const isNativeWindow = (window: NativeWindow | OtherWindow): window is NativeWindow => (
+      window instanceof NativeWindow
+    );
+
+    expect(desktopProjectSourceWindow(source, isNativeWindow)).toBe(source);
+    expect(desktopProjectSourceWindow(new OtherWindow(), isNativeWindow)).toBeUndefined();
+  });
+
   it('delivers a sourced request only to its live source window', async () => {
     const source = {};
     const send = vi.fn();
@@ -22,13 +41,14 @@ describe('Desktop Project open targeting', () => {
   });
 
   it('discards a sourced request when its source window was destroyed', async () => {
+    const source = { destroyed: true };
     const send = vi.fn();
     const openWindow = vi.fn();
 
     await dispatchDesktopProjectOpen({
       projectRoot: '/projects/missing',
-      preferredWindow: {},
-      isLiveWindow: () => false,
+      preferredWindow: source,
+      isLiveWindow: (window) => !window.destroyed,
       singleLiveWindow: () => ({}),
       openWindow,
       send

@@ -361,7 +361,7 @@ bar. Cancelling is indeterminate. Notices and terminal tasks show no progress.
 
 There is no severity, read/unread state, red dot, deduplication, separate Toast
 model, operating-system notification, or Project-change reset. Starting a
-Model Operation from either CLI or Workbench creates a Model Request task;
+Model Operation from the CLI creates a Model Request task;
 Debrute-to-Photoshop transfer and Integration install/update/uninstall create
 their own tasks. Project, Canvas, Explorer, Workbench, and Update failures use
 terminal notices. Product Update itself is not an Activity task because a

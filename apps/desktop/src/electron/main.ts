@@ -14,7 +14,10 @@ import {
   buildDesktopDockMenu
 } from './desktopApplicationMenu.js';
 import { createDesktopOpenAdmission } from './desktopOpenAdmission.js';
-import { dispatchDesktopProjectOpen } from './desktopProjectOpen.js';
+import {
+  desktopProjectSourceWindow,
+  dispatchDesktopProjectOpen
+} from './desktopProjectOpen.js';
 import { requireDesktopPlatform } from './desktopPlatform.js';
 import { DesktopWindowHost } from './desktopWindowHost.js';
 import { DesktopProductQuit } from './desktopProductQuit.js';
@@ -139,14 +142,6 @@ async function startDesktop(): Promise<void> {
       runDesktopAction(dispatchDesktopOpen({ kind: 'new-window' }));
     })));
   }
-  registerNativeWindowIpc<Electron.WebContents, Electron.BrowserWindow>({
-    ipcMain,
-    browserWindow: BrowserWindow,
-    executeNativeMenuCommand,
-    takeDesktopLaunchContext: (browserWindow) => (
-      windowHost?.takeDesktopLaunchContext(browserWindow)
-    )
-  });
   const runtime = runtimeLaunchConfiguration();
   control = await connectOrLaunchDesktopRuntime({
     productVersion: app.getVersion(),
@@ -159,7 +154,10 @@ async function startDesktop(): Promise<void> {
     environment: process.env
   });
   const activeControl = control;
-  windowHost = new DesktopWindowHost({
+  const activeWindowHost = new DesktopWindowHost<
+    Electron.BrowserWindow,
+    ElectronDesktopWindow
+  >({
     control: activeControl,
     createWindow: ({ windowKey }) => new ElectronDesktopWindow({
       windowKey,
@@ -180,6 +178,15 @@ async function startDesktop(): Promise<void> {
       app.quit();
     },
     onError: reportDesktopError
+  });
+  windowHost = activeWindowHost;
+  registerNativeWindowIpc<Electron.WebContents, Electron.BrowserWindow>({
+    ipcMain,
+    browserWindow: BrowserWindow,
+    executeNativeMenuCommand,
+    takeDesktopLaunchContext: (browserWindow) => (
+      activeWindowHost.takeDesktopLaunchContext(browserWindow)
+    )
   });
   activeControl.onEvent(handleControlEvent);
   activeControl.onRuntimeLost((error) => {
@@ -275,7 +282,7 @@ function installApplicationMenu(): void {
     },
     dispatchEditCommand: (window, command) => {
       const browserWindow = desktopBrowserWindow(window);
-      if (browserWindow) {
+      if (browserWindow && !browserWindow.isDestroyed()) {
         sendNativeEditCommand(browserWindow, command);
       }
     },
@@ -406,7 +413,10 @@ async function dispatchAdmittedDesktopOpen(
 function desktopBrowserWindow(
   window: Electron.BaseWindow | null | undefined
 ): Electron.BrowserWindow | undefined {
-  return window instanceof BrowserWindow && !window.isDestroyed() ? window : undefined;
+  return desktopProjectSourceWindow(
+    window,
+    (source): source is Electron.BrowserWindow => source instanceof BrowserWindow
+  );
 }
 
 function runtimeLaunchConfiguration(): {

@@ -447,11 +447,9 @@ impl<'a> ExecutionContext<'a> {
         }
         self.reserve_request_bytes(file_size)?;
         let mut bytes = Vec::with_capacity(file_size);
+        let read_limit = self.limits.input_media_item_bytes as u64 + 1;
         fs::File::open(&path)
-            .and_then(|file| {
-                file.take(u64::try_from(self.limits.input_media_item_bytes).unwrap_or(u64::MAX) + 1)
-                    .read_to_end(&mut bytes)
-            })
+            .and_then(|file| file.take(read_limit).read_to_end(&mut bytes))
             .map_err(|error| {
                 ModelRequestError::new("model_request_input_invalid", error.to_string())
             })?;
@@ -901,18 +899,22 @@ pub(crate) fn mime_from_response(response: &ModelHttpResponse) -> Option<String>
     response
         .headers
         .get("content-type")
-        .and_then(|value| value.split(';').next())
+        .map(|value| {
+            value
+                .split_once(';')
+                .map_or(value.as_str(), |(mime, _)| mime)
+        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_ascii_lowercase)
 }
 
 pub(crate) fn mime_from_path_or_bytes(path: &str, bytes: &[u8]) -> Option<&'static str> {
-    let path = path.split('?').next().unwrap_or(path);
-    let registered = project_content_type(path)
-        .split(';')
-        .next()
-        .unwrap_or_default();
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    let content_type = project_content_type(path);
+    let registered = content_type
+        .split_once(';')
+        .map_or(content_type, |(mime, _)| mime);
     if registered.starts_with("image/")
         || registered.starts_with("video/")
         || registered.starts_with("audio/")
@@ -954,9 +956,8 @@ fn extension_eq(path: &str, expected: &str) -> bool {
 
 pub(crate) fn extension_for_mime(mime: &str) -> Result<&'static str, ModelRequestError> {
     match mime
-        .split(';')
-        .next()
-        .unwrap_or(mime)
+        .split_once(';')
+        .map_or(mime, |(mime, _)| mime)
         .trim()
         .to_ascii_lowercase()
         .as_str()

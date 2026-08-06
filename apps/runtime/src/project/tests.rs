@@ -300,6 +300,83 @@ fn reset_canvas_persistence_failure_preserves_available_state() {
 }
 
 #[test]
+fn canvas_patch_persistence_failure_discards_the_staged_project_tree() {
+    let (base, root, _) = fixture();
+    let home = base.join("patch-failure-home");
+    fs::create_dir(root.join("assets")).unwrap();
+    fs::write(root.join("assets/child.txt"), "child").unwrap();
+    let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
+    let mut service =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let before = service.snapshot().clone();
+    assert!(!service.is_loaded_watch_path("assets/child.txt"));
+    let canvas_path =
+        crate::global::root_state_directory(&home, &canonical_root).join("canvas.json");
+    fs::remove_file(&canvas_path).unwrap();
+    fs::create_dir(&canvas_path).unwrap();
+    let patch = serde_json::from_value(serde_json::json!({
+        "expandedDirectories": ["assets"]
+    }))
+    .unwrap();
+
+    let error = service.patch_canvas_state(&patch).unwrap_err();
+
+    assert_eq!(error.code(), "canvas_workspace_persistence_failed");
+    assert_eq!(service.snapshot(), &before);
+    assert!(!service.is_loaded_watch_path("assets/child.txt"));
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn canvas_patch_commits_when_confirmed_path_feedback_cannot_be_pruned() {
+    let (base, root, _) = fixture();
+    let home = base.join("patch-feedback-failure-home");
+    let removed_directory = root.join("assets/removed");
+    fs::create_dir_all(&removed_directory).unwrap();
+    fs::write(removed_directory.join("child.txt"), "child").unwrap();
+    let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
+    let mut service =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let feedback = serde_json::from_value(serde_json::json!({
+        "operation": "set-mark",
+        "projectRelativePaths": ["assets/removed/child.txt"],
+        "mark": "like",
+        "selected": true
+    }))
+    .unwrap();
+    service.update_canvas_feedback(&feedback).unwrap();
+    let feedback_before = service.canvas_feedback().clone();
+    fs::remove_dir_all(&removed_directory).unwrap();
+    let feedback_path = root.join(CANVAS_FEEDBACK_PROJECT_PATH);
+    fs::remove_file(&feedback_path).unwrap();
+    fs::create_dir(&feedback_path).unwrap();
+    let patch = serde_json::from_value(serde_json::json!({
+        "expandedDirectories": ["assets", "assets/removed"]
+    }))
+    .unwrap();
+
+    let (snapshot, changed) = service.patch_canvas_state(&patch).unwrap();
+
+    assert!(changed);
+    let workspace = available_canvas_workspace(&snapshot);
+    assert_eq!(workspace.state.expanded_directories, vec!["assets"]);
+    assert_eq!(service.canvas_feedback(), &feedback_before);
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "project_path_state_persistence_failed" })
+    );
+    assert_eq!(
+        CanvasWorkspaceStore::new(&home, &canonical_root)
+            .load_or_create()
+            .unwrap(),
+        *workspace
+    );
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn invalid_canvas_patch_leaves_all_project_state_unchanged() {
     let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
     let home = base.join("home");

@@ -2,10 +2,10 @@
 
 Only a client holding a live CLI Control-session credential may submit, list,
 inspect, wait for, or cancel Model Operations. Any such CLI session may manage
-every Model Operation in the current Runtime instance. Project reference is
-result ownership and a list filter, not an Operation permission or
-session-lifetime boundary. Runtime defines no role-by-kind matrix, per-Project
-Operation ACL, or initiator ownership.
+every Model Operation in the current Runtime instance. A Model Operation has no
+Project reference: its accepted output directory and declared local input paths
+resolve from the CLI's captured canonical working directory. Runtime defines no
+role-by-kind matrix, per-Project Operation ACL, or initiator ownership.
 
 The five peer Model Kinds are image, video, text-to-speech, music, and sound
 effect. `audio` is only a configuration and implementation grouping for the

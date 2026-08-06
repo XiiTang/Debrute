@@ -582,26 +582,35 @@ impl ProjectService {
         patch: &CanvasStatePatch,
     ) -> Result<(ProjectSnapshot, bool), ProjectError> {
         let current = self.available_canvas_workspace()?.state.clone();
-        let next = apply_canvas_state_patch(&current, patch)?;
+        let mut next = apply_canvas_state_patch(&current, patch)?;
         let directories = disclosed_directory_closure(&next);
         let mut project_tree = self.project_tree.clone();
         let change = project_tree.load_directories(&directories)?;
-        Self::validate_canvas_state_paths_in(&project_tree, &next)?;
-        self.project_tree = project_tree;
-        let invalidated = self.apply_project_tree_change(&change)?;
-        if next == current {
-            if invalidated.is_empty() {
-                return Ok((self.snapshot.clone(), false));
-            }
-            return self
-                .rebuild_snapshot(&invalidated, false)
-                .map(|snapshot| (snapshot, true));
+        let invalidated = project_tree_invalidated_paths(&change);
+        for path in &invalidated {
+            next = prune_canvas_state_path(&next, path);
         }
-        let mut document = self.available_canvas_workspace()?.clone();
-        document.state = next;
-        self.persist_workspace(document)?;
-        self.rebuild_snapshot(&invalidated, false)
-            .map(|snapshot| (snapshot, true))
+        Self::validate_canvas_state_paths_in(&project_tree, &next)?;
+        let canvas_changed = next != current;
+        if !canvas_changed && invalidated.is_empty() {
+            return Ok((self.snapshot.clone(), false));
+        }
+        if canvas_changed {
+            let mut document = self.available_canvas_workspace()?.clone();
+            document.state = next;
+            self.persist_workspace(document)?;
+        }
+        self.project_tree = project_tree;
+        let feedback_error = self
+            .reconcile_feedback_paths(&invalidated.iter().cloned().collect::<Vec<_>>(), &[])
+            .err();
+        let snapshot = self
+            .rebuild_snapshot(&invalidated, false)
+            .expect("accepted Canvas Workspace remains valid while rebuilding a patch snapshot");
+        let snapshot = feedback_error.map_or(snapshot, |error| {
+            self.record_path_state_persistence_failure(&error.to_string())
+        });
+        Ok((snapshot, canvas_changed || !invalidated.is_empty()))
     }
 
     fn validate_canvas_state_paths_in(
@@ -671,12 +680,7 @@ impl ProjectService {
         &mut self,
         change: &ProjectTreeChange,
     ) -> Result<HashSet<String>, ProjectError> {
-        let invalidated = change
-            .confirmed_missing_paths
-            .iter()
-            .chain(&change.identity_reset_paths)
-            .cloned()
-            .collect::<HashSet<_>>();
+        let invalidated = project_tree_invalidated_paths(change);
         if invalidated.is_empty() {
             return Ok(invalidated);
         }
@@ -691,12 +695,7 @@ impl ProjectService {
         &mut self,
         change: &ProjectTreeChange,
     ) -> (HashSet<String>, Vec<String>) {
-        let invalidated = change
-            .confirmed_missing_paths
-            .iter()
-            .chain(&change.identity_reset_paths)
-            .cloned()
-            .collect::<HashSet<_>>();
+        let invalidated = project_tree_invalidated_paths(change);
         if invalidated.is_empty() {
             return (invalidated, Vec::new());
         }
@@ -1135,6 +1134,15 @@ fn project_name(root: &Path) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or(root.to_string_lossy().as_ref())
         .to_owned()
+}
+
+fn project_tree_invalidated_paths(change: &ProjectTreeChange) -> HashSet<String> {
+    change
+        .confirmed_missing_paths
+        .iter()
+        .chain(&change.identity_reset_paths)
+        .cloned()
+        .collect()
 }
 
 fn disclosed_directory_closure(state: &CanvasState) -> Vec<String> {

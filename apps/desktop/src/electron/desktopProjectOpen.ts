@@ -1,3 +1,12 @@
+export function desktopProjectSourceWindow<BaseWindow, ProjectWindow extends BaseWindow>(
+  source: BaseWindow | null | undefined,
+  isProjectWindow: (source: BaseWindow) => source is ProjectWindow
+): ProjectWindow | undefined {
+  return source !== null && source !== undefined && isProjectWindow(source)
+    ? source
+    : undefined;
+}
+
 export async function dispatchDesktopProjectOpen<Window>(input: {
   projectRoot: string;
   preferredWindow?: Window | undefined;

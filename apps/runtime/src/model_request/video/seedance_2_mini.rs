@@ -324,9 +324,8 @@ fn validate_intent(intent: &str) -> Result<(), ModelRequestError> {
 
 fn infer_media_type(source: &str) -> Option<&'static str> {
     let lower = source
-        .split('?')
-        .next()
-        .unwrap_or(source)
+        .split_once('?')
+        .map_or(source, |(path, _)| path)
         .to_ascii_lowercase();
     if lower.starts_with("data:image/")
         || [
