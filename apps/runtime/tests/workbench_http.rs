@@ -4,7 +4,7 @@ use std::{
     fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -17,7 +17,6 @@ use debrute_runtime::{
     },
 };
 use reqwest::{
-    Method,
     blocking::{Client, Response},
     header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, COOKIE, ORIGIN, SET_COOKIE},
 };
@@ -31,12 +30,18 @@ const WORKBENCH_HTTP_TEST_TIMEOUT: Duration = Duration::from_mins(2);
 fn stable_assets_have_no_launch_credential_in_the_url() {
     let runtime = TestRuntime::start();
     let response = test_client()
-        .get(format!("{}/projects/project-1", runtime.origin()))
+        .get(format!(
+            "{}/open?path=%2FUsers%2Fme%2FProject%20A",
+            runtime.origin()
+        ))
         .send()
         .expect("stable Workbench route should respond");
     assert_eq!(response.status().as_u16(), 200);
-    assert_eq!(response.url().path(), "/projects/project-1");
-    assert!(response.url().query().is_none());
+    assert_eq!(response.url().path(), "/open");
+    assert_eq!(
+        response.url().query(),
+        Some("path=%2FUsers%2Fme%2FProject%20A")
+    );
     assert_eq!(
         response
             .headers()
@@ -50,12 +55,7 @@ fn stable_assets_have_no_launch_credential_in_the_url() {
 fn packaged_workbench_serves_only_the_closed_page_routes() {
     let runtime = TestRuntime::start();
     let client = test_client();
-    for path in [
-        "/",
-        "/open",
-        "/open?path=%2FUsers%2Fme%2FProject%20A",
-        "/projects/project-1._~",
-    ] {
+    for path in ["/", "/open", "/open?path=%2FUsers%2Fme%2FProject%20A"] {
         let response = client
             .get(format!("{}{path}", runtime.origin()))
             .send()
@@ -69,6 +69,7 @@ fn packaged_workbench_serves_only_the_closed_page_routes() {
         "/open?path=",
         "/open?path=%FF",
         "/open?path=%2Ftmp&path=%2Fother",
+        "/projects/project-1._~",
         "/projects/project-1/",
         "/projects/project-1/files/a",
         "/projects/project%201",
@@ -297,12 +298,19 @@ fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
         .expect("Project open should complete");
     assert_eq!(open.status().as_u16(), 200);
     let body: Value = open.json().expect("Project open response should be JSON");
-    assert_eq!(body["projectId"], project.id);
+    assert_eq!(body["canonicalRoot"], project.canonical_root);
+    assert!(body["bindingId"].as_str().is_some());
     assert!(body.get("snapshot").is_none());
     let bound = events.next_of_type("project.bound");
     assert_eq!(bound["type"], "project.bound");
-    assert_eq!(bound["project"]["projectId"], project.id);
-    assert_eq!(bound["workingCopies"], json!({"text": {}, "feedback": {}}));
+    assert_eq!(bound["project"]["canonicalRoot"], project.canonical_root);
+    assert_eq!(bound["project"]["bindingId"], body["bindingId"]);
+    assert_eq!(
+        bound["workingCopies"]["canonicalRoot"],
+        project.canonical_root
+    );
+    assert_eq!(bound["workingCopies"]["text"], json!({}));
+    assert_eq!(bound["workingCopies"]["feedback"], json!({}));
 }
 
 #[test]
@@ -329,8 +337,8 @@ fn activity_stream_is_runtime_global_keeps_history_and_clears_terminal_records_f
         &first_credential,
     );
     assert_eq!(
-        first_events.next_of_type("project.bound")["project"]["projectId"],
-        project.id
+        first_events.next_of_type("project.bound")["project"]["canonicalRoot"],
+        project.canonical_root
     );
 
     let (second_cookie, second_credential, mut second_events) =
@@ -342,9 +350,9 @@ fn activity_stream_is_runtime_global_keeps_history_and_clears_terminal_records_f
 
     let report = client
         .post(format!(
-            "{}/api/projects/{}/activities/notices",
+            "{}/api/workbench/bindings/{}/activities/notices",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &first_cookie)
@@ -367,7 +375,10 @@ fn activity_stream_is_runtime_global_keeps_history_and_clears_terminal_records_f
     ] {
         assert_eq!(event["record"]["id"], activity_id);
         assert_eq!(event["record"]["source"], "canvas");
-        assert_eq!(event["record"]["project"]["projectId"], project.id);
+        assert_eq!(
+            event["record"]["project"]["canonicalRoot"],
+            project.canonical_root
+        );
         assert_eq!(event["record"]["project"]["projectName"], "activity-stream");
         assert_eq!(
             event["record"]["message"]["kind"],
@@ -420,25 +431,25 @@ fn project_directory_load_publishes_only_the_requested_depth() {
     open_project(&client, &runtime, &project, &cookie, &credential);
 
     let bound = events.next_of_type("project.bound");
-    let opened_files = bound["project"]["snapshot"]["files"]
+    let opened_project_tree = bound["project"]["snapshot"]["projectTree"]
         .as_array()
-        .expect("bound Project files should be an array");
+        .expect("bound Project Tree should be an array");
     assert!(
-        opened_files
+        opened_project_tree
             .iter()
             .any(|entry| entry["projectRelativePath"] == "assets")
     );
     assert!(
-        !opened_files
+        !opened_project_tree
             .iter()
             .any(|entry| entry["projectRelativePath"] == "assets/cover.png")
     );
 
     let load = client
         .post(format!(
-            "{}/api/projects/{}/files/load-directory",
+            "{}/api/workbench/bindings/{}/files/load-directory",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
@@ -450,23 +461,23 @@ fn project_directory_load_publishes_only_the_requested_depth() {
     let body: Value = load
         .json()
         .expect("Project directory load should return JSON");
-    assert_eq!(body["projectId"], project.id);
+    assert_eq!(body["bindingId"], project.binding_id());
     let changed = events.next_of_type("project.changed");
-    let loaded_files = changed["snapshot"]["files"]
+    let loaded_project_tree = changed["snapshot"]["projectTree"]
         .as_array()
-        .expect("changed Project files should be an array");
+        .expect("changed Project Tree should be an array");
     assert!(
-        loaded_files
+        loaded_project_tree
             .iter()
             .any(|entry| entry["projectRelativePath"] == "assets/cover.png")
     );
     assert!(
-        loaded_files
+        loaded_project_tree
             .iter()
             .any(|entry| entry["projectRelativePath"] == "assets/deep")
     );
     assert!(
-        !loaded_files
+        !loaded_project_tree
             .iter()
             .any(|entry| entry["projectRelativePath"] == "assets/deep/notes.md")
     );
@@ -480,9 +491,10 @@ fn replacement_publishes_the_prepared_project_and_releases_the_source_use() {
     let client = test_client();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &source, &cookie, &credential);
+    let source_binding_id = source.binding_id();
     assert_eq!(
-        events.next_of_type("project.bound")["project"]["projectId"],
-        source.id
+        events.next_of_type("project.bound")["project"]["canonicalRoot"],
+        source.canonical_root
     );
 
     let replacement = client
@@ -494,29 +506,50 @@ fn replacement_publishes_the_prepared_project_and_releases_the_source_use() {
         .send()
         .expect("Project replacement should complete");
     assert_eq!(replacement.status().as_u16(), 200);
-    assert_eq!(
-        replacement
-            .json::<Value>()
-            .expect("replacement response should be JSON"),
-        json!({"outcome": "bound", "projectId": target.id})
-    );
+    let replacement = replacement
+        .json::<Value>()
+        .expect("replacement response should be JSON");
+    assert_eq!(replacement["outcome"], "bound");
+    assert_eq!(replacement["canonicalRoot"], target.canonical_root);
+    let target_binding_id = replacement["bindingId"]
+        .as_str()
+        .expect("replacement should return a binding id")
+        .to_owned();
     let bound = events.next_of_type("project.bound");
-    assert_eq!(bound["project"]["projectId"], target.id);
-    assert_eq!(bound["workingCopies"], json!({"text": {}, "feedback": {}}));
+    assert_eq!(bound["project"]["canonicalRoot"], target.canonical_root);
+    assert_eq!(bound["project"]["bindingId"], target_binding_id);
+    assert_eq!(
+        bound["workingCopies"]["canonicalRoot"],
+        target.canonical_root
+    );
+    assert_eq!(bound["workingCopies"]["text"], json!({}));
+    assert_eq!(bound["workingCopies"]["feedback"], json!({}));
 
     let stale_source_request = client
         .get(format!(
-            "{}/api/projects/{}/files/text/missing.txt",
+            "{}/api/workbench/bindings/{}/files/text/missing.txt",
             runtime.origin(),
-            source.id
+            source_binding_id
         ))
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .send()
         .expect("stale source request should complete");
     assert_eq!(stale_source_request.status().as_u16(), 403);
-    assert!(runtime.services().projects().get(&source.id).is_err());
-    assert!(runtime.services().projects().get(&target.id).is_ok());
+    assert!(
+        runtime
+            .services()
+            .projects()
+            .get(Path::new(&source.canonical_root))
+            .is_err()
+    );
+    assert!(
+        runtime
+            .services()
+            .projects()
+            .get(Path::new(&target.canonical_root))
+            .is_ok()
+    );
 }
 
 #[test]
@@ -543,6 +576,7 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
         &cookie,
         &first_credential,
     );
+    let first_binding_id = first_project.binding_id();
     open_project(
         &client,
         &runtime,
@@ -550,6 +584,7 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
         &cookie,
         &second_credential,
     );
+    let second_binding_id = second_project.binding_id();
     assert_eq!(
         first_events.next_of_type("project.bound")["type"],
         "project.bound"
@@ -561,9 +596,9 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
 
     let wrong_connection = client
         .get(format!(
-            "{}/api/projects/{}/files/text/first.txt",
+            "{}/api/workbench/bindings/{}/files/text/first.txt",
             runtime.origin(),
-            first_project.id
+            first_binding_id
         ))
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &second_credential)
@@ -571,10 +606,10 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
         .expect("cross-connection request should complete");
     assert_eq!(wrong_connection.status().as_u16(), 403);
 
-    for (project, path, revision, expected) in [
-        (&first_project, "first.txt", &first_revision, "first tab"),
+    for (binding_id, path, revision, expected) in [
+        (&first_binding_id, "first.txt", &first_revision, "first tab"),
         (
-            &second_project,
+            &second_binding_id,
             "second.txt",
             &second_revision,
             "second tab",
@@ -582,9 +617,8 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
     ] {
         let media = client
             .get(format!(
-                "{}/api/projects/{}/files/raw/{path}?v={revision}",
+                "{}/api/workbench/bindings/{binding_id}/files/raw/{path}?v={revision}",
                 runtime.origin(),
-                project.id
             ))
             .header(COOKIE, &cookie)
             .send()
@@ -596,9 +630,9 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
     drop(second_events);
     let first_still_live = client
         .get(format!(
-            "{}/api/projects/{}/files/text/first.txt",
+            "{}/api/workbench/bindings/{}/files/text/first.txt",
             runtime.origin(),
-            first_project.id
+            first_binding_id
         ))
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &first_credential)
@@ -618,18 +652,21 @@ fn passive_media_routes_reject_missing_or_empty_identity_values() {
     open_project(&client, &runtime, &project, &cookie, &credential);
 
     for path in [
-        format!("/api/projects/{}/files/raw/image.png", project.id),
         format!(
-            "/api/projects/{}/canvas-image-preview?w=64&path=&sourceRevision=revision",
-            project.id
+            "/api/workbench/bindings/{}/files/raw/image.png",
+            project.binding_id()
         ),
         format!(
-            "/api/projects/{}/canvas-text-preview?w=64&path=image.png&targetIdentity=target",
-            project.id
+            "/api/workbench/bindings/{}/canvas-image-preview?w=64&path=&sourceRevision=revision",
+            project.binding_id()
         ),
         format!(
-            "/api/projects/{}/canvas-video-preview?w=64&frameTimeMs=0&path=image.png&sourceRevision=revision&canvasId=canvas-1",
-            project.id
+            "/api/workbench/bindings/{}/canvas-text-preview?w=64&path=image.png&targetIdentity=target",
+            project.binding_id()
+        ),
+        format!(
+            "/api/workbench/bindings/{}/canvas-video-preview?w=64&frameTimeMs=0&path=image.png&sourceRevision=revision&canvasId=canvas-1",
+            project.binding_id()
         ),
     ] {
         let response = client
@@ -658,9 +695,9 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
 
     let response = client
         .get(format!(
-            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&sourceRevision={revision}",
+            "{}/api/workbench/bindings/{}/canvas-image-preview?w=8&path=image.png&sourceRevision={revision}",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(COOKIE, &cookie)
         .send()
@@ -676,9 +713,9 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
 
     let stale = client
         .get(format!(
-            "{}/api/projects/{}/canvas-image-preview?w=8&path=image.png&sourceRevision=stale",
+            "{}/api/workbench/bindings/{}/canvas-image-preview?w=8&path=image.png&sourceRevision=stale",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(COOKIE, &cookie)
         .send()
@@ -704,9 +741,9 @@ fn project_path_entries_reject_unknown_fields_at_the_http_boundary() {
 
     let response = client
         .post(format!(
-            "{}/api/projects/{}/files/batch/delete-permanently",
+            "{}/api/workbench/bindings/{}/files/batch/delete-permanently",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
@@ -728,236 +765,74 @@ fn project_path_entries_reject_unknown_fields_at_the_http_boundary() {
 }
 
 #[test]
-fn canvas_mutation_routes_require_exact_non_empty_collections() {
+fn canvas_state_patch_accepts_one_complete_sparse_patch() {
     let runtime = TestRuntime::start();
-    let project = runtime.create_project("canvas-mutation-contract");
+    let project = runtime.create_project("canvas-state-patch");
     fs::write(Path::new(&project.root).join("note.txt"), "note")
         .expect("text fixture should be written");
     let client = test_client();
     let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
+    let endpoint = format!(
+        "{}/api/workbench/bindings/{}/canvases/state",
+        runtime.origin(),
+        project.binding_id()
+    );
 
-    let canvas_id = create_canvas(&client, &runtime, &project, &cookie, &credential);
-    let layout_url = format!(
-        "{}/api/projects/{}/canvases/{canvas_id}/node-layouts",
-        runtime.origin(),
-        project.id
-    );
-    let reset_url = format!(
-        "{}/api/projects/{}/canvases/{canvas_id}/reset-layout",
-        runtime.origin(),
-        project.id
-    );
-    for (body, expected_code) in [
-        (json!({}), "invalid_json"),
-        (
-            json!({ "interaction": "move", "nodeLayouts": [] }),
-            "invalid_input",
-        ),
-        (
-            json!({
-                "interaction": "move",
-                "nodeLayouts": [{
-                    "projectRelativePath": "note.txt",
-                    "x": 0,
-                    "y": 0,
+    let response = client
+        .patch(&endpoint)
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({
+            "canvasId": "main",
+            "expandedDirectories": [],
+            "nodeStateUpdates": [{
+                "projectRelativePath": "note.txt",
+                "manualLayout": {
+                    "x": 10,
+                    "y": 20,
                     "width": 320,
-                    "height": 180,
-                    "unexpectedField": true
-                }]
-            }),
-            "invalid_json",
-        ),
-    ] {
-        assert_canvas_mutation_error(
-            &client,
-            &runtime,
-            Method::PATCH,
-            &layout_url,
-            (&cookie, &credential),
-            &body,
-            expected_code,
-        );
-    }
+                    "height": 180
+                }
+            }],
+            "occlusionOrder": ["note.txt"]
+        }))
+        .send()
+        .expect("Canvas state patch should complete");
+    assert_eq!(response.status().as_u16(), 200);
 
-    for (body, expected_code) in [
-        (json!({ "all": false }), "invalid_input"),
-        (
-            json!({ "all": false, "nodePaths": ["image.png"] }),
-            "invalid_json",
-        ),
-        (
-            json!({ "all": null, "nodePaths": ["image.png"] }),
-            "invalid_json",
-        ),
-        (json!({ "all": true, "nodePaths": null }), "invalid_json"),
-        (json!({ "nodePaths": [] }), "invalid_input"),
-        (
-            json!({ "nodePaths": ["image.png", "image.png"] }),
-            "invalid_input",
-        ),
-    ] {
-        assert_canvas_mutation_error(
-            &client,
-            &runtime,
-            Method::POST,
-            &reset_url,
-            (&cookie, &credential),
-            &body,
-            expected_code,
-        );
-    }
-}
-
-#[test]
-fn canvas_media_state_routes_require_exact_non_empty_collections() {
-    let runtime = TestRuntime::start();
-    let project = runtime.create_project("canvas-media-state-contract");
-    let client = test_client();
-    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
-    open_project(&client, &runtime, &project, &cookie, &credential);
-
-    let canvas_id = create_canvas(&client, &runtime, &project, &cookie, &credential);
-    let video_url = format!(
-        "{}/api/projects/{}/canvases/{canvas_id}/video-playback",
-        runtime.origin(),
-        project.id
-    );
-    let text_url = format!(
-        "{}/api/projects/{}/canvases/{canvas_id}/text-viewport",
-        runtime.origin(),
-        project.id
-    );
-    for (url, body, expected_code) in [
-        (&video_url, json!({ "updates": [] }), "invalid_input"),
-        (
-            &video_url,
-            json!({
-                "updates": [{
-                    "projectRelativePath": "clip.mp4",
-                    "currentTimeMs": 0,
-                    "unexpectedField": true
-                }]
-            }),
-            "invalid_json",
-        ),
-        (&text_url, json!({ "updates": [] }), "invalid_input"),
-        (
-            &text_url,
-            json!({
-                "updates": [{
-                    "projectRelativePath": "note.txt",
-                    "scrollTop": 0,
-                    "scrollLeft": 0,
-                    "unexpectedField": true
-                }]
-            }),
-            "invalid_json",
-        ),
-    ] {
-        assert_canvas_mutation_error(
-            &client,
-            &runtime,
-            Method::PATCH,
-            url,
-            (&cookie, &credential),
-            &body,
-            expected_code,
-        );
-    }
-}
-
-#[test]
-fn canvas_layout_and_selective_reset_accept_exact_current_inputs() {
-    let runtime = TestRuntime::start();
-    let project = runtime.create_project("canvas-layout-contract");
-    fs::write(Path::new(&project.root).join("note.txt"), "note")
-        .expect("text fixture should be written");
-    let client = test_client();
-    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
-    open_project(&client, &runtime, &project, &cookie, &credential);
-
-    let canvas_id = create_canvas(&client, &runtime, &project, &cookie, &credential);
-    let layout_url = format!(
-        "{}/api/projects/{}/canvases/{canvas_id}/node-layouts",
-        runtime.origin(),
-        project.id
-    );
-    let reset_url = format!(
-        "{}/api/projects/{}/canvases/{canvas_id}/reset-layout",
-        runtime.origin(),
-        project.id
-    );
-
-    let add = client
-        .post(format!(
-            "{}/api/projects/{}/canvases/{canvas_id}/canvas-map/project-paths",
+    let canvas = client
+        .get(format!(
+            "{}/api/workbench/bindings/{}/canvases/main",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({ "projectRelativePath": "note.txt" }))
         .send()
-        .expect("Canvas Map add should complete");
-    assert_eq!(add.status().as_u16(), 200);
-
-    let layout = client
-        .patch(&layout_url)
-        .header(ORIGIN, runtime.origin())
-        .header(COOKIE, &cookie)
-        .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({
-            "interaction": "resize",
-            "nodeLayouts": [{
-                "projectRelativePath": "note.txt",
-                "x": 10,
-                "y": 20,
-                "width": 320,
-                "height": 180
-            }]
-        }))
-        .send()
-        .expect("exact Canvas layout request should complete");
-    assert_eq!(layout.status().as_u16(), 200);
-
-    let reset = client
-        .post(&reset_url)
-        .header(ORIGIN, runtime.origin())
-        .header(COOKIE, &cookie)
-        .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({
-            "nodePaths": ["note.txt"]
-        }))
-        .send()
-        .expect("exact selective Canvas reset request should complete");
-    assert_eq!(reset.status().as_u16(), 200);
-}
-
-fn assert_canvas_mutation_error(
-    client: &Client,
-    runtime: &TestRuntime,
-    method: Method,
-    url: &str,
-    session: (&str, &str),
-    body: &Value,
-    expected_code: &str,
-) {
-    let response = client
-        .request(method, url)
-        .header(ORIGIN, runtime.origin())
-        .header(COOKIE, session.0)
-        .header(WORKBENCH_CONNECTION_HEADER, session.1)
-        .json(body)
-        .send()
-        .expect("invalid Canvas mutation request should complete");
-    assert_eq!(response.status().as_u16(), 400);
+        .expect("Canvas read should complete")
+        .json::<Value>()
+        .expect("Canvas should be JSON");
     assert_eq!(
-        response
-            .json::<Value>()
-            .expect("Canvas mutation error should be JSON")["error"]["code"],
-        expected_code
+        canvas["nodeStates"]["note.txt"]["manualLayout"],
+        json!({ "x": 10.0, "y": 20.0, "width": 320.0, "height": 180.0 })
+    );
+    assert_eq!(canvas["occlusionOrder"], json!(["note.txt"]));
+
+    let invalid = client
+        .patch(endpoint)
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, credential)
+        .json(&json!({ "canvasId": "main", "unexpectedField": true }))
+        .send()
+        .expect("invalid Canvas state patch should complete");
+    assert_eq!(invalid.status().as_u16(), 400);
+    assert_eq!(
+        invalid.json::<Value>().expect("error should be JSON")["error"]["code"],
+        "invalid_json"
     );
 }
 
@@ -975,9 +850,9 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
     );
     let put = client
         .put(format!(
-            "{}/api/projects/{}/working-copies/text/draft.md",
+            "{}/api/workbench/bindings/{}/working-copies/text/draft.md",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
@@ -1006,9 +881,9 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
     );
     let cleared = client
         .delete(format!(
-            "{}/api/projects/{}/working-copies/text/draft.md",
+            "{}/api/workbench/bindings/{}/working-copies/text/draft.md",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
@@ -1022,7 +897,11 @@ fn working_copy_survives_connection_close_and_clears_without_retention() {
     open_project(&client, &runtime, &project, &cookie, &credential);
     assert_eq!(
         events.next_of_type("project.bound")["workingCopies"],
-        json!({"text": {}, "feedback": {}})
+        json!({
+            "canonicalRoot": project.canonical_root,
+            "text": {},
+            "feedback": {}
+        })
     );
 }
 
@@ -1044,9 +923,9 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
     ] {
         let response = client
             .put(format!(
-                "{}/api/projects/{}/working-copies/feedback/{item_id}",
+                "{}/api/workbench/bindings/{}/working-copies/feedback/{item_id}",
                 runtime.origin(),
-                project.id
+                project.binding_id()
             ))
             .header(ORIGIN, runtime.origin())
             .header(COOKIE, &cookie)
@@ -1092,9 +971,9 @@ fn feedback_working_copies_are_independent_by_stable_item_id() {
 
     let cleared = client
         .delete(format!(
-            "{}/api/projects/{}/working-copies/feedback/feedback-a",
+            "{}/api/workbench/bindings/{}/working-copies/feedback/feedback-a",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
@@ -1138,9 +1017,9 @@ fn canvas_feedback_set_mark_is_one_atomic_node_batch_contract() {
         "project.bound"
     );
     let endpoint = format!(
-        "{}/api/projects/{}/canvas-feedback",
+        "{}/api/workbench/bindings/{}/canvas-feedback",
         runtime.origin(),
-        project.id
+        project.binding_id()
     );
     let session = (&*cookie, &*credential);
     assert_canvas_feedback_mark_batch(&client, &runtime, &endpoint, session);
@@ -1218,9 +1097,13 @@ fn add_canvas_feedback_node_comments(
                 }
             }),
         );
-        assert_eq!(comment.status().as_u16(), 200);
+        let status = comment.status().as_u16();
+        let body = comment
+            .text()
+            .expect("Feedback comment response should be readable");
+        assert_eq!(status, 200, "{body}");
         assert_eq!(
-            comment.json::<Value>().expect("response should be JSON")["projectRevision"],
+            serde_json::from_str::<Value>(&body).expect("response should be JSON")["projectRevision"],
             expected_revision
         );
     }
@@ -1331,9 +1214,9 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
 
     let response = client
         .post(format!(
-            "{}/api/projects/{}/canvas-video-previews/probe",
+            "{}/api/workbench/bindings/{}/canvas-video-previews/probe",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
@@ -1366,9 +1249,9 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
 
     let response = client
         .post(format!(
-            "{}/api/projects/{}/canvas-video-previews/ensure",
+            "{}/api/workbench/bindings/{}/canvas-video-previews/ensure",
             runtime.origin(),
-            project.id
+            project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
@@ -1454,46 +1337,14 @@ fn open_project(
         .send()
         .expect("Project open should complete");
     assert_eq!(response.status().as_u16(), 200);
-    assert_eq!(
-        response.json::<Value>().expect("response should be JSON"),
-        json!({"outcome": "bound", "projectId": project.id})
-    );
-}
-
-fn create_canvas(
-    client: &Client,
-    runtime: &TestRuntime,
-    project: &TestProject,
-    cookie: &str,
-    credential: &str,
-) -> String {
-    let response = client
-        .post(format!(
-            "{}/api/projects/{}/canvases",
-            runtime.origin(),
-            project.id
-        ))
-        .header(ORIGIN, runtime.origin())
-        .header(COOKIE, cookie)
-        .header(WORKBENCH_CONNECTION_HEADER, credential)
-        .json(&json!({}))
-        .send()
-        .expect("Canvas create should complete");
-    assert_eq!(response.status().as_u16(), 200);
-    let body = response
-        .json::<Value>()
-        .expect("Canvas create response should be JSON");
-    let object = body
-        .as_object()
-        .expect("Canvas create response should be an object");
-    assert_eq!(object.len(), 3);
-    assert!(object.contains_key("activeCanvasId"));
-    assert!(object.contains_key("projectId"));
-    assert!(object.contains_key("projectRevision"));
-    body["activeCanvasId"]
+    let body = response.json::<Value>().expect("response should be JSON");
+    assert_eq!(body["outcome"], "bound");
+    assert_eq!(body["canonicalRoot"], project.canonical_root);
+    let binding_id = body["bindingId"]
         .as_str()
-        .expect("created Canvas id should be present")
-        .to_owned()
+        .expect("bound response should contain a binding id")
+        .to_owned();
+    *project.binding_id.lock().unwrap() = Some(binding_id);
 }
 
 struct SseEvents {
@@ -1553,7 +1404,7 @@ impl TestRuntime {
             Arc::clone(services.models()),
             Arc::clone(services.global()),
             services.projects().clone(),
-            Arc::clone(services.generated_assets()),
+            Arc::clone(services.provenance()),
             Arc::clone(services.model_operations()),
             None,
         ));
@@ -1587,28 +1438,16 @@ impl TestRuntime {
     }
 
     fn create_project(&self, name: &str) -> TestProject {
-        let id = Uuid::new_v4().to_string();
         let root = self.root.join(name);
-        fs::create_dir_all(root.join(".debrute/canvases"))
-            .expect("Project metadata directory should be created");
-        write_json(
-            &root.join(".debrute/project.json"),
-            &json!({
-                "project": {
-                    "id": id,
-                    "name": name,
-                    "createdAt": "2026-07-18T00:00:00.000Z",
-                    "updatedAt": "2026-07-18T00:00:00.000Z"
-                }
-            }),
-        );
-        write_json(
-            &root.join(".debrute/canvases/index.json"),
-            &json!({ "canvasOrder": [] }),
-        );
+        fs::create_dir_all(&root).expect("Project directory should be created");
+        let canonical_root = fs::canonicalize(&root)
+            .expect("Project root should canonicalize")
+            .to_string_lossy()
+            .into_owned();
         TestProject {
-            id,
             root: root.to_string_lossy().into_owned(),
+            canonical_root,
+            binding_id: Mutex::new(None),
         }
     }
 }
@@ -1630,16 +1469,19 @@ impl Drop for TestRuntime {
 }
 
 struct TestProject {
-    id: String,
     root: String,
+    canonical_root: String,
+    binding_id: Mutex<Option<String>>,
 }
 
-fn write_json(path: &Path, value: &Value) {
-    fs::write(
-        path,
-        format!("{}\n", serde_json::to_string_pretty(value).unwrap()),
-    )
-    .expect("JSON fixture should be written");
+impl TestProject {
+    fn binding_id(&self) -> String {
+        self.binding_id
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("Project should already be bound")
+    }
 }
 
 fn media_revision(path: &Path) -> String {

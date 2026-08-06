@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconButton, Map } from '../ui/index.js';
-import type { CanvasDocument, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasCatalogEntry } from '@debrute/app-protocol';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { CANVAS_MINIMAP_PANEL_SIZE, type FloatingBarRect } from '../shell/floatingBars';
 import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';
 import type { CanvasMinimapDragState, CanvasSize } from './canvasMinimap';
@@ -29,7 +30,7 @@ export function CanvasMinimapBar({
   panelPlacement,
   interactionBlocked = false
 }: {
-  canvas: CanvasDocument | undefined;
+  canvas: CanvasCatalogEntry | undefined;
   runtime: CanvasEditorRuntime | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   open: boolean;

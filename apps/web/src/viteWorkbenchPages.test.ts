@@ -5,8 +5,7 @@ describe('Workbench Vite page routes', () => {
   it.each([
     '/',
     '/open',
-    '/open?path=%2FUsers%2Fme%2FProject%20A',
-    '/projects/project-1'
+    '/open?path=%2FUsers%2Fme%2FProject%20A'
   ])('rewrites the closed page route %s to the Workbench entry', (url) => {
     expect(workbenchPageEntry('GET', url)).toBe('/index.html');
   });

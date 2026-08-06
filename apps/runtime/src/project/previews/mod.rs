@@ -26,11 +26,11 @@ pub use video::*;
 use crate::{process::ProcessCancellation, workers::RuntimeWorkerServices};
 
 use super::{
-    CanvasDesiredNode, CanvasLayoutSize, CanvasMediaKind, CanvasNodeKind, CanvasVideoPresentation,
+    CanvasImageDimensions, CanvasImagePreviewInfo, CanvasVideoPresentation,
     CanvasVideoPresentationKind, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
-    DefaultProjectNodeAdapter, ProjectCapabilityFs, ProjectError, ProjectNodeAdapter,
-    ProjectPathEntry, ProjectPathKind, assert_project_tree_visible_path,
-    normalize_project_relative_path, open_no_symlink_existing_project_file, project_media_revision,
+    ProjectCapabilityFs, ProjectError, ProjectNodeAdapter, ProjectPathKind, ProjectTreeEntry,
+    assert_project_tree_visible_path, normalize_project_relative_path,
+    open_no_symlink_existing_project_file, project_media_revision,
     resolve_no_symlink_existing_project_path,
 };
 use cache::{
@@ -82,6 +82,7 @@ pub struct CanvasPreviewFile {
 pub struct CanvasImagePreviewSourceInfo {
     pub previewable: bool,
     pub source_width: Option<u32>,
+    pub source_height: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +105,7 @@ pub struct CanvasTextPreviewSourceView {
 }
 
 pub struct ProjectPreviewService {
+    debrute_home: PathBuf,
     raster_variants: Arc<RasterPreviewVariantService>,
     raster_pool: Arc<Semaphore>,
     video: CanvasVideoPreviewService,
@@ -121,41 +123,6 @@ impl NativeProjectNodeAdapter {
 }
 
 impl ProjectNodeAdapter for NativeProjectNodeAdapter {
-    fn layout_size(
-        &self,
-        project_root: &Path,
-        node: &CanvasDesiredNode,
-    ) -> Result<CanvasLayoutSize, ProjectError> {
-        match (node.node_kind, node.media_kind) {
-            (CanvasNodeKind::File, Some(CanvasMediaKind::Image)) => {
-                let relative = previewable_image_path(&node.project_relative_path)?;
-                let source = resolve_no_symlink_existing_project_path(project_root, &relative)?;
-                let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
-                let metadata = self.previews.raster_variants.metadata_file(
-                    &source,
-                    &mut file,
-                    &PreviewCancellation::default(),
-                )?;
-                Ok(CanvasLayoutSize {
-                    width: f64::from(metadata.width),
-                    height: f64::from(metadata.height),
-                })
-            }
-            (CanvasNodeKind::File, Some(CanvasMediaKind::Video)) => {
-                let metadata = self.previews.video.read_metadata(
-                    project_root,
-                    &node.project_relative_path,
-                    &PreviewCancellation::default(),
-                )?;
-                Ok(CanvasLayoutSize {
-                    width: f64::from(metadata.width),
-                    height: f64::from(metadata.height),
-                })
-            }
-            _ => DefaultProjectNodeAdapter.layout_size(project_root, node),
-        }
-    }
-
     fn video_presentation(
         &self,
         project_root: &Path,
@@ -179,26 +146,52 @@ impl ProjectNodeAdapter for NativeProjectNodeAdapter {
         &self,
         project_root: &Path,
         project_relative_path: &str,
-    ) -> Result<Option<(bool, Option<u64>)>, ProjectError> {
+    ) -> Result<Option<CanvasImagePreviewInfo>, ProjectError> {
         let info = self
             .previews
             .image_source_info(project_root, project_relative_path)?;
-        Ok(Some((info.previewable, info.source_width.map(u64::from))))
+        Ok(Some(CanvasImagePreviewInfo {
+            previewable: info.previewable,
+            dimensions: info
+                .source_width
+                .zip(info.source_height)
+                .map(|(width, height)| CanvasImageDimensions {
+                    width: u64::from(width),
+                    height: u64::from(height),
+                }),
+        }))
     }
 }
 
 impl ProjectPreviewService {
+    #[cfg(test)]
     #[must_use]
     pub fn new(workers: &RuntimeWorkerServices, media_tools: MediaToolPaths) -> Self {
+        Self::new_with_home(
+            workers,
+            media_tools,
+            std::env::temp_dir().join(format!("debrute-preview-home-{}", uuid::Uuid::new_v4())),
+        )
+    }
+
+    #[must_use]
+    pub fn new_with_home(
+        workers: &RuntimeWorkerServices,
+        media_tools: MediaToolPaths,
+        debrute_home: impl Into<PathBuf>,
+    ) -> Self {
+        let debrute_home = debrute_home.into();
         let raster_pool = Arc::new(Semaphore::new(3));
         let raster_variants = Arc::new(RasterPreviewVariantService::new(Arc::clone(&raster_pool)));
         Self {
+            debrute_home: debrute_home.clone(),
             raster_variants: Arc::clone(&raster_variants),
             raster_pool: Arc::clone(&raster_pool),
             video: CanvasVideoPreviewService::new(
                 workers.supervisor(),
                 media_tools,
                 raster_variants,
+                debrute_home,
             ),
         }
     }
@@ -225,6 +218,7 @@ impl ProjectPreviewService {
             return Ok(CanvasImagePreviewSourceInfo {
                 previewable: false,
                 source_width: None,
+                source_height: None,
             });
         };
         let source = resolve_no_symlink_existing_project_path(project_root, &relative)?;
@@ -237,6 +231,7 @@ impl ProjectPreviewService {
         Ok(CanvasImagePreviewSourceInfo {
             previewable: true,
             source_width: Some(metadata.width),
+            source_height: Some(metadata.height),
         })
     }
 
@@ -248,7 +243,7 @@ impl ProjectPreviewService {
     pub fn reconcile_image_cache(
         &self,
         project_root: &Path,
-        files: &[ProjectPathEntry],
+        files: &[ProjectTreeEntry],
     ) -> Result<(), ProjectError> {
         let mut expected = HashMap::new();
         for entry in files {
@@ -277,8 +272,9 @@ impl ProjectPreviewService {
             );
         }
 
-        let project = ProjectCapabilityFs::open(project_root)?;
-        let cache = match project.open_directory(".debrute/cache/canvas-image-previews") {
+        let cache_root = self.cache_root(project_root)?;
+        let cache_fs = ProjectCapabilityFs::open(&cache_root)?;
+        let cache = match cache_fs.open_directory("canvas-image-previews") {
             Ok(cache) => cache,
             Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(());
@@ -358,15 +354,16 @@ impl ProjectPreviewService {
         let relative = previewable_image_path(project_relative_path)?;
         let source = open_revisioned_source(project_root, &relative, revision)?;
         let cache_directory = format!(
-            ".debrute/cache/canvas-image-previews/{}/{}",
+            "canvas-image-previews/{}/{}",
             project_relative_path_cache_key(&relative)?,
             project_revision_cache_key(revision)?
         );
         let source_root = source.project_root.clone();
         let source_relative = source.relative.clone();
         let source_identity = source.identity;
+        let cache_root = self.cache_root(project_root)?;
         self.raster_variants.resolve(
-            project_root,
+            &cache_root,
             RasterPreviewVariantRequest {
                 source_path: source.path,
                 source_file: source.file,
@@ -413,7 +410,8 @@ impl ProjectPreviewService {
                 "Canvas text preview source grew beyond the size limit.",
             ));
         }
-        atomic_write(project_root, &source_path, &bytes)
+        let cache_root = self.cache_root(project_root)?;
+        atomic_write(&cache_root, &source_path, &bytes)
     }
 
     pub fn read_text_preview_sources(
@@ -427,7 +425,9 @@ impl ProjectPreviewService {
             .cloned()
             .map(|target| {
                 let status = match text_source_project_path(canvas_id, &target).and_then(|path| {
-                    existing_file(project_root, &path).map(|path| path.map(|_| ()))
+                    self.cache_root(project_root)
+                        .and_then(|cache_root| existing_file(&cache_root, &path))
+                        .map(|path| path.map(|_| ()))
                 }) {
                     Ok(Some(())) => CanvasTextPreviewSourceStatus::Available,
                     Ok(None) => CanvasTextPreviewSourceStatus::Missing,
@@ -451,7 +451,8 @@ impl ProjectPreviewService {
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
         let source_path = text_source_project_path(canvas_id, target)?;
-        let source = existing_file(project_root, &source_path)?.ok_or_else(|| {
+        let cache_root = self.cache_root(project_root)?;
+        let source = existing_file(&cache_root, &source_path)?.ok_or_else(|| {
             ProjectError::service_with_fields(
                 "canvas_text_preview_source_missing",
                 format!(
@@ -468,10 +469,10 @@ impl ProjectPreviewService {
                 ],
             )
         })?;
-        let file = open_no_symlink_existing_project_file(project_root, &source_path)?;
+        let file = open_no_symlink_existing_project_file(&cache_root, &source_path)?;
         let source_identity = debrute_native_fs::file_identity(&file)?;
         self.raster_variants.resolve(
-            project_root,
+            &cache_root,
             RasterPreviewVariantRequest {
                 source_path: source,
                 source_file: file,
@@ -485,8 +486,19 @@ impl ProjectPreviewService {
                 ),
             },
             cancellation,
-            || verify_text_preview_source(project_root, &source_path, &source_identity),
+            || verify_text_preview_source(&cache_root, &source_path, &source_identity),
         )
+    }
+
+    fn cache_root(&self, project_root: &Path) -> Result<PathBuf, ProjectError> {
+        let canonical_root = project_root.canonicalize()?;
+        let canonical_root = canonical_root.to_str().ok_or_else(|| {
+            ProjectError::Validation("Project root must be valid UTF-8.".to_owned())
+        })?;
+        let root =
+            crate::global::root_cache_directory(&self.debrute_home, canonical_root).join("canvas");
+        std::fs::create_dir_all(&root)?;
+        Ok(root)
     }
 
     #[must_use]
@@ -649,7 +661,7 @@ fn text_preview_base_project_path(
     }
     let relative = normalize_project_relative_path(&target.project_relative_path)?;
     Ok(format!(
-        ".debrute/cache/canvas-text-previews/{canvas_id}/{}/{}",
+        "canvas-text-previews/{canvas_id}/{}/{}",
         project_relative_path_cache_key(&relative)?,
         safe_cache_segment(
             &target.target_identity,
@@ -1002,7 +1014,6 @@ mod tests {
         let mut served = Vec::new();
         result.file.read_to_end(&mut served).unwrap();
         assert_eq!(served, fs::read(&source_path).unwrap());
-        assert!(!root.join(".debrute/cache/canvas-image-previews").exists());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1090,6 +1101,7 @@ mod tests {
             CanvasImagePreviewSourceInfo {
                 previewable: true,
                 source_width: Some(5_000),
+                source_height: Some(4_000),
             }
         );
 
@@ -1219,9 +1231,11 @@ mod tests {
     #[test]
     fn image_cache_reconcile_removes_old_revisions_and_invalid_entries() {
         let root = fixture();
+        let home = std::env::temp_dir().join(format!("debrute-preview-home-{}", Uuid::new_v4()));
         let source_path = root.join("assets/source.png");
         let workers = RuntimeWorkerServices::new();
-        let service = ProjectPreviewService::new(&workers, MediaToolPaths::unavailable());
+        let service =
+            ProjectPreviewService::new_with_home(&workers, MediaToolPaths::unavailable(), &home);
         let mut source = File::open(&source_path).unwrap();
         let first_revision = project_media_revision(&mut source).unwrap();
         let preview = service
@@ -1237,15 +1251,22 @@ mod tests {
         ImageBuffer::from_pixel(16, 9, Rgba([1_u8, 2, 3, 255]))
             .save(&source_path)
             .unwrap();
-        let cache_root = root.join(".debrute/cache/canvas-image-previews");
+        let canonical_root = root.canonicalize().unwrap();
+        let cache_root =
+            crate::global::root_cache_directory(&home, canonical_root.to_str().unwrap())
+                .join("canvas/canvas-image-previews");
         fs::write(cache_root.join("invalid-entry"), "invalid").unwrap();
         service
             .reconcile_image_cache(
                 &root,
-                &[ProjectPathEntry {
+                &[ProjectTreeEntry {
                     project_relative_path: "assets/source.png".to_owned(),
                     kind: ProjectPathKind::File,
                     size_bytes: None,
+                    ignored: false,
+                    hidden: false,
+                    directory_state: None,
+                    directory_error: None,
                 }],
             )
             .unwrap();
@@ -1257,6 +1278,7 @@ mod tests {
                 .exists()
         );
         fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
@@ -1307,21 +1329,26 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let root = fixture();
+        let home = std::env::temp_dir().join(format!("debrute-preview-home-{}", Uuid::new_v4()));
         let external = std::env::temp_dir().join(format!("debrute-external-{}", Uuid::new_v4()));
         fs::create_dir_all(&external).unwrap();
         fs::write(external.join("must-survive"), "outside").unwrap();
-        let cache = root.join(".debrute/cache/canvas-image-previews");
+        let canonical_root = root.canonicalize().unwrap();
+        let cache = crate::global::root_cache_directory(&home, canonical_root.to_str().unwrap())
+            .join("canvas/canvas-image-previews");
         if cache.exists() {
             fs::remove_dir_all(&cache).unwrap();
         }
         fs::create_dir_all(cache.parent().unwrap()).unwrap();
         symlink(&external, &cache).unwrap();
         let workers = RuntimeWorkerServices::new();
-        let service = ProjectPreviewService::new(&workers, MediaToolPaths::unavailable());
+        let service =
+            ProjectPreviewService::new_with_home(&workers, MediaToolPaths::unavailable(), &home);
         assert!(service.reconcile_image_cache(&root, &[]).is_err());
         assert!(external.join("must-survive").is_file());
         fs::remove_file(cache).unwrap();
         fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(home).unwrap();
         fs::remove_dir_all(external).unwrap();
     }
 }

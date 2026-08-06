@@ -40,7 +40,7 @@ function settingsFixture(themePreference: 'light' | 'dark'): DebruteGlobalSettin
         ligatures: true
       }
     },
-    chrome: { recentProjects: [] },
+    chrome: { recentProjectRoots: [] },
     models: { image: [], video: [], audio: [] }
   };
 }

@@ -1,63 +1,64 @@
 # Project
 
-The Project context names the local creative workspace and the Debrute-owned
-metadata that describes it without replacing the filesystem as the source of
-truth.
+The Project context names the local filesystem-backed creative workspace.
 
 ## Language
 
 **Project**:
-A local folder together with Debrute metadata under its `.debrute/` directory.
-The folder remains authoritative for project files.
-_Avoid_: Workspace, cloud workspace
+An existing local directory identified by its Canonical Root. Its files remain
+authoritative; opening it does not require or create a manifest or Project ID.
+_Avoid_: Workspace, registered project, Project instance
+
+**Canonical Root**:
+The canonical absolute filesystem path that is the complete durable identity of
+one Project.
+_Avoid_: Project ID, project URL, registration key
+
+**Root Key**:
+An internal association between one Canonical Root and its root-scoped state.
+It is not part of the Project's public identity.
+_Avoid_: Project ID, binding ID
 
 **Project Path**:
 A normalized path relative to the Project root used to identify a file or
-directory without exposing an absolute host path across product boundaries.
-_Avoid_: File URL, absolute path
+directory within Project-scoped operations.
+_Avoid_: Canonical Root, File URL
+
+**Project Session**:
+The live Project state shared by all temporary bindings for one Canonical Root.
+_Avoid_: Workbench connection, Project identity
+
+**Project Binding**:
+A temporary relationship granting one Workbench connection access to a Project
+Session. It is not Project identity.
+_Avoid_: Project ID, session ID, Canonical Root
 
 **Source Revision**:
 The Runtime-confirmed content identity of the exact bytes currently stored at
-one Project Path. It is used to reject stale reads, writes, and derived-resource
-requests; it does not include Canvas geometry, presentation, or rendering
-policy.
-_Avoid_: Preview Target Identity, modification time
+one Project Path. It rejects stale reads, writes, and derived-resource requests.
+_Avoid_: modification time, Canvas revision
 
 **Project Path Command**:
-A user operation directed at the Project root or one or more Project Paths,
-with the same meaning whether invoked from Explorer, Canvas, or the keyboard.
-_Avoid_: Context-menu command, Explorer command, Canvas command
+A user operation directed at the Project root or Project Paths with the same
+meaning whether invoked from Explorer, Canvas, or keyboard.
+_Avoid_: Explorer command, Canvas command
 
-**Project Document**:
-A structured Debrute-owned file under `.debrute/` whose registered role and
-owner determine how it participates in Project state.
-_Avoid_: Ordinary project file, schema registry entry
-
-**Source Document**:
-A Project Document that expresses editable intent from which related state can
-be derived.
-_Avoid_: Pushed document, cache
-
-**Pushed Document**:
-A persisted projection computed from source documents and current Project state;
-it is inspectable but is not the primary source of intent.
-_Avoid_: Source document, source of truth
-
-**Metadata Document**:
-A Project Document containing durable facts that cannot be recreated from source
-documents with full fidelity.
-_Avoid_: Cache document
-
-**Cache Document**:
-A rebuildable Project Document used to avoid repeated computation.
-_Avoid_: Metadata document, source document
+**Feedback Document**:
+A Project-local collection of review marks and comments associated with Project
+Paths.
+_Avoid_: Canvas state
 
 **Project Diagnostic**:
 A current, non-persisted error or warning produced while Runtime interprets
-Project files and Project Documents for one Project snapshot.
-_Avoid_: Canvas Diagnostic, diagnostic source, validation history
+Project content and root-scoped state for one snapshot.
+_Avoid_: validation history, repair record
 
-**Push**:
-The operation that validates source documents and Project inputs, computes
-affected pushed state, and commits the resulting Project Documents.
-_Avoid_: Save, file copy
+**Canvas Workspace Snapshot**:
+A Project Session's current view of its Canvas Workspace, including whether
+Canvas can presently be used. Canvas availability is independent of Project
+availability.
+_Avoid_: optional Canvas fields, Project-open failure, Canvas diagnostic
+
+**Project Tree**:
+A hierarchical view of the Project filesystem shared by Explorer and Canvas.
+_Avoid_: files alias, Canvas membership list

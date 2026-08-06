@@ -309,7 +309,7 @@ function settingsFixture(
   return {
     workbench: { locale: 'en', themePreference: 'dark' },
     canvas: { textAppearance: appearance },
-    chrome: { recentProjects: [] },
+    chrome: { recentProjectRoots: [] },
     models: { image: [], video: [], audio: [] }
   };
 }

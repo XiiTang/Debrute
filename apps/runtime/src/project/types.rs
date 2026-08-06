@@ -1,29 +1,31 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
-use super::feedback::CanvasFeedbackDocument;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DebruteProjectMetadata {
-    pub project: DebruteProjectIdentity,
-}
+use super::{ProjectError, feedback::CanvasFeedbackDocument};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DebruteProjectIdentity {
+pub struct CanvasCatalogEntry {
     pub id: String,
     pub name: String,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
-pub(crate) fn is_valid_stable_project_id(value: &str) -> bool {
-    !value.is_empty()
-        && !matches!(value, "." | "..")
-        && value.len() <= 256
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'~' | b'-'))
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanvasWorkspaceCanvas {
+    pub id: String,
+    pub name: String,
+    #[serde(flatten)]
+    pub state: CanvasState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanvasWorkspaceDocument {
+    pub canonical_root: String,
+    pub active_canvas_id: String,
+    pub canvases: Vec<CanvasWorkspaceCanvas>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +42,29 @@ pub struct ProjectPathEntry {
     pub kind: ProjectPathKind,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectDirectoryState {
+    Unloaded,
+    Loaded,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectTreeEntry {
+    pub project_relative_path: String,
+    pub kind: ProjectPathKind,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub size_bytes: Option<u64>,
+    pub ignored: bool,
+    pub hidden: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub directory_state: Option<ProjectDirectoryState>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub directory_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -111,47 +136,30 @@ pub struct CanvasTextViewportState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CanvasNodeElement {
-    pub project_relative_path: String,
-    pub node_kind: CanvasNodeKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub media_kind: Option<CanvasMediaKind>,
+pub struct CanvasManualLayout {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
-    pub z: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub layout_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanvasNodeState {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub manual_layout: Option<CanvasManualLayout>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub video_playback: Option<CanvasVideoPlaybackState>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub text_viewport: Option<CanvasTextViewportState>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CanvasAnnotation {
-    pub id: String,
-    pub text: String,
-    pub x: f64,
-    pub y: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CanvasPreferences {
-    pub show_diagnostics: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CanvasDocument {
-    pub id: String,
-    pub name: String,
-    pub node_elements: Vec<CanvasNodeElement>,
-    pub annotations: Vec<CanvasAnnotation>,
-    pub preferences: CanvasPreferences,
+pub struct CanvasState {
+    pub expanded_directories: Vec<String>,
+    pub node_states: BTreeMap<String, CanvasNodeState>,
+    pub occlusion_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -225,44 +233,111 @@ pub struct CanvasVideoPresentation {
     pub text_tracks: Vec<CanvasVideoTextTrack>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectedCanvasNode {
-    #[serde(flatten)]
-    pub node: CanvasNodeElement,
-    pub availability: CanvasNodeAvailability,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_language: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub video_presentation: Option<CanvasVideoPresentation>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CanvasStructureEdgeProjection {
-    pub id: String,
-    pub source_project_relative_path: String,
-    pub target_project_relative_path: String,
+pub struct CanvasImageDimensions {
+    pub width: u64,
+    pub height: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "nodeKind", rename_all = "lowercase")]
+pub enum CanvasResource {
+    Directory {
+        #[serde(rename = "projectRelativePath")]
+        project_relative_path: String,
+    },
+    File {
+        #[serde(rename = "projectRelativePath")]
+        project_relative_path: String,
+        #[serde(rename = "mediaKind")]
+        media_kind: CanvasMediaKind,
+        availability: Box<CanvasNodeAvailability>,
+        #[serde(rename = "imageDimensions", skip_serializing_if = "Option::is_none")]
+        image_dimensions: Option<CanvasImageDimensions>,
+        #[serde(rename = "textLanguage", skip_serializing_if = "Option::is_none")]
+        text_language: Option<String>,
+        #[serde(rename = "videoPresentation", skip_serializing_if = "Option::is_none")]
+        video_presentation: Option<CanvasVideoPresentation>,
+    },
+}
+
+impl CanvasResource {
+    #[must_use]
+    pub fn project_relative_path(&self) -> &str {
+        match self {
+            Self::Directory {
+                project_relative_path,
+            }
+            | Self::File {
+                project_relative_path,
+                ..
+            } => project_relative_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CanvasProjection {
+pub struct CanvasResourceView {
     pub canvas_id: String,
-    pub nodes: Vec<ProjectedCanvasNode>,
-    pub edges: Vec<CanvasStructureEdgeProjection>,
+    pub resources: Vec<CanvasResource>,
     pub diagnostics: Vec<ProjectDiagnostic>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanvasWorkspaceUnavailableCode {
+    CanvasWorkspaceInvalid,
+    CanvasWorkspaceUnreadable,
+    CanvasWorkspaceRootMismatch,
+    CanvasWorkspacePersistenceFailed,
+}
+
+impl CanvasWorkspaceUnavailableCode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CanvasWorkspaceInvalid => "canvas_workspace_invalid",
+            Self::CanvasWorkspaceUnreadable => "canvas_workspace_unreadable",
+            Self::CanvasWorkspaceRootMismatch => "canvas_workspace_root_mismatch",
+            Self::CanvasWorkspacePersistenceFailed => "canvas_workspace_persistence_failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanvasWorkspaceUnavailable {
+    pub code: CanvasWorkspaceUnavailableCode,
+    pub message: String,
+}
+
+impl CanvasWorkspaceUnavailable {
+    #[must_use]
+    pub fn new(code: CanvasWorkspaceUnavailableCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn to_error(&self) -> ProjectError {
+        ProjectError::service(self.code.as_str(), self.message.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
-pub enum CanvasRegistryState {
-    Ready {
-        #[serde(rename = "canvasOrder")]
-        canvas_order: Vec<String>,
+pub enum CanvasWorkspaceSnapshot {
+    Available {
+        workspace: CanvasWorkspaceDocument,
+        #[serde(rename = "activeCanvasResources")]
+        active_canvas_resources: CanvasResourceView,
     },
-    Invalid {
-        code: String,
+    Unavailable {
+        code: CanvasWorkspaceUnavailableCode,
         message: String,
     },
 }
@@ -278,7 +353,6 @@ pub struct ProjectDiagnosticCounts {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectHealthSummary {
     pub project_name: String,
-    pub canvas_count: usize,
     pub diagnostic_counts: ProjectDiagnosticCounts,
     pub runtime_data_location: String,
     pub checked_at: String,
@@ -287,20 +361,16 @@ pub struct ProjectHealthSummary {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSnapshot {
-    pub project_root: String,
-    pub metadata: DebruteProjectMetadata,
-    pub files: Vec<ProjectPathEntry>,
-    pub canvases: Vec<CanvasDocument>,
-    pub projections: Vec<CanvasProjection>,
+    pub canonical_root: String,
+    pub project_tree: Vec<ProjectTreeEntry>,
+    pub canvas_workspace: CanvasWorkspaceSnapshot,
     pub diagnostics: Vec<ProjectDiagnostic>,
-    pub canvas_registry: CanvasRegistryState,
     pub health: ProjectHealthSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSyncSnapshot {
-    pub project_id: String,
     pub project_revision: u64,
     pub snapshot: ProjectSnapshot,
 }
@@ -312,10 +382,6 @@ pub enum ProjectChange {
         project_relative_path: String,
         snapshot: ProjectSnapshot,
     },
-    CanvasChanged {
-        canvas: CanvasDocument,
-        projection: CanvasProjection,
-    },
     CanvasFeedbackChanged {
         feedback: CanvasFeedbackDocument,
         affects_rendered_artifact: bool,
@@ -324,7 +390,6 @@ pub enum ProjectChange {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectEvent {
-    pub project_id: String,
     pub project_revision: u64,
     pub change: ProjectChange,
 }
@@ -334,6 +399,7 @@ pub struct ProjectEvent {
 pub enum ProjectPathOperationStatus {
     Ok,
     Skipped,
+    Quarantined,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -343,11 +409,4 @@ pub struct ProjectPathBatchItemResult {
     pub project_relative_path: String,
     pub kind: ProjectPathKind,
     pub status: ProjectPathOperationStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CanvasRegistryDocument {
-    #[serde(rename = "canvasOrder")]
-    pub canvas_order: Vec<String>,
 }

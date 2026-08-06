@@ -13,7 +13,7 @@ function task(
   return {
     id: 'task-1',
     source: 'model-request',
-    project: { projectId: 'project-1', projectName: 'Project One' },
+    project: { canonicalRoot: 'project-1', projectName: 'Project One' },
     createdAt: '2026-08-02T00:00:00.000Z',
     updatedAt: status === 'running'
       ? '2026-08-02T00:00:01.000Z'

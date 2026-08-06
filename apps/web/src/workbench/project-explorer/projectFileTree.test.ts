@@ -15,11 +15,13 @@ describe('project file tree', () => {
         kind: 'directory',
         name: 'assets',
         path: 'assets',
+        directoryState: 'unloaded',
         children: [
           {
             kind: 'directory',
             name: 'pages',
             path: 'assets/pages',
+            directoryState: 'unloaded',
             children: [
               { kind: 'file', name: 'page-2.png', path: 'assets/pages/page-2.png' }
             ]
@@ -31,6 +33,7 @@ describe('project file tree', () => {
         kind: 'directory',
         name: 'rules',
         path: 'rules',
+        directoryState: 'unloaded',
         children: [
           { kind: 'file', name: 'main.md', path: 'rules/main.md' }
         ]
@@ -53,6 +56,7 @@ describe('project file tree', () => {
         kind: 'directory',
         name: 'assets',
         path: 'assets',
+        directoryState: 'unloaded',
         children: [
           { kind: 'file', name: 'cover.png', path: 'assets/cover.png' }
         ]
@@ -61,12 +65,12 @@ describe('project file tree', () => {
     ]);
   });
 
-  it('sorts directories before files and names naturally', () => {
+  it('preserves Runtime sibling order without a Web comparator', () => {
     const tree = buildProjectFileTree([
-      { kind: 'file', projectRelativePath: 'page-10.png' },
-      { kind: 'file', projectRelativePath: 'page-2.png' },
+      { kind: 'directory', projectRelativePath: 'assets-2' },
       { kind: 'directory', projectRelativePath: 'assets-10' },
-      { kind: 'directory', projectRelativePath: 'assets-2' }
+      { kind: 'file', projectRelativePath: 'page-2.png' },
+      { kind: 'file', projectRelativePath: 'page-10.png' }
     ]);
 
     expect(tree.map((node) => node.name)).toEqual([
@@ -75,6 +79,30 @@ describe('project file tree', () => {
       'page-2.png',
       'page-10.png'
     ]);
+  });
+
+  it('keeps Runtime tie-breaker order unchanged', () => {
+    const tree = buildProjectFileTree([
+      { kind: 'file', projectRelativePath: 'A.png' },
+      { kind: 'file', projectRelativePath: 'a.png' },
+      { kind: 'file', projectRelativePath: 'page-2.png' },
+      { kind: 'file', projectRelativePath: 'page-02.png' }
+    ]);
+
+    expect(tree.map((node) => node.name)).toEqual([
+      'A.png',
+      'a.png',
+      'page-2.png',
+      'page-02.png'
+    ]);
+  });
+
+  it('does not reinterpret Runtime Unicode order', () => {
+    const tree = buildProjectFileTree([
+      { kind: 'file', projectRelativePath: 'Ος' },
+      { kind: 'file', projectRelativePath: 'ΟΣ' }
+    ]);
+    expect(tree.map((node) => node.name)).toEqual(['Ος', 'ΟΣ']);
   });
 
   it('expands selected path ancestors', () => {

@@ -185,7 +185,7 @@ describe('multiplexed Terminal hub client', () => {
     client.bindProject('project-1', 'connection-1');
     const socket = FakeWebSocket.instances[0]!;
     socket.emit('open');
-    expect(socket.url).toBe('ws://127.0.0.1:41001/api/projects/project-1/terminals/ws');
+    expect(socket.url).toBe('ws://127.0.0.1:41001/api/workbench/bindings/project-1/terminals/ws');
     expect(JSON.parse(socket.sent[0]!)).toEqual({
       type: 'bind',
       protocolVersion: 1,

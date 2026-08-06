@@ -2,7 +2,7 @@
 
 This page records the current Canvas rendering, image-preview, scheduling, and
 performance-diagnostics contracts. It complements
-[`canvas.md`](./canvas.md), which owns the document, registry, layout, and
+[`canvas.md`](./canvas.md), which owns sparse state, disclosure, layout, and
 interaction model. Counter names and lower-level algorithms remain
 source-owned; user-visible scheduling thresholds are recorded here when they
 form part of the intended interaction contract.
@@ -17,7 +17,7 @@ their shared scheduling, culling, and diagnostic boundaries only.
 Camera movement is not a React geometry loop. `CanvasEditorRuntime` publishes
 the live camera and `CanvasStageRuntime` writes the stage transform directly.
 Each mounted `CanvasSurface` has one `CanvasRenderLifecycle` bound to its
-`CanvasEditorRuntime`. Runtime owns the accepted Canvas Projection and one
+`CanvasEditorRuntime`. Workbench owns the accepted Canvas Scene Projection and one
 `CanvasScenePresentation`, which composes every current Projected Canvas node,
 the node spatial index, one routing group per structure-edge source, and the
 edge-group spatial index. All routing groups are paths in one shared SVG; each
@@ -25,7 +25,7 @@ group retains its member edge IDs and target paths. React reads the stable
 full-scene render snapshot directly from Runtime through an external-store
 subscription.
 
-An accepted Projection replaces React membership once. During a live Manual
+An accepted Scene Projection replaces React membership once. During a live Manual
 Layout Draft, Runtime derives the presentation once and the Scene updates only
 the changed node layouts, routing groups, and spatial-index entries. The
 `CanvasRenderLifecycle` consumes that one delta, writes it through
@@ -45,7 +45,8 @@ values. Selected and active move/resize nodes remain display-visible when they
 are outside the viewport, but retention-only changes do not repeat geometric
 work or alter preview scheduling identity. These direct DOM writes do not
 publish a React scene snapshot and do not remove node-local preview state. This
-culling state is a rendering decision, not Canvas Document visibility.
+culling state is a rendering decision, not Folder Disclosure or Canvas
+visibility.
 
 While the camera state is moving, one transparent Surface-sized hit-test
 blocker sits above the world stage. It gives a stationary pointer one stable DOM
@@ -79,7 +80,7 @@ particular shape count.
 
 ## Image Preview Source Selection
 
-The Runtime projection marks a still raster image previewable only after its
+The Runtime Canvas Resource View marks a still raster image previewable only after its
 path, decoded media type, page count, and intrinsic width are validated. The
 projection supplies source width and revision metadata; the browser does not
 probe the source file to invent missing values. Source pixel count or the size
@@ -186,8 +187,9 @@ node shell.
 
 ## Local Image Preview Service And Cache
 
-The Runtime image-preview route passes Project identity, project-relative path,
-source revision, and requested width to `CanvasImagePreviewService`. The service
+The Runtime image-preview route passes temporary Project binding authority,
+project-relative path, source revision, and requested width to
+`CanvasImagePreviewService`. The service
 normalizes the path, rejects stale revisions and non-positive widths, verifies
 the decoded image matches the supported path type, rejects multi-page sources,
 and never enlarges beyond intrinsic width. It has no fixed maximum requested
@@ -366,7 +368,7 @@ their separate design.
 Image-preview cache identity has four levels:
 
 ```text
-.debrute/cache/canvas-image-previews/
+~/.debrute/cache/roots/<rootKey>/canvas/canvas-image-previews/
   <filesystem-safe source-path key>/
     <filesystem-safe revision key>/
       raster-engine-v<version>/

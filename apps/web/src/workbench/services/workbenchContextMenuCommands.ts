@@ -3,14 +3,13 @@ import type {
   WorkbenchApiClient,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
-import type { CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasProjection } from '../canvas/CanvasScene.js';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.js';
 import { projectTreePasteTargetDirectory } from '../project-explorer/projectTreeEditing.js';
 import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction.js';
 import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController.js';
 import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
 import {
-  cameraCenteredOnNode,
   explorerContextMenuEntries,
   explorerContextMenuPrimaryEntry,
   projectedContextMenuNode,
@@ -43,10 +42,9 @@ export function runProjectPathCommand(input: {
   activeProjection: CanvasProjection | undefined;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
   fileClipboard: WorkbenchFileClipboard | undefined;
-  resetCanvasNodeLayouts(
-    input: Parameters<WorkbenchApiClient['resetCanvasNodeLayouts']>[0]
-  ): ReturnType<WorkbenchApiClient['resetCanvasNodeLayouts']> | undefined;
+  resetCanvasNodeLayouts(canvasId: string, nodePaths: string[]): Promise<void> | undefined;
   openTerminalPanel(cwdProjectRelativePath: string): void;
+  revealInCanvas(projectRelativePath: string): void;
   sendProjectFileToPhotoshop(
     input: Parameters<WorkbenchApiClient['sendProjectFileToPhotoshop']>[0]
   ): ReturnType<WorkbenchApiClient['sendProjectFileToPhotoshop']> | undefined;
@@ -118,24 +116,11 @@ export function runProjectPathCommand(input: {
     }
     const canvasId = input.activeProjection?.canvasId;
     if (canvasId) {
-      const request = input.resetCanvasNodeLayouts({
+      const request = input.resetCanvasNodeLayouts(
         canvasId,
-        nodePaths: selectedNodes.map((selectedNode) => selectedNode.projectRelativePath)
-      });
-      void request?.then(() => {
-        const acceptedProjection = input.getProjectSnapshot()
-          ?.projections.find((projection) => projection.canvasId === canvasId);
-        const updatedNode = projectedContextMenuNode(acceptedProjection, projectRelativePath);
-        const snapshot = input.activeCanvasRuntime?.getSnapshot();
-        if (!updatedNode || !input.activeCanvasRuntime || !snapshot?.surfaceSize) {
-          return;
-        }
-        input.activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
-          node: updatedNode,
-          surfaceSize: snapshot.surfaceSize,
-          camera: snapshot.camera
-        }));
-      }).catch(() => {
+        selectedNodes.map((selectedNode) => selectedNode.projectRelativePath)
+      );
+      void request?.catch(() => {
         input.activities.report({
           kind: 'canvas-operation-failed',
           operation: 'reset-auto-layout'
@@ -201,6 +186,11 @@ function runSinglePathFileCommand(
   }
   if (input.command === 'open-terminal') {
     input.openTerminalPanel(terminalCwdForEntry(primaryEntry));
+    input.closeContextMenu();
+    return true;
+  }
+  if (input.command === 'reveal-in-canvas') {
+    input.revealInCanvas(primaryEntry.projectRelativePath);
     input.closeContextMenu();
     return true;
   }
@@ -324,7 +314,7 @@ function runPasteCommand(
   if (fileClipboard.operation === 'cut') {
     const snapshot = input.getProjectSnapshot();
     const overwrite = snapshot && projectTreeBatchMoveHasConflict({
-      existingProjectRelativePaths: new Set(snapshot.files.map((file) => file.projectRelativePath)),
+      existingProjectRelativePaths: new Set(snapshot.projectTree.map((entry) => entry.projectRelativePath)),
       entries: fileClipboard.entries,
       targetDirectoryProjectRelativePath
     });

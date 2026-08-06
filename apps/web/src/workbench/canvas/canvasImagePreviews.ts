@@ -4,13 +4,13 @@ export interface CanvasImageSource {
 }
 
 export function canvasImageSource(input: {
-  projectId: string;
+  bindingId: string;
   projectRelativePath: string;
   sourceRevision: string;
   previewWidth: number;
 }): CanvasImageSource {
   const src = canvasImagePreviewUrl(
-    input.projectId,
+    input.bindingId,
     input.projectRelativePath,
     input.sourceRevision,
     input.previewWidth
@@ -21,11 +21,11 @@ export function canvasImageSource(input: {
   };
 }
 
-function canvasImagePreviewUrl(projectId: string, projectRelativePath: string, revision: string, width: number): string {
+function canvasImagePreviewUrl(bindingId: string, projectRelativePath: string, revision: string, width: number): string {
   const params = new URLSearchParams({
     path: projectRelativePath,
     sourceRevision: revision,
     w: String(width)
   });
-  return `/api/projects/${projectId}/canvas-image-preview?${params.toString()}`;
+  return `/api/workbench/bindings/${bindingId}/canvas-image-preview?${params.toString()}`;
 }

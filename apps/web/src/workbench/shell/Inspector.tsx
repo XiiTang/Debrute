@@ -3,10 +3,10 @@ import {
   AlertTriangle,
   Loader2
 } from '../ui/index.js';
-import type { ProjectDiagnostic } from '@debrute/canvas-core';
-import type { GeneratedAssetMetadataLookup, GeneratedAssetRecord } from '@debrute/app-protocol';
+import type { ProjectDiagnostic } from '@debrute/app-protocol';
+import type { ModelArtifactProvenanceLookup } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { EmptyState, Select } from '../ui/index.js';
+import { EmptyState } from '../ui/index.js';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import {
   getSelectionContext,
@@ -66,7 +66,7 @@ function InspectorDetails({
             ))}
           </dl>
         </div>
-        {context.node.nodeKind === 'file' ? <NodeGeneratedMetadataSection node={context.node} actions={actions} i18n={i18n} /> : null}
+        {context.node.nodeKind === 'file' ? <NodeModelArtifactSection node={context.node} actions={actions} i18n={i18n} /> : null}
       </>
     );
   }
@@ -127,19 +127,19 @@ function selectedNodeRows(context: Extract<SelectionContext, { kind: 'node' }>, 
     [i18n.t('inspector.position'), `${Math.round(context.node.x)}, ${Math.round(context.node.y)}`],
     [i18n.t('inspector.size'), `${Math.round(context.node.width)} x ${Math.round(context.node.height)}`]
   ];
-  if (context.node.availability.state !== 'available') {
+  if (context.node.availability.state !== 'available' && context.node.availability.state !== 'directory') {
     rows.push([i18n.t('inspector.status'), nodeStatusLabel(context.node)]);
   }
   return rows;
 }
 
-type NodeGeneratedMetadataState =
+type NodeModelArtifactState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'loaded'; lookup: GeneratedAssetMetadataLookup }
+  | { status: 'loaded'; lookup: ModelArtifactProvenanceLookup }
   | { status: 'error'; message: string };
 
-function NodeGeneratedMetadataSection({
+function NodeModelArtifactSection({
   node,
   actions,
   i18n
@@ -148,17 +148,17 @@ function NodeGeneratedMetadataSection({
   actions: WorkbenchActions;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
-  const [state, setState] = useState<NodeGeneratedMetadataState>({ status: 'idle' });
+  const [state, setState] = useState<NodeModelArtifactState>({ status: 'idle' });
   const [open, setOpen] = useState(false);
   const lookupPathRef = useRef<string | undefined>(undefined);
-  const lookupGeneratedAssetMetadata = actions.lookupGeneratedAssetMetadata;
+  const lookupModelArtifactProvenance = actions.lookupModelArtifactProvenance;
 
   const load = useCallback(async () => {
     const lookupPath = node.projectRelativePath;
     lookupPathRef.current = lookupPath;
     setState({ status: 'loading' });
     try {
-      const lookup = await lookupGeneratedAssetMetadata({ projectRelativePath: lookupPath });
+      const lookup = await lookupModelArtifactProvenance({ projectRelativePath: lookupPath });
       if (lookupPathRef.current === lookupPath) {
         setState({ status: 'loaded', lookup });
       }
@@ -167,7 +167,7 @@ function NodeGeneratedMetadataSection({
         setState({ status: 'error', message: errorMessage(error) });
       }
     }
-  }, [node.projectRelativePath, lookupGeneratedAssetMetadata]);
+  }, [node.projectRelativePath, lookupModelArtifactProvenance]);
 
   useEffect(() => {
     lookupPathRef.current = undefined;
@@ -188,112 +188,31 @@ function NodeGeneratedMetadataSection({
       <summary>{i18n.t('inspector.aiMetadata')}</summary>
       {state.status === 'loading' ? <div className="empty-line"><Loader2 className="spin" size={14} />{i18n.t('inspector.loading')}</div> : null}
       {state.status === 'error' ? <div className="asset-ai-metadata-message error">{state.message}</div> : null}
-      {state.status === 'loaded' ? <GeneratedAssetMetadataLookupView lookup={state.lookup} i18n={i18n} /> : null}
+      {state.status === 'loaded' ? <ModelArtifactProvenanceView lookup={state.lookup} i18n={i18n} /> : null}
     </details>
   );
 }
 
-function GeneratedAssetMetadataLookupView({ lookup, i18n }: { lookup: GeneratedAssetMetadataLookup; i18n: WorkbenchI18n }): React.ReactElement {
-  const diagnostics = lookup.diagnostics.length
-    ? <GeneratedAssetMetadataDiagnosticsView diagnostics={lookup.diagnostics} i18n={i18n} />
-    : null;
-  if (lookup.status === 'unavailable') {
+function ModelArtifactProvenanceView({ lookup, i18n }: { lookup: ModelArtifactProvenanceLookup; i18n: WorkbenchI18n }): React.ReactElement {
+  if (!lookup.record) {
     return (
-      <>
-        <div className="asset-ai-metadata-message">{lookup.message}</div>
-        {diagnostics}
-      </>
+      <dl>
+        <dt>SHA-256</dt><dd>{lookup.sha256}</dd>
+        <dt>{i18n.t('inspector.match')}</dt><dd>{i18n.t('common.none')}</dd>
+      </dl>
     );
   }
-  if (lookup.status === 'unmatched') {
-    return (
-      <>
-        <dl>
-          <dt>SHA-256</dt><dd>{lookup.fingerprint.hash}</dd>
-          <dt>{i18n.t('inspector.match')}</dt><dd>{i18n.t('common.none')}</dd>
-        </dl>
-        {diagnostics}
-      </>
-    );
-  }
-  return (
-    <>
-      <MatchedGeneratedAssetMetadataView lookup={lookup} i18n={i18n} />
-      {diagnostics}
-    </>
-  );
-}
-
-function MatchedGeneratedAssetMetadataView({
-  lookup,
-  i18n
-}: {
-  lookup: Extract<GeneratedAssetMetadataLookup, { status: 'matched' }>;
-  i18n: WorkbenchI18n;
-}): React.ReactElement {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [lookup.fingerprint.hash, lookup.records.length]);
-  const record = lookup.records[Math.min(selectedIndex, lookup.records.length - 1)]!;
-
+  const record = lookup.record;
   return (
     <div className="asset-ai-metadata-content">
-      {lookup.records.length > 1 ? (
-        <label className="asset-ai-metadata-picker">
-          <span>{i18n.t('inspector.record')}</span>
-          <Select className="asset-ai-metadata-select" value={selectedIndex} onChange={(event) => setSelectedIndex(Number(event.currentTarget.value))}>
-            {lookup.records.map((item, index) => (
-              <option key={item.recordId} value={index}>{`${index + 1}. ${item.createdAt}`}</option>
-            ))}
-          </Select>
-        </label>
-      ) : null}
-      <GeneratedAssetMetadataRecordView record={record} fingerprint={lookup.fingerprint.hash} i18n={i18n} />
-    </div>
-  );
-}
-
-function GeneratedAssetMetadataRecordView({
-  record,
-  fingerprint,
-  i18n
-}: {
-  record: GeneratedAssetRecord;
-  fingerprint: string;
-  i18n: WorkbenchI18n;
-}): React.ReactElement {
-  return (
-    <>
       <dl>
-        <dt>SHA-256</dt><dd>{fingerprint}</dd>
+        <dt>SHA-256</dt><dd>{lookup.sha256}</dd>
         <dt>{i18n.t('inspector.created')}</dt><dd>{record.createdAt}</dd>
       </dl>
-      <JsonBlock title={i18n.t('inspector.request')} value={record.modelRun.request} />
-      <JsonBlock title={i18n.t('inspector.output')} value={record.modelRun.output} />
-    </>
-  );
-}
-
-function GeneratedAssetMetadataDiagnosticsView({
-  diagnostics,
-  i18n
-}: {
-  diagnostics: GeneratedAssetMetadataLookup['diagnostics'];
-  i18n: WorkbenchI18n;
-}): React.ReactElement {
-  return (
-    <section className="asset-ai-metadata-diagnostics">
-      <h4>{i18n.t('inspector.diagnostics')}</h4>
-      <ul>
-        {diagnostics.map((diagnostic, index) => (
-          <li key={`${diagnostic.code}:${diagnostic.recordId ?? index}`}>
-            <strong>{diagnostic.code}</strong>
-            <span>{diagnostic.message}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
+      <JsonBlock title={i18n.t('inspector.request')} value={record.request} />
+      <JsonBlock title={i18n.t('inspector.output')} value={record.response.output} />
+      <JsonBlock title="Trace" value={record.response.trace} />
+    </div>
   );
 }
 

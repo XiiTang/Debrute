@@ -102,6 +102,7 @@ pub enum CanvasVideoPreviewEnsureStatus {
 }
 
 pub struct CanvasVideoPreviewService {
+    debrute_home: PathBuf,
     supervisor: Arc<BoundedProcessSupervisor>,
     tools: MediaToolPaths,
     raster_variants: Arc<RasterPreviewVariantService>,
@@ -114,8 +115,10 @@ impl CanvasVideoPreviewService {
         supervisor: Arc<BoundedProcessSupervisor>,
         tools: MediaToolPaths,
         raster_variants: Arc<RasterPreviewVariantService>,
+        debrute_home: PathBuf,
     ) -> Self {
         Self {
+            debrute_home,
             supervisor,
             tools,
             raster_variants,
@@ -264,8 +267,9 @@ impl CanvasVideoPreviewService {
         )?;
         assert_source_revision(project_root, target)?;
         assert_canonical_source_identity_current(target, canonical_source_identity)?;
+        let cache_root = self.cache_root(project_root)?;
         let (source_project_path, source) =
-            source_file(project_root, &directory)?.ok_or_else(|| {
+            source_file(&cache_root, &directory)?.ok_or_else(|| {
                 ProjectError::service_with_fields(
                     "canvas_video_preview_source_missing",
                     format!(
@@ -286,9 +290,9 @@ impl CanvasVideoPreviewService {
                     ],
                 )
             })?;
-        let file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
+        let file = open_no_symlink_existing_project_file(&cache_root, &source_project_path)?;
         self.raster_variants.resolve(
-            project_root,
+            &cache_root,
             RasterPreviewVariantRequest {
                 source_path: source,
                 source_file: file,
@@ -325,12 +329,13 @@ impl CanvasVideoPreviewService {
             &target.source_revision,
             &canonical_source_identity,
         )?;
-        let Some((source_project_path, source)) = source_file(project_root, &directory)? else {
+        let cache_root = self.cache_root(project_root)?;
+        let Some((source_project_path, source)) = source_file(&cache_root, &directory)? else {
             return Ok(CanvasVideoPreviewProbeStatus::NeedsSource {
                 canonical_source_identity,
             });
         };
-        let mut file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
+        let mut file = open_no_symlink_existing_project_file(&cache_root, &source_project_path)?;
         let metadata = self
             .raster_variants
             .metadata_file(&source, &mut file, cancellation)?;
@@ -367,7 +372,8 @@ impl CanvasVideoPreviewService {
             canonical_source_identity,
         )?;
         let source_project_path = format!("{directory}/source.jpg");
-        let source = if let Some(source) = existing_file(project_root, &source_project_path)? {
+        let cache_root = self.cache_root(project_root)?;
+        let source = if let Some(source) = existing_file(&cache_root, &source_project_path)? {
             source
         } else {
             let video = StableVideoInput::open(
@@ -402,7 +408,7 @@ impl CanvasVideoPreviewService {
                     "canvas_video_preview_frame_too_large",
                     "Extracted Canvas video preview frame",
                 )?;
-                ProjectCapabilityFs::open(project_root)?.atomic_write_checked(
+                ProjectCapabilityFs::open(&cache_root)?.atomic_write_checked(
                     &source_project_path,
                     &bytes,
                     || {
@@ -413,9 +419,9 @@ impl CanvasVideoPreviewService {
                 )
             })();
             publication?;
-            resolve_no_symlink_existing_project_path(project_root, &source_project_path)?
+            resolve_no_symlink_existing_project_path(&cache_root, &source_project_path)?
         };
-        let mut file = open_no_symlink_existing_project_file(project_root, &source_project_path)?;
+        let mut file = open_no_symlink_existing_project_file(&cache_root, &source_project_path)?;
         let metadata = self
             .raster_variants
             .metadata_file(&source, &mut file, cancellation)?;
@@ -423,6 +429,17 @@ impl CanvasVideoPreviewService {
             canonical_source_identity: canonical_source_identity.to_owned(),
             source_width: metadata.width,
         })
+    }
+
+    fn cache_root(&self, project_root: &Path) -> Result<PathBuf, ProjectError> {
+        let canonical_root = project_root.canonicalize()?;
+        let canonical_root = canonical_root.to_str().ok_or_else(|| {
+            ProjectError::Validation("Project root must be valid UTF-8.".to_owned())
+        })?;
+        let root =
+            crate::global::root_cache_directory(&self.debrute_home, canonical_root).join("canvas");
+        fs::create_dir_all(&root)?;
+        Ok(root)
     }
 
     fn read_metadata_path(
@@ -870,7 +887,7 @@ fn video_source_directory(
         ));
     }
     Ok(format!(
-        ".debrute/cache/canvas-video-previews/{canvas_id}/{}/{}/{}",
+        "canvas-video-previews/{canvas_id}/{}/{}/{}",
         project_relative_path_cache_key(video_path)?,
         project_revision_cache_key(revision)?,
         validate_cache_segment(
@@ -914,7 +931,7 @@ mod tests {
                 "frame-v1--ms-1500",
             )
             .unwrap(),
-            ".debrute/cache/canvas-video-previews/canvas-1/assets%2Fclip.mp4--b00959a8cfb7dc12/1000%3A20/frame-v1--ms-1500"
+            "canvas-video-previews/canvas-1/assets%2Fclip.mp4--b00959a8cfb7dc12/1000%3A20/frame-v1--ms-1500"
         );
     }
 
@@ -993,6 +1010,7 @@ mod tests {
             workers.supervisor(),
             MediaToolPaths::unavailable(),
             Arc::new(RasterPreviewVariantService::new(raster_pool)),
+            root.join("home"),
         );
         let sources = service
             .probe_sources(
@@ -1007,7 +1025,6 @@ mod tests {
             CanvasVideoPreviewProbeStatus::NeedsSource { ref canonical_source_identity }
                 if canonical_source_identity == "frame-v1--ms-0"
         ));
-        assert!(!root.join(".debrute/cache/canvas-video-previews").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -97,7 +97,7 @@ export interface PhotoshopDocumentSnapshot {
 }
 
 export interface PhotoshopProjectSnapshot {
-  projectId: string;
+  canonicalRoot: string;
   name: string;
   revision: number;
 }
@@ -116,13 +116,13 @@ export type PluginMessage =
   | {
       type: 'photoshop.projectDirectories.request';
       requestId: string;
-      projectId: string;
+      canonicalRoot: string;
       revision: number;
     }
   | {
       type: 'photoshop.export.start';
       commandId: string;
-      projectId: string;
+      canonicalRoot: string;
       projectRevision: number;
       directory: string;
       items: Array<{ itemId: string; sourceName: string }>;
@@ -160,7 +160,7 @@ export type RuntimeMessage =
   | {
       type: 'photoshop.projectDirectories.snapshot';
       requestId: string;
-      projectId: string;
+      canonicalRoot: string;
       revision: number;
       directories: string[];
     }
@@ -205,9 +205,9 @@ export function parseRuntimeMessage(text: string): RuntimeMessage {
     return value as unknown as RuntimeMessage;
   }
   if (value.type === 'photoshop.projectDirectories.snapshot'
-    && exactKeys(value, ['type', 'requestId', 'projectId', 'revision', 'directories'])
+    && exactKeys(value, ['type', 'requestId', 'canonicalRoot', 'revision', 'directories'])
     && nonEmptyString(value.requestId)
-    && nonEmptyString(value.projectId)
+    && nonEmptyString(value.canonicalRoot)
     && nonNegativeInteger(value.revision)
     && Array.isArray(value.directories)
     && value.directories.every((directory) => typeof directory === 'string')) {
@@ -242,8 +242,8 @@ export function serializePluginMessage(message: PluginMessage): string {
 
 function isProjectSnapshot(value: unknown): boolean {
   return isRecord(value)
-    && exactKeys(value, ['projectId', 'name', 'revision'])
-    && nonEmptyString(value.projectId)
+    && exactKeys(value, ['canonicalRoot', 'name', 'revision'])
+    && nonEmptyString(value.canonicalRoot)
     && typeof value.name === 'string'
     && nonNegativeInteger(value.revision);
 }

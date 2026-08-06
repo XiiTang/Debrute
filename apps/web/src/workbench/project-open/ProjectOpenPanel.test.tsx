@@ -59,4 +59,19 @@ describe('ProjectOpenPanel', () => {
     expect(html).not.toContain('<form');
     expect(html).not.toContain('<button');
   });
+
+  it('reports an open failure', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <ProjectOpenPanel
+          attemptedPath="/damaged/project"
+          error="Project root could not be opened"
+          opening={false}
+          onOpenProject={() => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toContain('Project root could not be opened');
+  });
 });

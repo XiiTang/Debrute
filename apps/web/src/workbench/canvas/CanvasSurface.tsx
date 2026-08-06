@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type {
-  CanvasDocument,
+  CanvasCatalogEntry,
   CanvasFeedbackDocument,
   CanvasFeedbackEntry,
   CanvasFeedbackGeometry,
-  CanvasProjection,
-  CanvasTextViewportState,
-  ProjectedCanvasNode
-} from '@debrute/canvas-core';
+  CanvasState,
+  CanvasTextViewportState
+} from '@debrute/app-protocol';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import type { CanvasPoint, ResizeHandle } from '../services/canvasInteraction.js';
@@ -58,6 +58,7 @@ import { createCanvasRenderLifecycle } from './CanvasRenderLifecycle.js';
 import type { CanvasEdgeRoutingGroup } from './CanvasEdgeRoutingGroup.js';
 import type {
   CanvasEditorRuntime,
+  CanvasRuntimePointerInteraction,
   CanvasRuntimeSnapshot
 } from './runtime/CanvasEditorRuntime';
 import { createCanvasInteractionRuntime } from './runtime/CanvasInteractionRuntime.js';
@@ -76,12 +77,10 @@ import {
   canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
   canvasFeedbackBarTargetForSelection,
-  canvasMapProjectTreeDropInput,
   canvasPerfDebugSnapshot,
   canvasPerfFinalState,
   devicePixelRatioValue,
   domRectToFloatingBarRect,
-  isCanvasMapProjectTreeDragOver,
   isCanvasPrimaryPointerEvent,
   isProjectedVideoNode,
   pointerEventModifiers,
@@ -94,6 +93,11 @@ import {
 } from './canvasSurfaceSupport';
 
 const EMPTY_FEEDBACK_ITEM_IDS: ReadonlySet<string> = new Set();
+const EMPTY_CANVAS_STATE: CanvasState = {
+  expandedDirectories: [],
+  nodeStates: {},
+  occlusionOrder: []
+};
 
 interface CanvasPreviewActivationCandidate {
   pointerId: number;
@@ -102,7 +106,8 @@ interface CanvasPreviewActivationCandidate {
 }
 
 interface CanvasSurfaceProps {
-  canvas: CanvasDocument;
+  canvas: CanvasCatalogEntry;
+  canvasState?: CanvasState | undefined;
   projection: CanvasProjection;
   runtime: CanvasEditorRuntime;
   actions: CanvasSceneActions;
@@ -119,6 +124,7 @@ interface CanvasSurfaceProps {
 
 export function CanvasSurface({
   canvas,
+  canvasState = EMPTY_CANVAS_STATE,
   projection,
   runtime,
   actions,
@@ -158,6 +164,7 @@ export function CanvasSurface({
   return (
     <CanvasSurfaceRuntime
       canvas={canvas}
+      canvasState={canvasState}
       projection={projection}
       runtime={runtime}
       actions={actions}
@@ -177,6 +184,7 @@ export function CanvasSurface({
 
 function CanvasSurfaceRuntime({
   canvas,
+  canvasState = EMPTY_CANVAS_STATE,
   projection,
   runtime,
   actions,
@@ -304,6 +312,62 @@ function CanvasSurfaceRuntime({
   const instrumentationMonitor = perfMonitor;
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
   const interactionRuntime = useMemo(() => createCanvasInteractionRuntime(), [canvas.id]);
+  useEffect(() => {
+    let lastSubmittedSelection = '';
+    let pointerInteraction: CanvasRuntimePointerInteraction | undefined;
+    const submitSelection = () => {
+      if (runtime.getSnapshot().pointerInteraction) {
+        return;
+      }
+      const paths = selectedNodeProjectRelativePaths(runtime.getSnapshot().selection);
+      if (paths.length === 0) {
+        lastSubmittedSelection = '';
+        return;
+      }
+      const key = paths.join('\u001f');
+      if (key === lastSubmittedSelection) {
+        return;
+      }
+      lastSubmittedSelection = key;
+      void actions.raiseCanvasSelection({
+        canvasId: canvas.id,
+        projectRelativePaths: paths
+      }).catch(() => {
+        lastSubmittedSelection = '';
+      });
+    };
+    const unsubscribeSelection = runtime.subscribeSelection(submitSelection);
+    const unsubscribePointer = runtime.subscribePointerInteraction((interaction) => {
+      if (interaction) {
+        pointerInteraction = interaction;
+        return;
+      }
+      const completed = pointerInteraction;
+      pointerInteraction = undefined;
+      if (
+        (completed?.kind === 'move-node' || completed?.kind === 'resize-node')
+        && completed.phase === 'active'
+      ) {
+        const paths = selectedNodeProjectRelativePaths(runtime.getSnapshot().selection);
+        lastSubmittedSelection = paths.join('\u001f');
+        return;
+      }
+      if (
+        completed?.kind === 'move-node'
+        && completed.phase === 'pending'
+        && isCanvasNodeSelected(completed.initialSelection, completed.pressedProjectRelativePath)
+      ) {
+        lastSubmittedSelection = '';
+      } else if (completed?.kind === 'selection-marquee') {
+        lastSubmittedSelection = '';
+      }
+      submitSelection();
+    });
+    return () => {
+      unsubscribeSelection();
+      unsubscribePointer();
+    };
+  }, [actions, canvas.id, runtime]);
   const renderLifecycle = useMemo(() => createCanvasRenderLifecycle({
     runtime,
     stageRuntime,
@@ -727,15 +791,41 @@ function CanvasSurfaceRuntime({
     if (activationCandidate) {
       previewActivationCandidateRef.current = undefined;
     }
-    const interactionWasActive = runtime.getSnapshot().pointerInteraction?.phase === 'active';
-    const releaseTarget = interactionWasActive
+    const pointerInteraction = runtime.getSnapshot().pointerInteraction;
+    const interactionWasActive = pointerInteraction?.phase === 'active';
+    const pendingReleaseTarget = interactionWasActive
       ? undefined
       : resolvePointerReleaseTarget(event);
-    await runtime.input.finishPointerInteraction({
+    const finishedInteraction = await runtime.input.finishPointerInteraction({
       pointerId: event.pointerId,
       screenPoint: pointerScreenPoint(event),
       modifiers: pointerEventModifiers(event, productPlatform)
     });
+    const releaseTarget = finishedInteraction?.phase === 'active'
+      ? undefined
+      : pendingReleaseTarget;
+    const directoryTogglePath = finishedInteraction?.kind === 'move-node'
+      && finishedInteraction.phase === 'pending'
+      && !event.altKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && !event.shiftKey
+      && releaseTarget?.kind === 'node'
+      && releaseTarget.projectRelativePath.length > 0
+      && releaseTarget.projectRelativePath === finishedInteraction.pressedProjectRelativePath
+      && projectedNodesRef.current.some((node) => (
+        node.projectRelativePath === releaseTarget.projectRelativePath
+        && node.nodeKind === 'directory'
+      ))
+      ? finishedInteraction.pressedProjectRelativePath
+      : undefined;
+    if (directoryTogglePath !== undefined) {
+      void actions.setCanvasDirectoryExpanded({
+        canvasId: canvas.id,
+        projectRelativePath: directoryTogglePath,
+        expanded: !canvasState.expandedDirectories.includes(directoryTogglePath)
+      });
+    }
     if (
       activationCandidate?.pointerId === event.pointerId
       && releaseTarget?.kind === 'node'
@@ -770,7 +860,7 @@ function CanvasSurfaceRuntime({
         // Pointer capture may already have ended in the browser.
       }
     }
-  }, [interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
+  }, [actions, canvas.id, canvasState.expandedDirectories, interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
 
   const handlePointerUpEvent = useCallback((event: React.PointerEvent<Element>) => {
     void handlePointerUp(event).catch(() => undefined);
@@ -1258,20 +1348,10 @@ function CanvasSurfaceRuntime({
       onPointerCancel={cancelPointerEvent}
       onLostPointerCapture={cancelPointerEvent}
       onContextMenu={handleSurfaceContextMenu}
-      onDragOver={(event) => {
-        if (!isCanvasMapProjectTreeDragOver(event.dataTransfer)) {
-          return;
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          runtime.setSelection(undefined);
         }
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'copy';
-      }}
-      onDrop={(event) => {
-        const input = canvasMapProjectTreeDropInput(canvas.id, event.dataTransfer);
-        if (!input) {
-          return;
-        }
-        event.preventDefault();
-        void actions.addProjectPathToCanvasMap(input);
       }}
     >
       <div
@@ -1354,11 +1434,6 @@ function CanvasSurfaceRuntime({
         runtime={runtime}
         surfaceElement={surfaceRef.current}
       />
-      {projectedNodes.length === 0 ? (
-        <div className="canvas-empty-state" data-testid="canvas-empty-state">
-          <strong>No Canvas Map nodes</strong>
-        </div>
-      ) : null}
     </div>
   );
   return instrumentationMonitor ? (

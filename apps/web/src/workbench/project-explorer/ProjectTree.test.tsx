@@ -36,12 +36,12 @@ describe('ProjectTree', () => {
       <ProjectTree
         productPlatform="win32"
         snapshot={{
-          files: [
+          projectTree: [
             { kind: 'file', projectRelativePath: 'briefs/concept.md' },
             { kind: 'file', projectRelativePath: 'assets/cover.png' },
             { kind: 'file', projectRelativePath: 'archive.bin' }
           ]
-        } as WorkbenchProjectSessionSnapshot}
+        } as unknown as WorkbenchProjectSessionSnapshot}
         selection={selection(['briefs/concept.md'])}
         cutPaths={[]}
         onSelectionChange={() => undefined}
@@ -75,14 +75,14 @@ describe('ProjectTree', () => {
     });
   });
 
-  it('locates files on a plain click', () => {
+  it('keeps a plain file click scoped to Explorer selection', () => {
     expect(projectTreeRowClickAction({
       kind: 'file',
       platform: 'darwin',
       event: {}
     })).toEqual({
       toggleDirectory: false,
-      locateFileInCanvas: true
+      locateFileInCanvas: false
     });
   });
 
@@ -90,7 +90,7 @@ describe('ProjectTree', () => {
     const html = renderStaticWithI18n(
       <ProjectTree
         productPlatform="win32"
-        snapshot={{ files: [] } as unknown as WorkbenchProjectSessionSnapshot}
+        snapshot={{ projectTree: [] } as unknown as WorkbenchProjectSessionSnapshot}
         selection={selection([])}
         cutPaths={[]}
         onSelectionChange={() => undefined}
@@ -106,10 +106,10 @@ describe('ProjectTree', () => {
       <ProjectTree
         productPlatform="win32"
         snapshot={{
-          files: [
+          projectTree: [
             { kind: 'file', projectRelativePath: 'archive.bin' }
           ]
-        } as WorkbenchProjectSessionSnapshot}
+        } as unknown as WorkbenchProjectSessionSnapshot}
         selection={selection(['archive.bin'])}
         cutPaths={[]}
         onSelectionChange={() => undefined}
@@ -124,11 +124,11 @@ describe('ProjectTree', () => {
       <ProjectTree
         productPlatform="win32"
         snapshot={{
-          files: [
+          projectTree: [
             { kind: 'file', projectRelativePath: 'briefs/concept.md' },
             { kind: 'file', projectRelativePath: 'assets/cover.png' }
           ]
-        } as WorkbenchProjectSessionSnapshot}
+        } as unknown as WorkbenchProjectSessionSnapshot}
         selection={selection(['assets/cover.png', 'briefs/concept.md'])}
         cutPaths={[]}
         onSelectionChange={() => undefined}
@@ -146,11 +146,11 @@ describe('ProjectTree', () => {
       <ProjectTree
         productPlatform="win32"
         snapshot={{
-          files: [
+          projectTree: [
             { kind: 'file', projectRelativePath: 'assets/cover.png' },
             { kind: 'file', projectRelativePath: 'assets/page.png' }
           ]
-        } as WorkbenchProjectSessionSnapshot}
+        } as unknown as WorkbenchProjectSessionSnapshot}
         selection={selection(['assets/cover.png'])}
         cutPaths={['assets/page.png']}
         editing={{

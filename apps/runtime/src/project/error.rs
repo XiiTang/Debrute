@@ -4,7 +4,6 @@ use std::{collections::BTreeMap, error::Error, fmt, io};
 pub enum ProjectError {
     Io(io::Error),
     Json(serde_json::Error),
-    Yaml(serde_yaml::Error),
     Validation(String),
     Service(ProjectServiceError),
     RegistryClosed,
@@ -33,7 +32,7 @@ impl ProjectError {
             Self::ProjectNotFound(_) => "project_not_found",
             Self::ProjectNotOpen(_) => "project_not_open",
             Self::RevisionExhausted => "project_revision_exhausted",
-            Self::Io(_) | Self::Json(_) | Self::Yaml(_) | Self::Validation(_) => "project_invalid",
+            Self::Io(_) | Self::Json(_) | Self::Validation(_) => "project_invalid",
         }
     }
 
@@ -72,9 +71,10 @@ impl ProjectError {
         matches!(
             self.code(),
             "project_file_operation_rollback_failed"
-                | "document_push_rollback_failed"
+                | "document_transaction_rollback_failed"
                 | "native_shell_trash_quarantined"
                 | "native_shell_trash_not_consumed"
+                | "native_shell_trash_rollback_failed"
         )
     }
 }
@@ -84,15 +84,17 @@ impl fmt::Display for ProjectError {
         match self {
             Self::Io(error) => error.fmt(formatter),
             Self::Json(error) => error.fmt(formatter),
-            Self::Yaml(error) => error.fmt(formatter),
             Self::Validation(message) => formatter.write_str(message),
             Self::Service(error) => formatter.write_str(&error.message),
             Self::RegistryClosed => formatter.write_str("Debrute Project registry is closed."),
             Self::ProjectNotFound(root) => {
                 write!(formatter, "Debrute Project root does not exist: {root}")
             }
-            Self::ProjectNotOpen(project_id) => {
-                write!(formatter, "Debrute Project is not open: {project_id}")
+            Self::ProjectNotOpen(canonical_root) => {
+                write!(
+                    formatter,
+                    "Debrute Project root is not open: {canonical_root}"
+                )
             }
             Self::RevisionExhausted => formatter.write_str("Project revision is exhausted."),
         }
@@ -104,7 +106,6 @@ impl Error for ProjectError {
         match self {
             Self::Io(error) => Some(error),
             Self::Json(error) => Some(error),
-            Self::Yaml(error) => Some(error),
             Self::Validation(_)
             | Self::Service(_)
             | Self::RegistryClosed
@@ -124,11 +125,5 @@ impl From<io::Error> for ProjectError {
 impl From<serde_json::Error> for ProjectError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
-    }
-}
-
-impl From<serde_yaml::Error> for ProjectError {
-    fn from(error: serde_yaml::Error) -> Self {
-        Self::Yaml(error)
     }
 }

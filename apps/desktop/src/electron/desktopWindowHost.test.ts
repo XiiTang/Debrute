@@ -14,8 +14,8 @@ describe('DesktopWindowHost', () => {
     const host = createHost(control, [nativeWindow]);
     await control.emit(openEvent('window-1'));
     const intent: ActivationIntent = {
-      kind: 'open_known_project',
-      project_id: 'project-alpha',
+      kind: 'open_project',
+      project_root: '/projects/alpha',
       frontend: 'desktop'
     };
 

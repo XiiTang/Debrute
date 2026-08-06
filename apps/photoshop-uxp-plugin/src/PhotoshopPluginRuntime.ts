@@ -54,7 +54,7 @@ interface PhotoshopPluginRuntimeOptions {
 }
 
 export interface PhotoshopProjectDirectoryTree {
-  projectId: string;
+  canonicalRoot: string;
   projectRevision: number;
   status: 'loading' | 'loaded';
   directories: string[];
@@ -66,11 +66,11 @@ export interface PhotoshopPluginSnapshot {
   projects: PhotoshopProjectSnapshot[];
   directoryTrees: PhotoshopProjectDirectoryTree[];
   expandedDirectories: Array<{
-    projectId: string;
+    canonicalRoot: string;
     directory: string;
   }>;
   destination: {
-    projectId: string;
+    canonicalRoot: string;
     projectName: string;
     projectRevision: number;
     directory: string;
@@ -90,12 +90,12 @@ export function resolvePhotoshopDestination(snapshot: PhotoshopPluginSnapshot): 
   const destination = snapshot.destination;
   if (destination === null) return null;
   const project = snapshot.projects.find((candidate) => (
-    candidate.projectId === destination.projectId
+    candidate.canonicalRoot === destination.canonicalRoot
     && candidate.revision === destination.projectRevision
   ));
   if (!project) return null;
   const directoryValid = destination.directory === ''
-    || currentDirectoryTree(snapshot, project.projectId)?.directories.includes(destination.directory) === true;
+    || currentDirectoryTree(snapshot, project.canonicalRoot)?.directories.includes(destination.directory) === true;
   return directoryValid ? { destination, project } : null;
 }
 
@@ -111,7 +111,7 @@ export class PhotoshopPluginRuntime {
   private snapshotValue: PhotoshopPluginSnapshot;
   private readonly pendingDirectoryRequests = new Map<string, {
     requestId: string;
-    projectId: string;
+    canonicalRoot: string;
     revision: number;
   }>();
   private pendingExportReady: { commandId: string; resolve(): void; reject(error: Error): void } | undefined;
@@ -173,24 +173,24 @@ export class PhotoshopPluginRuntime {
     return () => this.subscribers.delete(subscriber);
   }
 
-  requestDirectories(projectId: string): void {
-    const project = this.snapshotValue.projects.find((candidate) => candidate.projectId === projectId);
+  requestDirectories(canonicalRoot: string): void {
+    const project = this.snapshotValue.projects.find((candidate) => candidate.canonicalRoot === canonicalRoot);
     if (!project || this.snapshotValue.connection.status !== 'ready') return;
     const currentTree = this.snapshotValue.directoryTrees.find((tree) => (
-      tree.projectId === project.projectId && tree.projectRevision === project.revision
+      tree.canonicalRoot === project.canonicalRoot && tree.projectRevision === project.revision
     ));
     if (currentTree?.status === 'loaded') return;
-    const currentPending = this.pendingDirectoryRequests.get(project.projectId);
+    const currentPending = this.pendingDirectoryRequests.get(project.canonicalRoot);
     if (currentPending?.revision === project.revision) return;
     const pending = {
       requestId: uniqueId(),
-      projectId: project.projectId,
+      canonicalRoot: project.canonicalRoot,
       revision: project.revision
     };
-    this.pendingDirectoryRequests.set(project.projectId, pending);
+    this.pendingDirectoryRequests.set(project.canonicalRoot, pending);
     this.patch({
       directoryTrees: upsertDirectoryTree(this.snapshotValue.directoryTrees, {
-        projectId: project.projectId,
+        canonicalRoot: project.canonicalRoot,
         projectRevision: project.revision,
         status: 'loading',
         directories: []
@@ -202,73 +202,73 @@ export class PhotoshopPluginRuntime {
         ...pending
       });
     } catch {
-      if (this.pendingDirectoryRequests.get(project.projectId) === pending) {
-        this.pendingDirectoryRequests.delete(project.projectId);
+      if (this.pendingDirectoryRequests.get(project.canonicalRoot) === pending) {
+        this.pendingDirectoryRequests.delete(project.canonicalRoot);
       }
     }
   }
 
-  activateDestination(projectId: string, directory: string): void {
+  activateDestination(canonicalRoot: string, directory: string): void {
     const expanded = this.snapshotValue.expandedDirectories.some((entry) => (
-      entry.projectId === projectId && entry.directory === directory
+      entry.canonicalRoot === canonicalRoot && entry.directory === directory
     ));
-    if (!this.selectDestination(projectId, directory)) return;
+    if (!this.selectDestination(canonicalRoot, directory)) return;
     if (expanded) {
-      this.collapseDestination(projectId, directory);
+      this.collapseDestination(canonicalRoot, directory);
     } else {
-      this.expandDestination(projectId, directory);
+      this.expandDestination(canonicalRoot, directory);
     }
   }
 
-  selectDestination(projectId: string, directory: string): boolean {
-    const project = this.snapshotValue.projects.find((candidate) => candidate.projectId === projectId);
+  selectDestination(canonicalRoot: string, directory: string): boolean {
+    const project = this.snapshotValue.projects.find((candidate) => candidate.canonicalRoot === canonicalRoot);
     if (!project) return false;
     if (directory !== '') {
-      const tree = currentDirectoryTree(this.snapshotValue, projectId);
+      const tree = currentDirectoryTree(this.snapshotValue, canonicalRoot);
       if (!tree?.directories.includes(directory)) return false;
     }
     this.patch({
       destination: {
-        projectId: project.projectId,
+        canonicalRoot: project.canonicalRoot,
         projectName: project.name,
         projectRevision: project.revision,
         directory
       },
       expandedDirectories: withExpandedAncestors(
         this.snapshotValue.expandedDirectories,
-        projectId,
+        canonicalRoot,
         directory
       )
     });
     return true;
   }
 
-  expandDestination(projectId: string, directory: string): void {
-    const project = this.snapshotValue.projects.find((candidate) => candidate.projectId === projectId);
+  expandDestination(canonicalRoot: string, directory: string): void {
+    const project = this.snapshotValue.projects.find((candidate) => candidate.canonicalRoot === canonicalRoot);
     if (!project) return;
     if (directory !== '') {
-      const tree = currentDirectoryTree(this.snapshotValue, projectId);
+      const tree = currentDirectoryTree(this.snapshotValue, canonicalRoot);
       if (!tree?.directories.includes(directory) || !hasDirectChild(tree.directories, directory)) return;
     }
     if (this.snapshotValue.expandedDirectories.some((entry) => (
-      entry.projectId === projectId && entry.directory === directory
+      entry.canonicalRoot === canonicalRoot && entry.directory === directory
     ))) return;
     this.patch({
       expandedDirectories: [
-        ...withExpandedAncestors(this.snapshotValue.expandedDirectories, projectId, directory),
-        { projectId, directory }
+        ...withExpandedAncestors(this.snapshotValue.expandedDirectories, canonicalRoot, directory),
+        { canonicalRoot, directory }
       ]
     });
-    if (directory === '') this.requestDirectories(projectId);
+    if (directory === '') this.requestDirectories(canonicalRoot);
   }
 
-  collapseDestination(projectId: string, directory: string): void {
+  collapseDestination(canonicalRoot: string, directory: string): void {
     if (!this.snapshotValue.expandedDirectories.some((entry) => (
-      entry.projectId === projectId && entry.directory === directory
+      entry.canonicalRoot === canonicalRoot && entry.directory === directory
     ))) return;
     this.patch({
       expandedDirectories: this.snapshotValue.expandedDirectories.filter((entry) => !(
-        entry.projectId === projectId && entry.directory === directory
+        entry.canonicalRoot === canonicalRoot && entry.directory === directory
       ))
     });
   }
@@ -312,7 +312,7 @@ export class PhotoshopPluginRuntime {
       this.connection.send({
         type: 'photoshop.export.start',
         commandId,
-        projectId: project.projectId,
+        canonicalRoot: project.canonicalRoot,
         projectRevision: project.revision,
         directory: destination.directory,
         items: items.map(({ itemId, sourceName }) => ({ itemId, sourceName }))
@@ -415,22 +415,22 @@ export class PhotoshopPluginRuntime {
 
   private handleMessage(message: Exclude<RuntimeMessage, { type: 'photoshop.session.ready' }>): void {
     if (message.type === 'photoshop.projects.snapshot') {
-      for (const [projectId, pending] of this.pendingDirectoryRequests) {
+      for (const [canonicalRoot, pending] of this.pendingDirectoryRequests) {
         if (!message.projects.some((project) => (
-          project.projectId === projectId && project.revision === pending.revision
+          project.canonicalRoot === canonicalRoot && project.revision === pending.revision
         ))) {
-          this.pendingDirectoryRequests.delete(projectId);
+          this.pendingDirectoryRequests.delete(canonicalRoot);
         }
       }
       const destination = this.snapshotValue.destination;
       const destinationProject = destination === null
         ? undefined
-        : message.projects.find((project) => project.projectId === destination.projectId);
+        : message.projects.find((project) => project.canonicalRoot === destination.canonicalRoot);
       const nextDestination: PhotoshopPluginSnapshot['destination'] = destination === null
         || destinationProject === undefined
         ? null
         : {
-            projectId: destination.projectId,
+            canonicalRoot: destination.canonicalRoot,
             projectName: destinationProject.name,
             projectRevision: destination.directory === ''
               ? destinationProject.revision
@@ -441,48 +441,48 @@ export class PhotoshopPluginRuntime {
         projects: message.projects,
         destination: nextDestination,
         directoryTrees: this.snapshotValue.directoryTrees.filter((tree) => message.projects.some((project) => (
-          project.projectId === tree.projectId && project.revision === tree.projectRevision
+          project.canonicalRoot === tree.canonicalRoot && project.revision === tree.projectRevision
         ))),
         expandedDirectories: this.snapshotValue.expandedDirectories.filter((entry) => (
-          message.projects.some((project) => project.projectId === entry.projectId)
+          message.projects.some((project) => project.canonicalRoot === entry.canonicalRoot)
         ))
       });
       for (const expanded of this.snapshotValue.expandedDirectories) {
         if (expanded.directory === ''
-          && message.projects.some((project) => project.projectId === expanded.projectId)) {
-          this.requestDirectories(expanded.projectId);
+          && message.projects.some((project) => project.canonicalRoot === expanded.canonicalRoot)) {
+          this.requestDirectories(expanded.canonicalRoot);
         }
       }
       if (destinationProject !== undefined && destination?.directory !== '') {
-        this.requestDirectories(destinationProject.projectId);
+        this.requestDirectories(destinationProject.canonicalRoot);
       }
       return;
     }
     if (message.type === 'photoshop.projectDirectories.snapshot') {
-      const pending = this.pendingDirectoryRequests.get(message.projectId);
+      const pending = this.pendingDirectoryRequests.get(message.canonicalRoot);
       if (pending
         && pending.requestId === message.requestId
-        && pending.projectId === message.projectId
+        && pending.canonicalRoot === message.canonicalRoot
         && pending.revision === message.revision) {
-        this.pendingDirectoryRequests.delete(message.projectId);
+        this.pendingDirectoryRequests.delete(message.canonicalRoot);
         const directories = ['', ...message.directories.filter((directory) => directory.length > 0).sort()];
         const destination = this.snapshotValue.destination;
         const destinationStillValid = destination === null
-          || destination.projectId !== message.projectId
+          || destination.canonicalRoot !== message.canonicalRoot
           || directories.includes(destination.directory);
         this.patch({
           directoryTrees: upsertDirectoryTree(this.snapshotValue.directoryTrees, {
-            projectId: message.projectId,
+            canonicalRoot: message.canonicalRoot,
             projectRevision: message.revision,
             status: 'loaded',
             directories
           }),
           expandedDirectories: this.snapshotValue.expandedDirectories.filter((entry) => (
-            entry.projectId !== message.projectId
+            entry.canonicalRoot !== message.canonicalRoot
             || entry.directory === ''
             || directories.includes(entry.directory)
           )),
-          ...(destination === null || destination.projectId !== message.projectId
+          ...(destination === null || destination.canonicalRoot !== message.canonicalRoot
             ? {}
             : destinationStillValid
               ? { destination: { ...destination, projectRevision: message.revision } }
@@ -582,19 +582,19 @@ function upsertDirectoryTree(
   trees: readonly PhotoshopProjectDirectoryTree[],
   nextTree: PhotoshopProjectDirectoryTree
 ): PhotoshopProjectDirectoryTree[] {
-  const existingIndex = trees.findIndex((tree) => tree.projectId === nextTree.projectId);
+  const existingIndex = trees.findIndex((tree) => tree.canonicalRoot === nextTree.canonicalRoot);
   if (existingIndex === -1) return [...trees, nextTree];
   return trees.map((tree, index) => index === existingIndex ? nextTree : tree);
 }
 
 function currentDirectoryTree(
   snapshot: PhotoshopPluginSnapshot,
-  projectId: string
+  canonicalRoot: string
 ): PhotoshopProjectDirectoryTree | undefined {
-  const project = snapshot.projects.find((candidate) => candidate.projectId === projectId);
+  const project = snapshot.projects.find((candidate) => candidate.canonicalRoot === canonicalRoot);
   if (!project) return undefined;
   return snapshot.directoryTrees.find((tree) => (
-    tree.projectId === project.projectId
+    tree.canonicalRoot === project.canonicalRoot
     && tree.projectRevision === project.revision
     && tree.status === 'loaded'
   ));
@@ -609,16 +609,16 @@ function hasDirectChild(directories: readonly string[], directory: string): bool
 }
 
 function withExpandedAncestors(
-  expanded: readonly { projectId: string; directory: string }[],
-  projectId: string,
+  expanded: readonly { canonicalRoot: string; directory: string }[],
+  canonicalRoot: string,
   directory: string
-): Array<{ projectId: string; directory: string }> {
+): Array<{ canonicalRoot: string; directory: string }> {
   if (directory === '') return [...expanded];
   const required = ['', ...parentDirectories(directory)];
   const next = [...expanded];
   for (const ancestor of required) {
-    if (!next.some((entry) => entry.projectId === projectId && entry.directory === ancestor)) {
-      next.push({ projectId, directory: ancestor });
+    if (!next.some((entry) => entry.canonicalRoot === canonicalRoot && entry.directory === ancestor)) {
+      next.push({ canonicalRoot, directory: ancestor });
     }
   }
   return next;

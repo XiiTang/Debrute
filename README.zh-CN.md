@@ -36,7 +36,7 @@ Debrute 不是 agent。
 
 Debrute 不是工作流系统。
 
-它不强迫你使用固定的生产流程，也不规定你应该如何构思、生成、排序、编辑、批准或发布。agent 和人可以通过文件、文件夹、Canvas Map、提示词和正常的项目约定来表达这些选择。
+它不强迫你使用固定的生产流程，也不规定你应该如何构思、生成、排序、编辑、批准或发布。agent 和人可以通过文件、文件夹、提示词和正常的项目约定来表达这些选择。
 
 Debrute 也不是 Photoshop、Blender、Premiere、Figma 或其他专业创意软件的替代品。
 
@@ -53,7 +53,7 @@ Debrute 不限制 agent。它最推荐搭配具备内置浏览器的 agent GUI �
 - [Cursor](https://cursor.com/docs/agent/tools/browser)
 - [Google Antigravity](https://www.antigravity.google/docs/browser)
 
-所有 CLI agent 也都可以使用 Debrute。Debrute 提供命令接口和官方 Skills，让外部 agent 可以启动 Workbench、校验项目、推送 Canvas Map、请求生成、查询生成资产元数据。
+所有 CLI agent 也都可以使用 Debrute。Debrute 提供命令接口和官方 Skills，让外部 agent 可以启动 Workbench、校验项目、请求生成、查询生成资产元数据。
 
 ## 与设计师配合
 
@@ -69,13 +69,13 @@ Debrute 应该位于专业编辑软件之前和旁边，而不是位于它们之
 
 本地文件夹仍然是事实来源。agent 可以使用普通文件系统工具创建项目结构、提示词、参考资料、生成输出和最终资产。Debrute 在这个文件夹之上增加可视化层，让人和 agent 能看到同一个项目形状。
 
-Canvas Map 定义哪些项目文件会出现在某个 Canvas 上。Canvas 则成为用于查看、对比、挑选和反馈的共享视觉表面。
+每个 Canvas 都呈现完整的项目树。用户可以在各个 Canvas 上独立展开或折叠文件夹，再对当前可见文件进行排列、对比、挑选和反馈。
 
 ## 官方 Skills
 
 Debrute 提供面向外部 agent 的标准 Skills：
 
-- `debrute-core`：项目语义、Workbench URL、Canvas Map 推送、生成资产和基于模型的生成。
+- `debrute-core`：项目语义、Workbench 启动、生成资产和基于模型的生成。
 - `debrute-image-director`：通过 `debrute` 命令进行图片生成和编辑。
 - `debrute-video-director`：通过 `debrute` 命令进行视频生成和编辑。
 - `debrute-audio-director`：通过 `debrute` 命令进行 TTS、音乐生成和音效生成。

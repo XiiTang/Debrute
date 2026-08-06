@@ -1,7 +1,8 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasCatalogEntry } from '@debrute/app-protocol';
+import type { CanvasProjection } from './CanvasScene.js';
 import type { CanvasEditorActions } from './CanvasSceneActions.js';
 import { CanvasEditor } from './CanvasEditor.js';
 
@@ -80,13 +81,10 @@ describe('CanvasEditor', () => {
   });
 });
 
-function canvasFixture(id: string): CanvasDocument {
+function canvasFixture(id: string): CanvasCatalogEntry {
   return {
     id,
-    name: id,
-    nodeElements: [],
-    annotations: [],
-    preferences: { showDiagnostics: true }
+    name: id
   };
 }
 
@@ -109,6 +107,7 @@ const actions: CanvasEditorActions = {
   updateCanvasNodeLayouts: async () => undefined,
   updateCanvasVideoPlaybackState: async () => undefined,
   updateCanvasTextViewportState: async () => undefined,
-  addProjectPathToCanvasMap: async () => undefined,
+  setCanvasDirectoryExpanded: async () => undefined,
+  raiseCanvasSelection: async () => undefined,
   openProject: async () => undefined
 };

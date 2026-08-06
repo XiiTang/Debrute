@@ -345,10 +345,6 @@ function activityMessage(i18n: WorkbenchI18n, record: ActivityRecord): string {
       return i18n.t('shell.activities.message.projectOpened', {
         project: record.project?.projectName ?? ''
       });
-    case 'project-view-state-reset':
-      return i18n.t('shell.activities.message.projectViewStateReset', {
-        project: record.project?.projectName ?? ''
-      });
     case 'project-operation-failed':
       return i18n.t('shell.activities.message.projectOpenFailed');
     case 'canvas-operation-failed':
@@ -378,14 +374,16 @@ function canvasMessage(i18n: WorkbenchI18n, operation: CanvasActivityOperation):
     case 'save-text-viewport': return i18n.t('shell.activities.message.canvas.saveTextViewportFailed');
     case 'save-layout': return i18n.t('shell.activities.message.canvas.saveLayoutFailed');
     case 'save-video-playback': return i18n.t('shell.activities.message.canvas.saveVideoPlaybackFailed');
-    case 'add-to-canvas-map': return i18n.t('shell.activities.message.canvas.addToMapFailed');
-    case 'repair-registry': return i18n.t('shell.activities.message.canvas.repairRegistryFailed');
+    case 'set-directory-disclosure': return i18n.t('shell.activities.message.canvas.saveLayoutFailed');
+    case 'reveal-path': return i18n.t('shell.activities.message.canvas.saveLayoutFailed');
+    case 'raise-selection': return i18n.t('shell.activities.message.canvas.saveLayoutFailed');
     case 'create': return i18n.t('shell.activities.message.canvas.createFailed');
     case 'rename': return i18n.t('shell.activities.message.canvas.renameFailed');
     case 'delete': return i18n.t('shell.activities.message.canvas.deleteFailed');
     case 'reorder': return i18n.t('shell.activities.message.canvas.reorderFailed');
     case 'reset-auto-layout': return i18n.t('shell.activities.message.canvas.resetAutoLayoutFailed');
     case 'reset-layout': return i18n.t('shell.activities.message.canvas.resetLayoutFailed');
+    case 'reset-workspace': return i18n.t('shell.activities.message.canvas.resetWorkspaceFailed');
     case 'copy-path': return i18n.t('shell.activities.message.canvas.copyPathFailed');
   }
 }

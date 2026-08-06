@@ -1,7 +1,7 @@
 import {
   CANVAS_FEEDBACK_MARKS,
   type CanvasFeedbackGeometry
-} from '@debrute/canvas-core';
+} from '@debrute/app-protocol';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { WORKBENCH_FLOATING_DOCK_EDGE_INSET } from './workbenchLayers';
 

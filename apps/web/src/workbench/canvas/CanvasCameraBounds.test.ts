@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { cameraForCanvasContent, canvasContentBounds } from './CanvasCameraBounds';
 
 describe('CanvasCameraBounds', () => {
@@ -70,6 +70,7 @@ function imageNode(
 ): ProjectedCanvasNode {
   return {
     projectRelativePath,
+    displayName: projectRelativePath,
     nodeKind: 'file',
     mediaKind: 'image',
     x,

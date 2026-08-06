@@ -114,8 +114,8 @@ impl DesktopWindowTopology {
             .host
             .clone()
             .ok_or(DesktopOpenError::HostUnavailable)?;
-        if let WorkbenchRoute::Project { project_id } = route
-            && let Some(window_key) = project_window_key(&inner.windows, project_id)
+        if let WorkbenchRoute::OpenProject { canonical_root } = route
+            && let Some(window_key) = project_window_key(&inner.windows, canonical_root)
         {
             host.sender
                 .send(ServerMessage::event(
@@ -138,13 +138,13 @@ impl DesktopWindowTopology {
         Ok(DesktopOpenResult::Opened)
     }
 
-    pub(super) fn focus_project(&self, project_id: &str) -> Result<bool, DesktopOpenError> {
+    pub(super) fn focus_project(&self, canonical_root: &str) -> Result<bool, DesktopOpenError> {
         let inner = self.lock_inner();
         let host = inner
             .host
             .as_ref()
             .ok_or(DesktopOpenError::HostUnavailable)?;
-        let Some(window_key) = project_window_key(&inner.windows, project_id) else {
+        let Some(window_key) = project_window_key(&inner.windows, canonical_root) else {
             return Ok(false);
         };
         host.sender
@@ -164,13 +164,13 @@ impl DesktopWindowTopology {
         let route = {
             let inner = self.lock_inner();
             if inner.host.as_ref().is_none_or(|host| host.id != host_id) {
-                return Err(WorkbenchLaunchError::InvalidProjectId);
+                return Err(WorkbenchLaunchError::InvalidProjectPath);
             }
             inner
                 .windows
                 .get(window_key)
                 .cloned()
-                .ok_or(WorkbenchLaunchError::InvalidProjectId)?
+                .ok_or(WorkbenchLaunchError::InvalidProjectPath)?
         };
         let url = workbench.url_for_route(&route)?;
         let ticket = workbench.create_desktop_ticket(
@@ -245,10 +245,10 @@ impl DesktopWindowTopology {
 
 fn project_window_key(
     windows: &HashMap<String, WorkbenchRoute>,
-    project_id: &str,
+    canonical_root: &str,
 ) -> Option<String> {
     windows.iter().find_map(|(window_key, current)| {
-        matches!(current, WorkbenchRoute::Project { project_id: current_id } if current_id == project_id)
+        matches!(current, WorkbenchRoute::OpenProject { canonical_root: current_root } if current_root == canonical_root)
             .then(|| window_key.clone())
     })
 }

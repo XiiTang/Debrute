@@ -6,11 +6,11 @@ each accepted WebSocket connection a fresh opaque plugin-session identity and
 bearer, and expires both when that connection ends. Workbenches discover
 Photoshop Documents only through the live session, and every transfer binds
 the exact session and document so reconnection cannot redirect an in-flight
-command. This deliberately removes one-use codes, stored P-256 keys, signed
-pairing challenges, pairing records, and revocation behavior. It supersedes
-those parts of ADR 0009 while retaining loopback-only discovery,
-narrow sessions, origin restrictions, Project-relative paths, and Runtime
-validation. The concrete loopback gateway is governed by ADR 0065. Protection
+command. There are no one-use codes, stored P-256 keys, signed pairing
+challenges, pairing records, or revocation behavior. The connection remains
+loopback-only with narrow sessions, origin restrictions, Project-relative
+paths, and Runtime validation. The concrete loopback gateway is governed by
+ADR 0065. Protection
 against a local process imitating the plugin is deferred until the product
 introduces an explicit security boundary.
 

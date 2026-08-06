@@ -74,7 +74,7 @@ const apiState = vi.hoisted(() => {
           const result = await Reflect.apply(value, state.api, args) as Record<string, unknown>;
           if (
             state.projectProjection
-            && typeof result.projectId === 'string'
+            && typeof result.bindingId === 'string'
             && typeof result.projectRevision === 'number'
             && result.snapshot
             && result.workingCopies
@@ -216,7 +216,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   it('delegates the Desktop Project-open surface to the native picker', async () => {
-    const executeNativeMenuCommand = vi.fn(async () => ({ ok: true as const }));
+    const executeNativeMenuCommand = vi.fn(async () => ({ result: 'completed' as const }));
     window.debruteShell = shellApiFixture({ executeNativeMenuCommand });
     const { container, root } = await renderWorkbenchApp('/');
 
@@ -230,25 +230,111 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
+  it('presents a Project failure delivered by a native Desktop menu', async () => {
+    let projectOpenFailed: ((failure: {
+      projectRoot: string;
+      code: string;
+      message: string;
+    }) => void) | undefined;
+    window.debruteShell = shellApiFixture({
+      onNativeProjectOpenFailed: (listener) => {
+        projectOpenFailed = listener;
+        return () => { projectOpenFailed = undefined; };
+      }
+    });
+    const { container, root } = await renderWorkbenchApp('/');
+
+    await act(async () => {
+      projectOpenFailed?.({
+        projectRoot: '/projects/native-menu-unavailable',
+        code: 'project_invalid',
+        message: 'Native menu Project root is invalid.'
+      });
+    });
+
+    expect(container.textContent).toContain('/projects/native-menu-unavailable');
+    expect(container.textContent).toContain('Native menu Project root is invalid.');
+    await unmount(root, container);
+  });
+
+  it('presents a missing Project root reported by Desktop', async () => {
+    window.debruteShell = shellApiFixture({
+      executeNativeMenuCommand: async () => ({
+        result: 'project_open_failed',
+        failure: {
+          projectRoot: '/projects/missing',
+          code: 'project_not_found',
+          message: 'Project root does not exist.'
+        }
+      })
+    });
+    const { container, root } = await renderWorkbenchApp('/');
+
+    await act(async () => {
+      requireButton(container, 'Open Project').click();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('/projects/missing');
+    expect(container.textContent).toContain('Project root does not exist.');
+    await unmount(root, container);
+  });
+
+  it('keeps the current Project visible when another Desktop Project cannot open', async () => {
+    let projectOpenFailed: ((failure: {
+      projectRoot: string;
+      code: string;
+      message: string;
+    }) => void) | undefined;
+    window.debruteShell = shellApiFixture({
+      onNativeProjectOpenFailed: (listener) => {
+        projectOpenFailed = listener;
+        return () => { projectOpenFailed = undefined; };
+      }
+    });
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
+      openProject: vi.fn(async () => ({
+        bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
+        projectRevision: 1,
+        snapshot: snapshotFixture(),
+        workingCopies: emptyWorkingCopies()
+      }))
+    });
+
+    await act(async () => {
+      projectOpenFailed?.({
+        projectRoot: '/projects/other-unavailable',
+        code: 'project_not_found',
+        message: 'The other Project directory no longer exists.'
+      });
+    });
+
+    expect(container.querySelector('[data-testid="canvas-surface"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="workbench-project-open-failed-dialog-layer"]'))
+      .not.toBeNull();
+    expect(container.textContent).toContain('/projects/other-unavailable');
+    await unmount(root, container);
+  });
+
   it('keeps the current Project admitted while the Web selector is open and cancelled', async () => {
     const selection = deferred<string | undefined>();
     const chooseProjectRoot = vi.fn(() => selection.promise);
     const openProject = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
       projectRevision: 1,
-      snapshot: stackOrderSnapshotFixture(),
+      snapshot: snapshotFixture(),
       workingCopies: emptyWorkingCopies()
     }));
-    const addProjectPathToCanvasMap = vi.fn(async () => ({
-      projectId: 'project-1',
-      projectRevision: 2,
-      canvasId: 'canvas-1',
-      projectRelativePath: 'flow/new.png'
+    const patchCanvasState = vi.fn(async () => ({
+      bindingId: 'project-1',
+      projectRevision: 2
     }));
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
       chooseProjectRoot,
       openProject,
-      addProjectPathToCanvasMap
+      patchCanvasState
     });
 
     await act(async () => {
@@ -277,7 +363,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       await Promise.resolve();
     });
 
-    expect(addProjectPathToCanvasMap).toHaveBeenCalledTimes(1);
+    expect(patchCanvasState).not.toHaveBeenCalled();
 
     await act(async () => {
       selection.resolve(undefined);
@@ -299,15 +385,22 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
   it('requests a shallow Project directory when Explorer expands it', async () => {
     const snapshot = snapshotFixture();
-    snapshot.files = [{ projectRelativePath: 'assets', kind: 'directory' }];
+    snapshot.projectTree = [{
+      projectRelativePath: 'assets',
+      kind: 'directory',
+      ignored: false,
+      hidden: false,
+      directoryState: 'unloaded'
+    }];
     const loadProjectDirectory = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       snapshot
     }));
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
       openProject: vi.fn(async () => ({
-        projectId: 'project-1',
+        bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
         projectRevision: 1,
         snapshot,
         workingCopies: emptyWorkingCopies()
@@ -371,14 +464,14 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   it('replaces the Project-scoped event subscription when the initial generation opens', async () => {
-    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1');
 
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
+    expect(apiState.api!.openProject).toHaveBeenCalledWith({ projectRoot: '/projects/project-1' });
     expect(apiState.api!.onEvent).toHaveBeenCalledTimes(2);
     expect(apiState.listeners.size).toBe(1);
 
@@ -386,29 +479,13 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(apiState.listeners.size).toBe(0);
   });
 
-  it('opens the Project with defaults after rejecting an invalid saved view state', async () => {
-    window.sessionStorage.setItem('debrute:project-view:project-1', JSON.stringify({
-      activeCanvasId: 'canvas-1',
-      unexpectedField: 'sidebar'
-    }));
-
-    const { container, root } = await renderWorkbenchApp('/projects/project-1');
-
-    expect(container.textContent).toContain('Saved view state for Demo was invalid and has been reset.');
-    expect(container.textContent).toContain('Opened project: Demo');
-    expect(JSON.parse(window.sessionStorage.getItem('debrute:project-view:project-1')!)).toEqual({
-      floatingPanels: expect.any(Object)
-    });
-
-    await unmount(root, container);
-  });
-
   it('keeps the Project visible behind a blocking dialog when another Workbench preempts it', async () => {
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
       openProject: vi.fn(async () => ({
-        projectId: 'project-1',
+        bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
         projectRevision: 1,
-        snapshot: stackOrderSnapshotFixture(),
+        snapshot: snapshotFixture(),
         workingCopies: emptyWorkingCopies()
       }))
     });
@@ -432,11 +509,12 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   it('keeps the last accepted Project visible when its connection fails', async () => {
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
       openProject: vi.fn(async () => ({
-        projectId: 'project-1',
+        bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
         projectRevision: 1,
-        snapshot: stackOrderSnapshotFixture(),
+        snapshot: snapshotFixture(),
         workingCopies: emptyWorkingCopies()
       }))
     });
@@ -457,14 +535,15 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
   it('opens an explicitly requested Desktop Project without a destination confirmation surface', async () => {
     const openProject = vi.fn<WorkbenchApiClient['openProject']>(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
       projectRevision: 1,
       snapshot: snapshotFixture(),
       workingCopies: emptyWorkingCopies()
     }));
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', { openProject });
 
-    expect(openProject).toHaveBeenCalledWith({ projectId: 'project-1' });
+    expect(openProject).toHaveBeenCalledWith({ projectRoot: '/projects/project-1' });
     expect(findButton(container, 'Open Here')).toBeUndefined();
     expect(container.textContent).toContain('Demo');
     await unmount(root, container);
@@ -473,13 +552,14 @@ describe('WorkbenchApp preferences and project behavior', () => {
   it('keeps a detached Open Here failure inside the blocking dialog', async () => {
     const openProject = vi.fn<WorkbenchApiClient['openProject']>()
       .mockResolvedValueOnce({
-        projectId: 'project-1',
+        bindingId: 'project-1',
+        canonicalRoot: '/projects/project-1',
         projectRevision: 1,
         snapshot: snapshotFixture(),
         workingCopies: emptyWorkingCopies()
       })
       .mockRejectedValueOnce(new Error('takeover failed'));
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', { openProject });
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', { openProject });
 
     await act(async () => {
       detachCurrentProject();
@@ -495,27 +575,23 @@ describe('WorkbenchApp preferences and project behavior', () => {
     const error = dialog?.querySelector('[role="alert"]');
     expect(error?.textContent).toContain('Open project failed: takeover failed');
     expect(error?.previousElementSibling?.textContent).toContain('Open Here');
-    expect(openProject).toHaveBeenLastCalledWith({ projectId: 'project-1' });
+    expect(openProject).toHaveBeenLastCalledWith({ projectRoot: '/projects/project-1' });
     expect(container.querySelector('[data-testid="canvas-layer"]')?.hasAttribute('inert')).toBe(true);
     await unmount(root, container);
   });
 
   it('recreates Project-scoped presentation when a new binding generation is accepted', async () => {
-    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1');
     await act(async () => {
       requireButton(container, 'Terminal').click();
     });
     expect(container.querySelector('[data-testid="floating-panel-terminal"]')).not.toBeNull();
 
-    const secondSnapshot = snapshotFixture();
-    secondSnapshot.metadata.project = {
-      ...secondSnapshot.metadata.project,
-      id: 'project-2',
-      name: 'Second Project'
-    };
+    const secondSnapshot = snapshotFixture('/projects/project-2', 'Second Project');
     await act(async () => {
       apiState.projectProjection?.acceptBoundProject({
-        projectId: 'project-2',
+        bindingId: 'project-2',
+        canonicalRoot: '/projects/project-2',
         projectRevision: 1,
         snapshot: secondSnapshot,
         workingCopies: emptyWorkingCopies()
@@ -528,12 +604,12 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   it('derives current Project title and recent roots locally from ordered state', async () => {
-    const { container, root } = await renderWorkbenchApp('/projects/project-1');
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1');
 
     await act(async () => {
       emitWorkbenchEvent({
         type: 'recentProjects.changed', revision: 1,
-        recentProjects: [{ projectId: 'current', projectRoot: '/projects/current' }]
+        recentProjectRoots: ['/projects/current']
       });
       await Promise.resolve();
     });
@@ -557,9 +633,10 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
     await act(async () => {
       opening.resolve({
-        projectId: 'project-1',
+        bindingId: 'project-1',
+        canonicalRoot: '/tmp/first-open',
         projectRevision: 1,
-        snapshot: snapshotFixture(),
+        snapshot: snapshotFixture('/tmp/first-open'),
         workingCopies: emptyWorkingCopies()
       });
       await opening.promise;
@@ -567,11 +644,12 @@ describe('WorkbenchApp preferences and project behavior', () => {
       await Promise.resolve();
       emitWorkbenchEvent({
         type: 'recentProjects.changed', revision: 1,
-        recentProjects: [{ projectId: 'first-open', projectRoot: '/tmp/first-open' }]
+        recentProjectRoots: ['/tmp/first-open']
       });
     });
 
-    expect(window.location.pathname).toBe('/projects/project-1');
+    expect(window.location.pathname).toBe('/open');
+    expect(window.location.search).toBe('?path=%2Ftmp%2Ffirst-open');
     expect(container.textContent).toContain('Opened project: Demo');
     expect(container.textContent).not.toContain('No project open');
     expect(requireButton(container, 'Terminal').disabled).toBe(false);
@@ -580,7 +658,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
   it('opens the initial Project once during the StrictMode effect probe', async () => {
     const openProject = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
       projectRevision: 1,
       snapshot: snapshotFixture(),
       workingCopies: emptyWorkingCopies()
@@ -604,9 +683,29 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
+  it('activates a Canvas only when the active Canvas changes', async () => {
+    const activateCanvas = vi.fn(async () => ({ bindingId: 'project-1', projectRevision: 1 }));
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
+      activateCanvas
+    });
+
+    expect(activateCanvas).toHaveBeenCalledOnce();
+    await act(async () => {
+      emitWorkbenchEvent({
+        type: 'project.changed',
+        bindingId: 'project-1',
+        projectRevision: 2,
+        snapshot: snapshotFixture()
+      });
+    });
+
+    expect(activateCanvas).toHaveBeenCalledOnce();
+    await unmount(root, container);
+  });
+
   it('commits an opened project without waiting for Canvas feedback to load', async () => {
     const feedback = deferred<Awaited<ReturnType<WorkbenchApiClient['readCanvasFeedback']>>>();
-    const { container, root } = await renderWorkbenchApp('/projects/project-1', {
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
       readCanvasFeedback: vi.fn(() => feedback.promise)
     });
 
@@ -815,7 +914,7 @@ async function unmount(root: Root, container: HTMLDivElement): Promise<void> {
 }
 
 function emitWorkbenchEvent(event: WorkbenchEvent): void {
-  if ('projectId' in event && 'projectRevision' in event) {
+  if ('bindingId' in event && 'projectRevision' in event) {
     apiState.projectProjection?.acceptProjectEvent(event);
   } else {
     const projection = apiState.globalProjection?.getState();
@@ -832,7 +931,7 @@ function emitWorkbenchEvent(event: WorkbenchEvent): void {
 function detachCurrentProject(): void {
   const state = apiState.projectProjection?.getState();
   if (state && state.status === 'bound') {
-    apiState.projectProjection?.detachProject(state.projectId);
+    apiState.projectProjection?.detachProject(state.bindingId);
   }
 }
 
@@ -885,8 +984,8 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       const projectState = apiState.projectProjection?.getState();
       const project = projectState && projectState.status !== 'unbound'
         ? {
-            projectId: projectState.projectId,
-            projectName: projectState.presentedSnapshot.metadata.project.name
+            canonicalRoot: projectState.canonicalRoot,
+            projectName: projectState.snapshot.health.projectName
           }
         : undefined;
       const source = activitySource(input);
@@ -926,16 +1025,18 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       operation: 'install'
     })),
     openProject: vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
+      canonicalRoot: '/projects/project-1',
       projectRevision: 1,
       snapshot: snapshotFixture(),
       workingCopies: emptyWorkingCopies()
     })),
     chooseProjectRoot: vi.fn(async () => undefined),
+    activateCanvas: vi.fn(async () => ({ bindingId: 'project-1', projectRevision: 1 })),
     readCanvasFeedback: vi.fn(async () => ({ entries: {} })),
-    putTextWorkingCopy: vi.fn(async (_projectId, value) => value),
+    putTextWorkingCopy: vi.fn(async (_bindingId, value) => value),
     clearTextWorkingCopy: vi.fn(async () => undefined),
-    putFeedbackWorkingCopy: vi.fn(async (_projectId, value) => value),
+    putFeedbackWorkingCopy: vi.fn(async (_bindingId, value) => value),
     clearFeedbackWorkingCopy: vi.fn(async () => undefined),
     clearRecentProjectRoots: vi.fn(async () => ({ ok: true })),
     subscribeTerminalSessions: vi.fn(() => ({ close: vi.fn() })),
@@ -946,7 +1047,6 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
 function activitySource(input: WorkbenchActivityNoticeInput): ActivityRecord['source'] {
   switch (input.kind) {
     case 'project-opened':
-    case 'project-view-state-reset':
     case 'project-operation-failed': return 'project';
     case 'canvas-operation-failed': return 'canvas';
     case 'explorer-operation-failed': return 'explorer';
@@ -983,7 +1083,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
         ligatures: true
       }
     },
-    chrome: { recentProjects: [] },
+    chrome: { recentProjectRoots: [] },
     models: {
       image: imageSettingsFixture(),
       video: [],
@@ -1048,27 +1148,34 @@ function requireInputForLabel(container: HTMLElement, label: string): HTMLInputE
   return input;
 }
 
-function snapshotFixture(): WorkbenchProjectSessionSnapshot {
+function snapshotFixture(
+  canonicalRoot = '/projects/project-1',
+  projectName = 'Demo'
+): WorkbenchProjectSessionSnapshot {
   return {
-    metadata: {
-      project: {
-        id: 'project-1',
-        name: 'Demo',
-        createdAt: '2026-06-28T00:00:00.000Z',
-        updatedAt: '2026-06-28T00:00:00.000Z'
-      }
+    canonicalRoot,
+    canvasWorkspace: {
+      status: 'available',
+      workspace: {
+        canonicalRoot,
+        activeCanvasId: 'canvas-1',
+        canvases: [{
+          id: 'canvas-1',
+          name: 'Canvas 1',
+          expandedDirectories: [],
+          nodeStates: {},
+          occlusionOrder: []
+        }]
+      },
+      activeCanvasResources: { canvasId: 'canvas-1', resources: [], diagnostics: [] }
     },
-    files: [],
-    canvases: [],
-    projections: [],
+    projectTree: [],
     diagnostics: [],
     health: {
-      projectName: 'Demo',
-      canvasCount: 0,
+      projectName,
       diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-06-28T00:00:00.000Z'
-    },
-    canvasRegistry: { status: 'ready', canvasOrder: [] }
+    }
   };
 }
 
@@ -1078,53 +1185,12 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     minimizeNativeWindow: async () => ({ maximized: false }),
     toggleMaximizeNativeWindow: async () => ({ maximized: true }),
     closeNativeWindow: async () => ({ ok: true }),
-    executeNativeMenuCommand: async () => ({ ok: true }),
+    executeNativeMenuCommand: async () => ({ result: 'completed' }),
     takeDesktopLaunchTicket: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
     onNativeEditCommand: () => () => undefined,
+    onNativeProjectOpenFailed: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
-  };
-}
-
-function stackOrderSnapshotFixture(): WorkbenchProjectSessionSnapshot {
-  const snapshot = snapshotFixture();
-  return {
-    ...snapshot,
-    canvases: [{
-      id: 'canvas-1',
-      name: 'Canvas 1',
-      nodeElements: [
-        {
-          projectRelativePath: 'flow/a.png',
-          nodeKind: 'file',
-          mediaKind: 'image',
-          x: 0,
-          y: 0,
-          width: 100,
-          height: 100,
-          z: 0
-        },
-        {
-          projectRelativePath: 'flow/b.png',
-          nodeKind: 'file',
-          mediaKind: 'image',
-          x: 120,
-          y: 0,
-          width: 100,
-          height: 100,
-          z: 1
-        }
-      ],
-      annotations: [],
-      preferences: { showDiagnostics: true }
-    }],
-    projections: [{
-      canvasId: 'canvas-1',
-      nodes: [],
-      edges: [],
-      diagnostics: []
-    }],
-    canvasRegistry: { status: 'ready', canvasOrder: ['canvas-1'] }
   };
 }

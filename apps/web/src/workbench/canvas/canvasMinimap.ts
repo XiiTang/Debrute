@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPoint, CanvasRect } from './runtime/canvasGeometry';
 import { finiteNumber, pointInRect, rectCenter } from './runtime/canvasGeometry';

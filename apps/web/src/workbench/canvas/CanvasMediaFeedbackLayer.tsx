@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import type { CanvasFeedbackGeometry, CanvasFeedbackSpatialItem } from '@debrute/canvas-core';
+import type { CanvasFeedbackGeometry, CanvasFeedbackSpatialItem } from '@debrute/app-protocol';
 
 export type CanvasMediaFeedbackMode = 'pin' | 'rect' | undefined;
 

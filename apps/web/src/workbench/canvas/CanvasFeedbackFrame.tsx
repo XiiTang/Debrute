@@ -3,7 +3,7 @@ import {
   CANVAS_FEEDBACK_MARKS,
   type CanvasFeedbackEntry,
   type CanvasFeedbackMark
-} from '@debrute/canvas-core';
+} from '@debrute/app-protocol';
 
 export type CanvasFeedbackFrameKind = CanvasFeedbackMark | 'comments' | 'regions';
 

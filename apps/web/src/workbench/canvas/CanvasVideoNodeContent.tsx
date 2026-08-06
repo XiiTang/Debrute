@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertTriangle, Video } from '../ui/index.js';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem } from '@debrute/app-protocol';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { useI18n } from '../i18n';
 import type { CanvasVideoPlayRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter.js';
 import {
@@ -216,6 +217,9 @@ export function CanvasVideoNodeContent({
     />
   );
 
+  if (node.availability.state === 'directory') {
+    throw new Error(`Video content received a directory node: ${node.projectRelativePath}`);
+  }
   if (node.availability.state !== 'available') {
     return (
       <section className="canvas-video-node">

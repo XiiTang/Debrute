@@ -8,7 +8,7 @@ import {
   X,
   type CutoutIcon
 } from '../ui/index.js';
-import type { CanvasFeedbackMark } from '@debrute/canvas-core';
+import type { CanvasFeedbackMark } from '@debrute/app-protocol';
 import type { WorkbenchTranslationKey } from '../i18n';
 
 export const CANVAS_FEEDBACK_MARK_PRESENTATION: Record<CanvasFeedbackMark, {

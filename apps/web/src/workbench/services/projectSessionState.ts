@@ -22,12 +22,6 @@ export type ProjectOpenStartupError =
 export function resolveInitialProjectRoute(
   route: DebruteWorkbenchRoute = currentDebruteWorkbenchRoute()
 ): InitialProjectRouteResolution {
-  if (route.kind === 'project') {
-    return {
-      route,
-      target: { projectId: route.projectId }
-    };
-  }
   if (route.kind !== 'project-open') {
     return { route };
   }
@@ -55,7 +49,7 @@ export function resolveInitialProjectRoute(
 }
 
 export function shouldShowInitialProjectLoader(route: DebruteWorkbenchRoute): boolean {
-  return route.kind === 'project' || route.kind === 'project-open';
+  return route.kind === 'project-open';
 }
 
 export function errorMessage(error: unknown): string {
@@ -70,8 +64,8 @@ export function currentDebruteWorkbenchRoute(): DebruteWorkbenchRoute {
   );
 }
 
-export function replaceWorkbenchProjectRoute(projectId: string): void {
-  const nextPath = `/projects/${encodeURIComponent(projectId)}`;
+export function replaceWorkbenchProjectRoute(canonicalRoot: string): void {
+  const nextPath = `/open?path=${encodeURIComponent(canonicalRoot)}`;
   if (`${window.location.pathname}${window.location.search}${window.location.hash}` === nextPath) {
     return;
   }

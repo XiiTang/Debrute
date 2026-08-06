@@ -160,7 +160,7 @@ export interface CanvasTextPreviewSourceSize {
 }
 
 export interface CanvasTextPreviewCandidate extends CanvasTextPreviewSourceSize {
-  projectId: string;
+  bindingId: string;
   canvasId: string;
   projectRelativePath: string;
   contentDigest: string;
@@ -185,7 +185,7 @@ export interface CanvasTextPreviewCaptureTarget extends CanvasTextPreviewTarget 
 export function canvasTextPreviewTargetKey(target: CanvasTextPreviewTarget): CanvasPreviewTargetKey {
   return canvasPreviewTargetKey({
     mediaKind: 'text',
-    projectId: target.projectId,
+    bindingId: target.bindingId,
     canvasId: target.canvasId,
     projectRelativePath: target.projectRelativePath,
     targetIdentity: target.targetIdentity

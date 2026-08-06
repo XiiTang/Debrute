@@ -43,10 +43,11 @@ describe('Project binding lifecycle', () => {
 
     await expect(opening).resolves.toEqual({
       outcome: 'bound',
-      projectId: 'project-b',
+      bindingId: 'project-b',
+      canonicalRoot: '/projects/project-b',
       generation: 2
     });
-    expect(commitProjectRoute).toHaveBeenCalledWith('project-b');
+    expect(commitProjectRoute).toHaveBeenCalledWith('/projects/project-b');
     expect(lifecycle.getState()).toEqual({ opening: false });
     expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(false);
     expect(lifecycle.canAcceptProjectPathCommand(2)).toBe(true);
@@ -71,7 +72,7 @@ describe('Project binding lifecycle', () => {
     });
     expect(projection.getState()).toMatchObject({
       status: 'bound',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       generation: 1
     });
     expect(lifecycle.getState()).toEqual({ opening: false });
@@ -86,7 +87,7 @@ describe('Project binding lifecycle', () => {
     const lifecycle = createProjectBindingLifecycle({
       openProject: vi.fn<WorkbenchApiClient['openProject']>(async () => ({
         outcome: 'focused_existing_desktop',
-        projectId: 'project-b'
+        canonicalRoot: '/projects/b'
       })),
       projectProjection: projection,
       commitProjectRoute
@@ -94,11 +95,11 @@ describe('Project binding lifecycle', () => {
 
     await expect(lifecycle.open({ projectRoot: '/projects/b' })).resolves.toEqual({
       outcome: 'focused_existing_desktop',
-      projectId: 'project-b'
+      canonicalRoot: '/projects/b'
     });
     expect(projection.getState()).toMatchObject({
       status: 'bound',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       generation: 1
     });
     expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(true);
@@ -123,7 +124,7 @@ describe('Project binding lifecycle', () => {
     await expect(obsolete).resolves.toEqual({ outcome: 'superseded' });
     expect(projection.getState()).toMatchObject({
       status: 'bound',
-      projectId: 'project-c',
+      bindingId: 'project-c',
       generation: 2
     });
     expect(lifecycle.canAcceptProjectPathCommand(2)).toBe(true);
@@ -131,11 +132,12 @@ describe('Project binding lifecycle', () => {
   });
 });
 
-function projectResult(projectId: string): WorkbenchProjectOpenResult {
+function projectResult(bindingId: string): WorkbenchProjectOpenResult {
   return {
-    projectId,
+    bindingId,
+    canonicalRoot: `/projects/${bindingId}`,
     projectRevision: 1,
-    snapshot: { projectId } as unknown as WorkbenchProjectSessionSnapshot,
+    snapshot: { bindingId } as unknown as WorkbenchProjectSessionSnapshot,
     workingCopies: { text: {}, feedback: {} }
   };
 }

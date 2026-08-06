@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PHOTOSHOP_MAX_FILE_BYTES, type ProjectPathEntry } from '@debrute/app-protocol';
-import type { CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasProjection } from '../canvas/CanvasScene.js';
 import {
   buildWorkbenchContextMenuItems,
   cameraCenteredOnNode,
@@ -170,6 +170,7 @@ function projection(nodes: CanvasProjection['nodes']): CanvasProjection {
 function node(path: string, layoutMode?: 'manual'): CanvasProjection['nodes'][number] {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'file',
     mediaKind: 'image',
     x: 0,

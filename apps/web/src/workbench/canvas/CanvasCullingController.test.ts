@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createCanvasCullingController } from './CanvasCullingController.js';
 import type { CanvasSceneSnapshot } from './CanvasScenePresentation.js';
@@ -94,6 +94,7 @@ function node(projectRelativePath: string): ProjectedCanvasNode {
   return {
     nodeKind: 'directory',
     projectRelativePath,
+    displayName: projectRelativePath,
     x: 0,
     y: 0,
     width: 100,

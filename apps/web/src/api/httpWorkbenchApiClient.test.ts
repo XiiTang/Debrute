@@ -35,7 +35,7 @@ describe('Runtime Workbench connection', () => {
     const client = createHttpWorkbenchApiClient();
 
     await expect(client.openProject({ projectRoot: '/tmp/project' })).resolves.toMatchObject({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       workingCopies: {
         text: {
           'draft.md': { content: 'unsaved' }
@@ -84,7 +84,8 @@ describe('Runtime Workbench connection', () => {
     createHarness();
     vi.stubGlobal('location', {
       origin: 'http://127.0.0.1:41001',
-      pathname: '/projects/project-initial'
+      pathname: '/open',
+      search: '?path=%2Fprojects%2Fproject-initial'
     });
     const mark = vi.fn();
     const client = createHttpWorkbenchApiClient({ startupTimeline: { mark } });
@@ -132,7 +133,7 @@ describe('Runtime Workbench connection', () => {
     await client.loadProjectDirectory('assets/source files');
 
     const call = harness.calls.at(-1);
-    expect(call?.path).toBe('/api/projects/project-1/files/load-directory');
+    expect(call?.path).toBe('/api/workbench/bindings/project-1/files/load-directory');
     expect(call?.init?.method).toBe('POST');
     expect(JSON.parse(String(call?.init?.body))).toEqual({
       projectRelativeDirectory: 'assets/source files'
@@ -151,7 +152,7 @@ describe('Runtime Workbench connection', () => {
       record: {
         id: 'activity-1',
         source: 'canvas',
-        project: { projectId: 'project-1', projectName: 'project-1' },
+        project: { canonicalRoot: 'project-1', projectName: 'project-1' },
         createdAt: '2026-08-02T00:00:00.000Z',
         updatedAt: '2026-08-02T00:00:00.000Z',
         type: 'notice',
@@ -171,7 +172,7 @@ describe('Runtime Workbench connection', () => {
 
     const activityCalls = harness.calls.slice(-4);
     expect(activityCalls.map((call) => [call.init?.method, call.path])).toEqual([
-      ['POST', '/api/projects/project-1/activities/notices'],
+      ['POST', '/api/workbench/bindings/project-1/activities/notices'],
       ['POST', '/api/activities/notices'],
       ['DELETE', '/api/activities/activity-1'],
       ['DELETE', '/api/activities']
@@ -204,8 +205,8 @@ describe('Runtime Workbench connection', () => {
     })).resolves.toEqual({ status: 'source-changed' });
 
     const [probe, ensure] = harness.calls.slice(-2);
-    expect(probe?.path).toBe('/api/projects/project-1/canvas-video-previews/probe');
-    expect(ensure?.path).toBe('/api/projects/project-1/canvas-video-previews/ensure');
+    expect(probe?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/probe');
+    expect(ensure?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/ensure');
     expect(JSON.parse(String(probe?.init?.body))).toEqual({ canvasId: 'canvas-1', targets: [target] });
     expect(JSON.parse(String(ensure?.init?.body))).toEqual({
       canvasId: 'canvas-1',
@@ -221,7 +222,7 @@ describe('Runtime Workbench connection', () => {
 
     await client.openProject({ projectRoot: '/tmp/project-1' });
     await expect(client.openProject({ projectRoot: '/tmp/project-2' })).resolves.toMatchObject({
-      projectId: 'project-2'
+      bindingId: 'project-2'
     });
 
     expect(harness.calls.map((call) => call.path)).toEqual([
@@ -237,10 +238,10 @@ describe('Runtime Workbench connection', () => {
     const client = createHttpWorkbenchApiClient();
 
     await client.openProject({ projectRoot: '/tmp/project-1' });
-    harness.emit({ type: 'project.preempted', projectId: 'project-1' });
+    harness.emit({ type: 'project.preempted', bindingId: 'project-1' });
     await vi.waitFor(() => expect(client.projectProjection.getState()).toMatchObject({
       status: 'detached',
-      projectId: 'project-1'
+      bindingId: 'project-1'
     }));
     await client.openProject({ projectRoot: '/tmp/project-2' });
 
@@ -256,11 +257,11 @@ describe('Runtime Workbench connection', () => {
     harness.focusNextProject();
     await expect(client.openProject({ projectRoot: '/tmp/project-2' })).resolves.toEqual({
       outcome: 'focused_existing_desktop',
-      projectId: 'project-2'
+      canonicalRoot: '/tmp/project-2'
     });
 
-    await expect(client.openProject({ projectId: 'project-1' })).resolves.toMatchObject({
-      projectId: 'project-1'
+    await expect(client.openProject({ projectRoot: '/tmp/project-1' })).resolves.toMatchObject({
+      bindingId: 'project-1'
     });
     client.dispose();
   });
@@ -331,11 +332,11 @@ describe('Runtime Workbench connection', () => {
     await client.clearTextWorkingCopy('project-1', 'draft.md');
 
     expect(harness.calls.at(-1)?.path).toBe(
-      '/api/projects/project-1/working-copies/text/draft.md'
+      '/api/workbench/bindings/project-1/working-copies/text/draft.md'
     );
     await client.clearFeedbackWorkingCopy('project-1', 'feedback-a');
     expect(harness.calls.at(-1)?.path).toBe(
-      '/api/projects/project-1/working-copies/feedback/feedback-a'
+      '/api/workbench/bindings/project-1/working-copies/feedback/feedback-a'
     );
     client.dispose();
   });
@@ -348,15 +349,15 @@ describe('Runtime Workbench connection', () => {
     let completed = false;
     void mutation.then(() => { completed = true; });
 
-    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/projects/project-1/canvases'));
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/workbench/bindings/project-1/canvases'));
     await Promise.resolve();
     expect(completed).toBe(false);
 
     harness.emit({
       type: 'project.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
-      snapshot: snapshotFixture('project-1')
+      snapshot: snapshotFixture('/tmp/project-1', 'project-1')
     });
     await expect(mutation).resolves.toMatchObject({ projectRevision: 2 });
     client.dispose();
@@ -368,7 +369,7 @@ describe('Runtime Workbench connection', () => {
     await client.openProject({ projectRoot: '/tmp/project-1' });
     const mutation = client.createCanvas();
 
-    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/projects/project-1/canvases'));
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/workbench/bindings/project-1/canvases'));
     harness.close();
 
     await expect(mutation).rejects.toThrow('ended unexpectedly');
@@ -386,15 +387,15 @@ describe('Runtime Workbench connection', () => {
     let completed = false;
     void mutation.then(() => { completed = true; });
 
-    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/projects/project-1/files/import/uploads'));
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/workbench/bindings/project-1/files/import/uploads'));
     await Promise.resolve();
     expect(completed).toBe(false);
 
     harness.emit({
       type: 'project.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
-      snapshot: snapshotFixture('project-1')
+      snapshot: snapshotFixture('/tmp/project-1', 'project-1')
     });
     await expect(mutation).resolves.toMatchObject({ projectRevision: 2 });
     client.dispose();
@@ -409,7 +410,7 @@ describe('Runtime Workbench connection', () => {
 
     harness.emit({
       type: 'project.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       snapshot: { source: 'missing-revision' }
     });
 
@@ -430,7 +431,7 @@ describe('Runtime Workbench connection', () => {
     harness.emit({
       type: 'project.bound',
       project: {
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 1,
         snapshot: {}
       },
@@ -449,6 +450,7 @@ function createHarness(globalRevision = 1) {
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   const encoder = new TextEncoder();
   let projectNumber = 0;
+  let currentCanonicalRoot = '';
   let focusNext = false;
   let pickerSelection: string | undefined;
   let pendingPickerSelection: Promise<string | undefined> | undefined;
@@ -457,6 +459,9 @@ function createHarness(globalRevision = 1) {
     const path = String(input);
     calls.push({ path, init });
     if (path === '/api/workbench/connection') {
+      const requestedProjectRoot = (JSON.parse(String(init?.body)) as {
+        requestedProjectRoot?: string;
+      }).requestedProjectRoot;
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           streamController = controller;
@@ -482,23 +487,42 @@ function createHarness(globalRevision = 1) {
             activityRevision: 0,
             records: []
           }));
+          if (requestedProjectRoot) {
+            projectNumber += 1;
+            const bindingId = `project-${projectNumber}`;
+            currentCanonicalRoot = requestedProjectRoot;
+            controller.enqueue(sse(encoder, {
+              type: 'project.bound',
+              project: {
+                bindingId,
+                canonicalRoot: requestedProjectRoot,
+                projectRevision: 1,
+                snapshot: snapshotFixture(requestedProjectRoot, bindingId)
+              },
+              workingCopies: { text: {}, feedback: {} }
+            }));
+          }
         }
       });
       return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
     }
     if (path === '/api/projects/open' || path === '/api/projects/replace') {
       projectNumber += 1;
-      const projectId = `project-${projectNumber}`;
+      const bindingId = `project-${projectNumber}`;
+      const request = JSON.parse(String(init?.body)) as { projectRoot: string };
+      const canonicalRoot = request.projectRoot;
       if (focusNext) {
         focusNext = false;
-        return Response.json({ outcome: 'focused_existing_desktop', projectId });
+        return Response.json({ outcome: 'focused_existing_desktop', canonicalRoot });
       }
+      currentCanonicalRoot = canonicalRoot;
       streamController?.enqueue(sse(encoder, {
         type: 'project.bound',
         project: {
-          projectId,
+          bindingId,
+          canonicalRoot,
           projectRevision: 1,
-          snapshot: snapshotFixture(projectId)
+          snapshot: snapshotFixture(canonicalRoot, bindingId)
         },
         workingCopies: {
           text: projectNumber === 1
@@ -514,7 +538,7 @@ function createHarness(globalRevision = 1) {
           feedback: {}
         }
       }));
-      return Response.json({ outcome: 'bound', projectId });
+      return Response.json({ outcome: 'bound', bindingId });
     }
     if (path === '/api/projects/choose') {
       const selection = pendingPickerSelection;
@@ -540,33 +564,33 @@ function createHarness(globalRevision = 1) {
     if (path === '/api/activities') {
       return Response.json({ ok: true, cleared: 1 });
     }
-    if (path === '/api/projects/project-1/canvases') {
+    if (path === '/api/workbench/bindings/project-1/canvases') {
       return Response.json({
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 2
       });
     }
-    if (path === '/api/projects/project-1/files/load-directory') {
+    if (path === '/api/workbench/bindings/project-1/files/load-directory') {
       streamController?.enqueue(sse(encoder, {
         type: 'project.changed',
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 2,
-        snapshot: snapshotFixture('project-1')
+        snapshot: snapshotFixture(currentCanonicalRoot, 'project-1')
       }));
       return Response.json({
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 2
       });
     }
-    if (path === '/api/projects/project-1/canvas-video-previews/probe') {
+    if (path === '/api/workbench/bindings/project-1/canvas-video-previews/probe') {
       return Response.json({ sources: {} });
     }
-    if (path === '/api/projects/project-1/canvas-video-previews/ensure') {
+    if (path === '/api/workbench/bindings/project-1/canvas-video-previews/ensure') {
       return Response.json({ status: 'source-changed' });
     }
-    if (path === '/api/projects/project-1/files/import/uploads') {
+    if (path === '/api/workbench/bindings/project-1/files/import/uploads') {
       return Response.json({
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 2,
         results: []
       });
@@ -584,7 +608,8 @@ function createHarness(globalRevision = 1) {
   vi.stubGlobal('window', {});
   vi.stubGlobal('location', {
     origin: 'http://127.0.0.1:41001',
-    pathname: '/'
+    pathname: '/',
+    search: ''
   });
   return {
     calls,
@@ -614,24 +639,28 @@ function createHarness(globalRevision = 1) {
   };
 }
 
-function snapshotFixture(projectId: string) {
+function snapshotFixture(canonicalRoot: string, projectName: string) {
   return {
-    metadata: {
-      project: {
-        id: projectId,
-        name: projectId,
-        createdAt: '2026-07-23T00:00:00.000Z',
-        updatedAt: '2026-07-23T00:00:00.000Z'
-      }
+    canonicalRoot,
+    canvasWorkspace: {
+      status: 'available',
+      workspace: {
+        canonicalRoot,
+        activeCanvasId: 'canvas-1',
+        canvases: [{
+          id: 'canvas-1',
+          name: 'Canvas 1',
+          expandedDirectories: [],
+          nodeStates: {},
+          occlusionOrder: []
+        }]
+      },
+      activeCanvasResources: { canvasId: 'canvas-1', resources: [], diagnostics: [] }
     },
-    files: [],
-    canvases: [],
-    projections: [],
+    projectTree: [],
     diagnostics: [],
-    canvasRegistry: { status: 'ready', canvasOrder: [] },
     health: {
-      projectName: projectId,
-      canvasCount: 0,
+      projectName,
       diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-07-23T00:00:00.000Z'
     }

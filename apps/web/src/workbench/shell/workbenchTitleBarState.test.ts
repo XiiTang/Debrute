@@ -9,7 +9,7 @@ describe('Workbench title-bar state', () => {
     const state = buildWorkbenchTitleBarState({
       platform: 'darwin',
       projectTitle: 'Storyboard',
-      recentProjects: [{ projectId: 'alpha', projectRoot: '/projects/alpha' }],
+      recentProjects: [{ projectRoot: '/projects/alpha' }],
       host: 'desktop',
       locale: 'en'
     });
@@ -28,8 +28,8 @@ describe('Workbench title-bar state', () => {
       platform: 'win32',
       projectTitle: 'Cutout Project',
       recentProjects: [
-        { projectId: 'alpha', projectRoot: '/projects/alpha' },
-        { projectId: 'beta', projectRoot: '/projects/beta' }
+        { projectRoot: '/projects/alpha' },
+        { projectRoot: '/projects/beta' }
       ],
       host: 'desktop',
       locale: 'en'
@@ -66,7 +66,7 @@ describe('Workbench title-bar state', () => {
     const state = buildWorkbenchTitleBarState({
       platform: 'darwin',
       projectTitle: 'Storyboard',
-      recentProjects: [{ projectId: 'alpha', projectRoot: '/projects/alpha' }],
+      recentProjects: [{ projectRoot: '/projects/alpha' }],
       host: 'web',
       locale: 'en'
     });

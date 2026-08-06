@@ -84,7 +84,7 @@ export function ProjectTree({
   onKeyboardFileCommand?: ((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => void) | undefined;
 }): React.ReactElement {
   const i18n = useI18n();
-  const tree = useMemo(() => buildProjectFileTree(snapshot?.files ?? []), [snapshot?.files]);
+  const tree = useMemo(() => buildProjectFileTree(snapshot?.projectTree ?? []), [snapshot?.projectTree]);
   const defaultExpanded = useMemo(() => expandedProjectTreePaths(tree, selection.selectedPaths), [selection.selectedPaths, tree]);
   const [expanded, setExpanded] = useState<Set<string>>(defaultExpanded);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
@@ -326,7 +326,7 @@ export function projectTreeRowClickAction(input: {
   const selectionModifier = isSelectionModifierEvent(input.event, input.platform);
   return {
     toggleDirectory: input.kind === 'directory' && !selectionModifier,
-    locateFileInCanvas: input.kind === 'file' && !selectionModifier
+    locateFileInCanvas: false
   };
 }
 
@@ -629,7 +629,8 @@ function ProjectTreeRow({
             type="button"
             className={rowClassName}
             style={style}
-            title={node.path}
+            title={node.directoryError ?? node.path}
+            data-project-directory-state={node.directoryState}
             data-project-tree-context-path={node.path}
             draggable
             onClick={selectRow}
@@ -641,6 +642,9 @@ function ProjectTreeRow({
           >
             {open ? <FolderOpen size={14} /> : <Folder size={14} />}
             <span>{node.name}</span>
+            {node.directoryState === 'error' ? (
+              <span className="db-form-error" role="status">{node.directoryError}</span>
+            ) : null}
           </button>
         )}
         {open ? (
@@ -709,6 +713,12 @@ function ProjectTreeRow({
       data-project-tree-context-path={node.path}
       draggable
       onClick={selectRow}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        if (!isSelectionModifierEvent(event, productPlatform)) {
+          onLocateFileInCanvas?.(node.path);
+        }
+      }}
       onContextMenu={openContextMenu}
       onDragStart={dragStart}
       onDragOver={dragOver}

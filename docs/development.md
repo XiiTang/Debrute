@@ -80,7 +80,7 @@ unrepresentative loop.
 - `apps/desktop` - trayless Electron window host for native windows, menus, folder picking, and Product packaging.
 - `apps/runtime` - single-process Rust Runtime, native tray, Control/Workbench/Photoshop transports, domain services, Product updater, and external Agent-facing `debrute` CLI.
 - `apps/photoshop-uxp-plugin` - Photoshop UXP plugin surface.
-- `packages/canvas-core` - Canvas domain declarations and the browser-safe presentation values named by current production consumers. Authoritative Canvas document validation, projection, reconciliation, layout, feedback mutation, and persistence remain in Rust Runtime Project services.
+- `packages/canvas-core` - shared Canvas persistence and protocol declarations. Rust Runtime owns Canvas state validation, persistence, Project resources, and feedback mutation; Workbench owns scene projection, automatic layout, geometry, overlap, occlusion order, interaction, and rendering.
 - `packages/app-protocol` - protocol types shared across the app boundary.
 - `packages/runtime-control-client` - TypeScript native Control transport used by Desktop and development launchers.
 - `packages/architecture-rules` - repository architecture lint rules.
@@ -115,8 +115,9 @@ The principal dependency directions are:
   those unsupported UI systems;
 - Electron remains a native host and Control client rather than a backend or
   domain service host; and
-- Capability execution, Project filesystem and text classification, Canvas Map
-  expansion, and authoritative Runtime and CLI Project semantics remain in Rust
+- Capability execution, shared Project Tree loading and text classification,
+  Canvas state validation and persistence, and authoritative Runtime and CLI
+  Project semantics remain in Rust
   instead of being duplicated in TypeScript packages.
 
 Runtime composition follows the same closed direction internally. Core
@@ -173,50 +174,36 @@ Cross-surface trust boundaries are documented in
 performance, and resource ownership are documented in
 [`testing.md`](./testing.md).
 
-## Project State And Documents
+## Project And Root-Scoped State
 
-Runtime owns Project identity, path safety, visible file operations, and
-`.debrute/project.json` through `apps/runtime/src/project/`. The descriptor list
-in `documents.rs` is the executable authority for structured documents committed
-through the Project Document transaction, including their roles, path patterns,
-and allowed service writers. The TypeScript core packages retain browser-facing
-value shapes and pure renderer algorithms, not persistence authority.
+Runtime owns canonical-root admission, path safety, visible file operations,
+the shared Project Tree, and ordered Project Sessions through
+`apps/runtime/src/project/`. A Project is any existing directory, and its
+canonical absolute root is its durable identity. `.debrute/` remains visible;
+only structured Feedback under `.debrute/feedback/` has a Debrute-owned
+Project-local contract.
 
-Every persisted Project Document and its nested persisted values use one closed
-current shape. Unknown fields fail deserialization and remain untouched on disk;
-Runtime does not rewrite invalid documents. This strictness belongs only to
-persistence DTOs. Project snapshots, projections, file listings, diagnostics,
-and other response-only values are not persistence schemas merely because they
-share component types. Model Operation snapshots, states, execution variants,
-Artifact Pointers, Batch Item Outcomes, and list results likewise serialize
-outward only; Runtime defines no input contract for values it exclusively
-constructs.
+Canvas and Working Copy documents are Runtime-global and bucketed by the
+SHA-256 Root Key under `~/.debrute/state/roots/`. Preview caches use the
+parallel global cache root. Persisted documents use one closed current shape;
+unknown fields fail without automatic migration or partial salvage.
 
-Ordinary service-owned multi-document writes use the Project Document
-transaction boundary. It validates registered owners and participant hashes,
-acquires document locks, stages writes, and restores previous content when an
-ordinary commit fails. Generated Model outputs use the separate item commit from
-[ADR 0055](./adr/0055-generated-results-use-in-process-item-commits.md): one
-Project-rooted staged file set publishes output files, immutable provenance
-records, and the Generated Asset index under the Generated Asset service lock.
-Generic Project Tree mutations cannot modify protected `.debrute/`
-state. Revisioned text saves may edit visible Project Documents; the normal
-snapshot pipeline then exposes invalid source or pushed content as diagnostics
-instead of silently repairing it.
+Project snapshots aggregate canonical root, shared `projectTree`, one exact
+available-or-unavailable `canvasWorkspace` union, diagnostics, and health. The
+available Canvas branch contains both the Workspace Document and active Canvas
+resources. Workbench receives a
+temporary `bindingId` for Project-scoped HTTP authority; the canonical root is
+the durable identity. Commands return outcomes while ordered Project events
+carry monotonic `projectRevision` and authoritative state.
 
-Invalid `.debrute/project.json` prevents Project opening. An invalid Canvas JSON
-is excluded while the snapshot reports `document_invalid_pushed`; an invalid
-Canvas registry reports `canvas_registry_invalid`. These are the owning current
-error paths. An explicit Canvas push or registry repair may construct a valid
-current document, but reading never repairs or rewrites the invalid file.
+Invalid Feedback state remains unchanged and fails the Project load or refresh.
+Invalid Canvas state remains unchanged and makes only Canvas unavailable; the
+Project Tree, editor, and terminal still open. Model outputs commit first;
+Runtime-global content-addressed provenance is recorded afterward and a
+provenance failure becomes a warning rather than a cross-volume rollback.
 
-Project snapshots aggregate metadata, visible files, Canvas documents and
-projections, diagnostics, Canvas registry state, and health. Workbench protocol
-views omit the absolute Project root. Shared-state mutations are serialized and
-validated by their owning Runtime service. Commands return outcomes, while
-ordered Project events carry the monotonic `projectRevision` and authoritative
-state. Text Working Copies keep a file-specific `baseRevision` only to describe
-the source value from which an unsaved buffer was created; it is not a
+Text Working Copies keep a file-specific `baseRevision` only to describe the
+source value from which an unsaved buffer was created; it is not a
 Project-wide optimistic write lock. `project status` uses the read-only snapshot
 mode; interactive Project sessions use push mode.
 
@@ -245,20 +232,21 @@ behavior remain source-owned.
 
 ## Canvas
 
-The Canvas source/pushed/projection split, registry and identity rules,
-membership expansion, automatic and manual layout, stack order, and transient
-Workbench interaction model are documented in [`canvas.md`](./canvas.md).
+The Project Tree authority, root-scoped Canvas Workspace, sparse Canvas state, Folder
+Disclosure, automatic and manual layout, occlusion, and transient Workbench
+interaction model are documented in [`canvas.md`](./canvas.md).
 Rendering, viewport culling, image preview resources, cache reconciliation, and
 development-only performance diagnostics are documented in
 [`canvas-rendering.md`](./canvas-rendering.md).
 Project text access, Workbench buffer saves, CodeMirror, persisted Canvas text
 scroll state, and text-preview capture are documented in
 [`text-files.md`](./text-files.md).
-Exact persisted document, projection, reconciliation, layout, feedback, and
-stack-order behavior remains in Runtime Project services. Canvas Core supplies
-the shared declarations and browser presentation values consumed by Workbench;
-the Workbench Canvas runtime owns only transient interaction and rendering
-state.
+Exact persisted state validation, persistence, Project resources, and feedback
+mutation remain in Runtime Project services. App Protocol owns serialized and
+wire Project/Canvas declarations; Canvas Core owns pure projection and preview
+identity. The Workbench
+Canvas runtime owns scene projection, automatic layout, geometry, overlap,
+occlusion order, transient interaction, and rendering.
 
 ## Commands
 
@@ -372,9 +360,8 @@ reassembly and signing even when an earlier Rust test already rebuilt
 `target/debug/debrute-runtime` before `pnpm dev` began. Live browser diagnostics
 therefore cannot silently reuse an older application bundle.
 
-One Runtime can host multiple live Project sessions. The stable public Project
-id comes only from `.debrute/project.json.project.id`; Runtime maps recent ids to
-canonical roots and rejects duplicates. Browser tabs and Electron windows have
+One Runtime can host multiple live Project sessions, one per canonical root.
+Recent Projects store those roots directly. Browser tabs and Electron windows have
 one live Workbench connection and at most one bound Project. Interactive users
 open Projects with the Workbench `Open Project` action. Desktop Workbenches ask
 Electron to present the native directory picker owned by their current window;

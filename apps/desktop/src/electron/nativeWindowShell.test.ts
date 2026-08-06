@@ -23,7 +23,7 @@ describe('native window shell', () => {
     await api.minimizeNativeWindow();
     await api.toggleMaximizeNativeWindow();
     await api.closeNativeWindow();
-    await api.executeNativeMenuCommand({ commandId: 'project.open-known', projectId: 'alpha' });
+    await api.executeNativeMenuCommand({ commandId: 'project.open-path', projectRoot: '/projects/alpha' });
     const listener = vi.fn();
     const unsubscribe = api.onNativeWindowStateChanged(listener);
     const stateListener = on.mock.calls[0]?.[1] as ((event: unknown, state: { maximized: boolean }) => void);
@@ -32,8 +32,18 @@ describe('native window shell', () => {
     const unsubscribeEdit = api.onNativeEditCommand(editListener);
     const nativeEditListener = on.mock.calls[1]?.[1] as ((event: unknown, command: string) => void);
     nativeEditListener({}, 'edit.copy');
+    const projectFailureListener = vi.fn();
+    const unsubscribeProjectFailure = api.onNativeProjectOpenFailed(projectFailureListener);
+    const nativeProjectFailureListener = on.mock.calls[2]?.[1] as ((event: unknown, failure: unknown) => void);
+    const projectFailure = {
+      projectRoot: '/projects/damaged',
+      code: 'project_invalid',
+      message: 'Project root is invalid.'
+    };
+    nativeProjectFailureListener({}, projectFailure);
     unsubscribe();
     unsubscribeEdit();
+    unsubscribeProjectFailure();
 
     expect(invoke.mock.calls).toEqual([
       [nativeWindowIpcChannels.getState],
@@ -41,16 +51,25 @@ describe('native window shell', () => {
       [nativeWindowIpcChannels.toggleMaximize],
       [nativeWindowIpcChannels.close],
       [nativeWindowIpcChannels.executeMenuCommand, {
-        commandId: 'project.open-known',
-        projectId: 'alpha'
+        commandId: 'project.open-path',
+        projectRoot: '/projects/alpha'
       }]
     ]);
     expect(on).toHaveBeenCalledWith(nativeWindowIpcChannels.stateChanged, stateListener);
     expect(listener).toHaveBeenCalledWith({ maximized: true });
     expect(on).toHaveBeenCalledWith(nativeWindowIpcChannels.editCommand, nativeEditListener);
     expect(editListener).toHaveBeenCalledWith('edit.copy');
+    expect(on).toHaveBeenCalledWith(
+      nativeWindowIpcChannels.projectOpenFailed,
+      nativeProjectFailureListener
+    );
+    expect(projectFailureListener).toHaveBeenCalledWith(projectFailure);
     expect(removeListener).toHaveBeenCalledWith(nativeWindowIpcChannels.stateChanged, stateListener);
     expect(removeListener).toHaveBeenCalledWith(nativeWindowIpcChannels.editCommand, nativeEditListener);
+    expect(removeListener).toHaveBeenCalledWith(
+      nativeWindowIpcChannels.projectOpenFailed,
+      nativeProjectFailureListener
+    );
   });
 
   it('binds every native-window handler to the BrowserWindow for event.sender', async () => {
@@ -61,7 +80,15 @@ describe('native window shell', () => {
     const window = nativeWindow();
     const sender = {};
     const fromWebContents = vi.fn(() => window);
-    const executeNativeMenuCommand = vi.fn(async () => undefined);
+    const projectFailure = {
+      result: 'project_open_failed' as const,
+      failure: {
+        projectRoot: '/projects/damaged',
+        code: 'project_invalid',
+        message: 'Project root cannot be opened.'
+      }
+    };
+    const executeNativeMenuCommand = vi.fn(async () => projectFailure);
     const takeDesktopLaunchTicket = vi.fn(() => 'ticket-1');
     registerNativeWindowIpc({
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
@@ -74,11 +101,11 @@ describe('native window shell', () => {
     await handlers.get(nativeWindowIpcChannels.minimize)?.({ sender }, { commandId: 'window.new' });
     await handlers.get(nativeWindowIpcChannels.toggleMaximize)?.({ sender }, { commandId: 'window.new' });
     await handlers.get(nativeWindowIpcChannels.close)?.({ sender }, { commandId: 'window.new' });
-    await handlers.get(nativeWindowIpcChannels.executeMenuCommand)?.(
+    const menuResult = await handlers.get(nativeWindowIpcChannels.executeMenuCommand)?.(
       { sender },
-      { commandId: 'project.open-known', projectId: 'alpha' }
+      { commandId: 'project.open-path', projectRoot: '/projects/alpha' }
     );
-    const ticket = await handlers.get(nativeWindowIpcChannels.takeDesktopLaunchTicket)?.(
+    const launchTicket = await handlers.get(nativeWindowIpcChannels.takeDesktopLaunchTicket)?.(
       { sender },
       { commandId: 'window.new' }
     );
@@ -89,11 +116,12 @@ describe('native window shell', () => {
     expect(window.maximize).toHaveBeenCalledOnce();
     expect(window.close).toHaveBeenCalledOnce();
     expect(executeNativeMenuCommand).toHaveBeenCalledWith(window, {
-      commandId: 'project.open-known',
-      projectId: 'alpha'
+      commandId: 'project.open-path',
+      projectRoot: '/projects/alpha'
     });
+    expect(menuResult).toEqual(projectFailure);
     expect(takeDesktopLaunchTicket).toHaveBeenCalledWith(window);
-    expect(ticket).toBe('ticket-1');
+    expect(launchTicket).toBe('ticket-1');
   });
 
   it('rejects native menu commands without a sender window', async () => {
@@ -101,7 +129,7 @@ describe('native window shell', () => {
       string,
       (event: { sender: object }, input: NativeMenuCommand) => unknown
     >();
-    const executeNativeMenuCommand = vi.fn(async () => undefined);
+    const executeNativeMenuCommand = vi.fn(async () => ({ result: 'completed' as const }));
     registerNativeWindowIpc({
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       browserWindow: { fromWebContents: vi.fn(() => null) },

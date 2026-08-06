@@ -1,5 +1,5 @@
 import type { ProjectPathEntry } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
 
 export interface WorkbenchProjectPathCommandCandidate {
   pathEntry: ProjectPathEntry;
@@ -78,7 +78,7 @@ export function projectPathCommandEntryForCanvasNode(
         ? { sizeBytes: node.availability.size }
         : {})
     },
-    availability: node.availability.state
+    ...(node.availability.state === 'directory' ? {} : { availability: node.availability.state })
   };
 }
 

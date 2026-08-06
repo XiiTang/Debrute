@@ -71,7 +71,7 @@ requested Project binding is also prepared after the Global Settings frame and
 cannot delay it.
 
 A successful `project.bound` event is one complete Project-open result:
-Project id, ordered revision, snapshot, and current Working Copies travel
+temporary binding ID, canonical root, ordered revision, snapshot, and current Working Copies travel
 together from the HTTP client through startup to the composition root. An
 unbound or failed startup has no Project result; the Workbench does not split a
 successful binding into independently optional fields or reconstruct a partial
@@ -115,7 +115,7 @@ accepted replacement retires the source binding and is never rolled back by a
 later frontend completion.
 
 Every Project-scoped mutation is authorized against the connection's current
-binding generation as well as its Project id. Work begun for A cannot commit to
+temporary binding and binding generation. Work begun for A cannot commit to
 A after the same connection has switched to B; this applies in particular to
 Working Copies, which are persistent Project data but do not have their own
 ordered Project event stream.
@@ -170,9 +170,10 @@ projections, so events accepted before activation are not replayed or lost.
 After first activation, the Settings lifecycle host remains mounted while its
 panel may close and reopen; other optional feature surfaces keep their owning
 lifecycle rules.
-Canvas managed fonts gate only active Canvas text surfaces and floating text
-windows; they never block the shell, Explorer, Settings, or a Project-open
-result. The production build manifest enforces gzip ceilings of 80 KiB for the
+Workbench loads and awaits every base face used by its shell, Explorer, Canvas
+labels, and text presentation before importing `WorkbenchApp` or rendering any
+React surface. Dynamic Canvas text subset resources retain their node-local
+readiness lifecycle. The production build manifest enforces gzip ceilings of 80 KiB for the
 bootstrap graph and 250 KiB for the critical Workbench graph, and rejects an
 eager Settings, Explorer, Inspector, Terminal panel or Hub, floating-text-window,
 video-control, CodeMirror-engine, or language-parser dependency.
@@ -182,13 +183,13 @@ or `pnpm dev:electron -- --startup-perf` records bounded Performance marks and
 console entries from the navigation performance origin for main evaluation,
 Global snapshot, theme, Workbench chunk, React commit, first surface commit,
 first Project-open request and Project-surface commit, and first optional-feature
-request and readiness. `shell-fonts-ready` waits only for the Smiley display
-face and Noto Sans SC 400/600/700 faces used by the committed shell, while
+request and readiness. `shell-fonts-ready` waits for Smiley Sans 700, Noto Sans
+SC 400/600/700, and Noto Sans Mono CJK SC 400/700 before React, while
 `canvas-text-ready` records completion of the
 managed Font Resource for the first active text Canvas. A text Project is not
 reported as fully interactive merely because its shell committed while that
 resource is still preparing. The Project request mark is recorded at the HTTP binding
-boundary, including initial `/projects/<project-id>` and `/open?path=...`
+boundary, including initial `/open?path=...`
 navigation rather than only post-mount UI actions. Text-editor readiness means
 the actual CodeMirror engine chunk is loaded, not merely its floating-window
 shell. The native directory picker is a separate selection command: cancellation
@@ -197,8 +198,7 @@ selected, so human picker time is excluded. Without the flag it records and
 publishes nothing, and it never
 registers a production debugging global.
 
-Workbench has exactly three page-path shapes: `/`, `/open`, and
-`/projects/<project-id>`. Those paths select the application entry document;
+Workbench has exactly two page-path shapes: `/` and `/open`. Those paths select the application entry document;
 existing static-asset paths select their exact files. An unknown page path,
 deeper Project path, or missing asset returns `404` instead of falling back to
 the Workbench entry document or root surface. Page paths must already be
@@ -206,24 +206,21 @@ canonical: trailing slashes and repeated slashes return `404` and are not
 removed or redirected. Settings and other feature views remain internal
 Workbench state rather than additional URL routes.
 
-The root and Project routes accept no query parameters. `/open` accepts either
+The root route accepts no query parameters. `/open` accepts either
 no query or exactly one non-empty `path` parameter; unknown parameters,
-duplicate `path` values, and an explicit empty `path` return `404`. After a
-successful open, Workbench replaces the address with the clean canonical
-`/projects/<project-id>` path rather than retaining query parameters from the
-entry URL.
+duplicate `path` values, and an explicit empty `path` return `404`. A successful
+open canonicalizes the root and replaces the address with
+`/open?path=<percent-encoded-canonical-root>`.
 
 Workbench accepts no URL fragment. Because a browser does not send `#...` to
 Runtime, bootstrap rejects a non-empty fragment locally with the Not Found
 surface before it creates a Workbench connection or attempts a Project open.
 It does not ignore, preserve, or remove the fragment automatically.
 
-The Project id path segment uses the same current stable-id contract as Project
-metadata: 1–256 ASCII bytes containing only letters, digits, `.`, `_`, `~`, or
-`-`, excluding the complete values `.` and `..`. It remains an opaque id rather
-than a UUID-only value. Percent-encoded,
-Unicode, empty, oversized, or otherwise non-canonical segments return `404`
-instead of being decoded or normalized into another id.
+`path` must be one valid percent-encoded UTF-8 value. Runtime admits only an
+existing directory and returns its canonical absolute root. The absolute path is
+intentional user-visible identity; Project-scoped API calls use a separate
+opaque temporary `bindingId` so they never accept arbitrary roots.
 
 ## Shell, Layers, And Floating Windows
 
@@ -244,7 +241,7 @@ controls, so Canvas interaction cannot begin there. Local text/icon contrast and
 control interaction fills preserve chrome legibility without forming a strip.
 
 An unbound Workbench, its Project-opening progress and initial Project-open
-failure, an absent Canvas, and Canvas repair place their focused content directly
+failure, and an unavailable Canvas workspace place their focused content directly
 over this background, centered below the title-bar hit area. The initial failure
 remains visible below the corresponding Project action until another attempt
 begins. During a browser bound A-to-B open, A's last accepted presentation
@@ -253,7 +250,7 @@ failed preparation restores A and reports a non-blocking Activity. Selector
 cancel, a repeated open ignored while another attempt is active, and a
 superseded attempt report no error.
 The shared appearance does not create a Canvas domain object or admit Canvas
-interaction before a real Canvas projection exists. The Not Found page is not a
+interaction before a real Canvas Scene Projection exists. The Not Found page is not a
 Workbench shell and keeps its independent error presentation.
 
 When a bound Project is preempted or its Runtime connection ends, the last
@@ -274,23 +271,14 @@ its body.
 
 Panel definitions own initial and minimum/maximum dimensions. Dragging and
 viewport resize keep a usable drag area visible rather than forcing the entire
-panel inside the viewport. Open panel geometry and active Canvas are stored in
-tab-local session storage keyed by Project id. Each entry is one complete,
-closed current view snapshot containing only the active Canvas id and floating
-panel state. Saving writes that exact snapshot. Accepted HTTP Project opens
-restore that Project's active Canvas and floating-panel layout and reset
-unrelated transient window state.
-The snapshot is accepted only as one complete closed value. Invalid JSON,
-unknown fields, missing panel entries, non-finite geometry, and incorrect field
-types reject the whole snapshot rather than preserving valid-looking fields.
-When an entry exists, its floating-panel state is required and contains exactly
-Explorer, Inspector, Settings, and Terminal with complete open and geometry
-values; the active Canvas id alone may be absent when no Canvas is active. An
-absent storage entry, rather than a partial object, represents a first open.
-Because this state is disposable presentation rather than Project data, Workbench
-reports the validation failure once, removes the rejected tab-local entry, and
-opens the already-bound Project with its current first-open view defaults. It does
-not silently repair or rewrite the rejected value.
+panel inside the viewport. Open panel geometry is stored in tab-local session
+storage keyed by canonical root. Saving writes that floating-panel snapshot;
+accepted HTTP Project opens read it with direct `JSON.parse`. An absent entry
+uses the current first-open defaults. This disposable browser layout has no
+schema validation, repair, removal, reset Activity, compatibility layer, or
+try/catch fallback. If a present value is malformed, the parse error is exposed
+as an implementation/runtime failure. The Runtime-owned Canvas Workspace
+`activeCanvasId` is the sole persisted active-Canvas value.
 
 Canvas floating bars use separate placement helpers because they are attached
 to Canvas objects or reserved screen edges. Their collision and viewport rules
@@ -300,13 +288,13 @@ Canvas camera, selection, pointer drag state, and Manual Layout Drafts are owned
 by `CanvasEditorRuntime` rather than React component state or Canvas JSON. An
 internal Manual Layout lifecycle module owns active and submitted drafts,
 submission identity, confirmation, and rejection. `CanvasSurface` supplies DOM
-pointer facts and the latest Canvas Projection; `CanvasEditor` wires the existing
+pointer facts and the latest Canvas Scene Projection; `CanvasEditor` wires the existing
 Runtime mutation action into the lifecycle. Neither owns a parallel draft
 lifecycle. Rendering combines the
-Canvas Projection with submitted drafts in submission order and then the active
+Canvas Scene Projection with submitted drafts in submission order and then the active
 draft, so nodes, edges, viewport culling, and overlays observe one interaction geometry
 while earlier submissions await confirmation.
-See [`canvas.md`](./canvas.md) for the Canvas document, layout, registry, and
+See [`canvas.md`](./canvas.md) for sparse Canvas state, layout, disclosure, and
 interaction contract, and [`canvas-rendering.md`](./canvas-rendering.md) for
 stable scene mounting, viewport culling, preview resources, and diagnostics.
 Text buffers, CodeMirror ownership, inline handoff, and Canvas text preview
@@ -342,7 +330,7 @@ Operation `queued` handoff is presented as running rather than creating a
 user-visible queue state. Structured closed message kinds and typed arguments
 identify the fixed sources Project, Canvas, Explorer, Model Request, Photoshop,
 Workbench, Update, and Integration. Runtime is the authority but is not a
-displayed source. Project-scoped records capture stable Project id plus a name
+displayed source. Project-scoped records capture canonical root plus a name
 snapshot and never capture an originating Workbench. Arbitrary frontend text,
 raw errors, logs, HTTP bodies, commands, and stdout/stderr cannot enter the
 stream; Workbench localizes each structured record using its current locale, so
@@ -466,22 +454,14 @@ described in [`runtime-architecture.md`](./runtime-architecture.md).
 
 Explorer derives its tree from the current Project snapshot, excludes `.git`
 metadata, sorts directories before files, and naturally sorts names.
-Opening a Project loads only the root's direct visible children. Expanding a
-collapsed directory issues one revisioned Runtime directory-load command and
-adds only that directory's direct children to the current snapshot without
-reloading unrelated Project documents; repeated expansion is a no-op. Creating
-inside a collapsed directory first loads that parent. After the shallow
-`project.bound` snapshot is queued and its event stream is running, Runtime may
-build its complete Canvas/file index in a session-owned background task. That
-private index is not serialized into Explorer, does not inflate the initial
-tree, and never delays the first bound Project view.
-Closing the Project cancels and joins the task; scan failure keeps the shallow
-tree usable and appears as a retryable Project diagnostic. Automatic indexing
-and filesystem events share one filter: nested `.gitignore` rules and standard
-dependency, cache, and build directories are excluded. An explicit Explorer
-expansion still reads one requested directory and keeps its direct children as
-session watch dependencies, so exclusion removes background work rather than
-making the path inaccessible or stale.
+Opening a Project loads the root's direct visible children. Expanding a
+collapsed Explorer directory, disclosing a Canvas directory, activating a
+Canvas, or revealing a file loads the required direct children through the same
+Runtime-owned Project Tree. A revisioned load adds those children to the next
+complete snapshot without rescanning unrelated directories; repeated loads are
+no-ops. Creating inside a collapsed directory first loads that parent. Loaded
+directories remain watcher dependencies until the Project Session ends. There
+is no background complete-tree index or separate Canvas filesystem scan.
 Its selection model owns selected paths, focus, and range anchor. Pointer and
 keyboard behavior supports single, toggle, range, and context-menu selection,
 as well as platform-appropriate copy, cut, paste, delete, and permanent-delete
@@ -506,7 +486,7 @@ One Project Path Command model describes operations on the Project root and on
 single or multiple Project Path targets. Explorer pointer interaction, Project
 Tree keyboard shortcuts, and Canvas context menus only supply command intent;
 they do not define different command meanings. One Project-scoped intake
-authority owns admission and atomically captures the accepted Project id and
+authority owns admission and atomically captures the accepted binding ID and
 binding generation in an opaque command scope. Every context-menu, keyboard,
 inline-edit, drag-and-drop, and Canvas Project Path entry point must obtain that
 scope. A command effect cannot be submitted without it.
@@ -554,8 +534,8 @@ activation instead. If the initiating document is a true empty-window candidate,
 Runtime commits the ordinary `project.bound` lifecycle there; otherwise its
 gate remains unchanged while Runtime focuses or opens the destination window.
 
-A command submitted before that boundary remains owned by its captured Project
-id and binding generation. Runtime's Project binding lease lets the accepted
+A command submitted before that boundary remains owned by its captured binding
+ID and binding generation. Runtime's Project binding lease lets the accepted
 request finish before the replacement binding commits; switching does not
 retarget, retry, roll back, or imply cancellation of that command. Accepting the
 new binding may abort a remaining Web-side wait, but transport abort is not
@@ -567,7 +547,7 @@ command scope. Activity records remain Runtime-global across binding
 replacement; a stale Web callback cannot publish a new Project notice after its
 captured generation retires, while Runtime-owned task completion updates the
 already-authoritative record. This Web capability is in-memory,
-unforgeable by ordinary callers, and contains only Project identity and binding
+unforgeable by ordinary callers, and contains only binding identity and binding
 generation checks; it is not a queue, Runtime lease, cancellation token, retry,
 or rollback mechanism. The Project binding lifecycle owns admission state and
 does not own command completion.

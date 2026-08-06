@@ -1,7 +1,7 @@
 # Canvas Media Presentation
 
 This page records the current image, audio, and video presentation contracts on
-Canvas. Canvas document membership and layout are documented in
+Canvas. Project Tree projection and Canvas layout are documented in
 [`canvas.md`](./canvas.md); shared raster scheduling and image resources are
 documented in [`canvas-rendering.md`](./canvas-rendering.md); feedback over media
 is documented in [`canvas-feedback.md`](./canvas-feedback.md).
@@ -24,7 +24,7 @@ Image nodes use the derived raster-preview lifecycle in
 [`canvas-rendering.md`](./canvas-rendering.md). Audio nodes use a native audio
 element with controls, no preloading, a fixed presentation size, a file caption,
 and an explicit retry surface for media-load errors. Audio playback state is not
-stored in the Canvas Document.
+stored in Canvas state.
 
 An available video projection must include intrinsic width and height, optional
 duration, and discovered WebVTT text tracks. Static preview data is deliberately
@@ -34,7 +34,7 @@ not the player metadata contract.
 ## Video Playback Position
 
 Playback Position is persisted Canvas state because it controls the still frame
-shown after a player is unloaded or Workbench is reopened. The Canvas Document
+shown after a player is unloaded or Workbench is reopened. Canvas state
 stores only a non-negative safe-integer millisecond timestamp on video file nodes;
 zero removes the stored playback field. Browser media time is converted to and
 from seconds only at the player adapter boundary.
@@ -111,7 +111,7 @@ JPEG; width-specific JPEG variants add the same Raster Preview Engine Version
 used by image and text:
 
 ```text
-.debrute/cache/canvas-video-previews/
+~/.debrute/cache/roots/<rootKey>/canvas/canvas-video-previews/
   <canvas>/<path-key>/<source-revision>/<canonical-source-identity>/
     source.jpg
     raster-engine-v<version>/

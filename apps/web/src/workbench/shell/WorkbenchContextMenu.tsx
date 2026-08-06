@@ -263,7 +263,7 @@ function contextMenuIcon(command: ProjectPathCommand): React.ReactElement {
   if (command === 'paste') {
     return <Clipboard size={14} />;
   }
-  if (command === 'reveal-in-system-file-manager') {
+  if (command === 'reveal-in-canvas' || command === 'reveal-in-system-file-manager') {
     return <FolderOpen size={14} />;
   }
   if (command === 'rename') {

@@ -13,7 +13,7 @@ Windows; clicking the tray icon never chooses a frontend.
 **Recent Projects** consumes Runtime's one ordered Global projection and has
 exactly three submenus: **Desktop**, **Browser**, and **Copy URL**. Each repeats
 the same canonical Project-root labels in the same order and maps its item to
-the stable Project id. The Recent menu is disabled when the projection is
+the canonical root. The Recent menu is disabled when the projection is
 empty. Desktop activation follows the shared multi-window admission contract:
 focus the matching Project window, reuse one eligible truly empty window, or
 create a new window; it never replaces another Project. Browser activation

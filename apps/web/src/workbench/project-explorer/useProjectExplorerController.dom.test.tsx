@@ -52,12 +52,12 @@ describe('useProjectExplorerController', () => {
 
   it('pastes exact entries from the controller-owned Copy and Cut clipboard', async () => {
     const copyProjectPaths = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       results: []
     }));
     const moveProjectPaths = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 3,
       results: []
     }));
@@ -103,7 +103,7 @@ describe('useProjectExplorerController', () => {
 
   it('loads a collapsed parent before creating a child inside it', async () => {
     const loadProjectDirectory = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2
     }));
     const probe = await renderController({ loadProjectDirectory });
@@ -123,9 +123,9 @@ describe('useProjectExplorerController', () => {
   });
 
   it('does not submit a child create until its collapsed parent has loaded', async () => {
-    const directory = deferred<{ projectId: string; projectRevision: number }>();
+    const directory = deferred<{ bindingId: string; projectRevision: number }>();
     const createProjectFile = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 3,
       projectRelativePath: 'assets/new.txt',
       kind: 'file' as const
@@ -149,7 +149,7 @@ describe('useProjectExplorerController', () => {
     expect(createProjectFile).not.toHaveBeenCalled();
 
     await act(async () => {
-      directory.resolve({ projectId: 'project-1', projectRevision: 2 });
+      directory.resolve({ bindingId: 'project-1', projectRevision: 2 });
       await submission;
     });
     expect(createProjectFile).toHaveBeenCalledOnce();
@@ -157,12 +157,12 @@ describe('useProjectExplorerController', () => {
   });
 
   it('keeps a child create retryable when its parent directory load fails', async () => {
-    const failedDirectory = deferred<{ projectId: string; projectRevision: number }>();
+    const failedDirectory = deferred<{ bindingId: string; projectRevision: number }>();
     const loadProjectDirectory = vi.fn()
       .mockImplementationOnce(() => failedDirectory.promise)
-      .mockResolvedValueOnce({ projectId: 'project-1', projectRevision: 2 });
+      .mockResolvedValueOnce({ bindingId: 'project-1', projectRevision: 2 });
     const createProjectFile = vi.fn(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 3,
       projectRelativePath: 'assets/new.txt',
       kind: 'file' as const
@@ -199,7 +199,7 @@ describe('useProjectExplorerController', () => {
     const getSnapshot = vi.fn(() => snapshotWithFiles(['folder']));
     const probe = await renderController({
       trashProjectPaths: vi.fn(async () => ({
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 2,
         results: [{
           sourceProjectRelativePath: 'folder/brief.md',
@@ -298,7 +298,7 @@ describe('useProjectExplorerController', () => {
     currentScope = false;
     await act(async () => {
       deletion.resolve({
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 2,
         results: [{
           sourceProjectRelativePath: 'folder/brief.md',
@@ -358,17 +358,16 @@ function ControllerProbe({
   onValue(value: ProjectExplorerController, scope: AcceptedProjectPathCommandScope): void;
 }): null {
   const scope = {
-    projectId: 'project-1',
+    bindingId: 'project-1',
     generation: 1,
     canSubmit: () => canSubmitAcceptedScope() && isCurrentProjectPathCommandScope(),
-    isCurrent: (resultProjectId?: string) => isCurrentProjectPathCommandScope()
-      && (resultProjectId === undefined || resultProjectId === 'project-1')
+    isCurrent: (resultBindingId?: string) => isCurrentProjectPathCommandScope()
+      && (resultBindingId === undefined || resultBindingId === 'project-1')
   } as AcceptedProjectPathCommandScope;
   const controller = useProjectExplorerController({
     commandEffects: createProjectPathCommandEffects(api as WorkbenchApiClient),
     getSnapshot,
     activeCanvasRuntime: undefined,
-    centerProjectFileInCanvas: vi.fn(),
     activities: {
       report: (input) => notify(input.kind)
     },
@@ -442,24 +441,37 @@ function deferred<T>(): {
 
 function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
   return {
-    metadata: {
-      project: {
-        id: 'project-1',
-        name: 'Demo',
-        createdAt: '2026-07-10T00:00:00.000Z',
-        updatedAt: '2026-07-10T00:00:00.000Z'
-      }
-    },
-    files: paths.map((projectRelativePath) => ({ projectRelativePath, kind: 'file' as const })),
-    canvases: [],
-    projections: [],
+    canonicalRoot: '/projects/project-1',
+    canvasWorkspace: emptyCanvasWorkspace('/projects/project-1'),
+    projectTree: paths.map((projectRelativePath) => ({
+      projectRelativePath,
+      kind: 'file' as const,
+      ignored: false,
+      hidden: false
+    })),
     diagnostics: [],
-    canvasRegistry: { status: 'ready', canvasOrder: [] },
     health: {
       projectName: 'Demo',
-      canvasCount: 0,
       diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-07-10T00:00:00.000Z'
     }
+  };
+}
+
+function emptyCanvasWorkspace(canonicalRoot: string): WorkbenchProjectSessionSnapshot['canvasWorkspace'] {
+  return {
+    status: 'available',
+    workspace: {
+      canonicalRoot,
+      activeCanvasId: 'main',
+      canvases: [{
+        id: 'main',
+        name: 'Main',
+        expandedDirectories: [],
+        nodeStates: {},
+        occlusionOrder: []
+      }]
+    },
+    activeCanvasResources: { canvasId: 'main', resources: [], diagnostics: [] }
   };
 }

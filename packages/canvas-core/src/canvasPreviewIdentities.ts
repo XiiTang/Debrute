@@ -22,7 +22,7 @@ type CanvasPreviewIdentityPart = string | number;
 
 export interface CanvasPreviewOwner {
   mediaKind: 'image' | 'text' | 'video';
-  projectId: string;
+  bindingId: string;
   canvasId?: string | undefined;
   projectRelativePath: string;
 }
@@ -75,7 +75,7 @@ export function canvasPreviewTargetKey(input: CanvasPreviewOwner & {
   return JSON.stringify([
     'canvas-preview-target-key-v1',
     input.mediaKind,
-    input.projectId,
+    input.bindingId,
     input.canvasId ?? null,
     input.projectRelativePath,
     input.targetIdentity
@@ -92,7 +92,7 @@ export function canvasPreviewVariantKey(input: CanvasPreviewOwner & {
   return JSON.stringify([
     'canvas-preview-variant-key-v1',
     input.mediaKind,
-    input.projectId,
+    input.bindingId,
     input.canvasId ?? null,
     input.projectRelativePath,
     variantIdentity
@@ -100,7 +100,7 @@ export function canvasPreviewVariantKey(input: CanvasPreviewOwner & {
 }
 
 function assertOwner(owner: CanvasPreviewOwner): void {
-  assertNonEmptyString(owner.projectId, 'Canvas preview Project ID must be non-empty.');
+  assertNonEmptyString(owner.bindingId, 'Canvas preview Binding ID must be non-empty.');
   assertNonEmptyString(owner.projectRelativePath, 'Canvas preview Project path must be non-empty.');
   if (owner.canvasId !== undefined) {
     assertNonEmptyString(owner.canvasId, 'Canvas preview Canvas ID must be non-empty.');

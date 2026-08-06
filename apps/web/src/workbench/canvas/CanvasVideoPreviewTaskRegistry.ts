@@ -9,7 +9,7 @@ import {
 export const CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS = 10;
 
 export interface CanvasVideoPreviewTarget {
-  readonly projectId: string;
+  readonly bindingId: string;
   readonly canvasId: string;
   readonly projectRelativePath: string;
   readonly sourceRevision: string;
@@ -51,7 +51,7 @@ export function canvasVideoPreviewTargetIdentity(
 export function canvasVideoPreviewTargetKey(target: CanvasVideoPreviewTarget): CanvasPreviewTargetKey {
   return canvasPreviewTargetKey({
     mediaKind: 'video',
-    projectId: target.projectId,
+    bindingId: target.bindingId,
     canvasId: target.canvasId,
     projectRelativePath: target.projectRelativePath,
     targetIdentity: canvasVideoPreviewTargetIdentity(target)

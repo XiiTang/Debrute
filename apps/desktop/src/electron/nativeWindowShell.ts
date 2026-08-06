@@ -1,8 +1,10 @@
 import type {
   DebruteProductPlatform,
   DebruteShellApi,
+  NativeMenuCommandResult,
   NativeEditCommandId,
   NativeMenuCommand,
+  NativeProjectOpenFailure,
   NativeWindowState
 } from '@debrute/app-protocol';
 
@@ -14,6 +16,7 @@ export const nativeWindowIpcChannels = {
   executeMenuCommand: 'debrute-shell:executeNativeMenuCommand',
   stateChanged: 'debrute-shell:nativeWindowStateChanged',
   editCommand: 'debrute-shell:nativeEditCommand',
+  projectOpenFailed: 'debrute-shell:nativeProjectOpenFailed',
   takeDesktopLaunchTicket: 'debrute-shell:takeDesktopLaunchTicket'
 } as const;
 
@@ -27,6 +30,7 @@ export type NativeWindowPreloadApi = Pick<
   | 'takeDesktopLaunchTicket'
   | 'onNativeWindowStateChanged'
   | 'onNativeEditCommand'
+  | 'onNativeProjectOpenFailed'
 >;
 
 interface NativeWindowIpcInvoker {
@@ -72,7 +76,7 @@ export function createNativeWindowPreloadApi<Event>(
     minimizeNativeWindow: () => invoke<NativeWindowState>(ipcRenderer, nativeWindowIpcChannels.minimize),
     toggleMaximizeNativeWindow: () => invoke<NativeWindowState>(ipcRenderer, nativeWindowIpcChannels.toggleMaximize),
     closeNativeWindow: () => invoke<{ ok: true }>(ipcRenderer, nativeWindowIpcChannels.close),
-    executeNativeMenuCommand: (input) => invoke<{ ok: true }>(ipcRenderer, nativeWindowIpcChannels.executeMenuCommand, input),
+    executeNativeMenuCommand: (input) => invoke<NativeMenuCommandResult>(ipcRenderer, nativeWindowIpcChannels.executeMenuCommand, input),
     takeDesktopLaunchTicket: () => invoke<string | undefined>(ipcRenderer, nativeWindowIpcChannels.takeDesktopLaunchTicket),
     onNativeWindowStateChanged: (listener) => {
       const wrapped = (_event: Event, state: unknown) => listener(state as NativeWindowState);
@@ -87,6 +91,13 @@ export function createNativeWindowPreloadApi<Event>(
       return () => {
         ipcRenderer.removeListener(nativeWindowIpcChannels.editCommand, wrapped);
       };
+    },
+    onNativeProjectOpenFailed: (listener) => {
+      const wrapped = (_event: Event, failure: unknown) => listener(failure as NativeProjectOpenFailure);
+      ipcRenderer.on(nativeWindowIpcChannels.projectOpenFailed, wrapped);
+      return () => {
+        ipcRenderer.removeListener(nativeWindowIpcChannels.projectOpenFailed, wrapped);
+      };
     }
   };
 }
@@ -94,7 +105,7 @@ export function createNativeWindowPreloadApi<Event>(
 export function registerNativeWindowIpc<Sender, Window extends NativeWindow>(input: {
   ipcMain: NativeWindowIpcMain<Sender>;
   browserWindow: { fromWebContents(sender: Sender): Window | null };
-  executeNativeMenuCommand(window: Window, command: NativeMenuCommand): Promise<void>;
+  executeNativeMenuCommand(window: Window, command: NativeMenuCommand): Promise<NativeMenuCommandResult>;
   takeDesktopLaunchTicket(window: Window): string | undefined;
 }): void {
   input.ipcMain.handle(nativeWindowIpcChannels.getState, (event) => (
@@ -119,8 +130,10 @@ export function registerNativeWindowIpc<Sender, Window extends NativeWindow>(inp
     return { ok: true };
   });
   input.ipcMain.handle(nativeWindowIpcChannels.executeMenuCommand, async (event, command) => {
-    await input.executeNativeMenuCommand(requireSenderWindow(input.browserWindow, event.sender), command);
-    return { ok: true };
+    return input.executeNativeMenuCommand(
+      requireSenderWindow(input.browserWindow, event.sender),
+      command
+    );
   });
   input.ipcMain.handle(nativeWindowIpcChannels.takeDesktopLaunchTicket, (event) => (
     input.takeDesktopLaunchTicket(requireSenderWindow(input.browserWindow, event.sender))

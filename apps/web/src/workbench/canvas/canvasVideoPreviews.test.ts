@@ -14,14 +14,14 @@ describe('canvas video preview URLs', { tags: ['canvas-video'] }, () => {
     expect(request.variantTarget?.sourceWidth).toBe(1200);
     expect(request.variantTarget?.canonicalSourceIdentity).toBe(canonicalSourceIdentity);
     expect(request.variantTarget?.srcForWidth(300)).toBe(
-      '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&sourceRevision=rev-video&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
+      '/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/canvas-video-preview?canvasId=canvas-1&path=media%2Fclip.mp4&sourceRevision=rev-video&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
     );
   });
 });
 
 function videoTarget(): CanvasVideoPreviewTarget {
   return {
-    projectId: '123e4567-e89b-42d3-a456-426614174000',
+    bindingId: '123e4567-e89b-42d3-a456-426614174000',
     canvasId: 'canvas-1',
     projectRelativePath: 'media/clip.mp4',
     sourceRevision: 'rev-video',

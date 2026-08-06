@@ -3,12 +3,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{
-        Arc, Condvar, Mutex, MutexGuard, Weak,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
-    thread,
+    sync::{Arc, Condvar, Mutex, MutexGuard, Weak, mpsc},
     time::Duration,
 };
 
@@ -16,16 +11,16 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    CanvasDocument, CanvasFeedbackArtifacts, CanvasFeedbackDiagnosticUpdate,
-    CanvasFeedbackDocument, CanvasLayoutInteraction, CanvasNodeLayoutUpdate, CanvasProjection,
-    CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, ProjectChange, ProjectError, ProjectEvent,
-    ProjectNativeShellService, ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry,
-    ProjectPathKind, ProjectPathOperationStatus, ProjectService, ProjectSnapshot,
-    ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput,
-    copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
-    import_upload_project_entries, is_gitignore_path, list_project_files_until, move_project_paths,
-    rename_project_path,
-    watcher::{ProjectFileWatcher, ProjectWatchBackendFactory, ProjectWatchSignal},
+    CanvasFeedbackArtifacts, CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument,
+    CanvasStatePatch, ProjectChange, ProjectError, ProjectEvent, ProjectNativeShellService,
+    ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
+    ProjectPathOperationStatus, ProjectService, ProjectSnapshot, ProjectSyncSnapshot,
+    ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput, copy_project_paths,
+    create_project_path, delete_project_paths, import_local_project_paths,
+    import_upload_project_entries, move_project_paths, rename_project_path,
+    watcher::{
+        ProjectFileWatcher, ProjectWatchBackendFactory, ProjectWatchPath, ProjectWatchSignal,
+    },
     write_project_text_file,
 };
 
@@ -43,7 +38,7 @@ pub enum ProjectUseKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSessionSummary {
-    pub project_id: String,
+    pub canonical_root: String,
     pub project_revision: u64,
     pub project_name: String,
 }
@@ -51,7 +46,7 @@ pub struct ProjectSessionSummary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectRevisionResult<T> {
     pub value: T,
-    pub project_id: String,
+    pub canonical_root: String,
     pub project_revision: u64,
 }
 
@@ -84,6 +79,39 @@ impl<T> ProjectMutation<T> {
     }
 }
 
+impl ProjectMutation<ProjectCommandResult> {
+    fn replace_snapshot(&mut self, snapshot: &ProjectSnapshot) {
+        match &mut self.value {
+            ProjectCommandResult::Snapshot(current)
+            | ProjectCommandResult::CanvasCreated {
+                snapshot: current, ..
+            }
+            | ProjectCommandResult::CanvasDeleted {
+                snapshot: current, ..
+            }
+            | ProjectCommandResult::TextFileSaved {
+                snapshot: current, ..
+            }
+            | ProjectCommandResult::PathChanged {
+                snapshot: current, ..
+            }
+            | ProjectCommandResult::PathsChanged {
+                snapshot: current, ..
+            } => current.clone_from(snapshot),
+            ProjectCommandResult::CanvasFeedbackUpdated { .. } => {}
+        }
+        match &mut self.change {
+            Some(
+                ProjectChange::ProjectChanged(current)
+                | ProjectChange::ProjectFileChanged {
+                    snapshot: current, ..
+                },
+            ) => current.clone_from(snapshot),
+            Some(ProjectChange::CanvasFeedbackChanged { .. }) | None => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 /// Closed mutation vocabulary accepted by a revisioned Project session.
 ///
@@ -96,6 +124,7 @@ pub enum ProjectCommand {
         project_relative_directory: String,
     },
     CreateCanvas,
+    ResetCanvasWorkspace,
     RenameCanvas {
         canvas_id: String,
         name: String,
@@ -106,33 +135,14 @@ pub enum ProjectCommand {
     DeleteCanvas {
         canvas_id: String,
     },
-    RepairCanvasRegistry,
-    UpdateCanvasLayouts {
+    ActivateCanvas {
         canvas_id: String,
-        interaction: CanvasLayoutInteraction,
-        updates: Vec<CanvasNodeLayoutUpdate>,
     },
-    UpdateCanvasVideoPlayback {
-        canvas_id: String,
-        updates: Vec<CanvasVideoPlaybackUpdate>,
-    },
-    UpdateCanvasTextViewports {
-        canvas_id: String,
-        updates: Vec<CanvasTextViewportUpdate>,
+    PatchCanvasState {
+        patch: CanvasStatePatch,
     },
     UpdateCanvasFeedback {
         input: UpdateCanvasFeedbackInput,
-    },
-    PushCanvasMap {
-        canvas_id: String,
-    },
-    AddProjectPathToCanvasMap {
-        canvas_id: String,
-        project_relative_path: String,
-    },
-    ResetCanvasLayout {
-        canvas_id: String,
-        node_paths: Option<std::collections::BTreeSet<String>>,
     },
     WriteTextFile {
         project_relative_path: String,
@@ -184,25 +194,6 @@ pub enum ProjectCommandResult {
         active_canvas_id: String,
         snapshot: ProjectSnapshot,
     },
-    CanvasRegistryRepaired {
-        active_canvas_id: String,
-        snapshot: ProjectSnapshot,
-    },
-    CanvasChanged {
-        canvas: CanvasDocument,
-        projection: CanvasProjection,
-        changed: bool,
-    },
-    CanvasMapPathAdded {
-        canvas: CanvasDocument,
-        projection: CanvasProjection,
-        project_relative_path: String,
-    },
-    CanvasLayoutReset {
-        canvas: CanvasDocument,
-        projection: CanvasProjection,
-        reset_count: usize,
-    },
     CanvasFeedbackUpdated {
         feedback: CanvasFeedbackDocument,
     },
@@ -229,10 +220,54 @@ pub struct ProjectSessionRegistry {
     inner: Arc<ProjectSessionRegistryInner>,
 }
 
+pub trait ProjectPathStateReconciler: Send + Sync {
+    /// Rewrites or prunes path-keyed Working Copies after a filesystem mutation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ancillary state cannot be persisted. The
+    /// already-committed filesystem mutation remains successful.
+    fn reconcile(
+        &self,
+        canonical_root: &str,
+        command: &ProjectCommand,
+        result: &ProjectCommandResult,
+    ) -> Result<(), ProjectError>;
+
+    /// Prunes path-keyed Working Copies after watcher-confirmed removal or
+    /// identity replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ancillary state cannot be persisted. The
+    /// external filesystem change remains authoritative.
+    fn prune(&self, canonical_root: &str, removed: &[String]) -> Result<(), ProjectError>;
+}
+
+#[cfg(any(test, feature = "test-support"))]
+struct NoopProjectPathStateReconciler;
+
+#[cfg(any(test, feature = "test-support"))]
+impl ProjectPathStateReconciler for NoopProjectPathStateReconciler {
+    fn reconcile(
+        &self,
+        _canonical_root: &str,
+        _command: &ProjectCommand,
+        _result: &ProjectCommandResult,
+    ) -> Result<(), ProjectError> {
+        Ok(())
+    }
+
+    fn prune(&self, _canonical_root: &str, _removed: &[String]) -> Result<(), ProjectError> {
+        Ok(())
+    }
+}
+
 struct ProjectSessionRegistryInner {
     debrute_home: PathBuf,
     node_adapter: Arc<dyn ProjectNodeAdapter>,
     feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+    path_state_reconciler: Arc<dyn ProjectPathStateReconciler>,
     watch_backend_factory: Arc<dyn ProjectWatchBackendFactory>,
     state: Mutex<ProjectSessionRegistryState>,
     on_change: Arc<dyn Fn() + Send + Sync>,
@@ -242,9 +277,8 @@ struct ProjectSessionRegistryInner {
 struct ProjectSessionRegistryState {
     closed: bool,
     close_transition: Option<Arc<RootTransition>>,
-    sessions_by_id: HashMap<String, Arc<ProjectSession>>,
-    project_ids_by_root: HashMap<PathBuf, String>,
-    uses_by_project: HashMap<String, HashMap<Uuid, ProjectUseKind>>,
+    sessions_by_root: HashMap<PathBuf, Arc<ProjectSession>>,
+    uses_by_root: HashMap<PathBuf, HashMap<Uuid, ProjectUseKind>>,
     transitions_by_root: HashMap<PathBuf, Arc<RootTransition>>,
 }
 
@@ -337,6 +371,7 @@ pub(super) fn default_watch_backend_factory() -> Arc<dyn ProjectWatchBackendFact
 }
 
 impl ProjectSessionRegistry {
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn new(
         debrute_home: impl Into<PathBuf>,
@@ -351,6 +386,7 @@ impl ProjectSessionRegistry {
         )
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn with_change_callback(
         debrute_home: impl Into<PathBuf>,
@@ -363,39 +399,43 @@ impl ProjectSessionRegistry {
             node_adapter,
             feedback_artifacts,
             on_change,
+            Arc::new(NoopProjectPathStateReconciler),
             default_watch_backend_factory(),
         )
     }
 
-    #[cfg(test)]
-    pub(super) fn with_change_callback_and_watch_backend_factory(
+    #[must_use]
+    pub fn with_change_callback_and_path_state(
         debrute_home: impl Into<PathBuf>,
         node_adapter: Arc<dyn ProjectNodeAdapter>,
         feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
         on_change: Arc<dyn Fn() + Send + Sync>,
-        watch_backend_factory: Arc<dyn ProjectWatchBackendFactory>,
+        path_state_reconciler: Arc<dyn ProjectPathStateReconciler>,
     ) -> Self {
         Self::with_dependencies(
             debrute_home,
             node_adapter,
             feedback_artifacts,
             on_change,
-            watch_backend_factory,
+            path_state_reconciler,
+            default_watch_backend_factory(),
         )
     }
 
     #[cfg(feature = "test-support")]
-    pub(crate) fn with_change_callback_and_deterministic_watcher(
+    pub(crate) fn with_change_callback_and_deterministic_watcher_and_path_state(
         debrute_home: impl Into<PathBuf>,
         node_adapter: Arc<dyn ProjectNodeAdapter>,
         feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
         on_change: Arc<dyn Fn() + Send + Sync>,
+        path_state_reconciler: Arc<dyn ProjectPathStateReconciler>,
     ) -> Self {
         Self::with_dependencies(
             debrute_home,
             node_adapter,
             feedback_artifacts,
             on_change,
+            path_state_reconciler,
             Arc::new(super::watcher::NoopProjectWatchBackendFactory),
         )
     }
@@ -405,6 +445,7 @@ impl ProjectSessionRegistry {
         node_adapter: Arc<dyn ProjectNodeAdapter>,
         feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
         on_change: Arc<dyn Fn() + Send + Sync>,
+        path_state_reconciler: Arc<dyn ProjectPathStateReconciler>,
         watch_backend_factory: Arc<dyn ProjectWatchBackendFactory>,
     ) -> Self {
         Self {
@@ -412,6 +453,7 @@ impl ProjectSessionRegistry {
                 debrute_home: debrute_home.into(),
                 node_adapter,
                 feedback_artifacts,
+                path_state_reconciler,
                 watch_backend_factory,
                 state: Mutex::new(ProjectSessionRegistryState::default()),
                 on_change,
@@ -419,33 +461,14 @@ impl ProjectSessionRegistry {
         }
     }
 
-    /// Opens a canonical Project root, atomically issues its first typed Project use,
-    /// and starts its complete file index in the background.
+    /// Opens a canonical Project root, publishes its on-demand Project Tree root,
+    /// and atomically issues its first typed Project use.
     ///
     /// # Errors
     ///
-    /// Returns an error if the registry is closed, the root cannot be initialized,
+    /// Returns an error if the registry is closed, the root cannot be loaded,
     /// or its Project watcher cannot be established.
     pub fn open_project(
-        &self,
-        project_root: impl AsRef<Path>,
-        use_kind: ProjectUseKind,
-    ) -> Result<OpenProjectSession, ProjectError> {
-        let opened = self.open_project_deferred(project_root, use_kind)?;
-        opened.session.start_background_file_index();
-        Ok(opened)
-    }
-
-    /// Opens a canonical Project root without starting its complete file index.
-    ///
-    /// The caller must start the idempotent background index after publishing the
-    /// shallow snapshot, unless its operation intentionally needs only that snapshot.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the registry is closed, the root cannot be initialized,
-    /// or its Project watcher cannot be established.
-    pub fn open_project_deferred(
         &self,
         project_root: impl AsRef<Path>,
         use_kind: ProjectUseKind,
@@ -464,10 +487,8 @@ impl ProjectSessionRegistry {
                 if state.closed {
                     return Err(ProjectError::RegistryClosed);
                 }
-                if let Some(project_id) = state.project_ids_by_root.get(&canonical_root).cloned()
-                    && let Some(session) = state.sessions_by_id.get(&project_id).cloned()
-                {
-                    let project_use = add_use(&self.inner, &mut state, &project_id, use_kind)?;
+                if let Some(session) = state.sessions_by_root.get(&canonical_root).cloned() {
+                    let project_use = add_use(&self.inner, &mut state, &canonical_root, use_kind)?;
                     drop(state);
                     (self.inner.on_change)();
                     return Ok(OpenProjectSession {
@@ -491,25 +512,24 @@ impl ProjectSessionRegistry {
             break;
         }
 
-        self.open_new_project(canonical_root, use_kind)
+        self.open_new_project(&canonical_root, use_kind)
     }
 
     fn open_new_project(
         &self,
-        canonical_root: PathBuf,
+        canonical_root: &Path,
         use_kind: ProjectUseKind,
     ) -> Result<OpenProjectSession, ProjectError> {
         let opened = ProjectService::prepare_unloaded(
-            &canonical_root,
+            canonical_root,
             &self.inner.debrute_home,
             Arc::clone(&self.inner.node_adapter),
         )
         .and_then(|service| {
-            let project_id = service.snapshot().metadata.project.id.clone();
             let session = Arc::new(ProjectSession::new(
-                project_id,
                 service,
                 Arc::clone(&self.inner.feedback_artifacts),
+                Arc::clone(&self.inner.path_state_reconciler),
                 Arc::clone(&self.inner.on_change),
             ));
             session.prepare_for_publication(self.inner.watch_backend_factory.as_ref())?;
@@ -518,34 +538,14 @@ impl ProjectSessionRegistry {
         let mut state = lock(&self.inner.state);
         let transition = state
             .transitions_by_root
-            .remove(&canonical_root)
+            .remove(canonical_root)
             .expect("Project open transition must exist when loading finishes");
         match opened {
             Ok(session) if !state.closed => {
-                let project_id = session.project_id.clone();
-                if state.sessions_by_id.contains_key(&project_id) {
-                    drop(state);
-                    let error = ProjectError::service(
-                        "duplicate_project_id",
-                        "Another Project root has the same stable Project id",
-                    );
-                    let cleanup_failure = session
-                        .close()
-                        .err()
-                        .map(|cleanup| RootTransitionFailure::from_error(&cleanup));
-                    transition.finish(
-                        Some(RootTransitionFailure::from_error(&error)),
-                        cleanup_failure,
-                    );
-                    return Err(error);
-                }
                 state
-                    .project_ids_by_root
-                    .insert(canonical_root, project_id.clone());
-                state
-                    .sessions_by_id
-                    .insert(project_id.clone(), Arc::clone(&session));
-                let project_use = add_use(&self.inner, &mut state, &project_id, use_kind)?;
+                    .sessions_by_root
+                    .insert(canonical_root.to_path_buf(), Arc::clone(&session));
+                let project_use = add_use(&self.inner, &mut state, canonical_root, use_kind)?;
                 session.publish();
                 self.inner.feedback_artifacts.attach(&session);
                 drop(state);
@@ -588,37 +588,41 @@ impl ProjectSessionRegistry {
     /// Returns an error if the registry is closed or the Project is not open.
     pub fn acquire_use(
         &self,
-        project_id: &str,
+        canonical_root: &Path,
         kind: ProjectUseKind,
     ) -> Result<ProjectUse, ProjectError> {
         let mut state = lock(&self.inner.state);
         if state.closed {
             return Err(ProjectError::RegistryClosed);
         }
-        if !state.sessions_by_id.contains_key(project_id) {
-            return Err(ProjectError::ProjectNotOpen(project_id.to_owned()));
+        if !state.sessions_by_root.contains_key(canonical_root) {
+            return Err(ProjectError::ProjectNotOpen(
+                canonical_root.to_string_lossy().into_owned(),
+            ));
         }
-        let project_use = add_use(&self.inner, &mut state, project_id, kind)?;
+        let project_use = add_use(&self.inner, &mut state, canonical_root, kind)?;
         drop(state);
         (self.inner.on_change)();
         Ok(project_use)
     }
 
-    /// Resolves an open Project session by its opaque Runtime id.
+    /// Resolves an open Project session by canonical root.
     ///
     /// # Errors
     ///
     /// Returns an error if the registry is closed or the Project is not open.
-    pub fn get(&self, project_id: &str) -> Result<Arc<ProjectSession>, ProjectError> {
+    pub fn get(&self, canonical_root: &Path) -> Result<Arc<ProjectSession>, ProjectError> {
         let state = lock(&self.inner.state);
         if state.closed {
             return Err(ProjectError::RegistryClosed);
         }
         state
-            .sessions_by_id
-            .get(project_id)
+            .sessions_by_root
+            .get(canonical_root)
             .cloned()
-            .ok_or_else(|| ProjectError::ProjectNotOpen(project_id.to_owned()))
+            .ok_or_else(|| {
+                ProjectError::ProjectNotOpen(canonical_root.to_string_lossy().into_owned())
+            })
     }
 
     /// Captures summaries for every currently live Project session.
@@ -632,11 +636,11 @@ impl ProjectSessionRegistry {
             return Err(ProjectError::RegistryClosed);
         }
         let mut summaries = state
-            .sessions_by_id
+            .sessions_by_root
             .values()
             .map(|session| session.summary())
             .collect::<Result<Vec<_>, _>>()?;
-        summaries.sort_by(|left, right| left.project_id.cmp(&right.project_id));
+        summaries.sort_by(|left, right| left.canonical_root.cmp(&right.canonical_root));
         Ok(summaries)
     }
 
@@ -655,12 +659,11 @@ impl ProjectSessionRegistry {
                 let close_transition = Arc::new(RootTransition::new());
                 state.close_transition = Some(Arc::clone(&close_transition));
                 let sessions: Vec<Arc<ProjectSession>> = state
-                    .sessions_by_id
+                    .sessions_by_root
                     .drain()
                     .map(|(_, session)| session)
                     .collect();
-                state.project_ids_by_root.clear();
-                state.uses_by_project.clear();
+                state.uses_by_root.clear();
                 let transitions = state
                     .transitions_by_root
                     .values()
@@ -702,15 +705,15 @@ impl Clone for ProjectSessionRegistry {
 
 pub struct ProjectUse {
     registry: Weak<ProjectSessionRegistryInner>,
-    project_id: String,
+    canonical_root: PathBuf,
     use_id: Uuid,
     kind: ProjectUseKind,
 }
 
 impl ProjectUse {
     #[must_use]
-    pub fn project_id(&self) -> &str {
-        &self.project_id
+    pub fn canonical_root(&self) -> &Path {
+        &self.canonical_root
     }
 
     #[must_use]
@@ -719,10 +722,10 @@ impl ProjectUse {
     }
 
     #[cfg(test)]
-    pub(crate) fn detached_for_test(project_id: &str) -> Self {
+    pub(crate) fn detached_for_test(canonical_root: &Path) -> Self {
         Self {
             registry: Weak::new(),
-            project_id: project_id.to_owned(),
+            canonical_root: canonical_root.to_path_buf(),
             use_id: Uuid::new_v4(),
             kind: ProjectUseKind::Workbench,
         }
@@ -732,34 +735,21 @@ impl ProjectUse {
 impl Drop for ProjectUse {
     fn drop(&mut self) {
         if let Some(registry) = self.registry.upgrade() {
-            release_use(&registry, &self.project_id, self.use_id);
+            release_use(&registry, &self.canonical_root, self.use_id);
         }
     }
 }
 
 pub struct ProjectSession {
-    project_id: String,
     root: PathBuf,
     feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+    path_state_reconciler: Arc<dyn ProjectPathStateReconciler>,
     on_change: Arc<dyn Fn() + Send + Sync>,
     delivery: Mutex<()>,
     state: Mutex<ProjectSessionState>,
     watcher: Mutex<Option<ProjectFileWatcher>>,
-    background_file_index: Mutex<BackgroundFileIndexLifecycle>,
     published: Mutex<bool>,
     publication_ready: Condvar,
-}
-
-struct BackgroundFileIndex {
-    cancelled: Arc<AtomicBool>,
-    worker: thread::JoinHandle<()>,
-}
-
-enum BackgroundFileIndexLifecycle {
-    NotStarted,
-    Running(BackgroundFileIndex),
-    Unavailable,
-    Closed,
 }
 
 struct ProjectSessionState {
@@ -771,19 +761,18 @@ struct ProjectSessionState {
 
 impl ProjectSession {
     fn new(
-        project_id: String,
         service: ProjectService,
         feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
+        path_state_reconciler: Arc<dyn ProjectPathStateReconciler>,
         on_change: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
         Self {
-            project_id,
             root: service.root().to_path_buf(),
             feedback_artifacts,
+            path_state_reconciler,
             on_change,
             delivery: Mutex::new(()),
             watcher: Mutex::new(None),
-            background_file_index: Mutex::new(BackgroundFileIndexLifecycle::NotStarted),
             published: Mutex::new(false),
             publication_ready: Condvar::new(),
             state: Mutex::new(ProjectSessionState {
@@ -796,8 +785,13 @@ impl ProjectSession {
     }
 
     #[must_use]
-    pub fn project_id(&self) -> &str {
-        &self.project_id
+    /// # Panics
+    ///
+    /// Panics only if an admitted canonical root is not valid UTF-8.
+    pub fn canonical_root(&self) -> &str {
+        self.root
+            .to_str()
+            .expect("Project roots are validated as UTF-8 at admission")
     }
 
     #[must_use]
@@ -812,7 +806,7 @@ impl ProjectSession {
     /// Returns an error if the Project has closed or its state is unavailable.
     pub fn sync_snapshot(&self) -> Result<ProjectSyncSnapshot, ProjectError> {
         let state = self.open_state()?;
-        Ok(sync_snapshot(&self.project_id, &state))
+        Ok(sync_snapshot(&state))
     }
 
     /// Captures the current public session summary.
@@ -823,9 +817,9 @@ impl ProjectSession {
     pub fn summary(&self) -> Result<ProjectSessionSummary, ProjectError> {
         let state = self.open_state()?;
         Ok(ProjectSessionSummary {
-            project_id: self.project_id.clone(),
+            canonical_root: self.canonical_root().to_owned(),
             project_revision: state.project_revision,
-            project_name: state.service.snapshot().metadata.project.name.clone(),
+            project_name: state.service.snapshot().health.project_name.clone(),
         })
     }
 
@@ -838,8 +832,8 @@ impl ProjectSession {
     ) -> Result<ProjectRevisionResult<CanvasFeedbackDocument>, ProjectError> {
         let state = self.open_state()?;
         Ok(ProjectRevisionResult {
-            value: state.service.canvas_feedback()?.clone(),
-            project_id: self.project_id.clone(),
+            value: state.service.canvas_feedback().clone(),
+            canonical_root: self.canonical_root().to_owned(),
             project_revision: state.project_revision,
         })
     }
@@ -858,12 +852,11 @@ impl ProjectSession {
             .project_revision
             .checked_add(1)
             .ok_or(ProjectError::RevisionExhausted)?;
-        let Some(snapshot) = state.service.apply_canvas_feedback_diagnostics(update) else {
+        let Some(snapshot) = state.service.apply_canvas_feedback_diagnostics(update)? else {
             return Ok(());
         };
         state.project_revision = next_revision;
         let event = ProjectEvent {
-            project_id: self.project_id.clone(),
             project_revision: state.project_revision,
             change: ProjectChange::ProjectChanged(snapshot),
         };
@@ -893,7 +886,6 @@ impl ProjectSession {
         let event = if let Some(change) = result.change {
             state.project_revision = next_revision;
             Some(ProjectEvent {
-                project_id: self.project_id.clone(),
                 project_revision: state.project_revision,
                 change,
             })
@@ -907,7 +899,7 @@ impl ProjectSession {
         }
         let result = ProjectRevisionResult {
             value: result.value,
-            project_id: self.project_id.clone(),
+            canonical_root: self.canonical_root().to_owned(),
             project_revision: revision,
         };
         post_commit(&result);
@@ -931,6 +923,7 @@ impl ProjectSession {
         &self,
         command: ProjectCommand,
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
+        let path_command = command.clone();
         let feedback_source = match &command {
             ProjectCommand::UpdateCanvasFeedback { input } => {
                 input.rendered_artifact_source_path().map(str::to_owned)
@@ -939,7 +932,11 @@ impl ProjectSession {
         };
         let dispatch_error = std::cell::RefCell::new(None);
         let result = self.commit_mutation_with(
-            |service| execute_project_command(service, command),
+            |service| {
+                let mut mutation = execute_project_command(service, command)?;
+                self.reconcile_path_state_in_mutation(service, &path_command, &mut mutation);
+                Ok(mutation)
+            },
             |result| {
                 if let (
                     Some(project_relative_path),
@@ -974,6 +971,7 @@ impl ProjectSession {
         expected_revision: u64,
         command: ProjectCommand,
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
+        let path_command = command.clone();
         let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
         if state.project_revision != expected_revision {
@@ -989,12 +987,12 @@ impl ProjectSession {
             .project_revision
             .checked_add(1)
             .ok_or(ProjectError::RevisionExhausted)?;
-        let result = execute_project_command(&mut state.service, command)?;
+        let mut result = execute_project_command(&mut state.service, command)?;
+        self.reconcile_path_state_in_mutation(&mut state.service, &path_command, &mut result);
         let changed = result.change.is_some();
         if let Some(change) = result.change {
             state.project_revision = next_revision;
             let event = ProjectEvent {
-                project_id: self.project_id.clone(),
                 project_revision: state.project_revision,
                 change,
             };
@@ -1002,7 +1000,7 @@ impl ProjectSession {
         }
         let result = ProjectRevisionResult {
             value: result.value,
-            project_id: self.project_id.clone(),
+            canonical_root: self.canonical_root().to_owned(),
             project_revision: state.project_revision,
         };
         drop(state);
@@ -1011,91 +1009,6 @@ impl ProjectSession {
             (self.on_change)();
         }
         Ok(result)
-    }
-
-    pub(crate) fn start_background_file_index(self: &Arc<Self>) {
-        let mut background_file_index = lock(&self.background_file_index);
-        if !matches!(
-            *background_file_index,
-            BackgroundFileIndexLifecycle::NotStarted
-        ) {
-            return;
-        }
-        if lock(&self.state).closed {
-            *background_file_index = BackgroundFileIndexLifecycle::Closed;
-            return;
-        }
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let worker_cancelled = Arc::clone(&cancelled);
-        let session = Arc::clone(self);
-        let worker = thread::Builder::new()
-            .name("debrute-project-index".to_owned())
-            .spawn(move || {
-                let files = match list_project_files_until(&session.root, || {
-                    worker_cancelled.load(Ordering::Acquire)
-                }) {
-                    Ok(Some(files)) => files,
-                    Ok(None) => return,
-                    Err(error) => {
-                        if !worker_cancelled.load(Ordering::Acquire) {
-                            session.publish_background_file_index_failure(&error.to_string());
-                        }
-                        return;
-                    }
-                };
-                if worker_cancelled.load(Ordering::Acquire) {
-                    return;
-                }
-                let install_result = session.commit_mutation_with(
-                    move |service| {
-                        if service.file_index_is_complete() {
-                            return Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
-                                service.snapshot().clone(),
-                            )));
-                        }
-                        let previous = service.snapshot().clone();
-                        let snapshot = service.install_complete_file_index(files)?;
-                        if snapshots_equivalent(&previous, &snapshot) {
-                            service.preserve_public_snapshot(previous.clone());
-                            Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
-                                previous,
-                            )))
-                        } else {
-                            Ok(project_snapshot_mutation(snapshot))
-                        }
-                    },
-                    |_| {},
-                );
-                if let Err(error) = install_result
-                    && !worker_cancelled.load(Ordering::Acquire)
-                {
-                    session.publish_background_file_index_failure(&error.to_string());
-                }
-            });
-        match worker {
-            Ok(worker) => {
-                *background_file_index =
-                    BackgroundFileIndexLifecycle::Running(BackgroundFileIndex {
-                        cancelled,
-                        worker,
-                    });
-            }
-            Err(error) => {
-                *background_file_index = BackgroundFileIndexLifecycle::Unavailable;
-                drop(background_file_index);
-                self.publish_background_file_index_failure(&error.to_string());
-            }
-        }
-    }
-
-    fn publish_background_file_index_failure(&self, message: &str) {
-        let _ = self.commit_mutation_with(
-            |service| {
-                let snapshot = service.background_file_index_failed(message);
-                Ok(project_snapshot_mutation(snapshot))
-            },
-            |_| {},
-        );
     }
 
     /// Moves a fully validated Project batch to native trash inside the same
@@ -1109,6 +1022,9 @@ impl ProjectSession {
         native_shell: &ProjectNativeShellService,
         entries: &[ProjectPathEntry],
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
+        let command = ProjectCommand::DeletePaths {
+            entries: entries.to_vec(),
+        };
         self.commit_mutation_with(
             |service| {
                 let trashed = native_shell.trash(service.root(), entries)?;
@@ -1125,17 +1041,37 @@ impl ProjectSession {
                     .iter()
                     .map(|entry| entry.project_relative_path.clone())
                     .collect::<Vec<_>>();
-                let snapshot = service.finish_committed_changes(&changed_paths)?;
-                Ok(ProjectMutation::changed(
+                let snapshot = service.reconcile_committed_path_mutation(&changed_paths, &[])?;
+                let mut mutation = ProjectMutation::changed(
                     ProjectCommandResult::PathsChanged {
                         results,
                         snapshot: snapshot.clone(),
                     },
                     ProjectChange::ProjectChanged(snapshot),
-                ))
+                );
+                self.reconcile_path_state_in_mutation(service, &command, &mut mutation);
+                Ok(mutation)
             },
             |_| {},
         )
+    }
+
+    fn reconcile_path_state_in_mutation(
+        &self,
+        service: &mut ProjectService,
+        command: &ProjectCommand,
+        mutation: &mut ProjectMutation<ProjectCommandResult>,
+    ) {
+        if !is_path_state_command(command) {
+            return;
+        }
+        let error = self
+            .path_state_reconciler
+            .reconcile(self.canonical_root(), command, &mutation.value)
+            .err();
+        let errors = error.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let snapshot = service.complete_path_state_persistence(&errors);
+        mutation.replace_snapshot(&snapshot);
     }
 
     /// Registers an ordered observer and captures its snapshot-first revision barrier.
@@ -1152,7 +1088,7 @@ impl ProjectSession {
         Ok(ProjectSubscription {
             session: Arc::downgrade(self),
             id,
-            initial: Some(sync_snapshot(&self.project_id, &state)),
+            initial: Some(sync_snapshot(&state)),
             receiver,
             released: false,
         })
@@ -1161,19 +1097,11 @@ impl ProjectSession {
     fn open_state(&self) -> Result<MutexGuard<'_, ProjectSessionState>, ProjectError> {
         let state = lock(&self.state);
         if state.closed {
-            return Err(ProjectError::ProjectNotOpen(self.project_id.clone()));
+            return Err(ProjectError::ProjectNotOpen(
+                self.canonical_root().to_owned(),
+            ));
         }
         Ok(state)
-    }
-
-    #[cfg(test)]
-    pub(super) fn set_revision_for_test(&self, revision: u64) {
-        lock(&self.state).project_revision = revision;
-    }
-
-    #[cfg(test)]
-    pub(super) fn apply_watched_change_for_test(&self, path: &str) -> Result<(), ProjectError> {
-        self.apply_watched_file_change(path.to_owned())
     }
 
     fn prepare_for_publication(
@@ -1181,18 +1109,16 @@ impl ProjectSession {
         watch_backend_factory: &dyn ProjectWatchBackendFactory,
     ) -> Result<(), ProjectError> {
         let weak = Arc::downgrade(self);
-        let explicit_dependency_session = Arc::downgrade(self);
+        let loaded_dependency_session = Arc::downgrade(self);
         let watcher = ProjectFileWatcher::start(
             &self.root,
             watch_backend_factory,
             Arc::new(move |project_relative_path| {
-                explicit_dependency_session
-                    .upgrade()
-                    .is_some_and(|session| {
-                        lock(&session.state)
-                            .service
-                            .is_explicit_watch_path(project_relative_path)
-                    })
+                loaded_dependency_session.upgrade().is_some_and(|session| {
+                    lock(&session.state)
+                        .service
+                        .is_loaded_watch_path(project_relative_path)
+                })
             }),
             Arc::new(move |signal| {
                 if let Some(session) = weak.upgrade() {
@@ -1240,12 +1166,10 @@ impl ProjectSession {
         }
     }
 
-    #[cfg(test)]
-    fn apply_watched_file_change(&self, path: String) -> Result<(), ProjectError> {
-        self.apply_watched_file_changes(vec![path])
-    }
-
-    fn apply_watched_file_changes(&self, paths: Vec<String>) -> Result<(), ProjectError> {
+    pub(crate) fn apply_watched_file_changes(
+        &self,
+        paths: Vec<ProjectWatchPath>,
+    ) -> Result<(), ProjectError> {
         self.apply_watched_refresh(ProjectWatchSignal::Paths(paths))
     }
 
@@ -1253,45 +1177,48 @@ impl ProjectSession {
         self.apply_watched_refresh(ProjectWatchSignal::RescanRequired(message))
     }
 
-    #[allow(clippy::too_many_lines)] // One delivery guard owns the complete refresh transaction.
+    // One delivery guard owns the complete refresh transaction.
     fn apply_watched_refresh(&self, signal: ProjectWatchSignal) -> Result<(), ProjectError> {
         let feedback_source = match &signal {
             ProjectWatchSignal::Paths(paths)
-                if paths.len() == 1 && paths[0] != super::CANVAS_FEEDBACK_PROJECT_PATH =>
+                if paths.len() == 1
+                    && paths[0].project_relative_path != super::CANVAS_FEEDBACK_PROJECT_PATH =>
             {
-                Some(paths[0].clone())
+                Some(paths[0].project_relative_path.clone())
             }
             ProjectWatchSignal::Paths(_) | ProjectWatchSignal::RescanRequired(_) => None,
         };
         let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
+        if let ProjectWatchSignal::Paths(paths) = &signal
+            && state.service.watch_paths_match_current_documents(paths)
+        {
+            return Ok(());
+        }
         let next_revision = state
             .project_revision
             .checked_add(1)
             .ok_or(ProjectError::RevisionExhausted)?;
         let previous = state.service.snapshot().clone();
         let diagnostic_path = match &signal {
-            ProjectWatchSignal::Paths(paths) => paths.first().map_or("", String::as_str),
+            ProjectWatchSignal::Paths(paths) => paths
+                .first()
+                .map_or("", |path| path.project_relative_path.as_str()),
             ProjectWatchSignal::RescanRequired(_) => "",
         };
-        let requires_full_index = match &signal {
-            ProjectWatchSignal::RescanRequired(_) => true,
-            ProjectWatchSignal::Paths(paths) => paths.iter().any(|path| is_gitignore_path(path)),
-        };
-        let snapshot_result = match &signal {
-            ProjectWatchSignal::Paths(_) if requires_full_index => {
-                state.service.complete_file_index()
-            }
+        let refresh_result = match &signal {
             ProjectWatchSignal::Paths(paths) => state.service.refresh_watched_paths(paths),
-            ProjectWatchSignal::RescanRequired(_) => state.service.complete_file_index(),
+            ProjectWatchSignal::RescanRequired(_) => {
+                state.service.refresh_loaded_snapshot_for_watcher()
+            }
         };
-        let snapshot = match snapshot_result {
-            Ok(snapshot) => snapshot,
+        let refresh = match refresh_result {
+            Ok(refresh) => refresh,
             Err(error) => {
                 let message = match &signal {
                     ProjectWatchSignal::Paths(_) => error.to_string(),
                     ProjectWatchSignal::RescanRequired(watch_error) => {
-                        format!("{watch_error}; full refresh failed: {error}")
+                        format!("{watch_error}; loaded Project Tree refresh failed: {error}")
                     }
                 };
                 if error.leaves_mutation_outcome_uncertain() {
@@ -1300,7 +1227,6 @@ impl ProjectSession {
                         .watch_refresh_failed(diagnostic_path, &message);
                     state.project_revision = next_revision;
                     let event = ProjectEvent {
-                        project_id: self.project_id.clone(),
                         project_revision: state.project_revision,
                         change: ProjectChange::ProjectChanged(snapshot),
                     };
@@ -1312,15 +1238,44 @@ impl ProjectSession {
                 }
                 state
                     .service
-                    .watch_refresh_failed(diagnostic_path, &message)
+                    .watch_refresh_failed(diagnostic_path, &message);
+                super::service::WatchedProjectRefresh {
+                    snapshot: state.service.snapshot().clone(),
+                    path_state_invalidated: Vec::new(),
+                    path_state_persistence_errors: Vec::new(),
+                    refresh_error: None,
+                }
             }
         };
+        let mut snapshot = if let Some(error) = &refresh.refresh_error {
+            let message = match &signal {
+                ProjectWatchSignal::Paths(_) => error.to_string(),
+                ProjectWatchSignal::RescanRequired(watch_error) => {
+                    format!("{watch_error}; loaded Project state refresh failed: {error}")
+                }
+            };
+            state
+                .service
+                .watch_refresh_failed(diagnostic_path, &message)
+        } else {
+            refresh.snapshot
+        };
+        if !refresh.path_state_invalidated.is_empty() {
+            let mut errors = refresh.path_state_persistence_errors;
+            if let Err(error) = self
+                .path_state_reconciler
+                .prune(self.canonical_root(), &refresh.path_state_invalidated)
+            {
+                errors.push(error.to_string());
+            }
+            snapshot = state.service.complete_path_state_persistence(&errors);
+        }
         if snapshots_equivalent(&previous, &snapshot) {
-            let files = snapshot.files.clone();
+            let files = snapshot.project_tree.clone();
             state.service.preserve_public_snapshot(previous);
-            let feedback = state.service.canvas_feedback().ok().cloned();
+            let feedback = state.service.canvas_feedback().clone();
             let project_revision = state.project_revision;
-            let dispatch_error = feedback.and_then(|feedback| match feedback_source.as_deref() {
+            let dispatch_error = match feedback_source.as_deref() {
                 Some(source) => self
                     .feedback_artifacts
                     .enqueue_source_ordered(&self.root, project_revision, source, feedback)
@@ -1329,7 +1284,7 @@ impl ProjectSession {
                     .feedback_artifacts
                     .enqueue_document_ordered(&self.root, project_revision, feedback)
                     .err(),
-            });
+            };
             drop(state);
             drop(delivery);
             if let Some(error) = dispatch_error {
@@ -1348,7 +1303,7 @@ impl ProjectSession {
         let change = match signal {
             ProjectWatchSignal::Paths(paths) if paths.len() == 1 => {
                 ProjectChange::ProjectFileChanged {
-                    project_relative_path: paths[0].clone(),
+                    project_relative_path: paths[0].project_relative_path.clone(),
                     snapshot,
                 }
             }
@@ -1357,15 +1312,14 @@ impl ProjectSession {
             }
         };
         let event = ProjectEvent {
-            project_id: self.project_id.clone(),
             project_revision: state.project_revision,
             change,
         };
         publish_event(&mut state, &event);
-        let files = state.service.snapshot().files.clone();
-        let feedback = state.service.canvas_feedback().ok().cloned();
+        let files = state.service.snapshot().project_tree.clone();
+        let feedback = state.service.canvas_feedback().clone();
         let project_revision = state.project_revision;
-        let dispatch_error = feedback.and_then(|feedback| match feedback_source.as_deref() {
+        let dispatch_error = match feedback_source.as_deref() {
             Some(source) => self
                 .feedback_artifacts
                 .enqueue_source_ordered(&self.root, project_revision, source, feedback)
@@ -1374,7 +1328,7 @@ impl ProjectSession {
                 .feedback_artifacts
                 .enqueue_document_ordered(&self.root, project_revision, feedback)
                 .err(),
-        });
+        };
         drop(state);
         drop(delivery);
         (self.on_change)();
@@ -1414,13 +1368,12 @@ impl ProjectSession {
     }
 
     fn finalize_close(&self) -> Result<(), ProjectError> {
-        let background_index_result = self.close_background_file_index();
         self.close_watcher();
         let detach_result = self.feedback_artifacts.detach(&self.root);
         if detach_result.is_ok() {
             lock(&self.state).service.release_capability_binding();
         }
-        background_index_result.and(detach_result)
+        detach_result
     }
 
     fn close_watcher(&self) {
@@ -1428,28 +1381,6 @@ impl ProjectSession {
         if let Some(mut watcher) = watcher {
             watcher.close();
         }
-    }
-
-    fn close_background_file_index(&self) -> Result<(), ProjectError> {
-        let index = {
-            let mut lifecycle = lock(&self.background_file_index);
-            match std::mem::replace(&mut *lifecycle, BackgroundFileIndexLifecycle::Closed) {
-                BackgroundFileIndexLifecycle::Running(index) => Some(index),
-                BackgroundFileIndexLifecycle::NotStarted
-                | BackgroundFileIndexLifecycle::Unavailable
-                | BackgroundFileIndexLifecycle::Closed => None,
-            }
-        };
-        let Some(index) = index else {
-            return Ok(());
-        };
-        index.cancelled.store(true, Ordering::Release);
-        index.worker.join().map_err(|_| {
-            ProjectError::service(
-                "project_index_join_failed",
-                "Project background index worker panicked during close.",
-            )
-        })
     }
 }
 
@@ -1543,16 +1474,22 @@ fn execute_project_command(
             }
         }
         command @ (ProjectCommand::CreateCanvas
+        | ProjectCommand::ResetCanvasWorkspace
         | ProjectCommand::RenameCanvas { .. }
         | ProjectCommand::ReorderCanvases { .. }
         | ProjectCommand::DeleteCanvas { .. }
-        | ProjectCommand::RepairCanvasRegistry) => {
-            execute_canvas_registry_command(service, command)
+        | ProjectCommand::ActivateCanvas { .. }) => {
+            execute_canvas_management_command(service, command)
         }
-        command @ (ProjectCommand::UpdateCanvasLayouts { .. }
-        | ProjectCommand::UpdateCanvasVideoPlayback { .. }
-        | ProjectCommand::UpdateCanvasTextViewports { .. }) => {
-            execute_visual_canvas_command(service, command)
+        ProjectCommand::PatchCanvasState { patch } => {
+            let (snapshot, changed) = service.patch_canvas_state(&patch)?;
+            if changed {
+                Ok(project_snapshot_mutation(snapshot))
+            } else {
+                Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
+                    snapshot,
+                )))
+            }
         }
         ProjectCommand::UpdateCanvasFeedback { input } => {
             let affects_rendered_artifact = input.affects_rendered_artifact();
@@ -1572,9 +1509,6 @@ fn execute_project_command(
                 Ok(ProjectMutation::unchanged(result))
             }
         }
-        command @ (ProjectCommand::PushCanvasMap { .. }
-        | ProjectCommand::AddProjectPathToCanvasMap { .. }
-        | ProjectCommand::ResetCanvasLayout { .. }) => execute_canvas_map_command(service, command),
         command @ (ProjectCommand::WriteTextFile { .. }
         | ProjectCommand::CreatePath { .. }
         | ProjectCommand::RenamePath { .. }) => execute_single_file_command(service, command),
@@ -1582,11 +1516,28 @@ fn execute_project_command(
     }
 }
 
-fn execute_canvas_registry_command(
+fn is_path_state_command(command: &ProjectCommand) -> bool {
+    matches!(
+        command,
+        ProjectCommand::CreatePath { .. }
+            | ProjectCommand::RenamePath { .. }
+            | ProjectCommand::CopyPaths { .. }
+            | ProjectCommand::MovePaths { .. }
+            | ProjectCommand::DeletePaths { .. }
+            | ProjectCommand::ImportLocalPaths { .. }
+            | ProjectCommand::ImportUploadEntries { .. }
+    )
+}
+
+fn execute_canvas_management_command(
     service: &mut ProjectService,
     command: ProjectCommand,
 ) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
     match command {
+        ProjectCommand::ResetCanvasWorkspace => {
+            let snapshot = service.reset_canvas_workspace()?;
+            Ok(project_snapshot_mutation(snapshot))
+        }
         ProjectCommand::CreateCanvas => {
             let (canvas_id, snapshot) = service.create_canvas()?;
             Ok(ProjectMutation::changed(
@@ -1615,81 +1566,18 @@ fn execute_canvas_registry_command(
                 ProjectChange::ProjectChanged(snapshot),
             ))
         }
-        ProjectCommand::RepairCanvasRegistry => {
-            let (active_canvas_id, snapshot) = service.repair_canvas_registry()?;
-            Ok(ProjectMutation::changed(
-                ProjectCommandResult::CanvasRegistryRepaired {
-                    active_canvas_id,
-                    snapshot: snapshot.clone(),
-                },
-                ProjectChange::ProjectChanged(snapshot),
-            ))
+        ProjectCommand::ActivateCanvas { canvas_id } => {
+            let previous = service.snapshot().clone();
+            let snapshot = service.activate_canvas(&canvas_id)?;
+            if snapshots_equivalent(&previous, &snapshot) {
+                Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
+                    snapshot,
+                )))
+            } else {
+                Ok(project_snapshot_mutation(snapshot))
+            }
         }
-        _ => unreachable!("non-registry command reached the registry command executor"),
-    }
-}
-
-fn execute_visual_canvas_command(
-    service: &mut ProjectService,
-    command: ProjectCommand,
-) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
-    let (canvas, projection, changed) = match command {
-        ProjectCommand::UpdateCanvasLayouts {
-            canvas_id,
-            interaction,
-            updates,
-        } => service.update_canvas_layouts(&canvas_id, interaction, &updates)?,
-        ProjectCommand::UpdateCanvasVideoPlayback { canvas_id, updates } => {
-            service.update_canvas_video_playback(&canvas_id, &updates)?
-        }
-        ProjectCommand::UpdateCanvasTextViewports { canvas_id, updates } => {
-            service.update_canvas_text_viewports(&canvas_id, &updates)?
-        }
-        _ => unreachable!("non-visual command reached the visual Canvas executor"),
-    };
-    Ok(canvas_change_mutation(canvas, projection, changed))
-}
-
-fn execute_canvas_map_command(
-    service: &mut ProjectService,
-    command: ProjectCommand,
-) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
-    match command {
-        ProjectCommand::PushCanvasMap { canvas_id } => {
-            let snapshot = service.push_canvas_map(&canvas_id)?;
-            Ok(project_snapshot_mutation(snapshot))
-        }
-        ProjectCommand::AddProjectPathToCanvasMap {
-            canvas_id,
-            project_relative_path,
-        } => {
-            let (canvas, projection, added) =
-                service.add_project_path_to_canvas_map(&canvas_id, &project_relative_path)?;
-            Ok(ProjectMutation::changed(
-                ProjectCommandResult::CanvasMapPathAdded {
-                    canvas: canvas.clone(),
-                    projection: projection.clone(),
-                    project_relative_path: added,
-                },
-                ProjectChange::CanvasChanged { canvas, projection },
-            ))
-        }
-        ProjectCommand::ResetCanvasLayout {
-            canvas_id,
-            node_paths,
-        } => {
-            let (canvas, projection, reset_count) =
-                service.reset_canvas_layout(&canvas_id, node_paths.as_ref())?;
-            Ok(ProjectMutation::changed(
-                ProjectCommandResult::CanvasLayoutReset {
-                    canvas: canvas.clone(),
-                    projection: projection.clone(),
-                    reset_count,
-                },
-                ProjectChange::CanvasChanged { canvas, projection },
-            ))
-        }
-        _ => unreachable!("non-Canvas-Map command reached the Canvas Map executor"),
+        _ => unreachable!("non-management command reached the Canvas management executor"),
     }
 }
 
@@ -1709,7 +1597,7 @@ fn execute_single_file_command(
                 &content,
                 &expected_revision,
             )?;
-            let snapshot = service.finish_committed_change(&project_relative_path)?;
+            let snapshot = service.reconcile_committed_content_change(&project_relative_path)?;
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::TextFileSaved {
                     file,
@@ -1728,7 +1616,16 @@ fn execute_single_file_command(
         } => {
             let result =
                 create_project_path(service.root(), &parent_project_relative_path, &name, kind)?;
-            project_path_mutation(service, result)
+            let path = result.project_relative_path.clone();
+            let snapshot =
+                service.reconcile_committed_path_mutation(std::slice::from_ref(&path), &[])?;
+            Ok(ProjectMutation::changed(
+                ProjectCommandResult::PathChanged {
+                    result,
+                    snapshot: snapshot.clone(),
+                },
+                ProjectChange::ProjectChanged(snapshot),
+            ))
         }
         ProjectCommand::RenamePath {
             project_relative_path,
@@ -1736,7 +1633,10 @@ fn execute_single_file_command(
         } => {
             let result = rename_project_path(service.root(), &project_relative_path, &name)?;
             let target = result.project_relative_path.clone();
-            let snapshot = service.finish_committed_changes(&[project_relative_path, target])?;
+            let snapshot = service.reconcile_committed_path_mutation(
+                std::slice::from_ref(&target),
+                &[(project_relative_path, target.clone())],
+            )?;
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::PathChanged {
                     result,
@@ -1753,14 +1653,14 @@ fn execute_file_batch_command(
     service: &mut ProjectService,
     command: ProjectCommand,
 ) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
-    let (results, paths) = match command {
+    let (results, removed, rewrites) = match command {
         ProjectCommand::CopyPaths {
             entries,
             target_directory,
         } => {
             let results = copy_project_paths(service.root(), &entries, &target_directory)?;
-            let paths = result_project_paths(&results).collect();
-            (results, paths)
+            let removed = result_project_paths(&results).collect();
+            (results, removed, Vec::new())
         }
         ProjectCommand::MovePaths {
             entries,
@@ -1769,16 +1669,26 @@ fn execute_file_batch_command(
         } => {
             let results =
                 move_project_paths(service.root(), &entries, &target_directory, overwrite)?;
-            let paths = entries_project_paths(&entries)
-                .into_iter()
-                .chain(result_project_paths(&results))
-                .collect();
-            (results, paths)
+            let rewrites = results
+                .iter()
+                .filter(|result| result.status == ProjectPathOperationStatus::Ok)
+                .filter(|result| {
+                    result.source_project_relative_path != result.project_relative_path
+                })
+                .map(|result| {
+                    (
+                        result.source_project_relative_path.clone(),
+                        result.project_relative_path.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let removed = rewrites.iter().map(|(_, target)| target.clone()).collect();
+            (results, removed, rewrites)
         }
         ProjectCommand::DeletePaths { entries } => {
-            let paths = entries_project_paths(&entries);
+            let removed = entries_project_paths(&entries);
             let results = delete_project_paths(service.root(), &entries)?;
-            (results, paths)
+            (results, removed, Vec::new())
         }
         ProjectCommand::ImportLocalPaths {
             source_paths,
@@ -1791,8 +1701,8 @@ fn execute_file_batch_command(
                 &target_directory,
                 overwrite,
             )?;
-            let paths = result_project_paths(&results).collect();
-            (results, paths)
+            let removed = result_project_paths(&results).collect();
+            (results, removed, Vec::new())
         }
         ProjectCommand::ImportUploadEntries {
             entries,
@@ -1805,60 +1715,12 @@ fn execute_file_batch_command(
                 &target_directory,
                 overwrite,
             )?;
-            let paths = result_project_paths(&results).collect();
-            (results, paths)
+            let removed = result_project_paths(&results).collect();
+            (results, removed, Vec::new())
         }
         _ => unreachable!("non-batch command reached the file batch executor"),
     };
-    project_paths_mutation(service, results, paths)
-}
-
-fn project_snapshot_mutation(snapshot: ProjectSnapshot) -> ProjectMutation<ProjectCommandResult> {
-    ProjectMutation::changed(
-        ProjectCommandResult::Snapshot(snapshot.clone()),
-        ProjectChange::ProjectChanged(snapshot),
-    )
-}
-
-fn canvas_change_mutation(
-    canvas: CanvasDocument,
-    projection: CanvasProjection,
-    changed: bool,
-) -> ProjectMutation<ProjectCommandResult> {
-    let value = ProjectCommandResult::CanvasChanged {
-        canvas: canvas.clone(),
-        projection: projection.clone(),
-        changed,
-    };
-    if changed {
-        ProjectMutation::changed(value, ProjectChange::CanvasChanged { canvas, projection })
-    } else {
-        ProjectMutation::unchanged(value)
-    }
-}
-
-fn project_path_mutation(
-    service: &mut ProjectService,
-    result: ProjectPathEntry,
-) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
-    let path = result.project_relative_path.clone();
-    let snapshot = service.finish_committed_change(&path)?;
-    Ok(ProjectMutation::changed(
-        ProjectCommandResult::PathChanged {
-            result,
-            snapshot: snapshot.clone(),
-        },
-        ProjectChange::ProjectChanged(snapshot),
-    ))
-}
-
-fn project_paths_mutation(
-    service: &mut ProjectService,
-    results: Vec<ProjectPathBatchItemResult>,
-    paths: impl IntoIterator<Item = String>,
-) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
-    let paths = paths.into_iter().collect::<Vec<_>>();
-    let snapshot = service.finish_committed_changes(&paths)?;
+    let snapshot = service.reconcile_committed_path_mutation(&removed, &rewrites)?;
     Ok(ProjectMutation::changed(
         ProjectCommandResult::PathsChanged {
             results,
@@ -1866,6 +1728,13 @@ fn project_paths_mutation(
         },
         ProjectChange::ProjectChanged(snapshot),
     ))
+}
+
+fn project_snapshot_mutation(snapshot: ProjectSnapshot) -> ProjectMutation<ProjectCommandResult> {
+    ProjectMutation::changed(
+        ProjectCommandResult::Snapshot(snapshot.clone()),
+        ProjectChange::ProjectChanged(snapshot),
+    )
 }
 
 fn entries_project_paths(entries: &[ProjectPathEntry]) -> Vec<String> {
@@ -1906,43 +1775,44 @@ impl Drop for ProjectSubscription {
 fn add_use(
     registry: &Arc<ProjectSessionRegistryInner>,
     state: &mut ProjectSessionRegistryState,
-    project_id: &str,
+    canonical_root: &Path,
     kind: ProjectUseKind,
 ) -> Result<ProjectUse, ProjectError> {
-    if !state.sessions_by_id.contains_key(project_id) {
-        return Err(ProjectError::ProjectNotOpen(project_id.to_owned()));
+    if !state.sessions_by_root.contains_key(canonical_root) {
+        return Err(ProjectError::ProjectNotOpen(
+            canonical_root.to_string_lossy().into_owned(),
+        ));
     }
     let use_id = Uuid::new_v4();
     state
-        .uses_by_project
-        .entry(project_id.to_owned())
+        .uses_by_root
+        .entry(canonical_root.to_path_buf())
         .or_default()
         .insert(use_id, kind);
     Ok(ProjectUse {
         registry: Arc::downgrade(registry),
-        project_id: project_id.to_owned(),
+        canonical_root: canonical_root.to_path_buf(),
         use_id,
         kind,
     })
 }
 
-fn release_use(registry: &Arc<ProjectSessionRegistryInner>, project_id: &str, use_id: Uuid) {
+fn release_use(registry: &Arc<ProjectSessionRegistryInner>, canonical_root: &Path, use_id: Uuid) {
     let closing = {
         let mut state = registry
             .state
             .lock()
             .expect("Project registry lock poisoned");
-        let Some(project_uses) = state.uses_by_project.get_mut(project_id) else {
+        let Some(project_uses) = state.uses_by_root.get_mut(canonical_root) else {
             return;
         };
         if project_uses.remove(&use_id).is_none() || !project_uses.is_empty() {
             return;
         }
-        state.uses_by_project.remove(project_id);
-        let Some(session) = state.sessions_by_id.remove(project_id) else {
+        state.uses_by_root.remove(canonical_root);
+        let Some(session) = state.sessions_by_root.remove(canonical_root) else {
             return;
         };
-        state.project_ids_by_root.remove(session.root());
         let transition = Arc::new(RootTransition::new());
         state
             .transitions_by_root
@@ -1968,24 +1838,19 @@ fn release_use(registry: &Arc<ProjectSessionRegistryInner>, project_id: &str, us
     (registry.on_change)();
 }
 
-fn sync_snapshot(project_id: &str, state: &ProjectSessionState) -> ProjectSyncSnapshot {
+fn sync_snapshot(state: &ProjectSessionState) -> ProjectSyncSnapshot {
     ProjectSyncSnapshot {
-        project_id: project_id.to_owned(),
         project_revision: state.project_revision,
         snapshot: state.service.snapshot().clone(),
     }
 }
 
 fn snapshots_equivalent(left: &ProjectSnapshot, right: &ProjectSnapshot) -> bool {
-    left.project_root == right.project_root
-        && left.metadata == right.metadata
-        && left.files == right.files
-        && left.canvases == right.canvases
-        && left.projections == right.projections
+    left.canonical_root == right.canonical_root
+        && left.canvas_workspace == right.canvas_workspace
+        && left.project_tree == right.project_tree
         && left.diagnostics == right.diagnostics
-        && left.canvas_registry == right.canvas_registry
         && left.health.project_name == right.health.project_name
-        && left.health.canvas_count == right.health.canvas_count
         && left.health.diagnostic_counts == right.health.diagnostic_counts
         && left.health.runtime_data_location == right.health.runtime_data_location
 }

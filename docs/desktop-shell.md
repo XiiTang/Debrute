@@ -37,28 +37,31 @@ route. One `DesktopWindowHost` owns the complete local record for that window:
 the Runtime key, BrowserWindow identity, `opening` or `live` phase, current
 one-use launch ticket, deferred focus intent, and native close listener. Main
 does not keep a second BrowserWindow map, and the Electron adapter does not own
-the ticket or Runtime identity.
+the launch ticket or Runtime identity.
 
 The Host requests one in-memory, single-use launch ticket for the Runtime key.
 The same response carries the current Runtime-owned Workbench theme preference
-as a launch-time presentation snapshot. Window construction is synchronous and
-hidden. The Host inserts its record and close listener before applying the
-background and calling `loadURL`, so preload can resolve the real
-BrowserWindow to that record and consume the ticket while the document is
-loading. Only a successful load changes the record to `live` and shows the
-window. A focus request received during `opening` is remembered and applied
-after that transition instead of showing a partial Workbench.
+as a launch-time presentation snapshot. Desktop exposes the ticket to preload
+through one narrow one-use IPC method. Window construction is synchronous and hidden. The Host
+inserts its record and close listener before applying the background and
+calling `loadURL`, so preload can resolve the real BrowserWindow to that record
+and consume the ticket while the document is loading. Only a successful load
+changes the record to `live` and shows the window. A focus request received
+during `opening` is remembered and applied after that transition instead of
+showing a partial Workbench.
 
-The Host resolves `system` with Electron's native theme and loads the stable
-Workbench URL. Runtime records only the live window key and route. Desktop does
-not persist a settings copy. Missing or invalid launch presentation fails the
-window launch instead of selecting a default background. Runtime does not
-persist window bounds, focus, recovery topology, or renderer acknowledgements.
-The renderer document remains transparent while its Workbench connection waits
-for the authoritative Global Settings snapshot, leaving this native background
-visible. It begins normal painting only after applying the snapshot's resolved
-theme, so a slow Project or Integration resource cannot produce an intermediate
-default-theme frame.
+The Host resolves `system` with Electron's native theme and loads the complete
+Workbench URL from the ticket response unchanged. Runtime selects the packaged
+or registered source-development origin and encodes the complete root-or-Project
+route; Electron does not rewrite its origin, path, or query. Runtime records only
+the live window key and route. Desktop does not persist a settings copy. Missing
+or invalid launch presentation fails the window launch instead of selecting a
+default background. Runtime does not persist window bounds, focus, recovery
+topology, or renderer acknowledgements. The renderer document remains
+transparent while its Workbench connection waits for the authoritative Global
+Settings snapshot, leaving this native background visible. It begins normal
+painting only after applying the snapshot's resolved theme, so a slow Project or
+Integration resource cannot produce an intermediate default-theme frame.
 
 Electron Main owns the native Project selector and submits every ordinary
 Desktop Project open to Runtime activation. This includes startup arguments,
@@ -95,7 +98,24 @@ An explicit first-process Project argument runs first; otherwise the first
 queued native open replaces the default root window, and only an empty queue
 creates that default. Intents arriving during the first activation are drained
 in order before admission becomes live. The closure does not deduplicate,
-retry, replay, or persist opens.
+retry, replay, or persist opens. It returns every startup activation result in
+the same order, so a queued native request cannot lose a Project-open failure.
+
+Runtime returns an expected Project validation failure as
+`project_open_failed`, with the exact requested root, Project error code, and
+message. Renderer-originated native commands return that closed result over
+IPC instead of throwing a generic Electron invocation error. Application-menu
+and native-open callbacks deliver the same result to their source or focused
+Workbench over the closed shell event. Workbench shows the root and message;
+path failures such as `project_not_found` remain structured and are not
+converted to `invalid_activation`.
+
+If a startup Desktop activation fails this way, no initiating Workbench exists
+to receive the result. Desktop shows the exact code and message as a native
+startup error and does not create another window or retry the activation.
+
+Canvas Workspace damage does not fail Project opening. Workbench remains bound
+to the Project and presents the Canvas-unavailable surface there.
 
 The red close button closes one window. A non-final close reports that window
 key to Runtime. The final close instead closes the Desktop Control connection

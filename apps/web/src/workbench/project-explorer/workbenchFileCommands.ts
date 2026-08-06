@@ -35,7 +35,7 @@ export function externalDropPlanHasConflict(input: {
   uploads: Array<{ projectRelativePath: string }>;
   targetDirectoryProjectRelativePath: string;
 }): boolean {
-  const existingPaths = new Set(input.snapshot?.files.map((file) => file.projectRelativePath) ?? []);
+  const existingPaths = new Set(input.snapshot?.projectTree.map((entry) => entry.projectRelativePath) ?? []);
   return [
     ...input.localPaths.map((path) => (
       input.targetDirectoryProjectRelativePath
@@ -83,7 +83,11 @@ export function reconcileCutClipboardWithProjectEntries(
 
 export function batchResultSelectionPaths(results: WorkbenchProjectFileBatchOperationResult['results']): string[] {
   return results
-    .filter((result) => result.status === 'ok' || result.status === 'skipped')
+    .filter((result) => (
+      result.status === 'ok'
+      || result.status === 'skipped'
+      || result.status === 'quarantined'
+    ))
     .map((result) => result.projectRelativePath);
 }
 
@@ -115,6 +119,34 @@ export function clearCanvasSelectionAfterDeletedPath(
   return canvasNodeSelection(selection.projectRelativePaths.filter((path) => (
     !isProjectPathContainedByDeletedPath(path, deletedProjectRelativePath)
   )));
+}
+
+export function rewriteCanvasSelectionAfterPathChanges(
+  selection: CanvasSelection | undefined,
+  changes: readonly {
+    sourceProjectRelativePath: string;
+    projectRelativePath: string;
+    status: 'ok' | 'skipped' | 'quarantined';
+  }[]
+): CanvasSelection | undefined {
+  if (selection?.kind !== 'nodes') {
+    return selection;
+  }
+  const completed = changes
+    .filter((change) => change.status === 'ok'
+      && change.sourceProjectRelativePath !== change.projectRelativePath)
+    .sort((left, right) => right.sourceProjectRelativePath.length - left.sourceProjectRelativePath.length);
+  return canvasNodeSelection(selection.projectRelativePaths.map((path) => {
+    const change = completed.find(({ sourceProjectRelativePath }) => (
+      isProjectPathContainedByDeletedPath(path, sourceProjectRelativePath)
+    ));
+    if (!change) {
+      return path;
+    }
+    return path === change.sourceProjectRelativePath
+      ? change.projectRelativePath
+      : `${change.projectRelativePath}${path.slice(change.sourceProjectRelativePath.length)}`;
+  }));
 }
 
 export interface PermanentDeleteConfirmationLabels {

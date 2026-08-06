@@ -12,6 +12,7 @@ const commandKeys: Record<ProjectPathCommand, WorkbenchTranslationKey> = {
   copy: 'shell.contextMenu.copy',
   paste: 'shell.contextMenu.paste',
   'copy-path': 'shell.contextMenu.copyPath',
+  'reveal-in-canvas': 'shell.contextMenu.revealInCanvas',
   'reveal-in-system-file-manager': 'shell.contextMenu.openContainingFolder',
   rename: 'shell.contextMenu.rename',
   delete: 'shell.contextMenu.moveToTrash',

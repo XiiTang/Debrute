@@ -124,10 +124,10 @@ The resource-ownership rationale is recorded in
 The public command-matrix test keeps the closed CLI inventory explicit.
 Parser behavior tests cover each distinct syntax form: positional bounds,
 required and duplicate options, flags, repeatable values, simple allowed-value
-sets, Project positional and option path resolution, unknown options, and the
-`canvas.reset-layout` cross-option rule. They do not copy one canonical argv
-form for every command or inspect parser source for command-name switches; the
-registered syntax is the parser's input.
+sets, root and file path resolution, unknown options, and the mutually exclusive
+JSONL/direct Model Request sources. They do not copy one canonical argv form for
+every command or inspect parser source for command-name switches; the registered
+syntax is the parser's input.
 
 ## Workbench UI Acceptance
 
@@ -140,7 +140,7 @@ record used when Runtime never becomes Ready. Absence assertions are used when
 absence is part of the rendered contract, such as hiding ready content while a
 resource is loading.
 
-## Model Generation Acceptance
+## Model Request Acceptance
 
 Catalog-validation tests prove that Doubao Seed TTS 2.0 accepts omission and
 each documented integer `sample_rate`, while fractional, negative, and
@@ -148,7 +148,7 @@ unsupported values fail before the transport receives a request. Adapter tests
 prove that omission sends `24000`, an explicit supported rate is preserved in
 the upstream body, and PCM output writes that same rate into its WAV header.
 Exact-adapter fixtures dispatch TTS, music, and sound-effect through the shared
-internal audio execution family and verify their distinct Artifact Roles.
+internal audio execution family and verify their distinct request and response parsing.
 
 ## Workbench HTTP Acceptance
 

@@ -114,8 +114,7 @@ try {
     env: {
       ...process.env,
       DEBRUTE_RUNTIME_ENTRYPOINT: runtimeEntrypoint,
-      DEBRUTE_RUNTIME_WEB_ASSETS_DIR: runtimeAssetsDirectory,
-      DEBRUTE_DESKTOP_VITE_ORIGIN: viteOrigin
+      DEBRUTE_RUNTIME_WEB_ASSETS_DIR: runtimeAssetsDirectory
     }
   });
 

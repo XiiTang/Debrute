@@ -62,12 +62,25 @@ Unexpected filesystem errors fail closed. Only explicitly expected missing-path
 cases become absence; permission, invalid-link, IO, and other resolution errors
 are not converted into a successful fallback.
 
-The same boundary protects Project Tree mutations, Project Document
-transactions and their lock/temporary/rollback files, generated-asset records,
-Canvas preview caches, terminal working directories, native reveal/trash
-operations, professional-tool transfers, and Model Request inputs.
-Project Tree commands cannot mutate protected `.debrute/` documents, while
-their owning services use registered Project Document paths.
+The same boundary protects Project Tree mutations, Feedback writes and derived
+artifacts, Canvas preview reads, terminal working directories, native
+reveal/trash operations, and professional-tool transfers. `.debrute/` is visible Project content; only version-control
+internals, fixed operating-system debris, managed temporary files, symbolic
+links, and non-regular entries are excluded from the Project Tree. Feedback
+mutations separately reject every `.debrute/**` target so Feedback cannot review
+its own source or artifacts.
+
+Model Requests are not Project-bound. Runtime resolves required
+`output.directory` and Model-declared local input paths against the CLI's
+captured canonical working directory. Each local input must already be a
+canonicalizable ordinary file. For an output directory, Runtime canonicalizes
+the nearest existing ancestor and retains the resulting absolute path across
+remote execution. At local publication it safely opens or creates the exact
+ordinary directory. Existing symbolic links have already been resolved; a file,
+symbolic link, inaccessible path, or unsafe component introduced into the
+accepted missing suffix is rejected. Global Canvas state, Working
+Copies, settings, secrets, caches, and generated-file provenance use
+Runtime-owned global stores and do not inherit Project-relative path authority.
 
 The realpath decision is recorded in
 [`0012-project-paths-are-realpath-bound.md`](./adr/0012-project-paths-are-realpath-bound.md).
@@ -118,15 +131,15 @@ Full keys belong only in secret storage, the server-side execution state that
 is making an upstream request, the outbound request itself, a new settings
 write, or one explicit reveal response and its requesting component's transient
 visible state. They do not belong in ordinary Workbench settings or events,
-CLI and batch output, Runtime error details, Project files, Generated Asset
-records, or Model Runs.
+CLI and batch output, Runtime error details, Project files, Model Artifact
+records, or Model Request executions.
 
 Model execution redacts outward-facing copies before they cross the runtime
 boundary. The shared redactor removes sensitive object fields, exact active
 secret strings, credential-like URL query values, and image/audio/video data URL
 payloads while retaining useful non-secret request and error structure. Generic
 Runtime error serialization also structurally redacts sensitive fields and query
-parameters. Generated metadata receives an already-redacted Model Run rather
+parameters. Model Artifact metadata receives an already-redacted Model Request execution rather
 than attempting to repair unsafe provenance after persistence.
 
 ## Product And Plugin Trust
@@ -137,24 +150,28 @@ platform checks are enforced before replacement. See
 [`releases.md`](./releases.md).
 
 The Photoshop plugin receives neither Workbench/CLI authority nor arbitrary
-filesystem access. Its fresh socket identity and bearer, exact command targets,
-Project-relative paths, bounded gateway routes, and plugin-owned temporary
-storage define that separate boundary. Its HTTP errors use one shared closed
-Photoshop protocol envelope. Runtime keeps Project, staging, I/O, and Photoshop
-host diagnostics in its local log and returns only reviewed path-free messages;
-Project roots, temporary paths, and other absolute host paths do not cross the
-plugin or Workbench boundary. The first version deliberately performs no user
-authorization ceremony; protection against another local process imitating the
-plugin remains deferred.
+filesystem access. Its fresh socket identity and bearer, exact Canonical Root
+plus Project-relative command targets, bounded gateway routes, and plugin-owned
+temporary storage define that separate boundary. Its HTTP errors use one shared
+closed Photoshop protocol envelope. Runtime keeps staging, I/O, and Photoshop
+host diagnostics in its local log and returns only reviewed path-free error
+messages; temporary paths and unrelated absolute host paths do not cross the
+protocol. Canonical Root is deliberately present as the understandable Project
+identity in both Workbench URLs and Photoshop destinations. The first version
+performs no user authorization ceremony; protection against another local
+process imitating the plugin remains deferred.
 
 ## Executable Authorities
 
 - Native Control identity and role authorization: `apps/runtime/src/control/`.
 - Loopback routing, browser sessions, Workbench connections, and launch tickets:
   `apps/runtime/src/workbench/`.
-- Project containment and structured document writes:
-  `apps/runtime/src/project/paths.rs` and `documents.rs`.
-- DNS-pinned public HTTP(S) media policy: `apps/runtime/src/generation/http.rs`.
+- Project containment and Feedback writes:
+  `apps/runtime/src/project/paths.rs` and `apps/runtime/src/project/feedback.rs`.
+- Global root-scoped state and Model Artifact provenance:
+  `apps/runtime/src/global/root_state.rs` and
+  `apps/runtime/src/model_request/provenance.rs`.
+- DNS-pinned public HTTP(S) media policy: `apps/runtime/src/model_request/http.rs`.
 - Secret settings and public settings projections: `apps/runtime/src/global/store.rs`.
-- Runtime output redaction: `apps/runtime/src/generation/redaction.rs`.
+- Runtime output redaction: `apps/runtime/src/model_request/redaction.rs`.
 - Signed Product updates: `apps/runtime/src/product/`.

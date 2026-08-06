@@ -50,10 +50,7 @@ describe('WorkbenchGlobalProjection', () => {
     projection.acceptEvent({
       type: 'recentProjects.changed',
       revision: 9,
-      recentProjects: [{
-        projectId: 'project-1',
-        projectRoot: '/project-one'
-      }]
+      recentProjectRoots: ['/project-one']
     });
 
     const state = projection.getState();
@@ -62,7 +59,7 @@ describe('WorkbenchGlobalProjection', () => {
       revision: 9,
       settings: {
         workbench: { locale: 'zh-CN' },
-        chrome: { recentProjects: [{ projectId: 'project-1' }] }
+        chrome: { recentProjectRoots: ['/project-one'] }
       }
     });
   });
@@ -114,7 +111,7 @@ function settingsFixture(locale: 'en' | 'zh-CN' = 'en'): DebruteGlobalSettingsVi
         ligatures: true
       }
     },
-    chrome: { recentProjects: [] },
+    chrome: { recentProjectRoots: [] },
     models: { image: [], video: [], audio: [] }
   };
 }

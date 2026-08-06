@@ -11,7 +11,8 @@ describe('Workbench event decoding', () => {
     const frame = {
       type: 'project.bound',
       project: {
-        projectId: 'project-1',
+        bindingId: 'project-1',
+        canonicalRoot: '/projects/project-1',
         projectRevision: 1,
         snapshot: snapshotFixture()
       },
@@ -29,7 +30,7 @@ describe('Workbench event decoding', () => {
     })).toBeUndefined();
     expect(decodeWorkbenchProjectConnectionFrame({
       ...frame,
-      project: { ...frame.project, projectId: 'project-2' }
+      project: { ...frame.project, bindingId: '' }
     })).toBeUndefined();
     expect(decodeWorkbenchProjectConnectionFrame({
       ...frame,
@@ -82,7 +83,13 @@ describe('Workbench event decoding', () => {
       ...frame,
       project: {
         ...frame.project,
-        snapshot: { ...snapshotWithCanvasTopology(), projections: [] }
+        snapshot: {
+          ...snapshotWithCanvasTopology(),
+          canvasWorkspace: {
+            ...snapshotWithCanvasTopology().canvasWorkspace,
+            activeCanvasResources: { canvasId: 'canvas-unknown', resources: [], diagnostics: [] }
+          }
+        }
       }
     })).toBeUndefined();
     expect(decodeWorkbenchProjectConnectionFrame({
@@ -107,7 +114,7 @@ describe('Workbench event decoding', () => {
   it('accepts a complete revisioned Project snapshot event', () => {
     const event = {
       type: 'project.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       snapshot: snapshotFixture()
     };
@@ -171,106 +178,69 @@ describe('Workbench event decoding', () => {
   it('recognizes but rejects incomplete authoritative Project payloads', () => {
     const incompleteSnapshot = {
       type: 'project.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       snapshot: {}
     };
-    const incompleteCanvas = {
-      type: 'canvas.changed',
-      projectId: 'project-1',
-      projectRevision: 2,
-      canvas: {},
-      projection: {}
-    };
-
     expect(isRecognizedWorkbenchEventFrame(incompleteSnapshot)).toBe(true);
     expect(decodeWorkbenchEvent(incompleteSnapshot)).toBeUndefined();
-    expect(decodeWorkbenchEvent(incompleteCanvas)).toBeUndefined();
     expect(decodeWorkbenchEvent({
       type: 'project.changed',
-      projectId: 'project-2',
+      bindingId: '',
       projectRevision: 2,
       snapshot: snapshotFixture()
     })).toBeUndefined();
-    expect(decodeWorkbenchEvent({
-      type: 'canvas.changed',
-      projectId: 'project-1',
-      projectRevision: 2,
-      canvas: {
-        id: 'canvas-1',
-        name: 'Canvas 1',
-        nodeElements: [],
-        annotations: [],
-        preferences: { showDiagnostics: true }
-      },
-      projection: {
-        canvasId: 'canvas-2',
-        nodes: [],
-        edges: [],
-        diagnostics: []
-      }
-    })).toBeUndefined();
     const duplicateCanvasOrder = snapshotWithCanvasTopology();
-    duplicateCanvasOrder.canvasRegistry.canvasOrder = ['canvas-1', 'canvas-1'];
+    duplicateCanvasOrder.canvasWorkspace.workspace.canvases.push({
+      id: 'canvas-1',
+      name: 'Duplicate',
+      ...emptyCanvasState()
+    });
     expect(decodeWorkbenchEvent({
       type: 'project.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       snapshot: duplicateCanvasOrder
+    })).toBeUndefined();
+  });
+
+  it('accepts the exact unavailable Canvas Workspace variant', () => {
+    const snapshot = snapshotFixture();
+    snapshot.canvasWorkspace = {
+      status: 'unavailable' as const,
+      code: 'canvas_workspace_invalid' as const,
+      message: 'Canvas workspace JSON is invalid.'
+    };
+    expect(decodeWorkbenchEvent({
+      type: 'project.changed',
+      bindingId: 'project-1',
+      projectRevision: 2,
+      snapshot
+    })).toBeDefined();
+    expect(decodeWorkbenchEvent({
+      type: 'project.changed',
+      bindingId: 'project-1',
+      projectRevision: 2,
+      snapshot: {
+        ...snapshot,
+        canvasWorkspace: { ...snapshot.canvasWorkspace, workspace: {} }
+      }
     })).toBeUndefined();
   });
 
   it('rejects an invalid revision before it reaches projection acceptance', () => {
     expect(decodeWorkbenchEvent({
       type: 'canvas.feedback.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 1.5,
       feedback: { updatedAt: '2026-07-23T00:00:00.000Z', entries: {} }
     })).toBeUndefined();
   });
 
   it('rejects incomplete discriminated Project payload variants', () => {
-    const videoNode = {
-      projectRelativePath: 'clips/demo.mp4',
-      nodeKind: 'file',
-      mediaKind: 'video',
-      x: 0,
-      y: 0,
-      width: 640,
-      height: 360,
-      z: 0
-    };
-    expect(decodeWorkbenchEvent({
-      type: 'canvas.changed',
-      projectId: 'project-1',
-      projectRevision: 2,
-      canvas: {
-        id: 'canvas-1',
-        name: 'Canvas 1',
-        nodeElements: [videoNode],
-        annotations: [],
-        preferences: { showDiagnostics: true }
-      },
-      projection: {
-        canvasId: 'canvas-1',
-        nodes: [{
-          ...videoNode,
-          availability: {
-            state: 'available',
-            size: 100,
-            mimeType: 'video/mp4',
-            fileUrl: '/clips/demo.mp4',
-            revision: 'revision-1'
-          }
-        }],
-        edges: [],
-        diagnostics: []
-      }
-    })).toBeUndefined();
-
     expect(decodeWorkbenchEvent({
       type: 'canvas.feedback.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       feedback: {
         updatedAt: '2026-07-23T00:00:00.000Z',
@@ -295,7 +265,7 @@ describe('Workbench event decoding', () => {
     })).toBeUndefined();
     expect(decodeWorkbenchEvent({
       type: 'canvas.feedback.changed',
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       feedback: {
         updatedAt: '2026-07-23T00:00:00.000Z',
@@ -316,22 +286,24 @@ describe('Workbench event decoding', () => {
 
 function snapshotFixture() {
   return {
-    metadata: {
-      project: {
-        id: 'project-1',
-        name: 'Demo',
-        createdAt: '2026-07-23T00:00:00.000Z',
-        updatedAt: '2026-07-23T00:00:00.000Z'
+    canonicalRoot: '/projects/project-1',
+    canvasWorkspace: {
+      status: 'available' as const,
+      workspace: {
+        canonicalRoot: '/projects/project-1',
+        activeCanvasId: 'canvas-1',
+        canvases: [{ id: 'canvas-1', name: 'Canvas 1', ...emptyCanvasState() }]
+      },
+      activeCanvasResources: {
+        canvasId: 'canvas-1',
+        resources: [],
+        diagnostics: []
       }
     },
-    files: [],
-    canvases: [],
-    projections: [],
+    projectTree: [],
     diagnostics: [],
-    canvasRegistry: { status: 'ready', canvasOrder: [] },
     health: {
       projectName: 'Demo',
-      canvasCount: 0,
       diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-07-23T00:00:00.000Z'
     }
@@ -339,25 +311,13 @@ function snapshotFixture() {
 }
 
 function snapshotWithCanvasTopology() {
+  return snapshotFixture();
+}
+
+function emptyCanvasState() {
   return {
-    ...snapshotFixture(),
-    canvases: [{
-      id: 'canvas-1',
-      name: 'Canvas 1',
-      nodeElements: [],
-      annotations: [],
-      preferences: { showDiagnostics: true }
-    }],
-    projections: [{
-      canvasId: 'canvas-1',
-      nodes: [],
-      edges: [],
-      diagnostics: []
-    }],
-    canvasRegistry: { status: 'ready', canvasOrder: ['canvas-1'] },
-    health: {
-      ...snapshotFixture().health,
-      canvasCount: 1
-    }
+    expandedDirectories: [],
+    nodeStates: {},
+    occlusionOrder: []
   };
 }

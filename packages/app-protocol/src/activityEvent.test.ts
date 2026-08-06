@@ -11,7 +11,7 @@ describe('Workbench Activity protocol', () => {
         {
           id: 'notice-1',
           source: 'canvas',
-          project: { projectId: 'project-1', projectName: 'Project One' },
+          project: { canonicalRoot: '/projects/project-1', projectName: 'Project One' },
           createdAt: '2026-08-02T00:00:00.000Z',
           updatedAt: '2026-08-02T00:00:00.000Z',
           type: 'notice',
@@ -20,7 +20,7 @@ describe('Workbench Activity protocol', () => {
         {
           id: 'task-1',
           source: 'model-request',
-          project: { projectId: 'project-1', projectName: 'Project One' },
+          project: { canonicalRoot: '/projects/project-1', projectName: 'Project One' },
           createdAt: '2026-08-02T00:00:01.000Z',
           updatedAt: '2026-08-02T00:00:02.000Z',
           type: 'task',

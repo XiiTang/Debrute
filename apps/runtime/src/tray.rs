@@ -9,8 +9,7 @@ use std::{
 };
 
 use debrute_runtime::control::{
-    ActivationIntent, ProjectFrontend, RecentProject, RuntimeControlState, RuntimeStatus,
-    WorkbenchRoute,
+    ActivationIntent, ProjectFrontend, RuntimeControlState, RuntimeStatus, WorkbenchRoute,
 };
 #[cfg(target_os = "macos")]
 use debrute_runtime::login::MacOsLoginItem as PlatformLoginItem;
@@ -217,7 +216,7 @@ struct RuntimeTray {
     start_at_login_label: String,
     last_status: RuntimeStatus,
     last_recent_projects_revision: Option<u64>,
-    recent_projects: Vec<RecentProject>,
+    recent_projects: Vec<String>,
 }
 
 impl RuntimeTray {
@@ -263,7 +262,7 @@ impl RuntimeTray {
     fn update_presentation(
         &mut self,
         status: RuntimeStatus,
-        recent_projects: Option<(u64, Vec<RecentProject>)>,
+        recent_projects: Option<(u64, Vec<String>)>,
     ) -> Result<(), Box<dyn Error>> {
         if self.last_status == status && recent_projects.is_none() {
             return Ok(());
@@ -342,34 +341,35 @@ struct TrayMenuProjection {
     copy_url: Vec<TrayMenuEntry>,
 }
 
-fn tray_menu_projection(recent_projects: &[RecentProject]) -> TrayMenuProjection {
-    let project_entries = |kind: &str, action: fn(&RecentProject) -> TrayAction| {
-        recent_projects
+fn tray_menu_projection(recent_project_roots: &[String]) -> TrayMenuProjection {
+    let project_entries = |kind: &str, action: fn(&str) -> TrayAction| {
+        recent_project_roots
             .iter()
-            .map(|project| TrayMenuEntry {
-                id: format!("recent-{kind}-{}", project.project_id),
-                label: project.project_root.clone(),
-                action: action(project),
+            .enumerate()
+            .map(|(index, canonical_root)| TrayMenuEntry {
+                id: format!("recent-{kind}-{index}"),
+                label: canonical_root.clone(),
+                action: action(canonical_root),
             })
             .collect::<Vec<_>>()
     };
     TrayMenuProjection {
-        recent_projects_enabled: !recent_projects.is_empty(),
-        desktop: project_entries("desktop", |project| {
-            TrayAction::Activate(ActivationIntent::OpenKnownProject {
-                project_id: project.project_id.clone(),
+        recent_projects_enabled: !recent_project_roots.is_empty(),
+        desktop: project_entries("desktop", |canonical_root| {
+            TrayAction::Activate(ActivationIntent::OpenProject {
+                project_root: canonical_root.to_owned(),
                 frontend: ProjectFrontend::Desktop,
             })
         }),
-        browser: project_entries("browser", |project| {
-            TrayAction::Activate(ActivationIntent::OpenKnownProject {
-                project_id: project.project_id.clone(),
+        browser: project_entries("browser", |canonical_root| {
+            TrayAction::Activate(ActivationIntent::OpenProject {
+                project_root: canonical_root.to_owned(),
                 frontend: ProjectFrontend::Browser,
             })
         }),
-        copy_url: project_entries("copy-url", |project| {
-            TrayAction::CopyUrl(WorkbenchRoute::Project {
-                project_id: project.project_id.clone(),
+        copy_url: project_entries("copy-url", |canonical_root| {
+            TrayAction::CopyUrl(WorkbenchRoute::OpenProject {
+                canonical_root: canonical_root.to_owned(),
             })
         }),
     }
@@ -383,7 +383,7 @@ struct BuiltRuntimeMenu {
 
 fn build_runtime_menu(
     status: RuntimeStatus,
-    recent_projects: &[RecentProject],
+    recent_projects: &[String],
     start_at_login_checked: bool,
     start_at_login_label: &str,
 ) -> Result<BuiltRuntimeMenu, Box<dyn Error>> {
@@ -527,9 +527,7 @@ fn commit_start_at_login_request<E>(
 
 #[cfg(test)]
 mod tests {
-    use debrute_runtime::control::{
-        ActivationIntent, ProjectFrontend, RecentProject, WorkbenchRoute,
-    };
+    use debrute_runtime::control::{ActivationIntent, ProjectFrontend, WorkbenchRoute};
 
     use super::{
         TrayAction, commit_start_at_login_request, escape_menu_label, tray_menu_projection,
@@ -537,16 +535,7 @@ mod tests {
 
     #[test]
     fn recent_projects_are_projected_once_into_three_explicit_action_groups() {
-        let recent_projects = vec![
-            RecentProject {
-                project_id: "project-a".to_owned(),
-                project_root: "/projects/a".to_owned(),
-            },
-            RecentProject {
-                project_id: "project-b".to_owned(),
-                project_root: "/projects/b".to_owned(),
-            },
-        ];
+        let recent_projects = vec!["/projects/a".to_owned(), "/projects/b".to_owned()];
 
         let projection = tray_menu_projection(&recent_projects);
 
@@ -564,27 +553,27 @@ mod tests {
                 vec!["/projects/a", "/projects/b"]
             );
         }
-        assert_eq!(projection.desktop[0].id, "recent-desktop-project-a");
-        assert_eq!(projection.browser[1].id, "recent-browser-project-b");
-        assert_eq!(projection.copy_url[0].id, "recent-copy-url-project-a");
+        assert_eq!(projection.desktop[0].id, "recent-desktop-0");
+        assert_eq!(projection.browser[1].id, "recent-browser-1");
+        assert_eq!(projection.copy_url[0].id, "recent-copy-url-0");
         assert_eq!(
             projection.desktop[0].action,
-            TrayAction::Activate(ActivationIntent::OpenKnownProject {
-                project_id: "project-a".to_owned(),
+            TrayAction::Activate(ActivationIntent::OpenProject {
+                project_root: "/projects/a".to_owned(),
                 frontend: ProjectFrontend::Desktop,
             })
         );
         assert_eq!(
             projection.browser[0].action,
-            TrayAction::Activate(ActivationIntent::OpenKnownProject {
-                project_id: "project-a".to_owned(),
+            TrayAction::Activate(ActivationIntent::OpenProject {
+                project_root: "/projects/a".to_owned(),
                 frontend: ProjectFrontend::Browser,
             })
         );
         assert_eq!(
             projection.copy_url[0].action,
-            TrayAction::CopyUrl(WorkbenchRoute::Project {
-                project_id: "project-a".to_owned(),
+            TrayAction::CopyUrl(WorkbenchRoute::OpenProject {
+                canonical_root: "/projects/a".to_owned(),
             })
         );
     }

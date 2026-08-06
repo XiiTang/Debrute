@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
 import {
   canvasEdgeRoutingGroupForSource,
   canvasEdgeRoutingGroupIntersectsRect,
@@ -16,7 +16,7 @@ export interface CanvasSceneSnapshot {
 
 interface CanvasScenePresentationInput {
   layoutOverrides: readonly CanvasLayoutOverride[];
-  raisedNodeProjectRelativePaths?: readonly string[] | undefined;
+  selectedProjectRelativePaths: readonly string[];
 }
 
 interface CanvasPresentedNodeLayout extends CanvasLayoutOverride {
@@ -47,13 +47,14 @@ interface CanvasScenePresentation extends CanvasRuntimeScene {
 
 export function createCanvasScenePresentation(input: {
   projection: CanvasProjection;
+  presentation: CanvasScenePresentationInput;
 }): CanvasScenePresentation {
   let projection = input.projection;
   let projectedNodesByPath = new Map<string, ProjectedCanvasNode>();
   let presentedNodesByPath = new Map<string, ProjectedCanvasNode>();
   let layoutByPath = new Map<string, CanvasLayoutOverride>();
-  let raisedPaths: readonly string[] = [];
-  let baseMaxZ = 0;
+  let selectedPaths = new Set<string>();
+  let selectedOrder: string[] = [];
   let edgesBySource = new Map<string, CanvasProjection['edges']>();
   let sourceGroupsByNodePath = new Map<string, ReadonlySet<string>>();
   let edgeOrderById = new Map<string, number>();
@@ -75,14 +76,18 @@ export function createCanvasScenePresentation(input: {
     layoutByPath = new Map(
       presentation.layoutOverrides.map((layout) => [layout.projectRelativePath, layout])
     );
-    raisedPaths = presentation.raisedNodeProjectRelativePaths ?? [];
-    baseMaxZ = projection.nodes.reduce((maximum, node) => Math.max(maximum, node.z), 0);
-    const transientZByPath = transientZByPathFor(raisedPaths, baseMaxZ);
+    selectedPaths = new Set(presentation.selectedProjectRelativePaths);
+    selectedOrder = selectedOrderFor({
+      selectedPaths,
+      preferredOrder: selectedOrder,
+      nodes: projection.nodes
+    });
+    const selectedZByPath = selectionZByPath(projection.nodes, selectedOrder);
     presentedNodesByPath = new Map(projection.nodes.map((node) => {
       const presented = presentedNodeFor(
         node,
         layoutByPath.get(node.projectRelativePath),
-        transientZByPath.get(node.projectRelativePath)
+        selectedZByPath.get(node.projectRelativePath)
       );
       return [node.projectRelativePath, presented];
     }));
@@ -110,7 +115,7 @@ export function createCanvasScenePresentation(input: {
     return snapshot;
   };
 
-  rebuild(input.projection, { layoutOverrides: [] });
+  rebuild(input.projection, input.presentation);
 
   return {
     getRenderSnapshot: () => snapshot,
@@ -140,7 +145,19 @@ export function createCanvasScenePresentation(input: {
       const nextLayoutByPath = new Map(
         presentation.layoutOverrides.map((layout) => [layout.projectRelativePath, layout])
       );
-      const nextRaisedPaths = presentation.raisedNodeProjectRelativePaths ?? [];
+      const nextSelectedPaths = new Set(presentation.selectedProjectRelativePaths);
+      const selectionChanged = !sameStringSet(selectedPaths, nextSelectedPaths);
+      const nextSelectedOrder = selectionChanged
+        ? selectedOrderFor({
+            selectedPaths: nextSelectedPaths,
+            preferredOrder: [...presentedNodesByPath.values()]
+              .filter((node) => nextSelectedPaths.has(node.projectRelativePath))
+              .sort(comparePresentedNodeOrder)
+              .map((node) => node.projectRelativePath),
+            nodes: projection.nodes
+          })
+        : selectedOrder;
+      const nextSelectedZByPath = selectionZByPath(projection.nodes, nextSelectedOrder);
       const geometryCandidates = new Set([
         ...layoutByPath.keys(),
         ...nextLayoutByPath.keys()
@@ -151,18 +168,10 @@ export function createCanvasScenePresentation(input: {
           nextLayoutByPath.get(path)
         ))
       );
-      const previousTransientZByPath = transientZByPathFor(raisedPaths, baseMaxZ);
-      const nextTransientZByPath = transientZByPathFor(nextRaisedPaths, baseMaxZ);
-      const stackCandidates = new Set([
-        ...previousTransientZByPath.keys(),
-        ...nextTransientZByPath.keys()
-      ]);
-      const stackDirtyPaths = [...stackCandidates].filter((path) => (
-        previousTransientZByPath.get(path) !== nextTransientZByPath.get(path)
-      ));
       const presentationDirtyPaths = new Set([
         ...geometryDirtyPaths,
-        ...stackDirtyPaths
+        ...selectedPaths,
+        ...nextSelectedPaths
       ]);
       const nodeLayouts: CanvasPresentedNodeLayout[] = [];
       for (const path of presentationDirtyPaths) {
@@ -172,14 +181,18 @@ export function createCanvasScenePresentation(input: {
           nodeSpatialIndex.remove(path);
           continue;
         }
+        const previous = presentedNodesByPath.get(path);
         const presented = presentedNodeFor(
           projected,
           nextLayoutByPath.get(path),
-          nextTransientZByPath.get(path)
+          nextSelectedZByPath.get(path)
         );
         presentedNodesByPath.set(path, presented);
         if (geometryDirtyPaths.has(path)) {
           nodeSpatialIndex.upsert({ id: path, bounds: presented });
+        }
+        if (previous && samePresentedNodeLayout(previous, presented)) {
+          continue;
         }
         nodeLayouts.push({
           projectRelativePath: path,
@@ -215,7 +228,8 @@ export function createCanvasScenePresentation(input: {
         updatedGroups.push(group);
       }
       layoutByPath = nextLayoutByPath;
-      raisedPaths = nextRaisedPaths;
+      selectedPaths = nextSelectedPaths;
+      selectedOrder = nextSelectedOrder;
       const update = {
         nodeLayouts,
         edgeGroups: updatedGroups,
@@ -278,24 +292,12 @@ function sourceGroupsByNodePathFor(edges: CanvasProjection['edges']): Map<string
   return mutable;
 }
 
-function transientZByPathFor(paths: readonly string[], baseMaxZ: number): ReadonlyMap<string, number> {
-  const ordered: string[] = [];
-  for (const path of paths) {
-    const previousIndex = ordered.indexOf(path);
-    if (previousIndex >= 0) {
-      ordered.splice(previousIndex, 1);
-    }
-    ordered.push(path);
-  }
-  return new Map(ordered.map((path, index) => [path, baseMaxZ + index + 1]));
-}
-
 function presentedNodeFor(
   node: ProjectedCanvasNode,
   layout: CanvasLayoutOverride | undefined,
-  transientZ: number | undefined
+  selectionZ: number | undefined
 ): ProjectedCanvasNode {
-  if (!layout && transientZ === undefined) {
+  if (!layout && selectionZ === undefined) {
     return node;
   }
   return {
@@ -306,6 +308,48 @@ function presentedNodeFor(
       width: layout.width,
       height: layout.height
     } : {}),
-    ...(transientZ === undefined ? {} : { z: transientZ })
+    ...(selectionZ === undefined ? {} : { z: selectionZ })
   };
+}
+
+function selectionZByPath(
+  nodes: readonly ProjectedCanvasNode[],
+  selectedOrder: readonly string[]
+): Map<string, number> {
+  const top = nodes.reduce((maximum, node) => Math.max(maximum, node.z), 0);
+  return new Map(selectedOrder.map((path, index) => [path, top + index + 1]));
+}
+
+function selectedOrderFor(input: {
+  selectedPaths: ReadonlySet<string>;
+  preferredOrder: readonly string[];
+  nodes: readonly ProjectedCanvasNode[];
+}): string[] {
+  const available = new Set(input.nodes.map((node) => node.projectRelativePath));
+  const retained = input.preferredOrder.filter((path) => (
+    available.has(path) && input.selectedPaths.has(path)
+  ));
+  const retainedPaths = new Set(retained);
+  return retained.concat(
+    input.nodes
+      .filter((node) => input.selectedPaths.has(node.projectRelativePath) && !retainedPaths.has(node.projectRelativePath))
+      .sort(comparePresentedNodeOrder)
+      .map((node) => node.projectRelativePath)
+  );
+}
+
+function comparePresentedNodeOrder(left: ProjectedCanvasNode, right: ProjectedCanvasNode): number {
+  return left.z - right.z || left.projectRelativePath.localeCompare(right.projectRelativePath);
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
+function samePresentedNodeLayout(left: ProjectedCanvasNode, right: ProjectedCanvasNode): boolean {
+  return left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height
+    && left.z === right.z;
 }

@@ -7,7 +7,7 @@ import { useTextFileBufferActions, type TextFileBufferActions } from './textFile
 
 describe('useTextFileBufferActions', () => {
   it('preserves edits made while a save is pending', async () => {
-    const projectRelativePath = '.debrute/project.json';
+    const projectRelativePath = 'notes.md';
     const pendingWrite = deferred<Awaited<ReturnType<WorkbenchApiClient['writeProjectTextFile']>>>();
     const writeProjectTextFile = vi.fn<WorkbenchApiClient['writeProjectTextFile']>(() => pendingWrite.promise);
     const probe = await renderActions({ writeProjectTextFile }, projectRelativePath);
@@ -416,7 +416,7 @@ describe('useTextFileBufferActions', () => {
 
   it('accepts a committed save and replaces the buffer revision without parsing the content', async () => {
     const writeProjectTextFile = vi.fn<WorkbenchApiClient['writeProjectTextFile']>(async () => ({
-      projectId: 'project-1',
+      bindingId: 'project-1',
       projectRevision: 2,
       file: {
         projectRelativePath: 'brief.md',
@@ -445,7 +445,7 @@ describe('useTextFileBufferActions', () => {
   });
 
   it('persists each dirty full value and clears it after the matching save commits', async () => {
-    const putTextWorkingCopy = vi.fn<WorkbenchApiClient['putTextWorkingCopy']>(async (_projectId, value) => value);
+    const putTextWorkingCopy = vi.fn<WorkbenchApiClient['putTextWorkingCopy']>(async (_bindingId, value) => value);
     const clearTextWorkingCopy = vi.fn<WorkbenchApiClient['clearTextWorkingCopy']>(async () => undefined);
     const writeProjectTextFile = vi.fn<WorkbenchApiClient['writeProjectTextFile']>(async (input) => (
       projectTextFileWriteResult(input.projectRelativePath, input.content, 'saved-rev')
@@ -608,9 +608,9 @@ interface ActionsProbeValue {
   replaceBuffers(buffers: Record<string, TextFileBuffer>): void;
 }
 
-function ActionsProbe({ api, projectId, initialProjectRelativePath, onValue }: {
+function ActionsProbe({ api, bindingId, initialProjectRelativePath, onValue }: {
   api: Partial<WorkbenchApiClient>;
-  projectId: string;
+  bindingId: string;
   initialProjectRelativePath: string;
   onValue(value: ActionsProbeValue): void;
 }): null {
@@ -622,11 +622,11 @@ function ActionsProbe({ api, projectId, initialProjectRelativePath, onValue }: {
   buffersRef.current = buffers;
   const actions = useTextFileBufferActions({
     api: {
-      putTextWorkingCopy: vi.fn(async (_projectId, workingCopy) => workingCopy),
+      putTextWorkingCopy: vi.fn(async (_bindingId, workingCopy) => workingCopy),
       clearTextWorkingCopy: vi.fn(async () => undefined),
       ...api
     } as WorkbenchApiClient,
-    projectId,
+    bindingId,
     textFileBuffers: buffers,
     setTextFileBuffers: setBuffers,
     textFileBuffersRef: buffersRef,
@@ -638,18 +638,18 @@ function ActionsProbe({ api, projectId, initialProjectRelativePath, onValue }: {
 
 async function renderActions(api: Partial<WorkbenchApiClient>, initialProjectRelativePath = 'brief.md'): Promise<{
   readonly current: ActionsProbeValue;
-  switchProject(projectId: string, buffer: TextFileBuffer): Promise<void>;
+  switchProject(bindingId: string, buffer: TextFileBuffer): Promise<void>;
   unmount(): Promise<void>;
 }> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   let current!: ActionsProbeValue;
-  const renderProject = async (projectId: string): Promise<void> => {
+  const renderProject = async (bindingId: string): Promise<void> => {
     await act(async () => root.render(
       <ActionsProbe
         api={api}
-        projectId={projectId}
+        bindingId={bindingId}
         initialProjectRelativePath={initialProjectRelativePath}
         onValue={(value) => { current = value; }}
       />
@@ -658,8 +658,8 @@ async function renderActions(api: Partial<WorkbenchApiClient>, initialProjectRel
   await renderProject('project-1');
   return {
     get current() { return current; },
-    async switchProject(projectId, buffer) {
-      await renderProject(projectId);
+    async switchProject(bindingId, buffer) {
+      await renderProject(bindingId);
       await act(async () => current.replaceBuffers({ [buffer.projectRelativePath]: buffer }));
     },
     async unmount() {
@@ -702,7 +702,7 @@ function projectTextFileWriteResult(
   revision: string
 ): Awaited<ReturnType<WorkbenchApiClient['writeProjectTextFile']>> {
   return {
-    projectId: 'project-1',
+    bindingId: 'project-1',
     projectRevision: 2,
     file: {
       projectRelativePath,

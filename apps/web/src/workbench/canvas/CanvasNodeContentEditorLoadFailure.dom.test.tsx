@@ -3,9 +3,9 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   canvasPreviewContinuityKey,
-  canvasPreviewTargetIdentityFromDigest,
-  type ProjectedCanvasNode
+  canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer, WorkbenchActions } from '../../types.js';
 import { I18nProvider } from '../i18n/index.js';
 import { CanvasNodeContent } from './CanvasNodeContent.js';
@@ -112,6 +112,7 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
 function textNode(): ProjectedCanvasNode {
   return {
     projectRelativePath: 'flow/readme.md',
+    displayName: 'readme.md',
     nodeKind: 'file',
     mediaKind: 'text',
     x: 0,
@@ -123,7 +124,7 @@ function textNode(): ProjectedCanvasNode {
       state: 'available',
       size: 64,
       mimeType: 'text/markdown',
-      fileUrl: '/api/projects/p/files/raw/flow/readme.md?v=rev-a',
+      fileUrl: '/api/workbench/bindings/p/files/raw/flow/readme.md?v=rev-a',
       revision: 'rev-a'
     }
   };
@@ -147,19 +148,19 @@ function textPreviewRequest() {
   return {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'text',
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       continuityIdentity: targetIdentity
     }),
     variantTarget: {
       mediaKind: 'text' as const,
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       targetIdentity,
       sourceWidth: 700,
-      srcForWidth: () => '/api/projects/p/canvas-text-preview?path=flow%2Freadme.md'
+      srcForWidth: () => '/api/workbench/bindings/p/canvas-text-preview?path=flow%2Freadme.md'
     }
   };
 }

@@ -24,7 +24,7 @@ use crate::workbench::{
 use super::{
     ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
     ControlRequest, ControlResponse, DesktopOpenError, DesktopOpenResult, FrameDecodeError,
-    HandshakeRejection, RecentProject, RuntimeStatus, ServerHandshakeError, ServerMessage,
+    HandshakeRejection, ProjectOpenFailure, RuntimeStatus, ServerHandshakeError, ServerMessage,
     WorkbenchRoute, authorize_request,
     desktop::{DesktopHostRegistrationError, DesktopWindowTopology},
     frame::is_connection_closed,
@@ -75,12 +75,25 @@ pub trait RuntimeActivationService: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns a closed Control error when the requested target cannot be opened.
+    /// Returns a typed Control or Project-open failure when the requested target
+    /// cannot be opened.
     fn activate(
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ControlErrorCode>;
+    ) -> Result<ActivationOutcome, ActivationFailure>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActivationFailure {
+    Control(ControlErrorCode),
+    ProjectOpen(ProjectOpenFailure),
+}
+
+impl From<ControlErrorCode> for ActivationFailure {
+    fn from(code: ControlErrorCode) -> Self {
+        Self::Control(code)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +110,7 @@ struct RuntimeControlInner {
     executable_identity: Option<String>,
     workbench: Option<Arc<WorkbenchLaunchService>>,
     recent_projects_revision: Option<u64>,
-    recent_projects: Vec<RecentProject>,
+    recent_project_roots: Vec<String>,
     theme_preference: Option<String>,
     connections: HashMap<ConnectionId, ConnectionRecord>,
     cli_authorizations: HashMap<CliAuthorization, ConnectionId>,
@@ -140,7 +153,7 @@ impl RuntimeControlState {
                 executable_identity,
                 workbench: None,
                 recent_projects_revision: None,
-                recent_projects: Vec::new(),
+                recent_project_roots: Vec::new(),
                 theme_preference: None,
                 connections: HashMap::new(),
                 cli_authorizations: HashMap::new(),
@@ -207,7 +220,7 @@ impl RuntimeControlState {
     }
 
     /// Replaces the Desktop recent-Project projection when the revision advances.
-    pub fn set_recent_projects(&self, global_revision: u64, recent_projects: Vec<RecentProject>) {
+    pub fn set_recent_projects(&self, global_revision: u64, recent_project_roots: Vec<String>) {
         let mut inner = self.lock_inner();
         if inner
             .recent_projects_revision
@@ -216,10 +229,10 @@ impl RuntimeControlState {
             return;
         }
         inner.recent_projects_revision = Some(global_revision);
-        inner.recent_projects = recent_projects;
+        inner.recent_project_roots = recent_project_roots;
         let event = ControlEvent::DesktopRecentProjectsChanged {
             global_revision,
-            recent_projects: inner.recent_projects.clone(),
+            recent_project_roots: inner.recent_project_roots.clone(),
         };
         // Queue projection events under the same lock that advances the revision. This makes
         // concurrent updates and Desktop promotion observe one monotonic enqueue order.
@@ -237,10 +250,10 @@ impl RuntimeControlState {
     pub fn recent_projects_projection_after(
         &self,
         known_revision: Option<u64>,
-    ) -> Option<(u64, Vec<RecentProject>)> {
+    ) -> Option<(u64, Vec<String>)> {
         let inner = self.lock_inner();
         let revision = inner.recent_projects_revision?;
-        (known_revision != Some(revision)).then(|| (revision, inner.recent_projects.clone()))
+        (known_revision != Some(revision)).then(|| (revision, inner.recent_project_roots.clone()))
     }
 
     pub fn set_theme_preference(&self, theme_preference: &str) {
@@ -314,12 +327,12 @@ impl RuntimeControlState {
 
     pub(crate) fn focus_desktop_project_window(
         &self,
-        project_id: &str,
+        canonical_root: &str,
     ) -> Result<bool, DesktopOpenError> {
         if self.status() != RuntimeStatus::Ready {
             return Err(DesktopOpenError::HostUnavailable);
         }
-        self.desktop.focus_project(project_id)
+        self.desktop.focus_project(canonical_root)
     }
 
     pub(crate) fn retarget_desktop_window(
@@ -448,18 +461,21 @@ impl RuntimeControlState {
     ///
     /// # Errors
     ///
-    /// Returns a stable Control error when activation cannot be completed.
+    /// Returns a typed Control or Project-open failure when activation cannot
+    /// be completed.
     pub fn activate_intent(
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ControlErrorCode> {
+    ) -> Result<ActivationOutcome, ActivationFailure> {
         let _transition = self.read_product_transition();
         match &*self.lock_lifecycle() {
-            RuntimeLifecycle::Starting => return Err(ControlErrorCode::RuntimeStarting),
-            RuntimeLifecycle::Exiting => return Err(ControlErrorCode::RuntimeExiting),
+            RuntimeLifecycle::Starting => {
+                return Err(ControlErrorCode::RuntimeStarting.into());
+            }
+            RuntimeLifecycle::Exiting => return Err(ControlErrorCode::RuntimeExiting.into()),
             RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
-                return Err(ControlErrorCode::UpdateCommitInProgress);
+                return Err(ControlErrorCode::UpdateCommitInProgress.into());
             }
             RuntimeLifecycle::Ready => {}
         }
@@ -467,7 +483,7 @@ impl RuntimeControlState {
             return Ok(ActivationOutcome::Ensured);
         }
         let service = self.lock_activation_service().clone();
-        service.map_or(Err(ControlErrorCode::InvalidActivation), |service| {
+        service.map_or(Err(ControlErrorCode::InvalidActivation.into()), |service| {
             service.activate(intent, preferred_desktop_window_key)
         })
     }
@@ -731,7 +747,7 @@ impl RuntimeControlState {
                     Ok(_) => ControlResponse::Activation {
                         outcome: ActivationOutcome::HandledByExistingDesktop,
                     },
-                    Err(code) => ControlResponse::Rejected { code },
+                    Err(failure) => activation_failure_response(failure),
                 };
             }
             let mut inner = self.lock_inner();
@@ -765,7 +781,7 @@ impl RuntimeControlState {
             let _ = sender.send(ServerMessage::event(
                 ControlEvent::DesktopRecentProjectsChanged {
                     global_revision: revision,
-                    recent_projects: inner.recent_projects.clone(),
+                    recent_project_roots: inner.recent_project_roots.clone(),
                 },
             ));
             drop(inner);
@@ -773,19 +789,19 @@ impl RuntimeControlState {
                 Ok(_) => ControlResponse::Activation {
                     outcome: ActivationOutcome::PromotedToDesktopHost,
                 },
-                Err(code) => {
+                Err(failure) => {
                     self.desktop
                         .unregister_host(&connection_id.0, self.lock_inner().workbench.as_deref());
                     if let Some(connection) = self.lock_inner().connections.get_mut(connection_id) {
                         connection.desktop_host = false;
                     }
-                    ControlResponse::Rejected { code }
+                    activation_failure_response(failure)
                 }
             };
         }
         match self.activate_intent(intent, preferred_desktop_window_key) {
             Ok(outcome) => ControlResponse::Activation { outcome },
-            Err(code) => ControlResponse::Rejected { code },
+            Err(failure) => activation_failure_response(failure),
         }
     }
 
@@ -877,6 +893,13 @@ impl RuntimeControlState {
     }
 }
 
+fn activation_failure_response(failure: ActivationFailure) -> ControlResponse {
+    match failure {
+        ActivationFailure::Control(code) => ControlResponse::Rejected { code },
+        ActivationFailure::ProjectOpen(failure) => ControlResponse::ProjectOpenFailed { failure },
+    }
+}
+
 impl Drop for RuntimeWorkPermit {
     fn drop(&mut self) {
         let mut active = self
@@ -909,10 +932,6 @@ fn activation_targets_desktop(intent: &ActivationIntent) -> bool {
         intent,
         ActivationIntent::OpenDesktop
             | ActivationIntent::OpenProject {
-                frontend: super::ProjectFrontend::Desktop,
-                ..
-            }
-            | ActivationIntent::OpenKnownProject {
                 frontend: super::ProjectFrontend::Desktop,
                 ..
             }

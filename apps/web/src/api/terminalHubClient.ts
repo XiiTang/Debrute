@@ -10,7 +10,7 @@ import type {
 const TERMINAL_PROTOCOL_VERSION = 1;
 
 export interface TerminalHubClient {
-  bindProject(projectId: string, connectionCredential: string): void;
+  bindProject(bindingId: string, connectionCredential: string): void;
   unbindProject(): void;
   subscribeSessions(
     listener: (sessions: TerminalSessionView[]) => void,
@@ -65,7 +65,7 @@ interface TerminalObservationSubscription {
 }
 
 export function createTerminalHubClient(): TerminalHubClient {
-  let binding: { projectId: string; connectionCredential: string } | undefined;
+  let binding: { bindingId: string; connectionCredential: string } | undefined;
   let socket: WebSocket | undefined;
   let disposed = false;
   const terminalSubscriptions = new Map<string, Set<TerminalObservationSubscription>>();
@@ -170,7 +170,7 @@ export function createTerminalHubClient(): TerminalHubClient {
     if (disposed || !binding || socket) {
       return;
     }
-    const url = new URL(`/api/projects/${encodeURIComponent(binding.projectId)}/terminals/ws`, location.origin);
+    const url = new URL(`/api/workbench/bindings/${encodeURIComponent(binding.bindingId)}/terminals/ws`, location.origin);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const next = new WebSocket(url.toString());
     socket = next;
@@ -462,9 +462,9 @@ export function createTerminalHubClient(): TerminalHubClient {
   };
 
   return {
-    bindProject(projectId, connectionCredential) {
+    bindProject(bindingId, connectionCredential) {
       rejectPending('Terminal Project binding was replaced.');
-      binding = { projectId, connectionCredential };
+      binding = { bindingId, connectionCredential };
       socket?.close();
       socket = undefined;
       resetProjectState();

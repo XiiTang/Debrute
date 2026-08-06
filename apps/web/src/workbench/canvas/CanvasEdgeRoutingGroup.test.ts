@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
 import {
   canvasEdgeRoutingGroupsForProjection,
   canvasEdgeRoutingGroupIntersectsRect
@@ -64,6 +64,7 @@ function node(projectRelativePath: string, x: number, y: number): ProjectedCanva
   return {
     nodeKind: 'directory',
     projectRelativePath,
+    displayName: projectRelativePath,
     x,
     y,
     width: 100,

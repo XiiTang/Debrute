@@ -30,7 +30,7 @@ describe('executeTitleBarMenuCommand', () => {
   });
 
   it('routes every Desktop Project open through the native activation commands', async () => {
-    const executeNativeMenuCommand = vi.fn(async () => ({ ok: true as const }));
+    const executeNativeMenuCommand = vi.fn(async () => ({ result: 'completed' as const }));
     const openProjectFromPicker = vi.fn(async () => undefined);
     const context = {
       api: {} as WorkbenchApiClient,
@@ -48,13 +48,13 @@ describe('executeTitleBarMenuCommand', () => {
       label: '/projects/alpha',
       commandId: 'project.open-recent',
       enabled: true,
-      payload: { projectId: 'alpha', projectRoot: '/projects/alpha' }
+      payload: { projectRoot: '/projects/alpha' }
     }, context);
 
     expect(openProjectFromPicker).not.toHaveBeenCalled();
     expect(executeNativeMenuCommand.mock.calls).toEqual([
       [{ commandId: 'project.open-picker' }],
-      [{ commandId: 'project.open-known', projectId: 'alpha' }]
+      [{ commandId: 'project.open-path', projectRoot: '/projects/alpha' }]
     ]);
   });
 
@@ -77,7 +77,7 @@ describe('executeTitleBarMenuCommand', () => {
       label: '/projects/alpha',
       commandId: 'project.open-recent',
       enabled: true,
-      payload: { projectId: 'alpha', projectRoot: '/projects/alpha' }
+      payload: { bindingId: 'alpha', projectRoot: '/projects/alpha' }
     }, context);
 
     expect(openProjectFromPicker).toHaveBeenCalledOnce();
@@ -91,10 +91,11 @@ function shellApiFixture(overrides: Partial<DebruteShellApi>): DebruteShellApi {
     minimizeNativeWindow: async () => ({ maximized: false }),
     toggleMaximizeNativeWindow: async () => ({ maximized: true }),
     closeNativeWindow: async () => ({ ok: true }),
-    executeNativeMenuCommand: async () => ({ ok: true }),
+    executeNativeMenuCommand: async () => ({ result: 'completed' }),
     takeDesktopLaunchTicket: async () => undefined,
     onNativeWindowStateChanged: () => () => undefined,
     onNativeEditCommand: () => () => undefined,
+    onNativeProjectOpenFailed: () => () => undefined,
     getDroppedFilePath: () => undefined,
     ...overrides
   };

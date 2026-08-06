@@ -82,6 +82,24 @@ describe('workbench context menu commands', () => {
     expect(revealEntry.mock.calls[0]?.[1]).toMatchObject({ projectRelativePath: 'folder/b.png' });
   });
 
+  it('dispatches Reveal in Canvas for the Explorer invocation entry', () => {
+    const revealInCanvas = vi.fn();
+    run({
+      command: 'reveal-in-canvas',
+      target: {
+        source: 'explorer',
+        invocationEntry: {
+          pathEntry: { projectRelativePath: 'folder/a.png', kind: 'file' }
+        },
+        selectedEntries: [{
+          pathEntry: { projectRelativePath: 'folder/a.png', kind: 'file' }
+        }]
+      },
+      revealInCanvas
+    });
+    expect(revealInCanvas).toHaveBeenCalledWith('folder/a.png');
+  });
+
   it('confirms Trash and permanent deletion over the same effective batch', () => {
     const trashEntries = vi.fn();
     const deleteEntriesPermanently = vi.fn();
@@ -131,18 +149,13 @@ describe('workbench context menu commands', () => {
     expect(pasteEntries).toHaveBeenCalledTimes(1);
   });
 
-  it('resets exactly the selected Canvas nodes, preserves selection, and centers the invocation after confirmation', async () => {
-    const resetCanvasNodeLayouts = vi.fn(() => Promise.resolve({
-      projectId: 'project-1',
-      projectRevision: 2,
-      resetCount: 2
-    }));
+  it('resets exactly the selected Canvas nodes and preserves selection', async () => {
+    const resetCanvasNodeLayouts = vi.fn(async () => undefined);
     const setSelection = vi.fn();
-    const setCamera = vi.fn();
     const runtime = {
       setSelection,
       getSnapshot: () => ({ surfaceSize: { width: 400, height: 300 }, camera: { x: 0, y: 0, z: 2 } }),
-      camera: { setCamera }
+      camera: { setCamera: vi.fn() }
     };
     run({
       command: 'reset-auto-layout',
@@ -157,24 +170,10 @@ describe('workbench context menu commands', () => {
         diagnostics: []
       },
       activeCanvasRuntime: runtime,
-      resetCanvasNodeLayouts,
-      getProjectSnapshot: () => ({
-        projections: [{
-          canvasId: 'canvas-1',
-          nodes: [node('a.png'), { ...node('b.png'), x: 100, y: 200 }],
-          edges: [],
-          diagnostics: []
-        }]
-      } as never)
+      resetCanvasNodeLayouts
     });
-    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith({
-      canvasId: 'canvas-1',
-      nodePaths: ['a.png', 'b.png']
-    });
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', ['a.png', 'b.png']);
     expect(setSelection).not.toHaveBeenCalled();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(setCamera).toHaveBeenCalledWith({ x: -200, y: -370, z: 2 });
   });
 
   it('does not partially reset a selection with a target absent from the current Projection', () => {
@@ -211,12 +210,13 @@ function run(overrides: {
   resetCanvasNodeLayouts?: Parameters<typeof runProjectPathCommand>[0]['resetCanvasNodeLayouts'];
   fileClipboard?: Parameters<typeof runProjectPathCommand>[0]['fileClipboard'];
   getProjectSnapshot?: Parameters<typeof runProjectPathCommand>[0]['getProjectSnapshot'];
+  revealInCanvas?: Parameters<typeof runProjectPathCommand>[0]['revealInCanvas'];
   notify?: (input: Parameters<Parameters<typeof runProjectPathCommand>[0]['activities']['report']>[0]) => void;
 }): void {
   const noop = () => undefined;
   runProjectPathCommand({
     scope: {
-      projectId: 'project-1',
+      bindingId: 'project-1',
       generation: 1,
       canSubmit: () => true,
       isCurrent: () => true
@@ -225,6 +225,7 @@ function run(overrides: {
     contextMenu: { target: overrides.target, position: { x: 0, y: 0 } },
     activeProjection: overrides.activeProjection,
     activeCanvasRuntime: overrides.activeCanvasRuntime as Parameters<typeof runProjectPathCommand>[0]['activeCanvasRuntime'],
+    revealInCanvas: overrides.revealInCanvas ?? noop,
     fileClipboard: overrides.fileClipboard,
     resetCanvasNodeLayouts: overrides.resetCanvasNodeLayouts ?? (() => undefined),
     openTerminalPanel: overrides.openTerminalPanel ?? noop,
@@ -280,6 +281,7 @@ function canvasTarget(
 function node(path: string) {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'file' as const,
     mediaKind: 'image' as const,
     x: 0,

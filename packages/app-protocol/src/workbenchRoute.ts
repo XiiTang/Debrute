@@ -4,13 +4,7 @@ export type DebruteWorkbenchRoute =
       kind: 'project-open';
       projectRoot?: string;
     }
-  | {
-      kind: 'project';
-      projectId: string;
-    }
   | { kind: 'not-found' };
-
-const OPAQUE_PROJECT_ID = /^[A-Za-z0-9._~-]{1,256}$/;
 
 export function parseDebruteWorkbenchPath(
   pathname: string,
@@ -38,19 +32,6 @@ export function parseDebruteWorkbenchPath(
     } catch {
       return { kind: 'not-found' };
     }
-  }
-  if (search !== '') {
-    return { kind: 'not-found' };
-  }
-  const project = /^\/projects\/([^/]+)$/.exec(pathname);
-  const projectId = project?.[1];
-  if (
-    projectId !== undefined
-    && projectId !== '.'
-    && projectId !== '..'
-    && OPAQUE_PROJECT_ID.test(projectId)
-  ) {
-    return { kind: 'project', projectId };
   }
   return { kind: 'not-found' };
 }

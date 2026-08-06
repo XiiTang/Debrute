@@ -155,17 +155,17 @@ export class DesktopWindowHost<
       return;
     }
     const existing = this.records.get(windowKey);
-    if (existing && !existing.window.isDestroyed()) {
-      this.pendingOpenRequests.delete(windowKey);
-      if (existing.phase === 'opening') {
-        existing.focusRequested = true;
-      } else {
-        existing.window.show();
-        existing.window.focus();
-      }
-      return;
-    }
     if (existing) {
+      if (!existing.window.isDestroyed()) {
+        this.pendingOpenRequests.delete(windowKey);
+        if (existing.phase === 'opening') {
+          existing.focusRequested = true;
+        } else {
+          existing.window.show();
+          existing.window.focus();
+        }
+        return;
+      }
       this.forgetRecord(existing, false);
     }
     let record: WindowRecord<NativeIdentity, Window> | undefined;
@@ -177,7 +177,8 @@ export class DesktopWindowHost<
         return;
       }
       const window = this.createWindow({ windowKey });
-      const focusRequested = this.pendingOpenRequests.get(windowKey)?.focusRequested ?? false;
+      const pendingOpen = this.pendingOpenRequests.get(windowKey);
+      const focusRequested = pendingOpen?.focusRequested ?? false;
       this.pendingOpenRequests.delete(windowKey);
       record = {
         windowKey,

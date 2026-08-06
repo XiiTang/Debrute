@@ -7,24 +7,37 @@ use std::{
 
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
+use crate::global::root_state_directory;
 use crate::project::{
-    CanvasFeedbackGeometry, CanvasFeedbackItemKind, CanvasFeedbackScope,
-    normalize_project_relative_path, normalized_geometry, replace_file, validate_spatial_geometry,
+    CanvasFeedbackGeometry, CanvasFeedbackItemKind, CanvasFeedbackScope, ProjectCommand,
+    ProjectCommandResult, ProjectError, ProjectPathOperationStatus, ProjectPathStateReconciler,
+    normalize_project_relative_path, normalized_geometry, project_path_is_same_or_descendant,
+    replace_file, rewrite_project_path, validate_spatial_geometry,
 };
 
 use super::RuntimeHttpServiceError;
 
 const MAX_FEEDBACK_WORKING_COPY_ITEM_ID_BYTES: usize = 128;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectWorkingCopies {
+    pub canonical_root: String,
     pub text: BTreeMap<String, TextWorkingCopy>,
     pub feedback: BTreeMap<String, FeedbackWorkingCopy>,
+}
+
+impl ProjectWorkingCopies {
+    fn empty(canonical_root: &str) -> Self {
+        Self {
+            canonical_root: canonical_root.to_owned(),
+            text: BTreeMap::new(),
+            feedback: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,26 +65,29 @@ pub struct FeedbackWorkingCopy {
 }
 
 pub struct WorkingCopyStore {
-    directory: PathBuf,
+    debrute_home: PathBuf,
     io: Mutex<()>,
 }
 
 impl WorkingCopyStore {
     pub fn new(debrute_home: &Path) -> Self {
         Self {
-            directory: debrute_home.join("state/working-copies"),
+            debrute_home: debrute_home.to_path_buf(),
             io: Mutex::new(()),
         }
     }
 
-    pub fn load(&self, project_id: &str) -> Result<ProjectWorkingCopies, RuntimeHttpServiceError> {
+    pub fn load(
+        &self,
+        canonical_root: &str,
+    ) -> Result<ProjectWorkingCopies, RuntimeHttpServiceError> {
         let _io = self.lock();
-        self.read(project_id)
+        self.read(canonical_root)
     }
 
     pub fn put_text(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         mut working_copy: TextWorkingCopy,
     ) -> Result<TextWorkingCopy, RuntimeHttpServiceError> {
         working_copy.project_relative_path =
@@ -83,31 +99,31 @@ impl WorkingCopyStore {
             ));
         }
         let _io = self.lock();
-        let mut project = self.read(project_id)?;
+        let mut project = self.read(canonical_root)?;
         project.text.insert(
             working_copy.project_relative_path.clone(),
             working_copy.clone(),
         );
-        self.write(project_id, &project)?;
+        self.write(canonical_root, &project)?;
         Ok(working_copy)
     }
 
     pub fn clear_text(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         project_relative_path: &str,
     ) -> Result<(), RuntimeHttpServiceError> {
         let project_relative_path = normalize_project_relative_path(project_relative_path)
             .map_err(RuntimeHttpServiceError::from_project)?;
         let _io = self.lock();
-        let mut project = self.read(project_id)?;
+        let mut project = self.read(canonical_root)?;
         project.text.remove(&project_relative_path);
-        self.write_or_remove(project_id, &project)
+        self.write_or_remove(canonical_root, &project)
     }
 
     pub fn put_feedback(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         mut working_copy: FeedbackWorkingCopy,
     ) -> Result<FeedbackWorkingCopy, RuntimeHttpServiceError> {
         working_copy.project_relative_path =
@@ -168,36 +184,47 @@ impl WorkingCopyStore {
             working_copy.geometry = Some(normalized);
         }
         let _io = self.lock();
-        let mut project = self.read(project_id)?;
+        let mut project = self.read(canonical_root)?;
         project
             .feedback
             .insert(working_copy.item_id.clone(), working_copy.clone());
-        self.write(project_id, &project)?;
+        self.write(canonical_root, &project)?;
         Ok(working_copy)
     }
 
     pub fn clear_feedback(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         item_id: &str,
     ) -> Result<(), RuntimeHttpServiceError> {
         let _io = self.lock();
-        let mut project = self.read(project_id)?;
+        let mut project = self.read(canonical_root)?;
         project.feedback.remove(item_id);
-        self.write_or_remove(project_id, &project)
+        self.write_or_remove(canonical_root, &project)
     }
 
-    fn read(&self, project_id: &str) -> Result<ProjectWorkingCopies, RuntimeHttpServiceError> {
-        match fs::read(self.path(project_id)) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
-                RuntimeHttpServiceError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "working_copy_invalid",
-                    format!("Runtime Working Copy is invalid: {error}"),
-                )
-            }),
+    fn read(&self, canonical_root: &str) -> Result<ProjectWorkingCopies, RuntimeHttpServiceError> {
+        match fs::read(self.path(canonical_root)) {
+            Ok(bytes) => {
+                let state: ProjectWorkingCopies =
+                    serde_json::from_slice(&bytes).map_err(|error| {
+                        RuntimeHttpServiceError::new(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "working_copy_invalid",
+                            format!("Runtime Working Copy is invalid: {error}"),
+                        )
+                    })?;
+                if state.canonical_root != canonical_root {
+                    return Err(RuntimeHttpServiceError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "working_copy_root_mismatch",
+                        "Runtime Working Copy canonicalRoot does not match its root-state bucket.",
+                    ));
+                }
+                Ok(state)
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                Ok(ProjectWorkingCopies::default())
+                Ok(ProjectWorkingCopies::empty(canonical_root))
             }
             Err(error) => Err(persistence(&error)),
         }
@@ -205,28 +232,29 @@ impl WorkingCopyStore {
 
     fn write_or_remove(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         project: &ProjectWorkingCopies,
     ) -> Result<(), RuntimeHttpServiceError> {
         if project.text.is_empty() && project.feedback.is_empty() {
-            match fs::remove_file(self.path(project_id)) {
+            match fs::remove_file(self.path(canonical_root)) {
                 Ok(()) => Ok(()),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
                 Err(error) => Err(persistence(&error)),
             }
         } else {
-            self.write(project_id, project)
+            self.write(canonical_root, project)
         }
     }
 
     fn write(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         project: &ProjectWorkingCopies,
     ) -> Result<(), RuntimeHttpServiceError> {
-        fs::create_dir_all(&self.directory).map_err(|error| persistence(&error))?;
-        let path = self.path(project_id);
-        let temporary = self.directory.join(format!(".{}.tmp", Uuid::new_v4()));
+        let path = self.path(canonical_root);
+        let directory = path.parent().expect("Working Copy path has a parent");
+        fs::create_dir_all(directory).map_err(|error| persistence(&error))?;
+        let temporary = directory.join(format!(".working-copies.{}.tmp", Uuid::new_v4()));
         let bytes = serde_json::to_vec_pretty(project).map_err(|error| {
             RuntimeHttpServiceError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -242,14 +270,175 @@ impl WorkingCopyStore {
         Ok(())
     }
 
-    fn path(&self, project_id: &str) -> PathBuf {
-        let digest = Sha256::digest(project_id.as_bytes());
-        self.directory.join(format!("{digest:x}.json"))
+    fn path(&self, canonical_root: &str) -> PathBuf {
+        root_state_directory(&self.debrute_home, canonical_root).join("working-copies.json")
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {
         self.io.lock().expect("Working Copy I/O lock poisoned")
     }
+}
+
+impl ProjectPathStateReconciler for WorkingCopyStore {
+    fn reconcile(
+        &self,
+        canonical_root: &str,
+        command: &ProjectCommand,
+        result: &ProjectCommandResult,
+    ) -> Result<(), ProjectError> {
+        let (removed, rewrites) = working_copy_path_changes(command, result);
+        self.reconcile_paths(canonical_root, &removed, &rewrites)
+    }
+
+    fn prune(&self, canonical_root: &str, removed: &[String]) -> Result<(), ProjectError> {
+        self.reconcile_paths(canonical_root, removed, &[])
+    }
+}
+
+impl WorkingCopyStore {
+    fn reconcile_paths(
+        &self,
+        canonical_root: &str,
+        removed: &[String],
+        rewrites: &[(String, String)],
+    ) -> Result<(), ProjectError> {
+        if removed.is_empty() && rewrites.is_empty() {
+            return Ok(());
+        }
+        let _io = self.lock();
+        let mut copies = self
+            .read(canonical_root)
+            .map_err(working_copy_project_error)?;
+        copies.text = reconcile_map(copies.text, removed, rewrites, |copy, path| {
+            copy.project_relative_path = path;
+        });
+        copies.feedback = reconcile_feedback_map(copies.feedback, removed, rewrites);
+        self.write_or_remove(canonical_root, &copies)
+            .map_err(working_copy_project_error)
+    }
+}
+
+fn working_copy_path_changes(
+    command: &ProjectCommand,
+    result: &ProjectCommandResult,
+) -> (Vec<String>, Vec<(String, String)>) {
+    match (command, result) {
+        (
+            ProjectCommand::RenamePath {
+                project_relative_path,
+                ..
+            },
+            ProjectCommandResult::PathChanged { result, .. },
+        ) => (
+            vec![result.project_relative_path.clone()],
+            vec![(
+                project_relative_path.clone(),
+                result.project_relative_path.clone(),
+            )],
+        ),
+        (ProjectCommand::MovePaths { .. }, ProjectCommandResult::PathsChanged { results, .. }) => {
+            let successful = results
+                .iter()
+                .filter(|result| result.status == ProjectPathOperationStatus::Ok)
+                .collect::<Vec<_>>();
+            (
+                successful
+                    .iter()
+                    .map(|result| result.project_relative_path.clone())
+                    .collect(),
+                successful
+                    .iter()
+                    .filter(|result| {
+                        result.source_project_relative_path != result.project_relative_path
+                    })
+                    .map(|result| {
+                        (
+                            result.source_project_relative_path.clone(),
+                            result.project_relative_path.clone(),
+                        )
+                    })
+                    .collect(),
+            )
+        }
+        (ProjectCommand::DeletePaths { entries }, _) => (
+            entries
+                .iter()
+                .map(|entry| entry.project_relative_path.clone())
+                .collect(),
+            Vec::new(),
+        ),
+        (
+            ProjectCommand::CopyPaths { .. }
+            | ProjectCommand::ImportLocalPaths { .. }
+            | ProjectCommand::ImportUploadEntries { .. },
+            ProjectCommandResult::PathsChanged { results, .. },
+        ) => (
+            results
+                .iter()
+                .filter(|result| result.status == ProjectPathOperationStatus::Ok)
+                .map(|result| result.project_relative_path.clone())
+                .collect(),
+            Vec::new(),
+        ),
+        _ => (Vec::new(), Vec::new()),
+    }
+}
+
+fn reconcile_map<T>(
+    source: BTreeMap<String, T>,
+    removed: &[String],
+    rewrites: &[(String, String)],
+    mut set_path: impl FnMut(&mut T, String),
+) -> BTreeMap<String, T> {
+    let mut unchanged = BTreeMap::new();
+    let mut rewritten = Vec::new();
+    for (path, mut value) in source {
+        if let Some(next) = rewrites
+            .iter()
+            .map(|(from, to)| rewrite_project_path(&path, from, to))
+            .find(|next| next != &path)
+        {
+            set_path(&mut value, next.clone());
+            rewritten.push((next, value));
+        } else if !removed
+            .iter()
+            .any(|root| project_path_is_same_or_descendant(&path, root))
+        {
+            unchanged.insert(path, value);
+        }
+    }
+    for (path, value) in rewritten {
+        unchanged.insert(path, value);
+    }
+    unchanged
+}
+
+fn reconcile_feedback_map(
+    source: BTreeMap<String, FeedbackWorkingCopy>,
+    removed: &[String],
+    rewrites: &[(String, String)],
+) -> BTreeMap<String, FeedbackWorkingCopy> {
+    source
+        .into_iter()
+        .filter_map(|(item_id, mut copy)| {
+            if let Some(next) = rewrites
+                .iter()
+                .map(|(from, to)| rewrite_project_path(&copy.project_relative_path, from, to))
+                .find(|next| next != &copy.project_relative_path)
+            {
+                copy.project_relative_path = next;
+                return Some((item_id, copy));
+            }
+            (!removed
+                .iter()
+                .any(|root| project_path_is_same_or_descendant(&copy.project_relative_path, root)))
+            .then_some((item_id, copy))
+        })
+        .collect()
+}
+
+fn working_copy_project_error(error: RuntimeHttpServiceError) -> ProjectError {
+    ProjectError::service(error.code, error.message)
 }
 
 fn invalid(message: &'static str) -> RuntimeHttpServiceError {
@@ -269,7 +458,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn working_copies_persist_by_stable_project_id_and_clear_without_retention() {
+    fn working_copies_persist_in_the_canonical_root_bucket() {
         let home = std::env::temp_dir().join(format!("dbrt-working-copy-{}", Uuid::new_v4()));
         let store = WorkingCopyStore::new(&home);
         let text = TextWorkingCopy {
@@ -278,32 +467,29 @@ mod tests {
             language: "markdown".to_owned(),
             base_revision: "revision-1".to_owned(),
         };
-        assert_eq!(store.put_text("project-1", text.clone()).unwrap(), text);
+        let root = "/projects/campaign";
+        assert_eq!(store.put_text(root, text.clone()).unwrap(), text);
         assert_eq!(
-            WorkingCopyStore::new(&home).load("project-1").unwrap().text["notes/draft.md"],
+            WorkingCopyStore::new(&home).load(root).unwrap().text["notes/draft.md"],
             text
         );
-        store.clear_text("project-1", "notes/draft.md").unwrap();
-        assert_eq!(
-            store.load("project-1").unwrap(),
-            ProjectWorkingCopies::default()
-        );
+        store.clear_text(root, "notes/draft.md").unwrap();
+        assert_eq!(store.load(root).unwrap(), ProjectWorkingCopies::empty(root));
         assert!(
-            fs::read_dir(home.join("state/working-copies"))
-                .unwrap()
-                .next()
-                .is_none()
+            !root_state_directory(&home, root)
+                .join("working-copies.json")
+                .exists()
         );
         fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
-    fn project_id_is_hashed_before_it_reaches_the_private_file_name() {
+    fn canonical_root_is_hashed_before_it_reaches_the_private_directory_name() {
         let home = std::env::temp_dir().join(format!("dbrt-working-copy-{}", Uuid::new_v4()));
         let store = WorkingCopyStore::new(&home);
         store
             .put_text(
-                "../not-a-path",
+                "/projects/../literal-root",
                 TextWorkingCopy {
                     project_relative_path: "draft.txt".to_owned(),
                     content: "draft".to_owned(),
@@ -312,13 +498,8 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(!home.join("state/not-a-path.json").exists());
-        assert_eq!(
-            fs::read_dir(home.join("state/working-copies"))
-                .unwrap()
-                .count(),
-            1
-        );
+        assert!(!home.join("state/literal-root/working-copies.json").exists());
+        assert_eq!(fs::read_dir(home.join("state/roots")).unwrap().count(), 1);
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -345,7 +526,7 @@ mod tests {
         assert!(store.put_feedback("project-1", invalid_pin).is_err());
         assert_eq!(
             store.load("project-1").unwrap(),
-            ProjectWorkingCopies::default()
+            ProjectWorkingCopies::empty("project-1")
         );
         if home.exists() {
             fs::remove_dir_all(home).unwrap();

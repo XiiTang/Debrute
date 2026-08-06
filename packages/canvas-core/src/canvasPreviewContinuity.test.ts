@@ -5,7 +5,7 @@ describe('canvasPreviewContinuityKey', () => {
   it('scopes presentation continuity by owner and continuity identity', () => {
     const base = canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-a'
@@ -13,35 +13,35 @@ describe('canvasPreviewContinuityKey', () => {
 
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-a'
     })).toBe(base);
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: 'project-b',
+      bindingId: 'project-b',
       canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-a'
     })).not.toBe(base);
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-b',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-a'
     })).not.toBe(base);
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-a',
       projectRelativePath: 'media/other.mp4',
       continuityIdentity: 'sha256:source-a'
     })).not.toBe(base);
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-b'
@@ -51,7 +51,7 @@ describe('canvasPreviewContinuityKey', () => {
   it('rejects incomplete continuity inputs', () => {
     expect(() => canvasPreviewContinuityKey({
       mediaKind: 'text',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       projectRelativePath: 'notes/readme.md',
       continuityIdentity: ''
     })).toThrow('Canvas preview continuity identity must be non-empty.');

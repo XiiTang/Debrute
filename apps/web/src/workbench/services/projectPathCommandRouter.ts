@@ -25,7 +25,6 @@ type ProjectPathCommandContext = Omit<
   | 'contextMenu'
   | 'sendProjectFileToPhotoshop'
   | 'copyProjectPathsToSystemClipboard'
-  | 'resetCanvasNodeLayouts'
   | 'openTerminalPanel'
 >;
 
@@ -43,7 +42,6 @@ export function createProjectPathCommandRouter(input: {
   commandEffects: Pick<ProjectPathCommandEffects,
     | 'sendProjectFileToPhotoshop'
     | 'copyProjectPathsToSystemClipboard'
-    | 'resetCanvasNodeLayouts'
   >;
   openTerminalPanel(
     scope: AcceptedProjectPathCommandScope,
@@ -82,9 +80,9 @@ export function createProjectPathCommandRouter(input: {
         copyProjectPathsToSystemClipboard: (clipboardInput) => (
           input.commandEffects.copyProjectPathsToSystemClipboard(scope, clipboardInput)
         ),
-        resetCanvasNodeLayouts: (resetInput) => (
-          input.commandEffects.resetCanvasNodeLayouts(scope, resetInput)
-        ),
+        resetCanvasNodeLayouts: (canvasId, nodePaths) => scope.canSubmit()
+          ? input.commandContext.resetCanvasNodeLayouts(canvasId, nodePaths)
+          : undefined,
         openTerminalPanel: (cwdProjectRelativePath) => {
           input.openTerminalPanel(scope, cwdProjectRelativePath);
         },

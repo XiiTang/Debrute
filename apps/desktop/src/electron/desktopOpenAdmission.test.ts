@@ -14,15 +14,16 @@ describe('Desktop open admission', () => {
   });
 
   it('uses the first native startup intent instead of opening a default root window', async () => {
-    const activate = vi.fn(async () => undefined);
+    const activate = vi.fn(async () => 'opened');
     const admission = createDesktopOpenAdmission(activate);
     await admission.dispatch({ kind: 'open-project-path', projectRoot: '/projects/alpha' });
 
-    await admission.start(undefined);
+    const result = await admission.start(undefined);
 
     expect(activate.mock.calls).toEqual([[
       { kind: 'open-project-path', projectRoot: '/projects/alpha' }
     ]]);
+    expect(result).toEqual(['opened']);
   });
 
   it('preserves the native source window while an open waits for startup admission', async () => {
@@ -47,10 +48,10 @@ describe('Desktop open admission', () => {
     const admission = createDesktopOpenAdmission(activate);
     await admission.dispatch({ kind: 'open-project-path', projectRoot: '/projects/native' });
 
-    await admission.start({ kind: 'open-project-id', projectId: 'explicit' });
+    await admission.start({ kind: 'open-project-path', projectRoot: '/projects/explicit' });
 
     expect(activate.mock.calls).toEqual([
-      [{ kind: 'open-project-id', projectId: 'explicit' }],
+      [{ kind: 'open-project-path', projectRoot: '/projects/explicit' }],
       [{ kind: 'open-project-path', projectRoot: '/projects/native' }]
     ]);
   });
@@ -63,15 +64,37 @@ describe('Desktop open admission', () => {
       .mockResolvedValue(undefined);
     const admission = createDesktopOpenAdmission(activate);
 
-    const startup = admission.start({ kind: 'open-project-id', projectId: 'first' });
+    const startup = admission.start({ kind: 'open-project-path', projectRoot: '/projects/first' });
     await Promise.resolve();
-    await admission.dispatch({ kind: 'open-project-id', projectId: 'second' });
+    await admission.dispatch({ kind: 'open-project-path', projectRoot: '/projects/second' });
     releaseFirst();
     await startup;
 
     expect(activate.mock.calls).toEqual([
-      [{ kind: 'open-project-id', projectId: 'first' }],
-      [{ kind: 'open-project-id', projectId: 'second' }]
+      [{ kind: 'open-project-path', projectRoot: '/projects/first' }],
+      [{ kind: 'open-project-path', projectRoot: '/projects/second' }]
+    ]);
+  });
+
+  it('returns every startup activation result in admission order', async () => {
+    const firstResult = { result: 'completed' as const };
+    const secondResult = {
+      result: 'project_open_failed' as const,
+      failure: {
+        projectRoot: '/projects/damaged',
+        code: 'project_invalid',
+        message: 'Project root is invalid.'
+      }
+    };
+    const activate = vi.fn()
+      .mockResolvedValueOnce(firstResult)
+      .mockResolvedValueOnce(secondResult);
+    const admission = createDesktopOpenAdmission(activate);
+    await admission.dispatch({ kind: 'open-project-path', projectRoot: '/projects/damaged' });
+
+    await expect(admission.start({ kind: 'new-window' })).resolves.toEqual([
+      firstResult,
+      secondResult
     ]);
   });
 
@@ -80,10 +103,10 @@ describe('Desktop open admission', () => {
     const admission = createDesktopOpenAdmission(activate);
     await admission.start(undefined);
 
-    await admission.dispatch({ kind: 'open-project-id', projectId: 'later' });
+    await admission.dispatch({ kind: 'open-project-path', projectRoot: '/projects/later' });
 
     expect(activate.mock.calls.at(-1)).toEqual([
-      { kind: 'open-project-id', projectId: 'later' }
+      { kind: 'open-project-path', projectRoot: '/projects/later' }
     ]);
   });
 });

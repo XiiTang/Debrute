@@ -1,12 +1,10 @@
 //! Filesystem-backed Project, structured-document, Canvas, and revision authority.
 
 mod canvas;
-mod canvas_map;
-mod documents;
+mod canvas_store;
 mod error;
 mod feedback;
 mod files;
-mod generated_assets;
 mod media;
 mod native_shell;
 #[cfg(feature = "native-watcher-probe")]
@@ -16,16 +14,15 @@ mod platform;
 mod previews;
 mod registry;
 mod service;
+mod tree;
 mod types;
 mod watcher;
 
 pub use canvas::*;
-pub use canvas_map::*;
-pub use documents::*;
+pub(crate) use canvas_store::*;
 pub use error::*;
 pub use feedback::*;
 pub use files::*;
-pub use generated_assets::*;
 pub use media::*;
 pub use native_shell::*;
 #[cfg(feature = "native-watcher-probe")]
@@ -36,7 +33,8 @@ pub(crate) use platform::{rename_no_replace, replace_file};
 pub use previews::*;
 pub use registry::*;
 pub(crate) use service::ProjectService;
-pub use service::{DefaultProjectNodeAdapter, ProjectNodeAdapter};
+pub use service::{CanvasImagePreviewInfo, DefaultProjectNodeAdapter, ProjectNodeAdapter};
+pub(crate) use tree::{ProjectTree, ProjectTreeChange};
 pub use types::*;
 
 #[cfg(test)]

@@ -15,8 +15,8 @@ describe('Debrute repository Skill', () => {
     expect(skill).toContain('## Visual Workbench');
     expect(skill).toContain('debrute workbench start --frontend browser');
     expect(skill).toContain('debrute workbench start --frontend desktop');
-    expect(skill).toContain('debrute workbench start /absolute/path/to/project --frontend browser');
-    expect(skill).toContain('debrute workbench start /absolute/path/to/project --frontend desktop');
+    expect(skill).toContain('debrute workbench start ./ --frontend browser');
+    expect(skill).toContain('debrute workbench start ./ --frontend desktop');
     expect(skill).not.toMatch(/^debrute workbench start$/m);
     expect(skill).toContain('users can also open projects from the Workbench `Open Project` picker.');
     expect(skill).toContain('`--frontend browser` opens the root Workbench or Project in the system browser.');
@@ -26,7 +26,7 @@ describe('Debrute repository Skill', () => {
     expect(skill).toContain('Cline: use the browser to inspect the opened Debrute Workbench tab');
     expect(skill).toContain('Codex app:');
     expect(skill).toContain('use Browser for Web or Computer Use for Desktop');
-    expect(skill).toContain('debrute request batch /path/to/project --input');
+    expect(skill).toContain('debrute request batch --input');
     expect(skill).toContain('debrute models tts describe openai-gpt-4o-mini-tts');
     expect(skill).toContain('debrute models music describe elevenlabs-music');
     expect(skill).toContain('debrute models sfx describe elevenlabs-sound-effects');

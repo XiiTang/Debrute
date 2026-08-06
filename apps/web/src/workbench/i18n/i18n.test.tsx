@@ -12,10 +12,6 @@ describe('Workbench i18n', () => {
 
   it('interpolates parameters', () => {
     expect(createI18n('zh-CN').t('shell.activities.message.projectOpened', { project: 'Demo' })).toBe('已打开项目：Demo');
-    expect(createI18n('en').t('shell.activities.message.projectViewStateReset', { project: 'Demo' }))
-      .toBe('Saved view state for Demo was invalid and has been reset.');
-    expect(createI18n('zh-CN').t('shell.activities.message.projectViewStateReset', { project: 'Demo' }))
-      .toBe('Demo 的已保存视图状态无效，已重置。');
   });
 
   it('provides the General language save failure in both locales', () => {

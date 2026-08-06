@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { CanvasFeedbackEntry } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry } from '@debrute/app-protocol';
 import {
   CanvasFeedbackFrame,
   canvasFeedbackEntryHasFeedback,

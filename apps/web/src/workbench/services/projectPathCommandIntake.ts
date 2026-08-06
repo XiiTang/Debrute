@@ -4,10 +4,10 @@ import type { WorkbenchProjectProjection } from './WorkbenchProjectProjection.js
 const acceptedProjectPathCommandScope = Symbol('AcceptedProjectPathCommandScope');
 
 export interface AcceptedProjectPathCommandScope {
-  readonly projectId: string;
+  readonly bindingId: string;
   readonly generation: number;
   canSubmit(): boolean;
-  isCurrent(resultProjectId?: string): boolean;
+  isCurrent(resultBindingId?: string): boolean;
   readonly [acceptedProjectPathCommandScope]: true;
 }
 
@@ -21,7 +21,7 @@ export function createProjectPathCommandIntake(input: {
   projectProjection: Pick<WorkbenchProjectProjection, 'getState'>;
   isCommandSurfaceAvailable(): boolean;
 }): ProjectPathCommandIntake {
-  const currentAcceptedScope = (): { projectId: string; generation: number } | undefined => {
+  const currentAcceptedScope = (): { bindingId: string; generation: number } | undefined => {
     const current = input.projectProjection.getState();
     if (
       current.status !== 'bound'
@@ -31,7 +31,7 @@ export function createProjectPathCommandIntake(input: {
       return undefined;
     }
     return {
-      projectId: current.projectId,
+      bindingId: current.bindingId,
       generation: current.generation
     };
   };
@@ -43,12 +43,12 @@ export function createProjectPathCommandIntake(input: {
       if (!accepted) {
         return undefined;
       }
-      const isCurrent = (resultProjectId?: string): boolean => {
+      const isCurrent = (resultBindingId?: string): boolean => {
         const current = input.projectProjection.getState();
         return current.status !== 'unbound'
-          && current.projectId === accepted.projectId
+          && current.bindingId === accepted.bindingId
           && current.generation === accepted.generation
-          && (resultProjectId === undefined || resultProjectId === accepted.projectId);
+          && (resultBindingId === undefined || resultBindingId === accepted.bindingId);
       };
       return {
         ...accepted,

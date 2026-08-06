@@ -6,7 +6,9 @@ const WORKBENCH_SHELL_FONT_REQUESTS = [
   ['700 16px "Smiley Sans"', 'Debrute'],
   ['400 16px "Noto Sans SC"', 'Debrute 设置'],
   ['600 16px "Noto Sans SC"', 'Debrute 设置'],
-  ['700 16px "Noto Sans SC"', 'Debrute 设置']
+  ['700 16px "Noto Sans SC"', 'Debrute 设置'],
+  ['400 16px "Noto Sans Mono CJK SC"', 'Debrute 设置'],
+  ['700 16px "Noto Sans Mono CJK SC"', 'Debrute 设置']
 ] as const;
 
 export async function waitForWorkbenchShellFonts(fonts: WorkbenchShellFontSet): Promise<void> {

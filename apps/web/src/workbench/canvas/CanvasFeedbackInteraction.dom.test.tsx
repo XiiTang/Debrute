@@ -7,7 +7,7 @@ import type {
   WorkbenchCanvasFeedbackMutationResult,
   WorkbenchEvent
 } from '@debrute/app-protocol';
-import type { CanvasFeedbackDocument, CanvasFeedbackGeometry } from '@debrute/canvas-core';
+import type { CanvasFeedbackDocument, CanvasFeedbackGeometry } from '@debrute/app-protocol';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import {
   CanvasFeedbackInteractionBar,
@@ -23,7 +23,7 @@ import type {
 
 describe('CanvasFeedbackInteraction', () => {
   it('keeps Feedback Item values independent and saves only the capsule that loses focus', async () => {
-    const putFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['putFeedbackWorkingCopy']>(async (_projectId, value) => value);
+    const putFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['putFeedbackWorkingCopy']>(async (_bindingId, value) => value);
     const clearFeedbackWorkingCopy = vi.fn<WorkbenchApiClient['clearFeedbackWorkingCopy']>(async () => undefined);
     const updateCanvasFeedback = vi.fn<WorkbenchApiClient['updateCanvasFeedback']>(async (input) => {
       const itemId = input.operation === 'update-item' ? input.itemId : 'unexpected';
@@ -429,7 +429,7 @@ describe('CanvasFeedbackInteraction', () => {
     await act(async () => {
       probe.current.applyEvent({
         type: 'canvas.feedback.changed',
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 2,
         feedback: feedbackFixtureWithout('feedback-a')
       });
@@ -452,7 +452,7 @@ describe('CanvasFeedbackInteraction', () => {
       mutation = probe.current.setMark(['image.png'], 'important', true);
       probe.current.applyEvent({
         type: 'canvas.feedback.changed',
-        projectId: 'project-1',
+        bindingId: 'project-1',
         projectRevision: 3,
         feedback: feedbackFixture('Event value')
       } as WorkbenchEvent);
@@ -831,7 +831,7 @@ function InteractionProbe({
 }): null {
   const interaction = useCanvasFeedbackInteraction({
     api,
-    projectId: 'project-1',
+    bindingId: 'project-1',
     overlayRuntime,
     notifyUnavailable: vi.fn(),
     notifySaveFailed: notifySaveFailed ?? vi.fn()
@@ -883,7 +883,7 @@ function PointInteractionProbe({
 }): ReactElement {
   const interaction = useCanvasFeedbackInteraction({
     api,
-    projectId: 'project-1',
+    bindingId: 'project-1',
     overlayRuntime,
     notifyUnavailable: vi.fn(),
     notifySaveFailed: vi.fn()
@@ -948,7 +948,7 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
   return {
     readCanvasFeedback: vi.fn(async () => feedbackFixture()),
     updateCanvasFeedback: vi.fn(async () => mutationResult(feedbackFixture())),
-    putFeedbackWorkingCopy: vi.fn(async (_projectId, value) => value),
+    putFeedbackWorkingCopy: vi.fn(async (_bindingId, value) => value),
     clearFeedbackWorkingCopy: vi.fn(async () => undefined),
     ...overrides
   } as unknown as WorkbenchApiClient;
@@ -1054,7 +1054,7 @@ function feedbackFixtureWithout(itemId: string): CanvasFeedbackDocument {
 
 function mutationResult(_feedback: CanvasFeedbackDocument): WorkbenchCanvasFeedbackMutationResult {
   return {
-    projectId: 'project-1',
+    bindingId: 'project-1',
     projectRevision: 2
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasProjection } from './CanvasScene.js';
 import {
   beginCanvasMinimapDrag,
   buildCanvasMinimapStaticModel,
@@ -229,6 +229,7 @@ function nodeFixture(
 ): CanvasProjection['nodes'][number] {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'file',
     mediaKind: 'image',
     x,
@@ -240,7 +241,7 @@ function nodeFixture(
       state: 'available',
       size: 100,
       mimeType: 'image/png',
-      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     }
   };

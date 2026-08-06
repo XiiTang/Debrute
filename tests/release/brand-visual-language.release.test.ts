@@ -89,12 +89,9 @@ describe('brand visual language', () => {
   it('reserves display type for sparse text at 15px or larger', () => {
     const panels = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/panels.css'), 'utf8');
     const overlays = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/overlays.css'), 'utf8');
-    const canvas = readFileSync(join(root, 'apps/web/src/workbench/styles/canvas.css'), 'utf8');
     const uxp = readFileSync(join(root, 'apps/photoshop-uxp-plugin/src/styles.css'), 'utf8');
     expect(panels.match(/\.db-panel__title\s*\{[\s\S]*?\}/)?.[0]).not.toContain('--db-font-display');
     expect(overlays.match(/\.db-empty-state strong\s*\{[\s\S]*?\}/)?.[0])
-      .toContain('font-size: var(--db-font-lg)');
-    expect(canvas.match(/\.canvas-empty-state strong\s*\{[\s\S]*?\}/)?.[0])
       .toContain('font-size: var(--db-font-lg)');
     expect(uxp).not.toContain('Smiley Sans');
   });

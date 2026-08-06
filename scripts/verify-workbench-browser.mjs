@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,6 @@ const browserScreenshotDirectory = process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR?.t
 const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
 const fixtureHome = join(fixtureRoot, '.home');
 const fixtureTemporaryDirectory = join(fixtureRoot, '.tmp');
-const fixtureProjectId = randomUUID();
 const fixtureTextPath = 'notes/browser-verification.md';
 const fixtureImagePath = 'images/browser-verification.png';
 const fixtureVideoPath = 'media/browser-verification.mp4';
@@ -79,9 +78,7 @@ async function writeFixtureProject() {
   await mkdir(join(fixtureRoot, 'media'), { recursive: true });
   await mkdir(fixtureHome, { recursive: true });
   await mkdir(fixtureTemporaryDirectory, { recursive: true });
-  await mkdir(join(fixtureRoot, '.debrute', 'canvases'), { recursive: true });
-  await mkdir(join(fixtureRoot, '.debrute', 'canvas-maps'), { recursive: true });
-  await mkdir(join(fixtureRoot, '.debrute', 'reviews'), { recursive: true });
+  await mkdir(join(fixtureRoot, '.debrute', 'feedback'), { recursive: true });
 
   const lines = Array.from(
     { length: 80 },
@@ -97,69 +94,36 @@ async function writeFixtureProject() {
     }
   }).png().toFile(join(fixtureRoot, fixtureImagePath));
   await writeFile(join(fixtureRoot, fixtureVideoPath), Buffer.from(fixtureVideoBase64, 'base64'));
-  await writeJson(join(fixtureRoot, '.debrute', 'project.json'), {
-    project: {
-      id: fixtureProjectId,
-      name: 'browser-verification-project',
-      createdAt: '2026-07-07T00:00:00.000Z',
-      updatedAt: '2026-07-07T00:00:00.000Z'
-    }
-  });
-  await writeJson(join(fixtureRoot, '.debrute', 'canvases', 'index.json'), {
-    canvasOrder: [fixtureCanvasId]
-  });
-  await writeJson(join(fixtureRoot, '.debrute', 'canvases', `${fixtureCanvasId}.json`), {
-    id: fixtureCanvasId,
-    name: 'Browser Verification',
-    nodeElements: [
-      {
-        projectRelativePath: fixtureTextPath,
-        nodeKind: 'file',
-        mediaKind: 'text',
-        x: 120,
-        y: 80,
-        width: 420,
-        height: 260,
-        z: 0
+  const rootKey = createHash('sha256').update(fixtureRoot, 'utf8').digest('hex');
+  await writeJson(join(fixtureHome, '.debrute', 'state', 'roots', rootKey, 'canvas.json'), {
+    canonicalRoot: fixtureRoot,
+    activeCanvasId: fixtureCanvasId,
+    canvases: [{
+      id: fixtureCanvasId,
+      name: 'Browser Verification',
+      expandedDirectories: ['images', 'media', 'notes'],
+      nodeStates: {
+        [fixtureTextPath]: {
+          manualLayout: { x: 120, y: 80, width: 420, height: 260 }
+        },
+        [fixtureImagePath]: {
+          manualLayout: { x: 600, y: 80, width: 512, height: 384 }
+        },
+        [fixtureVideoPath]: {
+          manualLayout: { x: 600, y: 500, width: 480, height: 270 }
+        }
       },
-      {
-        projectRelativePath: fixtureImagePath,
-        nodeKind: 'file',
-        mediaKind: 'image',
-        x: 600,
-        y: 80,
-        width: 512,
-        height: 384,
-        z: 1
-      },
-      {
-        projectRelativePath: fixtureVideoPath,
-        nodeKind: 'file',
-        mediaKind: 'video',
-        x: 600,
-        y: 500,
-        width: 480,
-        height: 270,
-        z: 2
-      }
-    ],
-    annotations: [],
-    preferences: {
-      showDiagnostics: true
-    }
+      occlusionOrder: []
+    }]
   });
-  await writeFile(
-    join(fixtureRoot, '.debrute', 'canvas-maps', `${fixtureCanvasId}.yaml`),
-    `paths:\n  - ${fixtureTextPath}\n  - ${fixtureImagePath}\n  - ${fixtureVideoPath}\n`,
-    'utf8'
-  );
-  await writeJson(join(fixtureRoot, '.debrute', 'reviews', 'canvas-feedback.json'), {
+  await writeJson(join(fixtureRoot, '.debrute', 'feedback', 'feedback.json'), {
     updatedAt: '2026-07-07T00:00:00.000Z',
     entries: {}
   });
 }
 
 async function writeJson(path, value) {
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 

@@ -6,7 +6,7 @@ import {
   type PhotoshopStateView,
   type ProjectPathEntry
 } from '@debrute/app-protocol';
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '../canvas/CanvasScene.js';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 import {
@@ -26,6 +26,7 @@ export type ProjectPathCommand =
   | 'copy'
   | 'paste'
   | 'copy-path'
+  | 'reveal-in-canvas'
   | 'reveal-in-system-file-manager'
   | 'rename'
   | 'delete'
@@ -122,6 +123,9 @@ export function buildWorkbenchContextMenuItems(input: {
     ? resolved.selectionEntries[0]
     : undefined;
   const pathActions = compactMenuItems([
+    explorerItem && resolved.selectionEntries.length === 1
+      ? action('reveal-in-canvas')
+      : undefined,
     action('open-terminal'),
     action('copy-path'),
     action('copy-relative-path'),

@@ -3,7 +3,8 @@
 Workbench persists each unsaved text buffer and the latest value of every
 Feedback Capsule that is not yet reflected in accepted Runtime state as a
 complete Working Copy whenever it changes. Runtime stores them atomically in
-its private state directory under a hash of the stable Project id. Feedback
+its private state directory under the canonical root's Root Key defined by
+[ADR-0067](./0067-project-identity-is-the-canonical-root.md). Feedback
 Working Copies use stable Capsule identities and creation timestamps, so
 multiple comments and files synchronize independently without response order
 changing their presentation order. A successful matching text save, explicit

@@ -6,24 +6,26 @@ not process boundaries or workspace package count.
 ## Contexts
 
 - [Project](./docs/project/CONTEXT.md) — the local filesystem-backed
-  creative workspace and its Debrute-owned project metadata.
+  creative workspace and its Project-local Feedback.
 - [Canvas](./packages/canvas-core/CONTEXT.md) — the visual organization, review,
   comparison, and feedback surface projected from Project paths. Canvas-owned
   decisions live under `packages/canvas-core/docs/adr/`.
 - [Capability](./docs/capability/CONTEXT.md) — runtime-backed operations
-  and their structured results, including model generation and artifact pointers.
+  and their structured results, including Model Requests and artifact pointers.
 
 ## Relationships
 
-- **Project → Canvas**: a Canvas Map selects Project paths; a Canvas stores visual
-  state for the resulting nodes while file and folder hierarchy remains
-  Project-owned.
-- **Capability → Project**: capabilities may read Project inputs and produce
-  outputs identified by project-relative artifact pointers; the Project folder
-  remains the source of truth for files.
+- **Project → Canvas**: every Canvas projects the shared Project Tree. Per-Canvas
+  Folder Disclosure controls which descendants are visible, while sparse visual
+  state remains Canvas-owned.
+- **Capability → Project**: Project capabilities operate on files beneath a
+  canonical Project root. Model Requests accept explicit local inputs and an
+  absolute or invocation-working-directory-relative output directory and
+  basename independently of any open Project. Outputs written beneath a
+  Project root enter its Project Tree as ordinary files.
 - **Canvas reads Capability output through Project**: Canvas presents Project
-  files regardless of how they were created. It does not own model execution or
-  generated-asset provenance.
+  Tree files regardless of how they were created. It does not own model
+  execution or Model Artifact provenance.
 
 ## Application Surfaces
 

@@ -6,19 +6,19 @@ describe('PhotoshopPanelView interaction', () => {
   it('renders a semantic nested tree and activates the complete destination row', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 2 }],
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 2 }],
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 2,
         status: 'loaded',
         directories: ['', 'data', 'data/shopify', 'exports']
       }],
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-1', directory: 'data' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'data' }
       ],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: 'data'
@@ -29,7 +29,7 @@ describe('PhotoshopPanelView interaction', () => {
     view.attach();
 
     const tree = root.querySelector<HTMLElement>('[role="tree"]');
-    const project = root.querySelector<HTMLElement>('[role="treeitem"][data-project-id="project-1"][data-directory=""]');
+    const project = root.querySelector<HTMLElement>('[role="treeitem"][data-canonical-root="project-1"][data-directory=""]');
     const data = root.querySelector<HTMLElement>('[role="treeitem"][data-directory="data"]');
     const shopify = root.querySelector<HTMLElement>('[role="treeitem"][data-directory="data/shopify"]');
     expect(tree?.getAttribute('aria-label')).toBe('Debrute Project directories');
@@ -57,17 +57,17 @@ describe('PhotoshopPanelView interaction', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 2,
         status: 'loaded',
         directories: ['', 'data', 'data/shopify', 'exports']
       }],
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-1', directory: 'data' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'data' }
       ],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: 'data'
@@ -95,14 +95,14 @@ describe('PhotoshopPanelView interaction', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 2,
         status: 'loaded',
         directories: ['', 'data', 'data/shopify', 'exports']
       }],
-      expandedDirectories: [{ projectId: 'project-1', directory: '' }],
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: 'data'
@@ -121,11 +121,11 @@ describe('PhotoshopPanelView interaction', () => {
     runtime.publish({
       ...runtime.snapshot(),
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-1', directory: 'data' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'data' }
       ],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: 'data/shopify'
@@ -153,7 +153,7 @@ describe('PhotoshopPanelView interaction', () => {
 
     expect(root.querySelector('select')).toBeNull();
     expect(root.textContent).not.toContain('Hero');
-    const projectRow = root.querySelector<HTMLElement>('[data-project-id="project-1"]');
+    const projectRow = root.querySelector<HTMLElement>('[data-canonical-root="project-1"]');
     expect(projectRow?.tagName).toBe('DIV');
     expect(projectRow?.getAttribute('role')).toBe('treeitem');
     expect(root.querySelector<HTMLElement>('[role="tree"]')?.tabIndex).toBe(0);
@@ -166,14 +166,14 @@ describe('PhotoshopPanelView interaction', () => {
     runtime.publish({
       ...runtime.snapshot(),
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 2,
         status: 'loaded',
         directories: ['', 'data', 'data/shopify', 'exports']
       }],
-      expandedDirectories: [{ projectId: 'project-1', directory: '' }],
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: ''
@@ -190,14 +190,14 @@ describe('PhotoshopPanelView interaction', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 2,
         status: 'loaded',
         directories: ['', 'exports']
       }],
-      expandedDirectories: [{ projectId: 'project-1', directory: '' }],
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: 'exports'
@@ -219,19 +219,19 @@ describe('PhotoshopPanelView interaction', () => {
   it('keeps the tree focusable and reveals a retained destination after its snapshot loads', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 3 }],
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 3 }],
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 3,
         status: 'loading',
         directories: []
       }],
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-1', directory: 'data' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'data' }
       ],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: 'data/shopify'
@@ -257,13 +257,13 @@ describe('PhotoshopPanelView interaction', () => {
       runtime.publish({
         ...runtime.snapshot(),
         directoryTrees: [{
-          projectId: 'project-1',
+          canonicalRoot: 'project-1',
           projectRevision: 3,
           status: 'loaded',
           directories: ['', 'data', 'data/shopify']
         }],
         destination: {
-          projectId: 'project-1',
+          canonicalRoot: 'project-1',
           projectName: 'Poster',
           projectRevision: 3,
           directory: 'data/shopify'
@@ -289,14 +289,14 @@ describe('PhotoshopPanelView interaction', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 2,
         status: 'loaded',
         directories: ['', 'data', 'exports']
       }],
-      expandedDirectories: [{ projectId: 'project-1', directory: '' }],
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectName: 'Poster',
         projectRevision: 2,
         directory: ''
@@ -352,7 +352,7 @@ function snapshotFixture(): PhotoshopPluginSnapshot {
       documentTitle: 'Poster.psd',
       items: [{ layerId: 8, name: 'Hero', kind: 'layer' }]
     },
-    projects: [{ projectId: 'project-1', name: 'Poster', revision: 2 }],
+    projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 2 }],
     directoryTrees: [],
     expandedDirectories: [],
     destination: null,

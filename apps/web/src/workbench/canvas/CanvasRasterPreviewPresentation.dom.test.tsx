@@ -41,7 +41,7 @@ describe('CanvasRasterPreviewPresentation', () => {
     const scheduler = createManualScheduler();
     const continuityKey = canvasPreviewContinuityKey({
       mediaKind: 'image',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       projectRelativePath: 'flow/cover.png',
       continuityIdentity: 'sha256:source-a'
     });
@@ -50,7 +50,7 @@ describe('CanvasRasterPreviewPresentation', () => {
       continuityKey,
       variantTarget: {
         mediaKind: 'image',
-        projectId: 'project-a',
+        bindingId: 'project-a',
         projectRelativePath: 'flow/cover.png',
         targetIdentity,
         sourceWidth: 640,
@@ -280,7 +280,7 @@ async function settlePending(container: ParentNode): Promise<HTMLImageElement> {
 function previewRequest(identity: string): CanvasRasterPreviewRequest {
   const continuityKey = canvasPreviewContinuityKey({
     mediaKind: 'image',
-    projectId: 'project-a',
+    bindingId: 'project-a',
     projectRelativePath: 'flow/cover.png',
     continuityIdentity: identity
   });
@@ -289,7 +289,7 @@ function previewRequest(identity: string): CanvasRasterPreviewRequest {
     continuityKey,
     variantTarget: {
       mediaKind: 'image',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       projectRelativePath: 'flow/cover.png',
       targetIdentity,
       sourceWidth: 640,

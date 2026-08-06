@@ -1,6 +1,5 @@
 import React, {
   createContext,
-  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -13,10 +12,9 @@ import React, {
 import { createPortal } from 'react-dom';
 import {
   canvasPreviewContinuityKey,
-  type CanvasPreviewTargetIdentity,
-  type CanvasPreviewTargetKey,
-  type ProjectedCanvasNode
+  type CanvasPreviewTargetKey
 } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types.js';
 import type { CanvasSceneActions } from './CanvasSceneActions.js';
 import {
@@ -55,7 +53,7 @@ import {
   canvasRecordValuesEqual,
   createCanvasPathSnapshotStore
 } from './CanvasPathSnapshotStore.js';
-import { canvasRawFileProjectId } from './canvasRawFileUrls.js';
+import { canvasRawFileBindingId } from './canvasRawFileUrls.js';
 import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
 import type { CanvasTextPreparedFont } from './CanvasTextRenderProfile.js';
 import {
@@ -68,6 +66,7 @@ import { useCanvasTextProjectFontEnvironment } from './font-subset/CanvasTextPro
 import {
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_CONCURRENT_READS,
   canvasTextPreviewContentWindow,
+  canvasTextPreviewExecutingTask,
   canvasTextPreviewTaskHoldsContent,
   reconcileCanvasTextPreviewTasks,
   type CanvasTextPreviewTask
@@ -78,7 +77,7 @@ import { useCanvasPreviewInteractionGate } from './useCanvasPreviewInteractionGa
 import type { CanvasRect } from './runtime/canvasGeometry.js';
 
 export interface CanvasTextPreviewSourceAvailability {
-  targetIdentity: CanvasPreviewTargetIdentity;
+  targetKey: CanvasPreviewTargetKey;
   available: boolean;
 }
 
@@ -89,11 +88,10 @@ interface CanvasTextPreviewErrorState {
 
 interface CanvasTextPreviewAvailabilityRequest {
   epoch: number;
-  targetKeys: ReadonlySet<CanvasPreviewTargetKey>;
 }
 
 interface CanvasTextPreviewTargetInput {
-  readonly projectId: string;
+  readonly bindingId: string;
   readonly canvasId: string;
   readonly projectRelativePath: string;
   readonly contentDigest?: string | undefined;
@@ -116,12 +114,15 @@ interface CanvasTextPreviewTargetResolution {
 
 interface CanvasTextPreviewCoverageJob {
   readonly abortController: AbortController;
-  readonly targetKeys: ReadonlyMap<string, CanvasPreviewTargetKey>;
 }
+
+type CanvasTextPreviewAttemptTarget = CanvasTextPreviewTarget & Pick<CanvasTextPreviewTask, 'attempt'>;
+type CanvasTextPreviewExecutionTarget = CanvasTextPreviewCaptureTarget & Pick<CanvasTextPreviewTask, 'attempt'>;
 
 interface CanvasTextPreviewFontBuild {
   readonly abortController: AbortController;
   readonly coverage: Uint32Array;
+  readonly attempts: ReadonlyMap<string, object>;
 }
 
 interface CanvasTextPreviewFontCandidate {
@@ -193,6 +194,7 @@ export function CanvasTextPreviewProvider({
   const [previewErrors, setPreviewErrors] = useState<Record<string, CanvasTextPreviewErrorState>>({});
   const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasTextPreviewTarget>>({});
   const [tasks, setTasks] = useState<Map<string, CanvasTextPreviewTask>>(() => new Map());
+  const [availabilitySettlementVersion, setAvailabilitySettlementVersion] = useState(0);
   const [contentReadSettlementVersion, setContentReadSettlementVersion] = useState(0);
   const [styleKeyState, setStyleKeyState] = useState<{ key?: string; error?: Error }>({});
   const currentTargetKeysRef = useRef(new Map<string, CanvasPreviewTargetKey>());
@@ -205,6 +207,7 @@ export function CanvasTextPreviewProvider({
   const changedNodePathsRef = useRef(new Set<string>());
   const currentCanvasIdRef = useRef(canvasId);
   const textFileBuffersRef = useRef(textFileBuffers);
+  const activeInlineTextPathRef = useRef(activeInlineTextPath);
   const styleKeyRef = useRef(styleKeyState.key);
   const previewOrderSnapshot = useSyncExternalStore(
     previewOrder.subscribePreviewOrder,
@@ -214,7 +217,6 @@ export function CanvasTextPreviewProvider({
   const runtimeEpochRef = useRef(0);
   const mountedRef = useRef(true);
   const availabilityInFlightRef = useRef<CanvasTextPreviewAvailabilityRequest | undefined>(undefined);
-  const sourceCheckedTargetKeysRef = useRef(new Map<string, CanvasPreviewTargetKey>());
   const contentReadsRef = useRef(new Set<number>());
   const contentReadIdByPathRef = useRef(new Map<string, number>());
   const nextContentReadIdRef = useRef(0);
@@ -224,7 +226,6 @@ export function CanvasTextPreviewProvider({
   const activeFontCoverageRef = useRef<Uint32Array>(new Uint32Array());
   const epochCoverageRef = useRef<Uint32Array>(new Uint32Array());
   const registryWasEmptyRef = useRef(true);
-  const uploadingTargetKeysRef = useRef(new Set<CanvasPreviewTargetKey>());
   const hasPendingPreviewWork = useCallback(() => (
     [...tasksRef.current.values()].some((task) => (
       task.state === 'checking'
@@ -253,6 +254,7 @@ export function CanvasTextPreviewProvider({
   }, []);
   currentCanvasIdRef.current = canvasId;
   textFileBuffersRef.current = textFileBuffers;
+  activeInlineTextPathRef.current = activeInlineTextPath;
   styleKeyRef.current = styleKeyState.key;
   currentTargetsRef.current = currentTargets;
   tasksRef.current = tasks;
@@ -266,8 +268,11 @@ export function CanvasTextPreviewProvider({
     nodesByPath,
     visibleRect: previewOrderSnapshot
   }), [nodesByPath, previewOrderSnapshot, tasks]);
-  const captureTask = orderedTasks.find((task) => task.state === 'capturing' && task.content !== undefined);
-  const captureTarget = useMemo<CanvasTextPreviewCaptureTarget | undefined>(() => (
+  const executingTask = canvasTextPreviewExecutingTask(tasks);
+  const captureTask = executingTask?.state === 'capturing' && executingTask.content !== undefined
+    ? executingTask
+    : undefined;
+  const captureTarget = useMemo<CanvasTextPreviewExecutionTarget | undefined>(() => (
     captureTask?.content === undefined
       ? undefined
       : { ...captureTask, content: captureTask.content }
@@ -304,11 +309,12 @@ export function CanvasTextPreviewProvider({
   ), []);
 
   const setCurrentPreviewFailure = useCallback((
-    target: CanvasTextPreviewTarget,
+    target: CanvasTextPreviewAttemptTarget,
     error: CanvasTextPreviewFailure
   ) => {
     const targetKey = canvasTextPreviewTargetKey(target);
-    if (currentTargetKeysRef.current.get(target.projectRelativePath) !== targetKey) {
+    if (currentTargetKeysRef.current.get(target.projectRelativePath) !== targetKey
+      || tasksRef.current.get(target.projectRelativePath)?.attempt !== target.attempt) {
       return;
     }
     setPreviewErrors((current) => {
@@ -351,7 +357,6 @@ export function CanvasTextPreviewProvider({
       || error?.targetKey !== canvasTextPreviewTargetKey(target)) {
       return;
     }
-    sourceCheckedTargetKeysRef.current.delete(projectRelativePath);
     setSourceAvailability((current) => {
       const next = withoutRecordPath(current, projectRelativePath);
       sourceAvailabilityRef.current = next;
@@ -372,9 +377,11 @@ export function CanvasTextPreviewProvider({
         coverage: undefined
       };
       if (existing && canvasTextPreviewTargetKey(existing) === canvasTextPreviewTargetKey(target)) {
-        return updateCanvasTextPreviewTask(current, target, checking);
+        const next = new Map(current);
+        next.set(projectRelativePath, { ...target, ...checking, attempt: {} });
+        return next;
       }
-      return new Map(current).set(projectRelativePath, { ...target, ...checking });
+      return new Map(current).set(projectRelativePath, { ...target, ...checking, attempt: {} });
     });
   }, [markChangedNodeRecords, markNodePathChanged, updateTasks]);
 
@@ -401,8 +408,6 @@ export function CanvasTextPreviewProvider({
       fontCandidateRef.current?.preparation.discard();
       fontCandidateRef.current = undefined;
       availabilityInFlightRef.current = undefined;
-      sourceCheckedTargetKeysRef.current.clear();
-      uploadingTargetKeysRef.current.clear();
       for (const path of currentTargetKeysRef.current.keys()) {
         previewResourceScheduler.cancel('text', path);
       }
@@ -583,15 +588,15 @@ export function CanvasTextPreviewProvider({
       contentTargetCount: heldContent.length,
       contentBytes: heldContent.reduce((total, task) => total + (task.contentBytes ?? 0), 0),
       readInFlight: contentReadsRef.current.size,
-      uploadInFlight: uploadingTargetKeysRef.current.size,
+      uploadInFlight: [...tasks.values()].filter((task) => task.state === 'uploading').length,
       readingPath: taskInState('reading'),
       readyPath: taskInState('ready'),
       waitingFontPath: taskInState('waiting-font'),
       capturingPath: taskInState('capturing'),
-      orderedCapturingPath: orderedTasks.find((task) => task.state === 'capturing')?.projectRelativePath,
+      orderedCapturingPath: captureTask?.projectRelativePath,
       uploadingPath: taskInState('uploading')
     });
-  }, [orderedTasks, recordTextPreviewCounter, tasks]);
+  }, [captureTask?.projectRelativePath, orderedTasks, recordTextPreviewCounter, tasks]);
 
   useEffect(() => {
     const empty = tasks.size === 0;
@@ -611,24 +616,14 @@ export function CanvasTextPreviewProvider({
     if (interactionActiveRef.current || availabilityInFlightRef.current) {
       return;
     }
-    const checking = orderedTasks.filter((task) => (
-      task.state === 'checking'
-      && sourceCheckedTargetKeysRef.current.get(task.projectRelativePath) !== canvasTextPreviewTargetKey(task)
-    ));
+    const checking = orderedTasks.filter((task) => task.state === 'checking');
     if (checking.length === 0) {
       return;
     }
     const request: CanvasTextPreviewAvailabilityRequest = {
-      epoch: runtimeEpochRef.current,
-      targetKeys: new Set(checking.map(canvasTextPreviewTargetKey))
+      epoch: runtimeEpochRef.current
     };
     availabilityInFlightRef.current = request;
-    for (const target of checking) {
-      sourceCheckedTargetKeysRef.current.set(
-        target.projectRelativePath,
-        canvasTextPreviewTargetKey(target)
-      );
-    }
     recordTextPreviewCounter('text-preview-source-check-requested', { count: checking.length });
     void actions.readCanvasTextPreviewSources({
       canvasId,
@@ -640,9 +635,10 @@ export function CanvasTextPreviewProvider({
         return;
       }
       availabilityInFlightRef.current = undefined;
-      const successful: CanvasTextPreviewTarget[] = [];
+      const successful: CanvasTextPreviewTask[] = [];
       for (const target of checking) {
-        if (currentTargetKeysRef.current.get(target.projectRelativePath) !== canvasTextPreviewTargetKey(target)) {
+        const currentTask = tasksRef.current.get(target.projectRelativePath);
+        if (currentTask?.attempt !== target.attempt || currentTask.state !== 'checking') {
           continue;
         }
         const source = result.sources[target.projectRelativePath];
@@ -663,18 +659,29 @@ export function CanvasTextPreviewProvider({
           available: source.status === 'available'
         });
       }
-      startTransition(() => {
-        setSourceAvailability((current) => {
-          const next = canvasTextPreviewSourcesWithAvailability({
-            current,
-            targets: successful,
-            sources: result.sources
-          });
-          sourceAvailabilityRef.current = next;
-          markChangedNodeRecords(current, next);
-          return next;
-        });
+      const currentAvailability = sourceAvailabilityRef.current;
+      const nextAvailability = canvasTextPreviewSourcesWithAvailability({
+        current: currentAvailability,
+        targets: successful,
+        sources: result.sources
       });
+      sourceAvailabilityRef.current = nextAvailability;
+      markChangedNodeRecords(currentAvailability, nextAvailability);
+      setSourceAvailability(nextAvailability);
+      updateTasks((current) => {
+        let next = current;
+        for (const target of successful) {
+          const source = result.sources[target.projectRelativePath];
+          if (!source || source.status === 'error') {
+            continue;
+          }
+          next = source.status === 'available'
+            ? withoutCanvasTextPreviewTask(next, target)
+            : updateCanvasTextPreviewTask(next, target, { state: 'needs-content' });
+        }
+        return next;
+      });
+      setAvailabilitySettlementVersion((current) => current + 1);
     }, (error: unknown) => {
       if (availabilityInFlightRef.current !== request
         || request.epoch !== runtimeEpochRef.current
@@ -683,21 +690,28 @@ export function CanvasTextPreviewProvider({
       }
       availabilityInFlightRef.current = undefined;
       for (const target of checking) {
+        const currentTask = tasksRef.current.get(target.projectRelativePath);
+        if (currentTask?.attempt !== target.attempt || currentTask.state !== 'checking') {
+          continue;
+        }
         setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
           'source_availability_failed',
           canvasTextPreviewFailureFieldsForTarget(target),
           error
         ));
       }
+      setAvailabilitySettlementVersion((current) => current + 1);
     });
   }, [
     actions,
     canvasId,
+    availabilitySettlementVersion,
     interactionResumeVersion,
     markChangedNodeRecords,
     orderedTasks,
     recordTextPreviewCounter,
-    setCurrentPreviewFailure
+    setCurrentPreviewFailure,
+    updateTasks
   ]);
 
   useEffect(() => {
@@ -742,7 +756,6 @@ export function CanvasTextPreviewProvider({
         continue;
       }
       availableReadSlots -= 1;
-      const targetKey = canvasTextPreviewTargetKey(task);
       const readId = nextContentReadIdRef.current + 1;
       nextContentReadIdRef.current = readId;
       contentReadsRef.current.add(readId);
@@ -770,7 +783,7 @@ export function CanvasTextPreviewProvider({
           return;
         }
         const current = tasksRef.current.get(task.projectRelativePath);
-        if (!current || canvasTextPreviewTargetKey(current) !== targetKey) {
+        if (!current || current.attempt !== task.attempt || current.state !== 'reading') {
           return;
         }
         if (file.revision !== task.contentDigest || file.language !== task.language) {
@@ -813,10 +826,7 @@ export function CanvasTextPreviewProvider({
       return;
     }
     const abortController = new AbortController();
-    const job: CanvasTextPreviewCoverageJob = {
-      abortController,
-      targetKeys: new Map(uncovered.map((task) => [task.projectRelativePath, canvasTextPreviewTargetKey(task)]))
-    };
+    const job: CanvasTextPreviewCoverageJob = { abortController };
     coverageJobRef.current = job;
     void collectCanvasTextPreviewCoverage(
       uncovered.map((task) => task.content!),
@@ -833,7 +843,8 @@ export function CanvasTextPreviewProvider({
       updateTasks((current) => {
         let next = current;
         for (const task of uncovered) {
-          if (job.targetKeys.get(task.projectRelativePath) === canvasTextPreviewTargetKey(task)) {
+          const currentTask = next.get(task.projectRelativePath);
+          if (currentTask === task) {
             next = updateCanvasTextPreviewTask(next, task, {
               state: 'waiting-font',
               coverage: coverage.codepoints
@@ -868,15 +879,19 @@ export function CanvasTextPreviewProvider({
     if (interactionActiveRef.current || fontBuildRef.current || fontCandidate) {
       return;
     }
-    const needsFont = orderedTasks.some((task) => task.state === 'waiting-font'
+    const waitingTasks = orderedTasks.filter((task) => task.state === 'waiting-font'
       && task.coverage
       && !canvasTextPreviewCoverageContains(activeFontCoverageRef.current, task.coverage));
-    if (!needsFont || epochCoverageRef.current.length === 0) {
+    if (waitingTasks.length === 0 || epochCoverageRef.current.length === 0) {
       return;
     }
     const abortController = new AbortController();
     const coverage = epochCoverageRef.current.slice();
-    const build: CanvasTextPreviewFontBuild = { abortController, coverage };
+    const build: CanvasTextPreviewFontBuild = {
+      abortController,
+      coverage,
+      attempts: new Map(waitingTasks.map((task) => [task.projectRelativePath, task.attempt]))
+    };
     fontBuildRef.current = build;
     void previewFontSession.prepareCoverage(coverage, abortController.signal).then((preparation) => {
       if (fontBuildRef.current !== build || !mountedRef.current) {
@@ -893,7 +908,8 @@ export function CanvasTextPreviewProvider({
       }
       fontBuildRef.current = undefined;
       for (const task of tasksRef.current.values()) {
-        if (task.state === 'waiting-font') {
+        if (task.state === 'waiting-font'
+          && build.attempts.get(task.projectRelativePath) === task.attempt) {
           setCurrentPreviewFailure(task, canvasTextPreviewFailureFromUnknown(
             'font_prepare_failed',
             canvasTextPreviewFailureFieldsForTarget(task),
@@ -919,7 +935,7 @@ export function CanvasTextPreviewProvider({
   }, [fontCandidate, orderedTasks]);
 
   useEffect(() => {
-    if (interactionActiveRef.current || orderedTasks.some((task) => task.state === 'capturing')) {
+    if (interactionActiveRef.current || executingTask) {
       return;
     }
     let preparedFont = activePreparedFont;
@@ -961,18 +977,36 @@ export function CanvasTextPreviewProvider({
       return;
     }
     updateTasks((current) => updateCanvasTextPreviewTask(current, firstRunnable, { state: 'capturing' }));
-  }, [activePreparedFont, fontCandidate, interactionResumeVersion, orderedTasks, setCurrentPreviewFailure, updateTasks]);
+  }, [activePreparedFont, executingTask, fontCandidate, interactionResumeVersion, orderedTasks, setCurrentPreviewFailure, updateTasks]);
+
+  const finishExecutingTask = useCallback((target: CanvasTextPreviewTarget) => {
+    updateTasks((current) => {
+      const withoutExecutor = withoutCanvasTextPreviewTask(current, target);
+      const workTargets = Object.values(currentTargetsRef.current).filter((candidate) => (
+        candidate.projectRelativePath !== activeInlineTextPathRef.current
+      ));
+      return reconcileCanvasTextPreviewTasks({
+        previous: withoutExecutor,
+        targets: workTargets,
+        sourceAvailability: sourceAvailabilityRef.current
+      });
+    });
+  }, [updateTasks]);
 
   const finishRasterizedTarget = useCallback((
-    target: CanvasTextPreviewCaptureTarget,
+    target: CanvasTextPreviewExecutionTarget,
     raster: CanvasTextPreviewCaptureResult
   ) => {
     const targetKey = canvasTextPreviewTargetKey(target);
     const epoch = runtimeEpochRef.current;
-    if (!isCurrentTarget(epoch, target)) {
+    const task = tasksRef.current.get(target.projectRelativePath);
+    if (!mountedRef.current
+      || epoch !== runtimeEpochRef.current
+      || !task
+      || task.state !== 'capturing'
+      || canvasTextPreviewTargetKey(task) !== targetKey) {
       return;
     }
-    uploadingTargetKeysRef.current.add(targetKey);
     updateTasks((current) => updateCanvasTextPreviewTask(current, target, {
       state: 'uploading',
       content: undefined,
@@ -983,48 +1017,49 @@ export function CanvasTextPreviewProvider({
     recordTextPreviewCounter('text-preview-source-upload-started', {
       projectRelativePath: target.projectRelativePath,
       bytes: raster.sourcePng.size,
-      inFlight: uploadingTargetKeysRef.current.size
+      inFlight: 1
     });
     void actions.saveCanvasTextPreviewSource({
       ...canvasTextPreviewSourceTargetForApi(target),
       canvasId: target.canvasId,
       sourcePng: raster.sourcePng
     }).then(() => {
-      uploadingTargetKeysRef.current.delete(targetKey);
-      if (!isCurrentTarget(epoch, target)) {
+      if (!mountedRef.current || epoch !== runtimeEpochRef.current) {
         return;
       }
-      startTransition(() => {
-        setSourceAvailability((current) => {
-          const next = {
-            ...current,
-            [target.projectRelativePath]: { targetIdentity: target.targetIdentity, available: true }
-          };
-          sourceAvailabilityRef.current = next;
-          markChangedNodeRecords(current, next);
-          return next;
-        });
-      });
-      clearCurrentPreviewFailure(target);
+      if (isCurrentTarget(epoch, target)) {
+        const current = sourceAvailabilityRef.current;
+        const next = {
+          ...current,
+          [target.projectRelativePath]: { targetKey, available: true }
+        };
+        sourceAvailabilityRef.current = next;
+        markChangedNodeRecords(current, next);
+        setSourceAvailability(next);
+        clearCurrentPreviewFailure(target);
+      }
+      finishExecutingTask(target);
       recordTextPreviewCounter('text-preview-source-upload-completed', {
         projectRelativePath: target.projectRelativePath,
         targetIdentity: target.targetIdentity,
         durationMs: performance.now() - startedAt,
-        inFlight: uploadingTargetKeysRef.current.size
+        inFlight: 0
       });
     }, (error: unknown) => {
-      uploadingTargetKeysRef.current.delete(targetKey);
       if (isCurrentTarget(epoch, target)) {
         setCurrentPreviewFailure(target, canvasTextPreviewFailureFromUnknown(
           'source_upload_failed',
           canvasTextPreviewFailureFieldsForTarget(target),
           error
         ));
+      } else if (mountedRef.current && epoch === runtimeEpochRef.current) {
+        finishExecutingTask(target);
       }
     });
   }, [
     actions,
     clearCurrentPreviewFailure,
+    finishExecutingTask,
     isCurrentTarget,
     markChangedNodeRecords,
     recordTextPreviewCounter,
@@ -1033,11 +1068,15 @@ export function CanvasTextPreviewProvider({
   ]);
 
   const finishFailedTarget = useCallback((
-    target: CanvasTextPreviewCaptureTarget,
+    target: CanvasTextPreviewExecutionTarget,
     failure: CanvasTextPreviewFailure
   ) => {
-    setCurrentPreviewFailure(target, failure);
-  }, [setCurrentPreviewFailure]);
+    if (isCurrentTarget(runtimeEpochRef.current, target)) {
+      setCurrentPreviewFailure(target, failure);
+    } else {
+      finishExecutingTask(target);
+    }
+  }, [finishExecutingTask, isCurrentTarget, setCurrentPreviewFailure]);
 
   const currentTargetForRenderedNode = useCallback((node: ProjectedCanvasNode): CanvasTextPreviewTarget | undefined => {
     const styleKey = styleKeyRef.current;
@@ -1069,7 +1108,7 @@ export function CanvasTextPreviewProvider({
       const availability = sourceAvailabilityRef.current[node.projectRelativePath];
       request = canvasTextRasterPreviewRequest({
         target,
-        available: availability?.targetIdentity === target.targetIdentity && availability.available
+        available: availability?.targetKey === targetKey && availability.available
       });
       const error = previewErrorsRef.current[node.projectRelativePath];
       if (error?.targetKey === targetKey) {
@@ -1135,7 +1174,7 @@ function canvasTextPreviewTargetInput(input: {
   }
   const geometry = canvasTextPresentationGeometry(node);
   return {
-    projectId: canvasRawFileProjectId(node.availability.fileUrl),
+    bindingId: canvasRawFileBindingId(node.availability.fileUrl),
     canvasId: input.canvasId,
     projectRelativePath: node.projectRelativePath,
     ...(buffer?.dirty
@@ -1161,7 +1200,7 @@ async function resolveCanvasTextPreviewTarget(
   const contentDigest = targetInput.contentDigest ?? dirtyIdentity!.digest;
   const sourceSize = canvasTextPreviewSourceSize(targetInput);
   const candidate: CanvasTextPreviewCandidate = {
-    projectId: targetInput.projectId,
+    bindingId: targetInput.bindingId,
     canvasId: targetInput.canvasId,
     projectRelativePath: targetInput.projectRelativePath,
     contentDigest,
@@ -1191,7 +1230,7 @@ function canvasTextPreviewTargetInputsEqual(
   left: CanvasTextPreviewTargetInput,
   right: CanvasTextPreviewTargetInput
 ): boolean {
-  return left.projectId === right.projectId
+  return left.bindingId === right.bindingId
     && left.canvasId === right.canvasId
     && left.projectRelativePath === right.projectRelativePath
     && left.contentDigest === right.contentDigest
@@ -1258,15 +1297,32 @@ function orderCanvasTextPreviewTasks(input: {
 
 function updateCanvasTextPreviewTask(
   current: Map<string, CanvasTextPreviewTask>,
-  target: CanvasTextPreviewTarget,
+  target: CanvasTextPreviewTarget | CanvasTextPreviewTask,
   patch: Partial<CanvasTextPreviewTask>
 ): Map<string, CanvasTextPreviewTask> {
   const existing = current.get(target.projectRelativePath);
-  if (!existing || canvasTextPreviewTargetKey(existing) !== canvasTextPreviewTargetKey(target)) {
+  if (!existing
+    || canvasTextPreviewTargetKey(existing) !== canvasTextPreviewTargetKey(target)
+    || ('attempt' in target && existing.attempt !== target.attempt)) {
     return current;
   }
   const next = new Map(current);
   next.set(target.projectRelativePath, { ...existing, ...patch });
+  return next;
+}
+
+function withoutCanvasTextPreviewTask(
+  current: Map<string, CanvasTextPreviewTask>,
+  target: CanvasTextPreviewTarget | CanvasTextPreviewTask
+): Map<string, CanvasTextPreviewTask> {
+  const existing = current.get(target.projectRelativePath);
+  if (!existing
+    || canvasTextPreviewTargetKey(existing) !== canvasTextPreviewTargetKey(target)
+    || ('attempt' in target && existing.attempt !== target.attempt)) {
+    return current;
+  }
+  const next = new Map(current);
+  next.delete(target.projectRelativePath);
   return next;
 }
 
@@ -1294,12 +1350,16 @@ function canvasTextPreviewBufferMatchesTarget(
   target: CanvasTextPreviewTarget,
   resolution: CanvasTextPreviewTargetResolution | undefined
 ): boolean {
-  if (buffer.error || buffer.language !== target.language) {
+  if (
+    buffer.error
+    || buffer.language !== target.language
+    || !resolution?.target
+    || canvasTextPreviewTargetKey(resolution.target) !== canvasTextPreviewTargetKey(target)
+  ) {
     return false;
   }
   return buffer.dirty
-    ? resolution?.target?.targetIdentity === target.targetIdentity
-      && resolution.input.dirtyContent === buffer.content
+    ? resolution.input.dirtyContent === buffer.content
     : buffer.baseRevision === target.contentDigest;
 }
 
@@ -1310,7 +1370,7 @@ export function canvasTextRasterPreviewRequest(input: {
   const { target } = input;
   const continuityKey = canvasPreviewContinuityKey({
     mediaKind: 'text',
-    projectId: target.projectId,
+    bindingId: target.bindingId,
     canvasId: target.canvasId,
     projectRelativePath: target.projectRelativePath,
     continuityIdentity: target.targetIdentity
@@ -1322,7 +1382,7 @@ export function canvasTextRasterPreviewRequest(input: {
     continuityKey,
     variantTarget: {
       mediaKind: 'text',
-      projectId: target.projectId,
+      bindingId: target.bindingId,
       canvasId: target.canvasId,
       projectRelativePath: target.projectRelativePath,
       targetIdentity: target.targetIdentity,
@@ -1334,7 +1394,7 @@ export function canvasTextRasterPreviewRequest(input: {
           targetIdentity: target.targetIdentity,
           w: String(width)
         });
-        return `/api/projects/${target.projectId}/canvas-text-preview?${params.toString()}`;
+        return `/api/workbench/bindings/${target.bindingId}/canvas-text-preview?${params.toString()}`;
       }
     }
   };
@@ -1354,9 +1414,12 @@ function canvasTextPreviewSourcesWithAvailability(input: {
     if (!source || source.status === 'error') {
       continue;
     }
-    const availability = { targetIdentity: target.targetIdentity, available: source.status === 'available' };
+    const availability = {
+      targetKey: canvasTextPreviewTargetKey(target),
+      available: source.status === 'available'
+    };
     const existing = next[target.projectRelativePath];
-    if (existing?.targetIdentity === availability.targetIdentity && existing.available === availability.available) {
+    if (existing?.targetKey === availability.targetKey && existing.available === availability.available) {
       continue;
     }
     next = next === input.current ? { ...input.current } : next;
@@ -1369,9 +1432,9 @@ function canvasTextPreviewCurrentSourceAvailability(input: {
   targets: CanvasTextPreviewTarget[];
   sourceAvailability: Record<string, CanvasTextPreviewSourceAvailability>;
 }): Record<string, CanvasTextPreviewSourceAvailability> {
-  const targetIdentities = new Map(input.targets.map((target) => [target.projectRelativePath, target.targetIdentity]));
+  const targetKeys = new Map(input.targets.map((target) => [target.projectRelativePath, canvasTextPreviewTargetKey(target)]));
   return Object.fromEntries(Object.entries(input.sourceAvailability).filter(([path, availability]) => (
-    targetIdentities.get(path) === availability.targetIdentity
+    targetKeys.get(path) === availability.targetKey
   )));
 }
 

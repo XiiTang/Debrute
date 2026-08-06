@@ -6,16 +6,22 @@ Project files.
 ## Language
 
 **Canvas**:
-A visual workspace whose nodes represent selected Project files and directories,
-with stored layout, stack order, annotations, feedback, and preferences. Canvas
-state is secondary to Project files: missing or invalid Canvas state never makes
-the Project files unavailable.
+A visual file manager whose nodes represent Project files and directories. Each
+Canvas persists independent Folder Disclosure and sparse visual state. Canvas
+state is machine-local presentation associated with one canonical Project root.
 _Avoid_: Board, document layer
 
-**Canvas Map**:
-A YAML document that selects the Project paths appearing on one Canvas and may
-define automatic comparison rows for those selected paths.
-_Avoid_: Canvas document, workflow
+**Project Tree**:
+The Runtime-owned, on-demand index of user-visible Project files and
+directories shared by Explorer and Canvas. Every indexed entry logically
+belongs to every Canvas.
+_Avoid_: Canvas membership, Explorer snapshot
+
+**Folder Disclosure**:
+The persisted per-Canvas set of directories whose children are visible. A new
+Canvas discloses the Project root, and the root can later be collapsed. Explorer
+expansion is independent view state.
+_Avoid_: Membership, filesystem loading, Explorer expansion
 
 **Canvas Node**:
 The Canvas representation of one Project file or directory, identified by its
@@ -26,7 +32,7 @@ _Avoid_: Asset record, layer
 The transient set of Canvas Nodes targeted together by the current Canvas
 interaction. Empty, one-node, and many-node selections are cardinalities of
 this one selection, not separate selection states. It contains only Canvas
-Nodes and is not Canvas Document state.
+Nodes and is not Canvas State.
 _Avoid_: Mixed selection, selected assets
 
 **Selection Marquee**:
@@ -36,58 +42,74 @@ intersects it. It is not a selection state or persistent selection mode.
 _Avoid_: Selection box, lasso
 
 **Canvas ID**:
-The stable filesystem-safe identity shared by one Canvas, its Canvas Map, and
-its registry entry. It does not change when the Canvas is renamed.
+The stable identity of one Canvas inside its root-scoped Canvas Workspace
+Document. It does not change when the Canvas is renamed.
 _Avoid_: Canvas name, title
 
 **Canvas Name**:
 The editable display label of a Canvas. It is presentation, not identity.
 _Avoid_: Canvas ID
 
-**Canvas Document**:
-The pushed JSON state for one Canvas: identity, display name, materialized node
-geometry, stack order, annotations, and preferences.
-_Avoid_: Canvas Map, live editor state
+**Canvas State**:
+The sparse state for one Canvas: ID, Name, Folder Disclosure, non-default
+node-local state, and Occlusion Order. It is one member of the root-scoped
+Canvas Workspace Document; Project membership, hierarchy, Automatic Layout,
+Selection, and camera are derived or transient.
+_Avoid_: Project Tree, live editor state
 
-**Canvas Projection**:
-The runtime view produced from a Canvas Document and current Project state. It
-adds current availability, exact text language for available text files, derived
-file-tree edges, and Project Diagnostics without making them persisted Canvas
-state.
-_Avoid_: Canvas Document
+**Canvas Resource View**:
+The Runtime view produced from Canvas State and the shared Project Tree. It
+adds visible paths, current availability, node kinds, media facts, and Project
+Diagnostics without calculating geometry.
+_Avoid_: Canvas State, scene projection
 
-**Canvas Registry**:
-The ordered collection of Canvas IDs for one Project. Every registered ID owns
-exactly one Canvas Document and one Canvas Map.
-_Avoid_: Recent canvases, active Canvas
+**Canvas Scene Projection**:
+The Workbench-owned nodes and edges derived from one Canvas Resource View and
+Canvas State after fonts are ready. It contains Automatic Layout, Manual Layout
+overlay, overlap-only stacking, and hierarchy edges without persisting them.
+_Avoid_: Runtime projection, Canvas State
+
+**Canvas Workspace Document**:
+The one Runtime-global Canvas JSON document for a Project Canonical Root. It
+stores that root, Active Canvas ID, and the ordered complete Canvas states. It
+is not Project content.
+_Avoid_: Project file
 
 **Automatic Layout**:
-Deterministic hierarchy-and-row placement recalculated from current Canvas Map
-membership for nodes without a manual override.
+Deterministic hierarchy placement recalculated from currently visible Project
+Tree nodes. Manual rectangles override only their own nodes.
 _Avoid_: Saved layout, fallback layout
 
 **Manual Layout**:
 A persisted node rectangle created by direct move or resize and preserved while
-the node remains a member of the Canvas.
+the Project Path exists.
 _Avoid_: Locked node, drag preview
 
 **Manual Layout Draft**:
-A not-yet-confirmed node geometry and stack-order change produced by direct move
-or resize. It may be presented over a Canvas Projection, but it is not Canvas
-Document state.
-_Avoid_: Manual Layout, pending layout, optimistic Canvas Document
+A not-yet-confirmed node geometry produced by direct move or resize. It may be
+presented over a Canvas Scene Projection, but it is not Canvas State.
+_Avoid_: Manual Layout, pending layout, optimistic Canvas State
 
-**Stack Order**:
-The persisted back-to-front order of Canvas Nodes. It is independent of Project
-hierarchy and automatic placement.
+**Occlusion Order**:
+The persisted bottom-to-top order containing only currently visible Canvas
+Nodes that overlap at least one other node. Non-overlapping relative order has
+no product meaning. Selecting nodes raises the complete resulting Selection
+while preserving its internal order.
 _Avoid_: Layer tree, z-order panel
+
+**Selection Raise**:
+The rule that immediately presents the complete Canvas Node Selection above
+overlapping unselected nodes while preserving the selected nodes' existing
+internal order. Workbench presents it locally, while Canvas State records only
+the resulting overlap-only Occlusion Order.
+_Avoid_: Drag raise, global stack order, bring-to-front command
 
 **Canvas Text Appearance**:
 The user's complete global typography value for Project text shown on every
 Canvas, comprising font selection, font size, line height, font weight request,
 letter spacing, and ligatures. Changing Projects or Canvases does not
 override it. Runtime owns it as the complete `canvas.textAppearance` member of
-global settings rather than a Project, Canvas Document, Workbench Theme, or
+global settings rather than a Project, Canvas State, Workbench Theme, or
 field-level patch; it excludes named preset identity, syntax colors, editor
 ornamentation, and editing behavior. Font size is a finite `6–100` CSS-pixel
 value with `0.5px` precision and a `12px` default; invalid values are rejected
@@ -127,7 +149,7 @@ their deterministic fallback.
 _Avoid_: System font, CSS font stack
 
 **Text Viewport**:
-The persisted scroll position confirmed in a Canvas Document and shared by a
+The persisted scroll position confirmed in Canvas State and shared by a
 Canvas text node's editor and derived preview. An unconfirmed local scroll
 position is transient interaction state rather than a Text Viewport.
 _Avoid_: Editor focus, capture viewport
@@ -139,8 +161,11 @@ _Avoid_: Player time, playback session
 
 **Canvas Maintenance Job**:
 An automatic, rebuildable attempt to derive a preview, fill a cache, or update
-an index from authoritative Project and Canvas state. It has no public identity,
-history, or Operation lifecycle and may be cancelled, coalesced, or superseded.
+an index from authoritative Project and Canvas state, with no public identity,
+history, or Operation lifecycle. Hiding a Canvas Node ends queued or preparatory
+work without deleting reusable derived output; one source executor that has
+already started may finish. Showing the node again starts a new maintenance
+attempt, and any non-executing attempt may be cancelled or superseded.
 _Avoid_: Runtime Operation, user task, source data
 
 **Preview Target Identity**:
@@ -148,8 +173,8 @@ The media-specific identity of one exact canonical preview requested from
 current Project and Canvas state before raster-width selection. It includes the
 Source Revision when the target uses saved Project bytes, or a content digest
 for uncommitted text, plus every target input that can change the requested
-pixels. It does not include the Project ID, Canvas ID, or Project Path that owns
-a resource; those scope resource keys.
+pixels. It does not include the Canonical Root, Canvas ID, or Project Path that
+owns a resource; those scope resource keys.
 _Avoid_: Source Revision, resource key, cache path
 
 **Canonical Preview Source Identity**:

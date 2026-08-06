@@ -10,9 +10,6 @@ use std::{
 use regex::Regex;
 use uuid::Uuid;
 
-#[cfg(test)]
-use std::cell::RefCell;
-
 use super::{
     ProjectError, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
     ProjectPathOperationStatus, ProjectTextFile, assert_project_tree_visible_mutation_path,
@@ -21,9 +18,6 @@ use super::{
     replace_file, resolve_no_symlink_existing_project_path, resolve_project_path,
     resolve_project_path_for_write,
 };
-
-pub const MAX_EDITABLE_PROJECT_TEXT_BYTES: u32 = 2 * 1024 * 1024;
-const MAX_EDITABLE_PROJECT_TEXT_BYTES_U64: u64 = MAX_EDITABLE_PROJECT_TEXT_BYTES as u64;
 
 fn project_io_error(operation: &str, path: &Path, error: &io::Error) -> ProjectError {
     ProjectError::Io(io::Error::new(
@@ -43,11 +37,6 @@ fn project_rename_error(source: &Path, target: &Path, error: &io::Error) -> Proj
     ))
 }
 
-#[cfg(test)]
-thread_local! {
-    static VISIBLE_REPLACEMENT_AFTER_CLAIM: RefCell<Option<(PathBuf, Vec<u8>)>> = const { RefCell::new(None) };
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectUploadEntry {
     Directory {
@@ -63,10 +52,10 @@ pub enum ProjectUploadEntry {
     },
 }
 
-/// Reads a visible UTF-8 Project file with size and binary guards.
+/// Reads a visible UTF-8 Project file with a binary guard.
 ///
 /// # Errors
-/// Returns an error for invalid paths, non-text content, oversize files, or I/O failure.
+/// Returns an error for invalid paths, non-text content, or I/O failure.
 pub fn read_project_text_file(
     root: &Path,
     relative: &str,
@@ -79,23 +68,10 @@ pub fn read_project_text_file(
             "Project path is not a file: {relative}"
         )));
     }
-    if metadata.len() > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64 {
-        return Err(project_text_file_too_large(&relative, metadata.len()));
-    }
-    let mut bytes = Vec::with_capacity(
-        usize::try_from(metadata.len())
-            .unwrap_or(usize::MAX)
-            .min(usize::try_from(MAX_EDITABLE_PROJECT_TEXT_BYTES).unwrap_or(usize::MAX)),
-    );
-    let mut limited = fs::File::open(&absolute)?.take(MAX_EDITABLE_PROJECT_TEXT_BYTES_U64 + 1);
-    limited.read_to_end(&mut bytes)?;
-    let read_metadata = limited.get_ref().metadata()?;
-    if bytes.len() as u64 > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64
-        || read_metadata.len() > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64
-    {
-        let actual_bytes = read_metadata.len().max(bytes.len() as u64);
-        return Err(project_text_file_too_large(&relative, actual_bytes));
-    }
+    let mut file = fs::File::open(&absolute)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    let read_metadata = file.metadata()?;
     if bytes.contains(&0) {
         return Err(ProjectError::Validation(format!(
             "Project file appears to be binary, not text: {relative}"
@@ -118,10 +94,6 @@ pub(crate) fn write_project_text_file(
     expected_revision: &str,
 ) -> Result<ProjectTextFile, ProjectError> {
     let relative = assert_project_tree_visible_path(relative)?;
-    let actual_bytes = u64::try_from(content.len()).unwrap_or(u64::MAX);
-    if actual_bytes > MAX_EDITABLE_PROJECT_TEXT_BYTES_U64 {
-        return Err(project_text_file_too_large(&relative, actual_bytes));
-    }
     let absolute = resolve_no_symlink_existing_project_path(root, &relative)?;
     let metadata = fs::metadata(&absolute)?;
     if !metadata.is_file() {
@@ -163,22 +135,6 @@ pub(crate) fn write_project_text_file(
         let _ = fs::remove_file(&temporary);
     }
     result
-}
-
-fn project_text_file_too_large(relative: &str, actual_bytes: u64) -> ProjectError {
-    ProjectError::service_with_fields(
-        "project_text_file_too_large",
-        format!(
-            "Project text file exceeds the editable limit ({actual_bytes} > {MAX_EDITABLE_PROJECT_TEXT_BYTES} bytes): {relative}"
-        ),
-        [
-            ("actual_bytes".to_owned(), actual_bytes.to_string()),
-            (
-                "max_bytes".to_owned(),
-                MAX_EDITABLE_PROJECT_TEXT_BYTES.to_string(),
-            ),
-        ],
-    )
 }
 
 fn project_text_file(
@@ -946,18 +902,6 @@ fn claim_expected_path(
         )
     })?;
 
-    #[cfg(test)]
-    VISIBLE_REPLACEMENT_AFTER_CLAIM.with(|replacement| {
-        let mut replacement = replacement.borrow_mut();
-        if replacement
-            .as_ref()
-            .is_some_and(|(replacement_path, _)| replacement_path == path)
-            && let Some((_, content)) = replacement.take()
-        {
-            fs::write(path, content).expect("injected visible replacement should be written");
-        }
-    });
-
     match project_path_identity(&quarantine) {
         Ok(actual) if actual == *expected_identity => Ok(quarantine),
         inspection => {
@@ -974,27 +918,6 @@ fn claim_expected_path(
             }
         }
     }
-}
-
-#[cfg(test)]
-pub(super) fn inject_visible_replacement_after_claim_for_test(path: &Path, content: &[u8]) {
-    VISIBLE_REPLACEMENT_AFTER_CLAIM.with(|replacement| {
-        *replacement.borrow_mut() = Some((path.to_path_buf(), content.to_vec()));
-    });
-}
-
-#[cfg(test)]
-pub(super) fn remove_committed_paths_for_rollback_for_test(
-    paths: &[(PathBuf, debrute_native_fs::PathIdentity)],
-) -> Vec<String> {
-    remove_committed_paths_for_rollback(paths)
-}
-
-#[cfg(all(test, unix))]
-pub(super) fn commit_staged_paths_for_test(
-    staged: &[(PathBuf, PathBuf)],
-) -> Result<(), ProjectError> {
-    commit_staged_paths(staged, false)
 }
 
 fn project_path_identity(path: &Path) -> Result<debrute_native_fs::PathIdentity, ProjectError> {

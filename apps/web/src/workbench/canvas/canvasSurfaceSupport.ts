@@ -1,8 +1,6 @@
 import type React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
-import type {
-  ProjectedCanvasNode
-} from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction,
@@ -15,7 +13,6 @@ import {
   type CanvasFeedbackSelectionBarTarget,
   type FloatingBarRect
 } from '../shell/floatingBars';
-import { hasInternalProjectTreeDrag, readInternalProjectTreeDragEntries } from '../project-explorer/ProjectTree';
 import type { DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
@@ -30,30 +27,6 @@ import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPreviewResourceInteractionState } from './CanvasPreviewResourceScheduler';
 import type { CanvasCullingCounts } from './CanvasCullingController.js';
 import type { CanvasRenderLifecycle } from './CanvasRenderLifecycle.js';
-
-export function canvasMapProjectTreeDropEntry(
-  dataTransfer: Pick<DataTransfer, 'getData'>
-): ReturnType<typeof readInternalProjectTreeDragEntries>[number] | undefined {
-  const entries = readInternalProjectTreeDragEntries(dataTransfer);
-  return entries.length === 1 ? entries[0] : undefined;
-}
-
-export function canvasMapProjectTreeDropInput(
-  canvasId: string,
-  dataTransfer: Pick<DataTransfer, 'getData'>
-): { canvasId: string; projectRelativePath: string } | undefined {
-  const entry = canvasMapProjectTreeDropEntry(dataTransfer);
-  return entry
-    ? {
-        canvasId,
-        projectRelativePath: entry.projectRelativePath
-      }
-    : undefined;
-}
-
-export function isCanvasMapProjectTreeDragOver(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
-  return hasInternalProjectTreeDrag(dataTransfer);
-}
 
 export function pointerEventModifiers(
   event: Pick<React.PointerEvent<Element>, 'shiftKey' | 'metaKey' | 'ctrlKey'>,

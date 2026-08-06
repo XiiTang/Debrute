@@ -3,24 +3,36 @@ import { Loader2 } from './ui/index.js';
 import type {
   DebruteProductPlatform,
   DebruteWorkbenchRoute,
-  ProjectPathEntry,
-  WorkbenchProjectSessionSnapshot
+  CanvasWorkspaceCanvas,
+  NativeProjectOpenFailure,
+  ProjectPathEntry
 } from '@debrute/app-protocol';
-import type { HttpWorkbenchApiClient } from '../api/httpWorkbenchApiClient.js';
+import {
+  DebruteHttpRequestError,
+  type HttpWorkbenchApiClient
+} from '../api/httpWorkbenchApiClient.js';
 import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasCardBar } from './canvas/CanvasCardBar';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
+import {
+  canvasPathAncestors,
+  projectCanvasScene,
+  raiseCanvasSelection as raiseProjectedCanvasSelection,
+  type CanvasProjection
+} from './canvas/CanvasScene.js';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
+import { createCanvasOcclusionMutationLane } from './canvas/CanvasOcclusionMutationLane.js';
 import {
   CanvasFeedbackInteractionBar,
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
-import { canvasNodeSelection } from './canvas/runtime/canvasSelection.js';
+import {
+  canvasNodeSelection
+} from './canvas/runtime/canvasSelection.js';
 import { getCanvasById } from './services/canvasState';
-import { chooseInitialActiveCanvasId } from './canvas/canvasCardBarState';
 import {
   currentDebruteWorkbenchRoute,
   replaceWorkbenchProjectRoute,
@@ -78,9 +90,6 @@ import {
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
-import {
-  createCanvasTextViewportStateController
-} from './services/canvasSnapshotUpdates';
 import type { WorkbenchProjectProjectionState } from './services/WorkbenchProjectProjection.js';
 import {
   projectPathDeletionConfirmationMessageForEntries,
@@ -140,7 +149,6 @@ import {
 } from './canvas/CanvasTextRenderProfileContext.js';
 import { CanvasTextProjectFontEnvironmentProvider } from './canvas/font-subset/CanvasTextProjectFontEnvironment.js';
 import { workbenchStartupTimeline } from '../startup/workbenchStartupTimeline.js';
-import { waitForWorkbenchShellFonts } from '../startup/workbenchShellFonts.js';
 
 const productPlatform: DebruteProductPlatform = __DEBRUTE_PLATFORM__;
 const TerminalPanel = React.lazy(async () => {
@@ -188,7 +196,7 @@ const WorkbenchFloatingTextEditorWindowFeature = React.lazy(async () => {
   return { default: module.WorkbenchFloatingTextEditorWindowFeature };
 });
 
-type WorkbenchProjectGenerationApi = Omit<HttpWorkbenchApiClient, ProjectPathEffectApiName>;
+type WorkbenchBoundProjectApi = Omit<HttpWorkbenchApiClient, ProjectPathEffectApiName>;
 
 export function WorkbenchApp({
   api,
@@ -254,10 +262,9 @@ function WorkbenchRuntimeApp({
   );
   const [connectionEnded, setConnectionEnded] = useState<Error>();
   const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
-  const [projectOpenAttemptedPath, setProjectOpenAttemptedPath] = useState<string>();
-  const [projectOpenError, setProjectOpenError] = useState<string>();
+  const [projectOpenPresentation, setProjectOpenPresentation] = useState<ProjectOpenPresentation>({});
   const initialProjectOpeningRef = useRef<ReturnType<ProjectBindingLifecycle['open']> | undefined>(undefined);
-  const announcedProjectGenerationsRef = useRef(new Set<number>());
+  const announcedProjectBindingsRef = useRef(new Set<number>());
   const presentationController = useWorkbenchPresentationController({
     globalProjection: api.globalProjection
   });
@@ -265,20 +272,6 @@ function WorkbenchRuntimeApp({
     workbenchStartupTimeline.mark('react-committed');
     onCommitted?.();
   }, [onCommitted]);
-  useEffect(() => {
-    if (!workbenchStartupTimeline.enabled) {
-      return;
-    }
-    let cancelled = false;
-    void waitForWorkbenchShellFonts(document.fonts).then(() => {
-      if (!cancelled) {
-        workbenchStartupTimeline.mark('shell-fonts-ready');
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
   const [settingsFeatureRequested, setSettingsFeatureRequested] = useState(false);
   const [settingsFeatureController, setSettingsFeatureController] = useState<WorkbenchSettingsController>();
   const requestSettingsFeature = useCallback(() => {
@@ -302,17 +295,11 @@ function WorkbenchRuntimeApp({
     () => createI18n(presentationController.locale),
     [presentationController.locale]
   );
-  const announceProjectGeneration = useCallback((input: {
-    generation: number;
-    viewStateInvalid: boolean;
-  }) => {
-    if (announcedProjectGenerationsRef.current.has(input.generation)) {
+  const announceProjectBinding = useCallback((input: { bindingGeneration: number }) => {
+    if (announcedProjectBindingsRef.current.has(input.bindingGeneration)) {
       return;
     }
-    announcedProjectGenerationsRef.current.add(input.generation);
-    if (input.viewStateInvalid) {
-      void api.reportActivityNotice({ kind: 'project-view-state-reset' }).catch(() => undefined);
-    }
+    announcedProjectBindingsRef.current.add(input.bindingGeneration);
     void api.reportActivityNotice({ kind: 'project-opened' }).catch(() => undefined);
   }, [api]);
 
@@ -323,11 +310,16 @@ function WorkbenchRuntimeApp({
     void (async () => {
       try {
         const resolution = resolveInitialProjectRoute(initialRoute);
-        setProjectOpenAttemptedPath(resolution.projectOpen?.attemptedPath);
-        setProjectOpenError(localizedProjectOpenError(
+        const initialError = localizedProjectOpenError(
           resolution.projectOpen?.error,
           presentationController.getCurrentI18n()
-        ));
+        );
+        setProjectOpenPresentation({
+          ...(resolution.projectOpen?.attemptedPath
+            ? { attemptedPath: resolution.projectOpen.attemptedPath }
+            : {}),
+          ...(initialError ? { error: initialError } : {})
+        });
         if (!resolution.target) {
           return;
         }
@@ -337,15 +329,30 @@ function WorkbenchRuntimeApp({
           return;
         }
         if (result.outcome === 'failed') {
-          const error: ProjectOpenStartupError = initialRoute.kind === 'project'
-            ? { code: 'project-snapshot-load-failed', message: result.error.message }
-            : { code: 'project-open-failed', message: result.error.message };
-          setProjectOpenError(localizedProjectOpenError(error, presentationController.getCurrentI18n()));
+          const attemptedPath = projectRootFromOpenError(result.error)
+            ?? resolution.projectOpen?.attemptedPath;
+          const code = projectOpenErrorCode(result.error);
+          const error: ProjectOpenStartupError = {
+            code: 'project-open-failed',
+            message: result.error.message
+          };
+          const localizedError = localizedProjectOpenError(
+            error,
+            presentationController.getCurrentI18n()
+          );
+          setProjectOpenPresentation({
+            ...(attemptedPath ? { attemptedPath } : {}),
+            ...(code ? { code } : {}),
+            ...(localizedError ? { error: localizedError } : {})
+          });
         }
       } catch (error) {
         if (!disposed) {
-          setProjectOpenError(presentationController.getCurrentI18n().t('shell.boot.projectStartupFailed', {
-            message: errorMessage(error)
+          setProjectOpenPresentation((current) => ({
+            ...(current.attemptedPath ? { attemptedPath: current.attemptedPath } : {}),
+            error: presentationController.getCurrentI18n().t('shell.boot.projectStartupFailed', {
+              message: errorMessage(error)
+            })
           }));
         }
       } finally {
@@ -359,36 +366,34 @@ function WorkbenchRuntimeApp({
     };
   }, [initialRoute, presentationController.getCurrentI18n, projectBindingLifecycle]);
 
-  const projectGenerationAppProps = {
+  const boundProjectAppProps = {
     api,
     projectPathCommandEffects,
     canvasTextRenderProfile,
     projectProjection,
     connectionEnded,
-    announceProjectGeneration,
+    announceProjectBinding,
     presentationController,
     settingsFeatureController,
     requestSettingsFeature,
     i18n,
     isLoading,
-    projectOpenAttemptedPath,
-    setProjectOpenAttemptedPath,
-    projectOpenError,
-    setProjectOpenError,
+    projectOpenPresentation,
+    setProjectOpenPresentation,
     projectBindingLifecycle,
     isProjectOpening: projectBindingLifecycleState.opening
   };
-  const generationApp = <WorkbenchProjectGenerationApp {...projectGenerationAppProps} />;
+  const boundProjectApp = <WorkbenchBoundProjectApp {...boundProjectAppProps} />;
   const surface = projectProjection.status === 'unbound' ? (
     <CanvasTextProjectFontEnvironmentProvider profile={canvasTextRenderProfile}>
-      {generationApp}
+      {boundProjectApp}
     </CanvasTextProjectFontEnvironmentProvider>
   ) : (
     <CanvasTextProjectFontEnvironmentProvider
       key={projectProjection.generation}
       profile={canvasTextRenderProfile}
     >
-      {generationApp}
+      {boundProjectApp}
     </CanvasTextProjectFontEnvironmentProvider>
   );
   return (
@@ -406,46 +411,41 @@ function WorkbenchRuntimeApp({
   );
 }
 
-function WorkbenchProjectGenerationApp({
+function WorkbenchBoundProjectApp({
   api,
   projectPathCommandEffects,
   canvasTextRenderProfile,
   projectProjection,
   connectionEnded,
-  announceProjectGeneration,
+  announceProjectBinding,
   presentationController,
   settingsFeatureController,
   requestSettingsFeature,
   i18n,
   isLoading,
-  projectOpenAttemptedPath,
-  setProjectOpenAttemptedPath,
-  projectOpenError,
-  setProjectOpenError,
+  projectOpenPresentation,
+  setProjectOpenPresentation,
   projectBindingLifecycle,
   isProjectOpening
 }: {
-  api: WorkbenchProjectGenerationApi;
+  api: WorkbenchBoundProjectApi;
   projectPathCommandEffects: ProjectPathCommandEffects;
   canvasTextRenderProfile: ReturnType<typeof canvasTextRenderProfileForAppearance>;
   projectProjection: WorkbenchProjectProjectionState;
   connectionEnded: Error | undefined;
-  announceProjectGeneration(input: {
-    generation: number;
-    viewStateInvalid: boolean;
-  }): void;
+  announceProjectBinding(input: { bindingGeneration: number }): void;
   presentationController: WorkbenchPresentationController;
   settingsFeatureController: WorkbenchSettingsController | undefined;
   requestSettingsFeature(): void;
   i18n: WorkbenchI18n;
   isLoading: boolean;
-  projectOpenAttemptedPath: string | undefined;
-  setProjectOpenAttemptedPath: React.Dispatch<React.SetStateAction<string | undefined>>;
-  projectOpenError: string | undefined;
-  setProjectOpenError: React.Dispatch<React.SetStateAction<string | undefined>>;
+  projectOpenPresentation: ProjectOpenPresentation;
+  setProjectOpenPresentation: React.Dispatch<React.SetStateAction<ProjectOpenPresentation>>;
   projectBindingLifecycle: ProjectBindingLifecycle;
   isProjectOpening: boolean;
 }): React.ReactElement {
+  const projectOpenAttemptedPath = projectOpenPresentation.attemptedPath;
+  const projectOpenError = projectOpenPresentation.error;
   const activityBellRef = useRef<HTMLButtonElement>(null);
   const activitySnapshot = useSyncExternalStore(
     api.activities.subscribe,
@@ -485,10 +485,14 @@ function WorkbenchProjectGenerationApp({
   }, [api, globalActivities]);
   const acceptedProject = projectProjection.status === 'unbound' ? undefined : projectProjection;
   const hasAcceptedProject = acceptedProject !== undefined;
-  const snapshot = acceptedProject?.presentedSnapshot;
-  const runtimeProjectId = acceptedProject?.projectId;
+  const snapshot = acceptedProject?.snapshot;
+  const runtimeBindingId = acceptedProject?.bindingId;
+  const canonicalRoot = acceptedProject?.canonicalRoot;
   const projectDetached = projectProjection.status === 'detached';
-  const projectPresentationBlocked = Boolean(connectionEnded || projectDetached);
+  const projectOpenFailureBlocking = Boolean(hasAcceptedProject && projectOpenError);
+  const projectPresentationBlocked = Boolean(
+    connectionEnded || projectDetached || projectOpenFailureBlocking
+  );
   const projectPathCommandSurfaceAvailableRef = useRef(!projectPresentationBlocked);
   projectPathCommandSurfaceAvailableRef.current = !projectPresentationBlocked;
   useLayoutEffect(() => {
@@ -511,6 +515,8 @@ function WorkbenchProjectGenerationApp({
   const [activeCanvasId, setActiveCanvasId] = useState<string | undefined>(
     initialProjectPresentation.activeCanvasId
   );
+  const [resettingCanvasWorkspace, setResettingCanvasWorkspace] = useState(false);
+  const [canvasWorkspaceResetError, setCanvasWorkspaceResetError] = useState<string>();
   const [mountedCanvasRuntime, setMountedCanvasRuntime] = useState<CanvasEditorRuntime>();
   const focusCommandRouterRef = useRef<WorkbenchFocusCommandRouter | undefined>(undefined);
   const canvasRuntimeScopeKey = projectProjection.generation;
@@ -548,18 +554,106 @@ function WorkbenchProjectGenerationApp({
     initialProjectPresentation.viewportRect
   );
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
+  const canvasOcclusionMutationLane = useMemo(() => createCanvasOcclusionMutationLane(), []);
+  const enqueueCanvasOcclusionMutation = useCallback(<Result,>(
+    canvasId: string,
+    mutation: (
+      accepted: Extract<WorkbenchProjectProjectionState, { status: 'bound' }>
+    ) => Promise<Result>
+  ): Promise<Result> => {
+    const generation = projectProjection.generation;
+    return canvasOcclusionMutationLane.run(`${generation}\u001f${canvasId}`, async () => {
+      const accepted = api.projectProjection.getState();
+      if (accepted.status !== 'bound' || accepted.generation !== generation) {
+        throw new Error(`Canvas ${canvasId} mutation belongs to an inactive Project.`);
+      }
+      return mutation(accepted);
+    });
+  }, [api.projectProjection, canvasOcclusionMutationLane, projectProjection.generation]);
   const workbenchViewportRectRef = useRef(workbenchViewportRect);
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
+  const availableCanvasWorkspace = snapshot?.canvasWorkspace.status === 'available'
+    ? snapshot.canvasWorkspace
+    : undefined;
   const activeCanvas = getCanvasById(snapshot, activeCanvasId);
+  const activeCanvasAvailable = activeCanvas !== undefined;
+  const activeCanvasState = useMemo(
+    () => activeCanvas ? canvasStateFromWorkspaceCanvas(activeCanvas) : undefined,
+    [activeCanvas]
+  );
   const activeCanvasRuntime = mountedCanvasRuntime?.canvasId === activeCanvas?.id
     ? mountedCanvasRuntime
     : undefined;
-  const activeProjection = activeCanvas
-    ? snapshot?.projections.find((item) => item.canvasId === activeCanvas.id)
-    : undefined;
+  const activeScene = useMemo(() => (
+    activeCanvas
+    && activeCanvasState
+    && availableCanvasWorkspace?.activeCanvasResources.canvasId === activeCanvas.id
+    && canonicalRoot
+      ? projectCanvasScene({
+          canonicalRoot,
+          resources: availableCanvasWorkspace.activeCanvasResources,
+          state: activeCanvasState
+        })
+      : undefined
+  ), [activeCanvas, activeCanvasState, availableCanvasWorkspace, canonicalRoot]);
+  const activeProjection = activeScene?.projection;
+  const visibleCanvasPathsRef = useRef<{
+    canvasId: string;
+    paths: Set<string>;
+  } | undefined>(undefined);
+  useEffect(() => {
+    if (!activeCanvas || !activeCanvasState || !activeScene) {
+      visibleCanvasPathsRef.current = undefined;
+      return;
+    }
+    const visiblePaths = new Set(
+      activeScene.projection.nodes.map((node) => node.projectRelativePath)
+    );
+    const previous = visibleCanvasPathsRef.current;
+    visibleCanvasPathsRef.current = { canvasId: activeCanvas.id, paths: visiblePaths };
+    const newlyVisible = previous?.canvasId === activeCanvas.id
+      ? [...visiblePaths].filter((path) => !previous.paths.has(path))
+      : [];
+    const currentOcclusionOrder = newlyVisible.length === 0
+      ? activeScene.occlusionOrder
+      : raiseProjectedCanvasSelection(
+          activeScene.occlusionOrder,
+          activeScene.projection.nodes,
+          newlyVisible
+        );
+    if (equalStringArrays(activeCanvasState.occlusionOrder, currentOcclusionOrder)) {
+      return;
+    }
+    void enqueueCanvasOcclusionMutation(activeCanvas.id, async (accepted) => {
+      const context = canvasMutationContext(accepted, activeCanvas.id);
+      const scene = projectCanvasScene({
+        canonicalRoot: accepted.canonicalRoot,
+        resources: context.resources,
+        state: context.state
+      });
+      const currentVisiblePaths = new Set(
+        scene.projection.nodes.map((node) => node.projectRelativePath)
+      );
+      const currentlyNew = newlyVisible.filter((path) => currentVisiblePaths.has(path));
+      const occlusionOrder = currentlyNew.length === 0
+        ? scene.occlusionOrder
+        : raiseProjectedCanvasSelection(
+            scene.occlusionOrder,
+            scene.projection.nodes,
+            currentlyNew
+          );
+      if (equalStringArrays(context.state.occlusionOrder, occlusionOrder)) {
+        return;
+      }
+      await api.patchCanvasState({ canvasId: activeCanvas.id, occlusionOrder });
+    }).catch(() => projectActivities.report({
+      kind: 'canvas-operation-failed',
+      operation: 'raise-selection'
+    }));
+  }, [activeCanvas, activeCanvasState, activeScene, api, enqueueCanvasOcclusionMutation, projectActivities]);
   const centerCanvasProjectionNode = useCallback((
-    projection: WorkbenchProjectSessionSnapshot['projections'][number] | undefined,
+    projection: CanvasProjection | undefined,
     projectRelativePath: string
   ) => {
     const node = projection?.nodes.find((item) => item.projectRelativePath === projectRelativePath);
@@ -574,18 +668,52 @@ function WorkbenchProjectGenerationApp({
       camera: runtimeSnapshot.camera
     }));
   }, [activeCanvasRuntime]);
-  const centerActiveCanvasProjectFile = useCallback((projectRelativePath: string) => {
-    centerCanvasProjectionNode(activeProjection, projectRelativePath);
-  }, [activeProjection, centerCanvasProjectionNode]);
-  const locateProjectFileInCanvas = useCallback((projectRelativePath: string) => {
-    if (!projectPathCommandIntake.tryAccept()) {
+  const locateProjectFileInCanvas = useCallback(async (projectRelativePath: string) => {
+    const scope = projectPathCommandIntake.tryAccept();
+    if (!scope || !activeCanvasId) {
       return;
     }
-    centerActiveCanvasProjectFile(projectRelativePath);
-  }, [centerActiveCanvasProjectFile, projectPathCommandIntake]);
+    try {
+      const acceptedBefore = api.projectProjection.getState();
+      const snapshotBefore = acceptedBefore.status === 'unbound'
+        ? undefined
+        : acceptedBefore.snapshot;
+      const canvasBefore = getCanvasById(snapshotBefore, activeCanvasId);
+      if (!canvasBefore) {
+        return;
+      }
+      const expandedDirectories = Array.from(new Set([
+        ...canvasStateFromWorkspaceCanvas(canvasBefore).expandedDirectories,
+        ...canvasPathAncestors(projectRelativePath)
+      ]));
+      await api.patchCanvasState({ canvasId: activeCanvasId, expandedDirectories });
+      if (!scope.isCurrent()) {
+        return;
+      }
+      const accepted = api.projectProjection.getState();
+      const latestSnapshot = accepted.status === 'unbound' ? undefined : accepted.snapshot;
+      const latestCanvas = getCanvasById(latestSnapshot, activeCanvasId);
+      const resources = latestSnapshot?.canvasWorkspace.status === 'available'
+        ? latestSnapshot.canvasWorkspace.activeCanvasResources
+        : undefined;
+      const projection = latestCanvas && resources?.canvasId === activeCanvasId && canonicalRoot
+        ? projectCanvasScene({
+            canonicalRoot,
+            resources,
+            state: canvasStateFromWorkspaceCanvas(latestCanvas)
+          }).projection
+        : undefined;
+      centerCanvasProjectionNode(projection, projectRelativePath);
+      document.querySelector<HTMLElement>('[data-testid="canvas-surface"]')?.focus({ preventScroll: true });
+    } catch {
+      if (scope.isCurrent()) {
+        projectActivities.report({ kind: 'canvas-operation-failed', operation: 'reveal-path' });
+      }
+    }
+  }, [activeCanvasId, api, canonicalRoot, centerCanvasProjectionNode, projectActivities, projectPathCommandIntake]);
   const getAcceptedProjectSnapshot = useCallback(() => {
     const state = api.projectProjection.getState();
-    return state.status === 'unbound' ? undefined : state.presentedSnapshot;
+    return state.status === 'unbound' ? undefined : state.snapshot;
   }, []);
   const [explorerFeatureRequested, setExplorerFeatureRequested] = useState(false);
   const [explorerController, setExplorerController] = useState<ProjectExplorerController>();
@@ -619,7 +747,7 @@ function WorkbenchProjectGenerationApp({
   }, [projectActivities]);
   const feedbackInteraction = useCanvasFeedbackInteraction({
     api,
-    projectId: runtimeProjectId,
+    bindingId: runtimeBindingId,
     overlayRuntime: canvasOverlayRuntime,
     notifyUnavailable: notifyCanvasFeedbackUnavailable,
     notifySaveFailed: notifyCanvasFeedbackSaveFailed
@@ -629,26 +757,24 @@ function WorkbenchProjectGenerationApp({
     if (!acceptedProject) {
       return;
     }
-    announceProjectGeneration({
-      generation: acceptedProject.generation,
-      viewStateInvalid: initialProjectPresentation.viewStateInvalid
+    announceProjectBinding({
+      bindingGeneration: acceptedProject.generation
     });
-    setProjectOpenAttemptedPath(undefined);
-    setProjectOpenError(undefined);
+    setProjectOpenPresentation({});
     feedbackInteraction.restoreWorkingCopies(acceptedProject.workingCopies.feedback);
     void feedbackInteraction.load();
   }, [acceptedProject?.generation]);
 
   const reopenDetachedProject = useCallback(async () => {
-    if (!runtimeProjectId) {
+    if (!canonicalRoot) {
       return;
     }
-    setProjectOpenError(undefined);
-    const outcome = await projectBindingLifecycle.open({ projectId: runtimeProjectId });
+    setProjectOpenPresentation({});
+    const outcome = await projectBindingLifecycle.open({ projectRoot: canonicalRoot });
     if (outcome.outcome === 'failed') {
-      setProjectOpenError(i18n.t('projectOpen.openFailed', { message: outcome.error.message }));
+      setProjectOpenPresentation(projectOpenPresentationFromFailure(outcome.error, i18n));
     }
-  }, [i18n, projectBindingLifecycle, runtimeProjectId, setProjectOpenError]);
+  }, [canonicalRoot, i18n, projectBindingLifecycle, setProjectOpenPresentation]);
 
   useEffect(() => {
     workbenchViewportRectRef.current = workbenchViewportRect;
@@ -703,18 +829,15 @@ function WorkbenchProjectGenerationApp({
   }, [globalActivities, reconcileCurrentWorkbenchViewportLayout]);
 
   useEffect(() => {
-    if (!runtimeProjectId) {
+    if (!canonicalRoot) {
       return;
     }
     saveProjectViewState({
       storage: window.sessionStorage,
-      projectId: runtimeProjectId,
-      state: {
-        ...(activeCanvasId === undefined ? {} : { activeCanvasId }),
-        floatingPanels
-      }
+      canonicalRoot,
+      state: { floatingPanels }
     });
-  }, [activeCanvasId, runtimeProjectId, floatingPanels]);
+  }, [canonicalRoot, floatingPanels]);
 
   const {
     ensureTextFileBuffer,
@@ -725,7 +848,7 @@ function WorkbenchProjectGenerationApp({
     refreshTextFileBuffer
   } = useTextFileBufferActions({
     api,
-    projectId: runtimeProjectId,
+    bindingId: runtimeBindingId,
     textFileBuffers,
     setTextFileBuffers,
     textFileBuffersRef,
@@ -738,7 +861,7 @@ function WorkbenchProjectGenerationApp({
 
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
-        if (event.event.projectRelativePath === '.debrute/reviews/canvas-feedback.json') {
+        if (event.event.projectRelativePath === '.debrute/feedback/feedback.json') {
           void feedbackInteraction.load();
         }
       }
@@ -750,13 +873,28 @@ function WorkbenchProjectGenerationApp({
   ]);
 
   useEffect(() => {
-    if (!snapshot || snapshot.canvasRegistry.status !== 'ready') {
+    if (!snapshot) {
       return;
     }
-    if (!activeCanvasId || !snapshot.canvasRegistry.canvasOrder.includes(activeCanvasId)) {
-      setActiveCanvasId(snapshot.canvasRegistry.canvasOrder[0]);
+    if (snapshot.canvasWorkspace.status !== 'available') {
+      setActiveCanvasId(undefined);
+      return;
+    }
+    const canvasIds = snapshot.canvasWorkspace.workspace.canvases.map((canvas) => canvas.id);
+    if (!activeCanvasId || !canvasIds.includes(activeCanvasId)) {
+      setActiveCanvasId(snapshot.canvasWorkspace.workspace.activeCanvasId);
     }
   }, [activeCanvasId, snapshot]);
+
+  useEffect(() => {
+    if (!activeCanvasId || !activeCanvasAvailable) {
+      return;
+    }
+    void api.activateCanvas(activeCanvasId).catch(() => projectActivities.report({
+      kind: 'canvas-operation-failed',
+      operation: 'set-directory-disclosure'
+    }));
+  }, [activeCanvasAvailable, activeCanvasId, api, projectActivities]);
 
   const toggleTextFileWordWrap = useCallback((projectRelativePath: string) => {
     setTextFileBuffers((buffers) => {
@@ -780,17 +918,15 @@ function WorkbenchProjectGenerationApp({
     void ensureTextFileBuffer(projectRelativePath);
   }, [ensureTextFileBuffer]);
 
-  const canvasTextViewportStateController = useMemo(() => createCanvasTextViewportStateController({
-    projectProjection: api.projectProjection,
-    updateCanvasTextViewportState: (canvasId, input) => api.updateCanvasTextViewportState({
-      canvasId,
-      ...input
-    })
-  }), []);
-
   const updateCanvasTextViewportState = useCallback<WorkbenchActions['updateCanvasTextViewportState']>(async (canvasId, input) => {
     try {
-      await canvasTextViewportStateController.update(canvasId, input);
+      await api.patchCanvasState({
+        canvasId,
+        nodeStateUpdates: input.updates.map((update) => ({
+          projectRelativePath: update.projectRelativePath,
+          textViewport: { scrollTop: update.scrollTop, scrollLeft: update.scrollLeft }
+        }))
+      });
     } catch (error) {
       projectActivities.report({
         kind: 'canvas-operation-failed',
@@ -798,13 +934,49 @@ function WorkbenchProjectGenerationApp({
       });
       throw error;
     }
-  }, [canvasTextViewportStateController, projectActivities]);
+  }, [api, projectActivities]);
 
   const updateCanvasNodeLayouts = useCallback<WorkbenchActions['updateCanvasNodeLayouts']>(async (canvasId, input) => {
     try {
-      await api.updateCanvasNodeLayouts({
-        canvasId,
-        ...input
+      await enqueueCanvasOcclusionMutation(canvasId, async (accepted) => {
+        const context = canvasMutationContext(accepted, canvasId);
+        const nextState = {
+          ...context.state,
+          nodeStates: { ...context.state.nodeStates }
+        };
+        for (const layout of input.nodeLayouts) {
+          nextState.nodeStates[layout.projectRelativePath] = {
+            ...nextState.nodeStates[layout.projectRelativePath],
+            manualLayout: {
+              x: layout.x,
+              y: layout.y,
+              width: layout.width,
+              height: layout.height
+            }
+          };
+        }
+        const projection = projectCanvasScene({
+          canonicalRoot: accepted.canonicalRoot,
+          resources: context.resources,
+          state: nextState
+        }).projection;
+        await api.patchCanvasState({
+          canvasId,
+          occlusionOrder: raiseProjectedCanvasSelection(
+            context.state.occlusionOrder,
+            projection.nodes,
+            input.selectedProjectRelativePaths
+          ),
+          nodeStateUpdates: input.nodeLayouts.map((layout) => ({
+            projectRelativePath: layout.projectRelativePath,
+            manualLayout: {
+              x: layout.x,
+              y: layout.y,
+              width: layout.width,
+              height: layout.height
+            }
+          }))
+        });
       });
     } catch (error) {
       projectActivities.report({
@@ -813,28 +985,56 @@ function WorkbenchProjectGenerationApp({
       });
       throw error;
     }
-  }, [api, projectActivities]);
+  }, [api, enqueueCanvasOcclusionMutation, projectActivities]);
 
   const resetCanvasNodeLayouts = useCallback<WorkbenchActions['resetCanvasNodeLayouts']>(async (canvasId, input) => {
-    const scope = projectPathCommandIntake.tryAccept();
-    if (!scope) {
-      throw new Error('Project path commands are unavailable.');
-    }
-    const request = projectPathCommandEffects.resetCanvasNodeLayouts(scope, {
-      canvasId,
-      ...input
+    await enqueueCanvasOcclusionMutation(canvasId, async (accepted) => {
+      const context = canvasMutationContext(accepted, canvasId);
+      const nodePaths = 'all' in input
+        ? Object.entries(context.state.nodeStates)
+            .filter(([, nodeState]) => nodeState.manualLayout !== undefined)
+            .map(([path]) => path)
+        : input.nodePaths;
+      const nextState = {
+        ...context.state,
+        nodeStates: { ...context.state.nodeStates }
+      };
+      for (const path of nodePaths) {
+        const current = nextState.nodeStates[path];
+        if (!current) {
+          continue;
+        }
+        const { manualLayout: _manualLayout, ...remaining } = current;
+        if (Object.keys(remaining).length === 0) {
+          delete nextState.nodeStates[path];
+        } else {
+          nextState.nodeStates[path] = remaining;
+        }
+      }
+      const scene = projectCanvasScene({
+        canonicalRoot: accepted.canonicalRoot,
+        resources: context.resources,
+        state: nextState
+      });
+      await api.patchCanvasState({
+        canvasId,
+        occlusionOrder: scene.occlusionOrder,
+        nodeStateUpdates: nodePaths.map((projectRelativePath) => ({
+          projectRelativePath,
+          manualLayout: null
+        }))
+      });
     });
-    if (!request) {
-      throw new Error('Project path commands are unavailable.');
-    }
-    return request;
-  }, [projectPathCommandEffects, projectPathCommandIntake]);
+  }, [api, enqueueCanvasOcclusionMutation]);
 
   const updateCanvasVideoPlaybackState = useCallback<WorkbenchActions['updateCanvasVideoPlaybackState']>(async (canvasId, input) => {
     try {
-      await api.updateCanvasVideoPlaybackState({
+      await api.patchCanvasState({
         canvasId,
-        ...input
+        nodeStateUpdates: input.updates.map((update) => ({
+          projectRelativePath: update.projectRelativePath,
+          videoPlayback: { currentTimeMs: update.currentTimeMs }
+        }))
       });
     } catch (error) {
       projectActivities.report({
@@ -845,43 +1045,57 @@ function WorkbenchProjectGenerationApp({
     }
   }, [api, projectActivities]);
 
-  const addProjectPathToCanvasMap = useCallback<WorkbenchActions['addProjectPathToCanvasMap']>(async (input) => {
-    const scope = projectPathCommandIntake.tryAccept();
-    if (!scope) {
-      return;
-    }
+  const setCanvasDirectoryExpanded = useCallback<WorkbenchActions['setCanvasDirectoryExpanded']>(async (input) => {
     try {
-      const request = projectPathCommandEffects.addProjectPathToCanvasMap(scope, input);
-      if (!request) {
-        return;
-      }
-      await request;
-      if (!scope.isCurrent()) {
-        return;
-      }
       const accepted = api.projectProjection.getState();
-      const projection = accepted.status === 'unbound'
-        ? undefined
-        : accepted.presentedSnapshot.projections.find((item) => item.canvasId === input.canvasId);
-      setActiveCanvasId(input.canvasId);
-      explorerController?.setSelection(projectTreeSelectionFromPaths([input.projectRelativePath]));
-      centerCanvasProjectionNode(projection, input.projectRelativePath);
-    } catch {
-      if (!scope.isCurrent()) {
-        return;
+      const acceptedSnapshot = accepted.status === 'unbound' ? undefined : accepted.snapshot;
+      const canvas = getCanvasById(acceptedSnapshot, input.canvasId);
+      if (!canvas) {
+        throw new Error(`Canvas ${input.canvasId} is unavailable.`);
       }
+      const current = canvasStateFromWorkspaceCanvas(canvas).expandedDirectories;
+      const expandedDirectories = input.expanded
+        ? Array.from(new Set([...current, input.projectRelativePath]))
+        : current.filter((path) => path !== input.projectRelativePath);
+      await api.patchCanvasState({ canvasId: input.canvasId, expandedDirectories });
+    } catch {
       projectActivities.report({
         kind: 'canvas-operation-failed',
-        operation: 'add-to-canvas-map'
+        operation: 'set-directory-disclosure'
       });
     }
-  }, [
-    centerCanvasProjectionNode,
-    explorerController,
-    projectActivities,
-    projectPathCommandEffects,
-    projectPathCommandIntake
-  ]);
+  }, [api, projectActivities]);
+
+  const raiseCanvasSelection = useCallback<WorkbenchActions['raiseCanvasSelection']>(async (input) => {
+    try {
+      await enqueueCanvasOcclusionMutation(input.canvasId, async (accepted) => {
+        const context = canvasMutationContext(accepted, input.canvasId);
+        const scene = projectCanvasScene({
+          canonicalRoot: accepted.canonicalRoot,
+          resources: context.resources,
+          state: context.state
+        });
+        await api.patchCanvasState({
+          canvasId: input.canvasId,
+          occlusionOrder: raiseProjectedCanvasSelection(
+            context.state.occlusionOrder,
+            scene.projection.nodes,
+            input.projectRelativePaths
+          )
+        });
+      });
+    } catch (error) {
+      projectActivities.report({
+        kind: 'canvas-operation-failed',
+        operation: 'raise-selection'
+      });
+      throw error;
+    }
+  }, [api, enqueueCanvasOcclusionMutation, projectActivities]);
+
+  const activateCanvas = useCallback<WorkbenchActions['activateCanvas']>(async (canvasId) => {
+    await api.activateCanvas(canvasId);
+  }, [api]);
 
   const createCanvas = useCallback<WorkbenchActions['createCanvas']>(async () => {
     const result = await api.createCanvas();
@@ -907,32 +1121,20 @@ function WorkbenchProjectGenerationApp({
     return result;
   }, []);
 
-  const repairCanvasIndex = useCallback<WorkbenchActions['repairCanvasIndex']>(async () => {
-    const result = await api.repairCanvasIndex();
-    const accepted = api.projectProjection.getState();
-    const registry = accepted.status === 'unbound'
-      ? undefined
-      : accepted.presentedSnapshot.canvasRegistry;
-    const repairedOrder = registry?.status === 'ready'
-      ? registry.canvasOrder
-      : [];
-    const repairedActiveCanvasId = activeCanvasId && repairedOrder.includes(activeCanvasId)
-      ? activeCanvasId
-      : result.activeCanvasId ?? repairedOrder[0];
-    setActiveCanvasId(repairedActiveCanvasId);
-    return result;
-  }, [activeCanvasId]);
-
-  const presentProjectOpenFailure = useCallback((error: Error) => {
+  const presentProjectOpenFailure = useCallback((failure: Error | NativeProjectOpenFailure) => {
     if (hasAcceptedProject) {
       projectActivities.report({
         kind: 'project-operation-failed',
         operation: 'open'
       });
-      return;
     }
-    setProjectOpenError(i18n.t('projectOpen.openFailed', { message: error.message }));
-  }, [hasAcceptedProject, i18n, projectActivities, setProjectOpenError]);
+    setProjectOpenPresentation(projectOpenPresentationFromFailure(failure, i18n));
+  }, [hasAcceptedProject, i18n, projectActivities, setProjectOpenPresentation]);
+
+  useEffect(() => {
+    const shell = getDebruteShellApi();
+    return shell?.onNativeProjectOpenFailed(presentProjectOpenFailure);
+  }, [presentProjectOpenFailure]);
 
   const presentProjectOpenOutcome = useCallback((outcome: ProjectBindingLifecycleOutcome) => {
     if (outcome.outcome === 'failed') {
@@ -943,34 +1145,36 @@ function WorkbenchProjectGenerationApp({
   const openProject = useCallback<WorkbenchActions['openProject']>(async () => {
     const shell = getDebruteShellApi();
     if (shell) {
-      setProjectOpenError(undefined);
-      setProjectOpenAttemptedPath(undefined);
+      setProjectOpenPresentation({});
       try {
-        await shell.executeNativeMenuCommand({ commandId: 'project.open-picker' });
+        const result = await shell.executeNativeMenuCommand({ commandId: 'project.open-picker' });
+        if (result.result === 'project_open_failed') {
+          presentProjectOpenFailure(result.failure);
+        } else {
+          setProjectOpenPresentation({});
+        }
       } catch (error) {
         presentProjectOpenFailure(error instanceof Error ? error : new Error(String(error)));
       }
       return;
     }
-    setProjectOpenError(undefined);
-    setProjectOpenAttemptedPath(undefined);
+    setProjectOpenPresentation({});
     try {
       const projectRoot = await api.chooseProjectRoot();
       if (!projectRoot) {
         return;
       }
-      setProjectOpenAttemptedPath(projectRoot);
+      setProjectOpenPresentation({ attemptedPath: projectRoot });
       presentProjectOpenOutcome(await projectBindingLifecycle.open({ projectRoot }));
     } catch (error) {
       presentProjectOpenFailure(error instanceof Error ? error : new Error(String(error)));
     }
-  }, [api, presentProjectOpenFailure, presentProjectOpenOutcome, projectBindingLifecycle, setProjectOpenAttemptedPath, setProjectOpenError]);
+  }, [api, presentProjectOpenFailure, presentProjectOpenOutcome, projectBindingLifecycle, setProjectOpenPresentation]);
 
   const openProjectRoot = useCallback(async (projectRoot: string): Promise<ProjectBindingLifecycleOutcome> => {
-    setProjectOpenError(undefined);
-    setProjectOpenAttemptedPath(projectRoot);
+    setProjectOpenPresentation({ attemptedPath: projectRoot });
     return projectBindingLifecycle.open({ projectRoot });
-  }, [projectBindingLifecycle, setProjectOpenAttemptedPath, setProjectOpenError]);
+  }, [projectBindingLifecycle, setProjectOpenPresentation]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
     if (!projectPathCommandIntake.canAccept()) {
@@ -1001,12 +1205,12 @@ function WorkbenchProjectGenerationApp({
     platform: productPlatform,
     host: getDebruteShellApi() ? 'desktop' : 'web',
     locale: presentationController.locale,
-    projectTitle: snapshot?.metadata.project.name,
-    recentProjects: presentationController.settings.chrome.recentProjects
-  }), [presentationController.locale, presentationController.settings.chrome.recentProjects, snapshot?.metadata.project.name]);
+    projectTitle: snapshot?.health.projectName,
+    recentProjects: presentationController.settings.chrome.recentProjectRoots.map((projectRoot) => ({ projectRoot }))
+  }), [presentationController.locale, presentationController.settings.chrome.recentProjectRoots, snapshot?.health.projectName]);
   const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
-    runtimeProjectId ? [] : ['terminal']
-  ), [runtimeProjectId]);
+    runtimeBindingId ? [] : ['terminal']
+  ), [runtimeBindingId]);
 
   const globalProjection = api.globalProjection.getState();
   if (globalProjection.status === 'uninitialized') {
@@ -1020,7 +1224,9 @@ function WorkbenchProjectGenerationApp({
     : undefined;
   const state: WorkbenchState = {
     snapshot,
-    projectId: runtimeProjectId,
+    canvasProjection: activeProjection,
+    bindingId: runtimeBindingId,
+    canonicalRoot,
     titleBarState: effectiveTitleBarState,
     resolvedTheme: presentationController.resolvedTheme,
     projectOpen: {
@@ -1048,7 +1254,7 @@ function WorkbenchProjectGenerationApp({
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
-    lookupGeneratedAssetMetadata: api.lookupGeneratedAssetMetadata,
+    lookupModelArtifactProvenance: api.lookupModelArtifactProvenance,
     readProjectTextFile: api.readProjectTextFile,
     writeProjectTextFile: api.writeProjectTextFile,
     saveCanvasTextPreviewSource: api.saveCanvasTextPreviewSource,
@@ -1066,12 +1272,13 @@ function WorkbenchProjectGenerationApp({
     resetCanvasNodeLayouts,
     updateCanvasVideoPlaybackState,
     updateCanvasTextViewportState,
-    addProjectPathToCanvasMap,
+    setCanvasDirectoryExpanded,
+    raiseCanvasSelection,
+    activateCanvas,
     createCanvas,
     renameCanvas,
     deleteCanvas,
     reorderCanvases,
-    repairCanvasIndex,
     openProject
   }), [
     ensureTextFileBuffer,
@@ -1085,15 +1292,15 @@ function WorkbenchProjectGenerationApp({
     resetCanvasNodeLayouts,
     updateCanvasVideoPlaybackState,
     updateCanvasTextViewportState,
-    addProjectPathToCanvasMap,
+    setCanvasDirectoryExpanded,
+    raiseCanvasSelection,
+    activateCanvas,
     createCanvas,
     renameCanvas,
     deleteCanvas,
     reorderCanvases,
-    repairCanvasIndex,
     openProject
   ]);
-
   const openWorkbenchWindows = useMemo<WorkbenchWindowIdentity[]>(() => [
     ...FLOATING_PANEL_IDS
       .filter((panelId) => floatingPanels.panels[panelId].open)
@@ -1122,13 +1329,17 @@ function WorkbenchProjectGenerationApp({
       openProjectRoot: async (projectRoot) => {
         presentProjectOpenOutcome(await openProjectRoot(projectRoot));
       }
+    }).then((result) => {
+      if (result?.result === 'project_open_failed') {
+        presentProjectOpenFailure(result.failure);
+      }
     }).catch(() => {
       globalActivities.report({
         kind: 'workbench-operation-failed',
         operation: 'menu-command'
       });
     });
-  }, [actions.openProject, globalActivities, openProjectRoot, presentProjectOpenOutcome]);
+  }, [actions.openProject, globalActivities, openProjectRoot, presentProjectOpenFailure, presentProjectOpenOutcome]);
   const handleTitleBarWindowCommand = useCallback((command: 'minimize' | 'toggle-maximize' | 'close') => {
     const shell = getDebruteShellApi();
     if (!shell) {
@@ -1155,10 +1366,10 @@ function WorkbenchProjectGenerationApp({
     buttonRect: minimapButtonRect,
     viewportRect: workbenchViewportRect
   });
-  const resetLayoutButtonRect = snapshot?.canvasRegistry.status === 'ready'
+  const resetLayoutButtonRect = activeCanvasState
     ? canvasResetLayoutButtonRect(workbenchViewportRect)
     : undefined;
-  const cardBarRect = snapshot?.canvasRegistry.status === 'ready'
+  const cardBarRect = snapshot
     ? canvasCardBarRect(workbenchViewportRect)
     : undefined;
   const floatingBarReservedRects = [
@@ -1211,19 +1422,15 @@ function WorkbenchProjectGenerationApp({
   const readyPhotoshop = globalProjection.photoshop.status === 'ready'
     ? globalProjection.photoshop.value
     : undefined;
-  const canvasOrder = snapshot?.canvasRegistry.status === 'ready'
-    ? snapshot.canvasRegistry.canvasOrder
-    : [];
+  const workspaceCanvases = availableCanvasWorkspace?.workspace.canvases ?? [];
+  const canvasOrder = workspaceCanvases.map((canvas) => canvas.id);
   const canvasCards = useMemo(() => {
-    const canvasesById = new Map((snapshot?.canvases ?? []).map((canvas) => [canvas.id, canvas]));
+    const canvasesById = new Map(workspaceCanvases.map((canvas) => [canvas.id, canvas]));
     return canvasOrder.flatMap((canvasId) => {
       const canvas = canvasesById.get(canvasId);
       return canvas ? [{ id: canvas.id, name: canvas.name }] : [];
     });
-  }, [canvasOrder, snapshot?.canvases]);
-  const registryInvalid = snapshot?.canvasRegistry.status === 'invalid'
-    ? snapshot.canvasRegistry
-    : undefined;
+  }, [canvasOrder, workspaceCanvases]);
   const permanentDeleteConfirmationLabels = useMemo(() => ({
     directory: (path: string) => i18n.t('shell.confirm.permanentDeleteDirectory', { path }),
     file: (path: string) => i18n.t('shell.confirm.permanentDeleteFile', { path }),
@@ -1262,6 +1469,9 @@ function WorkbenchProjectGenerationApp({
       activeProjection,
       activeCanvasRuntime,
       fileClipboard,
+      revealInCanvas: (projectRelativePath) => {
+        void locateProjectFileInCanvas(projectRelativePath);
+      },
       explorerCommands: explorerController,
       activities: projectActivities,
       closeContextMenu: closeWorkbenchContextMenu,
@@ -1269,6 +1479,9 @@ function WorkbenchProjectGenerationApp({
       confirmPermanentDelete,
       confirmTrash,
       getProjectSnapshot: getAcceptedProjectSnapshot,
+      resetCanvasNodeLayouts: (canvasId, nodePaths) => (
+        resetCanvasNodeLayouts(canvasId, { nodePaths })
+      ),
       confirmMoveOverwrite,
     }
     })
@@ -1282,10 +1495,12 @@ function WorkbenchProjectGenerationApp({
     fileClipboard,
     getAcceptedProjectSnapshot,
     explorerController,
+    locateProjectFileInCanvas,
     projectActivities,
     openProjectPathTerminalPanel,
     openInspectorPanel,
     readyPhotoshop,
+    resetCanvasNodeLayouts,
     projectPathCommandEffects,
     projectPathCommandIntake
   ]);
@@ -1428,6 +1643,7 @@ function WorkbenchProjectGenerationApp({
   const canvasEditor = (
     <CanvasEditor
       canvas={activeCanvas}
+      canvasState={activeCanvasState}
       projection={activeProjection}
       hasProject={Boolean(snapshot)}
       projectOpenAttemptedPath={projectOpenAttemptedPath}
@@ -1452,6 +1668,22 @@ function WorkbenchProjectGenerationApp({
       {canvasEditor}
     </CanvasTextRenderProfileProvider>
   ) : canvasEditor;
+  const canvasWorkspaceUnavailable = snapshot?.canvasWorkspace.status === 'unavailable'
+    ? snapshot.canvasWorkspace
+    : undefined;
+  const resetCanvasWorkspace = () => {
+    setResettingCanvasWorkspace(true);
+    setCanvasWorkspaceResetError(undefined);
+    void api.resetCanvasWorkspace()
+      .catch((error) => {
+        setCanvasWorkspaceResetError(errorMessage(error));
+        projectActivities.report({
+          kind: 'canvas-operation-failed',
+          operation: 'reset-workspace'
+        });
+      })
+      .finally(() => setResettingCanvasWorkspace(false));
+  };
 
   return (
     <>
@@ -1461,7 +1693,6 @@ function WorkbenchProjectGenerationApp({
             commandEffects={projectPathCommandEffects}
             getSnapshot={getAcceptedProjectSnapshot}
             activeCanvasRuntime={activeCanvasRuntime}
-            centerProjectFileInCanvas={centerActiveCanvasProjectFile}
             activities={projectActivities}
             i18n={i18n}
             onController={setExplorerController}
@@ -1518,24 +1749,40 @@ function WorkbenchProjectGenerationApp({
               <Button autoFocus disabled={isProjectOpening} onClick={() => { void reopenDetachedProject(); }}>Open Here</Button>
               {projectOpenError ? <span className="db-form-error" role="alert">{projectOpenError}</span> : null}
             </WorkbenchCanvasDialog>
-          ) : null}
-          <div className="canvas-layer" data-testid="canvas-layer" inert={projectPresentationBlocked}>
-            {registryInvalid ? (
-              <div className="empty-editor empty-project">
-                <strong>{i18n.t('canvas.registry.needsRepair')}</strong>
-                <span>{registryInvalid.message}</span>
-                <Button
-                  onClick={() => { void actions.repairCanvasIndex().catch(() => projectActivities.report({
-                    kind: 'canvas-operation-failed',
-                    operation: 'repair-registry'
-                  })); }}
-                >
-                  {i18n.t('canvas.registry.autoRepair')}
+          ) : projectOpenFailureBlocking ? (
+            <WorkbenchCanvasDialog
+              testId="workbench-project-open-failed-dialog-layer"
+              titleId="workbench-project-open-failed-dialog-title"
+              title={i18n.t('projectOpen.title')}
+            >
+              {projectOpenAttemptedPath ? <span>{projectOpenAttemptedPath}</span> : null}
+              <span className="db-form-error" role="alert">{projectOpenError}</span>
+              <div className="db-action-row">
+                <Button onClick={() => setProjectOpenPresentation({})}>
+                  {i18n.t('common.close')}
                 </Button>
               </div>
-            ) : (
-              profiledCanvasEditor
-            )}
+            </WorkbenchCanvasDialog>
+          ) : null}
+          <div className="canvas-layer" data-testid="canvas-layer" inert={projectPresentationBlocked}>
+            {canvasWorkspaceUnavailable ? (
+              <div
+                className="db-empty-state canvas-workspace-unavailable"
+                role="alert"
+                data-testid="canvas-workspace-unavailable"
+              >
+                <strong>{i18n.t('canvas.workspaceUnavailable.title')}</strong>
+                <span>{canvasWorkspaceResetError ?? canvasWorkspaceUnavailable.message}</span>
+                <Button
+                  disabled={resettingCanvasWorkspace}
+                  onClick={resetCanvasWorkspace}
+                >
+                  {resettingCanvasWorkspace
+                    ? i18n.t('canvas.workspaceUnavailable.resetting')
+                    : i18n.t('canvas.workspaceUnavailable.reset')}
+                </Button>
+              </div>
+            ) : profiledCanvasEditor}
           </div>
           <div className="floating-bar-layer" data-testid="floating-bar-layer" inert={projectPresentationBlocked}>
             <FloatingDock
@@ -1560,26 +1807,30 @@ function WorkbenchProjectGenerationApp({
                 ));
               }}
             />
-            <CanvasMinimapBar
-              canvas={activeCanvas}
-              runtime={activeCanvasRuntime}
-              overlayRuntime={canvasOverlayRuntime}
-              open={canvasMinimapOpen}
-              onOpenChange={setCanvasMinimapOpen}
-              panelPlacement={minimapPanelPlacement}
-              interactionBlocked={projectPresentationBlocked}
-            />
-            {snapshot?.canvasRegistry.status === 'ready' ? (
-              <CanvasResetLayoutButton
-                enabled={canResetActiveCanvasLayout}
-                onResetCanvasLayout={resetActiveCanvasLayout}
-              />
+            {availableCanvasWorkspace ? (
+              <>
+                <CanvasMinimapBar
+                  canvas={activeCanvas}
+                  runtime={activeCanvasRuntime}
+                  overlayRuntime={canvasOverlayRuntime}
+                  open={canvasMinimapOpen}
+                  onOpenChange={setCanvasMinimapOpen}
+                  panelPlacement={minimapPanelPlacement}
+                  interactionBlocked={projectPresentationBlocked}
+                />
+                {activeCanvasState ? (
+                  <CanvasResetLayoutButton
+                    enabled={canResetActiveCanvasLayout}
+                    onResetCanvasLayout={resetActiveCanvasLayout}
+                  />
+                ) : null}
+                <CanvasFeedbackInteractionBar
+                  interaction={feedbackInteraction}
+                  overlayRuntime={canvasOverlayRuntime}
+                />
+              </>
             ) : null}
-            <CanvasFeedbackInteractionBar
-              interaction={feedbackInteraction}
-              overlayRuntime={canvasOverlayRuntime}
-            />
-            {snapshot?.canvasRegistry.status === 'ready' ? (
+            {availableCanvasWorkspace ? (
               <CanvasCardBar
                 canvases={canvasCards}
                 activeCanvasId={activeCanvasId}
@@ -1647,6 +1898,7 @@ function WorkbenchProjectGenerationApp({
                     explorerPanel={explorerController ? (
                       <React.Suspense fallback={<div className="project-tree" aria-busy="true" />}>
                         <WorkbenchExplorerPanelFeature
+                          key={runtimeBindingId}
                           locale={presentationController.locale}
                           state={state}
                           fileClipboard={fileClipboard}
@@ -1715,7 +1967,7 @@ function WorkbenchProjectGenerationApp({
                     terminalPanel={(
                       <React.Suspense fallback={<div className="terminal-panel" aria-busy="true" />}>
                         <TerminalPanel
-                          key={runtimeProjectId}
+                          key={runtimeBindingId}
                           api={api}
                           resolvedTheme={presentationController.resolvedTheme}
                           requestedCwdProjectRelativePath={requestedTerminal?.cwdProjectRelativePath ?? null}
@@ -1811,7 +2063,6 @@ function createInitialProjectPresentation(
   activeCanvasId: string | undefined;
   floatingPanels: FloatingPanelState;
   textFileBuffers: Record<string, TextFileBuffer>;
-  viewStateInvalid: boolean;
 } {
   const viewportRect = readWorkbenchViewportRect();
   if (!project) {
@@ -1819,26 +2070,20 @@ function createInitialProjectPresentation(
       viewportRect,
       activeCanvasId: undefined,
       floatingPanels: DEFAULT_FLOATING_PANEL_STATE,
-      textFileBuffers: {},
-      viewStateInvalid: false
+      textFileBuffers: {}
     };
   }
   const restoredViewState = restoreProjectViewState({
     storage: window.sessionStorage,
-    projectId: project.projectId
+    canonicalRoot: project.canonicalRoot
   });
-  const viewState = restoredViewState.status === 'ready'
-    ? restoredViewState.state
-    : { floatingPanels: DEFAULT_FLOATING_PANEL_STATE };
-  const canvasOrder = project.presentedSnapshot.canvasRegistry.status === 'ready'
-    ? project.presentedSnapshot.canvasRegistry.canvasOrder
-    : [];
+  const viewState = restoredViewState ?? { floatingPanels: DEFAULT_FLOATING_PANEL_STATE };
+  const canvasWorkspace = project.snapshot.canvasWorkspace.status === 'available'
+    ? project.snapshot.canvasWorkspace.workspace
+    : undefined;
   return {
     viewportRect,
-    activeCanvasId: chooseInitialActiveCanvasId({
-      storedActiveCanvasId: viewState.activeCanvasId,
-      canvasOrder
-    }),
+    activeCanvasId: canvasWorkspace?.activeCanvasId,
     floatingPanels: constrainOpenFloatingPanelsToViewport(
       viewState.floatingPanels,
       viewportRect
@@ -1854,13 +2099,78 @@ function createInitialProjectPresentation(
           externalChange: false
         }
       ])
-    ),
-    viewStateInvalid: restoredViewState.status === 'invalid'
+    )
   };
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+interface ProjectOpenPresentation {
+  attemptedPath?: string;
+  code?: string;
+  error?: string;
+}
+
+function projectOpenPresentationFromFailure(
+  failure: Error | NativeProjectOpenFailure,
+  i18n: WorkbenchI18n
+): ProjectOpenPresentation {
+  const projectRoot = failure instanceof Error
+    ? projectRootFromOpenError(failure)
+    : failure.projectRoot;
+  const code = failure instanceof Error
+    ? projectOpenErrorCode(failure)
+    : failure.code;
+  return {
+    ...(projectRoot ? { attemptedPath: projectRoot } : {}),
+    ...(code ? { code } : {}),
+    error: i18n.t('projectOpen.openFailed', { message: failure.message })
+  };
+}
+
+function canvasStateFromWorkspaceCanvas(canvas: CanvasWorkspaceCanvas) {
+  return {
+    expandedDirectories: canvas.expandedDirectories,
+    nodeStates: canvas.nodeStates,
+    occlusionOrder: canvas.occlusionOrder
+  };
+}
+
+function canvasMutationContext(
+  project: Extract<WorkbenchProjectProjectionState, { status: 'bound' }>,
+  canvasId: string
+) {
+  const canvas = getCanvasById(project.snapshot, canvasId);
+  if (project.snapshot.canvasWorkspace.status !== 'available') {
+    throw new Error(project.snapshot.canvasWorkspace.message);
+  }
+  const resources = project.snapshot.canvasWorkspace.activeCanvasResources;
+  if (!canvas || resources.canvasId !== canvasId) {
+    throw new Error(`Canvas ${canvasId} is unavailable.`);
+  }
+  const state = canvasStateFromWorkspaceCanvas(canvas);
+  return {
+    resources,
+    state
+  };
+}
+
+function equalStringArrays(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function projectOpenErrorCode(error: Error): string | undefined {
+  return error instanceof DebruteHttpRequestError ? error.code : undefined;
+}
+
+function projectRootFromOpenError(error: Error): string | undefined {
+  if (!(error instanceof DebruteHttpRequestError)) {
+    return undefined;
+  }
+  const projectRoot = error.details?.canonicalRoot;
+  return typeof projectRoot === 'string' && projectRoot.length > 0 ? projectRoot : undefined;
 }
 
 function localizedProjectOpenError(error: ProjectOpenStartupError | undefined, i18n: WorkbenchI18n): string | undefined {

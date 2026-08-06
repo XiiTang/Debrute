@@ -8,9 +8,10 @@ use std::{
 };
 
 use debrute_runtime::control::{
-    ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
-    ControlRequest, ControlResponse, RuntimeActivationService, RuntimeControlState, RuntimeStatus,
-    ServerMessage, encode_frame, read_server_frame, request_handshake, serve_control_connection,
+    ActivationFailure, ActivationIntent, ActivationOutcome, ClientMessage, ClientRole,
+    ControlErrorCode, ControlEvent, ControlRequest, ControlResponse, RuntimeActivationService,
+    RuntimeControlState, RuntimeStatus, ServerMessage, encode_frame, read_server_frame,
+    request_handshake, serve_control_connection,
 };
 
 struct BrowserActivation;
@@ -20,7 +21,7 @@ impl RuntimeActivationService for BrowserActivation {
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ControlErrorCode> {
+    ) -> Result<ActivationOutcome, ActivationFailure> {
         assert_eq!(intent, &ActivationIntent::OpenBrowser);
         assert_eq!(preferred_desktop_window_key, None);
         Ok(ActivationOutcome::Opened)

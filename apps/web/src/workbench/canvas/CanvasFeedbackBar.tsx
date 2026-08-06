@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import { Clock3, MapPin, Square } from '../ui/index.js';
-import { CANVAS_FEEDBACK_MARKS, type CanvasFeedbackMark } from '@debrute/canvas-core';
+import { CANVAS_FEEDBACK_MARKS, type CanvasFeedbackMark } from '@debrute/app-protocol';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackLocalToolset } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';

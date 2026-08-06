@@ -5,48 +5,51 @@ interface PendingDesktopOpen<NativeIdentity> {
   preferredIdentity: NativeIdentity | undefined;
 }
 
-export function createDesktopOpenAdmission<NativeIdentity>(
+export function createDesktopOpenAdmission<NativeIdentity, Result>(
   activate: (
     intent: DesktopOpenIntent,
     preferredIdentity?: NativeIdentity
-  ) => Promise<void>
+  ) => Promise<Result>
 ) {
   const pending: Array<PendingDesktopOpen<NativeIdentity>> = [];
   let phase: 'pending' | 'starting' | 'live' = 'pending';
 
-  function activateOpen(request: PendingDesktopOpen<NativeIdentity>): Promise<void> {
+  function activateOpen(request: PendingDesktopOpen<NativeIdentity>): Promise<Result> {
     return request.preferredIdentity === undefined
       ? activate(request.intent)
       : activate(request.intent, request.preferredIdentity);
   }
 
   return {
-    dispatch(intent: DesktopOpenIntent, preferredIdentity?: NativeIdentity) {
+    dispatch(
+      intent: DesktopOpenIntent,
+      preferredIdentity?: NativeIdentity
+    ): Promise<Result | undefined> {
       const request = { intent, preferredIdentity };
       if (phase !== 'live') {
         pending.push(request);
-        return Promise.resolve();
+        return Promise.resolve(undefined);
       }
       return activateOpen(request);
     },
-    async start(explicitIntent: DesktopOpenIntent | undefined) {
+    async start(explicitIntent: DesktopOpenIntent | undefined): Promise<Result[]> {
       if (phase !== 'pending') {
         throw new Error('Desktop open admission has already started.');
       }
       phase = 'starting';
-      await activateOpen(explicitIntent
+      const results: Result[] = [];
+      const initialResult = await activateOpen(explicitIntent
         ? { intent: explicitIntent, preferredIdentity: undefined }
         : pending.shift() ?? {
             intent: { kind: 'new-window' },
             preferredIdentity: undefined
           });
+      results.push(initialResult);
       while (pending.length > 0) {
-        const request = pending.shift();
-        if (request) {
-          await activateOpen(request);
-        }
+        results.push(await activateOpen(pending.shift()!));
       }
       phase = 'live';
+      return results;
     }
   };
 }

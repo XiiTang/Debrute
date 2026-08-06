@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasVideoPreviewProbeRequest } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { WorkbenchActions } from '../../types.js';
 import type {
   CanvasPreviewResourceRequest,
@@ -45,13 +45,13 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
         { ...videoNode('media/c.mp4', 'rev-c'), availability: { state: 'missing', message: 'missing' } }
       ]
     })).toEqual([{
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'media/a.mp4',
       sourceRevision: 'rev-a',
       frameTimeMs: 4_250
     }, {
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'media/b.mp4',
       sourceRevision: 'rev-b',
@@ -66,7 +66,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
         'media/a.mp4',
         'rev-a',
         0,
-        'http://127.0.0.1:17321/api/projects/p/files/raw/media/a.mp4?v=rev-a'
+        'http://127.0.0.1:17321/api/workbench/bindings/p/files/raw/media/a.mp4?v=rev-a'
       )]
     })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
   });
@@ -131,7 +131,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
 
     expect(ensure).not.toHaveBeenCalled();
     expect(previewSrc()).toBe(
-      '/api/projects/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&sourceRevision=rev-a&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
+      '/api/workbench/bindings/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&sourceRevision=rev-a&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
     );
   });
 
@@ -521,10 +521,11 @@ function videoNode(
   projectRelativePath: string,
   revision: string,
   currentTimeMs = 0,
-  fileUrl = `/api/projects/p/files/raw/${projectRelativePath}?v=${revision}`
+  fileUrl = `/api/workbench/bindings/p/files/raw/${projectRelativePath}?v=${revision}`
 ): ProjectedCanvasNode {
   return {
     projectRelativePath,
+    displayName: projectRelativePath,
     nodeKind: 'file',
     mediaKind: 'video',
     x: 0,

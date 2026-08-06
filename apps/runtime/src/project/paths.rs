@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     fs,
     io::{Read as _, Write as _},
     path::{Component, Path, PathBuf},
@@ -14,54 +15,9 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{ProjectError, ProjectPathEntry, ProjectPathKind};
-
-pub const PROJECT_FILE: &str = ".debrute/project.json";
-pub const CANVAS_INDEX_FILE: &str = ".debrute/canvases/index.json";
+use super::{ProjectDirectoryState, ProjectError, ProjectPathKind, ProjectTreeEntry};
 
 const MAX_PROJECT_GITIGNORE_BYTES: usize = 1024 * 1024;
-const DEFAULT_BACKGROUND_EXCLUDED_DIRECTORIES: &[&str] = &[
-    ".gradle",
-    ".mypy_cache",
-    ".next",
-    ".nuxt",
-    ".pnpm-store",
-    ".pytest_cache",
-    ".turbo",
-    ".venv",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "target",
-    "venv",
-];
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DebruteProjectPaths {
-    pub debrute_dir: PathBuf,
-    pub project_file: PathBuf,
-    pub canvases_dir: PathBuf,
-    pub canvas_maps_dir: PathBuf,
-    pub canvas_index_file: PathBuf,
-    pub global_runtime_dir: PathBuf,
-}
-
-#[must_use]
-pub fn debrute_project_paths(project_root: &Path, debrute_home: &Path) -> DebruteProjectPaths {
-    let debrute_dir = project_root.join(".debrute");
-    DebruteProjectPaths {
-        project_file: debrute_dir.join("project.json"),
-        canvases_dir: debrute_dir.join("canvases"),
-        canvas_maps_dir: debrute_dir.join("canvas-maps"),
-        canvas_index_file: debrute_dir.join("canvases/index.json"),
-        global_runtime_dir: debrute_home.join("runtime"),
-        debrute_dir,
-    }
-}
-
 /// Normalizes a non-root Project-relative path.
 ///
 /// # Errors
@@ -181,6 +137,28 @@ pub fn join_project_path(parent: &str, name: &str) -> Result<String, ProjectErro
     })
 }
 
+#[must_use]
+pub fn project_path_is_same_or_descendant(path: &str, root: &str) -> bool {
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+#[must_use]
+pub fn rewrite_project_path(path: &str, source: &str, target: &str) -> String {
+    if path == source {
+        target.to_owned()
+    } else if let Some(suffix) = path
+        .strip_prefix(source)
+        .and_then(|suffix| suffix.strip_prefix('/'))
+    {
+        format!("{target}/{suffix}")
+    } else {
+        path.to_owned()
+    }
+}
+
 /// Resolves a normalized path lexically beneath the Project root.
 ///
 /// # Errors
@@ -291,35 +269,10 @@ pub(crate) struct ProjectCapabilityFs {
     root: Arc<Dir>,
 }
 
-pub(crate) struct ProjectCapabilityFileWrite {
-    pub(crate) project_relative_path: String,
-    pub(crate) content: Vec<u8>,
-    pub(crate) replace: bool,
-}
-
-pub(crate) struct ProjectCapabilityFileStage {
-    capability: ProjectCapabilityFs,
-    files: Vec<StagedCapabilityFile>,
-}
-
-struct StagedCapabilityFile {
-    stage: String,
-    target: String,
-    backup: Option<String>,
-    replace: bool,
-    published: bool,
-}
-
 static PROJECT_CAPABILITY_ROOTS: OnceLock<Mutex<std::collections::HashMap<PathBuf, Weak<Dir>>>> =
     OnceLock::new();
 
 impl ProjectCapabilityFs {
-    pub(crate) fn open_current(root: &Path) -> Result<Self, ProjectError> {
-        Ok(Self {
-            root: Arc::new(Dir::open_ambient_dir(root, ambient_authority())?),
-        })
-    }
-
     pub(crate) fn open(root: &Path) -> Result<Self, ProjectError> {
         let roots =
             PROJECT_CAPABILITY_ROOTS.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
@@ -379,20 +332,6 @@ impl ProjectCapabilityFs {
         }
         self.root.create_dir_all(&relative)?;
         Ok(self.root.open_dir(relative)?)
-    }
-
-    /// Stages a logical group of files through the already-open Project
-    /// directory capability without publishing any target paths.
-    pub(crate) fn stage_files(
-        &self,
-        writes: Vec<ProjectCapabilityFileWrite>,
-    ) -> Result<ProjectCapabilityFileStage, ProjectError> {
-        let mut staged = Vec::with_capacity(writes.len());
-        stage_capability_files(self, writes, &mut staged)?;
-        Ok(ProjectCapabilityFileStage {
-            capability: self.clone(),
-            files: staged,
-        })
     }
 
     pub(crate) fn atomic_write(&self, relative: &str, bytes: &[u8]) -> Result<(), ProjectError> {
@@ -511,11 +450,6 @@ impl ProjectCapabilityFs {
         Ok(bytes)
     }
 
-    pub(crate) fn file_size(&self, relative: &str) -> Result<u64, ProjectError> {
-        let relative = normalize_project_relative_path(relative)?;
-        Ok(self.root.open(relative)?.metadata()?.len())
-    }
-
     pub(crate) fn remove_file(&self, relative: &str) -> Result<(), ProjectError> {
         let relative = normalize_project_relative_path(relative)?;
         self.root.remove_file(relative)?;
@@ -544,220 +478,6 @@ impl ProjectCapabilityFs {
         normalize_project_path_basename(destination_name)?;
         self.root.hard_link(source, destination, destination_name)?;
         Ok(())
-    }
-}
-
-impl ProjectCapabilityFileStage {
-    pub(crate) fn capability(&self) -> &ProjectCapabilityFs {
-        &self.capability
-    }
-
-    pub(crate) fn commit_more(
-        mut self,
-        writes: Vec<ProjectCapabilityFileWrite>,
-    ) -> Result<(), ProjectError> {
-        stage_capability_files(&self.capability, writes, &mut self.files)?;
-        if let Err(error) = publish_capability_files(&self.capability.root, &mut self.files) {
-            let rollback = rollback_capability_files(&self.capability.root, &mut self.files);
-            let cleanup = cleanup_capability_files(&self.capability.root, &mut self.files);
-            return match (rollback, cleanup) {
-                (Ok(()), Ok(())) => Err(error.into()),
-                (Err(rollback_error), Ok(())) => Err(ProjectError::service(
-                    "project_file_commit_rollback_failed",
-                    format!("{error} Rollback also failed: {rollback_error}"),
-                )),
-                (Ok(()), Err(cleanup_error)) => Err(ProjectError::service(
-                    "project_file_commit_cleanup_failed",
-                    format!("{error} Cleanup also failed: {cleanup_error}"),
-                )),
-                (Err(rollback_error), Err(cleanup_error)) => Err(ProjectError::service(
-                    "project_file_commit_rollback_failed",
-                    format!(
-                        "{error} Rollback also failed: {rollback_error} Cleanup also failed: {cleanup_error}"
-                    ),
-                )),
-            };
-        }
-        if let Err(error) = cleanup_capability_files(&self.capability.root, &mut self.files) {
-            eprintln!("Debrute Project files were published but temporary cleanup failed: {error}");
-        }
-        Ok(())
-    }
-}
-
-impl Drop for ProjectCapabilityFileStage {
-    fn drop(&mut self) {
-        if let Err(error) = cleanup_capability_files(&self.capability.root, &mut self.files) {
-            eprintln!("Debrute Project staged file cleanup failed: {error}");
-        }
-    }
-}
-
-fn stage_capability_files(
-    capability: &ProjectCapabilityFs,
-    writes: Vec<ProjectCapabilityFileWrite>,
-    staged: &mut Vec<StagedCapabilityFile>,
-) -> Result<(), ProjectError> {
-    let mut targets = staged
-        .iter()
-        .map(|file| file.target.clone())
-        .collect::<std::collections::HashSet<_>>();
-    let mut normalized = Vec::with_capacity(writes.len());
-    for write in writes {
-        let target = normalize_project_relative_path(&write.project_relative_path)?;
-        if !targets.insert(target.clone()) {
-            return Err(ProjectError::Validation(format!(
-                "Project file commit contains a duplicate target: {target}"
-            )));
-        }
-        let (parent, name) = split_parent_name(&target)?;
-        let parent = parent.to_owned();
-        let name = name.to_owned();
-        normalized.push((target, parent, name, write.content, write.replace));
-    }
-
-    for (target, parent, name, content, replace) in normalized {
-        if let Err(error) = capability.ensure_directory(&parent) {
-            return match cleanup_capability_files(&capability.root, staged) {
-                Ok(()) => Err(error),
-                Err(cleanup_error) => Err(ProjectError::service(
-                    "project_file_stage_cleanup_failed",
-                    format!("{error} Cleanup also failed: {cleanup_error}"),
-                )),
-            };
-        }
-        let stage = if parent.is_empty() {
-            format!(".{name}.{}.tmp", Uuid::new_v4())
-        } else {
-            format!("{parent}/.{name}.{}.tmp", Uuid::new_v4())
-        };
-        let mut options = cap_std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        let stage_result = (|| {
-            let mut file = capability.root.open_with(&stage, &options)?;
-            file.write_all(&content)?;
-            file.sync_all()?;
-            Ok::<(), std::io::Error>(())
-        })();
-        if let Err(error) = stage_result {
-            staged.push(StagedCapabilityFile {
-                stage,
-                target,
-                backup: None,
-                replace,
-                published: false,
-            });
-            return match cleanup_capability_files(&capability.root, staged) {
-                Ok(()) => Err(error.into()),
-                Err(cleanup_error) => Err(ProjectError::service(
-                    "project_file_stage_cleanup_failed",
-                    format!("{error} Cleanup also failed: {cleanup_error}"),
-                )),
-            };
-        }
-        staged.push(StagedCapabilityFile {
-            stage,
-            target,
-            backup: None,
-            replace,
-            published: false,
-        });
-    }
-    Ok(())
-}
-
-fn publish_capability_files(root: &Dir, files: &mut [StagedCapabilityFile]) -> std::io::Result<()> {
-    for file in files {
-        match root.symlink_metadata(&file.target) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-                return Err(std::io::Error::other(format!(
-                    "Project commit target is not a regular file: {}",
-                    file.target
-                )));
-            }
-            Ok(_) if file.replace => {
-                let (parent, name) = split_parent_name(&file.target)
-                    .map_err(|error| std::io::Error::other(error.to_string()))?;
-                let backup = if parent.is_empty() {
-                    format!(".{name}.{}.restore.tmp", Uuid::new_v4())
-                } else {
-                    format!("{parent}/.{name}.{}.restore.tmp", Uuid::new_v4())
-                };
-                root.hard_link(&file.target, root, &backup)?;
-                file.backup = Some(backup);
-            }
-            Ok(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    format!("Project commit target already exists: {}", file.target),
-                ));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        if file.replace {
-            root.rename(&file.stage, root, &file.target)?;
-            file.published = true;
-        } else {
-            root.hard_link(&file.stage, root, &file.target)?;
-            file.published = true;
-            root.remove_file(&file.stage)?;
-        }
-    }
-    Ok(())
-}
-
-fn rollback_capability_files(
-    root: &Dir,
-    files: &mut [StagedCapabilityFile],
-) -> std::io::Result<()> {
-    let mut first_error = None;
-    for file in files.iter_mut().rev() {
-        if file.published {
-            if let Some(backup) = file.backup.take() {
-                remember_capability_error(
-                    root.rename(&backup, root, &file.target),
-                    &mut first_error,
-                );
-            } else {
-                remember_missing_ok(root.remove_file(&file.target), &mut first_error);
-            }
-        }
-    }
-    first_error.map_or(Ok(()), Err)
-}
-
-fn cleanup_capability_files(
-    root: &Dir,
-    files: &mut Vec<StagedCapabilityFile>,
-) -> std::io::Result<()> {
-    let mut first_error = None;
-    for mut file in files.drain(..) {
-        remember_missing_ok(root.remove_file(&file.stage), &mut first_error);
-        if let Some(backup) = file.backup.take() {
-            remember_missing_ok(root.remove_file(backup), &mut first_error);
-        }
-    }
-    first_error.map_or(Ok(()), Err)
-}
-
-fn remember_capability_error(
-    result: std::io::Result<()>,
-    first_error: &mut Option<std::io::Error>,
-) {
-    if let Err(error) = result
-        && first_error.is_none()
-    {
-        *first_error = Some(error);
-    }
-}
-
-fn remember_missing_ok(result: std::io::Result<()>, first_error: &mut Option<std::io::Error>) {
-    if let Err(error) = result
-        && error.kind() != std::io::ErrorKind::NotFound
-        && first_error.is_none()
-    {
-        *first_error = Some(error);
     }
 }
 
@@ -875,74 +595,34 @@ pub fn assert_project_tree_visible_path(path: &str) -> Result<String, ProjectErr
     Ok(normalized)
 }
 
-/// Requires a visible path that is not owned by the Project Document System.
+/// Requires a visible path that may be mutated through the Project filesystem API.
 ///
 /// # Errors
-/// Returns an error when the path is invalid, hidden, or protected.
+/// Returns an error when the path is invalid or hidden.
 pub fn assert_project_tree_visible_mutation_path(path: &str) -> Result<String, ProjectError> {
-    let normalized = assert_project_tree_visible_path(path)?;
-    if is_protected_project_document_mutation_path(&normalized) {
-        return Err(ProjectError::Validation(format!(
-            "Project path is protected by the Project Document System: {path}"
-        )));
-    }
-    Ok(normalized)
+    assert_project_tree_visible_path(path)
 }
 
 #[must_use]
 pub fn is_project_visible_path(path: &str) -> bool {
-    let policy = reserved_namespace_policy_path(path);
-    let policy_case_folded = policy.to_ascii_lowercase();
-    let folded_segments = policy_case_folded.split('/').collect::<Vec<_>>();
-    if folded_segments.contains(&".git")
-        || folded_segments
-            .windows(2)
-            .any(|segments| segments == [".debrute", "cache"])
-        || folded_segments
-            .windows(3)
-            .any(|segments| segments == [".debrute", "reviews", "rendered-feedback"])
+    let folded_segments = path
+        .split('/')
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    if folded_segments.iter().any(|segment| {
+        matches!(
+            segment.as_str(),
+            ".git" | ".svn" | ".hg" | ".jj" | ".sl" | ".repo" | "cvs"
+        )
+    }) || folded_segments
+        .iter()
+        .any(|segment| matches!(segment.as_str(), ".ds_store" | "thumbs.db"))
     {
         return false;
     }
-    let segments: Vec<_> = policy.split('/').collect();
-    if segments.iter().enumerate().any(|(index, segment)| {
-        segment.eq_ignore_ascii_case(".debrute")
-            && segments
-                .iter()
-                .skip(index + 1)
-                .any(|nested| nested.to_ascii_lowercase().ends_with(".lock"))
-    }) {
-        return false;
-    }
-    !segments
-        .iter()
+    !path
+        .split('/')
         .any(|segment| managed_temporary().is_match(segment))
-}
-
-#[must_use]
-pub fn is_protected_project_document_mutation_path(path: &str) -> bool {
-    is_same_or_child(&reserved_namespace_policy_path(path), ".debrute")
-}
-
-fn reserved_namespace_policy_path(path: &str) -> String {
-    let (first, rest) = path
-        .split_once('/')
-        .map_or((path, None), |(a, b)| (a, Some(b)));
-    let normalized_first = if first.eq_ignore_ascii_case(".git") {
-        ".git"
-    } else if first.eq_ignore_ascii_case(".debrute") {
-        ".debrute"
-    } else {
-        first
-    };
-    rest.map_or_else(
-        || normalized_first.to_owned(),
-        |rest| format!("{normalized_first}/{rest}"),
-    )
-}
-
-fn is_same_or_child(candidate: &str, parent: &str) -> bool {
-    candidate == parent || candidate.starts_with(&format!("{parent}/"))
 }
 
 fn managed_temporary() -> &'static Regex {
@@ -963,113 +643,6 @@ fn is_windows_absolute(path: &str) -> bool {
         && matches!(bytes[2], b'/' | b'\\')
 }
 
-/// Lists the deterministic visible Project file tree.
-///
-/// # Panics
-/// Panics if the traversal reports cancellation even though this entry point disables it.
-///
-/// # Errors
-/// Returns an error when the root cannot be traversed safely.
-pub fn list_project_files(root: &Path) -> Result<Vec<ProjectPathEntry>, ProjectError> {
-    Ok(list_project_files_until(root, || false)?
-        .expect("a traversal with cancellation disabled must complete"))
-}
-
-/// Lists the deterministic visible Project tree until cancellation is requested.
-///
-/// A cancelled traversal returns `None` without treating normal Project close as
-/// a filesystem failure.
-///
-/// # Errors
-/// Returns an error when the root cannot be traversed safely before cancellation.
-pub(crate) fn list_project_files_until(
-    root: &Path,
-    is_cancelled: impl Fn() -> bool,
-) -> Result<Option<Vec<ProjectPathEntry>>, ProjectError> {
-    if is_cancelled() {
-        return Ok(None);
-    }
-    let project = ProjectCapabilityFs::open(root)?;
-    let Some(ignore_stack) = ProjectIgnoreStack::for_directory(&project, root, "")? else {
-        return Ok(Some(Vec::new()));
-    };
-    let mut walk = ProjectIndexWalk {
-        project: &project,
-        root,
-        result: Vec::new(),
-        is_cancelled: &is_cancelled,
-    };
-    if !walk.run_directory(&project.root, "", &ignore_stack)? {
-        return Ok(None);
-    }
-    if is_cancelled() {
-        return Ok(None);
-    }
-    walk.result
-        .sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
-    if is_cancelled() {
-        return Ok(None);
-    }
-    Ok(Some(walk.result))
-}
-
-/// Lists one indexed subtree using Project-root ignore semantics.
-///
-/// # Errors
-/// Returns an error when the subtree or its ignore policy cannot be read.
-pub(crate) fn list_project_subtree_files(
-    root: &Path,
-    project_relative_directory: &str,
-) -> Result<Vec<ProjectPathEntry>, ProjectError> {
-    let directory = normalize_project_directory_path(project_relative_directory)?;
-    if !directory.is_empty() && !is_background_index_path(&directory) {
-        return Ok(Vec::new());
-    }
-    let project = ProjectCapabilityFs::open(root)?;
-    let Some(ignore_stack) = ProjectIgnoreStack::for_directory(&project, root, &directory)? else {
-        return Ok(Vec::new());
-    };
-    let current = match project.open_directory(&directory) {
-        Ok(current) => current,
-        Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Vec::new());
-        }
-        Err(error) => return Err(error),
-    };
-    let never_cancelled = || false;
-    let mut walk = ProjectIndexWalk {
-        project: &project,
-        root,
-        result: Vec::new(),
-        is_cancelled: &never_cancelled,
-    };
-    let _ = walk.run_directory(&current, &directory, &ignore_stack)?;
-    walk.result
-        .sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
-    Ok(walk.result)
-}
-
-/// Returns whether one path belongs in the background index and watcher set.
-///
-/// # Errors
-/// Returns an error when an ancestor ignore file cannot be read safely.
-pub(crate) fn is_project_indexed_path(
-    root: &Path,
-    project_relative_path: &str,
-    is_dir: bool,
-) -> Result<bool, ProjectError> {
-    let relative = normalize_project_relative_path(project_relative_path)?;
-    if !is_background_index_path(&relative) {
-        return Ok(false);
-    }
-    let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
-    let project = ProjectCapabilityFs::open(root)?;
-    let Some(ignore_stack) = ProjectIgnoreStack::for_directory(&project, root, parent)? else {
-        return Ok(false);
-    };
-    Ok(!ignore_stack.is_ignored(&root.join(relative), is_dir))
-}
-
 /// Lists only the direct visible children of one Project directory.
 ///
 /// # Errors
@@ -1077,7 +650,7 @@ pub(crate) fn is_project_indexed_path(
 pub fn list_project_directory(
     root: &Path,
     project_relative_directory: &str,
-) -> Result<Vec<ProjectPathEntry>, ProjectError> {
+) -> Result<Vec<ProjectTreeEntry>, ProjectError> {
     let directory = normalize_project_directory_path(project_relative_directory)?;
     if !directory.is_empty() && !is_project_visible_path(&directory) {
         return Err(ProjectError::Validation(format!(
@@ -1085,162 +658,45 @@ pub fn list_project_directory(
         )));
     }
     let project = ProjectCapabilityFs::open(root)?;
-    let current = match project.open_directory(&directory) {
-        Ok(current) => current,
-        Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Vec::new());
-        }
-        Err(error) => return Err(error),
-    };
+    let ignore_stack = ProjectIgnoreStack::for_visible_directory(&project, root, &directory)?;
+    let current = project.open_directory(&directory)?;
     let mut result = Vec::new();
     for entry in current.entries()? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        let hidden = name.starts_with('.');
         let relative = if directory.is_empty() {
             name
         } else {
             format!("{directory}/{name}")
         };
         if file_type.is_dir() && !file_type.is_symlink() && is_project_visible_path(&relative) {
-            result.push(ProjectPathEntry {
+            let ignored = ignore_stack.is_ignored(&root.join(&relative), true);
+            result.push(ProjectTreeEntry {
                 project_relative_path: relative,
                 kind: ProjectPathKind::Directory,
                 size_bytes: None,
+                ignored,
+                hidden,
+                directory_state: Some(ProjectDirectoryState::Unloaded),
+                directory_error: None,
             });
         } else if file_type.is_file() && is_project_visible_path(&relative) {
-            result.push(ProjectPathEntry {
+            let ignored = ignore_stack.is_ignored(&root.join(&relative), false);
+            result.push(ProjectTreeEntry {
                 project_relative_path: relative,
                 kind: ProjectPathKind::File,
                 size_bytes: Some(entry.metadata()?.len()),
+                ignored,
+                hidden,
+                directory_state: None,
+                directory_error: None,
             });
         }
     }
-    result.sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
+    result.sort_by(compare_project_tree_entries);
     Ok(result)
-}
-
-/// Lists one explicitly requested visible file or directory subtree.
-///
-/// This intentionally does not apply background-index exclusions or
-/// `.gitignore`: a literal Canvas Map rule is explicit user intent. Reserved
-/// Project namespaces, managed temporary files, and symlinks remain excluded.
-///
-/// # Errors
-/// Returns an error when the path is invalid or cannot be traversed safely.
-pub(crate) fn list_explicit_project_path(
-    root: &Path,
-    project_relative_path: &str,
-) -> Result<Vec<ProjectPathEntry>, ProjectError> {
-    let relative = normalize_project_relative_path(project_relative_path)?;
-    if !is_project_visible_path(&relative) {
-        return Ok(Vec::new());
-    }
-    let project = ProjectCapabilityFs::open(root)?;
-    let metadata = match project.root.symlink_metadata(&relative) {
-        Ok(metadata) if !metadata.file_type().is_symlink() => metadata,
-        Ok(_) => return Ok(Vec::new()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.into()),
-    };
-    if metadata.is_file() {
-        return Ok(vec![ProjectPathEntry {
-            project_relative_path: relative,
-            kind: ProjectPathKind::File,
-            size_bytes: Some(metadata.len()),
-        }]);
-    }
-    if !metadata.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let mut result = vec![ProjectPathEntry {
-        project_relative_path: relative.clone(),
-        kind: ProjectPathKind::Directory,
-        size_bytes: None,
-    }];
-    let mut pending = vec![relative];
-    while let Some(directory) = pending.pop() {
-        for entry in list_project_directory(root, &directory)? {
-            if entry.kind == ProjectPathKind::Directory {
-                pending.push(entry.project_relative_path.clone());
-            }
-            result.push(entry);
-        }
-    }
-    result.sort_by(|left, right| left.project_relative_path.cmp(&right.project_relative_path));
-    result.dedup_by(|left, right| left.project_relative_path == right.project_relative_path);
-    Ok(result)
-}
-
-struct ProjectIndexWalk<'a, C> {
-    project: &'a ProjectCapabilityFs,
-    root: &'a Path,
-    result: Vec<ProjectPathEntry>,
-    is_cancelled: &'a C,
-}
-
-impl<C> ProjectIndexWalk<'_, C>
-where
-    C: Fn() -> bool,
-{
-    fn run_directory(
-        &mut self,
-        current: &Dir,
-        prefix: &str,
-        ignore_stack: &ProjectIgnoreStack,
-    ) -> Result<bool, ProjectError> {
-        if (self.is_cancelled)() {
-            return Ok(false);
-        }
-        let entries = match current.entries() {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-            Err(error) => return Err(error.into()),
-        };
-        for entry in entries {
-            if (self.is_cancelled)() {
-                return Ok(false);
-            }
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let relative = if prefix.is_empty() {
-                name
-            } else {
-                format!("{prefix}/{name}")
-            };
-            let is_dir = file_type.is_dir() && !file_type.is_symlink();
-            let is_file = file_type.is_file() && !file_type.is_symlink();
-            if (!is_dir && !is_file)
-                || !is_background_index_path(&relative)
-                || ignore_stack.is_ignored(&self.root.join(&relative), is_dir)
-            {
-                continue;
-            }
-            self.result.push(ProjectPathEntry {
-                project_relative_path: relative.clone(),
-                kind: if is_dir {
-                    ProjectPathKind::Directory
-                } else {
-                    ProjectPathKind::File
-                },
-                size_bytes: if is_file {
-                    Some(entry.metadata()?.len())
-                } else {
-                    None
-                },
-            });
-            if is_dir {
-                let child_ignore_stack =
-                    ignore_stack.with_directory(self.project, self.root, &relative)?;
-                if !self.run_directory(&entry.open_dir()?, &relative, &child_ignore_stack)? {
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
-    }
 }
 
 #[derive(Clone, Default)]
@@ -1249,14 +705,14 @@ struct ProjectIgnoreStack {
 }
 
 impl ProjectIgnoreStack {
-    fn for_directory(
+    fn for_visible_directory(
         project: &ProjectCapabilityFs,
         root: &Path,
         directory: &str,
-    ) -> Result<Option<Self>, ProjectError> {
+    ) -> Result<Self, ProjectError> {
         let mut stack = Self::default().with_directory(project, root, "")?;
         if directory.is_empty() {
-            return Ok(Some(stack));
+            return Ok(stack);
         }
         let mut prefix = String::new();
         for segment in directory.split('/') {
@@ -1265,12 +721,9 @@ impl ProjectIgnoreStack {
             } else {
                 format!("{prefix}/{segment}")
             };
-            if !is_background_index_path(&prefix) || stack.is_ignored(&root.join(&prefix), true) {
-                return Ok(None);
-            }
             stack = stack.with_directory(project, root, &prefix)?;
         }
-        Ok(Some(stack))
+        Ok(stack)
     }
 
     fn with_directory(
@@ -1306,25 +759,17 @@ impl ProjectIgnoreStack {
             } else {
                 line
             };
-            builder
-                .add_line(Some(source.clone()), line)
-                .map_err(|error| {
-                    ProjectError::service(
-                        "project_ignore_invalid",
-                        format!(
-                            "Project ignore rule is invalid at {}:{}: {error}",
-                            source.display(),
-                            index + 1
-                        ),
-                    )
-                })?;
+            if let Err(error) = builder.add_line(Some(source.clone()), line) {
+                eprintln!(
+                    "Debrute ignored invalid Project ignore rule at {}:{}: {error}",
+                    source.display(),
+                    index + 1
+                );
+            }
         }
-        let matcher = builder.build().map_err(|error| {
-            ProjectError::service(
-                "project_ignore_invalid",
-                format!("Project ignore rules could not be compiled: {error}"),
-            )
-        })?;
+        let Ok(matcher) = builder.build() else {
+            return Ok(self.clone());
+        };
         let mut next = self.clone();
         next.matchers.push(matcher);
         Ok(next)
@@ -1343,22 +788,73 @@ impl ProjectIgnoreStack {
     }
 }
 
-fn is_background_index_path(path: &str) -> bool {
-    is_project_visible_path(path) && !is_project_fixed_heavy_path(path)
+/// Compares two Project Tree siblings using the shared presentation order.
+#[must_use]
+pub fn compare_project_tree_entries(left: &ProjectTreeEntry, right: &ProjectTreeEntry) -> Ordering {
+    match (left.kind, right.kind) {
+        (ProjectPathKind::Directory, ProjectPathKind::File) => Ordering::Less,
+        (ProjectPathKind::File, ProjectPathKind::Directory) => Ordering::Greater,
+        _ => {
+            let left_name = left
+                .project_relative_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&left.project_relative_path);
+            let right_name = right
+                .project_relative_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&right.project_relative_path);
+            natural_name_cmp(left_name, right_name)
+                .then_with(|| left_name.cmp(right_name))
+                .then_with(|| left.project_relative_path.cmp(&right.project_relative_path))
+        }
+    }
 }
 
-#[must_use]
-pub(crate) fn is_project_fixed_heavy_path(path: &str) -> bool {
-    path.split('/').any(|segment| {
-        DEFAULT_BACKGROUND_EXCLUDED_DIRECTORIES
-            .iter()
-            .any(|excluded| segment.eq_ignore_ascii_case(excluded))
-    })
-}
-
-#[must_use]
-pub(crate) fn is_gitignore_path(path: &str) -> bool {
-    path == ".gitignore" || path.ends_with("/.gitignore")
+pub(crate) fn natural_name_cmp(left: &str, right: &str) -> Ordering {
+    let left_folded = left
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    let right_folded = right
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    let mut left = left_folded.chars().peekable();
+    let mut right = right_folded.chars().peekable();
+    loop {
+        match (left.peek(), right.peek()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(a), Some(b)) if a.is_ascii_digit() && b.is_ascii_digit() => {
+                let a =
+                    std::iter::from_fn(|| left.next_if(char::is_ascii_digit)).collect::<String>();
+                let b =
+                    std::iter::from_fn(|| right.next_if(char::is_ascii_digit)).collect::<String>();
+                let a_trimmed = a.trim_start_matches('0');
+                let b_trimmed = b.trim_start_matches('0');
+                let order = a_trimmed
+                    .len()
+                    .cmp(&b_trimmed.len())
+                    .then_with(|| a_trimmed.cmp(b_trimmed))
+                    .then_with(|| a.len().cmp(&b.len()));
+                if order != Ordering::Equal {
+                    return order;
+                }
+            }
+            (Some(_), Some(_)) => {
+                let order = left
+                    .next()
+                    .unwrap_or_default()
+                    .cmp(&right.next().unwrap_or_default());
+                if order != Ordering::Equal {
+                    return order;
+                }
+            }
+        }
+    }
 }
 
 #[must_use]
@@ -1366,72 +862,39 @@ pub fn project_content_hash(content: impl AsRef<[u8]>) -> String {
     format!("sha256:{:x}", Sha256::digest(content.as_ref()))
 }
 
-#[must_use]
-pub(crate) fn project_file_metadata_revision(size: u64, mtime_ms: f64) -> String {
-    format!("{}:{size}", mtime_ms.round())
-}
-
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-
     use super::*;
 
     #[test]
-    fn visible_project_walk_stops_when_its_owner_is_cancelled() {
-        let root = std::env::temp_dir().join(format!("debrute-cancel-walk-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("one/two/three")).unwrap();
-        fs::write(root.join("one/a.txt"), "a").unwrap();
-        fs::write(root.join("one/two/b.txt"), "b").unwrap();
-        fs::write(root.join("one/two/three/c.txt"), "c").unwrap();
-        let checks = Cell::new(0usize);
-
-        let result = list_project_files_until(&root, || {
-            let next = checks.get() + 1;
-            checks.set(next);
-            next >= 4
-        })
-        .unwrap();
-
-        assert!(result.is_none());
-        assert_eq!(checks.get(), 4);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn protected_visibility_is_case_insensitive_across_every_segment() {
-        for path in [
-            ".DEBRUTE/CACHE/preview.png",
-            ".debrute/Cache/preview.png",
-            ".Debrute/REVIEWS/Rendered-Feedback/frame.png",
-            ".DEBRUTE/reviews/RENDERED-FEEDBACK/frame.png",
-            ".Debrute/Canvases/INDEX.JSON.LOCK",
-            ".GIT/objects/one",
-            "nested/.Git/objects/one",
-            "nested/.Debrute/CACHE/preview.png",
-            "nested/.Debrute/Canvases/INDEX.JSON.LOCK",
-        ] {
+        for path in [".GIT/objects/one", "nested/.Git/objects/one"] {
             assert!(!is_project_visible_path(path), "{path} must stay hidden");
         }
-        assert!(is_project_visible_path(".debrute/reviews/notes.md"));
+        assert!(is_project_visible_path(".debrute/feedback/feedback.json"));
+        assert!(is_project_visible_path("nested/.Debrute/CACHE/preview.png"));
     }
 
     #[test]
-    fn project_ignore_supports_utf8_bom_and_rejects_invalid_rules() {
+    fn project_directory_marks_ignored_entries_and_skips_invalid_rules() {
         let root = std::env::temp_dir().join(format!("debrute-ignore-{}", Uuid::new_v4()));
         fs::create_dir_all(root.join("vendor-cache")).unwrap();
         fs::write(root.join("vendor-cache/large.bin"), "ignored").unwrap();
         fs::write(root.join(".gitignore"), "\u{feff}vendor-cache/\n").unwrap();
-        assert!(
-            list_project_files(&root)
-                .unwrap()
-                .iter()
-                .all(|entry| !entry.project_relative_path.starts_with("vendor-cache"))
-        );
+        let entries = list_project_directory(&root, "").unwrap();
+        let vendor = entries
+            .iter()
+            .find(|entry| entry.project_relative_path == "vendor-cache")
+            .unwrap();
+        assert!(vendor.ignored);
 
         fs::write(root.join(".gitignore"), "invalid\\\n").unwrap();
-        let error = list_project_files(&root).expect_err("invalid ignore rules must be visible");
-        assert_eq!(error.code(), "project_ignore_invalid");
+        let entries = list_project_directory(&root, "").unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| { entry.project_relative_path == "vendor-cache" && !entry.ignored })
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1453,33 +916,8 @@ mod tests {
     }
 
     #[test]
-    fn dropping_staged_project_files_publishes_nothing_and_removes_temporary_files() {
-        let root = std::env::temp_dir().join(format!("debrute-cap-root-{}", Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        let capability = ProjectCapabilityFs::open(&root).unwrap();
-        let staged = capability
-            .stage_files(vec![ProjectCapabilityFileWrite {
-                project_relative_path: "generated/output.bin".to_owned(),
-                content: b"staged".to_vec(),
-                replace: false,
-            }])
-            .unwrap();
-
-        assert!(!root.join("generated/output.bin").exists());
-        assert!(list_project_files(&root).unwrap().iter().all(|entry| {
-            !Path::new(&entry.project_relative_path)
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("tmp"))
-        }));
-        drop(staged);
-        assert!(
-            fs::read_dir(root.join("generated"))
-                .unwrap()
-                .next()
-                .is_none()
-        );
-        drop(capability);
-        fs::remove_dir_all(root).unwrap();
+    fn natural_name_order_uses_per_character_unicode_case_folding() {
+        assert_eq!(natural_name_cmp("Ος", "ΟΣ"), Ordering::Less);
     }
 
     #[cfg(target_os = "windows")]
@@ -1488,7 +926,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("debrute-cap-root-{}", Uuid::new_v4()));
         let moved = root.with_extension("moved");
         fs::create_dir_all(&root).unwrap();
-        let capability = ProjectCapabilityFs::open_current(&root).unwrap();
+        let capability = ProjectCapabilityFs::open(&root).unwrap();
 
         assert!(fs::rename(&root, &moved).is_err());
         drop(capability);
@@ -1505,17 +943,17 @@ mod tests {
         let root = std::env::temp_dir().join(format!("debrute-cap-root-{}", Uuid::new_v4()));
         let external =
             std::env::temp_dir().join(format!("debrute-cap-external-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join(".debrute")).unwrap();
+        fs::create_dir_all(root.join("artifacts")).unwrap();
         fs::create_dir_all(&external).unwrap();
-        symlink(&external, root.join(".debrute/cache")).unwrap();
+        symlink(&external, root.join("artifacts/output")).unwrap();
         assert!(
             ProjectCapabilityFs::open(&root)
                 .unwrap()
-                .atomic_write(".debrute/cache/preview.bin", b"preview")
+                .atomic_write("artifacts/output/preview.bin", b"preview")
                 .is_err()
         );
         assert!(!external.join("preview.bin").exists());
-        fs::remove_file(root.join(".debrute/cache")).unwrap();
+        fs::remove_file(root.join("artifacts/output")).unwrap();
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(external).unwrap();
     }
@@ -1535,15 +973,10 @@ mod tests {
         fs::rename(&root, &moved).unwrap();
         symlink(&external, &root).unwrap();
 
-        capability
-            .atomic_write(".debrute/cache/value", b"owned")
-            .unwrap();
+        capability.atomic_write("output/value", b"owned").unwrap();
 
-        assert_eq!(
-            fs::read(moved.join(".debrute/cache/value")).unwrap(),
-            b"owned"
-        );
-        assert!(!external.join(".debrute/cache/value").exists());
+        assert_eq!(fs::read(moved.join("output/value")).unwrap(), b"owned");
+        assert!(!external.join("output/value").exists());
         fs::remove_file(root).unwrap();
         fs::remove_dir_all(moved).unwrap();
         fs::remove_dir_all(external).unwrap();
@@ -1560,17 +993,17 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let new = ProjectCapabilityFs::bind_session_root(&root).unwrap();
 
-        old.atomic_write(".debrute/cache/old", b"old").unwrap();
-        new.atomic_write(".debrute/cache/new", b"new").unwrap();
+        old.atomic_write("output/old", b"old").unwrap();
+        new.atomic_write("output/new", b"new").unwrap();
         old.unbind_session_root(&root);
         ProjectCapabilityFs::open(&root)
             .unwrap()
-            .atomic_write(".debrute/cache/current", b"current")
+            .atomic_write("output/current", b"current")
             .unwrap();
 
-        assert!(moved.join(".debrute/cache/old").is_file());
-        assert!(root.join(".debrute/cache/new").is_file());
-        assert!(root.join(".debrute/cache/current").is_file());
+        assert!(moved.join("output/old").is_file());
+        assert!(root.join("output/new").is_file());
+        assert!(root.join("output/current").is_file());
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(moved).unwrap();
     }
@@ -1585,7 +1018,7 @@ mod tests {
         let result = ProjectCapabilityFs::open(&root)
             .unwrap()
             .atomic_write_stream_checked(
-                ".debrute/cache/preview.png",
+                "derived/preview.png",
                 |file| {
                     file.write_all(b"rendered")?;
                     Ok::<(), ProjectError>(())
@@ -1602,7 +1035,7 @@ mod tests {
             );
 
         assert_eq!(result.unwrap_err().code(), "stale");
-        assert!(!root.join(".debrute/cache/preview.png").exists());
+        assert!(!root.join("derived/preview.png").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

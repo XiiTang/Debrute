@@ -27,7 +27,7 @@ describe('Project Path Command intake', () => {
 
     const accepted = intake.tryAccept();
 
-    expect(accepted).toMatchObject({ projectId: 'project-a', generation: 1 });
+    expect(accepted).toMatchObject({ bindingId: 'project-a', generation: 1 });
     expect(accepted?.canSubmit()).toBe(true);
     expect(accepted?.isCurrent()).toBe(true);
     expect(accepted?.isCurrent('project-a')).toBe(true);
@@ -51,7 +51,7 @@ describe('Project Path Command intake', () => {
 
     await expect(opening).resolves.toEqual({
       outcome: 'focused_existing_desktop',
-      projectId: 'project-b'
+      canonicalRoot: '/projects/b'
     });
   });
 
@@ -67,15 +67,15 @@ describe('Project Path Command intake', () => {
 });
 
 function boundIntake(
-  projectId: string,
+  bindingId: string,
   isCommandSurfaceAvailable: () => boolean = () => true
 ) {
   const projection = createWorkbenchProjectProjection();
-  projection.acceptBoundProject(projectResult(projectId));
+  projection.acceptBoundProject(projectResult(bindingId));
   const lifecycle = createProjectBindingLifecycle({
     openProject: vi.fn<WorkbenchApiClient['openProject']>(async () => ({
       outcome: 'focused_existing_desktop',
-      projectId: 'project-b'
+      canonicalRoot: '/projects/b'
     })),
     projectProjection: projection,
     commitProjectRoute: vi.fn()
@@ -91,11 +91,12 @@ function boundIntake(
   };
 }
 
-function projectResult(projectId: string) {
+function projectResult(bindingId: string) {
   return {
-    projectId,
+    bindingId,
+    canonicalRoot: `/projects/${bindingId}`,
     projectRevision: 1,
-    snapshot: { projectId } as never,
+    snapshot: { bindingId } as never,
     workingCopies: { text: {}, feedback: {} }
   };
 }

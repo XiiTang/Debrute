@@ -613,6 +613,12 @@
   background-size: var(--db-canvas-grid-size);
 }
 
+.canvas-workspace-unavailable {
+  width: 100%;
+  height: 100%;
+  padding: var(--db-space-5);
+}
+
 .empty-editor {
   box-sizing: border-box;
   height: 100%;

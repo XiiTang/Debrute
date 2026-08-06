@@ -92,7 +92,7 @@ impl CanvasFeedbackArtifacts {
             if let Ok(snapshot) = session.sync_snapshot()
                 && let Err(error) = self
                     .previews
-                    .reconcile_image_cache(session.root(), &snapshot.snapshot.files)
+                    .reconcile_image_cache(session.root(), &snapshot.snapshot.project_tree)
             {
                 self.report_runtime_error_for_epoch(session.root(), epoch, &error);
             }
@@ -153,7 +153,7 @@ impl CanvasFeedbackArtifacts {
     pub(crate) fn reconcile_image_cache_for_source(
         &self,
         root: &Path,
-        files: &[crate::project::ProjectPathEntry],
+        files: &[crate::project::ProjectTreeEntry],
         project_relative_path: &str,
     ) {
         let epoch = self.epoch(root);
@@ -168,7 +168,7 @@ impl CanvasFeedbackArtifacts {
     pub(crate) fn reconcile_image_cache(
         &self,
         root: &Path,
-        files: &[crate::project::ProjectPathEntry],
+        files: &[crate::project::ProjectTreeEntry],
     ) {
         let epoch = self.epoch(root);
         if let Err(error) = self.previews.reconcile_image_cache(root, files)
@@ -1332,7 +1332,7 @@ fn remove_unexpected_artifacts(
     project_root: &Path,
     expected: &BTreeSet<String>,
 ) -> Result<(), ProjectError> {
-    const ROOT: &str = ".debrute/reviews/rendered-feedback";
+    const ROOT: &str = ".debrute/feedback/artifacts";
     let project = ProjectCapabilityFs::open(project_root)?;
     let root = match project.open_directory(ROOT) {
         Ok(root) => root,
@@ -1760,10 +1760,10 @@ mod tests {
 
         let root = std::env::temp_dir().join(format!("debrute-feedback-{}", Uuid::new_v4()));
         let external = std::env::temp_dir().join(format!("debrute-external-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join(".debrute/reviews")).unwrap();
+        fs::create_dir_all(root.join(".debrute/feedback")).unwrap();
         fs::create_dir_all(&external).unwrap();
         fs::write(external.join("must-survive"), "outside").unwrap();
-        symlink(&external, root.join(".debrute/reviews/rendered-feedback")).unwrap();
+        symlink(&external, root.join(".debrute/feedback/artifacts")).unwrap();
         assert!(remove_unexpected_artifacts(&root, &BTreeSet::new()).is_err());
         assert!(external.join("must-survive").is_file());
 
@@ -1805,7 +1805,7 @@ mod tests {
         let diagnostic_sink: FeedbackDiagnosticSink = Arc::new(|_, _, _| {});
         enqueue_document_state(&mut state, &root, epoch, 1, &document, &diagnostic_sink);
         assert!(state.states.values().any(|render| render.queued.is_some()));
-        fs::remove_file(root.join(".debrute/reviews/rendered-feedback")).unwrap();
+        fs::remove_file(root.join(".debrute/feedback/artifacts")).unwrap();
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(external).unwrap();
     }
@@ -1814,18 +1814,14 @@ mod tests {
     fn artifact_cleanup_removes_stale_files_and_their_empty_directories() {
         let root =
             std::env::temp_dir().join(format!("debrute-feedback-cleanup-{}", Uuid::new_v4()));
-        let stale = root.join(".debrute/reviews/rendered-feedback/nested/source");
+        let stale = root.join(".debrute/feedback/artifacts/nested/source");
         fs::create_dir_all(&stale).unwrap();
         fs::write(stale.join("old.png"), b"stale").unwrap();
 
         remove_unexpected_artifacts(&root, &BTreeSet::new()).unwrap();
 
-        assert!(
-            !root
-                .join(".debrute/reviews/rendered-feedback/nested")
-                .exists()
-        );
-        assert!(root.join(".debrute/reviews/rendered-feedback").is_dir());
+        assert!(!root.join(".debrute/feedback/artifacts/nested").exists());
+        assert!(root.join(".debrute/feedback/artifacts").is_dir());
         fs::remove_dir_all(root).unwrap();
     }
 }

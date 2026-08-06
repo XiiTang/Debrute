@@ -12,19 +12,6 @@ describe('initial Project route', () => {
     (globalThis as { window?: unknown }).window = originalWindow;
   });
 
-  it('resolves a Project route to one concrete Project id', () => {
-    expect(resolveInitialProjectRoute({
-      kind: 'project',
-      projectId: '123e4567-e89b-42d3-a456-426614174000'
-    })).toEqual({
-      route: {
-        kind: 'project',
-        projectId: '123e4567-e89b-42d3-a456-426614174000'
-      },
-      target: { projectId: '123e4567-e89b-42d3-a456-426614174000' }
-    });
-  });
-
   it('keeps the Workbench root target-free', () => {
     expect(resolveInitialProjectRoute({ kind: 'workbench' })).toEqual({
       route: { kind: 'workbench' }
@@ -62,17 +49,13 @@ describe('initial Project route', () => {
   it('shows the initial loader only for explicit Project routes', () => {
     expect(shouldShowInitialProjectLoader({ kind: 'workbench' })).toBe(false);
     expect(shouldShowInitialProjectLoader({
-      kind: 'project',
-      projectId: 'project-1'
-    })).toBe(true);
-    expect(shouldShowInitialProjectLoader({
       kind: 'project-open',
       projectRoot: '/Users/me/Project A'
     })).toBe(true);
     expect(shouldShowInitialProjectLoader({ kind: 'not-found' })).toBe(false);
   });
 
-  it('commits an accepted Project id without preserving stale search or hash state', () => {
+  it('commits an accepted canonical root without preserving stale search or hash state', () => {
     const replaceState = vi.fn();
     const state = { preserved: true };
     (globalThis as { window?: unknown }).window = {
@@ -80,12 +63,12 @@ describe('initial Project route', () => {
       history: { state, replaceState }
     };
 
-    replaceWorkbenchProjectRoute('123e4567-e89b-42d3-a456-426614174000');
+    replaceWorkbenchProjectRoute('/Users/me/Project A');
 
     expect(replaceState).toHaveBeenCalledWith(
       state,
       '',
-      '/projects/123e4567-e89b-42d3-a456-426614174000'
+      '/open?path=%2FUsers%2Fme%2FProject%20A'
     );
   });
 });

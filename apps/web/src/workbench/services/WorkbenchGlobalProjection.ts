@@ -25,7 +25,7 @@ export type WorkbenchGlobalProjectionState =
 
 export type WorkbenchGlobalEvent = Exclude<
   WorkbenchEvent,
-  { projectId: string; projectRevision: number }
+  { bindingId: string; projectRevision: number }
 >;
 
 export interface WorkbenchGlobalProjection {
@@ -103,7 +103,7 @@ export function createWorkbenchGlobalProjection(): WorkbenchGlobalProjectionWrit
             revision,
             settings: {
               ...current.settings,
-              chrome: { ...current.settings.chrome, recentProjects: event.recentProjects }
+              chrome: { ...current.settings.chrome, recentProjectRoots: event.recentProjectRoots }
             }
           });
           return;

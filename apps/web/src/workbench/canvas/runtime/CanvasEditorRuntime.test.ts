@@ -223,6 +223,17 @@ describe('CanvasEditorRuntime', () => {
     expect(snapshots).toEqual([{ kind: 'nodes', projectRelativePaths: ['flow/a.png'] }]);
   });
 
+  it('raises the complete Selection while preserving its displayed internal order', () => {
+    const runtime = createRuntime();
+
+    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png', 'flow/b.png'] });
+
+    const presented = runtime.scene.getPresentedNodes();
+    expect(presented.get('flow/a.png')!.z).toBeGreaterThan(presented.get('flow/b.png')!.z);
+    expect(presented.get('flow/b.png')!.z).toBeGreaterThan(presented.get('assets')!.z);
+  });
+
   it('converts screen points through the bound surface and live camera', () => {
     const runtime = createRuntime({ camera: { x: 40, y: 20, z: 2 } });
     runtime.bindSurface({
@@ -720,6 +731,7 @@ describe('CanvasEditorRuntime', () => {
     await runtime.input.finishPointerInteraction({ pointerId: 13, screenPoint: { x: 10, y: 15 } });
     expect(submitManualLayout).toHaveBeenCalledWith({
       interaction: 'move',
+      selectedProjectRelativePaths: ['flow/a.png', 'flow/b.png'],
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 20, y: 35, width: 100, height: 80 },
         { projectRelativePath: 'flow/b.png', x: 40, y: 55, width: 100, height: 80 }
@@ -741,65 +753,6 @@ describe('CanvasEditorRuntime', () => {
     });
     expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({ x: 20, y: 35 });
     expect(runtime.scene.getPresentedNodes().get('flow/b.png')).toMatchObject({ x: 40, y: 55 });
-  });
-
-  it('raises a selected move group only after the existing movement threshold activates it', () => {
-    const runtime = createCanvasEditorRuntime({
-      canvasId: 'canvas-1',
-      initialProjection: {
-        canvasId: 'canvas-1',
-        nodes: ['a.png', 'b.png', 'c.png', 'd.png'].map((path, z) => ({
-          ...canvasProjection(path, z * 20).nodes[0]!,
-          z
-        })),
-        edges: [],
-        diagnostics: []
-      },
-      selection: { kind: 'nodes', projectRelativePaths: ['b.png', 'd.png'] },
-      submitManualLayout: async () => undefined
-    });
-
-    runtime.input.beginNodeMove({
-      pointerId: 20,
-      projectRelativePath: 'b.png',
-      screenPoint: { x: 0, y: 0 }
-    });
-    expect(runtime.scene.getPresentedNodes().get('b.png')?.z).toBe(1);
-    expect(runtime.scene.getPresentedNodes().get('d.png')?.z).toBe(3);
-
-    runtime.input.updatePointerInteraction({ pointerId: 20, screenPoint: { x: 5, y: 0 } });
-    expect(runtime.scene.getPresentedNodes().get('b.png')?.z).toBe(4);
-    expect(runtime.scene.getPresentedNodes().get('d.png')?.z).toBe(5);
-
-    runtime.input.cancelPointerInteraction(20);
-    expect(runtime.scene.getPresentedNodes().get('b.png')?.z).toBe(1);
-    expect(runtime.scene.getPresentedNodes().get('d.png')?.z).toBe(3);
-  });
-
-  it('raises only the resized node as soon as its handle is pressed', () => {
-    const runtime = createCanvasEditorRuntime({
-      canvasId: 'canvas-1',
-      initialProjection: {
-        canvasId: 'canvas-1',
-        nodes: [
-          { ...canvasProjection('a.png', 0).nodes[0]!, z: 0 },
-          { ...canvasProjection('b.png', 20).nodes[0]!, z: 1 }
-        ],
-        edges: [],
-        diagnostics: []
-      },
-      submitManualLayout: async () => undefined
-    });
-
-    runtime.input.beginNodeResize({
-      pointerId: 21,
-      projectRelativePath: 'a.png',
-      handle: 'se',
-      screenPoint: { x: 0, y: 0 },
-      modifiers: noModifiers()
-    });
-
-    expect(runtime.scene.getPresentedNodes().get('a.png')?.z).toBe(2);
   });
 
   it('does not notify broad snapshot subscribers for pointer move drag previews', () => {
@@ -835,6 +788,7 @@ describe('CanvasEditorRuntime', () => {
       screenPoint: { x: 0, y: 0 },
       projectRelativePath: 'flow/a.png'
     });
+    presentationChanges.length = 0;
     runtime.input.updatePointerInteraction({
       pointerId: 7,
       screenPoint: { x: 20, y: 30 }
@@ -844,12 +798,49 @@ describe('CanvasEditorRuntime', () => {
     expect(renderChanges).toEqual([]);
     expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({
       x: 30,
-      y: 50,
-      z: 2
+      y: 50
     });
     expect(runtime.scene.queryNodePaths({ x: 25, y: 45, width: 110, height: 90 }))
       .toContain('flow/a.png');
     expect(presentationChanges).toHaveLength(1);
+  });
+
+  it('presents a selected node above the node it is dragged onto in either direction', () => {
+    for (const fixture of [
+      { movingPath: 'left.png', deltaX: 120 },
+      { movingPath: 'right.png', deltaX: -120 }
+    ]) {
+      const runtime = createCanvasEditorRuntime({
+        canvasId: 'canvas-1',
+        initialProjection: {
+          canvasId: 'canvas-1',
+          nodes: [
+            { ...canvasProjection('left.png', 0).nodes[0]!, z: 0 },
+            { ...canvasProjection('right.png', 120).nodes[0]!, z: 1 }
+          ],
+          edges: [],
+          diagnostics: []
+        },
+        submitManualLayout: async () => undefined
+      });
+      const stationaryPath = fixture.movingPath === 'left.png' ? 'right.png' : 'left.png';
+
+      runtime.input.beginNodeMove({
+        pointerId: 91,
+        projectRelativePath: fixture.movingPath,
+        screenPoint: { x: 0, y: 0 }
+      });
+      runtime.input.updatePointerInteraction({
+        pointerId: 91,
+        screenPoint: { x: fixture.deltaX, y: 0 }
+      });
+
+      const moving = runtime.scene.getPresentedNodes().get(fixture.movingPath)!;
+      const stationary = runtime.scene.getPresentedNodes().get(stationaryPath)!;
+      expect(moving.x).toBe(stationary.x);
+      expect(moving.z).toBeGreaterThan(stationary.z);
+      runtime.dispose();
+    }
   });
 
   it('updates directory resize aspect behavior from live modifiers', () => {
@@ -968,6 +959,7 @@ function canvasProjection(projectRelativePath: string, x: number) {
     canvasId: 'canvas-1',
     nodes: [{
       projectRelativePath,
+      displayName: projectRelativePath,
       nodeKind: 'file' as const,
       mediaKind: 'image' as const,
       x,
@@ -1000,6 +992,7 @@ function createRuntime(input?: {
         { ...canvasProjection('flow/b.png', 30).nodes[0]!, y: 40 },
         {
           projectRelativePath: 'assets',
+          displayName: 'assets',
           nodeKind: 'directory' as const,
           x: 10,
           y: 20,

@@ -3,7 +3,7 @@ use std::{error::Error, fmt};
 use ts_rs::TS;
 
 pub const CONTROL_PROTOCOL: &str = "debrute-control";
-pub const CONTROL_PROTOCOL_VERSION: u32 = 4;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 6;
 pub const CONTROL_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 pub const PRODUCT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -96,10 +96,6 @@ pub enum ActivationIntent {
         project_root: String,
         frontend: ProjectFrontend,
     },
-    OpenKnownProject {
-        project_id: String,
-        frontend: ProjectFrontend,
-    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -122,19 +118,20 @@ pub enum ActivationOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export, export_to = "runtime-control/")]
+pub struct ProjectOpenFailure {
+    pub canonical_root: String,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[ts(export, export_to = "runtime-control/")]
 pub enum WorkbenchRoute {
     Root,
-    Project { project_id: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export, export_to = "runtime-control/")]
-pub struct RecentProject {
-    pub project_id: String,
-    pub project_root: String,
+    OpenProject { canonical_root: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -161,6 +158,9 @@ pub enum ControlResponse {
     Ok,
     Activation {
         outcome: ActivationOutcome,
+    },
+    ProjectOpenFailed {
+        failure: ProjectOpenFailure,
     },
     Inspection {
         instance_id: String,
@@ -207,7 +207,7 @@ pub enum ControlEvent {
     DesktopRecentProjectsChanged {
         #[ts(type = "number")]
         global_revision: u64,
-        recent_projects: Vec<RecentProject>,
+        recent_project_roots: Vec<String>,
     },
     DesktopWindowOpenRequested {
         window_key: String,

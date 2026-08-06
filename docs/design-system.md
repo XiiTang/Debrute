@@ -355,10 +355,9 @@ Shared layout without behavior stays a named CSS pattern. A React component exis
 The Workbench uses one continuous Canvas background and floating-panel
 interaction model. Every valid Workbench page paints that background from the
 top of the window through the main viewport, including while no Project is
-bound, a Project is opening, no Canvas is available, or Canvas state needs
-repair. Sharing the Canvas background does not create a Canvas domain object or
-enable Canvas interaction in those states. The Not Found page remains outside
-the Workbench shell.
+bound, a Project is opening, or Project opening has failed. Sharing the Canvas
+background does not create a Canvas domain object or enable Canvas interaction
+in those states. The Not Found page remains outside the Workbench shell.
 
 The title bar is a transparent interaction layer over the Canvas. It does not
 paint a strip, gradient, texture, or duplicate Canvas background. Canvas Nodes
@@ -382,15 +381,14 @@ emulator geometry. Project Open owns one focused entry rendered directly over
 the Canvas background. Canvas owns node geometry, media presentation,
 annotations, handles, feedback, and overlay placement.
 
-Project Open, Project opening, failed Project opening, an unavailable Canvas,
-and Canvas repair render centered status content directly over the Canvas
-background without a page, card, or full-viewport surface. Content is centered
-within the main viewport below the title-bar hit area. A retained Project that
-has become read-only because it was preempted or because the Runtime connection
-ended keeps its last Canvas visible. A solid, non-dismissible dialog blocks the
-Canvas, floating bars, panels, title bar, and Activity surfaces without dimming or
-covering the Canvas. The blocker is the highest shell layer and freezes every
-surface beneath it.
+Project Open, Project opening, and failed Project opening render centered status
+content directly over the Canvas background without a page, card, or
+full-viewport surface. Content is centered within the main viewport below the
+title-bar hit area. A retained Project that has become read-only because it was
+preempted or because the Runtime connection ended keeps its last Canvas
+visible. A solid, non-dismissible dialog blocks the Canvas, floating bars,
+panels, title bar, and Activity surfaces without dimming or covering the Canvas.
+The blocker is the highest shell layer and freezes every surface beneath it.
 
 ## Surface Application Matrix
 

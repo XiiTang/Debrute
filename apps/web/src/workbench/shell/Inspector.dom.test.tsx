@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { ProjectDiagnostic } from '@debrute/canvas-core';
+import type { ProjectDiagnostic } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
 import { DiagnosticList, Inspector } from './Inspector';
 import { I18nProvider } from '../i18n';
@@ -76,39 +76,23 @@ describe('Inspector property density', () => {
         activeCanvasId="canvas"
         selection={{ kind: 'nodes', projectRelativePaths: ['flow/cover.png'] }}
         state={{
+          canvasProjection: {
+            canvasId: 'canvas',
+            nodes: [{
+              projectRelativePath: 'flow/cover.png',
+              nodeKind: 'file',
+              mediaKind: 'image',
+              x: 12,
+              y: 24,
+              width: 320,
+              height: 180,
+              z: 0,
+              availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
+            }],
+            edges: [],
+            diagnostics: []
+          },
           snapshot: {
-            canvases: [{
-              id: 'canvas',
-              name: 'canvas',
-              nodeElements: [{
-                projectRelativePath: 'flow/cover.png',
-                nodeKind: 'file',
-                mediaKind: 'image',
-                x: 12,
-                y: 24,
-                width: 320,
-                height: 180,
-                z: 0
-              }],
-              annotations: [],
-              preferences: { showDiagnostics: true }
-            }],
-            projections: [{
-              canvasId: 'canvas',
-              nodes: [{
-                projectRelativePath: 'flow/cover.png',
-                nodeKind: 'file',
-                mediaKind: 'image',
-                x: 12,
-                y: 24,
-                width: 320,
-                height: 180,
-                z: 0,
-                availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
-              }],
-              edges: [],
-              diagnostics: []
-            }],
             diagnostics: []
           }
         } as unknown as WorkbenchState}
@@ -135,35 +119,33 @@ describe('Inspector property density', () => {
         activeCanvasId="canvas"
         selection={{ kind: 'nodes', projectRelativePaths: ['flow/assets', 'flow/cover.png'] }}
         state={{
-          snapshot: {
-            canvases: [],
-            projections: [{
-              canvasId: 'canvas',
-              nodes: [{
-                projectRelativePath: 'flow/assets',
-                nodeKind: 'directory',
-                x: 0,
-                y: 0,
-                width: 200,
-                height: 120,
-                z: 0,
-                layoutMode: 'auto',
-                availability: { state: 'missing', message: 'missing' }
-              }, {
-                projectRelativePath: 'flow/cover.png',
-                nodeKind: 'file',
-                mediaKind: 'image',
-                x: 220,
-                y: 0,
-                width: 200,
-                height: 120,
-                z: 1,
-                layoutMode: 'manual',
-                availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
-              }],
-              edges: [],
-              diagnostics: []
+          canvasProjection: {
+            canvasId: 'canvas',
+            nodes: [{
+              projectRelativePath: 'flow/assets',
+              nodeKind: 'directory',
+              x: 0,
+              y: 0,
+              width: 200,
+              height: 120,
+              z: 0,
+              availability: { state: 'directory' }
+            }, {
+              projectRelativePath: 'flow/cover.png',
+              nodeKind: 'file',
+              mediaKind: 'image',
+              x: 220,
+              y: 0,
+              width: 200,
+              height: 120,
+              z: 1,
+              layoutMode: 'manual',
+              availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
             }],
+            edges: [],
+            diagnostics: []
+          },
+          snapshot: {
             diagnostics: []
           }
         } as unknown as WorkbenchState}
@@ -176,7 +158,7 @@ describe('Inspector property density', () => {
     expect(html).toContain('<dt>Directories</dt><dd>1</dd>');
     expect(html).toContain('<dt>Manual Layout</dt><dd>1</dd>');
     expect(html).toContain('<dt>Available</dt><dd>1</dd>');
-    expect(html).toContain('<dt>Missing</dt><dd>1</dd>');
+    expect(html).toContain('<dt>directory</dt><dd>1</dd>');
     expect(html).not.toContain('<dt>Position</dt>');
     expect(html).not.toContain('<dt>Size</dt>');
   });
@@ -195,9 +177,7 @@ describe('Inspector property density', () => {
         selection={{ kind: 'diagnostic', id: diagnostic.id }}
         state={{
           snapshot: {
-            diagnostics: [diagnostic],
-            canvases: [],
-            projections: []
+            diagnostics: [diagnostic]
           }
         } as unknown as WorkbenchState}
         actions={{} as WorkbenchActions}

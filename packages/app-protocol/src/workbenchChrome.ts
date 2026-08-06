@@ -16,8 +16,8 @@ export type NativeMenuCommand =
         | 'view.toggle-devtools';
     }
   | {
-      commandId: 'project.open-known';
-      projectId: string;
+      commandId: 'project.open-path';
+      projectRoot: string;
     };
 
 export type NativeMenuCommandId = NativeMenuCommand['commandId'];

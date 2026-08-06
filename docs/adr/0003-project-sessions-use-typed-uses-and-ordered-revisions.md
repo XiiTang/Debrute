@@ -1,180 +1,105 @@
+---
+status: accepted
+---
+
 # Project Sessions Use Typed Uses And Ordered Revisions
 
-Runtime owns one loaded Project session for each canonical root and stable
-Project id. The public id is exactly `.debrute/project.json.project.id`; Runtime
-rejects invalid ids and rejects a second canonical root that declares an
-already-live id. It does not derive aliases from paths, generate replacement
-ids, or preserve an old identity format.
+Runtime owns one loaded Project Session for each canonical absolute root. The
+root is the Project identity defined by
+[ADR-0067](./0067-project-identity-is-the-canonical-root.md). A Workbench
+receives a temporary `bindingId` only as Project-scoped command authority; the
+binding is never stored or used as durable identity.
 
-A session remains open only while at least one typed Project Use exists. The
-closed use vocabulary is Workbench, request, running terminal, and transfer.
-Uses express actual ownership of live Project
-resources; they are not client sessions, transport credentials, idle timers, or
-generic reference counts exposed on the wire. Releasing the last use closes the
-live session immediately and installs a closing transition for its canonical
-root before watcher and Project-state cleanup begins. Ending a Project Use is
-an ownership event, not a fallible cleanup command and not a claim that final
-session cleanup succeeded. Cleanup success removes the transition. Cleanup
-failure remains the authoritative result for that root: another open and final
-Registry shutdown return the exact failure, and the root cannot reopen in the
-current Runtime. An unexpected panic terminates Runtime instead of leaving the
-process available to serve further requests.
-There is no 30-second retention, reconnect reservation, grace worker, or
-arbitrary open-Project cap.
+## Session lifetime
 
-Each Project mutation is serialized by the session, semantically validated,
-and assigned a monotonic `projectRevision` only when authoritative state
-changes. The ordered Project stream carries complete current projections or
-typed events with that revision. HTTP commands return their closed outcome;
-the stream, not a duplicated mutation response, advances renderer state. A
-missing response is never permission to replay a state-changing request.
-The accepted `project.bound` frame establishes the complete Project projection
-and revision baseline for a new Workbench binding generation. Every later
-authoritative renderer transition for that binding comes only from its ordered
-Project stream. An HTTP mutation result must not replace or merge a Project
-snapshot or Canvas Projection, and HTTP success does not confirm a local
-presentation overlay. A local overlay settles only when an accepted Runtime
-projection contains its exact state, when its command fails, or when a new
-Project binding replaces its scope.
+A session remains open while at least one typed Project Use exists. The closed
+use vocabulary is Workbench, request, running terminal, and transfer. Uses
+express ownership of live Project resources; they are not client sessions,
+transport credentials, idle timers, or a public reference count.
 
-Workbench concentrates that acceptance policy in one in-process Project
-projection module. The module owns the current Project identity, binding
-generation, accepted revision, complete-snapshot replacement, Canvas-local
-projection merge for every Canvas Node kind, and composition of authoritative
-state with any local value that actually changes the presented Project
-snapshot. Pending Text Viewport is the only such local overlay in the current
-design. Manual Layout Drafts, Playback Position interaction, media-resource
-state, Feedback Working Copies, camera, and selection retain their existing
-Canvas- or interaction-local owners; Workbench does not add a generic overlay
-registry for hypothetical future values. This is a replacement seam rather
-than an additional state layer: Workbench callers do not retain independent
-revision gates, authoritative snapshot stores, or mutation-response commit
-paths. Explorer selection, active Canvas, camera and panel state, routes,
-notifications, and Working Copy editing lifecycles remain owned by their
-existing modules.
+Releasing the last use closes the session immediately. Runtime marks the root
+as closing before watcher and Project-state cleanup begins. A cleanup failure
+remains the result for that root and for final Registry shutdown; the root
+cannot reopen in the same Runtime. An unexpected cleanup panic terminates the
+Runtime. Sessions have no retention timer, reconnect reservation, grace worker,
+or arbitrary count limit.
 
-The Runtime connection and Project projection module outlive any one Project
-binding. React places Project-scoped presentation beneath a subtree keyed by
-the accepted binding generation. After the projection module atomically
-accepts a new `project.bound` baseline, React disposes the previous subtree and
-mounts a new one from that accepted binding. A rebind to the same Project id
-still has a new generation and therefore a new subtree. Active Canvas,
-Explorer, selection, camera, Project-local panel and route state, and Working
-Copy editors begin from the new binding rather than resetting an instance that
-belonged to the previous binding. Working Copies and any view state with an
-existing explicit persistence contract may initialize the new subtree;
-arbitrary component memory is not migrated.
+Terminals retain their own running-terminal use. Closing or preempting a
+Workbench therefore does not end a terminal process. Its Workbench Terminal
+WebSocket ends with the binding; explicit terminal closure or Runtime shutdown
+ends the PTY.
 
-Connection state, the projection module, product settings, global
-notifications, and the unbound/open surface remain outside that keyed subtree.
-Workbench does not reload the whole renderer, keep the previous Project
-subtree alive in the background, define a generic Project-reset interface, or
-maintain an imperative reset list. A detach does not advance the generation or
-replace the subtree: it removes command authority and preserves that binding's
-last presentation read-only. Project-local presentation work retires with its
-generation-keyed subtree. Work that publishes outside that subtree must prove
-that it still belongs to the current accepted generation. The Project binding
-lifecycle governs admission; it does not own completion of commands that were
-already accepted.
+## Ordered Project state
 
-Within one binding generation, the accepted Project stream is contiguous.
-After revision `R`, only revision `R + 1` is valid. A repeated, older, or
-skipped revision is a connection protocol failure: Workbench preserves the
-last presentation for explanation, removes Project command authority, and
-requires an explicit page refresh to create a new connection and obtain a new
-complete snapshot. It does not ignore the inconsistency, fetch missing events,
-request a replacement snapshot, reconnect, or infer the skipped state. Every
-Project-scoped event participates in this ordering even when it does not alter
-the Project projection itself.
+The session serializes Project mutations and increments `projectRevision` only
+when authoritative state changes. The Project stream carries complete current
+snapshots or typed events at that revision. HTTP returns the command outcome;
+the ordered stream is the only input that advances Workbench Project state. A
+missing response never authorizes replay of a state-changing request.
 
-A Project mutation invocation exposed to a Workbench caller completes only
-after both its closed HTTP outcome has arrived and the Project stream has
-accepted that outcome's `projectRevision` or a later contiguous revision. This
-coordination does not make the HTTP result a renderer-state input. It ensures
-that selection, activation, and centering performed after the invocation can
-read the corresponding accepted Project projection without each caller
-implementing its own revision wait. If the connection ends before both facts
-arrive, Workbench ends the surface instead of replaying the command or treating
-an unobserved mutation as safe to retry.
+`project.bound` establishes the complete snapshot and revision baseline for a
+new Workbench binding generation. Within that generation, the next accepted
+Project event must have exactly the current binding ID and revision `R + 1`.
+A repeated, older, skipped, or differently bound event fails the projection,
+removes Project command authority, and requires an explicit page refresh. The
+client does not ignore the event, fetch a gap, reconnect, or infer state.
 
-The renderer seam sits after the HTTP adapter has decoded a Project frame and
-before React presentation. The adapter synchronously delivers each
-`project.bound`, Project event, or detach frame to the Project projection
-module in wire order. Only after acceptance succeeds may it publish the event
-to other Workbench modules or complete a command waiting on that revision.
-The adapter does not merge Project state, the projection module does not own
-network transport, and React subscribes to accepted state without participating
-in acceptance ordering.
-An exact mutation or refresh failure is returned to its caller but does not
-install a second session-poison or later-command rejection state. Runtime does
-not replay the failed effect; a later explicit refresh or new observed
-filesystem change operates on the current filesystem state.
+`WorkbenchProjectProjection` owns the current binding generation, canonical
+root, revision, complete snapshot, and Working Copies. It replaces the snapshot
+as a whole after each accepted snapshot-affecting event. The Workbench derives
+Canvas Scene geometry from that snapshot and holds transient presentation state
+in the owning Canvas or UI module; the Project projection has no Canvas merge,
+optimistic overlay, or parallel authoritative/presented snapshot.
 
-Project-wide optimistic `baseRevision` locks are not part of this protocol.
-File-specific revisions may still be inputs where the domain needs them—for
-example, a text save or a Working Copy's source revision—but they do not turn
-unrelated Project mutations into compare-and-swap operations.
+A Project mutation exposed to Workbench completes only after its HTTP outcome
+arrives and the stream has accepted that outcome's `projectRevision` or a later
+contiguous revision. This wait lets subsequent selection, activation, and
+centering read the accepted snapshot without treating the HTTP body as state.
+If the binding ends first, the caller fails without replaying the mutation.
 
-Every loaded Workbench has at most one current Project binding, and every
-Project has at most one Workbench owner. Opening is valid only from an unbound
-connection; replacing is valid only from a bound connection. Runtime validates
-and prepares the target before it atomically switches the binding. Preparation
-does not modify the source binding or preempt the target's current owner. It
-opens the target Workbench Project Use, creates the target subscription, uses
-the subscription's snapshot-first barrier to build the public Project
-projection, loads Working Copies, and secures delivery of the first
-`project.bound` frame. Any preparation failure leaves both Workbench owners
-unchanged. Selecting the already bound target is a no-op.
+Project-wide `baseRevision` compare-and-swap locks are not part of this
+protocol. A domain may still use a file-specific revision, such as for a text
+save, without serializing unrelated Project mutations together.
 
-Target selection is outside the Project binding attempt. Cancelling a browser or
-native selector submits no open, leaves the current binding unchanged, and does
-not close Project Path Command admission. Once a concrete target enters the
-Workbench Project binding lifecycle, it synchronously closes admission for the
-presented binding before transport or any asynchronous preparation begins.
-Commands already submitted retain their captured Project id and binding
-generation; commands not yet submitted do not cross that boundary. Runtime
-replacement waits for active Project request leases to drain before committing
-the new binding. Failed preparation restores command admission to the unchanged
-requesting binding. An accepted
-`project.bound` mounts the new generation with fresh command authority. Neither
-Web transport abort nor Project switching claims to cancel or roll back an
-accepted Runtime command.
+## Binding replacement
 
-The commit changes the connection's Project binding, the unique owner, and the
-owning Workbench Project Use as one Runtime transaction. It advances a
-connection-local binding generation so a Project-scoped mutation authorized by
-the old binding cannot commit after replacement. Preemption and derived Desktop
-routing follow that committed state. If Project streaming fails after commit,
-Runtime closes the exact Workbench connection and releases its current Project
-Use; it does not roll back to the source Project because the target binding may
-already be visible to the client.
+Every Workbench has at most one current Project binding, and every Project has
+at most one Workbench owner. Runtime fully prepares a requested target before
+changing either owner. Preparation opens the target Workbench use, establishes
+the snapshot-first subscription barrier, builds the public snapshot, loads
+Working Copies, and prepares the first `project.bound` frame. Failure leaves
+both bindings unchanged. Selecting the already bound canonical root is a no-op.
 
-For example, suppose A is current, another Workbench owns B, and B's public
-projection cannot be serialized. Changing A's binding or preempting B before
-serialization would expose a half-completed replacement. The required ordering
-returns the preparation error while A and B retain their original owners. If
-serialization and first-frame delivery succeed, the later owner change is the
-single commit.
+Once a concrete target enters replacement, Workbench closes new Project command
+admission for the presented binding. Already admitted commands retain their
+captured binding ID and generation, and Runtime waits for their request leases
+before committing replacement. A failed preparation restores admission to the
+unchanged binding. Browser transport abort does not cancel or roll back a
+command already accepted by Runtime.
 
-The browser explicit-open ownership rule, native Desktop activation rule, and
-detached **Open Here** behavior are defined by
-[ADR 0033](./0033-workbench-session-lifetime-follows-its-container.md). When that
-routing selects an ownership transfer, Runtime sends `project.preempted`, clears
-the displaced binding and Workbench Project Use, and retargets a displaced
-Desktop window to the root route as part of the committed transition. It does
-not close the native window or transfer frontend state.
+The commit atomically changes the connection binding, unique Workbench owner,
+and Workbench Project Use, then advances the connection-local generation. If
+streaming fails after commit, Runtime closes that Workbench connection and
+releases its current use; it does not roll back to the source Project.
 
-Runtime Working Copies protect unsaved text values and the latest Canvas
-Feedback values not yet reflected in accepted Runtime state independently of a
-Workbench connection. They are private, persistent, keyed by stable Project id,
-and restored in `project.bound`. Feedback Working Copies are additionally keyed
-by stable Feedback Capsule identity, so editing one comment never replaces
-another comment's unsynchronized value. A successful matching save, accepted
-feedback mutation, explicit discard, or feedback deletion clears only the
-corresponding value. They have no TTL or count cap. Reconstructible view state,
-live terminal state, and arbitrary component memory are not Working Copies.
+When routing requires ownership transfer, Runtime sends `project.preempted`,
+clears the displaced binding and Workbench use, and retargets a displaced
+Desktop window to the root route. It does not close the native window or
+transfer renderer state. Native and browser routing rules are defined by
+[ADR-0033](./0033-workbench-session-lifetime-follows-its-container.md).
 
-Terminals hold their own `running-terminal` Project Use, so closing or
-preempting a Workbench does not imply that a long-lived terminal has ended.
-The Workbench's Terminal WebSocket does end with its Project binding; Runtime
-shutdown or explicit terminal closure remains the PTY lifetime boundary.
+React keys Project-scoped presentation by binding generation. Accepting a new
+`project.bound` disposes the previous Project subtree and mounts a fresh one.
+Connection state, product settings, global notifications, and the unbound open
+surface remain outside that subtree. Detach removes command authority and keeps
+the last snapshot read-only; it does not create a new generation.
+
+## Working Copies
+
+Runtime Working Copies protect unsaved text values and Canvas Feedback values
+independently of a Workbench connection. They are private, persistent, keyed by
+canonical root, and restored in `project.bound`. Feedback Working Copies are
+also keyed by Feedback item identity. A matching save, accepted Feedback
+mutation, explicit discard, or Feedback deletion clears only that value.
+Working Copies have no TTL or count limit. Reconstructible view state, terminal
+state, and arbitrary component memory are not Working Copies.

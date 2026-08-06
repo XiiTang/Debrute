@@ -5,7 +5,10 @@ type WorkbenchHostKind = 'web' | 'desktop';
 
 export type WorkbenchMenuId = 'file' | 'edit' | 'view';
 
-export type WorkbenchMenuCommandId = Exclude<NativeMenuCommandId, 'project.open-known'>
+export type WorkbenchMenuCommandId = Exclude<
+  NativeMenuCommandId,
+  'project.open-path'
+>
   | 'project.open-recent'
   | 'project.clear-recent';
 
@@ -46,7 +49,6 @@ export interface WorkbenchTitleBarState {
 }
 
 interface WorkbenchRecentProject {
-  projectId: string;
   projectRoot: string;
 }
 
@@ -88,12 +90,11 @@ function buildWorkbenchMenus(input: {
   const recentItems: WorkbenchMenuItem[] = input.recentProjects.length > 0
     ? input.recentProjects.map((project) => ({
         kind: 'command' as const,
-        id: `recent:${project.projectId}`,
+        id: `recent:${project.projectRoot}`,
         label: project.projectRoot,
         commandId: 'project.open-recent' as const,
         enabled: true,
         payload: {
-          projectId: project.projectId,
           projectRoot: project.projectRoot
         }
       }))

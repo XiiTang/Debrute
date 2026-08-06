@@ -22,10 +22,10 @@ describe('Photoshop v1 Runtime message parser', () => {
   it('accepts exact Project snapshots and placement requests', () => {
     expect(parseRuntimeMessage(JSON.stringify({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Campaign', revision: 4 }]
+      projects: [{ canonicalRoot: '/projects/project-1', name: 'Campaign', revision: 4 }]
     }))).toEqual({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Campaign', revision: 4 }]
+      projects: [{ canonicalRoot: '/projects/project-1', name: 'Campaign', revision: 4 }]
     });
 
     expect(parseRuntimeMessage(JSON.stringify({

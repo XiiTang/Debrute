@@ -8,14 +8,14 @@ describe('ProjectPathCommandRouter', () => {
       commandIntake: { canAccept: () => false, tryAccept: () => undefined },
       commandEffects: {
         sendProjectFileToPhotoshop: () => undefined,
-        copyProjectPathsToSystemClipboard: () => undefined,
-        resetCanvasNodeLayouts: () => undefined
+        copyProjectPathsToSystemClipboard: () => undefined
       },
       openTerminalPanel: vi.fn(),
       menuContext: { projection: undefined },
       commandContext: {
         activeProjection: undefined,
         activeCanvasRuntime: undefined,
+        revealInCanvas: vi.fn(),
         fileClipboard: undefined,
         explorerCommands: {
           beginCreateFile: vi.fn(),
@@ -30,6 +30,7 @@ describe('ProjectPathCommandRouter', () => {
         },
         activities: { report: vi.fn() },
         getProjectSnapshot: () => undefined,
+        resetCanvasNodeLayouts: () => undefined,
         closeContextMenu: vi.fn(),
         openInspectorPanel: vi.fn(),
         confirmTrash: () => true,
@@ -47,7 +48,7 @@ describe('ProjectPathCommandRouter', () => {
 
   it('passes its one accepted Project scope unchanged to a batch file command', () => {
     const acceptedScope = {
-      projectId: 'project-1',
+      bindingId: 'project-1',
       generation: 7,
       canSubmit: () => true,
       isCurrent: () => true
@@ -60,14 +61,14 @@ describe('ProjectPathCommandRouter', () => {
       },
       commandEffects: {
         sendProjectFileToPhotoshop: () => undefined,
-        copyProjectPathsToSystemClipboard: () => undefined,
-        resetCanvasNodeLayouts: () => undefined
+        copyProjectPathsToSystemClipboard: () => undefined
       },
       openTerminalPanel: vi.fn(),
       menuContext: { projection: undefined },
       commandContext: {
         activeProjection: undefined,
         activeCanvasRuntime: undefined,
+        revealInCanvas: vi.fn(),
         fileClipboard: undefined,
         explorerCommands: {
           beginCreateFile: vi.fn(),
@@ -82,6 +83,7 @@ describe('ProjectPathCommandRouter', () => {
         },
         activities: { report: vi.fn() },
         getProjectSnapshot: () => undefined,
+        resetCanvasNodeLayouts: () => undefined,
         closeContextMenu: vi.fn(),
         openInspectorPanel: vi.fn(),
         confirmTrash: () => true,
@@ -109,7 +111,7 @@ describe('ProjectPathCommandRouter', () => {
     });
     const report = vi.fn();
     const acceptedScope = {
-      projectId: 'project-1',
+      bindingId: 'project-1',
       generation: 7,
       canSubmit: () => current,
       isCurrent: () => current
@@ -121,14 +123,14 @@ describe('ProjectPathCommandRouter', () => {
       },
       commandEffects: {
         sendProjectFileToPhotoshop: () => undefined,
-        copyProjectPathsToSystemClipboard: () => clipboard,
-        resetCanvasNodeLayouts: () => undefined
+        copyProjectPathsToSystemClipboard: () => clipboard
       },
       openTerminalPanel: vi.fn(),
       menuContext: { projection: undefined },
       commandContext: {
         activeProjection: undefined,
         activeCanvasRuntime: undefined,
+        revealInCanvas: vi.fn(),
         fileClipboard: undefined,
         explorerCommands: {
           beginCreateFile: vi.fn(),
@@ -143,6 +145,7 @@ describe('ProjectPathCommandRouter', () => {
         },
         activities: { report },
         getProjectSnapshot: () => undefined,
+        resetCanvasNodeLayouts: () => undefined,
         closeContextMenu: vi.fn(),
         openInspectorPanel: vi.fn(),
         confirmTrash: () => true,

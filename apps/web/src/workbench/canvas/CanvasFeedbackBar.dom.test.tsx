@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasFeedbackMark } from '@debrute/canvas-core';
+import type { CanvasFeedbackMark } from '@debrute/app-protocol';
 import { CanvasFeedbackBar, CanvasFeedbackSelectionBar } from './CanvasFeedbackBar.js';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';

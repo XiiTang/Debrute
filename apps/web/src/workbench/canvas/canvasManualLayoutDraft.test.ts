@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import {
   canvasManualLayoutDraftFromInteraction,
   canvasManualLayoutDraftFromMoveInteraction,
@@ -219,6 +219,7 @@ function node(
 ): ProjectedCanvasNode {
   return {
     projectRelativePath,
+    displayName: projectRelativePath,
     nodeKind: 'file',
     mediaKind: 'image',
     x,
@@ -228,7 +229,7 @@ function node(
     z: 1,
     availability: {
       state: 'available',
-      fileUrl: `/api/projects/p/files/raw/${projectRelativePath}?v=rev`,
+      fileUrl: `/api/workbench/bindings/p/files/raw/${projectRelativePath}?v=rev`,
       revision: 'rev',
       size: 1000,
       mimeType: 'image/png',

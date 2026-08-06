@@ -35,7 +35,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     harness.host.selectionValue = {
       documentId: 7,
@@ -83,7 +83,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     harness.host.selectionValue = {
       documentId: 7,
@@ -122,7 +122,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
 
     harness.runtime.requestDirectories('project-1');
@@ -136,26 +136,26 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: 'stale-request',
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       revision: 4,
       directories: ['stale']
     });
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: 'project-2',
+      canonicalRoot: 'project-2',
       revision: request.revision,
       directories: ['mismatched-project']
     });
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: request.projectId,
+      canonicalRoot: request.canonicalRoot,
       revision: request.revision + 1,
       directories: ['mismatched-revision']
     });
     expect(harness.runtime.snapshot().directoryTrees).toEqual([{
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       projectRevision: 4,
       status: 'loading',
       directories: []
@@ -164,12 +164,12 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: request.projectId,
+      canonicalRoot: request.canonicalRoot,
       revision: request.revision,
       directories: ['exports', 'assets']
     });
     expect(harness.runtime.snapshot().directoryTrees).toEqual([{
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       projectRevision: 4,
       status: 'loaded',
       directories: ['', 'assets', 'exports']
@@ -177,12 +177,12 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: request.projectId,
+      canonicalRoot: request.canonicalRoot,
       revision: request.revision,
       directories: ['duplicate-response']
     });
     expect(harness.runtime.snapshot().directoryTrees).toEqual([{
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       projectRevision: 4,
       status: 'loaded',
       directories: ['', 'assets', 'exports']
@@ -196,8 +196,8 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projects.snapshot',
       projects: [
-        { projectId: 'project-1', name: 'Poster 2', revision: 4 },
-        { projectId: 'project-2', name: 'Poster 10', revision: 7 }
+        { canonicalRoot: 'project-1', name: 'Poster 2', revision: 4 },
+        { canonicalRoot: 'project-2', name: 'Poster 10', revision: 7 }
       ]
     });
 
@@ -213,14 +213,14 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: secondRequest.requestId,
-      projectId: secondRequest.projectId,
+      canonicalRoot: secondRequest.canonicalRoot,
       revision: secondRequest.revision,
       directories: ['folder10', 'folder2']
     });
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: firstRequest.requestId,
-      projectId: firstRequest.projectId,
+      canonicalRoot: firstRequest.canonicalRoot,
       revision: firstRequest.revision,
       directories: ['assets']
     });
@@ -228,21 +228,21 @@ describe('PhotoshopPluginRuntime', () => {
     expect(harness.runtime.snapshot()).toMatchObject({
       directoryTrees: [
         {
-          projectId: 'project-1',
+          canonicalRoot: 'project-1',
           projectRevision: 4,
           status: 'loaded',
           directories: ['', 'assets']
         },
         {
-          projectId: 'project-2',
+          canonicalRoot: 'project-2',
           projectRevision: 7,
           status: 'loaded',
           directories: ['', 'folder10', 'folder2']
         }
       ],
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-2', directory: '' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-2', directory: '' }
       ]
     });
   });
@@ -253,16 +253,16 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     expect(harness.connection.send).not.toHaveBeenCalled();
 
     harness.runtime.activateDestination('project-1', '');
     const request = latestDirectoryRequest(harness);
     expect(harness.runtime.snapshot()).toMatchObject({
-      destination: { projectId: 'project-1', projectRevision: 4, directory: '' },
+      destination: { canonicalRoot: 'project-1', projectRevision: 4, directory: '' },
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 4,
         status: 'loading',
         directories: []
@@ -276,7 +276,7 @@ describe('PhotoshopPluginRuntime', () => {
     const pendingSend = harness.runtime.sendSelection();
     expect(harness.connection.send).toHaveBeenLastCalledWith(expect.objectContaining({
       type: 'photoshop.export.start',
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       projectRevision: 4,
       directory: ''
     }));
@@ -286,7 +286,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     const reloadedRequest = latestDirectoryRequest(harness);
     harness.message(directorySnapshot(reloadedRequest, ['assets']));
@@ -294,7 +294,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.runtime.activateDestination('project-1', '');
     harness.runtime.activateDestination('project-1', '');
     expect(harness.connection.send).toHaveBeenCalledTimes(sendsAfterLoad);
-    expect(request.projectId).toBe(reloadedRequest.projectId);
+    expect(request.canonicalRoot).toBe(reloadedRequest.canonicalRoot);
   });
 
   it('clears a directory snapshot when its Project or revision is no longer live', () => {
@@ -303,7 +303,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     harness.runtime.requestDirectories('project-1');
     const request = harness.connection.send.mock.calls.at(-1)?.[0] as PluginMessage;
@@ -313,14 +313,14 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: request.projectId,
+      canonicalRoot: request.canonicalRoot,
       revision: request.revision,
       directories: ['exports']
     });
 
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 5 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 5 }]
     });
 
     expect(harness.runtime.snapshot().directoryTrees).toEqual([]);
@@ -333,8 +333,8 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projects.snapshot',
       projects: [
-        { projectId: 'project-1', name: 'Poster', revision: 4 },
-        { projectId: 'project-2', name: 'Campaign', revision: 7 }
+        { canonicalRoot: 'project-1', name: 'Poster', revision: 4 },
+        { canonicalRoot: 'project-2', name: 'Campaign', revision: 7 }
       ]
     });
     harness.runtime.activateDestination('project-1', '');
@@ -347,27 +347,27 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projects.snapshot',
       projects: [
-        { projectId: 'project-1', name: 'Poster', revision: 5 },
-        { projectId: 'project-2', name: 'Campaign', revision: 7 }
+        { canonicalRoot: 'project-1', name: 'Poster', revision: 5 },
+        { canonicalRoot: 'project-2', name: 'Campaign', revision: 7 }
       ]
     });
 
     expect(harness.runtime.snapshot().directoryTrees).toEqual([
       {
-        projectId: 'project-2',
+        canonicalRoot: 'project-2',
         projectRevision: 7,
         status: 'loaded',
         directories: ['', 'exports']
       },
       {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 5,
         status: 'loading',
         directories: []
       }
     ]);
     expect(latestDirectoryRequest(harness)).toMatchObject({
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       revision: 5
     });
   });
@@ -379,15 +379,15 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projects.snapshot',
       projects: [
-        { projectId: 'project-1', name: 'Poster', revision: 4 },
-        { projectId: 'project-2', name: 'Campaign', revision: 7 }
+        { canonicalRoot: 'project-1', name: 'Poster', revision: 4 },
+        { canonicalRoot: 'project-2', name: 'Campaign', revision: 7 }
       ]
     });
 
     harness.runtime.activateDestination('project-1', '');
     expect(harness.runtime.snapshot()).toMatchObject({
-      destination: { projectId: 'project-1', projectRevision: 4, directory: '' },
-      expandedDirectories: [{ projectId: 'project-1', directory: '' }]
+      destination: { canonicalRoot: 'project-1', projectRevision: 4, directory: '' },
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }]
     });
     const request = harness.connection.send.mock.calls.at(-1)?.[0] as PluginMessage;
     if (request.type !== 'photoshop.projectDirectories.request') {
@@ -396,7 +396,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: request.projectId,
+      canonicalRoot: request.canonicalRoot,
       revision: request.revision,
       directories: ['data/shopify', 'assets', 'data', 'data/amazon']
     });
@@ -404,17 +404,17 @@ describe('PhotoshopPluginRuntime', () => {
     harness.runtime.activateDestination('project-1', 'data');
     harness.runtime.selectDestination('project-1', 'data/shopify');
     expect(harness.runtime.snapshot()).toMatchObject({
-      destination: { projectId: 'project-1', projectRevision: 4, directory: 'data/shopify' },
+      destination: { canonicalRoot: 'project-1', projectRevision: 4, directory: 'data/shopify' },
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-1', directory: 'data' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'data' }
       ]
     });
 
     harness.runtime.collapseDestination('project-1', 'data');
     expect(harness.runtime.snapshot()).toMatchObject({
-      destination: { projectId: 'project-1', projectRevision: 4, directory: 'data/shopify' },
-      expandedDirectories: [{ projectId: 'project-1', directory: '' }]
+      destination: { canonicalRoot: 'project-1', projectRevision: 4, directory: 'data/shopify' },
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }]
     });
   });
 
@@ -424,7 +424,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     selectDestination(harness, 'project-1', 'data/shopify');
 
@@ -433,7 +433,7 @@ describe('PhotoshopPluginRuntime', () => {
       projects: [],
       directoryTrees: [],
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 4,
         directory: 'data/shopify'
       }
@@ -442,7 +442,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     const request = harness.connection.send.mock.calls.at(-1)?.[0] as PluginMessage;
     if (request.type !== 'photoshop.projectDirectories.request') {
@@ -451,14 +451,14 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: request.projectId,
+      canonicalRoot: request.canonicalRoot,
       revision: request.revision,
       directories: ['data', 'data/shopify']
     });
 
     expect(harness.runtime.snapshot()).toMatchObject({
       destination: {
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 4,
         directory: 'data/shopify'
       }
@@ -471,7 +471,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     harness.runtime.activateDestination('project-1', '');
     const firstRequest = latestDirectoryRequest(harness);
@@ -484,16 +484,16 @@ describe('PhotoshopPluginRuntime', () => {
       projects: [],
       directoryTrees: [],
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-1', directory: 'data' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'data' }
       ],
-      destination: { projectId: 'project-1', directory: 'data/shopify' }
+      destination: { canonicalRoot: 'project-1', directory: 'data/shopify' }
     });
 
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 5 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 5 }]
     });
     const refreshedRequest = latestDirectoryRequest(harness);
     harness.message(directorySnapshot(refreshedRequest, ['data', 'exports']));
@@ -501,8 +501,8 @@ describe('PhotoshopPluginRuntime', () => {
     expect(harness.runtime.snapshot()).toMatchObject({
       destination: null,
       expandedDirectories: [
-        { projectId: 'project-1', directory: '' },
-        { projectId: 'project-1', directory: 'data' }
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'data' }
       ]
     });
   });
@@ -513,13 +513,13 @@ describe('PhotoshopPluginRuntime', () => {
     harness.ready();
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 4 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 4 }]
     });
     selectDestination(harness, 'project-1', 'data/shopify');
 
     harness.message({
       type: 'photoshop.projects.snapshot',
-      projects: [{ projectId: 'project-1', name: 'Poster', revision: 5 }]
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 5 }]
     });
     const request = harness.connection.send.mock.calls.at(-1)?.[0] as PluginMessage;
     if (request.type !== 'photoshop.projectDirectories.request') {
@@ -528,7 +528,7 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projectDirectories.snapshot',
       requestId: request.requestId,
-      projectId: request.projectId,
+      canonicalRoot: request.canonicalRoot,
       revision: request.revision,
       directories: ['data', 'exports']
     });
@@ -545,8 +545,8 @@ describe('PhotoshopPluginRuntime', () => {
     harness.message({
       type: 'photoshop.projects.snapshot',
       projects: [
-        { projectId: 'project-a', name: 'Poster', revision: 4 },
-        { projectId: 'project-b', name: 'Campaign', revision: 7 }
+        { canonicalRoot: 'project-a', name: 'Poster', revision: 4 },
+        { canonicalRoot: 'project-b', name: 'Campaign', revision: 7 }
       ]
     });
     harness.runtime.selectDestination('project-a', '');
@@ -564,7 +564,7 @@ describe('PhotoshopPluginRuntime', () => {
     const start = harness.connection.send.mock.calls.at(-1)?.[0] as PluginMessage;
     expect(start).toMatchObject({
       type: 'photoshop.export.start',
-      projectId: 'project-a',
+      canonicalRoot: 'project-a',
       projectRevision: 4,
       directory: ''
     });
@@ -575,7 +575,7 @@ describe('PhotoshopPluginRuntime', () => {
 
     harness.runtime.selectDestination('project-b', '');
     expect(harness.runtime.snapshot()).toMatchObject({
-      destination: { projectId: 'project-b', projectRevision: 7, directory: '' },
+      destination: { canonicalRoot: 'project-b', projectRevision: 7, directory: '' },
       activeExport: { itemCount: 1, destinationLabel: 'Poster' }
     });
     if (start.type !== 'photoshop.export.start') throw new Error('expected export start');
@@ -583,7 +583,7 @@ describe('PhotoshopPluginRuntime', () => {
     await pending;
 
     expect(harness.runtime.snapshot()).toMatchObject({
-      destination: { projectId: 'project-b', projectRevision: 7, directory: '' },
+      destination: { canonicalRoot: 'project-b', projectRevision: 7, directory: '' },
       activeExport: null,
       result: { tone: 'success', message: 'Sent 1 file to Poster.' }
     });
@@ -748,14 +748,14 @@ function createHarness() {
 
 function selectDestination(
   harness: ReturnType<typeof createHarness>,
-  projectId: string,
+  canonicalRoot: string,
   directory: string
 ): void {
   if (directory === '') {
-    harness.runtime.selectDestination(projectId, '');
+    harness.runtime.selectDestination(canonicalRoot, '');
     return;
   }
-  harness.runtime.expandDestination(projectId, '');
+  harness.runtime.expandDestination(canonicalRoot, '');
   const request = harness.connection.send.mock.calls.at(-1)?.[0] as PluginMessage;
   if (request.type !== 'photoshop.projectDirectories.request') {
     throw new Error('expected directory request');
@@ -763,13 +763,13 @@ function selectDestination(
   harness.message({
     type: 'photoshop.projectDirectories.snapshot',
     requestId: request.requestId,
-    projectId: request.projectId,
+    canonicalRoot: request.canonicalRoot,
     revision: request.revision,
     directories: directory.split('/').map((_, index, segments) => (
       segments.slice(0, index + 1).join('/')
     ))
   });
-  harness.runtime.selectDestination(projectId, directory);
+  harness.runtime.selectDestination(canonicalRoot, directory);
 }
 
 function latestDirectoryRequest(
@@ -789,7 +789,7 @@ function directorySnapshot(
   return {
     type: 'photoshop.projectDirectories.snapshot',
     requestId: request.requestId,
-    projectId: request.projectId,
+    canonicalRoot: request.canonicalRoot,
     revision: request.revision,
     directories
   };

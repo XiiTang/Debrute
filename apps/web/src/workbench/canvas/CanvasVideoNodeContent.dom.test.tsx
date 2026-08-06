@@ -4,10 +4,10 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   canvasPreviewContinuityKey,
-  canvasPreviewTargetIdentityFromDigest,
-  type CanvasFeedbackEntry,
-  type ProjectedCanvasNode
+  canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry } from '@debrute/app-protocol';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { CanvasVideoNodeContent, canvasVideoFrameContentBox } from './CanvasVideoNodeContent';
 import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation';
 import { I18nProvider } from '../i18n';
@@ -859,6 +859,7 @@ function videoNode(options: {
   const revision = options.revision ?? 'rev';
   const node: ProjectedCanvasNode = {
     projectRelativePath: 'media/clip.mp4',
+    displayName: 'clip.mp4',
     nodeKind: 'file',
     mediaKind: 'video',
     x: 0,
@@ -870,7 +871,7 @@ function videoNode(options: {
       state: 'available',
       size: 100,
       mimeType: 'video/mp4',
-      fileUrl: `/api/projects/p/files/raw/media/clip.mp4?v=${revision}`,
+      fileUrl: `/api/workbench/bindings/p/files/raw/media/clip.mp4?v=${revision}`,
       revision
     },
     videoPresentation: {
@@ -880,7 +881,7 @@ function videoNode(options: {
       durationSeconds: 5,
       textTracks: [{
         projectRelativePath: 'media/clip.en.vtt',
-        fileUrl: '/api/projects/p/files/raw/media/clip.en.vtt?v=track-rev',
+        fileUrl: '/api/workbench/bindings/p/files/raw/media/clip.en.vtt?v=track-rev',
         revision: 'track-rev',
         kind: 'subtitles',
         label: 'English',
@@ -899,19 +900,19 @@ function previewSource(): CanvasRasterPreviewRequest {
   return {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: targetIdentity
     }),
     variantTarget: {
       mediaKind: 'video',
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'media/clip.mp4',
       targetIdentity,
       sourceWidth: 640,
-      srcForWidth: (width) => `http://127.0.0.1:17321/api/projects/p/canvas-video-preview/preview.jpg?path=media%2Fclip.mp4&w=${width}&sourceKey=test-preview`
+      srcForWidth: (width) => `http://127.0.0.1:17321/api/workbench/bindings/p/canvas-video-preview/preview.jpg?path=media%2Fclip.mp4&w=${width}&sourceKey=test-preview`
     }
   };
 }

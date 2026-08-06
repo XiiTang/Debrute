@@ -9,15 +9,14 @@ use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::{
-    CanvasMediaKind, ProjectCapabilityFs, ProjectError, canvas_media_kind_from_path,
-    normalize_project_directory_path, project_content_hash,
+    ProjectCapabilityFs, ProjectError, normalize_project_directory_path, project_content_hash,
 };
 
 mod artifacts;
 
 pub use artifacts::*;
 
-pub const CANVAS_FEEDBACK_PROJECT_PATH: &str = ".debrute/reviews/canvas-feedback.json";
+pub const CANVAS_FEEDBACK_PROJECT_PATH: &str = ".debrute/feedback/feedback.json";
 pub(super) const MAX_CANVAS_FEEDBACK_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CANVAS_FEEDBACK_ENTRIES: usize = 1_000;
 const MAX_CANVAS_FEEDBACK_ITEMS_PER_ENTRY: usize = 500;
@@ -334,8 +333,8 @@ pub(crate) fn write_canvas_feedback_document(
     };
     if current_hash.as_deref() != expected_hash {
         return Err(ProjectError::service(
-            "document_push_conflict",
-            "Canvas feedback document changed on disk before push commit.",
+            "document_transaction_conflict",
+            "Canvas feedback document changed on disk before transaction commit.",
         ));
     }
     let mut content = serde_json::to_string_pretty(document)?;
@@ -350,7 +349,6 @@ pub(crate) fn write_canvas_feedback_document(
 }
 
 // The closed operation interpreter stays together so every variant shares one validation tail.
-#[allow(clippy::too_many_lines)]
 pub(crate) fn update_canvas_feedback_document(
     document: &CanvasFeedbackDocument,
     input: &UpdateCanvasFeedbackInput,
@@ -582,32 +580,6 @@ fn update_canvas_feedback_marks(
     next.updated_at = updated_at;
     validate_canvas_feedback_document(&next)?;
     Ok(next)
-}
-
-pub(crate) fn validate_feedback_media_targets(
-    document: &CanvasFeedbackDocument,
-) -> Result<(), ProjectError> {
-    for entry in document.entries.values() {
-        let media_kind = canvas_media_kind_from_path(&entry.project_relative_path);
-        for item in &entry.items {
-            if item.is_spatial()
-                && item.scope == CanvasFeedbackScope::Node
-                && media_kind != CanvasMediaKind::Image
-            {
-                return Err(ProjectError::Validation(format!(
-                    "Canvas feedback node-scope spatial items require an image file: {}",
-                    entry.project_relative_path
-                )));
-            }
-            if item.scope == CanvasFeedbackScope::Moment && media_kind != CanvasMediaKind::Video {
-                return Err(ProjectError::Validation(format!(
-                    "Canvas feedback moment items require a video file: {}",
-                    entry.project_relative_path
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Validates the complete persisted Canvas feedback invariant set.
@@ -877,11 +849,9 @@ pub(crate) fn normalize_feedback_path(path: &str) -> Result<String, ProjectError
             "Canvas feedback path exceeds {MAX_CANVAS_FEEDBACK_PATH_BYTES} bytes."
         )));
     }
-    if normalized == ".debrute/reviews/rendered-feedback"
-        || normalized.starts_with(".debrute/reviews/rendered-feedback/")
-    {
+    if normalized == ".debrute" || normalized.starts_with(".debrute/") {
         return Err(ProjectError::Validation(
-            "Canvas feedback cannot target rendered feedback artifacts.".to_owned(),
+            "Canvas feedback cannot target the .debrute namespace.".to_owned(),
         ));
     }
     Ok(normalized)
@@ -1050,7 +1020,7 @@ fn validate_iso_timestamp(value: &str) -> Result<(), ProjectError> {
 
 #[must_use]
 pub fn canvas_feedback_rendered_project_path(project_relative_path: &str) -> String {
-    format!(".debrute/reviews/rendered-feedback/{project_relative_path}.annotated.png")
+    format!(".debrute/feedback/artifacts/{project_relative_path}.annotated.png")
 }
 
 #[must_use]
@@ -1059,7 +1029,7 @@ pub fn canvas_feedback_rendered_moment_project_path(
     moment_label: &str,
 ) -> String {
     format!(
-        ".debrute/reviews/rendered-feedback/{project_relative_path}.moment-{moment_label}.annotated.png"
+        ".debrute/feedback/artifacts/{project_relative_path}.moment-{moment_label}.annotated.png"
     )
 }
 
@@ -1312,34 +1282,6 @@ mod tests {
     }
 
     #[test]
-    fn document_validation_rejects_inconsistent_and_unsupported_targets() {
-        let mut document = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
-        document.entries.insert(
-            "notes/readme.md".to_owned(),
-            CanvasFeedbackEntry {
-                project_relative_path: "notes/readme.md".to_owned(),
-                marks: Vec::new(),
-                next_moment_label: 1,
-                next_spatial_label: 2,
-                items: vec![CanvasFeedbackItem {
-                    id: "one".to_owned(),
-                    kind: CanvasFeedbackItemKind::Pin,
-                    scope: CanvasFeedbackScope::Node,
-                    label: Some(1),
-                    geometry: Some(CanvasFeedbackGeometry::Point { x: 0.1, y: 0.2 }),
-                    moment: None,
-                    comment: "comment".to_owned(),
-                    created_at: T0.to_owned(),
-                    updated_at: T0.to_owned(),
-                }],
-                updated_at: T0.to_owned(),
-            },
-        );
-        validate_canvas_feedback_document(&document).expect("shape should be valid");
-        assert!(validate_feedback_media_targets(&document).is_err());
-    }
-
-    #[test]
     fn persisted_document_normalization_matches_the_canonical_feedback_shape() {
         let input = serde_json::json!({
             "updatedAt": T0,
@@ -1417,7 +1359,7 @@ mod tests {
     fn persisted_feedback_document_read_is_bounded() {
         let root =
             std::env::temp_dir().join(format!("debrute-feedback-limit-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join(".debrute/reviews")).unwrap();
+        std::fs::create_dir_all(root.join(".debrute/feedback")).unwrap();
         std::fs::write(
             root.join(CANVAS_FEEDBACK_PROJECT_PATH),
             vec![b'x'; MAX_CANVAS_FEEDBACK_DOCUMENT_BYTES + 1],

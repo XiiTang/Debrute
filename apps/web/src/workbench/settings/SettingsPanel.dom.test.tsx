@@ -421,7 +421,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
                 globalSettings: {
                   status: 'ready',
                   value: globalSettingsFixture({
-                    chrome: { recentProjects: [{ projectId: 'alpha', projectRoot: '/projects/alpha' }] }
+                    chrome: { recentProjectRoots: ['/projects/alpha'] }
                   })
                 }
               }).globalSettings).models.image}
@@ -690,7 +690,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           settings={{
             workbench: { locale: 'zh-CN', themePreference: 'system' },
             canvas: { textAppearance: globalSettingsFixture().canvas.textAppearance },
-            chrome: { recentProjects: [] },
+            chrome: { recentProjectRoots: [] },
             models: { image: [], video: [], audio: [] }
           }}
           onSettingsChange={async (settings) => {
@@ -878,7 +878,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
         ligatures: true
       }
     },
-    chrome: { recentProjects: [] },
+    chrome: { recentProjectRoots: [] },
     models: {
       image: [{
         debruteModelId: 'image/openai/gpt-image-1',

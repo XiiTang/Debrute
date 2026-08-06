@@ -142,6 +142,7 @@ function key(keyValue: string, overrides: Partial<Pick<KeyboardEvent, 'metaKey' 
 function node(path: string) {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'file' as const,
     mediaKind: 'image' as const,
     x: 0,

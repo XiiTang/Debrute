@@ -1,13 +1,12 @@
 import type {
   WorkbenchActivityNoticeInput,
-  AddProjectPathToCanvasMapInput,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewEnsureResponse,
   CanvasVideoPreviewProbeResponse,
   DebruteGlobalSettingsView,
   DebruteHttpErrorBody,
   RuntimeProjectUploadImportPlan,
-  GeneratedAssetMetadataLookup,
+  ModelArtifactProvenanceLookup,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   SaveCanvasTextPreviewSourceResult,
@@ -16,14 +15,11 @@ import type {
   SendProjectFileToPhotoshopResult,
   TerminalEventSubscription,
   TerminalSessionResult,
-  UpdateCanvasTextViewportStateInput,
-  UpdateCanvasVideoPlaybackStateInput,
   WorkbenchEvent,
   WorkbenchApiClient,
-  WorkbenchCanvasDocumentMutationResult,
+  WorkbenchCanvasStateMutationResult,
   WorkbenchCanvasFeedbackMutationResult,
   WorkbenchCanvasManagementResult,
-  WorkbenchCanvasResetLayoutResult,
   WorkbenchProjectOpenResult,
   WorkbenchProjectTarget,
   WorkbenchProjectFileBatchOperationResult,
@@ -33,7 +29,6 @@ import type {
   WorkbenchFeedbackWorkingCopy,
   WorkbenchTextWorkingCopy,
   WorkbenchProjectUploadImportInput,
-  WorkbenchAddProjectPathToCanvasMapResult,
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
 import {
@@ -44,7 +39,7 @@ import {
   isRecognizedWorkbenchEventFrame,
   isRecognizedWorkbenchProjectConnectionFrame
 } from '@debrute/app-protocol';
-import type { CanvasFeedbackDocument } from '@debrute/canvas-core';
+import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
 import { readJsonSseStream } from './streamingSse.js';
 import type { TerminalHubClient } from './terminalHubClient.js';
 import { getDebruteShellApi } from './shellApi.js';
@@ -67,12 +62,12 @@ import {
 } from '../startup/workbenchStartupTimeline.js';
 
 interface ProjectRequestScope {
-  projectId: string;
+  bindingId: string;
   generation: number;
 }
 
 interface RevisionedProjectCommandResult {
-  projectId: string;
+  bindingId: string;
   projectRevision: number;
 }
 
@@ -88,7 +83,7 @@ export interface WorkbenchGlobalSettingsBootstrap {
   settings: DebruteGlobalSettingsView;
 }
 
-class DebruteHttpRequestError extends Error {
+export class DebruteHttpRequestError extends Error {
   constructor(
     readonly status: number,
     readonly code: string | undefined,
@@ -109,10 +104,9 @@ interface GlobalSnapshotFrame {
   };
 }
 
-interface ProjectBindingCommandResult {
-  projectId: string;
-  outcome: 'bound' | 'focused_existing_desktop';
-}
+type ProjectBindingCommandResult =
+  | { outcome: 'bound'; bindingId: string; canonicalRoot: string }
+  | { outcome: 'focused_existing_desktop'; canonicalRoot: string };
 
 type ProjectPickerCommandResult =
   | { selected: false }
@@ -126,7 +120,7 @@ export function createHttpWorkbenchApiClient(options: {
   const projectProjection = createWorkbenchProjectProjection();
   let terminalHub: TerminalHubClient | undefined;
   let terminalHubLoad: Promise<TerminalHubClient> | undefined;
-  let terminalBinding: { projectId: string; connectionCredential: string } | undefined;
+  let terminalBinding: { bindingId: string; connectionCredential: string } | undefined;
   let connectionCredential: string | undefined;
   let globalSettingsBootstrap: WorkbenchGlobalSettingsBootstrap | undefined;
   let globalSettingsBootstrapError: Error | undefined;
@@ -244,7 +238,7 @@ export function createHttpWorkbenchApiClient(options: {
       }
       terminalHub = hub;
       if (terminalBinding) {
-        hub.bindProject(terminalBinding.projectId, terminalBinding.connectionCredential);
+        hub.bindProject(terminalBinding.bindingId, terminalBinding.connectionCredential);
       }
       return hub;
     });
@@ -272,9 +266,9 @@ export function createHttpWorkbenchApiClient(options: {
       }
     };
   };
-  const bindTerminalProject = (projectId: string, connectionCredential: string): void => {
-    terminalBinding = { projectId, connectionCredential };
-    terminalHub?.bindProject(projectId, connectionCredential);
+  const bindTerminalProject = (bindingId: string, connectionCredential: string): void => {
+    terminalBinding = { bindingId, connectionCredential };
+    terminalHub?.bindProject(bindingId, connectionCredential);
   };
   const unbindTerminalProject = (): void => {
     terminalBinding = undefined;
@@ -288,7 +282,7 @@ export function createHttpWorkbenchApiClient(options: {
   const pendingInitialEvents: WorkbenchEvent[] = [];
   let eventListenerWasRegistered = false;
   const connectionEndedListeners = new Set<(error: Error) => void>();
-  const projectPathFor = (projectId: string, path: string) => `/api/projects/${encodeURIComponent(projectId)}${path}`;
+  const projectPathFor = (bindingId: string, path: string) => `/api/workbench/bindings/${encodeURIComponent(bindingId)}${path}`;
   const currentProjectBinding = () => {
     const state = projectProjection.getState();
     return state.status === 'bound' ? state : undefined;
@@ -298,7 +292,7 @@ export function createHttpWorkbenchApiClient(options: {
     if (!binding) {
       throw new Error('Debrute project is not open.');
     }
-    return projectPathFor(binding.projectId, path);
+    return projectPathFor(binding.bindingId, path);
   };
   const captureProjectScope = (): ProjectRequestScope => {
     const binding = currentProjectBinding();
@@ -306,13 +300,13 @@ export function createHttpWorkbenchApiClient(options: {
       throw new Error('Debrute project is not open.');
     }
     return {
-      projectId: binding.projectId,
+      bindingId: binding.bindingId,
       generation: binding.generation
     };
   };
   const isCurrentProjectScope = (scope: ProjectRequestScope): boolean => {
     const binding = currentProjectBinding();
-    return binding?.projectId === scope.projectId && binding.generation === scope.generation;
+    return binding?.bindingId === scope.bindingId && binding.generation === scope.generation;
   };
   const runProjectRequest = async <T>(
     operation: (scope: ProjectRequestScope, signal: AbortSignal) => Promise<T>,
@@ -352,7 +346,7 @@ export function createHttpWorkbenchApiClient(options: {
     body?: unknown,
     callerSignal?: AbortSignal
   ): Promise<T> => runProjectRequest((scope, signal) => (
-    request<T>(method, projectPathFor(scope.projectId, path), body, signal)
+    request<T>(method, projectPathFor(scope.bindingId, path), body, signal)
   ), callerSignal);
   const requestProjectMutation = <T extends RevisionedProjectCommandResult>(
     method: string,
@@ -360,9 +354,9 @@ export function createHttpWorkbenchApiClient(options: {
     body?: object
   ): Promise<T> => runProjectRequest(async (scope, signal) => {
     const result = await request<T>(method, path, body, signal);
-    if (result.projectId !== scope.projectId) {
+    if (result.bindingId !== scope.bindingId) {
       throw new Error(
-        `Project command returned ${result.projectId} while bound to ${scope.projectId}.`
+        `Project command returned ${result.bindingId} while bound to ${scope.bindingId}.`
       );
     }
     await projectProjection.waitForRevision(scope.generation, result.projectRevision);
@@ -373,16 +367,16 @@ export function createHttpWorkbenchApiClient(options: {
     body: FormData
   ): Promise<T> => runProjectRequest(async (scope, signal) => {
     const result = await requestFormData<T>('POST', path, body, signal);
-    if (result.projectId !== scope.projectId) {
+    if (result.bindingId !== scope.bindingId) {
       throw new Error(
-        `Project command returned ${result.projectId} while bound to ${scope.projectId}.`
+        `Project command returned ${result.bindingId} while bound to ${scope.bindingId}.`
       );
     }
     await projectProjection.waitForRevision(scope.generation, result.projectRevision);
     return result;
   });
   const dispatchWorkbenchEvent = (event: WorkbenchEvent): void => {
-    if ('projectId' in event && 'projectRevision' in event) {
+    if ('bindingId' in event && 'projectRevision' in event) {
       projectProjection.acceptProjectEvent(event);
     } else {
       globalProjection.acceptEvent(event as WorkbenchGlobalEvent);
@@ -395,8 +389,8 @@ export function createHttpWorkbenchApiClient(options: {
       listener(event);
     }
   };
-  const markProjectDetached = (projectId: string): void => {
-    projectProjection.detachProject(projectId);
+  const markProjectDetached = (bindingId: string): void => {
+    projectProjection.detachProject(bindingId);
     for (const controller of projectRequestControllers) {
       controller.abort();
     }
@@ -413,21 +407,22 @@ export function createHttpWorkbenchApiClient(options: {
     }
     projectRequestControllers.clear();
     initialProjectError = undefined;
-    bindTerminalProject(project.projectId, connectionCredential);
+    bindTerminalProject(project.bindingId, connectionCredential);
   };
   const acceptBoundProject = (project: WorkbenchProjectOpenResult): void => {
-    for (const waiter of boundProjectWaiters.get(project.projectId) ?? []) {
+    for (const waiter of boundProjectWaiters.get(project.bindingId) ?? []) {
       waiter.resolve(project);
     }
-    boundProjectWaiters.delete(project.projectId);
+    boundProjectWaiters.delete(project.bindingId);
   };
-  const waitForBoundProject = (projectId: string): Promise<WorkbenchProjectOpenResult> => {
+  const waitForBoundProject = (bindingId: string): Promise<WorkbenchProjectOpenResult> => {
     const current = currentProjectBinding();
-    if (current?.projectId === projectId) {
+    if (current?.bindingId === bindingId) {
       return Promise.resolve({
-        projectId: current.projectId,
+        bindingId: current.bindingId,
+        canonicalRoot: current.canonicalRoot,
         projectRevision: current.projectRevision,
-        snapshot: current.authoritativeSnapshot,
+        snapshot: current.snapshot,
         workingCopies: current.workingCopies
       });
     }
@@ -435,9 +430,9 @@ export function createHttpWorkbenchApiClient(options: {
       return Promise.reject(connectionEndedError);
     }
     return new Promise((resolve, reject) => {
-      const waiters = boundProjectWaiters.get(projectId) ?? [];
+      const waiters = boundProjectWaiters.get(bindingId) ?? [];
       waiters.push({ resolve, reject });
-      boundProjectWaiters.set(projectId, waiters);
+      boundProjectWaiters.set(bindingId, waiters);
     });
   };
   const requestProjectBinding = async (
@@ -447,9 +442,9 @@ export function createHttpWorkbenchApiClient(options: {
     startupTimeline.mark('project-open-requested');
     const opened = await request<ProjectBindingCommandResult>('POST', path, target);
     if (opened.outcome === 'focused_existing_desktop') {
-      return { outcome: opened.outcome, projectId: opened.projectId };
+      return opened;
     }
-    return waitForBoundProject(opened.projectId);
+    return waitForBoundProject(opened.bindingId);
   };
   const ensureConnection = (): Promise<void> => {
     if (connectionReady) {
@@ -460,10 +455,10 @@ export function createHttpWorkbenchApiClient(options: {
     let resolveReady!: () => void;
     let rejectReady!: (error: unknown) => void;
     let readySettled = false;
-    const requestedProjectId = requestedProjectIdFromLocation();
+    const requestedProjectRoot = requestedProjectRootFromLocation();
     let globalSynchronized = false;
     let activitySynchronized = false;
-    let projectSynchronized = requestedProjectId === undefined;
+    let projectSynchronized = requestedProjectRoot === undefined;
     const ready = new Promise<void>((resolve, reject) => {
       resolveReady = resolve;
       rejectReady = reject;
@@ -479,7 +474,7 @@ export function createHttpWorkbenchApiClient(options: {
       try {
         const shell = getDebruteShellApi();
         const desktopLaunchTicket = shell ? await shell.takeDesktopLaunchTicket() : undefined;
-        if (requestedProjectId) {
+        if (requestedProjectRoot) {
           startupTimeline.mark('project-open-requested');
         }
         const response = await fetch('/api/workbench/connection', {
@@ -491,7 +486,7 @@ export function createHttpWorkbenchApiClient(options: {
           credentials: 'same-origin',
           signal: controller.signal,
           body: JSON.stringify({
-            ...(requestedProjectId ? { requestedProjectId } : {}),
+            ...(requestedProjectRoot ? { requestedProjectRoot } : {}),
             ...(desktopLaunchTicket ? { desktopLaunchTicket } : {})
           })
         });
@@ -537,7 +532,7 @@ export function createHttpWorkbenchApiClient(options: {
               };
               commitCurrentProject(project);
               acceptBoundProject(project);
-              if (project.projectId === requestedProjectId) {
+              if (project.canonicalRoot === requestedProjectRoot) {
                 projectSynchronized = true;
                 settleReady();
               }
@@ -548,13 +543,15 @@ export function createHttpWorkbenchApiClient(options: {
                 409,
                 projectConnectionFrame.error.code,
                 projectConnectionFrame.error.message,
-                { projectId: projectConnectionFrame.projectId }
+                {
+                  canonicalRoot: projectConnectionFrame.canonicalRoot
+                }
               );
               projectSynchronized = true;
               settleReady();
               return;
             }
-            markProjectDetached(projectConnectionFrame.projectId);
+            markProjectDetached(projectConnectionFrame.bindingId);
             return;
           }
           if (isRecognizedWorkbenchProjectConnectionFrame(value)) {
@@ -633,21 +630,15 @@ export function createHttpWorkbenchApiClient(options: {
     ),
     openProject: async (target) => {
       await ensureConnection();
-      const currentProjectId = currentProjectBinding()?.projectId;
-      if ('projectId' in target) {
-        if (initialProjectError) {
-          throw initialProjectError;
-        }
-        if (currentProjectId === target.projectId) {
-          return waitForBoundProject(target.projectId);
-        }
-        if (!currentProjectId) {
-          return requestProjectBinding('/api/projects/open', target);
-        }
-        throw new Error(`Workbench is already bound to Project ${currentProjectId}.`);
+      const current = currentProjectBinding();
+      if (initialProjectError && !current) {
+        throw initialProjectError;
       }
-      if (!currentProjectId) {
+      if (!current) {
         return requestProjectBinding('/api/projects/open', target);
+      }
+      if (current.canonicalRoot === target.projectRoot) {
+        return waitForBoundProject(current.bindingId);
       }
       return requestProjectBinding('/api/projects/replace', target);
     },
@@ -700,32 +691,32 @@ export function createHttpWorkbenchApiClient(options: {
       projectPath(`/files/text/${encodeProjectPath(input.projectRelativePath)}`),
       { content: input.content, expectedRevision: input.expectedRevision }
     ),
-    putTextWorkingCopy: (projectId: string, input: WorkbenchTextWorkingCopy) => request<WorkbenchTextWorkingCopy>(
+    putTextWorkingCopy: (bindingId: string, input: WorkbenchTextWorkingCopy) => request<WorkbenchTextWorkingCopy>(
       'PUT',
-      projectPathFor(projectId, `/working-copies/text/${encodeProjectPath(input.projectRelativePath)}`),
+      projectPathFor(bindingId, `/working-copies/text/${encodeProjectPath(input.projectRelativePath)}`),
       {
         content: input.content,
         language: input.language,
         baseRevision: input.baseRevision
       }
     ),
-    clearTextWorkingCopy: (projectId, projectRelativePath) => request<void>(
+    clearTextWorkingCopy: (bindingId, projectRelativePath) => request<void>(
       'DELETE',
-      projectPathFor(projectId, `/working-copies/text/${encodeProjectPath(projectRelativePath)}`)
+      projectPathFor(bindingId, `/working-copies/text/${encodeProjectPath(projectRelativePath)}`)
     ),
-    putFeedbackWorkingCopy: (projectId: string, input: WorkbenchFeedbackWorkingCopy) => request<WorkbenchFeedbackWorkingCopy>(
+    putFeedbackWorkingCopy: (bindingId: string, input: WorkbenchFeedbackWorkingCopy) => request<WorkbenchFeedbackWorkingCopy>(
       'PUT',
-      projectPathFor(projectId, `/working-copies/feedback/${encodeURIComponent(input.itemId)}`),
+      projectPathFor(bindingId, `/working-copies/feedback/${encodeURIComponent(input.itemId)}`),
       input
     ),
-    clearFeedbackWorkingCopy: (projectId, itemId) => request<void>(
+    clearFeedbackWorkingCopy: (bindingId, itemId) => request<void>(
       'DELETE',
-      projectPathFor(projectId, `/working-copies/feedback/${encodeURIComponent(itemId)}`)
+      projectPathFor(bindingId, `/working-copies/feedback/${encodeURIComponent(itemId)}`)
     ),
     saveCanvasTextPreviewSource: (input) => runProjectRequest((scope, signal) => (
       requestFormData<SaveCanvasTextPreviewSourceResult>(
         'POST',
-        projectPathFor(scope.projectId, '/canvas-text-previews/source'),
+        projectPathFor(scope.bindingId, '/canvas-text-previews/source'),
         canvasTextPreviewSourceFormData(input),
         signal
       )
@@ -733,7 +724,7 @@ export function createHttpWorkbenchApiClient(options: {
     readCanvasTextPreviewSources: (input) => runProjectRequest((scope, signal) => (
       request<CanvasTextPreviewSourceAvailabilityResponse>(
         'POST',
-        projectPathFor(scope.projectId, '/canvas-text-previews/sources'),
+        projectPathFor(scope.bindingId, '/canvas-text-previews/sources'),
         input,
         signal
       )
@@ -779,10 +770,14 @@ export function createHttpWorkbenchApiClient(options: {
       `/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`,
       { kind: input.kind }
     ),
-    lookupGeneratedAssetMetadata: (input) => requestForCurrentProject<GeneratedAssetMetadataLookup>('POST', '/generated-assets/lookup', input),
+    lookupModelArtifactProvenance: (input) => requestForCurrentProject<ModelArtifactProvenanceLookup>('POST', '/model-artifacts/lookup', input),
     readCanvasFeedback: () => requestForCurrentProject<CanvasFeedbackDocument>('GET', '/canvas-feedback'),
     updateCanvasFeedback: (input) => requestProjectMutation<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
     createCanvas: () => requestProjectMutation<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
+    resetCanvasWorkspace: () => requestProjectMutation<RevisionedProjectCommandResult>(
+      'POST',
+      projectPath('/canvases/reset-workspace')
+    ),
     renameCanvas: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
       'PATCH',
       projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`),
@@ -794,33 +789,17 @@ export function createHttpWorkbenchApiClient(options: {
     ),
     reorderCanvases: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
       'PUT',
-      projectPath('/canvases/index'),
+      projectPath('/canvases/order'),
       input
     ),
-    repairCanvasIndex: () => requestProjectMutation<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases/index/repair')),
-    addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => requestProjectMutation<WorkbenchAddProjectPathToCanvasMapResult>(
+    activateCanvas: (canvasId) => requestProjectMutation<RevisionedProjectCommandResult>(
       'POST',
-      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/canvas-map/project-paths`),
-      { projectRelativePath: input.projectRelativePath }
+      projectPath(`/canvases/${encodeURIComponent(canvasId)}/activate`)
     ),
-    updateCanvasNodeLayouts: (input) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>('PATCH', projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/node-layouts`), {
-      interaction: input.interaction,
-      nodeLayouts: input.nodeLayouts
-    }),
-    resetCanvasNodeLayouts: (input) => requestProjectMutation<WorkbenchCanvasResetLayoutResult>(
-      'POST',
-      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/reset-layout`),
-      'all' in input ? { all: true } : { nodePaths: input.nodePaths }
-    ),
-    updateCanvasVideoPlaybackState: (input: UpdateCanvasVideoPlaybackStateInput) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>(
+    patchCanvasState: (input) => requestProjectMutation<WorkbenchCanvasStateMutationResult>(
       'PATCH',
-      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/video-playback`),
-      { updates: input.updates }
-    ),
-    updateCanvasTextViewportState: (input: UpdateCanvasTextViewportStateInput) => requestProjectMutation<WorkbenchCanvasDocumentMutationResult>(
-      'PATCH',
-      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}/text-viewport`),
-      { updates: input.updates }
+      projectPath('/canvases/state'),
+      input
     ),
     integrationsRescan: () => request<{ ok: true }>('POST', '/api/integrations/rescan', {}),
     integrationsRunOperation: (input: RunIntegrationOperationInput) => request<RunIntegrationOperationResult>(
@@ -879,7 +858,6 @@ export function createHttpWorkbenchApiClient(options: {
 
 function isProjectScopedActivityNotice(input: WorkbenchActivityNoticeInput): boolean {
   return input.kind === 'project-opened'
-    || input.kind === 'project-view-state-reset'
     || input.kind === 'project-operation-failed'
     || input.kind === 'canvas-operation-failed'
     || input.kind === 'explorer-operation-failed';
@@ -925,9 +903,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function requestedProjectIdFromLocation(): string | undefined {
-  const match = location.pathname.match(/^\/projects\/([^/]+)$/);
-  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+function requestedProjectRootFromLocation(): string | undefined {
+  if (location.pathname !== '/open') {
+    return undefined;
+  }
+  const values = new URLSearchParams(location.search).getAll('path');
+  return values.length === 1 && values[0] ? values[0] : undefined;
 }
 
 function encodeProjectPath(projectRelativePath: string): string {

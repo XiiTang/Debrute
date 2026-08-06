@@ -4,8 +4,7 @@ import type { DebruteProductPlatform } from '@debrute/app-protocol';
 
 export type DesktopOpenIntent =
   | { kind: 'new-window' }
-  | { kind: 'open-project-path'; projectRoot: string }
-  | { kind: 'open-project-id'; projectId: string };
+  | { kind: 'open-project-path'; projectRoot: string };
 
 export interface NativeRecentProjectHost {
   addRecentDocument(path: string): void;
@@ -18,20 +17,12 @@ export function parseDesktopOpenIntent(argv: string[]): DesktopOpenIntent | unde
     return { kind: 'new-window' };
   }
   let openProjectValue: string | undefined;
-  let projectIdValue: string | undefined;
   for (let index = argv.length - 1; index >= 0; index -= 1) {
     const value = argv[index];
-    if (value?.startsWith('--open-project=')) {
-      openProjectValue = value.slice('--open-project='.length);
+    if (value?.startsWith('--debrute-project-root=')) {
+      openProjectValue = value.slice('--debrute-project-root='.length);
       break;
     }
-    if (value?.startsWith('--debrute-project-id=')) {
-      projectIdValue = value.slice('--debrute-project-id='.length);
-      break;
-    }
-  }
-  if (projectIdValue) {
-    return { kind: 'open-project-id', projectId: projectIdValue };
   }
   if (openProjectValue) {
     return { kind: 'open-project-path', projectRoot: openProjectValue };
@@ -81,7 +72,7 @@ function windowsJumpList(execPath: string, recentProjectRoots: string[]): JumpLi
         title: projectDisplayName(projectRoot),
         description: projectRoot,
         program: execPath,
-        args: `--open-project="${projectRoot.replace(/"/g, '\\"')}"`,
+        args: `--debrute-project-root="${projectRoot.replace(/"/g, '\\"')}"`,
         iconPath: 'explorer.exe',
         iconIndex: 0
       }))

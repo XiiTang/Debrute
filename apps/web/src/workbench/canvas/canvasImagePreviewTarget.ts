@@ -1,11 +1,11 @@
 import {
   canvasPreviewContinuityKey,
-  canvasPreviewTargetIdentityFromDigest,
-  type ProjectedCanvasNode
+  canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation.js';
 import { canvasImageSource } from './canvasImagePreviews.js';
-import { canvasRawFileProjectId } from './canvasRawFileUrls.js';
+import { canvasRawFileBindingId } from './canvasRawFileUrls.js';
 
 export function canvasImageRasterPreviewRequestForNode(
   node: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'nodeKind' | 'mediaKind' | 'width' | 'availability'>
@@ -20,24 +20,24 @@ export function canvasImageRasterPreviewRequestForNode(
   if (typeof sourceWidth !== 'number' || !Number.isFinite(sourceWidth) || sourceWidth <= 0) {
     throw new Error('Canvas previewable image nodes must include a positive finite source width.');
   }
-  const projectId = canvasRawFileProjectId(node.availability.fileUrl);
+  const bindingId = canvasRawFileBindingId(node.availability.fileUrl);
   const sourceRevision = node.availability.revision;
   const targetIdentity = canvasPreviewTargetIdentityFromDigest(sourceRevision);
   return {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'image',
-      projectId,
+      bindingId,
       projectRelativePath: node.projectRelativePath,
       continuityIdentity: sourceRevision
     }),
     variantTarget: {
       mediaKind: 'image',
-      projectId,
+      bindingId,
       projectRelativePath: node.projectRelativePath,
       targetIdentity,
       sourceWidth,
       srcForWidth: (width) => canvasImageSource({
-        projectId,
+        bindingId,
         projectRelativePath: node.projectRelativePath,
         sourceRevision,
         previewWidth: width

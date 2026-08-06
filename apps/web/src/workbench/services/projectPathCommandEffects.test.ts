@@ -6,7 +6,7 @@ import { createProjectPathCommandEffects } from './projectPathCommandEffects.js'
 describe('Project Path Command effects', () => {
   it('submits through the accepted scope and refuses a scope that can no longer submit', async () => {
     const trashProjectPaths = vi.fn<WorkbenchApiClient['trashProjectPaths']>(async () => ({
-      projectId: 'project-a',
+      bindingId: 'project-a',
       projectRevision: 2,
       results: []
     }));
@@ -15,7 +15,7 @@ describe('Project Path Command effects', () => {
     } as never);
     let canSubmit = true;
     const scope = {
-      projectId: 'project-a',
+      bindingId: 'project-a',
       generation: 1,
       canSubmit: () => canSubmit,
       isCurrent: () => true
@@ -25,7 +25,7 @@ describe('Project Path Command effects', () => {
     };
 
     await expect(effects.trashProjectPaths(scope, input)).resolves.toMatchObject({
-      projectId: 'project-a'
+      bindingId: 'project-a'
     });
     canSubmit = false;
     expect(effects.trashProjectPaths(scope, input)).toBeUndefined();
@@ -40,7 +40,7 @@ describe('Project Path Command effects', () => {
     const effects = createProjectPathCommandEffects({ trashProjectPaths } as never);
     let canSubmit = true;
     const scope = {
-      projectId: 'project-a',
+      bindingId: 'project-a',
       generation: 1,
       canSubmit: () => canSubmit,
       isCurrent: () => true
@@ -52,12 +52,12 @@ describe('Project Path Command effects', () => {
     expect(request).toBeDefined();
     canSubmit = false;
     resolveRequest({
-      projectId: 'project-a',
+      bindingId: 'project-a',
       projectRevision: 2,
       results: []
     });
 
-    await expect(request).resolves.toMatchObject({ projectId: 'project-a' });
+    await expect(request).resolves.toMatchObject({ bindingId: 'project-a' });
     expect(trashProjectPaths).toHaveBeenCalledOnce();
   });
 });

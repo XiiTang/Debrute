@@ -14,17 +14,14 @@ export interface CreateElectronDesktopWindowInput {
   platform: DebruteProductPlatform;
   projectIconPath: string;
   preloadDirectory: string;
-  developmentOrigin: string | undefined;
   onRendererGone(reason: string): void;
 }
 
 export class ElectronDesktopWindow implements DesktopHostedWindow<Electron.BrowserWindow> {
   readonly identity: Electron.BrowserWindow;
-  private readonly developmentOrigin: string | undefined;
   private destroying = false;
 
   constructor(input: CreateElectronDesktopWindowInput) {
-    this.developmentOrigin = input.developmentOrigin;
     this.identity = new BrowserWindow({
       width: 1440,
       height: 940,
@@ -68,7 +65,7 @@ export class ElectronDesktopWindow implements DesktopHostedWindow<Electron.Brows
   }
 
   async load(url: string): Promise<void> {
-    await this.identity.loadURL(rewriteRuntimeUrlForDevelopment(url, this.developmentOrigin));
+    await this.identity.loadURL(url);
   }
 
   destroy(): void {
@@ -82,17 +79,4 @@ export class ElectronDesktopWindow implements DesktopHostedWindow<Electron.Brows
     this.identity.once('closed', listener);
     return () => this.identity.removeListener('closed', listener);
   }
-}
-
-function rewriteRuntimeUrlForDevelopment(
-  url: string,
-  developmentOrigin: string | undefined
-): string {
-  if (!developmentOrigin) {
-    return url;
-  }
-  const source = new URL(url);
-  const target = new URL(developmentOrigin);
-  target.pathname = source.pathname;
-  return target.toString();
 }

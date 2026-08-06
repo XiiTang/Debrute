@@ -324,32 +324,6 @@
   fill: var(--db-canvas-edge);
 }
 
-.canvas-empty-state {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 10;
-  transform: translate(-50%, -50%);
-  min-width: 220px;
-  min-height: 42px;
-  display: grid;
-  place-items: center;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 0;
-  background: var(--db-surface-1);
-  color: var(--db-text-muted);
-  box-shadow: var(--db-shadow-menu);
-  pointer-events: none;
-}
-
-.canvas-empty-state strong {
-  color: var(--db-text-muted);
-  font-size: var(--db-font-lg);
-  font-weight: 700;
-  font-family: var(--db-font-display);
-}
-
 .db-canvas-node-frame {
   border: 0;
   border-radius: 0;

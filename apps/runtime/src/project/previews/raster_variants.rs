@@ -55,7 +55,7 @@ impl RasterPreviewVariantService {
 
     pub(super) fn resolve(
         &self,
-        project_root: &Path,
+        cache_root: &Path,
         mut request: RasterPreviewVariantRequest,
         cancellation: &PreviewCancellation,
         verify_source: impl Fn() -> Result<(), ProjectError>,
@@ -65,7 +65,7 @@ impl RasterPreviewVariantService {
             "{}/raster-engine-v{RASTER_PREVIEW_ENGINE_VERSION}/preview-w{}",
             request.cache_directory, request.width
         );
-        let key = format!("{}\0{cache_base}", project_root.display());
+        let key = format!("{}\0{cache_base}", cache_root.display());
         let _lock = self.locks.acquire(&key, cancellation)?;
         cancellation.check()?;
         verify_source()?;
@@ -95,7 +95,7 @@ impl RasterPreviewVariantService {
 
         let output = output_for(request.output_policy, metadata);
         let variant_path = format!("{cache_base}.{}", output.extension);
-        if let Some((absolute_path, file)) = existing_open_file(project_root, &variant_path)? {
+        if let Some((absolute_path, file)) = existing_open_file(cache_root, &variant_path)? {
             verify_source()?;
             return Ok(CanvasPreviewFile {
                 absolute_path,
@@ -104,7 +104,7 @@ impl RasterPreviewVariantService {
             });
         }
 
-        ProjectCapabilityFs::open(project_root)?.atomic_write_stream_checked(
+        ProjectCapabilityFs::open(cache_root)?.atomic_write_stream_checked(
             &variant_path,
             |output_file| {
                 self.raster.render_variant_to_file(
@@ -118,9 +118,9 @@ impl RasterPreviewVariantService {
             },
             verify_source,
         )?;
-        let file = open_no_symlink_existing_project_file(project_root, &variant_path)?;
+        let file = open_no_symlink_existing_project_file(cache_root, &variant_path)?;
         Ok(CanvasPreviewFile {
-            absolute_path: resolve_no_symlink_existing_project_path(project_root, &variant_path)?,
+            absolute_path: resolve_no_symlink_existing_project_path(cache_root, &variant_path)?,
             file,
             content_type: output.content_type,
         })

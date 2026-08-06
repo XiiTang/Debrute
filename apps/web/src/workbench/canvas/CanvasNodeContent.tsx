@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from '../ui/index.js';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState } from '@debrute/app-protocol';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
@@ -145,7 +146,7 @@ export function CanvasNodeContent({
     textBufferEnsureKey
   ]);
 
-  const availabilityProblem = node.availability.state === 'available'
+  const availabilityProblem = node.availability.state === 'available' || node.availability.state === 'directory'
     ? undefined
     : { title: nodeAvailabilityTitle(node.availability.state, i18n), message: node.availability.message };
   const mediaProblem = node.mediaKind === 'image' || !mediaError ? undefined : { title: i18n.t('canvas.node.loadError'), message: mediaError };
@@ -156,7 +157,7 @@ export function CanvasNodeContent({
   };
 
   if (node.nodeKind === 'directory' || node.mediaKind === 'unknown' || !node.mediaKind) {
-    return <CanvasGenericNodeContent node={node} problem={problem} i18n={i18n} />;
+    return <CanvasGenericNodeContent node={node} problem={problem} />;
   }
 
   if (node.mediaKind === 'text') {
@@ -243,7 +244,7 @@ export function CanvasNodeContent({
           <div className={problem ? 'db-canvas-node-placeholder db-canvas-node-placeholder--problem' : 'db-canvas-node-placeholder'}>
             {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
             <strong>{problem?.title ?? mediaKindLabel(node.mediaKind, i18n)}</strong>
-            <span>{problem?.message ?? nodeDisplayName(node.projectRelativePath, i18n)}</span>
+            <span>{problem?.message ?? nodeDisplayName(node)}</span>
             {mediaProblem ? (
               <Button
                 className="db-canvas-node-retry"
@@ -259,7 +260,7 @@ export function CanvasNodeContent({
       )}
       {node.mediaKind === 'audio' ? (
         <div className="db-canvas-node-caption" data-canvas-node-zone="move">
-          <span>{nodeDisplayName(node.projectRelativePath, i18n)}</span>
+          <span>{nodeDisplayName(node)}</span>
         </div>
       ) : null}
     </>
@@ -320,14 +321,12 @@ function CanvasImageNodeContent({
 
 function CanvasGenericNodeContent({
   node,
-  problem,
-  i18n
+  problem
 }: {
   node: ProjectedCanvasNode;
   problem: { title: string; message: string } | undefined;
-  i18n: WorkbenchI18n;
 }): React.ReactElement {
-  const label = nodeDisplayName(node.projectRelativePath, i18n);
+  const label = nodeDisplayName(node);
   const className = [
     'db-canvas-node-generic',
     problem ? 'db-canvas-node-generic--problem' : '',
@@ -368,7 +367,7 @@ function CanvasImagePlaceholder({
     <div className="db-canvas-node-placeholder">
       <ImageIcon size={22} />
       <strong>{i18n.t('canvas.node.image')}</strong>
-      <span>{nodeDisplayName(node.projectRelativePath, i18n)}</span>
+      <span>{nodeDisplayName(node)}</span>
       {onRetry ? (
         <Button
           className="db-canvas-node-retry"
@@ -557,7 +556,7 @@ function CanvasTextNodeContent({
     <section className="canvas-text-node">
       <CanvasNodeTitleBar
         icon={<FileText size={13} />}
-        title={nodeDisplayName(node.projectRelativePath, i18n)}
+        title={nodeDisplayName(node)}
         status={status ? <StatusPill tone={status.tone}>{status.label}</StatusPill> : null}
         actions={(
           <>
@@ -696,11 +695,8 @@ function textBufferStatus(
   return undefined;
 }
 
-function nodeDisplayName(path: string, i18n: WorkbenchI18n): string {
-  if (path === '') {
-    return i18n.t('canvas.node.projectRoot');
-  }
-  return path.split('/').pop() ?? path;
+function nodeDisplayName(node: ProjectedCanvasNode): string {
+  return node.displayName;
 }
 
 function nodeAvailabilityTitle(state: ProjectedCanvasNode['availability']['state'], i18n: WorkbenchI18n): string {

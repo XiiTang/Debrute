@@ -10,8 +10,7 @@ describe('Workbench routes', () => {
       projectRoot: '/Users/me/Project A'
     });
     expect(parseDebruteWorkbenchPath('/projects/123e4567-e89b-42d3-a456-426614174000')).toEqual({
-      kind: 'project',
-      projectId: '123e4567-e89b-42d3-a456-426614174000'
+      kind: 'not-found'
     });
   });
 

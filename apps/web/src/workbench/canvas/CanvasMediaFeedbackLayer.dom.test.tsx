@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
-import type { CanvasFeedbackSpatialItem } from '@debrute/canvas-core';
+import type { CanvasFeedbackSpatialItem } from '@debrute/app-protocol';
 import { CanvasMediaFeedbackLayer } from './CanvasMediaFeedbackLayer';
 
 it('activates an immutable geometry by stable Feedback Item identity', async () => {

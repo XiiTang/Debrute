@@ -20,7 +20,7 @@ export interface PhotoshopPanelPresentation {
 export interface DestinationTreeItemPresentation {
   kind: 'project' | 'directory';
   key: string;
-  projectId: string;
+  canonicalRoot: string;
   directory: string;
   label: string;
   depth: number;
@@ -84,19 +84,19 @@ export function destinationTreePresentation(
   snapshot: PhotoshopPluginSnapshot
 ): DestinationTreePresentation {
   const expanded = new Set(snapshot.expandedDirectories.map((entry) => treeIdentity(
-    entry.projectId,
+    entry.canonicalRoot,
     entry.directory
   )));
   const selected = snapshot.destination === null
     ? null
-    : treeIdentity(snapshot.destination.projectId, snapshot.destination.directory);
+    : treeIdentity(snapshot.destination.canonicalRoot, snapshot.destination.directory);
   const roots = [...snapshot.projects]
     .sort((left, right) => naturalCompare(left.name, right.name))
     .map((project): DestinationTreeItemPresentation => {
-      const key = treeIdentity(project.projectId, '');
+      const key = treeIdentity(project.canonicalRoot, '');
       const isExpanded = expanded.has(key);
       const tree = snapshot.directoryTrees.find((candidate) => (
-        candidate.projectId === project.projectId
+        candidate.canonicalRoot === project.canonicalRoot
         && candidate.projectRevision === project.revision
       ));
       let children: DestinationTreeNodePresentation[] = [];
@@ -109,7 +109,7 @@ export function destinationTreePresentation(
               depth: 1
             }]
           : directoryTreeChildren({
-              projectId: project.projectId,
+              canonicalRoot: project.canonicalRoot,
               directories: tree.directories,
               parentDirectory: '',
               depth: 1,
@@ -120,7 +120,7 @@ export function destinationTreePresentation(
       return {
         kind: 'project',
         key,
-        projectId: project.projectId,
+        canonicalRoot: project.canonicalRoot,
         directory: '',
         label: project.name,
         depth: 0,
@@ -210,7 +210,7 @@ export class PhotoshopPanelView {
       && snapshot.destination !== null) {
       const destinationElement = findTreeItem(
         this.root,
-        snapshot.destination.projectId,
+        snapshot.destination.canonicalRoot,
         snapshot.destination.directory
       );
       if (destinationElement) {
@@ -230,21 +230,21 @@ export class PhotoshopPanelView {
 
   private bind(tree: DestinationTreePresentation): void {
     const visibleItems = flattenDestinationTree(tree.roots);
-    for (const element of this.root.querySelectorAll<HTMLElement>('[role="treeitem"][data-project-id][data-directory]')) {
+    for (const element of this.root.querySelectorAll<HTMLElement>('[role="treeitem"][data-canonical-root][data-directory]')) {
       element.addEventListener('click', () => {
-        const projectId = element.getAttribute('data-project-id');
+        const canonicalRoot = element.getAttribute('data-canonical-root');
         const directory = element.getAttribute('data-directory');
-        if (projectId !== null && directory !== null) {
+        if (canonicalRoot !== null && directory !== null) {
           this.focusDestinationAfterRender = true;
-          this.runtime.activateDestination(projectId, directory);
+          this.runtime.activateDestination(canonicalRoot, directory);
         }
       });
       element.addEventListener('keydown', (event) => {
-        const projectId = element.getAttribute('data-project-id');
+        const canonicalRoot = element.getAttribute('data-canonical-root');
         const directory = element.getAttribute('data-directory');
-        if (projectId === null || directory === null) return;
+        if (canonicalRoot === null || directory === null) return;
         const currentIndex = visibleItems.findIndex(({ item }) => (
-          item.projectId === projectId && item.directory === directory
+          item.canonicalRoot === canonicalRoot && item.directory === directory
         ));
         if (currentIndex === -1) return;
         const current = visibleItems[currentIndex];
@@ -253,28 +253,28 @@ export class PhotoshopPanelView {
         let action: (() => void) | undefined;
         if (event.key === 'ArrowUp') {
           const previous = visibleItems[currentIndex - 1]?.item;
-          if (previous) action = () => this.runtime.selectDestination(previous.projectId, previous.directory);
+          if (previous) action = () => this.runtime.selectDestination(previous.canonicalRoot, previous.directory);
         } else if (event.key === 'ArrowDown') {
           const next = visibleItems[currentIndex + 1]?.item;
-          if (next) action = () => this.runtime.selectDestination(next.projectId, next.directory);
+          if (next) action = () => this.runtime.selectDestination(next.canonicalRoot, next.directory);
         } else if (event.key === 'ArrowRight') {
           if (current.item.expandable && !current.item.expanded) {
-            action = () => this.runtime.expandDestination(projectId, directory);
+            action = () => this.runtime.expandDestination(canonicalRoot, directory);
           } else {
             const firstChild = current.item.children.find((child) => child.kind !== 'loading');
             if (firstChild) {
-              action = () => this.runtime.selectDestination(firstChild.projectId, firstChild.directory);
+              action = () => this.runtime.selectDestination(firstChild.canonicalRoot, firstChild.directory);
             }
           }
         } else if (event.key === 'ArrowLeft') {
           if (current.item.expanded) {
-            action = () => this.runtime.collapseDestination(projectId, directory);
+            action = () => this.runtime.collapseDestination(canonicalRoot, directory);
           } else if (current.parent) {
             const parent = current.parent;
-            action = () => this.runtime.selectDestination(parent.projectId, parent.directory);
+            action = () => this.runtime.selectDestination(parent.canonicalRoot, parent.directory);
           }
         } else if (event.key === 'Enter' || event.key === ' ') {
-          action = () => this.runtime.activateDestination(projectId, directory);
+          action = () => this.runtime.activateDestination(canonicalRoot, directory);
         } else {
           handled = false;
         }
@@ -298,7 +298,7 @@ export class PhotoshopPanelView {
       event.preventDefault();
       event.stopPropagation();
       this.focusDestinationAfterRender = true;
-      this.runtime.selectDestination(target.projectId, target.directory);
+      this.runtime.selectDestination(target.canonicalRoot, target.directory);
     });
     this.root.querySelector<HTMLButtonElement>('[data-action="send"]')?.addEventListener('click', () => {
       void this.runtime.sendSelection().catch(() => undefined);
@@ -341,7 +341,7 @@ function naturalCompare(left: string, right: string): number {
 }
 
 function directoryTreeChildren(input: {
-  projectId: string;
+  canonicalRoot: string;
   directories: readonly string[];
   parentDirectory: string;
   depth: number;
@@ -349,13 +349,13 @@ function directoryTreeChildren(input: {
   selected: string | null;
 }): DestinationTreeItemPresentation[] {
   return directChildren(input.directories, input.parentDirectory).map((child) => {
-    const key = treeIdentity(input.projectId, child.directory);
+    const key = treeIdentity(input.canonicalRoot, child.directory);
     const children = directChildren(input.directories, child.directory);
     const isExpanded = input.expanded.has(key);
     return {
       kind: 'directory',
       key,
-      projectId: input.projectId,
+      canonicalRoot: input.canonicalRoot,
       directory: child.directory,
       label: child.label,
       depth: input.depth,
@@ -373,8 +373,8 @@ function directoryTreeChildren(input: {
   });
 }
 
-function treeIdentity(projectId: string, directory: string): string {
-  return `${projectId.length}:${projectId}:${directory}`;
+function treeIdentity(canonicalRoot: string, directory: string): string {
+  return `${canonicalRoot.length}:${canonicalRoot}:${directory}`;
 }
 
 function renderDestinationTreeNode(node: DestinationTreeItemPresentation): string {
@@ -393,7 +393,7 @@ function renderDestinationTreeNode(node: DestinationTreeItemPresentation): strin
       </div>`;
   return `<div class="photoshop-panel__tree-node" role="none">
     <div class="photoshop-panel__tree-row${node.selected ? ' photoshop-panel__tree-row--selected' : ''}" role="treeitem"
-      data-project-id="${escapeHtml(node.projectId)}" data-directory="${escapeHtml(node.directory)}"
+      data-canonical-root="${escapeHtml(node.canonicalRoot)}" data-directory="${escapeHtml(node.directory)}"
       aria-level="${node.depth + 1}" aria-selected="${node.selected}"${expandedAttribute}
       ${groupId === null ? '' : `aria-owns="${escapeHtml(groupId)}"`}
       style="--tree-indent: ${node.depth * TREE_INDENT_PX}px"
@@ -443,11 +443,11 @@ function flattenDestinationTree(
 
 function findTreeItem(
   root: HTMLElement,
-  projectId: string,
+  canonicalRoot: string,
   directory: string
 ): UxpTreeItemElement | undefined {
   return [...root.querySelectorAll<UxpTreeItemElement>('[role="treeitem"]')].find((element) => (
-    element.getAttribute('data-project-id') === projectId
+    element.getAttribute('data-canonical-root') === canonicalRoot
     && element.getAttribute('data-directory') === directory
   ));
 }

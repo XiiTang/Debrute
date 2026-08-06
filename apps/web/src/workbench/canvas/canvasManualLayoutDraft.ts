@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { buildResizeGeometry } from '../services/canvasInteraction.js';
 import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime.js';
 import type { CanvasPoint } from './runtime/canvasGeometry.js';
@@ -16,8 +16,6 @@ export interface CanvasManualLayoutDraft {
   interaction: 'move' | 'resize';
   nodeLayouts: CanvasLayoutOverride[];
 }
-
-export type CanvasNodeStackOrder = readonly string[];
 
 export function canvasManualLayoutDraftFromMoveInteraction(input: {
   canvasId: string;
@@ -107,34 +105,4 @@ export function canvasNodesWithLayoutOverrides(input: {
         }
       : node;
   });
-}
-
-export function canvasNodeStackOrder(
-  nodes: readonly Pick<ProjectedCanvasNode, 'projectRelativePath' | 'z'>[]
-): string[] {
-  return [...nodes]
-    .sort(compareCanvasNodeStackOrder)
-    .map((node) => node.projectRelativePath);
-}
-
-function compareCanvasNodeStackOrder(
-  left: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'z'>,
-  right: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'z'>
-): number {
-  if (left.z !== right.z) {
-    return left.z < right.z ? -1 : 1;
-  }
-  return left.projectRelativePath < right.projectRelativePath
-    ? -1
-    : left.projectRelativePath > right.projectRelativePath ? 1 : 0;
-}
-
-export function canvasStackOrderWithRaisedGroup(
-  order: readonly string[],
-  raisedPaths: readonly string[]
-): string[] {
-  const raised = new Set(raisedPaths);
-  return order
-    .filter((path) => !raised.has(path))
-    .concat(order.filter((path) => raised.has(path)));
 }

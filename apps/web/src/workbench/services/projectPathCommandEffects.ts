@@ -15,8 +15,6 @@ export type ProjectPathEffectApi = Pick<WorkbenchApiClient,
   | 'importExternalLocalProjectPaths'
   | 'importExternalProjectUploads'
   | 'revealProjectPathInSystemFileManager'
-  | 'addProjectPathToCanvasMap'
-  | 'resetCanvasNodeLayouts'
 >;
 
 export type ProjectPathEffectApiName = keyof ProjectPathEffectApi;
@@ -71,14 +69,6 @@ export function createProjectPathCommandEffects(
     revealProjectPathInSystemFileManager: (scope, input) => submit(
       scope,
       () => api.revealProjectPathInSystemFileManager(input)
-    ),
-    addProjectPathToCanvasMap: (scope, input) => submit(
-      scope,
-      () => api.addProjectPathToCanvasMap(input)
-    ),
-    resetCanvasNodeLayouts: (scope, input) => submit(
-      scope,
-      () => api.resetCanvasNodeLayouts(input)
     )
   };
 }

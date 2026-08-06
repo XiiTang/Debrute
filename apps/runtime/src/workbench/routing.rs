@@ -15,14 +15,12 @@ use axum::{
 };
 use serde::Serialize;
 
+use super::routes::{browser_api_router, cli_api_router, product_api_router};
 use super::{
     CliAuthorizationVerifier, ProjectBindingLease, RuntimeCliHttpService,
     RuntimeProductHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
     WorkbenchLaunchService, WorkbenchRuntimeServices, authority::is_opaque_value,
 };
-use crate::project::is_valid_stable_project_id;
-
-use super::routes::{browser_api_router, cli_api_router, product_api_router};
 
 #[derive(Clone)]
 pub(super) struct WorkbenchRouterState {
@@ -45,7 +43,8 @@ pub(super) struct CliRequestAuthorization(pub String);
 
 #[derive(Debug, Clone)]
 pub(super) struct ProjectAuthorization {
-    pub project_id: String,
+    pub binding_id: String,
+    pub canonical_root: String,
     _binding_generation: u64,
     _lease: ProjectBindingLease,
 }
@@ -195,12 +194,7 @@ fn is_workbench_page_route(path: &str, query: Option<&str>) -> bool {
     match path {
         "/" => query.is_none(),
         "/open" => query.is_none_or(valid_open_query),
-        _ => {
-            query.is_none()
-                && path
-                    .strip_prefix("/projects/")
-                    .is_some_and(is_valid_stable_project_id)
-        }
+        _ => false,
     }
 }
 
@@ -318,9 +312,9 @@ async fn authorize_workbench_api(
         .extensions()
         .get::<OriginalUri>()
         .map_or_else(|| request.uri().path(), |uri| uri.0.path());
-    let project_id =
-        scoped_project_id(original_path).map(|project_id| project_id.map(str::to_owned));
-    let Ok(project_id) = project_id else {
+    let binding_id =
+        scoped_binding_id(original_path).map(|binding_id| binding_id.map(str::to_owned));
+    let Ok(binding_id) = binding_id else {
         return forbidden();
     };
     let services = &state.services;
@@ -330,10 +324,10 @@ async fn authorize_workbench_api(
         has_exact_header(request.headers(), axum::http::header::UPGRADE, "websocket");
     let is_terminal_websocket = request.uri().path().ends_with("/terminals/ws") && is_websocket;
     let context = if passive_media || is_terminal_websocket {
-        project_id.as_deref().and_then(|project_id| {
+        binding_id.as_deref().and_then(|binding_id| {
             services
                 .connections()
-                .context_for_browser_session_project(&session, project_id)
+                .context_for_browser_session_binding(&session, binding_id)
         })
     } else {
         let Ok(Some(credential)) = one_header(request.headers(), connection_header) else {
@@ -350,8 +344,8 @@ async fn authorize_workbench_api(
         .insert(BrowserSession(session.clone()));
     request.extensions_mut().insert(context.clone());
     let mut project_lifetime = None;
-    if let Some(project_id) = project_id {
-        if context.project_id.as_deref() != Some(project_id.as_str()) {
+    if let Some(binding_id) = binding_id {
+        if context.binding_id.as_deref() != Some(binding_id.as_str()) {
             return forbidden();
         }
         if is_terminal_websocket {
@@ -363,7 +357,7 @@ async fn authorize_workbench_api(
                 .acquire_project_binding_with_lifetime(
                     &session,
                     &context.credential,
-                    &project_id,
+                    &binding_id,
                     context.binding_generation,
                 )
             else {
@@ -371,7 +365,11 @@ async fn authorize_workbench_api(
             };
             project_lifetime = Some(lifetime);
             request.extensions_mut().insert(ProjectAuthorization {
-                project_id,
+                binding_id,
+                canonical_root: context
+                    .canonical_root
+                    .clone()
+                    .expect("authorized Project binding has a canonical root"),
                 _binding_generation: context.binding_generation,
                 _lease: lease,
             });
@@ -512,7 +510,7 @@ fn one_header(headers: &HeaderMap, name: axum::http::HeaderName) -> Result<Optio
     value.to_str().map(Some).map_err(|_| ())
 }
 
-fn scoped_project_id(path: &str) -> Result<Option<&str>, ()> {
+fn scoped_binding_id(path: &str) -> Result<Option<&str>, ()> {
     if matches!(
         path,
         "/api/projects/open"
@@ -522,14 +520,14 @@ fn scoped_project_id(path: &str) -> Result<Option<&str>, ()> {
     ) {
         return Ok(None);
     }
-    let Some(tail) = path.strip_prefix("/api/projects/") else {
+    let Some(tail) = path.strip_prefix("/api/workbench/bindings/") else {
         return Ok(None);
     };
-    let project_id = tail.split('/').next().ok_or(())?;
-    if !is_valid_stable_project_id(project_id) {
+    let binding_id = tail.split('/').next().ok_or(())?;
+    if !is_opaque_value(binding_id) {
         return Err(());
     }
-    Ok(Some(project_id))
+    Ok(Some(binding_id))
 }
 
 fn is_passive_project_media_route(path: &str) -> bool {
@@ -563,7 +561,7 @@ mod tests {
             "/open",
             Some("path=%2FUsers%2Fme%2FProject%20A")
         ));
-        assert!(is_workbench_page_route("/projects/project-1._~", None));
+        assert!(!is_workbench_page_route("/projects/project-1._~", None));
 
         for (path, query) in [
             ("/settings", None),
@@ -589,16 +587,16 @@ mod tests {
     #[test]
     fn passive_project_media_routes_cover_dom_resource_requests_only() {
         assert!(is_passive_project_media_route(
-            "/api/projects/project-1/canvas-image-preview"
+            "/api/workbench/bindings/binding-1/canvas-image-preview"
         ));
         assert!(is_passive_project_media_route(
-            "/api/projects/project-1/canvas-text-preview"
+            "/api/workbench/bindings/binding-1/canvas-text-preview"
         ));
         assert!(is_passive_project_media_route(
-            "/api/projects/project-1/canvas-video-preview"
+            "/api/workbench/bindings/binding-1/canvas-video-preview"
         ));
         assert!(!is_passive_project_media_route(
-            "/api/projects/project-1/canvas-text-previews/source"
+            "/api/workbench/bindings/binding-1/canvas-text-previews/source"
         ));
     }
 }

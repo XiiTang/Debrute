@@ -1,25 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { canvasImageRasterPreviewRequestForNode } from './canvasImagePreviewTarget';
 
 describe('canvas image preview target', () => {
   it('provides canonical source width and width-specific Runtime URLs', () => {
     const request = canvasImageRasterPreviewRequestForNode(
-      nodeFixture('flow/cover art.png', 2400, 'image/png')
+      nodeFixture('flow/cover art.png', 2400, 'image/png', true)
     );
 
     expect(request.variantTarget?.sourceWidth).toBe(2400);
     expect(request.variantTarget?.srcForWidth(600)).toBe(
-      '/api/projects/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?path=flow%2Fcover+art.png&sourceRevision=rev&w=600'
+      '/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/canvas-image-preview?path=flow%2Fcover+art.png&sourceRevision=rev&w=600'
     );
   });
 
   it('does not create raster targets for unsupported image nodes', () => {
     expect(canvasImageRasterPreviewRequestForNode(
-      nodeFixture('flow/animated.gif', 1000, 'image/gif')
+      nodeFixture('flow/animated.gif', 1000, 'image/gif', false)
     )).toEqual({});
     expect(canvasImageRasterPreviewRequestForNode({
-      ...nodeFixture('flow/movie.mp4', 1000, 'video/mp4'),
+      ...nodeFixture('flow/movie.mp4', 1000, 'video/mp4', false),
       mediaKind: 'video'
     })).toEqual({});
     expect(canvasImageRasterPreviewRequestForNode(
@@ -42,12 +42,13 @@ function nodeFixture(
   path: string,
   width: number,
   mimeType: string,
-  canvasImagePreviewable = isStillRasterMimeType(mimeType),
+  canvasImagePreviewable: boolean,
   canvasImagePreviewSourceWidth = width,
   fileUrl = rawUrl(path)
 ): ProjectedCanvasNode {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'file',
     mediaKind: 'image',
     x: 0,
@@ -69,9 +70,5 @@ function nodeFixture(
 
 function rawUrl(path: string): string {
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-  return `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${encodedPath}?v=rev`;
-}
-
-function isStillRasterMimeType(mimeType: string): boolean {
-  return mimeType === 'image/png' || mimeType === 'image/jpeg' || mimeType === 'image/webp';
+  return `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${encodedPath}?v=rev`;
 }

@@ -1,15 +1,8 @@
 import type {
-  CanvasDocument,
-  CanvasFeedbackDocument,
-  CanvasFeedbackGeometry,
-  CanvasProjection,
-  ProjectDiagnostic,
-  UpdateCanvasFeedbackInput
-} from '@debrute/canvas-core';
-import type {
-  DebruteProjectMetadata,
   ProjectPathEntry,
   ProjectPathBatchOperationResult,
+  ProjectTextLanguageId,
+  ProjectTreeEntry,
   ProjectTextFile,
   WriteProjectTextFileInput
 } from './project.js';
@@ -23,19 +16,203 @@ import {
 export * from './runtimeControl.js';
 export * from './photoshopPlugin.js';
 export { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute } from './workbenchRoute.js';
-export type { DebruteShellApi, NativeWindowState } from './desktopShell.js';
+export type {
+  DebruteShellApi,
+  NativeMenuCommandResult,
+  NativeProjectOpenFailure,
+  NativeWindowState
+} from './desktopShell.js';
 export type { DebruteProductPlatform } from './productPlatform.js';
 export type {
   ProjectPathEntry,
+  ProjectTreeEntry,
   ProjectTextLanguageId,
   WriteProjectTextFileInput
 } from './project.js';
 
 export type { NativeEditCommandId, NativeMenuCommand, NativeMenuCommandId } from './workbenchChrome.js';
 
+export type CanvasNodeKind = 'directory' | 'file';
+export type CanvasMediaKind = 'image' | 'video' | 'audio' | 'text' | 'unknown';
+export type ProjectDiagnosticSeverity = 'error' | 'warning';
+
+export interface ProjectDiagnostic {
+  id: string;
+  severity: ProjectDiagnosticSeverity;
+  code: string;
+  message: string;
+  filePath?: string;
+  line?: number;
+  column?: number;
+  entityId?: string;
+}
+
+export interface CanvasCatalogEntry {
+  id: string;
+  name: string;
+}
+
+export interface CanvasManualLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CanvasVideoPlaybackState {
+  currentTimeMs: number;
+}
+
+export interface CanvasTextViewportState {
+  scrollTop: number;
+  scrollLeft: number;
+}
+
+export interface CanvasNodeState {
+  manualLayout?: CanvasManualLayout;
+  videoPlayback?: CanvasVideoPlaybackState;
+  textViewport?: CanvasTextViewportState;
+}
+
+export interface CanvasState {
+  expandedDirectories: string[];
+  nodeStates: Record<string, CanvasNodeState>;
+  occlusionOrder: string[];
+}
+
+export type CanvasNodeAvailability =
+  | {
+      state: 'available';
+      size: number;
+      mimeType: string;
+      fileUrl: string;
+      canvasImagePreviewable?: boolean;
+      canvasImagePreviewSourceWidth?: number;
+      mtimeMs?: number;
+      revision: string;
+    }
+  | { state: 'missing'; message: string }
+  | { state: 'unreadable'; message: string };
+
+export interface CanvasVideoTextTrack {
+  projectRelativePath: string;
+  fileUrl?: string;
+  revision: string;
+  kind: 'subtitles' | 'captions' | 'chapters' | 'metadata';
+  label: string;
+  srclang?: string;
+  default: boolean;
+}
+
+export interface CanvasVideoPresentation {
+  kind: 'video';
+  width: number;
+  height: number;
+  durationSeconds?: number;
+  textTracks: CanvasVideoTextTrack[];
+}
+
+export interface CanvasImageDimensions {
+  width: number;
+  height: number;
+}
+
+export type CanvasResource =
+  | { projectRelativePath: string; nodeKind: 'directory' }
+  | {
+      projectRelativePath: string;
+      nodeKind: 'file';
+      mediaKind: CanvasMediaKind;
+      availability: CanvasNodeAvailability;
+      imageDimensions?: CanvasImageDimensions;
+      textLanguage?: ProjectTextLanguageId;
+      videoPresentation?: CanvasVideoPresentation;
+    };
+
+export interface CanvasResourceView {
+  canvasId: string;
+  resources: CanvasResource[];
+  diagnostics: ProjectDiagnostic[];
+}
+
+export const CANVAS_FEEDBACK_MARKS = [
+  'like',
+  'dislike',
+  'check',
+  'cross',
+  'pending',
+  'important',
+  'needs_revision'
+] as const;
+
+export type CanvasFeedbackMark = typeof CANVAS_FEEDBACK_MARKS[number];
+export type CanvasFeedbackGeometry =
+  | { type: 'point'; x: number; y: number }
+  | { type: 'rect'; x: number; y: number; width: number; height: number };
+
+export interface CanvasFeedbackMomentRef {
+  label: string;
+  currentTimeSeconds: number;
+}
+
+interface CanvasFeedbackItemBase {
+  id: string;
+  comment: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+type CanvasFeedbackCommentItem =
+  | (CanvasFeedbackItemBase & { kind: 'comment'; scope: 'node' })
+  | (CanvasFeedbackItemBase & { kind: 'comment'; scope: 'moment'; moment: CanvasFeedbackMomentRef });
+
+export type CanvasFeedbackSpatialItem =
+  | (CanvasFeedbackItemBase & {
+      kind: 'pin' | 'region';
+      scope: 'node';
+      label: number;
+      geometry: CanvasFeedbackGeometry;
+    })
+  | (CanvasFeedbackItemBase & {
+      kind: 'pin' | 'region';
+      scope: 'moment';
+      label: number;
+      geometry: CanvasFeedbackGeometry;
+      moment: CanvasFeedbackMomentRef;
+    });
+
+export type CanvasFeedbackItem = CanvasFeedbackCommentItem | CanvasFeedbackSpatialItem;
+
+export interface CanvasFeedbackEntry {
+  projectRelativePath: string;
+  marks: CanvasFeedbackMark[];
+  nextMomentLabel: number;
+  nextSpatialLabel: number;
+  items: CanvasFeedbackItem[];
+  updatedAt: string;
+}
+
+export interface CanvasFeedbackDocument {
+  updatedAt: string;
+  entries: Record<string, CanvasFeedbackEntry>;
+}
+
+export type UpdateCanvasFeedbackInput =
+  | { operation: 'set-mark'; projectRelativePaths: string[]; mark: CanvasFeedbackMark; selected: boolean }
+  | {
+      operation: 'add-item';
+      projectRelativePath: string;
+      item:
+        | { id: string; createdAt: string; kind: 'comment'; scope: 'node'; comment: string }
+        | { id: string; createdAt: string; kind: 'comment'; scope: 'moment'; momentTimeSeconds: number; comment: string }
+        | { id: string; createdAt: string; kind: 'pin' | 'region'; scope: 'node'; geometry: CanvasFeedbackGeometry; comment: string }
+        | { id: string; createdAt: string; kind: 'pin' | 'region'; scope: 'moment'; momentTimeSeconds: number; geometry: CanvasFeedbackGeometry; comment: string };
+    }
+  | { operation: 'update-item'; projectRelativePath: string; itemId: string; geometry?: CanvasFeedbackGeometry; comment?: string }
+  | { operation: 'delete-item'; projectRelativePath: string; itemId: string };
+
 interface ProjectHealthSummary {
   projectName: string;
-  canvasCount: number;
   diagnosticCounts: {
     errors: number;
     warnings: number;
@@ -44,42 +221,52 @@ interface ProjectHealthSummary {
   checkedAt: string;
 }
 
-type CanvasRegistryErrorCode =
-  | 'canvas_registry_missing'
-  | 'canvas_registry_invalid'
-  | 'canvas_registry_conflict'
-  | 'canvas_registry_repair_failed';
+export type CanvasWorkspaceCanvas = CanvasCatalogEntry & CanvasState;
 
-type CanvasRegistryState =
+export interface CanvasWorkspaceDocument {
+  canonicalRoot: string;
+  activeCanvasId: string;
+  canvases: CanvasWorkspaceCanvas[];
+}
+
+const CANVAS_WORKSPACE_UNAVAILABLE_CODES = [
+  'canvas_workspace_invalid',
+  'canvas_workspace_unreadable',
+  'canvas_workspace_root_mismatch',
+  'canvas_workspace_persistence_failed'
+] as const;
+
+export type CanvasWorkspaceUnavailableCode =
+  typeof CANVAS_WORKSPACE_UNAVAILABLE_CODES[number];
+
+export type CanvasWorkspaceSnapshot =
   | {
-      status: 'ready';
-      canvasOrder: string[];
+      status: 'available';
+      workspace: CanvasWorkspaceDocument;
+      activeCanvasResources: CanvasResourceView;
     }
   | {
-      status: 'invalid';
-      code: CanvasRegistryErrorCode;
+      status: 'unavailable';
+      code: CanvasWorkspaceUnavailableCode;
       message: string;
     };
 
 interface ProjectSessionSnapshot {
-  projectRoot: string;
-  metadata: DebruteProjectMetadata;
-  files: ProjectPathEntry[];
-  canvases: CanvasDocument[];
-  projections: CanvasProjection[];
+  canonicalRoot: string;
+  projectTree: ProjectTreeEntry[];
+  canvasWorkspace: CanvasWorkspaceSnapshot;
   diagnostics: ProjectDiagnostic[];
-  canvasRegistry: CanvasRegistryState;
   health: ProjectHealthSummary;
 }
 
 export type WorkbenchProjectHealthSummary = Omit<ProjectHealthSummary, 'runtimeDataLocation'>;
-export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'projectRoot' | 'health'> & {
+export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'health'> & {
   health: WorkbenchProjectHealthSummary;
 };
 export type WorkbenchProjectTextFile = Omit<ProjectTextFile, 'absolutePath'>;
 
-interface RevisionedProjectResult {
-  projectId: string;
+export interface RevisionedProjectResult {
+  bindingId: string;
   projectRevision: number;
 }
 
@@ -110,11 +297,6 @@ export interface CanvasTextAppearance {
   ligatures: boolean;
 }
 
-interface RecentProjectView {
-  projectId: string;
-  projectRoot: string;
-}
-
 interface DebruteGlobalWorkbenchSettings {
   locale: WorkbenchLocale;
   themePreference: WorkbenchThemePreference;
@@ -125,7 +307,7 @@ interface DebruteGlobalCanvasSettings {
 }
 
 interface DebruteGlobalChromeSettings {
-  recentProjects: RecentProjectView[];
+  recentProjectRoots: string[];
 }
 
 export interface DebruteGlobalSettingsView {
@@ -211,17 +393,16 @@ export interface RuntimeProjectUploadImportPlan {
 }
 
 export interface WorkbenchProjectOpenResult extends RevisionedProjectResult {
+  canonicalRoot: string;
   snapshot: WorkbenchProjectSessionSnapshot;
   workingCopies: WorkbenchWorkingCopies;
 }
 
-export type WorkbenchProjectTarget =
-  | { projectRoot: string }
-  | { projectId: string };
+export type WorkbenchProjectTarget = { projectRoot: string };
 
 type WorkbenchProjectOpenOutcome =
   | WorkbenchProjectOpenResult
-  | { outcome: 'focused_existing_desktop'; projectId: string };
+  | { outcome: 'focused_existing_desktop'; canonicalRoot: string };
 
 export interface WorkbenchTextWorkingCopy {
   projectRelativePath: string;
@@ -346,23 +527,6 @@ export type CanvasVideoPreviewEnsureResponse =
   | { status: 'ready'; canonicalSourceIdentity: string; sourceWidth: number }
   | { status: 'source-changed' }
   | { status: 'failed'; message: string };
-
-export interface UpdateCanvasVideoPlaybackStateInput {
-  canvasId: string;
-  updates: Array<{
-    projectRelativePath: string;
-    currentTimeMs: number;
-  }>;
-}
-
-export interface UpdateCanvasTextViewportStateInput {
-  canvasId: string;
-  updates: Array<{
-    projectRelativePath: string;
-    scrollTop: number;
-    scrollLeft: number;
-  }>;
-}
 
 interface ApiKeySettingState {
   apiKeySet: boolean;
@@ -573,63 +737,38 @@ export interface DebruteProductState {
   update: ProductUpdateState;
 }
 
-type GeneratedArtifactRole =
-  | 'primary-image'
-  | 'primary-video'
-  | 'last-frame'
-  | 'tts-audio'
-  | 'music-audio'
-  | 'sound-effect-audio'
-  | 'other';
-
-export interface GeneratedAssetRecord {
-  recordId: string;
-  modelRunId: string;
-  projectRelativePath: string;
-  createdAt: string;
-  artifactRole: GeneratedArtifactRole;
+export interface ModelArtifactProvenanceRecord {
+  operationId: string;
+  itemIndex: number;
   artifactIndex: number;
-  fingerprint: {
-    algorithm: 'sha256';
-    hash: string;
-  };
-  modelRun: {
-    request: unknown;
+  outputPath: string;
+  createdAt: string;
+  mimeType: string;
+  request: unknown;
+  response: {
+    trace: unknown[];
     output: unknown;
   };
 }
 
-interface GeneratedAssetMetadataDiagnostic {
-  code: string;
-  message: string;
-  recordId?: string;
-  metadataPath?: string;
+export interface ModelArtifactProvenanceLookup {
+  sha256: string;
+  record: ModelArtifactProvenanceRecord | null;
 }
 
-export type GeneratedAssetMetadataLookup =
-  | {
-      status: 'matched';
-      fingerprint: {
-        algorithm: 'sha256';
-        hash: string;
-      };
-      records: GeneratedAssetRecord[];
-      diagnostics: GeneratedAssetMetadataDiagnostic[];
-    }
-  | {
-      status: 'unmatched';
-      fingerprint: {
-        algorithm: 'sha256';
-        hash: string;
-      };
-      diagnostics: GeneratedAssetMetadataDiagnostic[];
-    }
-  | {
-      status: 'unavailable';
-      reason: 'missing' | 'unreadable' | 'metadata_unreadable';
-      message: string;
-      diagnostics: GeneratedAssetMetadataDiagnostic[];
-    };
+export interface CanvasNodeStateUpdate {
+  projectRelativePath: string;
+  manualLayout?: CanvasManualLayout | null;
+  videoPlayback?: CanvasVideoPlaybackState | null;
+  textViewport?: CanvasTextViewportState | null;
+}
+
+export interface PatchCanvasStateInput {
+  canvasId: string;
+  expandedDirectories?: string[];
+  nodeStateUpdates?: CanvasNodeStateUpdate[];
+  occlusionOrder?: string[];
+}
 
 type TerminalSessionStatus = 'starting' | 'running' | 'terminating' | 'exited' | 'failed';
 
@@ -741,25 +880,7 @@ export type TerminalServerFrame =
   | { type: 'exit'; terminalId: string; exitCode: number | null; signal: string | null }
   | { type: 'error'; requestId: number | null; terminalId: string | null; code: string; message: string };
 
-export interface AddProjectPathToCanvasMapInput {
-  canvasId: string;
-  projectRelativePath: string;
-}
-
-type ResetCanvasNodeLayoutsInput = {
-  canvasId: string;
-} & (
-  | { all: true }
-  | { nodePaths: string[] }
-);
-
-export interface WorkbenchAddProjectPathToCanvasMapResult extends RevisionedProjectResult {}
-
-export interface WorkbenchCanvasDocumentMutationResult extends RevisionedProjectResult {}
-
-export interface WorkbenchCanvasResetLayoutResult extends WorkbenchCanvasDocumentMutationResult {
-  resetCount: number;
-}
+export interface WorkbenchCanvasStateMutationResult extends RevisionedProjectResult {}
 
 export interface WorkbenchCanvasFeedbackMutationResult extends RevisionedProjectResult {}
 
@@ -802,7 +923,7 @@ export type ActivitySource =
   | 'integration';
 
 export interface ActivityProjectContext {
-  projectId: string;
+  canonicalRoot: string;
   projectName: string;
 }
 
@@ -813,14 +934,16 @@ export type CanvasActivityOperation =
   | 'save-text-viewport'
   | 'save-layout'
   | 'save-video-playback'
-  | 'add-to-canvas-map'
-  | 'repair-registry'
+  | 'set-directory-disclosure'
+  | 'reveal-path'
+  | 'raise-selection'
   | 'create'
   | 'rename'
   | 'delete'
   | 'reorder'
   | 'reset-auto-layout'
   | 'reset-layout'
+  | 'reset-workspace'
   | 'copy-path';
 export type ExplorerActivityOperation =
   | 'load-directory'
@@ -836,7 +959,6 @@ export type IntegrationActivityOperation = 'install' | 'update' | 'uninstall';
 
 export type WorkbenchActivityNoticeInput =
   | { kind: 'project-opened' }
-  | { kind: 'project-view-state-reset' }
   | { kind: 'project-operation-failed'; operation: ProjectActivityOperation }
   | { kind: 'canvas-operation-failed'; operation: CanvasActivityOperation }
   | { kind: 'explorer-operation-failed'; operation: ExplorerActivityOperation }
@@ -885,14 +1007,16 @@ const CANVAS_ACTIVITY_OPERATIONS = new Set<CanvasActivityOperation>([
   'save-text-viewport',
   'save-layout',
   'save-video-playback',
-  'add-to-canvas-map',
-  'repair-registry',
+  'set-directory-disclosure',
+  'reveal-path',
+  'raise-selection',
   'create',
   'rename',
   'delete',
   'reorder',
   'reset-auto-layout',
   'reset-layout',
+  'reset-workspace',
   'copy-path'
 ]);
 const EXPLORER_ACTIVITY_OPERATIONS = new Set<ExplorerActivityOperation>([
@@ -910,9 +1034,9 @@ const ACTIVITY_TASK_STATUSES = new Set<ActivityTaskStatus>([
 
 function isActivityProjectContext(value: unknown): value is ActivityProjectContext {
   return isProtocolObject(value)
-    && hasExactKeys(value, ['projectId', 'projectName'])
-    && typeof value.projectId === 'string'
-    && value.projectId.length > 0
+    && hasExactKeys(value, ['canonicalRoot', 'projectName'])
+    && typeof value.canonicalRoot === 'string'
+    && value.canonicalRoot.length > 0
     && typeof value.projectName === 'string'
     && value.projectName.length > 0;
 }
@@ -921,7 +1045,6 @@ function isActivityMessage(value: unknown): value is ActivityMessage {
   if (!isProtocolObject(value) || typeof value.kind !== 'string') return false;
   switch (value.kind) {
     case 'project-opened':
-    case 'project-view-state-reset':
     case 'update-install-failed':
       return hasExactKeys(value, ['kind']);
     case 'project-operation-failed':
@@ -969,7 +1092,6 @@ function isActivityProgress(value: unknown): value is ActivityProgress {
 function activitySourceForMessage(message: ActivityMessage): ActivitySource {
   switch (message.kind) {
     case 'project-opened':
-    case 'project-view-state-reset':
     case 'project-operation-failed': return 'project';
     case 'canvas-operation-failed': return 'canvas';
     case 'explorer-operation-failed': return 'explorer';
@@ -1050,11 +1172,10 @@ interface WorkbenchFileWatchEvent {
 }
 
 export type WorkbenchEvent =
-  | { type: 'project.changed'; projectId: string; projectRevision: number; snapshot: WorkbenchProjectSessionSnapshot }
-  | { type: 'project.fileChanged'; projectId: string; projectRevision: number; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
-  | { type: 'canvas.changed'; projectId: string; projectRevision: number; canvas: CanvasDocument; projection: CanvasProjection }
-  | { type: 'canvas.feedback.changed'; projectId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
-  | { type: 'recentProjects.changed'; revision: number; recentProjects: RecentProjectView[] }
+  | { type: 'project.changed'; bindingId: string; projectRevision: number; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'project.fileChanged'; bindingId: string; projectRevision: number; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'canvas.feedback.changed'; bindingId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
+  | { type: 'recentProjects.changed'; revision: number; recentProjectRoots: string[] }
   | { type: 'globalSettings.changed'; revision: number; settings: DebruteGlobalSettingsView }
   | { type: 'integrations.changed'; revision: number; integrations: IntegrationSettingsView }
   | { type: 'photoshop.state.changed'; revision: number; state: PhotoshopStateView }
@@ -1068,22 +1189,26 @@ type WorkbenchProjectConnectionFrame =
     }
   | {
       type: 'project.open_failed';
-      projectId: string;
+      canonicalRoot: string;
       error: { code: string; message: string };
     }
-  | { type: 'project.preempted'; projectId: string };
+  | { type: 'project.preempted'; bindingId: string };
 
 const workbenchProjectConnectionFrameValidators = {
   'project.bound': (value) => isProtocolObject(value.project)
-    && typeof value.project.projectId === 'string'
+    && typeof value.project.bindingId === 'string'
+    && value.project.bindingId.length > 0
+    && typeof value.project.canonicalRoot === 'string'
+    && value.project.canonicalRoot.length > 0
     && isNonNegativeInteger(value.project.projectRevision)
-    && isWorkbenchProjectSessionSnapshotFor(value.project.snapshot, value.project.projectId)
+    && isWorkbenchProjectSessionSnapshotFor(value.project.snapshot, value.project.canonicalRoot)
     && isWorkbenchWorkingCopies(value.workingCopies),
-  'project.open_failed': (value) => typeof value.projectId === 'string'
+  'project.open_failed': (value) => typeof value.canonicalRoot === 'string'
     && isProtocolObject(value.error)
     && typeof value.error.code === 'string'
     && typeof value.error.message === 'string',
-  'project.preempted': (value) => typeof value.projectId === 'string'
+  'project.preempted': (value) => typeof value.bindingId === 'string'
+    && value.bindingId.length > 0
 } satisfies Record<
   WorkbenchProjectConnectionFrame['type'],
   (value: Record<string, unknown>) => boolean
@@ -1109,21 +1234,16 @@ export function decodeWorkbenchProjectConnectionFrame(
 
 const workbenchEventValidators = {
   'project.changed': (value) => isRevisionedProjectEvent(value)
-    && isWorkbenchProjectSessionSnapshotFor(value.snapshot, value.projectId),
+    && isWorkbenchProjectSessionSnapshot(value.snapshot),
   'project.fileChanged': (value) => isRevisionedProjectEvent(value)
     && isProtocolObject(value.event)
     && typeof value.event.projectRelativePath === 'string'
-    && isWorkbenchProjectSessionSnapshotFor(value.snapshot, value.projectId),
-  'canvas.changed': (value) => isRevisionedProjectEvent(value)
-    && isCanvasDocument(value.canvas)
-    && isProtocolObject(value.canvas)
-    && isCanvasProjection(value.projection)
-    && isProtocolObject(value.projection)
-    && value.canvas.id === value.projection.canvasId,
+    && isWorkbenchProjectSessionSnapshot(value.snapshot),
   'canvas.feedback.changed': (value) => isRevisionedProjectEvent(value)
     && isCanvasFeedbackDocument(value.feedback),
   'recentProjects.changed': (value) => isNonNegativeInteger(value.revision)
-    && Array.isArray(value.recentProjects),
+    && Array.isArray(value.recentProjectRoots)
+    && value.recentProjectRoots.every((root) => typeof root === 'string'),
   'globalSettings.changed': (value) => isNonNegativeInteger(value.revision)
     && isProtocolObject(value.settings),
   'integrations.changed': (value) => isNonNegativeInteger(value.revision)
@@ -1154,74 +1274,31 @@ function isWorkbenchProjectSessionSnapshot(
   value: unknown
 ): value is WorkbenchProjectSessionSnapshot {
   if (!isProtocolObject(value)
-    || !isProtocolObject(value.metadata)
-    || !isProtocolObject(value.metadata.project)
-    || typeof value.metadata.project.id !== 'string'
-    || typeof value.metadata.project.name !== 'string'
-    || typeof value.metadata.project.createdAt !== 'string'
-    || typeof value.metadata.project.updatedAt !== 'string'
-    || !Array.isArray(value.files)
-    || !value.files.every(isProjectPathEntry)
-    || !Array.isArray(value.canvases)
-    || !value.canvases.every(isCanvasDocument)
-    || !Array.isArray(value.projections)
-    || !value.projections.every(isCanvasProjection)
+    || !hasExactKeys(value, ['canonicalRoot', 'projectTree', 'canvasWorkspace', 'diagnostics', 'health'])
+    || typeof value.canonicalRoot !== 'string'
+    || !isCanvasWorkspaceSnapshot(value.canvasWorkspace, value.canonicalRoot)
+    || !Array.isArray(value.projectTree)
+    || !value.projectTree.every(isProjectTreeEntry)
     || !Array.isArray(value.diagnostics)
     || !value.diagnostics.every(isProjectDiagnostic)
-    || !isCanvasRegistryState(value.canvasRegistry)
-    || !isProtocolObject(value.canvasRegistry)
     || !isProtocolObject(value.health)
+    || !hasExactKeys(value.health, ['projectName', 'diagnosticCounts', 'checkedAt'])
     || typeof value.health.projectName !== 'string'
-    || !isNonNegativeInteger(value.health.canvasCount)
-    || value.health.canvasCount !== value.canvases.length
-    || value.health.projectName !== value.metadata.project.name
     || !isProtocolObject(value.health.diagnosticCounts)
+    || !hasExactKeys(value.health.diagnosticCounts, ['errors', 'warnings'])
     || !isNonNegativeInteger(value.health.diagnosticCounts.errors)
     || !isNonNegativeInteger(value.health.diagnosticCounts.warnings)
     || typeof value.health.checkedAt !== 'string'
   ) {
     return false;
   }
-  return hasClosedCanvasTopology(value.canvases, value.projections, value.canvasRegistry);
+  return true;
 }
 
-function isWorkbenchProjectSessionSnapshotFor(value: unknown, projectId: unknown): boolean {
-  return typeof projectId === 'string'
+function isWorkbenchProjectSessionSnapshotFor(value: unknown, canonicalRoot: unknown): boolean {
+  return typeof canonicalRoot === 'string'
     && isWorkbenchProjectSessionSnapshot(value)
-    && value.metadata.project.id === projectId;
-}
-
-function hasClosedCanvasTopology(
-  canvases: unknown[],
-  projections: unknown[],
-  canvasRegistry: Record<string, unknown>
-): boolean {
-  const canvasIds = canvases.map((canvas) => isProtocolObject(canvas) ? canvas.id : undefined);
-  const projectionIds = projections.map(
-    (projection) => isProtocolObject(projection) ? projection.canvasId : undefined
-  );
-  if (
-    canvasIds.some((id) => typeof id !== 'string')
-    || projectionIds.some((id) => typeof id !== 'string')
-    || new Set(canvasIds).size !== canvasIds.length
-    || new Set(projectionIds).size !== projectionIds.length
-    || canvasIds.length !== projectionIds.length
-  ) {
-    return false;
-  }
-  const canvasIdSet = new Set(canvasIds);
-  if (!projectionIds.every((id) => canvasIdSet.has(id))) {
-    return false;
-  }
-  if (canvasRegistry.status !== 'ready') {
-    return true;
-  }
-  if (!Array.isArray(canvasRegistry.canvasOrder)) {
-    return false;
-  }
-  return canvasRegistry.canvasOrder.length === canvasIds.length
-    && new Set(canvasRegistry.canvasOrder).size === canvasRegistry.canvasOrder.length
-    && canvasRegistry.canvasOrder.every((id) => typeof id === 'string' && canvasIdSet.has(id));
+    && value.canonicalRoot === canonicalRoot;
 }
 
 function isWorkbenchWorkingCopies(value: unknown): value is WorkbenchWorkingCopies {
@@ -1241,7 +1318,8 @@ function isWorkbenchWorkingCopies(value: unknown): value is WorkbenchWorkingCopi
 }
 
 function isRevisionedProjectEvent(value: Record<string, unknown>): boolean {
-  return typeof value.projectId === 'string'
+  return typeof value.bindingId === 'string'
+    && value.bindingId.length > 0
     && isNonNegativeInteger(value.projectRevision);
 }
 
@@ -1258,38 +1336,169 @@ function isProjectPathEntry(value: unknown): boolean {
   return value.kind === 'directory' && value.sizeBytes === undefined;
 }
 
-function isCanvasDocument(value: unknown): boolean {
-  return isProtocolObject(value)
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && Array.isArray(value.nodeElements)
-    && value.nodeElements.every(isCanvasNode)
-    && Array.isArray(value.annotations)
-    && value.annotations.every(isCanvasAnnotation)
-    && isProtocolObject(value.preferences)
-    && typeof value.preferences.showDiagnostics === 'boolean';
+function isProjectTreeEntry(value: unknown): boolean {
+  if (!isProtocolObject(value)
+    || Object.keys(value).some((key) => ![
+      'projectRelativePath',
+      'kind',
+      'sizeBytes',
+      'ignored',
+      'hidden',
+      'directoryState',
+      'directoryError'
+    ].includes(key))
+    || typeof value.ignored !== 'boolean'
+    || typeof value.hidden !== 'boolean'
+    || !isProjectPathEntry({
+      projectRelativePath: value.projectRelativePath,
+      kind: value.kind,
+      ...(value.sizeBytes === undefined ? {} : { sizeBytes: value.sizeBytes })
+    })
+  ) {
+    return false;
+  }
+  if (value.kind === 'file') {
+    return value.directoryState === undefined && value.directoryError === undefined;
+  }
+  return (
+    value.directoryState === 'unloaded'
+    || value.directoryState === 'loaded'
+    || value.directoryState === 'error'
+  ) && (value.directoryError === undefined || typeof value.directoryError === 'string');
 }
 
-function isCanvasProjection(value: unknown): boolean {
+function isCanvasWorkspaceDocument(
+  value: unknown,
+  canonicalRoot: string
+): value is CanvasWorkspaceDocument {
+  if (!isProtocolObject(value)
+    || !hasExactKeys(value, ['canonicalRoot', 'activeCanvasId', 'canvases'])
+    || value.canonicalRoot !== canonicalRoot
+    || typeof value.activeCanvasId !== 'string'
+    || !Array.isArray(value.canvases)
+    || value.canvases.length === 0
+    || !value.canvases.every(isCanvasWorkspaceCanvas)
+  ) {
+    return false;
+  }
+  const canvasIds = value.canvases.map((canvas) => (
+    isProtocolObject(canvas) ? canvas.id : undefined
+  ));
+  return new Set(canvasIds).size === canvasIds.length
+    && canvasIds.includes(value.activeCanvasId);
+}
+
+function isCanvasWorkspaceSnapshot(
+  value: unknown,
+  canonicalRoot: string
+): value is CanvasWorkspaceSnapshot {
+  if (!isProtocolObject(value) || typeof value.status !== 'string') {
+    return false;
+  }
+  if (value.status === 'available') {
+    if (!hasExactKeys(value, ['status', 'workspace', 'activeCanvasResources'])
+      || !isCanvasWorkspaceDocument(value.workspace, canonicalRoot)
+      || !isCanvasResourceView(value.activeCanvasResources)
+    ) {
+      return false;
+    }
+    const resources = value.activeCanvasResources as CanvasResourceView;
+    return resources.canvasId === value.workspace.activeCanvasId;
+  }
+  return value.status === 'unavailable'
+    && hasExactKeys(value, ['status', 'code', 'message'])
+    && CANVAS_WORKSPACE_UNAVAILABLE_CODES.includes(value.code as CanvasWorkspaceUnavailableCode)
+    && typeof value.message === 'string';
+}
+
+function isCanvasWorkspaceCanvas(value: unknown): value is CanvasWorkspaceCanvas {
+  return isProtocolObject(value)
+    && hasExactKeys(value, ['id', 'name', 'expandedDirectories', 'nodeStates', 'occlusionOrder'])
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && isCanvasState({
+      expandedDirectories: value.expandedDirectories,
+      nodeStates: value.nodeStates,
+      occlusionOrder: value.occlusionOrder
+    });
+}
+
+function isCanvasState(value: unknown): value is CanvasState {
+  return isProtocolObject(value)
+    && hasExactKeys(value, ['expandedDirectories', 'nodeStates', 'occlusionOrder'])
+    && Array.isArray(value.expandedDirectories)
+    && value.expandedDirectories.every((path) => typeof path === 'string' && path.length > 0)
+    && new Set(value.expandedDirectories).size === value.expandedDirectories.length
+    && isProtocolObject(value.nodeStates)
+    && Object.values(value.nodeStates).every(isCanvasNodeState)
+    && Array.isArray(value.occlusionOrder)
+    && value.occlusionOrder.every((path) => typeof path === 'string')
+    && new Set(value.occlusionOrder).size === value.occlusionOrder.length;
+}
+
+function isCanvasNodeState(value: unknown): boolean {
+  return isProtocolObject(value)
+    && hasExactKeys(value, [], ['manualLayout', 'videoPlayback', 'textViewport'])
+    && Object.keys(value).length > 0
+    && (value.manualLayout === undefined || (
+      isProtocolObject(value.manualLayout)
+      && hasExactKeys(value.manualLayout, ['x', 'y', 'width', 'height'])
+      && isFiniteNumber(value.manualLayout.x)
+      && isFiniteNumber(value.manualLayout.y)
+      && isFiniteNumber(value.manualLayout.width)
+      && value.manualLayout.width > 0
+      && isFiniteNumber(value.manualLayout.height)
+      && value.manualLayout.height > 0
+    ))
+    && (value.videoPlayback === undefined || (
+      isProtocolObject(value.videoPlayback)
+      && hasExactKeys(value.videoPlayback, ['currentTimeMs'])
+      && isNonNegativeInteger(value.videoPlayback.currentTimeMs)
+    ))
+    && (value.textViewport === undefined || (
+      isProtocolObject(value.textViewport)
+      && hasExactKeys(value.textViewport, ['scrollTop', 'scrollLeft'])
+      && isFiniteNumber(value.textViewport.scrollTop)
+      && value.textViewport.scrollTop >= 0
+      && isFiniteNumber(value.textViewport.scrollLeft)
+      && value.textViewport.scrollLeft >= 0
+    ));
+}
+
+function isCanvasResourceView(value: unknown): boolean {
   return isProtocolObject(value)
     && typeof value.canvasId === 'string'
-    && Array.isArray(value.nodes)
-    && value.nodes.every(isProjectedCanvasNode)
-    && Array.isArray(value.edges)
-    && value.edges.every(isCanvasEdge)
+    && Array.isArray(value.resources)
+    && value.resources.every(isCanvasResource)
     && Array.isArray(value.diagnostics)
     && value.diagnostics.every(isProjectDiagnostic);
 }
 
-function isProjectedCanvasNode(value: unknown): boolean {
-  if (!isCanvasNode(value)
-    || !isProtocolObject(value)
-    || !isCanvasNodeAvailability(value.availability)
-    || !isProtocolObject(value.availability)
-  ) {
+function isCanvasResource(value: unknown): boolean {
+  if (!isProtocolObject(value)
+    || typeof value.projectRelativePath !== 'string'
+    || (value.nodeKind !== 'file' && value.nodeKind !== 'directory')) {
     return false;
   }
+  if (value.nodeKind === 'directory') {
+    return hasExactKeys(value, ['projectRelativePath', 'nodeKind']);
+  }
+  if (!hasExactKeys(value, ['projectRelativePath', 'nodeKind', 'mediaKind', 'availability'], ['imageDimensions', 'textLanguage', 'videoPresentation'])
+    || !isCanvasMediaKind(value.mediaKind)
+    || !isCanvasNodeAvailability(value.availability)
+    || !isProtocolObject(value.availability)) return false;
+  const availability = value.availability;
   if (value.videoPresentation !== undefined && !isCanvasVideoPresentation(value.videoPresentation)) {
+    return false;
+  }
+  if (value.imageDimensions !== undefined && (
+    !isProtocolObject(value.imageDimensions)
+    || !hasExactKeys(value.imageDimensions, ['width', 'height'])
+    || !isFiniteNumber(value.imageDimensions.width)
+    || value.imageDimensions.width <= 0
+    || !isFiniteNumber(value.imageDimensions.height)
+    || value.imageDimensions.height <= 0
+  )) {
     return false;
   }
   if (value.textLanguage !== undefined
@@ -1298,34 +1507,11 @@ function isProjectedCanvasNode(value: unknown): boolean {
     return false;
   }
   return (value.mediaKind !== 'video'
-      || value.availability.state !== 'available'
+      || availability.state !== 'available'
       || isCanvasVideoPresentation(value.videoPresentation))
     && (value.mediaKind !== 'text'
-      || value.availability.state !== 'available'
+      || availability.state !== 'available'
       || typeof value.textLanguage === 'string');
-}
-
-function isCanvasNode(value: unknown): boolean {
-  return isProtocolObject(value)
-    && typeof value.projectRelativePath === 'string'
-    && (value.nodeKind === 'file' || value.nodeKind === 'directory')
-    && (value.mediaKind === undefined || isCanvasMediaKind(value.mediaKind))
-    && isFiniteNumber(value.x)
-    && isFiniteNumber(value.y)
-    && isFiniteNumber(value.width)
-    && isFiniteNumber(value.height)
-    && isFiniteNumber(value.z)
-    && (value.layoutMode === undefined || value.layoutMode === 'manual')
-    && (value.videoPlayback === undefined || (
-      isProtocolObject(value.videoPlayback)
-      && Number.isSafeInteger(value.videoPlayback.currentTimeMs)
-      && (value.videoPlayback.currentTimeMs as number) >= 0
-    ))
-    && (value.textViewport === undefined || (
-      isProtocolObject(value.textViewport)
-      && isFiniteNumber(value.textViewport.scrollTop)
-      && isFiniteNumber(value.textViewport.scrollLeft)
-    ));
 }
 
 function isCanvasMediaKind(value: unknown): boolean {
@@ -1379,21 +1565,6 @@ function isCanvasVideoTextTrack(value: unknown): boolean {
     && typeof value.default === 'boolean';
 }
 
-function isCanvasAnnotation(value: unknown): boolean {
-  return isProtocolObject(value)
-    && typeof value.id === 'string'
-    && typeof value.text === 'string'
-    && isFiniteNumber(value.x)
-    && isFiniteNumber(value.y);
-}
-
-function isCanvasEdge(value: unknown): boolean {
-  return isProtocolObject(value)
-    && typeof value.id === 'string'
-    && typeof value.sourceProjectRelativePath === 'string'
-    && typeof value.targetProjectRelativePath === 'string';
-}
-
 function isProjectDiagnostic(value: unknown): boolean {
   return isProtocolObject(value)
     && typeof value.id === 'string'
@@ -1404,24 +1575,6 @@ function isProjectDiagnostic(value: unknown): boolean {
     && (value.line === undefined || isFiniteNumber(value.line))
     && (value.column === undefined || isFiniteNumber(value.column))
     && (value.entityId === undefined || typeof value.entityId === 'string');
-}
-
-function isCanvasRegistryState(value: unknown): boolean {
-  if (!isProtocolObject(value)) {
-    return false;
-  }
-  if (value.status === 'ready') {
-    return Array.isArray(value.canvasOrder)
-      && value.canvasOrder.every((canvasId) => typeof canvasId === 'string');
-  }
-  return value.status === 'invalid'
-    && (
-      value.code === 'canvas_registry_missing'
-      || value.code === 'canvas_registry_invalid'
-      || value.code === 'canvas_registry_conflict'
-      || value.code === 'canvas_registry_repair_failed'
-    )
-    && typeof value.message === 'string';
 }
 
 function isCanvasFeedbackDocument(value: unknown): boolean {
@@ -1610,10 +1763,10 @@ export interface WorkbenchApiClient {
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
   loadProjectDirectory(projectRelativeDirectory: string): Promise<RevisionedProjectResult>;
   writeProjectTextFile(input: WriteProjectTextFileInput): Promise<WorkbenchProjectTextFileWriteResult>;
-  putTextWorkingCopy(projectId: string, input: WorkbenchTextWorkingCopy): Promise<WorkbenchTextWorkingCopy>;
-  clearTextWorkingCopy(projectId: string, projectRelativePath: string): Promise<void>;
-  putFeedbackWorkingCopy(projectId: string, input: WorkbenchFeedbackWorkingCopy): Promise<WorkbenchFeedbackWorkingCopy>;
-  clearFeedbackWorkingCopy(projectId: string, itemId: string): Promise<void>;
+  putTextWorkingCopy(bindingId: string, input: WorkbenchTextWorkingCopy): Promise<WorkbenchTextWorkingCopy>;
+  clearTextWorkingCopy(bindingId: string, projectRelativePath: string): Promise<void>;
+  putFeedbackWorkingCopy(bindingId: string, input: WorkbenchFeedbackWorkingCopy): Promise<WorkbenchFeedbackWorkingCopy>;
+  clearFeedbackWorkingCopy(bindingId: string, itemId: string): Promise<void>;
   saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
   probeCanvasVideoPreviewSources(input: CanvasVideoPreviewProbeRequest, signal?: AbortSignal): Promise<CanvasVideoPreviewProbeResponse>;
@@ -1629,23 +1782,16 @@ export interface WorkbenchApiClient {
   importExternalLocalProjectPaths(input: WorkbenchProjectExternalLocalImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   importExternalProjectUploads(input: WorkbenchProjectUploadImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
-  lookupGeneratedAssetMetadata(input: { projectRelativePath: string }): Promise<GeneratedAssetMetadataLookup>;
+  lookupModelArtifactProvenance(input: { projectRelativePath: string }): Promise<ModelArtifactProvenanceLookup>;
   readCanvasFeedback(): Promise<CanvasFeedbackDocument>;
   updateCanvasFeedback(input: UpdateCanvasFeedbackInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
   createCanvas(): Promise<WorkbenchCanvasManagementResult>;
+  resetCanvasWorkspace(): Promise<RevisionedProjectResult>;
   renameCanvas(input: { canvasId: string; name: string }): Promise<WorkbenchCanvasManagementResult>;
   deleteCanvas(input: { canvasId: string }): Promise<WorkbenchCanvasManagementResult>;
   reorderCanvases(input: { canvasOrder: string[] }): Promise<WorkbenchCanvasManagementResult>;
-  repairCanvasIndex(): Promise<WorkbenchCanvasManagementResult>;
-  addProjectPathToCanvasMap(input: AddProjectPathToCanvasMapInput): Promise<WorkbenchAddProjectPathToCanvasMapResult>;
-  updateCanvasNodeLayouts(input: {
-    canvasId: string;
-    interaction: 'move' | 'resize';
-    nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width: number; height: number }>;
-  }): Promise<WorkbenchCanvasDocumentMutationResult>;
-  updateCanvasVideoPlaybackState(input: UpdateCanvasVideoPlaybackStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
-  updateCanvasTextViewportState(input: UpdateCanvasTextViewportStateInput): Promise<WorkbenchCanvasDocumentMutationResult>;
-  resetCanvasNodeLayouts(input: ResetCanvasNodeLayoutsInput): Promise<WorkbenchCanvasResetLayoutResult>;
+  activateCanvas(canvasId: string): Promise<RevisionedProjectResult>;
+  patchCanvasState(input: PatchCanvasStateInput): Promise<WorkbenchCanvasStateMutationResult>;
   integrationsRescan(): Promise<{ ok: true }>;
   integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
   onEvent(listener: (event: WorkbenchEvent) => void): () => void;

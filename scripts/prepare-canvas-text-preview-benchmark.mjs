@@ -1,9 +1,8 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 
-const PROJECT_ID = randomUUID();
 const TRIAL_COUNT = 10;
 const NODE_COUNT = 200;
 const BENCHMARK_CANVAS_ID = 'benchmark-200';
@@ -12,37 +11,21 @@ if (process.argv[2] === '--bump') {
   await bumpBenchmarkFiles(resolveRequiredPath(process.argv[3]), Number(process.argv[4]));
   process.exit(0);
 }
-const outputRoot = resolve(
+const requestedOutputRoot = resolve(
   process.argv[2] ?? join(tmpdir(), `debrute-canvas-text-preview-benchmark-${randomUUID()}`)
 );
 
-await mkdir(outputRoot);
+await mkdir(requestedOutputRoot);
+const outputRoot = await realpath(requestedOutputRoot);
 await mkdir(join(outputRoot, 'text'), { recursive: true });
-await mkdir(join(outputRoot, '.debrute', 'canvases'), { recursive: true });
-await mkdir(join(outputRoot, '.debrute', 'canvas-maps'), { recursive: true });
-await mkdir(join(outputRoot, '.debrute', 'reviews'), { recursive: true });
+await mkdir(join(outputRoot, '.debrute'), { recursive: true });
 
 const files = benchmarkFiles();
 for (const file of files) {
   await writeFile(join(outputRoot, file.path), file.content, 'utf8');
 }
 
-await writeJson(join(outputRoot, '.debrute', 'project.json'), {
-  project: {
-    id: PROJECT_ID,
-    name: 'canvas-text-preview-benchmark',
-    createdAt: '2026-08-01T00:00:00.000Z',
-    updatedAt: '2026-08-01T00:00:00.000Z'
-  }
-});
-await writeJson(join(outputRoot, '.debrute', 'canvases', 'index.json'), {
-  canvasOrder: [BENCHMARK_CANVAS_ID]
-});
-await writeCanvas(BENCHMARK_CANVAS_ID, 'Benchmark 200', benchmarkNodes(files));
-await writeJson(join(outputRoot, '.debrute', 'reviews', 'canvas-feedback.json'), {
-  updatedAt: '2026-08-01T00:00:00.000Z',
-  entries: {}
-});
+await writeCanvas(BENCHMARK_CANVAS_ID, benchmarkNodes(files));
 await writeJson(join(outputRoot, '.debrute', 'canvas-text-preview-benchmark.json'), {
   contract: BENCHMARK_CONTRACT,
   canvasId: BENCHMARK_CANVAS_ID,
@@ -53,7 +36,6 @@ await writeJson(join(outputRoot, '.debrute', 'canvas-text-preview-benchmark.json
 const totalBytes = files.reduce((total, file) => total + Buffer.byteLength(file.content), 0);
 process.stdout.write(`${JSON.stringify({
   outputRoot,
-  projectId: PROJECT_ID,
   trialCount: TRIAL_COUNT,
   nodeCount: NODE_COUNT,
   totalTextBytes: totalBytes,
@@ -63,20 +45,32 @@ process.stdout.write(`${JSON.stringify({
     .slice(0, 12)
 }, null, 2)}\n`);
 
-async function writeCanvas(canvasId, name, nodeElements) {
-  await writeJson(join(outputRoot, '.debrute', 'canvases', `${canvasId}.json`), {
-    id: canvasId,
-    name,
-    nodeElements,
-    annotations: [],
-    preferences: { showDiagnostics: false }
+async function writeCanvas(canvasId, nodeElements) {
+  const userHome = process.platform === 'win32'
+    ? (process.env.USERPROFILE ?? homedir())
+    : (process.env.HOME ?? homedir());
+  const rootKey = createHash('sha256').update(outputRoot, 'utf8').digest('hex');
+  await writeJson(join(userHome, '.debrute', 'state', 'roots', rootKey, 'canvas.json'), {
+    canonicalRoot: outputRoot,
+    activeCanvasId: canvasId,
+    canvases: [{
+      id: canvasId,
+      name: 'Benchmark 200',
+      expandedDirectories: ['text'],
+      nodeStates: Object.fromEntries(nodeElements.map((node) => [
+        node.projectRelativePath,
+        {
+          manualLayout: {
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height
+          }
+        }
+      ])),
+      occlusionOrder: []
+    }]
   });
-  const paths = nodeElements.map((node) => `  - ${node.projectRelativePath}`).join('\n');
-  await writeFile(
-    join(outputRoot, '.debrute', 'canvas-maps', `${canvasId}.yaml`),
-    paths ? `paths:\n${paths}\n` : 'paths: []\n',
-    'utf8'
-  );
 }
 
 function benchmarkNodes(inputFiles) {
@@ -93,8 +87,7 @@ function benchmarkNodes(inputFiles) {
       y: 200 + row * 3400,
       width: wide ? 4800 : 4200,
       height: tall ? 3200 : 2800,
-      z: index,
-      layoutMode: 'manual'
+      z: index
     };
   });
 }
@@ -150,14 +143,12 @@ async function bumpBenchmarkFiles(root, trial) {
     join(root, '.debrute', 'canvas-text-preview-benchmark.json'),
     'utf8'
   ));
-  const project = JSON.parse(await readFile(join(root, '.debrute', 'project.json'), 'utf8'));
   if (
     manifest.contract !== BENCHMARK_CONTRACT
     || manifest.canvasId !== BENCHMARK_CANVAS_ID
     || manifest.nodeCount !== NODE_COUNT
     || !Array.isArray(manifest.paths)
     || manifest.paths.length !== NODE_COUNT
-    || project?.project?.name !== 'canvas-text-preview-benchmark'
   ) {
     throw new Error('Benchmark root does not match the current Canvas text preview fixture contract.');
   }
@@ -225,5 +216,6 @@ function exactAsciiBytes(targetBytes, prefix) {
 }
 
 async function writeJson(path, value) {
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }

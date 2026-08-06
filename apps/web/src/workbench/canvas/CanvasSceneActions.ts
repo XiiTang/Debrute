@@ -15,7 +15,8 @@ export type CanvasSceneActions = Pick<WorkbenchActions,
   | 'updateCanvasNodeLayouts'
   | 'updateCanvasVideoPlaybackState'
   | 'updateCanvasTextViewportState'
-  | 'addProjectPathToCanvasMap'
+  | 'setCanvasDirectoryExpanded'
+  | 'raiseCanvasSelection'
 >;
 
 export type CanvasEditorActions = CanvasSceneActions & Pick<WorkbenchActions, 'openProject'>;

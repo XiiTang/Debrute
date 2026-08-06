@@ -1,5 +1,5 @@
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
-import type { CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasProjection } from '../canvas/CanvasScene.js';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.js';
 import { canvasNodeSelection, selectedNodeProjectRelativePaths } from '../canvas/runtime/canvasSelection.js';
 import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController.js';

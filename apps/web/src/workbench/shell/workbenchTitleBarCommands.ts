@@ -1,4 +1,4 @@
-import type { NativeMenuCommand } from '@debrute/app-protocol';
+import type { NativeMenuCommand, NativeMenuCommandResult } from '@debrute/app-protocol';
 import type { DebruteShellApi } from '../../api/shellApi';
 import type { WorkbenchApiClient } from '../../types.js';
 import type { WorkbenchMenuCommandId, WorkbenchMenuItem } from './workbenchTitleBarState';
@@ -15,18 +15,18 @@ export interface TitleBarCommandContext {
 export async function executeTitleBarMenuCommand(
   item: Extract<WorkbenchMenuItem, { kind: 'command' }>,
   context: TitleBarCommandContext
-): Promise<void> {
+): Promise<NativeMenuCommandResult | undefined> {
   if (!item.enabled) {
     return;
   }
   if (context.shell) {
     const nativeCommand = nativeMenuCommand(item);
     if (nativeCommand) {
-      await context.shell.executeNativeMenuCommand(nativeCommand);
-      return;
+      return context.shell.executeNativeMenuCommand(nativeCommand);
     }
   }
   await executeBrowserMenuCommand(item.commandId, item.payload, context);
+  return undefined;
 }
 
 async function executeBrowserMenuCommand(
@@ -85,11 +85,11 @@ function nativeMenuCommand(
     return undefined;
   }
   if (item.commandId === 'project.open-recent') {
-    const projectId = item.payload?.projectId;
-    if (typeof projectId !== 'string' || projectId.length === 0) {
-      throw new Error('Desktop Project activation requires projectId.');
+    const projectRoot = item.payload?.projectRoot;
+    if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
+      throw new Error('Desktop Project activation requires projectRoot.');
     }
-    return { commandId: 'project.open-known', projectId };
+    return { commandId: 'project.open-path', projectRoot };
   }
   return { commandId: item.commandId };
 }

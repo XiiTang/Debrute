@@ -9,7 +9,6 @@ glossaries instead.
 
 ### Established Baseline
 
-- [Structured Project Documents Use Owner-Checked Transactions](./0001-structured-project-document-transactions.md)
 - [Local Runtime Owns Privileged Application State](./0002-local-runtime-owns-privileged-state.md)
 - [Project Sessions Use Typed Uses And Ordered Revisions](./0003-project-sessions-use-typed-uses-and-ordered-revisions.md)
 - [Browser API Uses Same-Origin Sessions](./0004-browser-api-uses-same-origin-sessions.md)
@@ -62,6 +61,7 @@ Workbench listener, and one bounded-pool Photoshop gateway.
 - [Photoshop Connections Use Ephemeral Runtime Sessions](./0064-photoshop-connections-use-ephemeral-runtime-sessions.md)
 - [Photoshop Gateway Uses A Bounded Loopback Port Pool](./0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md)
 - [Runtime Owns One Global Activity Stream](./0066-runtime-owns-one-global-activity-stream.md)
+- [Project Identity Is The Canonical Root](./0067-project-identity-is-the-canonical-root.md)
 - [Unexpected Runtime Panics Fail The Process](./0056-unexpected-runtime-panics-fail-the-process.md)
 - [Model API Key Reveal Is Explicit And Transient](./0057-model-api-key-reveal-is-explicit-and-transient.md)
 
@@ -102,26 +102,24 @@ and enforced by Rust and contract tests.
 - [Operation Cancellation Reports Whether Cancellation Won](./0052-operation-cancellation-reports-whether-cancellation-won.md)
 - [CLI Model Request Timeout Bounds Active Model Execution](./0053-cli-model-request-timeout-bounds-active-model-execution.md)
 - [Model Output Replacement Is Applied At Commit](./0054-model-output-replacement-is-applied-at-commit.md)
-- [Generated Results Use In-Process Item Commits](./0055-generated-results-use-in-process-item-commits.md)
+- [Model Results Use In-Process Item Commits](./0055-model-results-use-in-process-item-commits.md)
 
 ## Canvas Decisions
 
-- [Canvas Map Is Source Intent](../../packages/canvas-core/docs/adr/0001-canvas-map-is-source-intent.md)
 - [Image Preview State Is Node Local](../../packages/canvas-core/docs/adr/0002-image-preview-state-is-node-local.md)
 - [Inactive Text Nodes Use Derived Previews](../../packages/canvas-core/docs/adr/0003-inactive-text-nodes-use-derived-previews.md)
 - [Inactive Video Nodes Use Derived Previews](../../packages/canvas-core/docs/adr/0004-inactive-video-nodes-use-derived-previews.md)
 - [Feedback State Is Structured And Artifacts Are Derived](../../packages/canvas-core/docs/adr/0005-feedback-state-is-structured-and-artifacts-are-derived.md)
 - [Text Preview DOM Is The Visual Authority](../../packages/canvas-core/docs/adr/0006-text-preview-dom-is-the-visual-authority.md)
+- [Preview Maintenance Shares Presentation, Not Source Execution](../../packages/canvas-core/docs/adr/0007-preview-maintenance-shares-scheduling-not-execution.md)
+- [Project Tree Defines Canvas Membership](../../packages/canvas-core/docs/adr/0008-project-tree-defines-canvas-membership.md)
+- [Canvas Workspace Is Root-Scoped Global State](../../packages/canvas-core/docs/adr/0009-canvas-workspace-is-root-scoped-global-state.md)
 
 ## Capability Decisions
 
-- [Generated Assets Follow Content Fingerprints](../capability/adr/0001-generated-assets-follow-content-fingerprints.md)
+- [Model Artifacts Follow Content Fingerprints](../capability/adr/0001-model-artifacts-follow-content-fingerprints.md)
 - [Model Configuration Is Per Debrute Model](../capability/adr/0002-model-configuration-is-per-debrute-model.md)
-- [Model Runs Are Redacted Before Project Storage](../capability/adr/0003-model-runs-are-redacted-before-project-storage.md)
+- [Model Outputs Use Response Order](../capability/adr/0006-model-outputs-use-response-order.md)
 
 Project currently has no context-only ADR. Its qualifying decisions cross
 application or context boundaries and therefore live in the system-wide set.
-
-## Superseded Decisions
-
-- [Photoshop Bridge Uses A Link-Scoped Protocol](./0009-photoshop-bridge-uses-link-scoped-protocol.md) — its current Photoshop mechanics are superseded by ADRs 0063–0065.

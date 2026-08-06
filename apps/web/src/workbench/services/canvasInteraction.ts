@@ -1,5 +1,5 @@
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
-import type { CanvasMediaKind, CanvasNodeKind } from '@debrute/canvas-core';
+import type { CanvasMediaKind, CanvasNodeKind } from '@debrute/app-protocol';
 import type { CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
 
 export type { CanvasPoint, CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';

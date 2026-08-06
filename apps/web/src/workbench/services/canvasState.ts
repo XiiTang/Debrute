@@ -1,10 +1,7 @@
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import {
-  type CanvasDocument,
-  type ProjectDiagnostic,
-  type ProjectedCanvasNode
-} from '@debrute/canvas-core';
+import type { CanvasWorkspaceCanvas, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
+import type { ProjectDiagnostic } from '@debrute/app-protocol';
 import type { WorkbenchState } from '../../types';
+import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection.js';
 
 export type SelectionContext =
@@ -23,7 +20,9 @@ export function getSelectionContext(
     return { kind: 'empty', diagnostics: [] };
   }
   if (selection.kind === 'nodes') {
-    const projection = snapshot.projections.find((item) => item.canvasId === activeCanvasId);
+    const projection = state.canvasProjection?.canvasId === activeCanvasId
+      ? state.canvasProjection
+      : undefined;
     const selectedPaths = new Set(selection.projectRelativePaths);
     const nodes = projection?.nodes.filter((node) => selectedPaths.has(node.projectRelativePath)) ?? [];
     if (projection && nodes.length === 1) {
@@ -42,11 +41,16 @@ export function getSelectionContext(
   return { kind: 'empty', diagnostics: [] };
 }
 
-export function getCanvasById(snapshot: WorkbenchProjectSessionSnapshot | undefined, canvasId: string | undefined): CanvasDocument | undefined {
-  return canvasId ? snapshot?.canvases.find((canvas) => canvas.id === canvasId) : undefined;
+export function getCanvasById(snapshot: WorkbenchProjectSessionSnapshot | undefined, canvasId: string | undefined): CanvasWorkspaceCanvas | undefined {
+  return canvasId && snapshot?.canvasWorkspace.status === 'available'
+    ? snapshot.canvasWorkspace.workspace.canvases.find((canvas) => canvas.id === canvasId)
+    : undefined;
 }
 
 export function nodeStatusLabel(node: ProjectedCanvasNode): string {
+  if (node.availability.state === 'directory') {
+    return 'directory';
+  }
   if (node.availability.state === 'available') {
     return `${node.availability.mimeType} / ${node.availability.size} bytes`;
   }

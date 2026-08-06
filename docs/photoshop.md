@@ -127,7 +127,7 @@ disclosure hit target, confirmation, directory field, parent page, or **Select
 this directory** action. Multiple Projects and directory branches can remain
 expanded at the same time. Project roots and directory siblings use
 case-insensitive natural ordering, so `folder2` precedes `folder10`, while
-identity remains the exact Project ID and complete Project-relative directory.
+identity remains the exact Canonical Root and complete Project-relative directory.
 Duplicate displayed names are not merged or supplemented with generated labels.
 Rows use the same closed/open folder artwork, left alignment, 24-pixel row
 geometry, 14-pixel hierarchy step, guide lines, and selected/focused treatment
@@ -135,7 +135,7 @@ as the Workbench Explorer. Neutral colors still come from the Photoshop host
 theme, while Debrute clay identifies the selected destination. Expansion has
 no separate triangle column.
 
-Runtime initially publishes only live Project identities, names, and revisions,
+Runtime initially publishes only live canonical roots, names, and revisions,
 so every Project root starts collapsed without an eager directory scan. The
 first expansion of one Project requests only that Project's complete current
 writable-directory snapshot. While it loads, the Project root is already the
@@ -234,8 +234,8 @@ system notifications, or persistent history.
 | Gateway port | Runtime | One Runtime process; first free port in the closed pool |
 | Plugin session identity and bearer | Runtime | One accepted WebSocket; revoked immediately when it closes |
 | Photoshop Document catalog and placement formats | UXP host snapshot projected by Runtime | Replaced atomically by live session snapshots; removed with the session |
-| Live Project identities and revisions | Runtime | Current open-Project projection only |
-| Directory snapshots | UXP plugin runtime | Cached by exact Project ID and revision; invalidated on disconnect or revision change |
+| Live Project identities and revisions | Runtime | Current canonical-root projection only |
+| Directory snapshots | UXP plugin runtime | Cached by exact Canonical Root and revision; invalidated on disconnect or revision change |
 | Expanded tree nodes and selected destination candidate | UXP plugin runtime | Survive panel detach and transient reconnect; reset on plugin or Photoshop restart |
 | Admitted source, target, staging, and progress | Command coordinator | One command; immutable after admission and deleted after terminal settlement |
 | User-visible result | Initiating surface | Latest transient result only |

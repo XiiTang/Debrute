@@ -8,11 +8,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use notify::Event;
+use notify::{
+    Event, EventKind,
+    event::{ModifyKind, RenameMode},
+};
 #[cfg(not(test))]
 use notify::{RecursiveMode, Watcher};
 
-use super::{ProjectError, is_gitignore_path, is_project_indexed_path, is_project_visible_path};
+use super::{ProjectError, is_project_visible_path};
 
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(40);
 
@@ -63,8 +66,23 @@ enum WatchMessage {
 }
 
 pub(super) enum ProjectWatchSignal {
-    Paths(Vec<String>),
+    Paths(Vec<ProjectWatchPath>),
     RescanRequired(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectWatchPath {
+    pub project_relative_path: String,
+    pub resets_identity: bool,
+}
+
+impl ProjectWatchPath {
+    pub(super) fn modified(project_relative_path: String) -> Self {
+        Self {
+            project_relative_path,
+            resets_identity: false,
+        }
+    }
 }
 
 pub(super) struct ProjectFileWatcher {
@@ -83,7 +101,7 @@ impl ProjectFileWatcher {
     pub(super) fn start(
         project_root: &Path,
         backend_factory: &dyn ProjectWatchBackendFactory,
-        is_explicit_dependency: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+        is_loaded_dependency: Arc<dyn Fn(&str) -> bool + Send + Sync>,
         on_change: Arc<dyn Fn(ProjectWatchSignal) + Send + Sync>,
     ) -> Result<Self, ProjectError> {
         let root = project_root.to_path_buf();
@@ -98,7 +116,7 @@ impl ProjectFileWatcher {
         let worker = thread::Builder::new()
             .name("debrute-project-watch".to_owned())
             .spawn(move || {
-                watch_worker(&root, &receiver, &is_explicit_dependency, &on_change);
+                watch_worker(&root, &receiver, &is_loaded_dependency, &on_change);
             })?;
         Ok(Self {
             watch_guard: Some(watch_guard),
@@ -127,31 +145,21 @@ impl Drop for ProjectFileWatcher {
 fn watch_worker(
     root: &Path,
     receiver: &mpsc::Receiver<WatchMessage>,
-    is_explicit_dependency: &Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    is_loaded_dependency: &Arc<dyn Fn(&str) -> bool + Send + Sync>,
     on_change: &Arc<dyn Fn(ProjectWatchSignal) + Send + Sync>,
 ) {
-    let mut pending = HashMap::<String, Instant>::new();
-    let mut indexed_directories = HashMap::<String, bool>::new();
+    let mut pending = HashMap::<String, (Instant, bool)>::new();
     loop {
         flush_ready(&mut pending, on_change);
         let timeout = pending
             .values()
             .min()
-            .map_or(Duration::from_mins(1), |deadline| {
+            .map_or(Duration::from_mins(1), |(deadline, _)| {
                 deadline.saturating_duration_since(Instant::now())
             });
         match receiver.recv_timeout(timeout) {
             Ok(WatchMessage::Event(Ok(event))) => {
-                if let Err(error) = queue_event(
-                    root,
-                    event,
-                    is_explicit_dependency,
-                    &mut pending,
-                    &mut indexed_directories,
-                ) {
-                    indexed_directories.clear();
-                    on_change(ProjectWatchSignal::RescanRequired(error.to_string()));
-                }
+                queue_event(root, event, is_loaded_dependency, &mut pending);
             }
             Ok(WatchMessage::Event(Err(error))) => {
                 on_change(ProjectWatchSignal::RescanRequired(error.to_string()));
@@ -163,18 +171,26 @@ fn watch_worker(
 }
 
 fn flush_ready(
-    pending: &mut HashMap<String, Instant>,
+    pending: &mut HashMap<String, (Instant, bool)>,
     on_change: &Arc<dyn Fn(ProjectWatchSignal) + Send + Sync>,
 ) {
     let now = Instant::now();
     let mut ready = pending
         .iter()
-        .filter_map(|(path, deadline)| (*deadline <= now).then_some(path.clone()))
+        .filter_map(|(path, (deadline, _))| (*deadline <= now).then_some(path.clone()))
         .collect::<Vec<_>>();
     ready.sort();
-    for path in &ready {
-        pending.remove(path);
-    }
+    let ready = ready
+        .into_iter()
+        .filter_map(|path| {
+            pending
+                .remove(&path)
+                .map(|(_, resets_identity)| ProjectWatchPath {
+                    project_relative_path: path,
+                    resets_identity,
+                })
+        })
+        .collect::<Vec<_>>();
     if !ready.is_empty() {
         on_change(ProjectWatchSignal::Paths(ready));
     }
@@ -183,61 +199,33 @@ fn flush_ready(
 fn queue_event(
     root: &Path,
     event: Event,
-    is_explicit_dependency: &Arc<dyn Fn(&str) -> bool + Send + Sync>,
-    pending: &mut HashMap<String, Instant>,
-    indexed_directories: &mut HashMap<String, bool>,
-) -> Result<(), ProjectError> {
+    is_loaded_dependency: &Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    pending: &mut HashMap<String, (Instant, bool)>,
+) {
     let deadline = Instant::now() + WATCH_DEBOUNCE;
+    let event_kind = event.kind;
+    let path_count = event.paths.len();
     for path in event.paths {
         let Some(relative) = project_relative_path(root, &path) else {
             continue;
         };
-        if is_gitignore_path(&relative) {
-            indexed_directories.clear();
+        if is_loaded_dependency(&relative) && is_project_visible_path(&relative) {
+            let resets_identity = match event_kind {
+                EventKind::Create(_)
+                | EventKind::Remove(_)
+                | EventKind::Modify(ModifyKind::Name(RenameMode::From | RenameMode::To)) => true,
+                EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if path_count >= 2 => true,
+                _ => false,
+            };
+            pending
+                .entry(relative)
+                .and_modify(|entry| {
+                    entry.0 = deadline;
+                    entry.1 |= resets_identity;
+                })
+                .or_insert((deadline, resets_identity));
         }
-        let indexed = if is_gitignore_path(&relative) {
-            relative.rsplit_once('/').map_or(Ok(true), |(parent, _)| {
-                is_indexed_directory(root, parent, indexed_directories)
-            })?
-        } else {
-            is_indexed_event_path(root, &relative, path.is_dir(), indexed_directories)?
-        };
-        if is_project_visible_path(&relative) && (indexed || is_explicit_dependency(&relative)) {
-            pending.insert(relative, deadline);
-        }
     }
-    Ok(())
-}
-
-fn is_indexed_event_path(
-    root: &Path,
-    relative: &str,
-    is_dir: bool,
-    indexed_directories: &mut HashMap<String, bool>,
-) -> Result<bool, ProjectError> {
-    if let Some((parent, _)) = relative.rsplit_once('/')
-        && !is_indexed_directory(root, parent, indexed_directories)?
-    {
-        return Ok(false);
-    }
-    let indexed = is_project_indexed_path(root, relative, is_dir)?;
-    if is_dir {
-        indexed_directories.insert(relative.to_owned(), indexed);
-    }
-    Ok(indexed)
-}
-
-fn is_indexed_directory(
-    root: &Path,
-    relative: &str,
-    indexed_directories: &mut HashMap<String, bool>,
-) -> Result<bool, ProjectError> {
-    if let Some(indexed) = indexed_directories.get(relative).copied() {
-        return Ok(indexed);
-    }
-    let indexed = is_project_indexed_path(root, relative, true)?;
-    indexed_directories.insert(relative.to_owned(), indexed);
-    Ok(indexed)
 }
 
 fn project_relative_path(root: &Path, path: &Path) -> Option<String> {
@@ -252,93 +240,71 @@ fn watch_error(error: &notify::Error) -> ProjectError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use uuid::Uuid;
 
     use super::*;
 
     #[test]
-    fn event_filter_skips_generated_and_nested_ignored_subtrees() {
-        let root = std::env::temp_dir().join(format!("debrute-watch-filter-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("repo/vendor-cache")).unwrap();
-        fs::create_dir_all(root.join("repo/node_modules/package")).unwrap();
-        fs::create_dir_all(root.join("repo/src")).unwrap();
-        fs::write(root.join("repo/.gitignore"), "vendor-cache/\n").unwrap();
-        let mut cache = HashMap::new();
-
-        assert!(is_indexed_event_path(&root, "repo/src/main.rs", false, &mut cache).unwrap());
-        assert!(
-            !is_indexed_event_path(&root, "repo/vendor-cache/large.bin", false, &mut cache)
-                .unwrap()
-        );
-        assert!(
-            !is_indexed_event_path(&root, "repo/.git/objects/pack", false, &mut cache).unwrap()
-        );
-        assert!(
-            !is_indexed_event_path(
-                &root,
-                "repo/node_modules/package/index.js",
-                false,
-                &mut cache
-            )
-            .unwrap()
-        );
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn event_filter_keeps_only_explicit_dependencies_inside_excluded_trees() {
+    fn event_filter_keeps_only_loaded_visible_paths() {
         let root = std::env::temp_dir().join(format!("debrute-watch-explicit-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("dist")).unwrap();
-        fs::write(root.join("dist/render.png"), "render").unwrap();
-        fs::write(root.join("dist/noise.tmp"), "noise").unwrap();
-        let dependency: Arc<dyn Fn(&str) -> bool + Send + Sync> =
-            Arc::new(|path| path == "dist/render.png");
+        let dependency: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(|path| {
+            path == "node_modules/pkg/index.js" || path == ".debrute/feedback/feedback.json"
+        });
         let mut pending = HashMap::new();
-        let mut cache = HashMap::new();
 
         queue_event(
             &root,
             Event {
                 kind: notify::EventKind::Any,
-                paths: vec![root.join("dist/render.png"), root.join("dist/noise.tmp")],
+                paths: vec![
+                    root.join("node_modules/pkg/index.js"),
+                    root.join("unloaded/noise.txt"),
+                    root.join(".git/objects/pack"),
+                    root.join(".debrute/feedback/feedback.json"),
+                ],
                 attrs: notify::event::EventAttributes::default(),
             },
             &dependency,
             &mut pending,
-            &mut cache,
-        )
-        .unwrap();
+        );
 
-        assert!(pending.contains_key("dist/render.png"));
-        assert!(!pending.contains_key("dist/noise.tmp"));
-        fs::remove_dir_all(root).unwrap();
+        assert!(pending.contains_key("node_modules/pkg/index.js"));
+        assert!(pending.contains_key(".debrute/feedback/feedback.json"));
+        assert!(!pending.contains_key("unloaded/noise.txt"));
+        assert!(!pending.contains_key(".git/objects/pack"));
     }
 
     #[test]
-    fn event_filter_propagates_ignore_errors_without_caching_a_false_result() {
-        let root = std::env::temp_dir().join(format!("debrute-watch-error-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("repo/src")).unwrap();
-        fs::write(root.join("repo/.gitignore"), "invalid\\\n").unwrap();
-        let mut cache = HashMap::new();
-
-        let error = is_indexed_event_path(&root, "repo/src/main.rs", false, &mut cache)
-            .expect_err("invalid ignore rules must not become an excluded path");
-
-        assert_eq!(error.code(), "project_ignore_invalid");
-        assert!(!cache.contains_key("repo/src"));
-        fs::write(root.join("repo/.gitignore"), "generated/\n").unwrap();
-        assert!(is_indexed_event_path(&root, "repo/src/main.rs", false, &mut cache).unwrap());
-        fs::remove_dir_all(root).unwrap();
+    fn create_remove_and_rename_events_reset_path_identity() {
+        let root = std::env::temp_dir().join(format!("debrute-watch-identity-{}", Uuid::new_v4()));
+        let dependency: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(|_| true);
+        let mut pending = HashMap::new();
+        for kind in [
+            notify::EventKind::Remove(notify::event::RemoveKind::File),
+            notify::EventKind::Create(notify::event::CreateKind::File),
+            notify::EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+        ] {
+            queue_event(
+                &root,
+                Event {
+                    kind,
+                    paths: vec![root.join("old.txt"), root.join("new.txt")],
+                    attrs: notify::event::EventAttributes::default(),
+                },
+                &dependency,
+                &mut pending,
+            );
+        }
+        assert!(
+            pending
+                .values()
+                .all(|(_, resets_identity)| *resets_identity)
+        );
     }
 
     #[test]
-    fn ignore_filter_errors_request_a_full_rescan() {
+    fn backend_errors_request_a_refresh_of_loaded_authority() {
         let root = std::env::temp_dir().join(format!("debrute-watch-rescan-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("repo/src")).unwrap();
-        fs::write(root.join("repo/.gitignore"), "invalid\\\n").unwrap();
         let (message_sender, message_receiver) = mpsc::channel();
         let (signal_sender, signal_receiver) = mpsc::channel();
         let dependency: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(|_| false);
@@ -350,22 +316,21 @@ mod tests {
         });
 
         message_sender
-            .send(WatchMessage::Event(Ok(Event {
-                kind: notify::EventKind::Any,
-                paths: vec![root.join("repo/src/main.rs")],
-                attrs: notify::event::EventAttributes::default(),
-            })))
+            .send(WatchMessage::Event(Err(notify::Error::generic(
+                "dropped event",
+            ))))
             .unwrap();
         match signal_receiver
             .recv_timeout(Duration::from_secs(1))
             .unwrap()
         {
-            ProjectWatchSignal::RescanRequired(message) => assert!(message.contains("invalid")),
+            ProjectWatchSignal::RescanRequired(message) => {
+                assert!(message.contains("dropped event"));
+            }
             ProjectWatchSignal::Paths(paths) => panic!("unexpected filtered paths: {paths:?}"),
         }
 
         message_sender.send(WatchMessage::Stop).unwrap();
         worker.join().unwrap();
-        fs::remove_dir_all(root).unwrap();
     }
 }

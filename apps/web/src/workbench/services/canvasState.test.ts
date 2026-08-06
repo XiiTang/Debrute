@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectDiagnostic, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { ProjectDiagnostic } from '@debrute/app-protocol';
 import type { WorkbenchState } from '../../types.js';
+import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
 import { getSelectionContext } from './canvasState.js';
 
 describe('Canvas selection context', () => {
@@ -13,13 +14,13 @@ describe('Canvas selection context', () => {
   const first = node('flow/a.png');
   const second = node('flow/b.png');
   const state = {
+    canvasProjection: {
+      canvasId: 'canvas-1',
+      nodes: [first, second],
+      edges: [],
+      diagnostics: []
+    },
     snapshot: {
-      projections: [{
-        canvasId: 'canvas-1',
-        nodes: [first, second],
-        edges: [],
-        diagnostics: []
-      }],
       diagnostics: [diagnostic]
     }
   } as unknown as WorkbenchState;
@@ -72,6 +73,7 @@ describe('Canvas selection context', () => {
 function node(projectRelativePath: string): ProjectedCanvasNode {
   return {
     projectRelativePath,
+    displayName: projectRelativePath,
     nodeKind: 'file',
     mediaKind: 'image',
     x: 0,

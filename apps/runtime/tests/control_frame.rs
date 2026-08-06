@@ -1,9 +1,9 @@
 use debrute_runtime::control::{
     ActivationIntent, ActivationOutcome, CONTROL_PROTOCOL, CONTROL_PROTOCOL_VERSION, ClientMessage,
     ClientRole, ControlEvent, ControlRequest, ControlResponse, FrameDecodeError, FrameEncodeError,
-    HandshakeRejection, MAX_CONTROL_FRAME_BYTES, PRODUCT_VERSION, ProjectFrontend, RuntimeStatus,
-    ServerMessage, authorize_request, encode_frame, encode_server_frame, read_frame,
-    read_server_frame, validate_handshake,
+    HandshakeRejection, MAX_CONTROL_FRAME_BYTES, PRODUCT_VERSION, ProjectFrontend,
+    ProjectOpenFailure, RuntimeStatus, ServerMessage, authorize_request, encode_frame,
+    encode_server_frame, read_frame, read_server_frame, validate_handshake,
 };
 use std::io::Cursor;
 
@@ -17,7 +17,7 @@ fn handshake_encodes_as_one_big_endian_length_prefixed_json_frame() {
     };
 
     let frame = encode_frame(&message).expect("handshake frame should encode");
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":4,"product_version":"0.0.4","role":"launcher"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":6,"product_version":"0.0.4","role":"launcher"}"#;
     let mut expected = u32::try_from(payload.len())
         .expect("test payload length fits in u32")
         .to_be_bytes()
@@ -29,7 +29,7 @@ fn handshake_encodes_as_one_big_endian_length_prefixed_json_frame() {
 
 #[test]
 fn handshake_decodes_from_one_complete_frame() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":4,"product_version":"0.0.4","role":"cli"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":5,"product_version":"0.0.4","role":"cli"}"#;
     let frame = frame(payload);
 
     let message = read_frame(&mut Cursor::new(frame)).expect("complete handshake should decode");
@@ -38,7 +38,7 @@ fn handshake_decodes_from_one_complete_frame() {
         message,
         ClientMessage::Handshake {
             protocol: "debrute-control".to_owned(),
-            protocol_version: 4,
+            protocol_version: 5,
             product_version: "0.0.4".to_owned(),
             role: ClientRole::Cli,
         }
@@ -105,7 +105,7 @@ fn non_utf8_payload_is_rejected() {
 
 #[test]
 fn trailing_json_value_is_rejected() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":4,"product_version":"0.0.4","role":"launcher"}{}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":5,"product_version":"0.0.4","role":"launcher"}{}"#;
     let error = read_frame(&mut Cursor::new(frame(payload)))
         .expect_err("a second JSON value inside one frame must be rejected");
 
@@ -114,7 +114,7 @@ fn trailing_json_value_is_rejected() {
 
 #[test]
 fn unknown_handshake_fields_are_rejected() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":4,"product_version":"0.0.4","role":"launcher","extra":true}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":5,"product_version":"0.0.4","role":"launcher","extra":true}"#;
     let error = read_frame(&mut Cursor::new(frame(payload)))
         .expect_err("unknown handshake fields must be rejected");
 
@@ -123,7 +123,7 @@ fn unknown_handshake_fields_are_rejected() {
 
 #[test]
 fn unknown_client_roles_are_rejected_by_the_closed_decoder() {
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":4,"product_version":"0.0.4","role":"web"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":5,"product_version":"0.0.4","role":"web"}"#;
     let error = read_frame(&mut Cursor::new(frame(payload)))
         .expect_err("unknown role must not decode as a current handshake");
 
@@ -134,19 +134,35 @@ fn unknown_client_roles_are_rejected_by_the_closed_decoder() {
 fn handshake_requires_exact_protocol_and_product_versions() {
     assert_eq!(PRODUCT_VERSION, "0.0.4");
     assert_eq!(
-        validate_handshake(&handshake("debrute-control", 4, "0.0.4")),
+        validate_handshake(&handshake(
+            CONTROL_PROTOCOL,
+            CONTROL_PROTOCOL_VERSION,
+            PRODUCT_VERSION,
+        )),
         Ok(ClientRole::Launcher)
     );
     assert_eq!(
-        validate_handshake(&handshake("other-control", 4, "0.0.4")),
+        validate_handshake(&handshake(
+            "other-control",
+            CONTROL_PROTOCOL_VERSION,
+            PRODUCT_VERSION,
+        )),
         Err(HandshakeRejection::IncompatibleProtocol)
     );
     assert_eq!(
-        validate_handshake(&handshake("debrute-control", 2, "0.0.4")),
+        validate_handshake(&handshake(
+            CONTROL_PROTOCOL,
+            CONTROL_PROTOCOL_VERSION - 1,
+            PRODUCT_VERSION,
+        )),
         Err(HandshakeRejection::IncompatibleProtocolVersion)
     );
     assert_eq!(
-        validate_handshake(&handshake("debrute-control", 4, "0.0.5")),
+        validate_handshake(&handshake(
+            CONTROL_PROTOCOL,
+            CONTROL_PROTOCOL_VERSION,
+            "0.0.5",
+        )),
         Err(HandshakeRejection::IncompatibleProductVersion)
     );
 }
@@ -155,7 +171,7 @@ fn handshake_requires_exact_protocol_and_product_versions() {
 fn runtime_encodes_and_decodes_closed_handshake_responses() {
     let accepted = ServerMessage::handshake_accepted("runtime-instance", RuntimeStatus::Ready);
     let accepted_frame = encode_server_frame(&accepted).expect("accepted handshake should encode");
-    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":4,"product_version":"0.0.4","status":"ready"}"#;
+    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":6,"product_version":"0.0.4","status":"ready"}"#;
     assert_eq!(accepted_frame, frame(accepted_payload));
     assert_eq!(
         read_server_frame(&mut Cursor::new(accepted_frame))
@@ -272,6 +288,30 @@ fn control_responses_and_lifecycle_events_have_closed_frames() {
         read_server_frame(&mut Cursor::new(response_frame))
             .expect("Control response should decode"),
         response
+    );
+
+    let project_failure = ServerMessage::response(
+        "request-project",
+        ControlResponse::ProjectOpenFailed {
+            failure: ProjectOpenFailure {
+                canonical_root: "/projects/damaged".to_owned(),
+                code: "project_not_found".to_owned(),
+                message: "Project root does not exist.".to_owned(),
+            },
+        },
+    );
+    let project_failure_frame =
+        encode_server_frame(&project_failure).expect("Project failure should encode");
+    assert_eq!(
+        project_failure_frame,
+        frame(
+            br#"{"type":"response","request_id":"request-project","response":{"result":"project_open_failed","failure":{"canonical_root":"/projects/damaged","code":"project_not_found","message":"Project root does not exist."}}}"#
+        )
+    );
+    assert_eq!(
+        read_server_frame(&mut Cursor::new(project_failure_frame))
+            .expect("Project failure should decode"),
+        project_failure
     );
 
     let event = ServerMessage::event(ControlEvent::ProductExiting);

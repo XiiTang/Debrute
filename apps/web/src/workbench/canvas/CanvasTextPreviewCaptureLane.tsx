@@ -34,21 +34,23 @@ const CanvasTextEditor = React.lazy(async () => {
   return { default: module.CanvasTextEditor };
 });
 
-export interface CanvasTextPreviewCaptureLaneProps {
-  target: CanvasTextPreviewCaptureTarget | undefined;
+export interface CanvasTextPreviewCaptureLaneProps<
+  Target extends CanvasTextPreviewCaptureTarget = CanvasTextPreviewCaptureTarget
+> {
+  target: Target | undefined;
   renderProfile: CanvasTextRenderProfile;
   preparedFont: CanvasTextPreparedFont | undefined;
   interactionSource: Pick<CanvasPreviewResourceScheduler, 'getInteractionState' | 'subscribeInteraction'>;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
-  onRasterized(target: CanvasTextPreviewCaptureTarget, result: CanvasTextPreviewCaptureResult): void;
-  onFailure(target: CanvasTextPreviewCaptureTarget, failure: CanvasTextPreviewFailure): void;
+  onRasterized(target: Target, result: CanvasTextPreviewCaptureResult): void;
+  onFailure(target: Target, failure: CanvasTextPreviewFailure): void;
 }
 
 type LanePhase = 'waiting-layout' | 'readiness' | 'capture' | 'capturing' | 'complete';
 
-interface LaneJob {
+interface LaneJob<Target extends CanvasTextPreviewCaptureTarget> {
   key: string;
-  target: CanvasTextPreviewCaptureTarget;
+  target: Target;
   renderProfile: CanvasTextRenderProfile;
   preparedFont: CanvasTextPreparedFont;
   phase: LanePhase;
@@ -58,7 +60,9 @@ interface LaneJob {
   disposed: boolean;
 }
 
-export function CanvasTextPreviewCaptureLane({
+export function CanvasTextPreviewCaptureLane<
+  Target extends CanvasTextPreviewCaptureTarget = CanvasTextPreviewCaptureTarget
+>({
   target,
   renderProfile,
   preparedFont,
@@ -66,9 +70,9 @@ export function CanvasTextPreviewCaptureLane({
   perfMonitor,
   onRasterized,
   onFailure
-}: CanvasTextPreviewCaptureLaneProps): React.ReactElement | null {
+}: CanvasTextPreviewCaptureLaneProps<Target>): React.ReactElement | null {
   const elementRef = useRef<HTMLDivElement | null>(null);
-  const jobRef = useRef<LaneJob | undefined>(undefined);
+  const jobRef = useRef<LaneJob<Target> | undefined>(undefined);
   const captureInFlightRef = useRef(false);
   const interactionActiveRef = useRef(
     canvasPreviewResourceInteractionActive(interactionSource.getInteractionState())
@@ -100,7 +104,7 @@ export function CanvasTextPreviewCaptureLane({
     });
   }, []);
 
-  const disposeJob = useCallback((job: LaneJob) => {
+  const disposeJob = useCallback((job: LaneJob<Target>) => {
     if (job.disposed) {
       return;
     }
@@ -112,7 +116,7 @@ export function CanvasTextPreviewCaptureLane({
     }
   }, []);
 
-  const failJob = useCallback((job: LaneJob, stage: 'capture_not_ready' | 'raster_failed', error: unknown) => {
+  const failJob = useCallback((job: LaneJob<Target>, stage: 'capture_not_ready' | 'raster_failed', error: unknown) => {
     if (job.disposed) {
       return;
     }
@@ -225,7 +229,7 @@ export function CanvasTextPreviewCaptureLane({
       jobRef.current = undefined;
       return undefined;
     }
-    const job: LaneJob = {
+    const job: LaneJob<Target> = {
       key: targetKey,
       target,
       renderProfile,

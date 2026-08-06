@@ -2,10 +2,11 @@ import React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { Boxes } from '../ui/index.js';
 import type {
-  CanvasDocument,
+  CanvasCatalogEntry,
   CanvasFeedbackDocument,
-  CanvasProjection
-} from '@debrute/canvas-core';
+  CanvasState
+} from '@debrute/app-protocol';
+import type { CanvasProjection } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import { CanvasSurface } from './CanvasSurface';
@@ -15,8 +16,15 @@ import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
 import type { CanvasEditorActions, CanvasSceneActions } from './CanvasSceneActions.js';
 
+const EMPTY_CANVAS_STATE: CanvasState = {
+  expandedDirectories: [],
+  nodeStates: {},
+  occlusionOrder: []
+};
+
 export function CanvasEditor({
   canvas,
+  canvasState,
   projection,
   hasProject,
   projectOpenAttemptedPath,
@@ -35,7 +43,8 @@ export function CanvasEditor({
   onOpenContextMenu,
   interactionBlocked = false,
 }: {
-  canvas: CanvasDocument | undefined;
+  canvas: CanvasCatalogEntry | undefined;
+  canvasState?: CanvasState | undefined;
   projection: CanvasProjection | undefined;
   hasProject: boolean;
   projectOpenAttemptedPath?: string | undefined;
@@ -76,6 +85,7 @@ export function CanvasEditor({
   return (
     <CanvasScene
       canvas={canvas}
+      canvasState={canvasState ?? EMPTY_CANVAS_STATE}
       projection={projection}
       actions={actions}
       textFileBuffers={textFileBuffers}
@@ -94,7 +104,8 @@ export function CanvasEditor({
 }
 
 interface CanvasSceneProps {
-  canvas: CanvasDocument;
+  canvas: CanvasCatalogEntry;
+  canvasState: CanvasState;
   projection: CanvasProjection;
   actions: CanvasSceneActions;
   textFileBuffers: Record<string, TextFileBuffer>;
@@ -112,6 +123,7 @@ interface CanvasSceneProps {
 
 const CanvasScene = React.memo(function CanvasScene({
   canvas,
+  canvasState,
   projection,
   actions,
   textFileBuffers,
@@ -134,6 +146,7 @@ const CanvasScene = React.memo(function CanvasScene({
     initialProjection: projection,
     submitManualLayout: (mutation) => actionsRef.current.updateCanvasNodeLayouts(canvas.id, {
       interaction: mutation.interaction,
+      selectedProjectRelativePaths: [...mutation.selectedProjectRelativePaths],
       nodeLayouts: [...mutation.nodeLayouts]
     })
   };
@@ -165,7 +178,8 @@ const CanvasScene = React.memo(function CanvasScene({
   return (
     <section className="canvas-shell">
       <CanvasSurface
-        canvas={canvas}
+      canvas={canvas}
+      canvasState={canvasState}
         projection={projection}
         runtime={runtime}
         actions={actions}

@@ -6,7 +6,8 @@ import type {
   ControlEvent,
   NativeEditCommandId,
   NativeMenuCommand,
-  RecentProject
+  NativeMenuCommandResult,
+  NativeProjectOpenFailure
 } from '@debrute/app-protocol';
 import type { RuntimeControlClient } from '@debrute/runtime-control-client';
 
@@ -49,9 +50,12 @@ let windowHost: DesktopWindowHost<Electron.BrowserWindow, ElectronDesktopWindow>
 let appQuitAllowed = false;
 const productQuit = new DesktopProductQuit();
 let runtimeLossReported = false;
-let recentProjects: RecentProject[] = [];
+let recentProjectRoots: string[] = [];
 let productUpdateFailureShown = false;
-const desktopOpenAdmission = createDesktopOpenAdmission<Electron.BrowserWindow>(async (
+const desktopOpenAdmission = createDesktopOpenAdmission<
+  Electron.BrowserWindow,
+  NativeMenuCommandResult
+>(async (
   intent,
   preferredWindow
 ) => {
@@ -59,7 +63,7 @@ const desktopOpenAdmission = createDesktopOpenAdmission<Electron.BrowserWindow>(
   if (!activeHost) {
     throw new Error('Debrute window host is not available for Desktop activation.');
   }
-  await activateOpenIntent(activeHost, intent, preferredWindow);
+  return activateOpenIntent(activeHost, intent, preferredWindow);
 });
 
 if (app.requestSingleInstanceLock()) {
@@ -80,7 +84,7 @@ function registerDesktopLifecycle(): void {
 
   app.on('open-file', (event, projectRoot) => {
     event.preventDefault();
-    runDesktopAction(dispatchDesktopOpen({ kind: 'open-project-path', projectRoot }));
+    runDesktopOpenAction(dispatchDesktopOpen({ kind: 'open-project-path', projectRoot }));
   });
 
   app.on('second-instance', (_event, argv) => {
@@ -94,7 +98,7 @@ function registerDesktopLifecycle(): void {
       reportDesktopError(error);
       return;
     }
-    runDesktopAction(dispatchDesktopOpen(
+    runDesktopOpenAction(dispatchDesktopOpen(
       parseDesktopOpenIntent(argv) ?? { kind: 'new-window' }
     ));
   });
@@ -163,7 +167,6 @@ async function startDesktop(): Promise<void> {
       platform: desktopPlatform,
       projectIconPath,
       preloadDirectory: __dirname,
-      developmentOrigin: process.env.DEBRUTE_DESKTOP_VITE_ORIGIN,
       onRendererGone: (reason) => {
         dialog.showErrorBox(
           'Debrute Workbench stopped',
@@ -194,38 +197,54 @@ async function startDesktop(): Promise<void> {
   }
   installApplicationMenu();
 
-  await desktopOpenAdmission.start(parseDesktopOpenIntent(process.argv));
+  const startupResults = await desktopOpenAdmission.start(parseDesktopOpenIntent(process.argv));
+  for (const startupResult of startupResults) {
+    if (startupResult.result === 'project_open_failed') {
+      reportDesktopError(new Error(
+        `${startupResult.failure.code}: ${startupResult.failure.message}`
+      ));
+    }
+  }
 }
 
 async function activateOpenIntent(
   activeHost: DesktopWindowHost<Electron.BrowserWindow, ElectronDesktopWindow>,
   intent: DesktopOpenIntent,
   preferredWindow?: Electron.BrowserWindow
-): Promise<void> {
+): Promise<NativeMenuCommandResult> {
   const activation: ActivationIntent = intent.kind === 'open-project-path'
     ? { kind: 'open_project', project_root: intent.projectRoot, frontend: 'desktop' }
-    : intent.kind === 'open-project-id'
-      ? { kind: 'open_known_project', project_id: intent.projectId, frontend: 'desktop' }
-      : { kind: 'open_desktop' };
+    : { kind: 'open_desktop' };
   const response = await activeHost.activate(activation, preferredWindow);
+  if (response.result === 'project_open_failed') {
+    return {
+      result: 'project_open_failed',
+      failure: {
+        projectRoot: response.failure.canonical_root,
+        code: response.failure.code,
+        message: response.failure.message
+      }
+    };
+  }
   if (response.result === 'rejected') {
     throw new Error(`Runtime rejected Desktop activation: ${response.code}`);
   }
   if (response.result !== 'activation') {
     throw new Error(`Runtime returned an unexpected activation response: ${response.result}`);
   }
+  return { result: 'completed' };
 }
 
 function handleControlEvent(event: ControlEvent): void {
   if (event.event !== 'desktop_recent_projects_changed') {
     return;
   }
-  recentProjects = event.recent_projects;
+  recentProjectRoots = event.recent_project_roots;
   const jumpListResult = syncNativeRecentProjects(
     app,
     desktopPlatform,
     process.execPath,
-    recentProjects.map((project) => project.projectRoot)
+    recentProjectRoots
   );
   if (jumpListResult && jumpListResult !== 'ok') {
     console.warn(`Windows rejected the Debrute Jump List: ${jumpListResult}`);
@@ -234,22 +253,26 @@ function handleControlEvent(event: ControlEvent): void {
 }
 
 function installApplicationMenu(): void {
-  const recentItems: Electron.MenuItemConstructorOptions[] = recentProjects.length === 0
+  const recentItems: Electron.MenuItemConstructorOptions[] = recentProjectRoots.length === 0
     ? [{ label: 'No Recent Projects', enabled: false }]
-    : recentProjects.map((project) => ({
-        label: project.projectRoot,
-        click: (_item, window) => runDesktopAction(dispatchDesktopOpen(
-          { kind: 'open-project-id', projectId: project.projectId },
-          desktopBrowserWindow(window)
-        ))
+    : recentProjectRoots.map((projectRoot) => ({
+        label: projectRoot,
+        click: (_item, window) => {
+          const browserWindow = desktopBrowserWindow(window);
+          runDesktopOpenAction(dispatchDesktopOpen(
+            { kind: 'open-project-path', projectRoot },
+            browserWindow
+          ), browserWindow);
+        }
       }));
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildDesktopApplicationMenu({
     platform: desktopPlatform,
     recentItems,
     newWindow: () => runDesktopAction(dispatchDesktopOpen({ kind: 'new-window' })),
-    openProject: (window) => runDesktopAction(chooseProject(
-      window as Electron.BrowserWindow | undefined
-    )),
+    openProject: (window) => {
+      const browserWindow = desktopBrowserWindow(window);
+      runDesktopOpenAction(chooseProject(browserWindow), browserWindow);
+    },
     reloadWorkbench: (window) => {
       if (window instanceof BrowserWindow && !window.isDestroyed()) {
         runDesktopAction(reloadWindow(window));
@@ -267,15 +290,16 @@ function installApplicationMenu(): void {
 
 async function chooseProject(
   window: Electron.BrowserWindow | undefined
-): Promise<void> {
+): Promise<NativeMenuCommandResult> {
   const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] };
   const result = window && !window.isDestroyed()
     ? await dialog.showOpenDialog(window, options)
     : await dialog.showOpenDialog(options);
   const projectRoot = result.filePaths[0];
-  if (!result.canceled && projectRoot) {
-    await dispatchDesktopOpen({ kind: 'open-project-path', projectRoot }, window);
+  if (result.canceled || !projectRoot) {
+    return { result: 'cancelled' };
   }
+  return dispatchAdmittedDesktopOpen({ kind: 'open-project-path', projectRoot }, window);
 }
 
 async function reloadWindow(window: Electron.BrowserWindow): Promise<void> {
@@ -288,34 +312,34 @@ async function reloadWindow(window: Electron.BrowserWindow): Promise<void> {
 async function executeNativeMenuCommand(
   window: Electron.BrowserWindow,
   command: NativeMenuCommand
-): Promise<void> {
+): Promise<NativeMenuCommandResult> {
   if (window.isDestroyed()) {
     throw new Error('Debrute native window is not available.');
   }
   switch (command.commandId) {
-    case 'window.new': await dispatchDesktopOpen({ kind: 'new-window' }); return;
-    case 'project.open-picker': await chooseProject(window); return;
-    case 'project.open-known': {
-      if (typeof command.projectId !== 'string' || command.projectId.length === 0) {
-        throw new Error('Native Project activation requires projectId.');
+    case 'window.new':
+      return dispatchAdmittedDesktopOpen({ kind: 'new-window' });
+    case 'project.open-picker': return chooseProject(window);
+    case 'project.open-path': {
+      if (typeof command.projectRoot !== 'string' || command.projectRoot.length === 0) {
+        throw new Error('Native Project activation requires projectRoot.');
       }
-      await dispatchDesktopOpen(
-        { kind: 'open-project-id', projectId: command.projectId },
+      return dispatchAdmittedDesktopOpen(
+        { kind: 'open-project-path', projectRoot: command.projectRoot },
         window
       );
-      return;
     }
-    case 'window.close': window.close(); return;
-    case 'view.reload': await reloadWindow(window); return;
-    case 'view.toggle-devtools': window.webContents.toggleDevTools(); return;
-    case 'edit.undo': window.webContents.undo(); return;
-    case 'edit.redo': window.webContents.redo(); return;
-    case 'edit.cut': sendNativeEditCommand(window, command.commandId); return;
-    case 'edit.copy': sendNativeEditCommand(window, command.commandId); return;
-    case 'edit.paste': sendNativeEditCommand(window, command.commandId); return;
-    case 'edit.paste-and-match-style': window.webContents.pasteAndMatchStyle(); return;
-    case 'edit.delete': sendNativeEditCommand(window, command.commandId); return;
-    case 'edit.select-all': sendNativeEditCommand(window, command.commandId); return;
+    case 'window.close': window.close(); return { result: 'completed' };
+    case 'view.reload': await reloadWindow(window); return { result: 'completed' };
+    case 'view.toggle-devtools': window.webContents.toggleDevTools(); return { result: 'completed' };
+    case 'edit.undo': window.webContents.undo(); return { result: 'completed' };
+    case 'edit.redo': window.webContents.redo(); return { result: 'completed' };
+    case 'edit.cut': sendNativeEditCommand(window, command.commandId); return { result: 'completed' };
+    case 'edit.copy': sendNativeEditCommand(window, command.commandId); return { result: 'completed' };
+    case 'edit.paste': sendNativeEditCommand(window, command.commandId); return { result: 'completed' };
+    case 'edit.paste-and-match-style': window.webContents.pasteAndMatchStyle(); return { result: 'completed' };
+    case 'edit.delete': sendNativeEditCommand(window, command.commandId); return { result: 'completed' };
+    case 'edit.select-all': sendNativeEditCommand(window, command.commandId); return { result: 'completed' };
     default: throw new Error('Unsupported native menu command.');
   }
 }
@@ -334,17 +358,54 @@ function requestProductQuit(): void {
   runDesktopAction(productQuit.request(control));
 }
 
-function runDesktopAction(action: Promise<void>): void {
+function runDesktopAction(action: Promise<unknown>): void {
   void action.catch(reportDesktopError);
+}
+
+function runDesktopOpenAction(
+  action: Promise<NativeMenuCommandResult | undefined>,
+  preferredWindow?: Electron.BrowserWindow
+): void {
+  void action.then((result) => {
+    if (result?.result !== 'project_open_failed') {
+      return;
+    }
+    const target = preferredWindow && !preferredWindow.isDestroyed()
+      ? preferredWindow
+      : BrowserWindow.getFocusedWindow() ?? undefined;
+    if (!target) {
+      reportDesktopError(new Error(`${result.failure.code}: ${result.failure.message}`));
+      return;
+    }
+    sendNativeProjectOpenFailure(target, result.failure);
+  }).catch(reportDesktopError);
+}
+
+function sendNativeProjectOpenFailure(
+  window: Electron.BrowserWindow,
+  failure: NativeProjectOpenFailure
+): void {
+  window.webContents.send(nativeWindowIpcChannels.projectOpenFailed, failure);
 }
 
 function dispatchDesktopOpen(
   intent: DesktopOpenIntent,
   preferredWindow?: Electron.BrowserWindow
-): Promise<void> {
+): Promise<NativeMenuCommandResult | undefined> {
   return intent.kind === 'new-window'
     ? desktopOpenAdmission.dispatch(intent)
     : desktopOpenAdmission.dispatch(intent, preferredWindow);
+}
+
+async function dispatchAdmittedDesktopOpen(
+  intent: DesktopOpenIntent,
+  preferredWindow?: Electron.BrowserWindow
+): Promise<NativeMenuCommandResult> {
+  const result = await dispatchDesktopOpen(intent, preferredWindow);
+  if (!result) {
+    throw new Error('Desktop open admission is not live.');
+  }
+  return result;
 }
 
 function desktopBrowserWindow(

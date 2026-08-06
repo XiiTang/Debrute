@@ -11,7 +11,7 @@ import {
   CanvasFeedbackItem,
   CanvasFeedbackMark,
   UpdateCanvasFeedbackInput
-} from '@debrute/canvas-core';
+} from '@debrute/app-protocol';
 import {
   sameCanvasFeedbackBarTarget,
   type CanvasFeedbackBarTarget,
@@ -92,7 +92,7 @@ export interface CanvasFeedbackCanvasBinding {
 
 export function useCanvasFeedbackInteraction(input: {
   api: CanvasFeedbackApi;
-  projectId: string | undefined;
+  bindingId: string | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   notifyUnavailable(message: string): void;
   notifySaveFailed(message: string): void;
@@ -120,12 +120,12 @@ export function useCanvasFeedbackInteraction(input: {
   const hoveredRef = useRef(false);
   const loadEpochRef = useRef(0);
   const feedbackAcceptanceEpochRef = useRef(0);
-  const projectIdRef = useRef(input.projectId);
+  const bindingIdRef = useRef(input.bindingId);
   const workingCopyCoordinatorsRef = useRef(new Map<string, {
     desired: WorkbenchFeedbackWorkingCopy | null | undefined;
     running: Promise<boolean>;
   }>());
-  projectIdRef.current = input.projectId;
+  bindingIdRef.current = input.bindingId;
   feedbackRef.current = feedback;
   localValuesRef.current = localValues;
   focusedCapsuleIdRef.current = focusedCapsuleId;
@@ -166,11 +166,11 @@ export function useCanvasFeedbackInteraction(input: {
   }, []);
 
   const persistWorkingCopy = useCallback((itemId: string, workingCopy: WorkbenchFeedbackWorkingCopy | null) => {
-    const projectId = projectIdRef.current;
-    if (!projectId) {
+    const bindingId = bindingIdRef.current;
+    if (!bindingId) {
       return Promise.resolve(false);
     }
-    const key = `${projectId}\u0000${itemId}`;
+    const key = `${bindingId}\u0000${itemId}`;
     const active = workingCopyCoordinatorsRef.current.get(key);
     if (active) {
       active.desired = workingCopy;
@@ -188,9 +188,9 @@ export function useCanvasFeedbackInteraction(input: {
         coordinator.desired = undefined;
         try {
           if (desired) {
-            await input.api.putFeedbackWorkingCopy(projectId, desired);
+            await input.api.putFeedbackWorkingCopy(bindingId, desired);
           } else {
-            await input.api.clearFeedbackWorkingCopy(projectId, itemId);
+            await input.api.clearFeedbackWorkingCopy(bindingId, itemId);
           }
         } catch {
           succeeded = false;
@@ -218,11 +218,11 @@ export function useCanvasFeedbackInteraction(input: {
   }, [input.api]);
 
   const deleteAcceptedItem = useCallback(async (itemId: string, projectRelativePath: string) => {
-    const projectId = projectIdRef.current;
-    if (!projectId) {
+    const bindingId = bindingIdRef.current;
+    if (!bindingId) {
       return false;
     }
-    const key = `${projectId}\u0000${itemId}`;
+    const key = `${bindingId}\u0000${itemId}`;
     if (deletingItemKeysRef.current.has(key)) {
       return false;
     }
@@ -243,8 +243,8 @@ export function useCanvasFeedbackInteraction(input: {
     mark: CanvasFeedbackMark,
     selected: boolean
   ) => {
-    const projectId = projectIdRef.current;
-    if (!projectId || marksMutationPendingRef.current) {
+    const bindingId = bindingIdRef.current;
+    if (!bindingId || marksMutationPendingRef.current) {
       return;
     }
     const frozenPaths = [...projectRelativePaths];

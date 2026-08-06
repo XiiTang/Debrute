@@ -1,7 +1,7 @@
 # Runtime Architecture
 
 Debrute runs one shared Rust Runtime per operating-system user. Runtime is the
-authority for Project files, global settings and secrets, model generation,
+authority for Project files, global settings and secrets, Model Request execution,
 integrations, product updates, Workbench connections, Photoshop transfers, and
 terminal processes. Web Workbench, Desktop, plugins, and the `debrute` CLI are
 clients; none owns a parallel backend or a copy of authoritative state.
@@ -211,7 +211,10 @@ close, and Product Quit. Closing the Desktop host connection unregisters that
 host and drains its complete remaining window topology; the final native window
 does not need a separate close request. Recent Projects and Desktop
 open/focus/exit instructions are Control's only events. Project, Canvas,
-settings, generation, file, and terminal work does not travel over Control.
+settings, Model Request, file, and terminal work does not travel over Control.
+Activation responses may carry one structured Project-open failure containing
+the requested root, Project error code, and message; this is an activation
+outcome, not a Project service transported over Control.
 Publishing a new recent-Projects projection updates Runtime's ordered state and
 fans the event out to current Desktop hosts without returning a delivery result
 to the Global publisher. Failure to enqueue closes that Control connection under
@@ -229,11 +232,12 @@ in-memory launch ticket over Control together with the current Runtime-owned
 Workbench theme preference. The preference is a launch-time presentation
 snapshot, not a general settings API or Desktop-owned state. Main resolves it
 against Electron's native system theme before creating the window and passes
-only the ticket to the renderer through one narrow preload call; each
-BrowserWindow has an isolated storage partition and loads a stable URL with no
-credential in its URL. Missing or invalid launch presentation fails the window
-launch rather than falling back to another theme. A ticket has no disk
-persistence or timer-based lifetime and is removed atomically when consumed.
+the ticket through one narrow preload IPC method. Each BrowserWindow has an isolated storage partition and loads
+a stable URL with no credential in its URL. Missing or invalid launch
+presentation fails the window launch rather than falling back to another theme.
+The ticket has no disk persistence or timer-based lifetime and is removed
+atomically when consumed. A failed startup Project activation is shown as a
+native Desktop error without creating another Workbench window.
 
 Each loaded Workbench opens one POST SSE connection at
 `/api/workbench/connection`. Its first frames establish an in-memory connection
@@ -285,9 +289,9 @@ than a child Operation. Integration install/update/uninstall, Product Update,
 terminal processes, Canvas preview work, and professional-tool transfers keep
 their own domain lifetimes and do not enter the Model Operation registry.
 
-Before acceptance, Runtime validates the live CLI credential, canonical
-Project identity, complete strict JSONL input, Model availability, execution
-options, and output paths. It reads one validated Global configuration and
+Before acceptance, Runtime validates the live CLI credential, invocation
+working directory, complete strict JSONL input, Model availability, execution
+options, and each Request's output directory and basename. It reads one validated Global configuration and
 secret snapshot, creates one immutable Accepted Model Binding per unique Model
 ID, and validates every request against its binding. Repeated requests for one
 Model share one binding. Rejection creates no Operation and starts no paid
@@ -302,8 +306,8 @@ An accepted Operation never re-resolves Model Settings. Its bindings keep each
 effective route and credential atomic while later Settings changes affect only
 later Operations; explicit cancellation revokes pending use in an accepted
 Operation. Bindings remain private Runtime memory only while requests can use
-them and are absent from serialized snapshots, logs, Project data, and retained
-terminal records.
+them and are absent from serialized snapshots, logs, output files, provenance,
+and retained terminal records.
 
 Ordinary execution failures remain typed `Result` values and settle the
 Operation normally. An unexpected executor panic instead terminates Runtime; it
@@ -326,7 +330,7 @@ The registry is current-process coordination state, not Project history. It
 keeps all active Operations and at most the 100 newest terminal records,
 including retained Batch Item Outcomes for wait replay. It is not persisted,
 reconstructed, resumed, or replayed after Runtime replacement. Successful
-outputs remain durable as ordinary Project files and Generated Asset
+outputs remain durable as ordinary files with Runtime-global Model Artifact
 provenance. Agent Records on CLI stdout are the single observation protocol;
 callers may redirect them if they need a file copy. Product Quit terminates
 active Model Operations with the rest of Runtime-owned work instead of running
@@ -346,7 +350,7 @@ types serialize outward but are not deserialization or persistence contracts.
 
 Exact CLI syntax and Agent Records are documented in [`cli.md`](./cli.md).
 Model Request, timeout, output, and commit behavior is documented in
-[`model-generation.md`](./model-generation.md), while the accepted lifecycle
+[`model-requests.md`](./model-requests.md), while the accepted lifecycle
 decisions are indexed under the
 [Model Operation subsystem](./adr/README.md#model-operation-subsystem).
 
@@ -358,8 +362,8 @@ API keys. Photoshop state is live-only and is not a Global Settings field.
 Canvas Text Appearance persists as one
 complete `canvas.textAppearance` value rather than field patches: managed font
 ID, font size, line-height ratio, requested integer weight, letter spacing, and
-ligatures. Recent Projects persist only the mapping from stable Project id to
-canonical root. Non-secret settings and secrets use separate atomic files;
+ligatures. Recent Projects persist only an ordered list of canonical roots.
+Non-secret settings and secrets use separate atomic files;
 public projections expose only whether a key is set and a non-secret preview.
 Runtime stores no default frontend. Every frontend-opening command or menu item
 selects `desktop` or `browser` explicitly. Global events carry an ordered
@@ -374,67 +378,58 @@ subset, but every present object has a closed field set and the request must
 express at least one mutation. Repeating a valid current value succeeds without
 publishing a change; an empty or unknown-only patch fails without writing.
 
-The public stable Project identity is `.debrute/project.json.project.id`.
-Runtime rejects invalid or duplicate stable ids instead of deriving aliases
-from roots or generating compatibility identities. Session preparation reads
-that identity once; the watcher-first publication pass and every later refresh
-must observe the same id or fail before publishing. A loaded Project session
-owns one canonical root, snapshot, monotonic `projectRevision`, serialized
-mutation authority, watcher, terminals, and typed Project Uses. The use kinds
-are Workbench, request, running terminal, and transfer.
+The canonical absolute root is the complete Project identity. Runtime creates
+one loaded Project Session per canonical root, with one snapshot, monotonic
+`projectRevision`, serialized mutation authority, watcher, terminal set, and
+typed Project Uses. Workbench APIs receive a temporary opaque `bindingId`; it
+is capability authority rather than durable identity. The use kinds are
+Workbench, request, running terminal, and transfer.
 
-Project opening publishes a shallow Explorer snapshot containing only direct
-visible children of the root plus targeted Debrute metadata and Canvas
-documents. Directory expansion is a revisioned session command which adds that
-directory's direct children by merging that one directory read into the public
-snapshot; it does not rebuild metadata, Canvas, Feedback, registry, or Canvas
-Map state. Registry callers choose either ordinary opening, which starts the
-complete index in the background, or deferred opening. The Workbench binding
-path uses deferred opening: it first captures the shallow snapshot, queues
-`project.bound`, and starts its Project event stream; only then does it start
-the session-owned, idempotent, cancellable background index task. Discovery
-also uses deferred opening because it needs only stable identity and recent
-Project metadata. The task traverses outside the serialized mutation lane,
-honors every nested `.gitignore`, and skips dependency, cache, and generated
-directories such as `node_modules`, `target`, `dist`, and `build`. Those
-directories remain available through an explicit Explorer expansion; they do
-not belong to automatic indexing. The task installs its result
-with one short revisioned commit when it changes a public Canvas projection.
-Project close cancels and joins that task. Scan failure
-preserves the shallow snapshot, publishes a Project diagnostic, and leaves
-explicit refresh as the retry. The CLI `project.validate` command builds a
-separate complete read-only validation snapshot before reporting health, so
-nested Canvas Map drift and target diagnostics are included deterministically
-without pushing drift or changing the live session.
-For a new session, Runtime initializes Project authority, establishes the
-platform watcher, and then performs exactly one initial shallow snapshot pass.
+Project opening publishes root-scoped Canvas state, Project-local Feedback, and the
+ordered view of one session-local `ProjectTree` module containing the real root
+entry and its direct children. That module alone owns the flat path index, directory
+load state, sibling ordering, and non-persistent filesystem identity. Directory
+loading is a revisioned session command that asks the module to enumerate one
+directory's direct children. Every loaded directory stays indexed until the
+session closes; disclosure changes never unload it. The public Project snapshot
+is derived output. Explorer consumes the ordered tree; the active Canvas
+consumes a disclosure-filtered resource view. Workbench derives Canvas scene
+geometry from that view.
+
+Each directory has explicit `unloaded`, `loaded`, or `error` state.
+An unloaded or failed directory is never represented as empty and never
+authorizes sparse-state cleanup. Only the active Canvas restores its disclosed
+directory closure. Canvas activation expands each retained disclosure to its
+complete ancestor-plus-self closure, continues loading independent branches
+when one branch fails, and publishes the batch through one final resource view.
+Read failures remain indexed as `error`; only authoritative not-found after
+ancestor enumeration confirms absence. Explorer expansion, Canvas expansion,
+Canvas activation, and Reveal in Canvas all request the same directory-load
+operation. There is no complete background traversal.
+
 The supported macOS FSEvents and Windows backends each use one native recursive
-root subscription. Events are filtered through the same nested `.gitignore`
-and generated-directory policy as the index, except paths currently named by
-an explicit Canvas literal rule or directly exposed by an expanded Explorer
-directory remain admitted as session dependencies. Literal Canvas expansions
-are cached per map; a matching event refreshes only its affected file or
-subtree, while unrelated events reuse the cache. A backend rescan, explicit
-full refresh, or changed literal rule rebuilds that targeted cache. Watcher events observed during that pass queue behind the
-publication barrier and are applied after the session is published. Runtime
-does not repeat Canvas projection and media inspection merely to close the
-watcher-establishment race, and it cannot publish a snapshot whose metadata id
-differs from the session id captured before watcher installation.
-Filesystem watcher bursts are sorted and delivered as one batch; a complete index is updated only
-for affected files or directory subtrees. Mutations accepted while the initial
-scan is running are replayed onto its candidate before installation. Changing
-an included `.gitignore` rebuilds the filtered index.
-Full traversal of included content is reserved for initial background indexing,
-an explicit refresh, an ignore-policy change, or a watcher-backend rescan signal.
+root subscription. Watcher bursts are sorted and delivered as a batch, but
+Runtime refreshes only loaded dependency paths and Debrute-managed documents.
+Runtime-authored Feedback events are discarded before refresh when their
+content hash matches the accepted document. Ordinary path events update the
+flat path index and rederive only Canvases that display or retain state for the
+affected subtree. A changed `.gitignore` re-enumerates every loaded descendant
+whose inherited ignore facts may change. A full watcher rescan additionally
+compares session-only filesystem identities so deletion plus recreation at the
+same path receives default Canvas state.
+Version-control internals, fixed operating-system debris, symbolic links, and
+non-regular entries are excluded. `.debrute/`, other dotfiles, and ignored
+entries remain visible; `.gitignore` contributes an `ignored` fact rather than
+membership. Directories such as `node_modules`, `target`, `dist`, and `build`
+are ordinary on-demand folders. Watcher events observed during initial
+publication queue behind its barrier and are applied afterward.
 
-Project metadata, Canvas JSON, the Canvas registry, Feedback, Generated Asset
-metadata, and Canvas Map source each deserialize as their one closed current
-document shape. Unknown nested fields are invalid and remain unchanged on disk.
-Invalid Project metadata prevents opening; invalid pushed Canvas documents and
-the registry use their existing snapshot diagnostic states so other valid
-Project content remains observable. Runtime does not strip unknown fields or
-rewrite those files while reading them. A later explicit push or repair is a
-new current operation, not an automatic migration.
+Global Canvas state, root-scoped Working Copies, Project-local Feedback, and
+global Model Artifact provenance each deserialize as one closed current document
+shape. Unknown fields are invalid and remain unchanged on disk. Invalid
+Feedback state fails the Project load or refresh. Invalid, unreadable, or
+root-mismatched Canvas state leaves Canvas unavailable without blocking the
+Project Tree, editor, or terminal.
 
 Releasing the final use atomically removes the live session and closes admission
 to that canonical root before cleanup begins. Project Use release itself is an
@@ -472,17 +467,36 @@ Project under this rule.
 Project mutations are serialized and semantically validated. Commands return
 their outcome; ordered stream events carry authoritative state. A stale or
 missing response is never permission to replay a state-changing command.
+Filesystem mutations commit first and then refresh the session-local Project
+Tree. Runtime subsequently applies the same path change to the root-scoped
+Canvas document, accepted Feedback, text Working Copies, and Feedback Working
+Copies. Rename and Move rewrite the source prefix; Delete prunes it; overwrite
+prunes the destination before rewriting the source. Watcher reconciliation
+prunes only a path confirmed missing by a successful parent enumeration.
+
+These updates are intentionally not a durable transaction with ordinary
+Project files. If secondary-state persistence fails, Runtime preserves the
+filesystem result, does not retry or roll it back, and publishes the successful
+command with one Error diagnostic named
+`project_path_state_persistence_failed` in that same Project revision. Ordinary
+refresh does not clear it; the next successful related path mutation does.
+Runtime writes no filesystem or Native Trash recovery journal, Canvas byte
+snapshot, expected output hash, or commit marker. Native Trash retains only
+immediate same-filesystem quarantine around the operating-system action.
 
 ## Working Copies And Terminal Lifetime
 
 Runtime persists unsaved text values and not-yet-accepted Canvas Feedback values
-as Working Copies under its private state directory, keyed by the stable Project
-id. Feedback values are additionally keyed by stable Feedback Capsule identity.
-Editing writes the complete current value; a successful matching save, accepted
-feedback mutation, explicit discard, or feedback deletion clears only the
-corresponding value. Working Copies have no time-to-live or arbitrary count cap
-and are restored in the next Project binding. Reconstructible Canvas camera,
-selection, and panel state remains frontend-local and is not a Working Copy.
+as Working Copies under its private state directory, keyed by the canonical
+root's Root Key. Feedback values are additionally keyed by stable Feedback
+Capsule identity. Text and Feedback Working Copies follow a Runtime-committed
+rename or move and are pruned by confirmed deletion or overwrite. Editing
+writes the complete current value; a
+successful matching save, accepted feedback mutation, explicit discard, or
+feedback deletion clears only the corresponding value. Working Copies have no
+time-to-live or arbitrary count cap and are restored in the next Project binding.
+Reconstructible Canvas camera, selection, and panel state remains frontend-local
+and is not a Working Copy.
 
 Runtime owns PTYs and holds a `running-terminal` Project Use independently of a
 Workbench connection. One Project-scoped WebSocket transports terminal
@@ -539,7 +553,7 @@ or Project Uses. See
 - Model Operation registry, lifecycle, observation, and result shapes:
   `apps/runtime/src/model_operation.rs` and `apps/runtime/src/cli/`.
 - Model execution, redaction, downloads, and output commit:
-  `apps/runtime/src/generation/`.
+  `apps/runtime/src/model_request/`.
 - Desktop window host: `apps/desktop/src/electron/`.
 - Terminal ownership: `apps/runtime/src/terminal/`.
 - Product bootstrap and update: `apps/runtime/src/product/`.

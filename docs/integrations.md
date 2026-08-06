@@ -67,7 +67,7 @@ the process exits instead of continuing with Workbenches observing different
 states. A later explicit launch performs the ordinary fresh status scan.
 
 This remains a domain-specific operation boundary. The initial Runtime
-Operation initiative covers only model generation and explicitly retains this
+Operation initiative covers only Model Request execution and explicitly retains this
 Integration exception; it must not wrap the service in a partial generic
 registry, detached-job API, or compatibility layer.
 

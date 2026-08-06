@@ -20,7 +20,5 @@ An occupied port advances Runtime to the next pool entry. Exhausting the pool
 makes Photoshop connectivity unavailable without preventing Runtime or
 Workbench operation. The plugin does not scan arbitrary ports, read a Runtime
 locator file, request broad host-filesystem access, or use a fixed port for the
-entire Workbench server. This narrowly supersedes the single fixed Photoshop
-discovery listener described by ADR 0004 and the discovery handoff in ADR 0009;
-their dynamic Workbench origin and role-partitioned authorization decisions
-remain unchanged.
+entire Workbench server. The Workbench keeps its dynamic origin and
+role-partitioned authorization.

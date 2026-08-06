@@ -1,7 +1,7 @@
 # Canvas Feedback
 
 Canvas Feedback is Project-scoped current review state for Project Path targets. It is
-not Canvas layout, a workflow history, an approval gate, or Generated Asset
+not Canvas layout, a workflow history, an approval gate, or Model Artifact
 metadata. This page records the current structured model, Workbench interaction,
 and derived artifact boundaries.
 
@@ -10,15 +10,16 @@ and derived artifact boundaries.
 One Project file is the durable source of truth:
 
 ```text
-.debrute/reviews/canvas-feedback.json
+.debrute/feedback/feedback.json
 ```
 
 The document is keyed by normalized project-relative path and stores only
 current entries. Missing storage means empty feedback. An entry is omitted when
-it has neither Feedback Marks nor Feedback Items. Feedback stays outside Canvas
-Documents so the same Project Path target keeps one review state across Canvas views
-and can be read by external Agents through ordinary filesystem or generic
-Project-file access.
+it has neither Feedback Marks nor Feedback Items. Feedback stays outside the
+Runtime-global Canvas Workspace so the same Project Path target keeps one
+review state across Canvas views and can be read by external Agents through
+ordinary filesystem access. `.debrute/` is ordinary visible Project content;
+Canvas and Explorer can disclose this document like any other visible file.
 
 Runtime validates the complete document on read, serializes overlapping writes
 per Project file, and commits against the content hash it read. Invalid JSON,
@@ -30,11 +31,20 @@ The closed document limits remain 2 MiB, 1,000 entries, 500 Items per entry,
 separate selection-size limit; the resulting document must satisfy those same
 limits atomically.
 
+If this document is unreadable or invalid, Runtime leaves its bytes unchanged
+and the Project load or refresh fails with that ordinary error.
+
 Path is the complete identity of Feedback state. The Project root uses the
 empty path. Files, directories, and the Project root may each own independent
 entries; selecting a directory never expands a mutation to its descendants and
-never suppresses an independently selected descendant. Rename and move do not
-carry Feedback to the new path.
+never suppresses an independently selected descendant. `.debrute/**` cannot be
+a Feedback target, preventing feedback from recursively reviewing its own
+source or derived files. Delete removes accepted Feedback for that path subtree.
+Rename and Move rewrite the source path or directory prefix; overwrite prunes
+the destination before rewriting the source. The same rules apply to Feedback
+Working Copies. A watcher signal alone removes nothing; Runtime prunes only
+after a successful parent-directory enumeration confirms that the path is
+missing.
 
 ## Marks, Items, And Moments
 
@@ -254,8 +264,8 @@ over the video.
 Rendered feedback images are derived review outputs under:
 
 ```text
-.debrute/reviews/rendered-feedback/<image-path>.annotated.png
-.debrute/reviews/rendered-feedback/<video-path>.moment-<M#>.annotated.png
+.debrute/feedback/artifacts/<image-path>.annotated.png
+.debrute/feedback/artifacts/<video-path>.moment-<M#>.annotated.png
 ```
 
 Image artifacts exist only when an entry has node-scoped spatial items. Every
@@ -288,8 +298,8 @@ cache hits, so they do not carry a separate cache or renderer version.
 Artifact failures do not roll back accepted feedback. They remove stale output
 for the failed target and surface a Project diagnostic keyed to the image path
 or video path plus moment. A later successful render clears that diagnostic.
-The artifact tree and its temporary files are excluded from Project-visible
-content and Canvas Map expansion.
+Completed artifacts are visible ordinary Project content. Runtime-owned
+temporary files remain excluded by the common managed-temporary policy.
 
 ## Agent Contract
 

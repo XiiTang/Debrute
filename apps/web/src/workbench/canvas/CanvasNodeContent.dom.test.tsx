@@ -4,9 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   canvasPreviewContinuityKey,
-  canvasPreviewTargetIdentityFromDigest,
-  type ProjectedCanvasNode
+  canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { EditorView } from '@codemirror/view';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import {
@@ -140,7 +140,7 @@ describe('CanvasNodeContent', () => {
       />
     );
 
-    expect(html).toContain('Project Root');
+    expect(html).toContain('ecommerce');
   });
 
   it('renders a generic node label once in the normal state', () => {
@@ -855,7 +855,7 @@ describe('CanvasNodeContent', () => {
         revision: 'rev-a',
         size: 10_000,
         mimeType: 'audio/mpeg',
-        fileUrl: '/api/projects/p/files/raw/audio/theme.mp3?v=rev-a'
+        fileUrl: '/api/workbench/bindings/p/files/raw/audio/theme.mp3?v=rev-a'
       }
     };
     const inactiveHtml = renderStaticWithI18n(
@@ -992,6 +992,7 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
 function textNode(path: string, revision: string): ProjectedCanvasNode {
   return {
     projectRelativePath: path,
+    displayName: path.split('/').at(-1)!,
     nodeKind: 'file',
     mediaKind: 'text',
     x: 0,
@@ -1003,7 +1004,7 @@ function textNode(path: string, revision: string): ProjectedCanvasNode {
       state: 'available',
       size: 64,
       mimeType: 'text/markdown',
-      fileUrl: `/api/projects/p/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/workbench/bindings/p/files/raw/${path}?v=${revision}`,
       revision
     }
   };
@@ -1012,6 +1013,7 @@ function textNode(path: string, revision: string): ProjectedCanvasNode {
 function videoNode(path: string, revision: string): ProjectedCanvasNode {
   return {
     projectRelativePath: path,
+    displayName: path.split('/').at(-1)!,
     nodeKind: 'file',
     mediaKind: 'video',
     x: 0,
@@ -1023,7 +1025,7 @@ function videoNode(path: string, revision: string): ProjectedCanvasNode {
       state: 'available',
       size: 10_000,
       mimeType: 'video/mp4',
-      fileUrl: `/api/projects/p/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/workbench/bindings/p/files/raw/${path}?v=${revision}`,
       revision
     },
     videoPresentation: {
@@ -1113,19 +1115,19 @@ function textPreviewRequest(
   return {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'text',
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       continuityIdentity: targetIdentity
     }),
     variantTarget: {
       mediaKind: 'text',
-      projectId: 'p',
+      bindingId: 'p',
       canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       targetIdentity,
       sourceWidth: 700,
-      srcForWidth: (width) => `/api/projects/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&targetIdentity=${targetIdentity}&w=${width}`
+      srcForWidth: (width) => `/api/workbench/bindings/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&targetIdentity=${targetIdentity}&w=${width}`
     }
   };
 }
@@ -1196,6 +1198,7 @@ function actionsFixture(overrides: Partial<WorkbenchActions> = {}): WorkbenchAct
 function imageNode(path: string, revision: string): ProjectedCanvasNode {
   return {
     projectRelativePath: path,
+    displayName: path.split('/').at(-1)!,
     nodeKind: 'file',
     mediaKind: 'image',
     x: 0,
@@ -1208,7 +1211,7 @@ function imageNode(path: string, revision: string): ProjectedCanvasNode {
       revision,
       size: 10_000,
       mimeType: 'image/png',
-      fileUrl: `/api/projects/p/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/workbench/bindings/p/files/raw/${path}?v=${revision}`,
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 1600
     }
@@ -1218,19 +1221,14 @@ function imageNode(path: string, revision: string): ProjectedCanvasNode {
 function directoryNode(path: string): ProjectedCanvasNode {
   return {
     projectRelativePath: path,
+    displayName: path ? path.split('/').at(-1)! : 'ecommerce',
     nodeKind: 'directory',
     x: 0,
     y: 0,
     width: 240,
     height: 96,
     z: 0,
-    availability: {
-      state: 'available',
-      size: 0,
-      mimeType: 'inode/directory',
-      fileUrl: '',
-      revision: 'rev-a'
-    }
+    availability: { state: 'directory' }
   };
 }
 

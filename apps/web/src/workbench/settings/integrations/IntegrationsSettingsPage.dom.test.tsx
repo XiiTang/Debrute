@@ -390,7 +390,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
         ligatures: true
       }
     },
-    chrome: { recentProjects: [] },
+    chrome: { recentProjectRoots: [] },
     models: { image: [], video: [], audio: [] },
     ...overrides
   };

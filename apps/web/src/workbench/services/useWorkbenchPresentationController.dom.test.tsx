@@ -96,7 +96,7 @@ function settingsFixture(
         ligatures: true
       }
     },
-    chrome: { recentProjects: [] },
+    chrome: { recentProjectRoots: [] },
     models: { image: [], video: [], audio: [] }
   };
 }

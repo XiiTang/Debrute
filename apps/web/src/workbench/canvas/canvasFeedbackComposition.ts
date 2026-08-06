@@ -1,4 +1,4 @@
-import type { CanvasFeedbackGeometry } from '@debrute/canvas-core';
+import type { CanvasFeedbackGeometry } from '@debrute/app-protocol';
 
 export interface CanvasFeedbackComposition {
   itemId: string;

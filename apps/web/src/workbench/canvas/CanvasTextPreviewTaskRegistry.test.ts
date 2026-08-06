@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canvasPreviewTargetIdentityFromDigest } from '@debrute/canvas-core';
+import { canvasTextPreviewTargetKey } from './CanvasTextPreviewCapture.js';
 import {
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_BYTES,
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_TARGETS,
@@ -18,8 +19,8 @@ describe('CanvasTextPreviewTaskRegistry', { tags: ['canvas-text'] }, () => {
       previous,
       targets: [target('a.md', 'new'), target('b.md', 'b')],
       sourceAvailability: {
-        'a.md': { targetIdentity: canvasPreviewTargetIdentityFromDigest('new'), available: false },
-        'b.md': { targetIdentity: canvasPreviewTargetIdentityFromDigest('b'), available: true }
+        'a.md': { targetKey: canvasTextPreviewTargetKey(target('a.md', 'new')), available: false },
+        'b.md': { targetKey: canvasTextPreviewTargetKey(target('b.md', 'b')), available: true }
       }
     });
 
@@ -33,11 +34,53 @@ describe('CanvasTextPreviewTaskRegistry', { tags: ['canvas-text'] }, () => {
       previous: new Map([['a.md', current]]),
       targets: [target('a.md', 'same')],
       sourceAvailability: {
-        'a.md': { targetIdentity: canvasPreviewTargetIdentityFromDigest('same'), available: false }
+        'a.md': { targetKey: canvasTextPreviewTargetKey(target('a.md', 'same')), available: false }
       }
     });
 
     expect(next.get('a.md')).toBe(current);
+  });
+
+  it('retains only the executing task after its target leaves active maintenance', () => {
+    const capturing = task('a.md', 'capture', 'capturing');
+    const next = reconcileCanvasTextPreviewTasks({
+      previous: new Map([
+        ['a.md', capturing],
+        ['b.md', task('b.md', 'queued', 'waiting-font')]
+      ]),
+      targets: [],
+      sourceAvailability: {}
+    });
+
+    expect([...next.values()]).toEqual([capturing]);
+  });
+
+  it('lets an old executing identity finish before admitting a replacement at the same path', () => {
+    const uploading = task('a.md', 'old', 'uploading');
+    const next = reconcileCanvasTextPreviewTasks({
+      previous: new Map([['a.md', uploading]]),
+      targets: [target('a.md', 'new')],
+      sourceAvailability: {}
+    });
+
+    expect(next.get('a.md')).toBe(uploading);
+  });
+
+  it('does not reuse work or source availability from another Project binding', () => {
+    const current = task('a.md', 'same', 'ready');
+    const rebound = { ...target('a.md', 'same'), bindingId: 'project-2' };
+    const next = reconcileCanvasTextPreviewTasks({
+      previous: new Map([['a.md', current]]),
+      targets: [rebound],
+      sourceAvailability: {
+        'a.md': {
+          targetKey: canvasTextPreviewTargetKey(current),
+          available: true
+        }
+      }
+    });
+
+    expect(next.get('a.md')).toMatchObject({ bindingId: 'project-2', state: 'checking' });
   });
 
   it('admits every unknown target without a viewport filter', () => {
@@ -74,11 +117,26 @@ describe('CanvasTextPreviewTaskRegistry', { tags: ['canvas-text'] }, () => {
       'fits.md'
     ]);
   });
+
+  it('runs the first oversized content task alone instead of starving it', () => {
+    const oversized = {
+      ...task('large.md', 'large', 'needs-content'),
+      estimatedBytes: CANVAS_TEXT_PREVIEW_CONTENT_MAX_BYTES + 1
+    };
+    const small = task('small.md', 'small', 'needs-content');
+
+    expect(canvasTextPreviewContentWindow({ orderedTasks: [oversized, small], allocatedTasks: [] }))
+      .toEqual([oversized]);
+    expect(canvasTextPreviewContentWindow({
+      orderedTasks: [oversized],
+      allocatedTasks: [task('allocated.md', 'allocated', 'reading')]
+    })).toEqual([]);
+  });
 });
 
 function target(projectRelativePath: string, targetIdentity: string) {
   return {
-    projectId: 'project-1',
+    bindingId: 'project-1',
     canvasId: 'canvas-1',
     projectRelativePath,
     targetIdentity: canvasPreviewTargetIdentityFromDigest(targetIdentity),
@@ -102,5 +160,5 @@ function task(
   targetIdentity: string,
   state: CanvasTextPreviewTask['state']
 ): CanvasTextPreviewTask {
-  return { ...target(projectRelativePath, targetIdentity), state };
+  return { ...target(projectRelativePath, targetIdentity), attempt: {}, state };
 }

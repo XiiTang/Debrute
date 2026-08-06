@@ -12,10 +12,11 @@ use std::{
 
 use debrute_runtime::cli::RuntimeCliService;
 use debrute_runtime::control::{
-    ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
-    ControlRequest, ControlResponse, DesktopOpenError, DesktopOpenResult, ProjectFrontend,
-    RecentProject, RuntimeActivationService, RuntimeControlState, ServerMessage, WorkbenchRoute,
-    encode_frame, read_server_frame, request_handshake, serve_control_connection,
+    ActivationFailure, ActivationIntent, ActivationOutcome, ClientMessage, ClientRole,
+    ControlErrorCode, ControlEvent, ControlRequest, ControlResponse, DesktopOpenError,
+    DesktopOpenResult, ProjectFrontend, ProjectOpenFailure, RuntimeActivationService,
+    RuntimeControlState, ServerMessage, WorkbenchRoute, encode_frame, read_server_frame,
+    request_handshake, serve_control_connection,
 };
 use debrute_runtime::workbench::{
     RuntimeCliHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
@@ -50,16 +51,16 @@ impl RuntimeActivationService for DesktopActivation {
         &self,
         intent: &ActivationIntent,
         _preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ControlErrorCode> {
+    ) -> Result<ActivationOutcome, ActivationFailure> {
         let route = match intent {
             ActivationIntent::OpenDesktop => WorkbenchRoute::Root,
-            ActivationIntent::OpenKnownProject {
-                project_id,
+            ActivationIntent::OpenProject {
+                project_root,
                 frontend: ProjectFrontend::Desktop,
-            } => WorkbenchRoute::Project {
-                project_id: project_id.clone(),
+            } => WorkbenchRoute::OpenProject {
+                canonical_root: project_root.clone(),
             },
-            _ => return Err(ControlErrorCode::InvalidActivation),
+            _ => return Err(ControlErrorCode::InvalidActivation.into()),
         };
         match self
             .state
@@ -70,7 +71,7 @@ impl RuntimeActivationService for DesktopActivation {
             Ok(DesktopOpenResult::Opened) => Ok(ActivationOutcome::Opened),
             Ok(DesktopOpenResult::FocusedExisting) => Ok(ActivationOutcome::FocusedExisting),
             Err(DesktopOpenError::HostUnavailable | DesktopOpenError::Outbound(_)) => {
-                Err(ControlErrorCode::DesktopUnavailable)
+                Err(ControlErrorCode::DesktopUnavailable.into())
             }
         }
     }
@@ -81,42 +82,47 @@ impl RuntimeActivationService for WorkbenchDesktopActivation {
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ControlErrorCode> {
+    ) -> Result<ActivationOutcome, ActivationFailure> {
         if matches!(intent, ActivationIntent::OpenDesktop) {
             return DesktopActivation {
                 state: self.state.clone(),
             }
             .activate(intent, None);
         }
-        let (project_id, project_root) = match intent {
+        let project_root = match intent {
             ActivationIntent::OpenProject {
                 project_root,
                 frontend: ProjectFrontend::Desktop,
-            } => (
-                self.services
-                    .discover_project(project_root)
-                    .map_err(|_| ControlErrorCode::InvalidActivation)?,
-                project_root.clone(),
-            ),
-            ActivationIntent::OpenKnownProject {
-                project_id,
-                frontend: ProjectFrontend::Desktop,
-            } => (
-                project_id.clone(),
-                self.services
-                    .project_root_for_stable_id(project_id)
-                    .map_err(|_| ControlErrorCode::InvalidActivation)?,
-            ),
-            _ => return Err(ControlErrorCode::InvalidActivation),
+            } => self
+                .services
+                .preflight_project_root(project_root)
+                .map_err(|error| project_open_failure(project_root, error))?,
+            _ => return Err(ControlErrorCode::InvalidActivation.into()),
         };
         self.services
-            .activate_desktop_project(&project_id, &project_root, preferred_desktop_window_key)
+            .activate_desktop_project(&project_root, preferred_desktop_window_key)
             .map(|outcome| match outcome {
                 DesktopOpenResult::Opened => ActivationOutcome::Opened,
                 DesktopOpenResult::FocusedExisting => ActivationOutcome::FocusedExisting,
             })
-            .map_err(|_| ControlErrorCode::DesktopUnavailable)
+            .map_err(|error| match error.code {
+                "desktop_window_activation_failed" | "desktop_window_focus_failed" => {
+                    ControlErrorCode::DesktopUnavailable.into()
+                }
+                _ => project_open_failure(&project_root, error),
+            })
     }
+}
+
+fn project_open_failure(
+    project_root: &str,
+    error: debrute_runtime::workbench::RuntimeHttpServiceError,
+) -> ActivationFailure {
+    ActivationFailure::ProjectOpen(ProjectOpenFailure {
+        canonical_root: project_root.to_owned(),
+        code: error.code.to_owned(),
+        message: error.message,
+    })
 }
 
 #[test]
@@ -163,25 +169,10 @@ fn desktop_promotion_requires_the_initial_recent_project_projection() {
 #[test]
 fn recent_project_projection_ignores_stale_revisions_without_a_delivery_result() {
     let state = Arc::new(RuntimeControlState::new("runtime-instance"));
-    let current_projects = vec![RecentProject {
-        project_id: "project-2".to_owned(),
-        project_root: "/projects/current".to_owned(),
-    }];
+    let current_projects = vec!["/projects/current".to_owned()];
     state.set_recent_projects(2, current_projects.clone());
-    state.set_recent_projects(
-        2,
-        vec![RecentProject {
-            project_id: "project-equal".to_owned(),
-            project_root: "/projects/equal".to_owned(),
-        }],
-    );
-    state.set_recent_projects(
-        1,
-        vec![RecentProject {
-            project_id: "project-1".to_owned(),
-            project_root: "/projects/stale".to_owned(),
-        }],
-    );
+    state.set_recent_projects(2, vec!["/projects/equal".to_owned()]);
+    state.set_recent_projects(1, vec!["/projects/stale".to_owned()]);
     assert_eq!(
         state.recent_projects_projection_after(None),
         Some((2, current_projects.clone()))
@@ -217,7 +208,7 @@ fn recent_project_projection_ignores_stale_revisions_without_a_delivery_result()
         read_server_frame(&mut desktop).expect("recent projects should arrive"),
         ServerMessage::event(ControlEvent::DesktopRecentProjectsChanged {
             global_revision: 2,
-            recent_projects: current_projects,
+            recent_project_roots: current_projects,
         })
     );
     let _ = expect_open_event(&mut desktop, &WorkbenchRoute::Root);
@@ -274,13 +265,7 @@ fn desktop_promotion_and_projection_update_enqueue_monotonic_revisions() {
         let update_start = Arc::clone(&start);
         let update = std::thread::spawn(move || {
             update_start.wait();
-            update_state.set_recent_projects(
-                1,
-                vec![RecentProject {
-                    project_id: "project-1".to_owned(),
-                    project_root: "/projects/current".to_owned(),
-                }],
-            );
+            update_state.set_recent_projects(1, vec!["/projects/current".to_owned()]);
         });
         start.wait();
         promotion.join().expect("promotion request should finish");
@@ -366,14 +351,14 @@ fn launcher_is_promoted_then_project_open_focus_and_close_are_single_instance() 
         )
     );
 
-    let project_route = WorkbenchRoute::Project {
-        project_id: "project-1".to_owned(),
+    let project_route = WorkbenchRoute::OpenProject {
+        canonical_root: "/projects/project-1".to_owned(),
     };
-    send_project_activation(&mut desktop, "open-project", "project-1");
+    send_project_activation(&mut desktop, "open-project", "/projects/project-1");
     let project_window = expect_open_event(&mut desktop, &project_route);
     expect_activation(&mut desktop, "open-project", ActivationOutcome::Opened);
 
-    send_project_activation(&mut desktop, "focus-project", "project-1");
+    send_project_activation(&mut desktop, "focus-project", "/projects/project-1");
     assert_eq!(
         read_server_frame(&mut desktop).expect("focus event should arrive"),
         ServerMessage::event(ControlEvent::DesktopWindowFocusRequested {
@@ -433,7 +418,7 @@ fn desktop_project_activation_reuses_its_true_empty_source_window() {
         Arc::clone(services.models()),
         Arc::clone(services.global()),
         services.projects().clone(),
-        Arc::clone(services.generated_assets()),
+        Arc::clone(services.provenance()),
         Arc::clone(services.model_operations()),
         None,
     ));
@@ -504,8 +489,8 @@ fn desktop_project_activation_reuses_its_true_empty_source_window() {
     );
 
     assert_eq!(
-        events.next_of_type("project.bound")["project"]["projectId"],
-        project.id
+        events.next_of_type("project.bound")["project"]["canonicalRoot"],
+        project.canonical_root
     );
     expect_control_focus(&mut desktop, &window_key);
     expect_activation(&mut desktop, "open-project", ActivationOutcome::Opened);
@@ -514,6 +499,95 @@ fn desktop_project_activation_reuses_its_true_empty_source_window() {
     drop(desktop);
     server.join().expect("server should finish");
     drop(http);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn desktop_project_activation_opens_a_plain_directory_and_preserves_path_failures() {
+    let root = std::env::temp_dir().join(format!("dbrt-desktop-project-paths-{}", Uuid::new_v4()));
+    let project_root = root.join("plain-project");
+    fs::create_dir_all(&project_root).expect("Project directory should be created");
+    fs::write(project_root.join("notes.txt"), "plain Project content")
+        .expect("Project file should be written");
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    state.set_recent_projects(0, Vec::new());
+    let services = compose_test_services(&root, &state);
+    assert!(
+        state.install_activation_service(Arc::new(WorkbenchDesktopActivation {
+            state: Arc::downgrade(&state),
+            services,
+        }))
+    );
+    assert!(state.finish_startup());
+
+    let (mut desktop, server_stream) = UnixStream::pair().expect("stream pair should open");
+    desktop
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("read should be bounded");
+    let server_state = Arc::clone(&state);
+    let server = std::thread::spawn(move || {
+        serve_control_connection(server_stream, &server_state, 8)
+            .expect("connection should close cleanly");
+    });
+    request_handshake(&mut desktop, ClientRole::Launcher).expect("handshake should succeed");
+    send_request(
+        &mut desktop,
+        "open-project",
+        ControlRequest::Activate {
+            intent: ActivationIntent::OpenProject {
+                project_root: project_root.to_string_lossy().into_owned(),
+                frontend: ProjectFrontend::Desktop,
+            },
+            preferred_desktop_window_key: None,
+        },
+    );
+
+    let _ = read_server_frame(&mut desktop).expect("recent Projects should arrive");
+    let canonical_root = project_root
+        .canonicalize()
+        .expect("Project root should canonicalize")
+        .to_string_lossy()
+        .into_owned();
+    let _window = expect_open_event(
+        &mut desktop,
+        &WorkbenchRoute::OpenProject {
+            canonical_root: canonical_root.clone(),
+        },
+    );
+    expect_activation(
+        &mut desktop,
+        "open-project",
+        ActivationOutcome::PromotedToDesktopHost,
+    );
+    assert!(state.has_desktop_host());
+
+    let missing_root = root.join("missing-project");
+    send_request(
+        &mut desktop,
+        "open-missing",
+        ControlRequest::Activate {
+            intent: ActivationIntent::OpenProject {
+                project_root: missing_root.to_string_lossy().into_owned(),
+                frontend: ProjectFrontend::Desktop,
+            },
+            preferred_desktop_window_key: None,
+        },
+    );
+    let ServerMessage::Response {
+        request_id,
+        response: ControlResponse::ProjectOpenFailed { failure },
+    } = read_server_frame(&mut desktop).expect("Project failure should arrive")
+    else {
+        panic!("expected structured missing-Project failure");
+    };
+    assert_eq!(request_id, "open-missing");
+    assert_eq!(failure.canonical_root, missing_root.to_string_lossy());
+    assert_eq!(failure.code, "project_not_found");
+    assert!(failure.message.contains("does not exist"));
+    assert!(state.has_desktop_host());
+
+    drop(desktop);
+    server.join().expect("server should finish");
     let _ = fs::remove_dir_all(root);
 }
 
@@ -540,7 +614,7 @@ fn desktop_project_activation_does_not_replace_a_bound_window() {
         Arc::clone(services.models()),
         Arc::clone(services.global()),
         services.projects().clone(),
-        Arc::clone(services.generated_assets()),
+        Arc::clone(services.provenance()),
         Arc::clone(services.model_operations()),
         None,
     ));
@@ -568,7 +642,7 @@ fn desktop_project_activation_does_not_replace_a_bound_window() {
         http.origin(),
         &state,
         &projects.target.root,
-        &projects.target.id,
+        &projects.target.canonical_root,
     );
     preempt_desktop_project(&mut desktop, http.origin(), &state, &projects, &mut binding);
 
@@ -581,7 +655,7 @@ fn desktop_project_activation_does_not_replace_a_bound_window() {
 
 struct ProjectFixture {
     root: PathBuf,
-    id: String,
+    canonical_root: String,
 }
 
 struct ProjectReplacementFixtures {
@@ -589,26 +663,17 @@ struct ProjectReplacementFixtures {
     source: ProjectFixture,
 }
 
-fn project_fixture(root: PathBuf, name: &str) -> ProjectFixture {
-    let id = Uuid::new_v4().to_string();
-    fs::create_dir_all(root.join(".debrute/canvases"))
-        .expect("Project metadata directory should be created");
-    write_json(
-        &root.join(".debrute/project.json"),
-        &json!({
-            "project": {
-                "id": id,
-                "name": name,
-                "createdAt": "2026-07-18T00:00:00.000Z",
-                "updatedAt": "2026-07-18T00:00:00.000Z"
-            }
-        }),
-    );
-    write_json(
-        &root.join(".debrute/canvases/index.json"),
-        &json!({"canvasOrder": []}),
-    );
-    ProjectFixture { root, id }
+fn project_fixture(root: PathBuf, _name: &str) -> ProjectFixture {
+    fs::create_dir_all(&root).expect("Project directory should be created");
+    let canonical_root = root
+        .canonicalize()
+        .expect("Project root should canonicalize")
+        .to_string_lossy()
+        .into_owned();
+    ProjectFixture {
+        root,
+        canonical_root,
+    }
 }
 
 struct DesktopProjectBinding {
@@ -622,7 +687,7 @@ fn bind_desktop_project(
     origin: &str,
     state: &RuntimeControlState,
     project_root: &Path,
-    project_id: &str,
+    canonical_root: &str,
 ) -> DesktopProjectBinding {
     send_request(
         desktop,
@@ -664,7 +729,7 @@ fn bind_desktop_project(
         &client,
         origin,
         project_root,
-        project_id,
+        canonical_root,
         &cookie,
         &credential,
     );
@@ -673,8 +738,8 @@ fn bind_desktop_project(
         "project.bound"
     );
     assert!(matches!(
-        state.open_desktop_window(&WorkbenchRoute::Project {
-            project_id: project_id.to_owned(),
+        state.open_desktop_window(&WorkbenchRoute::OpenProject {
+            canonical_root: canonical_root.to_owned(),
         }),
         Ok(DesktopOpenResult::FocusedExisting)
     ));
@@ -754,7 +819,7 @@ fn open_second_desktop_workbench(
         ),
         json!({
             "outcome": "focused_existing_desktop",
-            "projectId": projects.target.id
+            "canonicalRoot": projects.target.canonical_root
         })
     );
     expect_control_focus(desktop, &binding.window_key);
@@ -777,7 +842,7 @@ fn move_target_to_web(
         &binding.client,
         origin,
         &target.root,
-        &target.id,
+        &target.canonical_root,
         &web_cookie,
         &web_credential,
     );
@@ -804,13 +869,13 @@ fn reject_desktop_replacement_and_activate_new_window(
         &binding.client,
         origin,
         &projects.source.root,
-        &projects.source.id,
+        &projects.source.canonical_root,
         &second.cookie,
         &second.credential,
     );
     assert_eq!(
-        second.events.next_of_type("project.bound")["project"]["projectId"],
-        projects.source.id
+        second.events.next_of_type("project.bound")["project"]["canonicalRoot"],
+        projects.source.canonical_root
     );
     let replacement = binding
         .client
@@ -836,7 +901,7 @@ fn reject_desktop_replacement_and_activate_new_window(
     send_project_activation_in_window(
         desktop,
         "focus-source",
-        &projects.source.id,
+        &projects.source.canonical_root,
         &second.window_key,
     );
     expect_control_focus(desktop, &second.window_key);
@@ -845,13 +910,13 @@ fn reject_desktop_replacement_and_activate_new_window(
     send_project_activation_in_window(
         desktop,
         "open-detached-target",
-        &projects.target.id,
+        &projects.target.canonical_root,
         &binding.window_key,
     );
     let activated_window = expect_control_open(
         desktop,
-        &WorkbenchRoute::Project {
-            project_id: projects.target.id.clone(),
+        &WorkbenchRoute::OpenProject {
+            canonical_root: projects.target.canonical_root.clone(),
         },
     );
     expect_activation(desktop, "open-detached-target", ActivationOutcome::Opened);
@@ -935,13 +1000,17 @@ fn open_http_project(
     client: &Client,
     origin: &str,
     project_root: &Path,
-    project_id: &str,
+    canonical_root: &str,
     cookie: &str,
     credential: &str,
 ) {
-    assert_eq!(
-        open_http_project_response(client, origin, project_root, cookie, credential),
-        json!({"outcome": "bound", "projectId": project_id})
+    let response = open_http_project_response(client, origin, project_root, cookie, credential);
+    assert_eq!(response["outcome"], "bound");
+    assert_eq!(response["canonicalRoot"], canonical_root);
+    assert!(
+        response["bindingId"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
     );
 }
 
@@ -994,21 +1063,13 @@ fn expect_control_open(stream: &mut UnixStream, route: &WorkbenchRoute) -> Strin
     }
 }
 
-fn write_json(path: &Path, value: &Value) {
-    fs::write(
-        path,
-        format!("{}\n", serde_json::to_string_pretty(value).unwrap()),
-    )
-    .expect("JSON fixture should be written");
-}
-
-fn send_project_activation(stream: &mut UnixStream, request_id: &str, project_id: &str) {
+fn send_project_activation(stream: &mut UnixStream, request_id: &str, canonical_root: &str) {
     send_request(
         stream,
         request_id,
         ControlRequest::Activate {
-            intent: ActivationIntent::OpenKnownProject {
-                project_id: project_id.to_owned(),
+            intent: ActivationIntent::OpenProject {
+                project_root: canonical_root.to_owned(),
                 frontend: ProjectFrontend::Desktop,
             },
             preferred_desktop_window_key: None,
@@ -1019,15 +1080,15 @@ fn send_project_activation(stream: &mut UnixStream, request_id: &str, project_id
 fn send_project_activation_in_window(
     stream: &mut UnixStream,
     request_id: &str,
-    project_id: &str,
+    canonical_root: &str,
     window_key: &str,
 ) {
     send_request(
         stream,
         request_id,
         ControlRequest::Activate {
-            intent: ActivationIntent::OpenKnownProject {
-                project_id: project_id.to_owned(),
+            intent: ActivationIntent::OpenProject {
+                project_root: canonical_root.to_owned(),
                 frontend: ProjectFrontend::Desktop,
             },
             preferred_desktop_window_key: Some(window_key.to_owned()),

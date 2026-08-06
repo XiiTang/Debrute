@@ -3,7 +3,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasDocument, CanvasProjection } from '@debrute/canvas-core';
+import type { CanvasCatalogEntry } from '@debrute/app-protocol';
+import type { CanvasProjection } from './CanvasScene.js';
 import { CanvasMinimapBar, formatCanvasMinimapZoomLabel } from './CanvasMinimapBar';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
@@ -22,13 +23,10 @@ function renderStaticWithI18n(element: ReactElement): string {
   );
 }
 
-function createCanvasDocument(input: { id: string }): CanvasDocument {
+function createCanvasDocument(input: { id: string }): CanvasCatalogEntry {
   return {
     id: input.id,
-    name: input.id,
-    nodeElements: [],
-    annotations: [],
-    preferences: { showDiagnostics: true }
+    name: input.id
   };
 }
 
@@ -103,7 +101,7 @@ describe('CanvasMinimapBar', () => {
     expect(html).not.toContain('Close Mini Map');
     expect(html).not.toContain('canvas-minimap-close');
     expect(html).not.toContain('<div class="canvas-minimap-bar"');
-    expect(html).not.toContain('/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/');
+    expect(html).not.toContain('/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/');
     expect(html).not.toContain('canvas-node-element');
     expect(html).not.toContain('flow/a.png</');
   });
@@ -329,6 +327,7 @@ const panelPlacementFixture = placeCanvasMinimapPanel({
 function nodeFixture(path: string, x: number, y: number): CanvasProjection['nodes'][number] {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'file',
     mediaKind: 'image',
     x,
@@ -340,7 +339,7 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
       state: 'available',
       size: 100,
       mimeType: 'image/png',
-      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     }
   };

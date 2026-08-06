@@ -27,20 +27,19 @@ for exact coverage.
 
 Text-file access is broader than Canvas classification. A Project-visible file
 with an unfamiliar suffix can still be opened through the text API when it is a
-regular, bounded, non-binary, valid UTF-8 file; it receives plain-text language
-and MIME defaults.
+regular, non-binary, valid UTF-8 file; it receives plain-text language and MIME
+defaults.
 
 ## Read And Write Contract
 
 A text read resolves an existing Project-relative path inside the Project root,
-requires a regular file, applies the `2,097,152` UTF-8-byte editable limit,
-rejects NUL-bearing binary data and invalid UTF-8, and returns content with a
-SHA-256 content revision. A write applies the same byte limit before revision
-comparison or temporary-file creation. Oversize reads and writes return HTTP
-`413` with code `project_text_file_too_large` and numeric `actualBytes` and
-`maxBytes` details. The file remains Project-visible but does not acquire a
-Workbench editor buffer or Canvas text preview. The browser-facing protocol
-omits the absolute path.
+requires a regular file, rejects NUL-bearing binary data and invalid UTF-8, and
+returns content with a SHA-256 content revision. A write validates its UTF-8
+bytes before revision comparison or temporary-file creation. The editor and
+Canvas preview do not inherit a shared small file-size limit from this API.
+The request body and file contents are materialized in memory; there is no
+separate product-level text-size threshold. The browser-facing protocol omits
+the absolute path.
 
 A text write requires an existing Project-visible regular file, rejects final
 symlinks, and compares the current content hash with the required
@@ -50,17 +49,20 @@ preserves permission bits, atomically renames it over the target, and returns th
 new content revision.
 
 The write path does not parse or validate JSON, YAML, or any other structured
-format. Project-visible Debrute Project Documents can therefore be edited through
-the same text API, while generic create, rename, move, copy, and delete remain
-blocked for protected `.debrute` paths. The committed file remains successful
-even if the following Project refresh exposes an invalid structured document or
-cannot build a new Project snapshot; normal diagnostics report that state.
+format. Project-visible `.debrute/feedback/feedback.json` can therefore be edited
+through the same text API, as can other visible `.debrute/**` content. The
+committed file remains successful even if the following Project refresh exposes
+an invalid Feedback document or cannot build a new Project snapshot; normal
+diagnostics report that state.
 
 ## Workbench Text Buffers
 
-Workbench maintains one buffer per Project identity and project-relative path.
+Workbench maintains one buffer per Canonical Root and project-relative path.
 A buffer owns content, Debrute language, word-wrap preference, dirty and saving
 state, disk revision, external-change state, and an owning error.
+
+Ordinary large text files remain displayable, editable, saveable, and eligible
+for Canvas preview under the same text contract as smaller files.
 
 One save coordinator runs per Project/path. Edits remain possible during a
 write. Saving captures a content version and disk revision; if newer edits exist
@@ -69,7 +71,7 @@ An explicit save of newer content queues one follow-up write, with repeated
 requests coalescing to the latest intent. Reload and discard wait for the active
 save chain. A conflicting external revision keeps current content dirty and
 prevents a queued write from crossing that change automatically. Results from a
-previous Project identity cannot update the newly active Project.
+previous Canonical Root cannot update the newly active Project.
 
 ## CodeMirror Editor Boundary
 
@@ -78,6 +80,14 @@ the hidden preview-capture surface, and floating text editor windows. It owns on
 CodeMirror `EditorView`, reconfigurable language, read-only, and word-wrap
 compartments, external-value synchronization, search, save and wrap commands,
 and consumes the current resolved Canvas Text Render Profile.
+
+When a canonical preview source is missing, the hidden preview-capture surface
+loads the complete current text into its read-only editor so CodeMirror can
+reproduce the persisted pixel viewport and word wrapping exactly. This capture
+buffer is independent of the interactive editor buffer. Preview-content count
+and byte budgets limit only concurrent retained work: a task larger than the
+soft byte budget runs alone rather than becoming ineligible or remaining queued
+forever. Exact scheduling budgets are source-owned.
 
 ## Canvas Text Render Profile
 
@@ -221,10 +231,10 @@ version rather than a Project revision. Width variants add the shared
 `Raster Preview Engine Version` and requested width to that source identity.
 When the requested width reaches the canonical source width, Runtime returns
 `source.png` directly rather than decoding and encoding an equal-width PNG.
-Cache paths are therefore:
+For the current Project Root Key, cache paths are therefore:
 
 ```text
-.debrute/cache/canvas-text-previews/
+~/.debrute/cache/roots/<rootKey>/canvas/canvas-text-previews/
   <canvas-id>/<source-path-key>/<target-identity-key>/
     source.png
     raster-engine-v<version>/
@@ -234,9 +244,10 @@ Cache paths are therefore:
 The direct-source tier adds no `preview-w<source-width>.png` entry and consumes
 no Raster Preview Pool slot.
 
-The cache tree is not Project-visible. A project-visible `.debrute` text file,
-including a Canvas Map or Canvas JSON document, remains eligible as a source;
-the hidden derived cache cannot recursively become one. Runtime reads and writes
+The Runtime-global cache tree is outside the Project and is not Project-visible.
+The Project's `.debrute/` directory remains ordinary visible content. Any
+visible Project text file remains eligible as a source; the external derived
+cache cannot recursively become one. Runtime reads and writes
 only the exact requested target identity and Raster Engine path; neither lookup
 nor save enumerates sibling target-identity or engine-version directories. No byte
 quota, LRU, or TTL applies to width variants.
@@ -398,11 +409,11 @@ resource scheduler and diagnostic capture surface.
 - Text Viewport validation and persistence:
   `apps/runtime/src/project/canvas.rs`, `service.rs`, and
   `apps/runtime/src/workbench/project_routes.rs`.
-- Pending Text Viewport display and Runtime-result reconciliation:
-  `apps/web/src/workbench/services/canvasSnapshotUpdates.ts`.
+- Canvas Text Viewport projection:
+  `apps/web/src/workbench/canvas/CanvasScene.ts`.
 - Preview identity, DOM capture, raster, runtime, handoff, and typed failures:
   `apps/web/src/workbench/canvas/CanvasTextPreview*.ts*`.
-- Project-generation full-font and subset-font ownership:
+- Project-load full-font and subset-font ownership:
   `apps/web/src/workbench/canvas/font-subset/`.
 - Locked font-subset façade, sources, ABI, and maintainer rebuild:
   `assets/wasm/` and `scripts/*canvas-text-font-subset*`.

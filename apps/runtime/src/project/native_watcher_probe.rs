@@ -43,7 +43,7 @@ pub fn run_native_project_watcher_probe(root: &Path) -> Result<usize, ProjectErr
         let watcher = ProjectFileWatcher::start(
             &watch_root,
             backend_factory.as_ref(),
-            Arc::new(|_| false),
+            Arc::new(|_| true),
             on_change,
         )?;
         probes.push(ProbeWatch {
@@ -70,7 +70,9 @@ fn wait_for_expected_path(probe: &ProbeWatch, deadline: Instant) -> Result<(), P
         let remaining = deadline.saturating_duration_since(Instant::now());
         match probe.event_receiver.recv_timeout(remaining) {
             Ok(ProjectWatchSignal::Paths(paths))
-                if paths.contains(&probe.expected_project_path) =>
+                if paths
+                    .iter()
+                    .any(|path| path.project_relative_path == probe.expected_project_path) =>
             {
                 return Ok(());
             }

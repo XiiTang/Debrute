@@ -58,7 +58,7 @@ pub(crate) struct ReusableDesktopConnection {
 struct ConnectionRegistryInner {
     records: HashMap<String, ConnectionRecord>,
     credentials_by_browser_session: HashMap<String, HashSet<String>>,
-    owner_by_project: HashMap<String, String>,
+    owner_by_root: HashMap<String, String>,
     admission_closed: bool,
 }
 
@@ -76,12 +76,14 @@ struct ConnectionRecord {
 }
 
 struct ConnectionProjectBinding {
-    project_id: String,
+    binding_id: String,
+    canonical_root: String,
     _project_use: ProjectUse,
 }
 
 pub(crate) struct ProjectBindingCommit {
-    pub(crate) project_id: String,
+    pub(crate) binding_id: String,
+    pub(crate) canonical_root: String,
     pub(crate) project_use: ProjectUse,
     pub(crate) bound_event: Value,
 }
@@ -116,7 +118,8 @@ struct ConnectionTransition {
 pub(crate) struct WorkbenchConnectionContext {
     pub(crate) credential: String,
     pub(crate) browser_session: String,
-    pub(crate) project_id: Option<String>,
+    pub(crate) binding_id: Option<String>,
+    pub(crate) canonical_root: Option<String>,
     pub(crate) binding_generation: u64,
     pub(crate) desktop: Option<DesktopLaunchBinding>,
 }
@@ -268,7 +271,8 @@ impl WorkbenchConnectionRegistry {
             WorkbenchConnectionContext {
                 credential,
                 browser_session,
-                project_id: None,
+                binding_id: None,
+                canonical_root: None,
                 binding_generation: 0,
                 desktop: desktop_binding,
             },
@@ -306,10 +310,14 @@ impl WorkbenchConnectionRegistry {
         Some(WorkbenchConnectionContext {
             credential: credential.to_owned(),
             browser_session: record.browser_session.clone(),
-            project_id: record
+            binding_id: record
                 .binding
                 .as_ref()
-                .map(|binding| binding.project_id.clone()),
+                .map(|binding| binding.binding_id.clone()),
+            canonical_root: record
+                .binding
+                .as_ref()
+                .map(|binding| binding.canonical_root.clone()),
             binding_generation: record.binding_generation,
             desktop: record.desktop.clone(),
         })
@@ -322,10 +330,14 @@ impl WorkbenchConnectionRegistry {
         Some(WorkbenchConnectionContext {
             credential: credential.to_owned(),
             browser_session: record.browser_session.clone(),
-            project_id: record
+            binding_id: record
                 .binding
                 .as_ref()
-                .map(|binding| binding.project_id.clone()),
+                .map(|binding| binding.binding_id.clone()),
+            canonical_root: record
+                .binding
+                .as_ref()
+                .map(|binding| binding.canonical_root.clone()),
             binding_generation: record.binding_generation,
             desktop: record.desktop.clone(),
         })
@@ -371,28 +383,41 @@ impl WorkbenchConnectionRegistry {
     }
 
     #[must_use]
-    pub(crate) fn context_for_browser_session_project(
+    pub(crate) fn context_for_browser_session_binding(
         &self,
         browser_session: &str,
-        project_id: &str,
+        binding_id: &str,
     ) -> Option<WorkbenchConnectionContext> {
         let inner = self.lock_inner();
-        let credential = inner.owner_by_project.get(project_id)?;
+        let credential = inner
+            .credentials_by_browser_session
+            .get(browser_session)?
+            .iter()
+            .find(|credential| {
+                inner.records.get(*credential).is_some_and(|record| {
+                    record
+                        .binding
+                        .as_ref()
+                        .is_some_and(|binding| binding.binding_id == binding_id)
+                })
+            })?;
         let record = inner.records.get(credential)?;
         if record.closing
             || record.browser_session != browser_session
             || record
                 .binding
                 .as_ref()
-                .map(|binding| binding.project_id.as_str())
-                != Some(project_id)
+                .map(|binding| binding.binding_id.as_str())
+                != Some(binding_id)
         {
             return None;
         }
+        let binding = record.binding.as_ref()?;
         Some(WorkbenchConnectionContext {
             credential: credential.clone(),
             browser_session: record.browser_session.clone(),
-            project_id: Some(project_id.to_owned()),
+            binding_id: Some(binding.binding_id.clone()),
+            canonical_root: Some(binding.canonical_root.clone()),
             binding_generation: record.binding_generation,
             desktop: record.desktop.clone(),
         })
@@ -419,7 +444,7 @@ impl WorkbenchConnectionRegistry {
         let inner = self.lock_inner();
         WorkbenchConnectionCounts {
             connections: inner.records.len(),
-            bound_projects: inner.owner_by_project.len(),
+            bound_projects: inner.owner_by_root.len(),
         }
     }
 
@@ -432,11 +457,11 @@ impl WorkbenchConnectionRegistry {
     }
 
     #[must_use]
-    pub(crate) fn project_owner(&self, project_id: &str) -> Option<WorkbenchConnectionContext> {
+    pub(crate) fn project_owner(&self, canonical_root: &str) -> Option<WorkbenchConnectionContext> {
         let credential = self
             .lock_inner()
-            .owner_by_project
-            .get(project_id)
+            .owner_by_root
+            .get(canonical_root)
             .cloned()?;
         self.context(&credential)
     }
@@ -446,7 +471,7 @@ impl WorkbenchConnectionRegistry {
         &self,
         browser_session: &str,
         credential: &str,
-        project_id: &str,
+        binding_id: &str,
         generation: u64,
     ) -> Option<(ProjectBindingLease, broadcast::Receiver<()>)> {
         let inner = self.lock_inner();
@@ -458,7 +483,7 @@ impl WorkbenchConnectionRegistry {
             return None;
         }
         let record = inner.records.get(credential)?;
-        if record.closing || !binding_matches(record, project_id, generation) {
+        if record.closing || !binding_matches(record, binding_id, generation) {
             return None;
         }
         let lifetime = record.project_cancellation.subscribe();
@@ -471,7 +496,7 @@ impl WorkbenchConnectionRegistry {
         &self,
         browser_session: &str,
         credential: &str,
-        project_id: &str,
+        binding_id: &str,
     ) -> Option<broadcast::Receiver<()>> {
         let inner = self.lock_inner();
         if inner
@@ -488,8 +513,8 @@ impl WorkbenchConnectionRegistry {
         if record
             .binding
             .as_ref()
-            .map(|binding| binding.project_id.as_str())
-            != Some(project_id)
+            .map(|binding| binding.binding_id.as_str())
+            != Some(binding_id)
         {
             return None;
         }
@@ -503,13 +528,14 @@ impl WorkbenchConnectionRegistry {
         commit: ProjectBindingCommit,
     ) -> Result<ProjectBindOutcome, ProjectBindError> {
         let ProjectBindingCommit {
-            project_id,
+            binding_id,
+            canonical_root,
             project_use,
             bound_event,
         } = commit;
         assert_eq!(
-            project_use.project_id(),
-            project_id,
+            project_use.canonical_root().to_string_lossy(),
+            canonical_root,
             "Workbench Project Use must own the bound Project"
         );
         let binding_transaction = self.lock_binding_transaction();
@@ -525,7 +551,7 @@ impl WorkbenchConnectionRegistry {
             if record
                 .binding
                 .as_ref()
-                .is_some_and(|binding| binding.project_id == project_id)
+                .is_some_and(|binding| binding.canonical_root == canonical_root)
             {
                 return Ok(ProjectBindOutcome::AlreadyBound);
             }
@@ -538,7 +564,7 @@ impl WorkbenchConnectionRegistry {
                     &inner,
                     [
                         Some(credential),
-                        inner.owner_by_project.get(&project_id).map(String::as_str),
+                        inner.owner_by_root.get(&canonical_root).map(String::as_str),
                     ],
                 ),
                 bound_permit,
@@ -564,13 +590,13 @@ impl WorkbenchConnectionRegistry {
 
         let mut released_bindings = Vec::new();
         let (preempted, close_preempted, released_binding) =
-            preempt_project_owner(&mut inner, credential, &project_id);
+            preempt_project_owner(&mut inner, credential, &canonical_root);
         if let Some(binding) = released_binding {
             released_bindings.push(binding);
         }
         inner
-            .owner_by_project
-            .insert(project_id.clone(), credential.to_owned());
+            .owner_by_root
+            .insert(canonical_root.clone(), credential.to_owned());
         let record = inner
             .records
             .get_mut(credential)
@@ -580,7 +606,8 @@ impl WorkbenchConnectionRegistry {
         record.binding_generation = generation;
         record.reusable_desktop_empty = false;
         record.binding = Some(ConnectionProjectBinding {
-            project_id,
+            binding_id,
+            canonical_root,
             _project_use: project_use,
         });
         drop(inner);
@@ -599,18 +626,19 @@ impl WorkbenchConnectionRegistry {
     pub(crate) fn replace_project(
         &self,
         credential: &str,
-        source_project_id: &str,
+        source_binding_id: &str,
         expected_generation: u64,
         commit: ProjectBindingCommit,
     ) -> Result<ProjectBindOutcome, ProjectBindError> {
         let ProjectBindingCommit {
-            project_id: target_project_id,
+            binding_id: target_binding_id,
+            canonical_root: target_root,
             project_use,
             bound_event,
         } = commit;
         assert_eq!(
-            project_use.project_id(),
-            target_project_id,
+            project_use.canonical_root().to_string_lossy(),
+            target_root,
             "Workbench Project Use must own the replacement Project"
         );
         let binding_transaction = self.lock_binding_transaction();
@@ -620,10 +648,14 @@ impl WorkbenchConnectionRegistry {
                 .records
                 .get(credential)
                 .ok_or(ProjectBindError::Stale)?;
-            if record.closing || !binding_matches(record, source_project_id, expected_generation) {
+            if record.closing || !binding_matches(record, source_binding_id, expected_generation) {
                 return Err(ProjectBindError::Stale);
             }
-            if source_project_id == target_project_id {
+            if record
+                .binding
+                .as_ref()
+                .is_some_and(|binding| binding.canonical_root == target_root)
+            {
                 return Ok(ProjectBindOutcome::AlreadyBound);
             }
             let bound_permit = reserve_bound_event(record)?;
@@ -632,10 +664,7 @@ impl WorkbenchConnectionRegistry {
                     &inner,
                     [
                         Some(credential),
-                        inner
-                            .owner_by_project
-                            .get(&target_project_id)
-                            .map(String::as_str),
+                        inner.owner_by_root.get(&target_root).map(String::as_str),
                     ],
                 ),
                 bound_permit,
@@ -648,7 +677,7 @@ impl WorkbenchConnectionRegistry {
             .records
             .get(credential)
             .ok_or(ProjectBindError::Stale)?;
-        if record.closing || !binding_matches(record, source_project_id, expected_generation) {
+        if record.closing || !binding_matches(record, source_binding_id, expected_generation) {
             return Err(ProjectBindError::Stale);
         }
         if record.events.is_closed() {
@@ -656,16 +685,21 @@ impl WorkbenchConnectionRegistry {
         }
         bound_permit.send(bound_event);
 
-        remove_source_owner(&mut inner, credential, source_project_id);
+        let source_root = record
+            .binding
+            .as_ref()
+            .map(|binding| binding.canonical_root.clone())
+            .ok_or(ProjectBindError::Stale)?;
+        remove_source_owner(&mut inner, credential, &source_root);
         let mut released_bindings = Vec::new();
         let (preempted, close_preempted, released_binding) =
-            preempt_project_owner(&mut inner, credential, &target_project_id);
+            preempt_project_owner(&mut inner, credential, &target_root);
         if let Some(binding) = released_binding {
             released_bindings.push(binding);
         }
         inner
-            .owner_by_project
-            .insert(target_project_id.clone(), credential.to_owned());
+            .owner_by_root
+            .insert(target_root.clone(), credential.to_owned());
         let record = inner
             .records
             .get_mut(credential)
@@ -674,12 +708,13 @@ impl WorkbenchConnectionRegistry {
         let source_binding = record
             .binding
             .replace(ConnectionProjectBinding {
-                project_id: target_project_id,
+                binding_id: target_binding_id,
+                canonical_root: target_root,
                 _project_use: project_use,
             })
             .expect("replacement source Project binding must exist");
         assert_eq!(
-            source_binding.project_id, source_project_id,
+            source_binding.binding_id, source_binding_id,
             "replacement source binding must match its owner index"
         );
         released_bindings.push(source_binding);
@@ -716,7 +751,7 @@ impl WorkbenchConnectionRegistry {
     pub(crate) fn close_project_stream(
         &self,
         credential: &str,
-        project_id: &str,
+        binding_id: &str,
         generation: u64,
     ) -> bool {
         let binding_transaction = self.lock_binding_transaction();
@@ -725,7 +760,7 @@ impl WorkbenchConnectionRegistry {
             let Some(record) = inner.records.get_mut(credential) else {
                 return false;
             };
-            if !binding_matches(record, project_id, generation) {
+            if !binding_matches(record, binding_id, generation) {
                 return false;
             }
             signal_connection_close(record);
@@ -736,7 +771,7 @@ impl WorkbenchConnectionRegistry {
             .lock_inner()
             .records
             .get(credential)
-            .is_some_and(|record| binding_matches(record, project_id, generation));
+            .is_some_and(|record| binding_matches(record, binding_id, generation));
         if !is_current {
             return false;
         }
@@ -761,19 +796,23 @@ impl WorkbenchConnectionRegistry {
             }
         }
         let binding = record.binding.take();
-        let project_id = binding.as_ref().map(|binding| binding.project_id.clone());
-        if let Some(project_id) = project_id.as_ref()
+        let binding_id = binding.as_ref().map(|binding| binding.binding_id.clone());
+        let canonical_root = binding
+            .as_ref()
+            .map(|binding| binding.canonical_root.clone());
+        if let Some(canonical_root) = canonical_root.as_ref()
             && inner
-                .owner_by_project
-                .get(project_id)
+                .owner_by_root
+                .get(canonical_root)
                 .is_some_and(|owner| owner == credential)
         {
-            inner.owner_by_project.remove(project_id);
+            inner.owner_by_root.remove(canonical_root);
         }
         let context = WorkbenchConnectionContext {
             credential: credential.to_owned(),
             browser_session: record.browser_session,
-            project_id,
+            binding_id,
+            canonical_root,
             binding_generation: record.binding_generation,
             desktop: record.desktop,
         };
@@ -802,7 +841,7 @@ impl WorkbenchConnectionRegistry {
         let records = {
             let mut inner = self.lock_inner();
             inner.credentials_by_browser_session.clear();
-            inner.owner_by_project.clear();
+            inner.owner_by_root.clear();
             std::mem::take(&mut inner.records)
         };
         drop(records);
@@ -961,12 +1000,12 @@ impl Drop for WorkbenchConnectionCloser {
     }
 }
 
-fn binding_matches(record: &ConnectionRecord, project_id: &str, generation: u64) -> bool {
+fn binding_matches(record: &ConnectionRecord, binding_id: &str, generation: u64) -> bool {
     record.binding_generation == generation
         && record
             .binding
             .as_ref()
-            .is_some_and(|binding| binding.project_id == project_id)
+            .is_some_and(|binding| binding.binding_id == binding_id)
 }
 
 fn reserve_bound_event(
@@ -989,13 +1028,13 @@ fn begin_transitions(gates: &[Arc<ConnectionCommandGate>]) -> Vec<ConnectionTran
 fn preempt_project_owner(
     inner: &mut ConnectionRegistryInner,
     new_owner: &str,
-    project_id: &str,
+    canonical_root: &str,
 ) -> (
     Option<PreemptedConnection>,
     bool,
     Option<ConnectionProjectBinding>,
 ) {
-    let Some(previous) = inner.owner_by_project.get(project_id).cloned() else {
+    let Some(previous) = inner.owner_by_root.get(canonical_root).cloned() else {
         return (None, false, None);
     };
     if previous == new_owner {
@@ -1011,7 +1050,7 @@ fn preempt_project_owner(
         .take()
         .expect("Workbench Project owner must have a binding");
     assert_eq!(
-        binding.project_id, project_id,
+        binding.canonical_root, canonical_root,
         "Workbench Project owner binding must match its owner index"
     );
     record.binding_generation = next_binding_generation(record.binding_generation);
@@ -1019,7 +1058,7 @@ fn preempt_project_owner(
         .events
         .try_send(json!({
             "type": "project.preempted",
-            "projectId": project_id
+            "bindingId": binding.binding_id
         }))
         .is_err();
     (
@@ -1032,13 +1071,17 @@ fn preempt_project_owner(
     )
 }
 
-fn remove_source_owner(inner: &mut ConnectionRegistryInner, credential: &str, project_id: &str) {
+fn remove_source_owner(
+    inner: &mut ConnectionRegistryInner,
+    credential: &str,
+    canonical_root: &str,
+) {
     assert_eq!(
-        inner.owner_by_project.get(project_id).map(String::as_str),
+        inner.owner_by_root.get(canonical_root).map(String::as_str),
         Some(credential),
         "bound Workbench connection must own its source Project"
     );
-    inner.owner_by_project.remove(project_id);
+    inner.owner_by_root.remove(canonical_root);
 }
 
 fn next_binding_generation(generation: u64) -> u64 {
@@ -1071,14 +1114,15 @@ mod tests {
         WorkbenchConnectionCloser, WorkbenchConnectionDrainOutcome, WorkbenchConnectionRegistry,
     };
 
-    fn project_use(project_id: &str) -> ProjectUse {
-        ProjectUse::detached_for_test(project_id)
+    fn project_use(canonical_root: &str) -> ProjectUse {
+        ProjectUse::detached_for_test(std::path::Path::new(canonical_root))
     }
 
-    fn binding(project_id: &str) -> ProjectBindingCommit {
+    fn binding(canonical_root: &str) -> ProjectBindingCommit {
         ProjectBindingCommit {
-            project_id: project_id.to_owned(),
-            project_use: project_use(project_id),
+            binding_id: canonical_root.to_owned(),
+            canonical_root: canonical_root.to_owned(),
+            project_use: project_use(canonical_root),
             bound_event: json!({"type": "project.bound"}),
         }
     }
@@ -1461,7 +1505,7 @@ mod tests {
         let context = registry
             .context(&connection.credential)
             .expect("connection should remain live");
-        assert_eq!(context.project_id.as_deref(), Some("project-b"));
+        assert_eq!(context.binding_id.as_deref(), Some("project-b"));
         assert_eq!(context.binding_generation, 2);
         assert!(
             registry
@@ -1481,7 +1525,7 @@ mod tests {
             registry
                 .context(&connection.credential)
                 .expect("replacement connection should remain live")
-                .project_id
+                .binding_id
                 .as_deref(),
             Some("project-b")
         );

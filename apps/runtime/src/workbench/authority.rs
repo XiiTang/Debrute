@@ -2,12 +2,12 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt,
+    path::Path,
     sync::{Mutex, MutexGuard},
 };
 
 use url::Url;
 
-use crate::project::is_valid_stable_project_id;
 use uuid::Uuid;
 
 use crate::control::WorkbenchRoute;
@@ -91,7 +91,7 @@ impl WorkbenchLaunchService {
     ///
     /// # Errors
     ///
-    /// Returns an error when the route contains an invalid Project id.
+    /// Returns an error when the route contains an invalid canonical root.
     pub fn url_for_route(&self, route: &WorkbenchRoute) -> Result<String, WorkbenchLaunchError> {
         validate_route(route)?;
         let registration = lock(&self.source_workbench, "source Workbench registration");
@@ -156,12 +156,12 @@ fn lock<'a, T>(mutex: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkbenchLaunchError {
-    InvalidProjectId,
+    InvalidProjectPath,
 }
 
 impl fmt::Display for WorkbenchLaunchError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("Workbench Project id is not a valid opaque id")
+        formatter.write_str("Workbench Project path is not a valid canonical root")
     }
 }
 
@@ -170,15 +170,22 @@ impl Error for WorkbenchLaunchError {}
 fn validate_route(route: &WorkbenchRoute) -> Result<(), WorkbenchLaunchError> {
     match route {
         WorkbenchRoute::Root => Ok(()),
-        WorkbenchRoute::Project { project_id } if is_valid_stable_project_id(project_id) => Ok(()),
-        WorkbenchRoute::Project { .. } => Err(WorkbenchLaunchError::InvalidProjectId),
+        WorkbenchRoute::OpenProject { canonical_root }
+            if !canonical_root.is_empty() && Path::new(canonical_root).is_absolute() =>
+        {
+            Ok(())
+        }
+        WorkbenchRoute::OpenProject { .. } => Err(WorkbenchLaunchError::InvalidProjectPath),
     }
 }
 
 fn route_path(route: &WorkbenchRoute) -> String {
     match route {
         WorkbenchRoute::Root => "/".to_owned(),
-        WorkbenchRoute::Project { project_id } => format!("/projects/{project_id}"),
+        WorkbenchRoute::OpenProject { canonical_root } => format!(
+            "/open?path={}",
+            url::form_urlencoded::byte_serialize(canonical_root.as_bytes()).collect::<String>()
+        ),
     }
 }
 
@@ -221,8 +228,8 @@ mod tests {
     #[test]
     fn desktop_ticket_is_memory_only_and_one_use() {
         let service = WorkbenchLaunchService::new("http://127.0.0.1:17321".to_owned());
-        let route = WorkbenchRoute::Project {
-            project_id: "project-1".to_owned(),
+        let route = WorkbenchRoute::OpenProject {
+            canonical_root: "/project-1".to_owned(),
         };
         let ticket = service
             .create_desktop_ticket(
@@ -243,19 +250,22 @@ mod tests {
     }
 
     #[test]
-    fn source_workbench_registration_changes_only_the_stable_origin() {
+    fn source_workbench_registration_owns_the_origin_without_changing_the_route() {
         let service = WorkbenchLaunchService::new("http://127.0.0.1:17321".to_owned());
+        let route = WorkbenchRoute::OpenProject {
+            canonical_root: "/Users/me/Reference Projects".to_owned(),
+        };
         service
             .register_source_workbench("launcher-1", "http://127.0.0.1:5173")
             .unwrap();
         assert_eq!(
-            service.url_for_route(&WorkbenchRoute::Root).unwrap(),
-            "http://127.0.0.1:5173/"
+            service.url_for_route(&route).unwrap(),
+            "http://127.0.0.1:5173/open?path=%2FUsers%2Fme%2FReference+Projects"
         );
         service.unregister_source_workbench("launcher-1");
         assert_eq!(
-            service.url_for_route(&WorkbenchRoute::Root).unwrap(),
-            "http://127.0.0.1:17321/"
+            service.url_for_route(&route).unwrap(),
+            "http://127.0.0.1:17321/open?path=%2FUsers%2Fme%2FReference+Projects"
         );
     }
 }

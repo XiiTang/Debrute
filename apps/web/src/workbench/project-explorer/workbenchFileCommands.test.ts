@@ -11,6 +11,7 @@ import {
   permanentDeleteConfirmationMessage,
   projectTreeSelectionFromPaths,
   reconcileCutClipboardWithProjectEntries,
+  rewriteCanvasSelectionAfterPathChanges,
   singleFileBatchResultPath
 } from './workbenchFileCommands.js';
 
@@ -63,6 +64,20 @@ describe('workbench file command helpers', () => {
       kind: 'nodes',
       projectRelativePaths: ['assets/cover.png', 'briefs/concept.md']
     }, 'assets')).toEqual({ kind: 'nodes', projectRelativePaths: ['briefs/concept.md'] });
+  });
+
+  it('keeps Canvas selection attached to Runtime-confirmed renamed and moved paths', () => {
+    expect(rewriteCanvasSelectionAfterPathChanges({
+      kind: 'nodes',
+      projectRelativePaths: ['assets', 'assets/pages/page.png', 'brief.md']
+    }, [{
+      sourceProjectRelativePath: 'assets',
+      projectRelativePath: 'archive/assets',
+      status: 'ok'
+    }])).toEqual({
+      kind: 'nodes',
+      projectRelativePaths: ['archive/assets', 'archive/assets/pages/page.png', 'brief.md']
+    });
   });
 
   it('clears clipboard sources affected by deleted paths', () => {
@@ -147,22 +162,31 @@ const permanentDeleteLabels = {
 
 function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
   return {
-    metadata: {
-      project: {
-        id: 'project-1',
-        name: 'Demo',
-        createdAt: '2026-07-10T00:00:00.000Z',
-        updatedAt: '2026-07-10T00:00:00.000Z'
-      }
+    canonicalRoot: '/projects/project-1',
+    canvasWorkspace: {
+      status: 'available',
+      workspace: {
+        canonicalRoot: '/projects/project-1',
+        activeCanvasId: 'main',
+        canvases: [{
+          id: 'main',
+          name: 'Main',
+          expandedDirectories: [],
+          nodeStates: {},
+          occlusionOrder: []
+        }]
+      },
+      activeCanvasResources: { canvasId: 'main', resources: [], diagnostics: [] }
     },
-    files: paths.map((projectRelativePath) => ({ projectRelativePath, kind: 'file' as const })),
-    canvases: [],
-    projections: [],
+    projectTree: paths.map((projectRelativePath) => ({
+      projectRelativePath,
+      kind: 'file' as const,
+      ignored: false,
+      hidden: false
+    })),
     diagnostics: [],
-    canvasRegistry: { status: 'ready', canvasOrder: [] },
     health: {
       projectName: 'Demo',
-      canvasCount: 0,
       diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-07-10T00:00:00.000Z'
     }

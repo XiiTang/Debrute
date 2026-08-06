@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { CanvasFeedbackSpatialItem } from '@debrute/canvas-core';
+import type { CanvasFeedbackSpatialItem } from '@debrute/app-protocol';
 import { CanvasMediaFeedbackLayer } from './CanvasMediaFeedbackLayer';
 
 const NOW = '2026-06-21T12:00:00.000Z';

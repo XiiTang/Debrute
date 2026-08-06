@@ -1,5 +1,8 @@
-import type { CanvasPreviewTargetIdentity } from '@debrute/canvas-core';
-import type { CanvasTextPreviewTarget } from './CanvasTextPreviewCapture.js';
+import type { CanvasPreviewTargetKey } from '@debrute/canvas-core';
+import {
+  canvasTextPreviewTargetKey,
+  type CanvasTextPreviewTarget
+} from './CanvasTextPreviewCapture.js';
 
 export const CANVAS_TEXT_PREVIEW_CONTENT_MAX_TARGETS = 10;
 export const CANVAS_TEXT_PREVIEW_CONTENT_MAX_BYTES = 8 * 1024 * 1024;
@@ -17,6 +20,7 @@ export type CanvasTextPreviewTaskState =
   | 'failed';
 
 export interface CanvasTextPreviewTask extends CanvasTextPreviewTarget {
+  readonly attempt: object;
   readonly state: CanvasTextPreviewTaskState;
   readonly content?: string | undefined;
   readonly contentBytes?: number | undefined;
@@ -24,7 +28,7 @@ export interface CanvasTextPreviewTask extends CanvasTextPreviewTarget {
 }
 
 interface CanvasTextPreviewAvailability {
-  readonly targetIdentity: CanvasPreviewTargetIdentity;
+  readonly targetKey: CanvasPreviewTargetKey;
   readonly available: boolean;
 }
 
@@ -34,14 +38,20 @@ export function reconcileCanvasTextPreviewTasks(input: {
   readonly sourceAvailability: Readonly<Record<string, CanvasTextPreviewAvailability>>;
 }): Map<string, CanvasTextPreviewTask> {
   const next = new Map<string, CanvasTextPreviewTask>();
+  const executing = canvasTextPreviewExecutingTask(input.previous);
   for (const target of input.targets) {
     const availability = input.sourceAvailability[target.projectRelativePath];
-    if (availability?.targetIdentity === target.targetIdentity && availability.available) {
+    const targetKey = canvasTextPreviewTargetKey(target);
+    if (availability?.targetKey === targetKey && availability.available) {
       continue;
     }
     const existing = input.previous.get(target.projectRelativePath);
-    if (existing?.targetIdentity === target.targetIdentity) {
-      next.set(target.projectRelativePath, availability?.targetIdentity === target.targetIdentity
+    if (executing && existing === executing) {
+      next.set(target.projectRelativePath, existing);
+      continue;
+    }
+    if (existing && canvasTextPreviewTargetKey(existing) === targetKey) {
+      next.set(target.projectRelativePath, availability?.targetKey === targetKey
         && !availability.available
         && existing.state === 'checking'
         ? { ...existing, state: 'needs-content' }
@@ -50,10 +60,22 @@ export function reconcileCanvasTextPreviewTasks(input: {
     }
     next.set(target.projectRelativePath, {
       ...target,
-      state: availability?.targetIdentity === target.targetIdentity ? 'needs-content' : 'checking'
+      attempt: {},
+      state: availability?.targetKey === targetKey ? 'needs-content' : 'checking'
     });
   }
+  if (executing && !next.has(executing.projectRelativePath)) {
+    next.set(executing.projectRelativePath, executing);
+  }
   return next;
+}
+
+export function canvasTextPreviewExecutingTask(
+  tasks: ReadonlyMap<string, CanvasTextPreviewTask>
+): CanvasTextPreviewTask | undefined {
+  return [...tasks.values()].find((task) => (
+    task.state === 'capturing' || task.state === 'uploading'
+  ));
 }
 
 export function canvasTextPreviewContentWindow(input: {
@@ -69,6 +91,9 @@ export function canvasTextPreviewContentWindow(input: {
     }
     const taskBytes = task.estimatedBytes;
     if (bytes + taskBytes > CANVAS_TEXT_PREVIEW_CONTENT_MAX_BYTES) {
+      if (count === 0 && selected.length === 0) {
+        return [task];
+      }
       continue;
     }
     selected.push(task);

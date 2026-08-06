@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCanvasPerfMonitor } from './CanvasPerfMonitor.js';
 import {
@@ -237,6 +237,7 @@ function directoryNode(path: string, x: number, y: number, z: number): Projected
   return {
     nodeKind: 'directory',
     projectRelativePath: path,
+    displayName: path,
     x,
     y,
     width: 100,

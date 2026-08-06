@@ -2,7 +2,7 @@
 
 Product Quit is accepted and committed without a blocker inventory, frontend
 round trip, confirmation dialog, deferred-exit state, or save/discard protocol.
-Running terminals, transfers, generation, and other Runtime-owned work are
+Running terminals, transfers, Model Operations, and other Runtime-owned work are
 terminated as part of shutdown. Runtime first stops accepting Workbench HTTP
 connections and cancels every live Workbench stream so shutdown cannot wait on
 a frontend connection.

@@ -27,7 +27,7 @@ describe('PhotoshopPanelView presentation', () => {
         items: []
       },
       destination: {
-        projectId: 'project-2',
+        canonicalRoot: 'project-2',
         projectName: 'Campaign',
         projectRevision: 7,
         directory: 'next'
@@ -46,31 +46,31 @@ describe('PhotoshopPanelView presentation', () => {
     expect(destinationTreePresentation({
       ...snapshotFixture(),
       projects: [
-        { projectId: 'project-10', name: 'Project 10', revision: 3 },
-        { projectId: 'project-2', name: 'Project 2', revision: 5 }
+        { canonicalRoot: 'project-10', name: 'Project 10', revision: 3 },
+        { canonicalRoot: 'project-2', name: 'Project 2', revision: 5 }
       ],
       directoryTrees: [
         {
-          projectId: 'project-10',
+          canonicalRoot: 'project-10',
           projectRevision: 3,
           status: 'loaded',
           directories: ['', 'folder10', 'folder2', 'one', 'one/shared', 'two', 'two/shared']
         },
         {
-          projectId: 'project-2',
+          canonicalRoot: 'project-2',
           projectRevision: 5,
           status: 'loading',
           directories: []
         }
       ],
       expandedDirectories: [
-        { projectId: 'project-2', directory: '' },
-        { projectId: 'project-10', directory: '' },
-        { projectId: 'project-10', directory: 'one' },
-        { projectId: 'project-10', directory: 'two' }
+        { canonicalRoot: 'project-2', directory: '' },
+        { canonicalRoot: 'project-10', directory: '' },
+        { canonicalRoot: 'project-10', directory: 'one' },
+        { canonicalRoot: 'project-10', directory: 'two' }
       ],
       destination: {
-        projectId: 'project-10',
+        canonicalRoot: 'project-10',
         projectName: 'Project 10',
         projectRevision: 3,
         directory: 'one/shared'
@@ -78,7 +78,7 @@ describe('PhotoshopPanelView presentation', () => {
     }).roots).toMatchObject([
       {
         kind: 'project',
-        projectId: 'project-2',
+        canonicalRoot: 'project-2',
         directory: '',
         label: 'Project 2',
         depth: 0,
@@ -87,7 +87,7 @@ describe('PhotoshopPanelView presentation', () => {
       },
       {
         kind: 'project',
-        projectId: 'project-10',
+        canonicalRoot: 'project-10',
         directory: '',
         label: 'Project 10',
         depth: 0,
@@ -119,12 +119,12 @@ describe('PhotoshopPanelView presentation', () => {
     expect(destinationTreePresentation({
       ...snapshot,
       directoryTrees: [{
-        projectId: 'project-1',
+        canonicalRoot: 'project-1',
         projectRevision: 2,
         status: 'loaded',
         directories: ['']
       }],
-      expandedDirectories: [{ projectId: 'project-1', directory: '' }],
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: { ...snapshot.destination!, directory: '' }
     }).roots[0]).toMatchObject({ expanded: true, children: [] });
   });
@@ -134,18 +134,18 @@ describe('PhotoshopPanelView presentation', () => {
     const reordered = destinationTreePresentation({
       ...snapshot,
       projects: [
-        { projectId: 'project-b', name: 'projectB', revision: 1 },
-        { projectId: 'project-a', name: 'Projecta', revision: 1 }
+        { canonicalRoot: 'project-b', name: 'projectB', revision: 1 },
+        { canonicalRoot: 'project-a', name: 'Projecta', revision: 1 }
       ],
       directoryTrees: [{
-        projectId: 'project-b',
+        canonicalRoot: 'project-b',
         projectRevision: 1,
         status: 'loaded',
         directories: ['', 'folder10', 'Folder2', 'folder1']
       }],
-      expandedDirectories: [{ projectId: 'project-b', directory: '' }],
+      expandedDirectories: [{ canonicalRoot: 'project-b', directory: '' }],
       destination: {
-        projectId: 'project-b',
+        canonicalRoot: 'project-b',
         projectName: 'projectB',
         projectRevision: 1,
         directory: 'Folder2'
@@ -211,16 +211,16 @@ function snapshotFixture(): PhotoshopPluginSnapshot {
       documentTitle: 'Poster.psd',
       items: [{ layerId: 8, name: 'Hero', kind: 'layer' }]
     },
-    projects: [{ projectId: 'project-1', name: 'Poster', revision: 2 }],
+    projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 2 }],
     directoryTrees: [{
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       projectRevision: 2,
       status: 'loaded',
       directories: ['', 'exports']
     }],
-    expandedDirectories: [{ projectId: 'project-1', directory: '' }],
+    expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
     destination: {
-      projectId: 'project-1',
+      canonicalRoot: 'project-1',
       projectName: 'Poster',
       projectRevision: 2,
       directory: 'exports'

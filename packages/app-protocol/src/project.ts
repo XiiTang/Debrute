@@ -1,11 +1,55 @@
-export interface DebruteProjectMetadata {
-  project: {
-    id: string;
-    name: string;
-    createdAt: string;
-    updatedAt: string;
-  };
-}
+export const PROJECT_TEXT_LANGUAGE_IDS = [
+  'plaintext',
+  'markdown',
+  'json',
+  'jsonc',
+  'jsonl',
+  'yaml',
+  'shell',
+  'dotenv',
+  'ini',
+  'properties',
+  'log',
+  'html',
+  'css',
+  'scss',
+  'less',
+  'xml',
+  'javascript',
+  'javascriptreact',
+  'typescript',
+  'typescriptreact',
+  'python',
+  'ruby',
+  'php',
+  'sql',
+  'powershell',
+  'bat',
+  'go',
+  'rust',
+  'java',
+  'c',
+  'cpp',
+  'lua',
+  'perl',
+  'r',
+  'dockerfile',
+  'makefile',
+  'diff',
+  'csv',
+  'tsv',
+  'subtitle',
+  'webvtt',
+  'toml',
+  'tex',
+  'textile',
+  'protobuf',
+  'restructuredtext',
+  'asciidoc',
+  'org'
+] as const;
+
+export type ProjectTextLanguageId = typeof PROJECT_TEXT_LANGUAGE_IDS[number];
 
 export type ProjectPathKind = 'file' | 'directory';
 
@@ -13,6 +57,15 @@ export interface ProjectPathEntry {
   projectRelativePath: string;
   kind: ProjectPathKind;
   sizeBytes?: number;
+}
+
+export type ProjectDirectoryState = 'unloaded' | 'loaded' | 'error';
+
+export interface ProjectTreeEntry extends ProjectPathEntry {
+  ignored: boolean;
+  hidden: boolean;
+  directoryState?: ProjectDirectoryState;
+  directoryError?: string;
 }
 
 export interface ProjectTextFile {
@@ -39,27 +92,16 @@ export interface NormalizedFileWatchEvent {
   observedAt?: number;
   affects: Array<
     | 'canvas'
-    | 'canvas-registry'
-    | 'canvas-map'
     | 'canvas-feedback'
-    | 'project-metadata'
-    | 'generated-asset-metadata'
     | 'content'
   >;
 }
 
 export interface ProjectPathBatchItemResult extends ProjectPathEntry {
   sourceProjectRelativePath: string;
-  status: 'ok' | 'skipped';
+  status: 'ok' | 'skipped' | 'quarantined';
 }
 
 export interface ProjectPathBatchOperationResult {
   results: ProjectPathBatchItemResult[];
 }
-import {
-  PROJECT_TEXT_LANGUAGE_IDS,
-  type ProjectTextLanguageId
-} from '@debrute/canvas-core';
-
-export { PROJECT_TEXT_LANGUAGE_IDS };
-export type { ProjectTextLanguageId };

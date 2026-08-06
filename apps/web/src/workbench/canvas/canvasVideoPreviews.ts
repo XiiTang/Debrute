@@ -14,5 +14,5 @@ export function canvasVideoPreviewUrl(input: {
     canonicalSourceIdentity: input.canonicalSourceIdentity,
     w: String(input.width)
   });
-  return `/api/projects/${input.target.projectId}/canvas-video-preview?${params.toString()}`;
+  return `/api/workbench/bindings/${input.target.bindingId}/canvas-video-preview?${params.toString()}`;
 }

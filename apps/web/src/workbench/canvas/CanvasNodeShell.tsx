@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasTextViewportState, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasTextViewportState } from '@debrute/app-protocol';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';

@@ -59,7 +59,7 @@ subscription that will deliver its later events. The frame is secured for
 delivery before the binding commit, so a preparation failure cannot expose a
 new binding, preempt another Workbench, or create a gap between the bound
 snapshot and subsequent Project revisions. The connection's command authority
-contains the committed Project id and binding generation; a request authorized
+contains the opaque binding ID and binding generation; a request authorized
 by an earlier generation cannot commit after the connection changes Project.
 
 The connection is the command and Project-binding lifetime. Runtime closes it

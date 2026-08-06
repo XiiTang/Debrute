@@ -8,6 +8,7 @@ import {
 import './styles.css';
 import { workbenchStartupTimeline } from './startup/workbenchStartupTimeline.js';
 import { holdWorkbenchThemeUntilCommit } from './startup/workbenchBootstrapTheme.js';
+import { waitForWorkbenchShellFonts } from './startup/workbenchShellFonts.js';
 
 declare global {
   interface Window {
@@ -30,6 +31,8 @@ void api.bootstrapGlobalSettings().then(async ({ settings }) => {
     apply: setDocumentTheme,
     reveal: () => document.documentElement.removeAttribute('data-settings-bootstrap')
   });
+  await waitForWorkbenchShellFonts(document.fonts);
+  workbenchStartupTimeline.mark('shell-fonts-ready');
   const { WorkbenchApp } = await import('./workbench/WorkbenchApp.js');
   workbenchStartupTimeline.mark('workbench-chunk-ready');
   window.__debruteReactRoot ??= createRoot(document.getElementById('root')!);

@@ -3,10 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  type CanvasDocument,
+  type CanvasCatalogEntry,
   type CanvasFeedbackDocument,
-  type CanvasProjection
-} from '@debrute/canvas-core';
+  type CanvasState
+} from '@debrute/app-protocol';
+import type { CanvasProjection } from './CanvasScene.js';
 import type { CanvasFeedbackBarTarget } from '../shell/floatingBars.js';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
@@ -23,9 +24,6 @@ import {
   canvasFeedbackBarTargetForProjectedNode,
   canvasFeedbackBarTargetForSelection,
   isCanvasPrimaryPointerEvent,
-  isCanvasMapProjectTreeDragOver,
-  canvasMapProjectTreeDropEntry,
-  canvasMapProjectTreeDropInput,
   pointerEventModifiers,
   recordCanvasPerfFrame,
   syncCanvasPerfPointerInteractionSessionState,
@@ -85,13 +83,10 @@ const {
   }
 }));
 
-function createCanvasDocument(input: { id: string }): CanvasDocument {
+function createCanvasDocument(input: { id: string }): CanvasCatalogEntry {
   return {
     id: input.id,
-    name: input.id,
-    nodeElements: [],
-    annotations: [],
-    preferences: { showDiagnostics: true }
+    name: input.id
   };
 }
 
@@ -186,55 +181,6 @@ describe('CanvasSurface', () => {
     clearTextPreviewStyleVariables();
   });
 
-  it('renders an empty Canvas Map node state', () => {
-    const canvas = createCanvasDocument({ id: 'empty-canvas' });
-    const projection: CanvasProjection = {
-      canvasId: canvas.id,
-      nodes: [],
-      edges: [],
-      diagnostics: []
-    };
-
-    const html = renderToStaticMarkup(surface(canvas, projection));
-
-    expect(html).toContain('data-testid="canvas-empty-state"');
-    expect(html).toContain('No Canvas Map nodes');
-  });
-
-  it('accepts exactly one project tree entry for Canvas Map drops', () => {
-    expect(canvasMapProjectTreeDropEntry(projectTreeDragDataTransfer([
-      { kind: 'file', projectRelativePath: 'outputs/gpt/cover.png' }
-    ]))?.projectRelativePath).toBe('outputs/gpt/cover.png');
-    expect(canvasMapProjectTreeDropEntry(projectTreeDragDataTransfer([]))).toBeUndefined();
-    expect(canvasMapProjectTreeDropEntry(projectTreeDragDataTransfer([
-      { kind: 'file', projectRelativePath: 'outputs/gpt/a.png' },
-      { kind: 'file', projectRelativePath: 'outputs/gpt/b.png' }
-    ]))).toBeUndefined();
-  });
-
-  it('builds Canvas Map drop input without drop coordinates', () => {
-    expect(canvasMapProjectTreeDropInput('canvas-1', projectTreeDragDataTransfer([
-      { kind: 'file', projectRelativePath: 'outputs/gpt/cover.png' }
-    ]))).toEqual({
-      canvasId: 'canvas-1',
-      projectRelativePath: 'outputs/gpt/cover.png'
-    });
-    expect(canvasMapProjectTreeDropInput('canvas-1', projectTreeDragDataTransfer([
-      { kind: 'file', projectRelativePath: 'outputs/gpt/a.png' },
-      { kind: 'file', projectRelativePath: 'outputs/gpt/b.png' }
-    ]))).toBeUndefined();
-  });
-
-  it('accepts Canvas Map dragover from project tree MIME without reading drag payload', () => {
-    const dataTransfer = {
-      types: ['application/x-debrute-project-tree-paths'],
-      getData: vi.fn(() => '')
-    };
-
-    expect(isCanvasMapProjectTreeDragOver(dataTransfer)).toBe(true);
-    expect(dataTransfer.getData).not.toHaveBeenCalled();
-  });
-
   it('renders projected nodes without delete controls', () => {
     const canvas = createCanvasDocument({ id: 'node-canvas' });
     const projection: CanvasProjection = {
@@ -252,6 +198,168 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-canvas-node-path="image-production/cover.png"');
     expect(html).toContain('db-canvas-node-frame');
     expect(html).not.toContain('Delete');
+  });
+
+  it('raises an unchanged selected node again when it is clicked', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'repeat-selection-raise' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/a.png', 10, 10)],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection, {
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+    });
+    const raiseCanvasSelection = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, {
+          runtime,
+          actions: { ...actions, raiseCanvasSelection }
+        }));
+      });
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      const nodeElement = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/a.png"]')!;
+      surfaceElement.setPointerCapture = vi.fn();
+      surfaceElement.releasePointerCapture = vi.fn();
+
+      await act(async () => {
+        nodeElement.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 77,
+          button: 0,
+          clientX: 20,
+          clientY: 20
+        }));
+        nodeElement.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 77,
+          button: 0,
+          clientX: 20,
+          clientY: 20
+        }));
+      });
+
+      expect(raiseCanvasSelection).toHaveBeenCalledTimes(1);
+      expect(raiseCanvasSelection).toHaveBeenCalledWith({
+        canvasId: canvas.id,
+        projectRelativePaths: ['flow/a.png']
+      });
+    } finally {
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('does not submit a second Selection Raise after an active Manual Layout drag', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'manual-layout-single-raise' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [nodeFixture('flow/a.png', 10, 10)],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+    const raiseCanvasSelection = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, {
+          runtime,
+          actions: { ...actions, raiseCanvasSelection }
+        }));
+      });
+
+      await act(async () => {
+        runtime.input.beginNodeMove({
+          pointerId: 78,
+          projectRelativePath: 'flow/a.png',
+          screenPoint: { x: 0, y: 0 }
+        });
+        runtime.input.updatePointerInteraction({ pointerId: 78, screenPoint: { x: 20, y: 0 } });
+        await runtime.input.finishPointerInteraction({ pointerId: 78, screenPoint: { x: 20, y: 0 } });
+      });
+
+      expect(raiseCanvasSelection).not.toHaveBeenCalled();
+    } finally {
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('does not expose a disclosure toggle for the structural Project root', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const canvas = createCanvasDocument({ id: 'directory-click' });
+    const projection: CanvasProjection = {
+      canvasId: canvas.id,
+      nodes: [directoryFixture('', 10, 10)],
+      edges: [],
+      diagnostics: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+    const setCanvasDirectoryExpanded = vi.fn(async () => undefined);
+    const elementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+
+    try {
+      await act(async () => {
+        root.render(surface(canvas, projection, {
+          runtime,
+          actions: { ...actions, setCanvasDirectoryExpanded },
+          canvasState: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] }
+        }));
+      });
+      const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      const directoryElement = container.querySelector<HTMLElement>('[data-canvas-node-path=""]')!;
+      surfaceElement.setPointerCapture = vi.fn();
+      surfaceElement.releasePointerCapture = vi.fn();
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: () => directoryElement
+      });
+
+      await act(async () => {
+        directoryElement.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 78,
+          button: 0,
+          clientX: 20,
+          clientY: 20
+        }));
+      });
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({
+        kind: 'move-node',
+        phase: 'pending',
+        pressedProjectRelativePath: ''
+      });
+      await act(async () => {
+        directoryElement.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 78,
+          button: 0,
+          clientX: 22,
+          clientY: 21
+        }));
+      });
+
+      expect(setCanvasDirectoryExpanded).not.toHaveBeenCalled();
+    } finally {
+      if (elementFromPointDescriptor) {
+        Object.defineProperty(document, 'elementFromPoint', elementFromPointDescriptor);
+      } else {
+        Reflect.deleteProperty(document, 'elementFromPoint');
+      }
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it('covers Canvas node hit targets only while the camera is moving', async () => {
@@ -430,6 +538,8 @@ describe('CanvasSurface', () => {
       expect(container.querySelectorAll('.canvas-node-shell[data-canvas-selected="true"]')).toHaveLength(1);
       expect(container.querySelectorAll('[data-canvas-node-path="flow/a.png"] .canvas-node-resize')).toHaveLength(8);
       expect(container.querySelectorAll('[data-canvas-node-path="flow/b.png"] .canvas-node-resize')).toHaveLength(0);
+      expect(Number(container.querySelector<HTMLElement>('[data-canvas-node-path="flow/a.png"]')!.style.zIndex))
+        .toBeGreaterThan(Number(container.querySelector<HTMLElement>('[data-canvas-node-path="flow/b.png"]')!.style.zIndex));
     } finally {
       await act(async () => root.unmount());
       runtime.dispose();
@@ -1119,7 +1229,7 @@ describe('CanvasSurface', () => {
             state: 'available',
             size: 100,
             mimeType: 'text/plain',
-            fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/offscreen.txt?v=rev-text',
+            fileUrl: '/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/offscreen.txt?v=rev-text',
             revision: 'rev-text'
           }
         },
@@ -1181,7 +1291,7 @@ describe('CanvasSurface', () => {
             state: 'available',
             size: 100,
             mimeType: 'text/markdown',
-            fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/notes/offscreen.md?v=rev-text',
+            fileUrl: '/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/notes/offscreen.md?v=rev-text',
             revision: 'rev-text'
           }
         }
@@ -2050,7 +2160,7 @@ describe('CanvasSurface', () => {
         state: 'available',
         size: 100,
         mimeType: 'audio/wav',
-        fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/sound.wav?v=rev',
+        fileUrl: '/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/sound.wav?v=rev',
         revision: 'rev'
       }
     };
@@ -2061,7 +2171,7 @@ describe('CanvasSurface', () => {
         state: 'available',
         size: 100,
         mimeType: 'application/octet-stream',
-        fileUrl: '/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/archive.bin?v=rev',
+        fileUrl: '/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/flow/archive.bin?v=rev',
         revision: 'rev'
       }
     };
@@ -2923,6 +3033,8 @@ function surface(
     canvasFeedback?: CanvasFeedbackDocument;
     feedbackInteraction?: CanvasFeedbackCanvasBinding;
     runtime?: ReturnType<typeof createCanvasEditorRuntime>;
+    actions?: Parameters<typeof CanvasSurface>[0]['actions'];
+    canvasState?: CanvasState;
     minimapOpen?: boolean;
   } = {}
 ): React.ReactElement {
@@ -2935,9 +3047,10 @@ function surface(
       <CanvasSurface
         productPlatform="darwin"
         canvas={canvas}
+        canvasState={input.canvasState}
         projection={projection}
         runtime={runtime}
-        actions={actions}
+        actions={input.actions ?? actions}
         textFileBuffers={input.textFileBuffers ?? {}}
         canvasFeedback={input.canvasFeedback}
         feedbackInteraction={input.feedbackInteraction}
@@ -3017,6 +3130,7 @@ function clearTextPreviewStyleVariables(): void {
 function nodeFixture(path: string, x: number, y: number): CanvasProjection['nodes'][number] {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'file',
     mediaKind: 'image',
     x,
@@ -3030,7 +3144,7 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
       mimeType: 'image/png',
       canvasImagePreviewable: true,
       canvasImagePreviewSourceWidth: 200,
-      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     }
   };
@@ -3045,7 +3159,7 @@ function textProjectionNode(path: string, x: number, y: number, revision: string
       state: 'available',
       size: 100,
       mimeType: 'text/markdown',
-      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=${revision}`,
+      fileUrl: `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=${revision}`,
       revision
     }
   };
@@ -3061,7 +3175,7 @@ function videoProjectionNode(path: string, x: number, y: number): CanvasProjecti
       state: 'available',
       size: 100,
       mimeType: 'video/mp4',
-      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     },
     videoPresentation: {
@@ -3081,7 +3195,7 @@ function audioProjectionNode(path: string, x: number, y: number): CanvasProjecti
       state: 'available',
       size: 100,
       mimeType: 'audio/mpeg',
-      fileUrl: `/api/projects/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
+      fileUrl: `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     }
   };
@@ -3228,19 +3342,14 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
 function directoryFixture(path: string, x: number, y: number): CanvasProjection['nodes'][number] {
   return {
     projectRelativePath: path,
+    displayName: path,
     nodeKind: 'directory',
     x,
     y,
     width: 200,
     height: 120,
     z: 0,
-    availability: {
-      state: 'available',
-      size: 0,
-      mimeType: 'inode/directory',
-      fileUrl: '',
-      revision: 'rev'
-    }
+    availability: { state: 'directory' }
   };
 }
 
@@ -3252,7 +3361,7 @@ function feedbackDocument(entries: CanvasFeedbackDocument['entries']): CanvasFee
 }
 
 const actions: WorkbenchActions = {
-  lookupGeneratedAssetMetadata: async () => {
+  lookupModelArtifactProvenance: async () => {
     throw new Error('not used');
   },
   readProjectTextFile: async () => {
@@ -3280,7 +3389,9 @@ const actions: WorkbenchActions = {
   },
   updateCanvasVideoPlaybackState: async () => undefined,
   updateCanvasTextViewportState: async () => undefined,
-  addProjectPathToCanvasMap: async () => undefined,
+  setCanvasDirectoryExpanded: async () => undefined,
+  raiseCanvasSelection: async () => undefined,
+  activateCanvas: async () => undefined,
   createCanvas: async () => {
     throw new Error('not used');
   },
@@ -3293,17 +3404,8 @@ const actions: WorkbenchActions = {
   reorderCanvases: async () => {
     throw new Error('not used');
   },
-  repairCanvasIndex: async () => {
-    throw new Error('not used');
-  },
   openProject: async () => undefined
 };
-
-function projectTreeDragDataTransfer(entries: Array<{ kind: 'file' | 'directory'; projectRelativePath: string }>): Pick<DataTransfer, 'getData'> {
-  return {
-    getData: () => JSON.stringify(entries)
-  };
-}
 
 function deferred<T>(): {
   promise: Promise<T>;

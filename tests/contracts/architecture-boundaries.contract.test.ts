@@ -85,7 +85,7 @@ describe('Debrute architecture boundaries', () => {
       writeFileSync(
         join(fixtureRoot, 'apps/desktop/src/electron/violates-domain-core-boundary.ts'),
         [
-          "import type { CanvasDocument } from '@debrute/canvas-core';",
+          "import type { CanvasState } from '@debrute/canvas-core';",
           "import 'react/jsx-runtime';"
         ].join('\n'),
         'utf8'

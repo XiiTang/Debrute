@@ -1,25 +1,22 @@
 import type {
-  AddProjectPathToCanvasMapInput,
   CanvasTextPreviewSourceAvailabilityRequest,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewEnsureRequest,
   CanvasVideoPreviewEnsureResponse,
   CanvasVideoPreviewProbeRequest,
   CanvasVideoPreviewProbeResponse,
-  GeneratedAssetMetadataLookup,
+  ModelArtifactProvenanceLookup,
   PhotoshopStateView,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
-  UpdateCanvasTextViewportStateInput,
-  UpdateCanvasVideoPlaybackStateInput,
   WorkbenchCanvasManagementResult,
-  WorkbenchCanvasResetLayoutResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
-import type { CanvasFeedbackDocument } from '@debrute/canvas-core';
+import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
+import type { CanvasProjection } from './workbench/canvas/CanvasScene.js';
 import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchResolvedTheme } from './workbench/services/workbenchTheme';
 import type { WorkbenchTitleBarState } from './workbench/shell/workbenchTitleBarState';
@@ -34,7 +31,9 @@ export type SettingsResource<T> =
 
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
-  projectId?: string | undefined;
+  canvasProjection: CanvasProjection | undefined;
+  bindingId?: string | undefined;
+  canonicalRoot?: string | undefined;
   titleBarState: WorkbenchTitleBarState;
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
@@ -73,7 +72,7 @@ export interface FloatingTextEditorWindowState {
 }
 
 export interface WorkbenchActions {
-  lookupGeneratedAssetMetadata: (input: { projectRelativePath: string }) => Promise<GeneratedAssetMetadataLookup>;
+  lookupModelArtifactProvenance: (input: { projectRelativePath: string }) => Promise<ModelArtifactProvenanceLookup>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
@@ -89,17 +88,19 @@ export interface WorkbenchActions {
   toggleTextFileWordWrap: (projectRelativePath: string) => void;
   updateCanvasNodeLayouts: (canvasId: string, input: {
     interaction: 'move' | 'resize';
+    selectedProjectRelativePaths: string[];
     nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width: number; height: number }>;
   }) => Promise<void>;
-  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { nodePaths: string[] }) => Promise<WorkbenchCanvasResetLayoutResult>;
-  updateCanvasVideoPlaybackState: (canvasId: string, input: Omit<UpdateCanvasVideoPlaybackStateInput, 'canvasId'>) => Promise<void>;
-  updateCanvasTextViewportState: (canvasId: string, input: Omit<UpdateCanvasTextViewportStateInput, 'canvasId'>) => Promise<void>;
-  addProjectPathToCanvasMap: (input: AddProjectPathToCanvasMapInput) => Promise<void>;
+  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { nodePaths: string[] }) => Promise<void>;
+  updateCanvasVideoPlaybackState: (canvasId: string, input: { updates: Array<{ projectRelativePath: string; currentTimeMs: number }> }) => Promise<void>;
+  updateCanvasTextViewportState: (canvasId: string, input: { updates: Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }> }) => Promise<void>;
+  setCanvasDirectoryExpanded: (input: { canvasId: string; projectRelativePath: string; expanded: boolean }) => Promise<void>;
+  raiseCanvasSelection: (input: { canvasId: string; projectRelativePaths: string[] }) => Promise<void>;
+  activateCanvas: (canvasId: string) => Promise<void>;
   createCanvas: () => Promise<WorkbenchCanvasManagementResult>;
   renameCanvas: (input: { canvasId: string; name: string }) => Promise<WorkbenchCanvasManagementResult>;
   deleteCanvas: (input: { canvasId: string }) => Promise<WorkbenchCanvasManagementResult>;
   reorderCanvases: (input: { canvasOrder: string[] }) => Promise<WorkbenchCanvasManagementResult>;
-  repairCanvasIndex: () => Promise<WorkbenchCanvasManagementResult>;
   openProject: () => Promise<void>;
 }
 

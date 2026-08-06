@@ -33,6 +33,7 @@ describe('project path command target', () => {
   it('keeps Canvas availability out of Project Path command entries', () => {
     const canvasEntry = projectPathCommandEntryForCanvasNode({
       projectRelativePath: 'available.png',
+      displayName: 'available.png',
       nodeKind: 'file',
       mediaKind: 'image',
       x: 0,

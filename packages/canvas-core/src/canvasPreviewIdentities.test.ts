@@ -13,7 +13,7 @@ describe('Canvas preview identities', () => {
     const targetIdentity = canvasPreviewTargetIdentity(['sha256:source', 'frame-v1--ms-1250']);
     const projectATargetKey = canvasPreviewTargetKey({
       mediaKind: 'video',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-a',
       projectRelativePath: 'clips/a.mp4',
       targetIdentity
@@ -21,14 +21,14 @@ describe('Canvas preview identities', () => {
 
     expect(projectATargetKey).not.toBe(canvasPreviewTargetKey({
       mediaKind: 'video',
-      projectId: 'project-b',
+      bindingId: 'project-b',
       canvasId: 'canvas-a',
       projectRelativePath: 'clips/a.mp4',
       targetIdentity
     }));
     expect(projectATargetKey).not.toBe(canvasPreviewTargetKey({
       mediaKind: 'video',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-b',
       projectRelativePath: 'clips/b.mp4',
       targetIdentity
@@ -59,14 +59,14 @@ describe('Canvas preview identities', () => {
     const targetIdentity = canvasPreviewTargetIdentityFromDigest('sha256:text-target');
     expect(canvasPreviewVariantKey({
       mediaKind: 'text',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-a',
       projectRelativePath: 'notes/a.md',
       targetIdentity,
       width: 800
     })).not.toBe(canvasPreviewVariantKey({
       mediaKind: 'text',
-      projectId: 'project-a',
+      bindingId: 'project-a',
       canvasId: 'canvas-a',
       projectRelativePath: 'notes/b.md',
       targetIdentity,
@@ -90,9 +90,9 @@ describe('Canvas preview identities', () => {
     })).toThrow('Canvas preview variant width must be a positive integer.');
     expect(() => canvasPreviewTargetKey({
       mediaKind: 'image',
-      projectId: '',
+      bindingId: '',
       projectRelativePath: 'images/a.png',
       targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:image')
-    })).toThrow('Canvas preview Project ID must be non-empty.');
+    })).toThrow('Canvas preview Binding ID must be non-empty.');
   });
 });

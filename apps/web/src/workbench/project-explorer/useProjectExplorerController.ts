@@ -29,7 +29,7 @@ import {
   nearestExistingParentSelection,
   projectTreeSelectionFromPaths,
   reconcileCutClipboardWithProjectEntries,
-  singleFileBatchResultPath
+  rewriteCanvasSelectionAfterPathChanges
 } from './workbenchFileCommands.js';
 
 type DirectoryLoadOutcome =
@@ -80,7 +80,6 @@ export interface ProjectExplorerControllerInput {
   commandEffects: ProjectPathCommandEffects;
   getSnapshot(): WorkbenchProjectSessionSnapshot | undefined;
   activeCanvasRuntime: CanvasEditorRuntime | undefined;
-  centerProjectFileInCanvas(projectRelativePath: string): void;
   activities: WorkbenchActivityNoticeReporter;
   i18n: WorkbenchI18n;
 }
@@ -94,6 +93,8 @@ export function useProjectExplorerController(
   const [inlineEdit, setInlineEdit] = useState<ProjectTreeInlineEditState>();
   const editIntentTokenRef = useRef(0);
   const pendingCreateParentLoadRef = useRef<PendingCreateParentLoad | undefined>(undefined);
+  const activeCanvasRuntimeRef = useRef(input.activeCanvasRuntime);
+  activeCanvasRuntimeRef.current = input.activeCanvasRuntime;
   const acceptedSnapshot = input.getSnapshot();
   const reportExplorerFailure = useCallback((operation: ExplorerActivityOperation) => {
     input.activities.report({ kind: 'explorer-operation-failed', operation });
@@ -105,7 +106,7 @@ export function useProjectExplorerController(
     }
     setFileClipboard((current) => reconcileCutClipboardWithProjectEntries(
       current,
-      acceptedSnapshot.files
+      acceptedSnapshot.projectTree
     ));
   }, [acceptedSnapshot]);
 
@@ -130,7 +131,7 @@ export function useProjectExplorerController(
     }
     try {
       const result = await request;
-      if (!scope.isCurrent(result.projectId)) {
+      if (!scope.isCurrent(result.bindingId)) {
         throw new Error('Project changed while its directory was loading.');
       }
     } catch (error) {
@@ -270,11 +271,31 @@ export function useProjectExplorerController(
       if (!request) {
         return;
       }
+      const canvasRuntime = current.kind === 'renaming'
+        ? input.activeCanvasRuntime
+        : undefined;
+      const canvasSelection = canvasRuntime?.getSnapshot().selection;
+      const canvasSelectionIntentRevision = canvasRuntime?.getSelectionIntentRevision();
       const result = await request;
-      if (!scope.isCurrent(result.projectId)) {
+      if (!scope.isCurrent(result.bindingId)) {
         return;
       }
       setSelectionState(projectTreeSelectionFromPaths([result.projectRelativePath]));
+      if (
+        current.kind === 'renaming'
+        && canvasRuntime
+        && activeCanvasRuntimeRef.current === canvasRuntime
+        && canvasRuntime.getSelectionIntentRevision() === canvasSelectionIntentRevision
+      ) {
+        canvasRuntime.setSelection(rewriteCanvasSelectionAfterPathChanges(
+          canvasSelection,
+          [{
+            sourceProjectRelativePath: current.projectRelativePath,
+            projectRelativePath: result.projectRelativePath,
+            status: 'ok'
+          }]
+        ));
+      }
       pendingCreateParentLoadRef.current = undefined;
       setInlineEdit(undefined);
     } catch (error) {
@@ -282,7 +303,7 @@ export function useProjectExplorerController(
         setInlineEdit({ ...current, submitting: false, error: errorMessage(error) });
       }
     }
-  }, [commandEffects, inlineEdit, input.i18n, requestDirectory]);
+  }, [commandEffects, inlineEdit, input.activeCanvasRuntime, input.i18n, requestDirectory]);
 
   const cancelEdit = useCallback(() => {
     editIntentTokenRef.current += 1;
@@ -298,16 +319,12 @@ export function useProjectExplorerController(
     result: WorkbenchProjectFileBatchOperationResult,
     scope: AcceptedProjectPathCommandScope
   ): boolean => {
-    if (!scope.isCurrent(result.projectId)) {
+    if (!scope.isCurrent(result.bindingId)) {
       return false;
     }
     setSelectionState(projectTreeSelectionFromPaths(batchResultSelectionPaths(result.results)));
-    const locatedPath = singleFileBatchResultPath(result.results);
-    if (locatedPath) {
-      input.centerProjectFileInCanvas(locatedPath);
-    }
     return true;
-  }, [input.centerProjectFileInCanvas]);
+  }, []);
 
   const copyPaths = useCallback(async (copyInput: {
     entries: ProjectPathEntry[];
@@ -326,13 +343,27 @@ export function useProjectExplorerController(
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
   }, scope: AcceptedProjectPathCommandScope): Promise<boolean> => {
+    const canvasRuntime = input.activeCanvasRuntime;
+    const canvasSelection = canvasRuntime?.getSnapshot().selection;
+    const canvasSelectionIntentRevision = canvasRuntime?.getSelectionIntentRevision();
     const request = commandEffects.moveProjectPaths(scope, moveInput);
     if (!request) {
       return false;
     }
     const result = await request;
-    return applyBatchResult(result, scope);
-  }, [applyBatchResult, commandEffects]);
+    const applied = applyBatchResult(result, scope);
+    if (
+      applied
+      && canvasRuntime
+      && activeCanvasRuntimeRef.current === canvasRuntime
+      && canvasRuntime.getSelectionIntentRevision() === canvasSelectionIntentRevision
+    ) {
+      canvasRuntime.setSelection(
+        rewriteCanvasSelectionAfterPathChanges(canvasSelection, result.results)
+      );
+    }
+    return applied;
+  }, [applyBatchResult, commandEffects, input.activeCanvasRuntime]);
 
   const pasteEntries = useCallback((scope: AcceptedProjectPathCommandScope, pasteInput: {
     clipboard: WorkbenchFileClipboard;
@@ -383,7 +414,7 @@ export function useProjectExplorerController(
         currentSelection
       ));
     }
-    const existingPaths = new Set(snapshot.files.map((file) => file.projectRelativePath));
+    const existingPaths = new Set(snapshot.projectTree.map((entry) => entry.projectRelativePath));
     setSelectionState((current) => {
       if (!current.selectedPaths.some((path) => deletedPaths.some((deletedPath) => isPathInside(path, deletedPath)))) {
         return current;
@@ -411,7 +442,7 @@ export function useProjectExplorerController(
       return;
     }
     void request.then((result) => {
-      if (!scope.isCurrent(result.projectId)) {
+      if (!scope.isCurrent(result.bindingId)) {
         return;
       }
       const acceptedSnapshot = input.getSnapshot();
@@ -454,7 +485,7 @@ export function useProjectExplorerController(
       return;
     }
     const overwrite = projectTreeBatchMoveHasConflict({
-      existingProjectRelativePaths: new Set(input.getSnapshot()?.files.map((file) => file.projectRelativePath) ?? []),
+      existingProjectRelativePaths: new Set(input.getSnapshot()?.projectTree.map((entry) => entry.projectRelativePath) ?? []),
       entries: dropInput.entries,
       targetDirectoryProjectRelativePath: dropInput.targetDirectoryProjectRelativePath
     });

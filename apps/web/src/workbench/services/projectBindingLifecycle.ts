@@ -14,12 +14,13 @@ export interface ProjectBindingLifecycleState {
 export type ProjectBindingLifecycleOutcome =
   | {
       outcome: 'bound';
-      projectId: string;
+      bindingId: string;
+      canonicalRoot: string;
       generation: number;
     }
   | {
       outcome: 'focused_existing_desktop';
-      projectId: string;
+      canonicalRoot: string;
     }
   | {
       outcome: 'failed';
@@ -42,7 +43,7 @@ export interface ProjectBindingLifecycle {
 export function createProjectBindingLifecycle(input: {
   openProject: WorkbenchApiClient['openProject'];
   projectProjection: WorkbenchProjectProjection;
-  commitProjectRoute(projectId: string): void;
+  commitProjectRoute(canonicalRoot: string): void;
 }): ProjectBindingLifecycle {
   let state: ProjectBindingLifecycleState = { opening: false };
   const listeners = new Set<() => void>();
@@ -81,14 +82,15 @@ export function createProjectBindingLifecycle(input: {
         const accepted = input.projectProjection.getState();
         if (
           accepted.status !== 'bound'
-          || accepted.projectId !== opened.projectId
+          || accepted.bindingId !== opened.bindingId
         ) {
           return { outcome: 'superseded' };
         }
-        input.commitProjectRoute(accepted.projectId);
+        input.commitProjectRoute(accepted.canonicalRoot);
         return {
           outcome: 'bound',
-          projectId: accepted.projectId,
+          bindingId: accepted.bindingId,
+          canonicalRoot: accepted.canonicalRoot,
           generation: accepted.generation
         };
       } catch (error) {
@@ -120,6 +122,6 @@ function bindingIsUnchanged(
     return source.status === current.status;
   }
   return source.status === current.status
-    && source.projectId === current.projectId
+    && source.bindingId === current.bindingId
     && source.generation === current.generation;
 }

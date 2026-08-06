@@ -39,8 +39,8 @@ when prose and implementation differ.
 ## Capabilities And Integrations
 
 - [CLI and official Skills](./cli.md)
-- [Model generation](./model-generation.md)
-- [Generated Assets and Model Runs](./generated-assets.md)
+- [Model Requests](./model-requests.md)
+- [Model Artifacts and provenance](./model-artifacts.md)
 - [Local integrations](./integrations.md)
 - [Photoshop file transfer](./photoshop.md)
 

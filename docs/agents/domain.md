@@ -48,7 +48,7 @@ and links belong in their durable technical owner or the Context Map.
 - Use `docs/adr/` for decisions spanning contexts or application surfaces.
 - Use `docs/project/adr/` for Project-only decisions.
 - Use `packages/canvas-core/docs/adr/` for Canvas-only decisions, including
-  Canvas Map semantics.
+  Project Tree projection, Folder Disclosure, layout, and occlusion semantics.
 - Use `docs/capability/adr/` for Capability-only decisions.
 - Create an ADR only when the decision is hard to reverse, surprising without
   context, and the result of a real trade-off.

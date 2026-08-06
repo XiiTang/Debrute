@@ -283,7 +283,7 @@ function createInteractionSource(initiallyActive: boolean): React.ComponentProps
 
 function targetFixture(projectRelativePath = 'notes/a.md'): CanvasTextPreviewCaptureTarget {
   return {
-    projectId: 'project-1',
+    bindingId: 'project-1',
     canvasId: 'canvas-1',
     projectRelativePath,
     content: 'content',

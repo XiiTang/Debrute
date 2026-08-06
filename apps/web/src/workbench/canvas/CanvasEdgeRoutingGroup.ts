@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
 import type { CanvasRect } from './runtime/canvasGeometry.js';
 
 const TREE_EDGE_TRUNK_MAX_GAP = 96;

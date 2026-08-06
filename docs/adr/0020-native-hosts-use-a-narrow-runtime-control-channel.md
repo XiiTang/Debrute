@@ -32,7 +32,7 @@ promotes the Desktop launcher connection after Desktop activation. There is no
 public `desktop_host` role, generic business forwarding, Project snapshot,
 settings object, renderer credential, or unload protocol on Control.
 
-Project, Canvas, settings, generation, file, and terminal traffic uses the
+Project, Canvas, settings, Model Request, file, and terminal traffic uses the
 role-partitioned loopback business surfaces. CLI authorization is bound to the
 live `cli` Control connection. Desktop tickets are bound to the promoted host
 and window key and consumed once by the renderer connection request; the stable

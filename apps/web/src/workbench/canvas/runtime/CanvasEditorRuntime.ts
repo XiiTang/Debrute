@@ -1,4 +1,4 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '@debrute/canvas-core';
+import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene.js';
 import {
   getCanvasResizePreserveAspect,
   isAdditiveCanvasSelectionModifier,
@@ -130,6 +130,7 @@ export interface CanvasEditorRuntime {
   subscribeSurfaceSize(listener: (size: CanvasSize | undefined) => void): () => void;
   subscribePointerInteraction(listener: (state: CanvasRuntimePointerInteraction | undefined) => void): () => void;
   getSnapshot(): CanvasRuntimeSnapshot;
+  getSelectionIntentRevision(): number;
   bindSurface(elements: CanvasSurfaceElements): () => void;
   acceptProjection(projection: CanvasProjection): void;
   setSelection(selection: CanvasSelection | undefined): void;
@@ -218,6 +219,7 @@ export function createCanvasEditorRuntime(initial: {
   initialProjection: CanvasProjection;
   submitManualLayout(mutation: {
     interaction: 'move' | 'resize';
+    selectedProjectRelativePaths: readonly string[];
     nodeLayouts: CanvasLayoutOverride[];
   }): Promise<void>;
   camera?: CanvasCamera;
@@ -230,22 +232,30 @@ export function createCanvasEditorRuntime(initial: {
   const contentInteractionListeners = new Set<(projectRelativePath: string | undefined) => void>();
   const surfaceSizeListeners = new Set<(size: CanvasSize | undefined) => void>();
   const pointerInteractionListeners = new Set<(state: CanvasRuntimePointerInteraction | undefined) => void>();
+  const initialSelection = pruneCanvasSelection(
+    normalizeCanvasSelection(initial.selection),
+    new Set(initial.initialProjection.nodes.map((node) => node.projectRelativePath))
+  );
   const manualLayoutLifecycle = createCanvasManualLayoutLifecycle({
     canvasId: initial.canvasId,
     initialProjection: initial.initialProjection,
-    submitManualLayout: initial.submitManualLayout
+    submitManualLayout: (mutation) => initial.submitManualLayout({
+      ...mutation,
+      selectedProjectRelativePaths: selectedNodeProjectRelativePaths(state.selection)
+    })
   });
   const scenePresentation = createCanvasScenePresentation({
-    projection: initial.initialProjection
+    projection: initial.initialProjection,
+    presentation: {
+      layoutOverrides: [],
+      selectedProjectRelativePaths: selectedNodeProjectRelativePaths(initialSelection)
+    }
   });
   let acceptedProjection = initial.initialProjection;
   const state: RuntimeState = {
     camera: initial.camera ?? canvasCameraReset(),
     cameraState: 'idle',
-    selection: pruneCanvasSelection(
-      normalizeCanvasSelection(initial.selection),
-      new Set(initial.initialProjection.nodes.map((node) => node.projectRelativePath))
-    ),
+    selection: initialSelection,
     contentInteractionProjectRelativePath: undefined,
     pointerInteraction: undefined,
     surfaceSize: undefined
@@ -260,6 +270,7 @@ export function createCanvasEditorRuntime(initial: {
   let marqueeEdgeScrollFrame: number | undefined;
   let marqueeEdgeEnteredAt: number | undefined;
   let marqueeEdgeLastFrameAt: number | undefined;
+  let selectionIntentRevision = 0;
   let disposed = false;
 
   const invalidateSnapshot = () => {
@@ -423,10 +434,14 @@ export function createCanvasEditorRuntime(initial: {
     }
   };
 
-  const applyManualLayoutPresentation = () => {
-    scenePresentation.applyPresentation(manualLayoutLifecycle.getPresentation());
-  };
+  const canvasPresentation = (selection = state.selection) => ({
+    ...manualLayoutLifecycle.getPresentation(),
+    selectedProjectRelativePaths: selectedNodeProjectRelativePaths(selection)
+  });
 
+  const applyCanvasPresentation = () => {
+    scenePresentation.applyPresentation(canvasPresentation());
+  };
   const setPointerInteraction = (
     pointerInteraction: CanvasRuntimePointerInteraction | undefined,
     options: { notifySnapshot: boolean }
@@ -438,7 +453,7 @@ export function createCanvasEditorRuntime(initial: {
         : undefined
     );
     invalidateSnapshot();
-    applyManualLayoutPresentation();
+    applyCanvasPresentation();
     flushPointerInteractionListeners(pointerInteraction);
     syncMarqueeEdgeScroll(pointerInteraction);
     if (options.notifySnapshot) {
@@ -460,11 +475,13 @@ export function createCanvasEditorRuntime(initial: {
   };
 
   const commitSelection = (selection: CanvasSelection | undefined) => {
+    selectionIntentRevision += 1;
     const normalized = normalizeCanvasSelection(selection);
     if (sameCanvasSelection(state.selection, normalized)) {
       return;
     }
     state.selection = normalized;
+    applyCanvasPresentation();
     invalidateSnapshot();
     flushSelectionListeners(normalized);
     notify();
@@ -736,7 +753,7 @@ export function createCanvasEditorRuntime(initial: {
     );
     manualLayoutLifecycle.acceptProjection(projection);
     acceptedProjection = projection;
-    scenePresentation.setProjection(projection, manualLayoutLifecycle.getPresentation());
+    scenePresentation.setProjection(projection, canvasPresentation(nextSelection));
     if (nextPointerInteraction?.kind === 'selection-marquee') {
       nextSelection = marqueeSelection(nextPointerInteraction);
     }
@@ -799,7 +816,6 @@ export function createCanvasEditorRuntime(initial: {
             ? initialSelection
             : canvasNodeSelection([input.projectRelativePath]);
         presentedNode(input.projectRelativePath);
-        commitSelection(moveSelection);
         const selectedPaths = new Set(selectedNodeProjectRelativePaths(moveSelection));
         const start = screenToCanvas(input.screenPoint);
         setPointerInteraction({
@@ -814,12 +830,12 @@ export function createCanvasEditorRuntime(initial: {
           additive,
           origins: [...selectedPaths].flatMap((path) => scenePresentation.getPresentedNodes().get(path) ?? [])
         }, { notifySnapshot: false });
+        commitSelection(moveSelection);
       },
       beginNodeResize: (input) => {
         const node = presentedNode(input.projectRelativePath);
         const initialSelection = state.selection;
         const start = screenToCanvas(input.screenPoint);
-        commitSelection(canvasNodeSelection([input.projectRelativePath]));
         setPointerInteraction({
           kind: 'resize-node',
           pointerId: input.pointerId,
@@ -845,6 +861,7 @@ export function createCanvasEditorRuntime(initial: {
             node
           }, input.modifiers)
         }, { notifySnapshot: false });
+        commitSelection(canvasNodeSelection([input.projectRelativePath]));
       },
       updatePointerInteraction: (input) => {
         const active = state.pointerInteraction;
@@ -883,7 +900,7 @@ export function createCanvasEditorRuntime(initial: {
         try {
           await submission;
         } catch (error) {
-          applyManualLayoutPresentation();
+          applyCanvasPresentation();
           throw error;
         }
         return finished;
@@ -939,6 +956,7 @@ export function createCanvasEditorRuntime(initial: {
       };
     },
     getSnapshot: snapshot,
+    getSelectionIntentRevision: () => selectionIntentRevision,
     bindSurface: (elements) => {
       boundElements = elements;
       const nextSize = {

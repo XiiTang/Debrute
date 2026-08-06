@@ -2,6 +2,8 @@ export type ProjectFileEntryLike = {
   kind: 'file' | 'directory';
   projectRelativePath: string;
   sizeBytes?: number;
+  directoryState?: 'unloaded' | 'loaded' | 'error';
+  directoryError?: string;
 };
 
 export type ProjectFileTreeNode = ProjectFileTreeDirectory | ProjectFileTreeFile;
@@ -11,6 +13,8 @@ export interface ProjectFileTreeDirectory {
   name: string;
   path: string;
   children: ProjectFileTreeNode[];
+  directoryState: 'unloaded' | 'loaded' | 'error';
+  directoryError?: string;
 }
 
 export interface ProjectFileTreeFile {
@@ -25,6 +29,8 @@ interface MutableDirectory {
   path: string;
   directories: Map<string, MutableDirectory>;
   files: Map<string, ProjectFileTreeFile>;
+  directoryState: 'unloaded' | 'loaded' | 'error';
+  directoryError?: string;
 }
 
 export function buildProjectFileTree(entries: ProjectFileEntryLike[]): ProjectFileTreeNode[] {
@@ -32,7 +38,8 @@ export function buildProjectFileTree(entries: ProjectFileEntryLike[]): ProjectFi
     name: '',
     path: '',
     directories: new Map(),
-    files: new Map()
+    files: new Map(),
+    directoryState: 'loaded'
   };
 
   for (const entry of entries) {
@@ -53,11 +60,21 @@ export function buildProjectFileTree(entries: ProjectFileEntryLike[]): ProjectFi
           name: part,
           path: childPath,
           directories: new Map(),
-          files: new Map()
+          files: new Map(),
+          directoryState: 'unloaded'
         };
         current.directories.set(part, directory);
       }
       current = directory;
+    }
+
+    if (entry.kind === 'directory') {
+      current.directoryState = entry.directoryState ?? 'unloaded';
+      if (entry.directoryError === undefined) {
+        delete current.directoryError;
+      } else {
+        current.directoryError = entry.directoryError;
+      }
     }
 
     if (entry.kind === 'file') {
@@ -116,16 +133,16 @@ function collectProjectTreeNodePath(node: ProjectFileTreeNode, paths: Set<string
 }
 
 function finalizeDirectory(directory: MutableDirectory): ProjectFileTreeDirectory {
-  const directories = [...directory.directories.values()]
-    .sort(compareByName)
-    .map(finalizeDirectory);
-  const files = [...directory.files.values()].sort(compareByName);
+  const directories = [...directory.directories.values()].map(finalizeDirectory);
+  const files = [...directory.files.values()];
 
   return {
     kind: 'directory',
     name: directory.name,
     path: directory.path,
-    children: [...directories, ...files]
+    children: [...directories, ...files],
+    directoryState: directory.directoryState,
+    ...(directory.directoryError === undefined ? {} : { directoryError: directory.directoryError })
   };
 }
 
@@ -143,11 +160,4 @@ function parentProjectPath(path: string): string | undefined {
 
 function joinProjectPath(parent: string, child: string): string {
   return parent ? `${parent}/${child}` : child;
-}
-
-function compareByName(left: { name: string }, right: { name: string }): number {
-  return left.name.localeCompare(right.name, undefined, {
-    numeric: true,
-    sensitivity: 'base'
-  });
 }

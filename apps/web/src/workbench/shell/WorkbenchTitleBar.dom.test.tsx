@@ -23,7 +23,7 @@ describe('WorkbenchTitleBar', () => {
             platform: 'darwin',
             host: 'desktop', locale: 'en',
             projectTitle: 'Alpha',
-            recentProjects: [{ projectId: 'alpha', projectRoot: '/tmp/alpha' }]
+            recentProjects: [{ projectRoot: '/tmp/alpha' }]
           })}
           nativeWindowState={{ maximized: false }}
           onCommand={() => undefined}
@@ -48,7 +48,7 @@ describe('WorkbenchTitleBar', () => {
             platform: 'win32',
             host: 'desktop', locale: 'en',
             projectTitle: 'Beta',
-            recentProjects: [{ projectId: 'beta', projectRoot: '/tmp/beta' }]
+            recentProjects: [{ projectRoot: '/tmp/beta' }]
           })}
           nativeWindowState={{ maximized: true }}
           onCommand={() => undefined}
@@ -132,7 +132,7 @@ describe('WorkbenchTitleBar', () => {
                 platform: 'win32',
                 host: 'web', locale: 'en',
                 projectTitle: 'Alpha',
-                recentProjects: [{ projectId: 'alpha', projectRoot: '/tmp/alpha' }]
+                recentProjects: [{ projectRoot: '/tmp/alpha' }]
               })}
               nativeWindowState={{ maximized: false }}
               onCommand={onCommand}
@@ -188,7 +188,7 @@ describe('WorkbenchTitleBar', () => {
       expect(onCommand).toHaveBeenCalledOnce();
       expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({
         commandId: 'project.open-recent',
-        payload: { projectId: 'alpha', projectRoot: '/tmp/alpha' }
+        payload: { projectRoot: '/tmp/alpha' }
       }));
       expect(fileButton.getAttribute('aria-expanded')).toBe('false');
     } finally {

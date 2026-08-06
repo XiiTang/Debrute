@@ -14,7 +14,8 @@ import {
   MediaTimeRange,
   MediaVolumeRange
 } from 'media-chrome/react';
-import { normalizeCanvasVideoPlaybackTimeMs, type ProjectedCanvasNode } from '@debrute/canvas-core';
+import { normalizeCanvasVideoPlaybackTimeMs } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 
 export interface CanvasVideoPlayerHandle {
   readCurrentTimeSeconds(): number | undefined;

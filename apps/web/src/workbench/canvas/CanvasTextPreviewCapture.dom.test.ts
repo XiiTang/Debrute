@@ -291,7 +291,7 @@ function targetFixture(): CanvasTextPreviewCaptureTarget {
 
 function candidateFixture(): Omit<CanvasTextPreviewTarget, 'targetIdentity'> {
   return {
-    projectId: 'project-1',
+    bindingId: 'project-1',
     canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
     contentDigest: 'sha256:content',

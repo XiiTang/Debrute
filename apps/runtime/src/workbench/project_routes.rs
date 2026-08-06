@@ -3,8 +3,7 @@
     clippy::manual_let_else,
     clippy::needless_pass_by_value,
     clippy::result_large_err,
-    clippy::single_match_else,
-    clippy::too_many_lines
+    clippy::single_match_else
 )]
 
 use std::{
@@ -35,14 +34,14 @@ use tokio::sync::mpsc;
 
 use crate::{
     project::{
-        CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasLayoutInteraction,
-        CanvasNodeLayoutUpdate, CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
-        CanvasTextViewportUpdate, CanvasVideoPlaybackUpdate, CanvasVideoPreviewEnsureStatus,
-        CanvasVideoPreviewProbeStatus, CanvasVideoPreviewTarget, PreviewCancellation,
-        ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathClipboardFormat,
-        ProjectPathEntry, ProjectPathKind, ProjectRevisionResult, ProjectSession,
-        ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
-        open_revisioned_project_file, read_project_text_file,
+        CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasStatePatch,
+        CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
+        CanvasVideoPreviewEnsureStatus, CanvasVideoPreviewProbeStatus, CanvasVideoPreviewTarget,
+        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError,
+        ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind, ProjectRevisionResult,
+        ProjectSession, ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse,
+        UpdateCanvasFeedbackInput, open_revisioned_project_file, read_project_text_file,
+        resolve_existing_project_path,
     },
     terminal::{
         TERMINAL_PROTOCOL_VERSION, TerminalClientFrame, TerminalEvent, TerminalObservation,
@@ -53,10 +52,7 @@ use crate::{
 use super::{
     RuntimeHttpServiceError, WorkbenchConnectionContext, WorkbenchRuntimeServices,
     multipart::read_multipart,
-    routes::{
-        MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES, json_body, json_body_with_limit,
-        service_error_response,
-    },
+    routes::{json_body, json_body_with_limit, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
     services::project_response,
     websocket::{
@@ -77,7 +73,7 @@ const TERMINAL_HUB_WRITE_TIMEOUT: Duration = Duration::from_millis(50);
 pub(super) async fn text_file(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, path)): Path<(String, String)>,
+    Path((_binding_id, path)): Path<(String, String)>,
     request: Request,
 ) -> Response {
     let runtime = Arc::clone(&state.services);
@@ -97,13 +93,13 @@ pub(super) async fn text_file(
         content: String,
         expected_revision: String,
     }
-    let input: Input =
-        match json_body_with_limit(request, MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES).await {
-            Ok(input) => input,
-            Err(response) => return response,
-        };
+    let input: Input = match json_body_with_limit(request, usize::MAX).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
     execute_command(
         &session,
+        &scope.binding_id,
         ProjectCommand::WriteTextFile {
             project_relative_path: path,
             content: input.content,
@@ -115,7 +111,7 @@ pub(super) async fn text_file(
 pub(super) async fn raw_file(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, path)): Path<(String, String)>,
+    Path((_binding_id, path)): Path<(String, String)>,
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
     method: Method,
@@ -414,7 +410,7 @@ pub(super) async fn trash_paths(
         Err(response) => return response,
     };
     match session.trash_paths(runtime.native_shell(), &input.entries) {
-        Ok(result) => command_response(&session, result),
+        Ok(result) => command_response(&scope.binding_id, result),
         Err(error) => project_error(error),
     }
 }
@@ -422,7 +418,7 @@ pub(super) async fn trash_paths(
 pub(super) async fn project_path(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, path)): Path<(String, String)>,
+    Path((_binding_id, path)): Path<(String, String)>,
     request: Request,
 ) -> Response {
     if request.method() == Method::POST
@@ -487,7 +483,7 @@ async fn reveal_path(
     }
 }
 
-pub(super) async fn generated_asset_lookup(
+pub(super) async fn model_artifact_lookup(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
@@ -501,12 +497,23 @@ pub(super) async fn generated_asset_lookup(
         Ok(input) => input,
         Err(response) => return response,
     };
-    with_project_root(&state, &scope, |runtime, root| {
-        runtime
-            .generated_assets()
-            .lookup(root, &input.project_relative_path)
-            .map(|lookup| json!(lookup))
-    })
+    let runtime = Arc::clone(&state.services);
+    let session = match project_session(&runtime, &scope) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    let path = match resolve_existing_project_path(session.root(), &input.project_relative_path) {
+        Ok(path) => path,
+        Err(error) => return project_error(error),
+    };
+    let provenance = Arc::clone(runtime.provenance());
+    match tokio::task::spawn_blocking(move || provenance.lookup(&path))
+        .await
+        .expect("Model Artifact provenance worker must complete")
+    {
+        Ok(lookup) => Json(json!(lookup)).into_response(),
+        Err(error) => project_error(error),
+    }
 }
 
 pub(super) async fn feedback_get(
@@ -516,7 +523,7 @@ pub(super) async fn feedback_get(
     let runtime = Arc::clone(&state.services);
     match runtime
         .projects()
-        .get(&scope.project_id)
+        .get(std::path::Path::new(&scope.canonical_root))
         .and_then(|session| session.canvas_feedback())
     {
         Ok(result) => Json(result.value).into_response(),
@@ -547,6 +554,13 @@ pub(super) async fn canvas_create(
     command_for_scope(&state, &scope, ProjectCommand::CreateCanvas)
 }
 
+pub(super) async fn canvas_workspace_reset(
+    State(state): State<WorkbenchRouterState>,
+    Extension(scope): Extension<ProjectAuthorization>,
+) -> Response {
+    command_for_scope(&state, &scope, ProjectCommand::ResetCanvasWorkspace)
+}
+
 pub(super) async fn canvas_reorder(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
@@ -570,17 +584,10 @@ pub(super) async fn canvas_reorder(
     )
 }
 
-pub(super) async fn canvas_repair(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-) -> Response {
-    command_for_scope(&state, &scope, ProjectCommand::RepairCanvasRegistry)
-}
-
 pub(super) async fn canvas_item(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, canvas_id)): Path<(String, String)>,
+    Path((_binding_id, canvas_id)): Path<(String, String)>,
     request: Request,
 ) -> Response {
     let method = request.method().clone();
@@ -588,18 +595,25 @@ pub(super) async fn canvas_item(
         let runtime = Arc::clone(&state.services);
         return match runtime
             .projects()
-            .get(&scope.project_id)
+            .get(std::path::Path::new(&scope.canonical_root))
             .and_then(|session| session.sync_snapshot())
         {
-            Ok(sync) => sync
-                .snapshot
-                .canvases
-                .into_iter()
-                .find(|canvas| canvas.id == canvas_id)
-                .map_or_else(
-                    || StatusCode::NOT_FOUND.into_response(),
-                    |canvas| Json(canvas).into_response(),
-                ),
+            Ok(sync) => match sync.snapshot.canvas_workspace {
+                crate::project::CanvasWorkspaceSnapshot::Available { workspace, .. } => workspace
+                    .canvases
+                    .into_iter()
+                    .find(|canvas| canvas.id == canvas_id)
+                    .map_or_else(
+                        || StatusCode::NOT_FOUND.into_response(),
+                        |canvas| Json(canvas).into_response(),
+                    ),
+                crate::project::CanvasWorkspaceSnapshot::Unavailable { code, message } => {
+                    project_error(crate::project::ProjectError::service(
+                        code.as_str(),
+                        message,
+                    ))
+                }
+            },
             Err(error) => project_error(error),
         };
     }
@@ -627,224 +641,25 @@ pub(super) async fn canvas_item(
     command_for_scope(&state, &scope, command)
 }
 
-pub(super) async fn canvas_map_add(
+pub(super) async fn canvas_activate(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, canvas_id)): Path<(String, String)>,
-    request: Request,
+    Path((_binding_id, canvas_id)): Path<(String, String)>,
 ) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        project_relative_path: String,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
-    };
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::AddProjectPathToCanvasMap {
-            canvas_id,
-            project_relative_path: input.project_relative_path,
-        },
-    )
+    command_for_scope(&state, &scope, ProjectCommand::ActivateCanvas { canvas_id })
 }
 
-pub(super) async fn canvas_reset(
+pub(super) async fn canvas_state_patch(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, canvas_id)): Path<(String, String)>,
+    Path(_binding_id): Path<String>,
     request: Request,
 ) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct AllInput {
-        all: bool,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct NodePathsInput {
-        node_paths: Vec<String>,
-    }
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Input {
-        All(AllInput),
-        NodePaths(NodePathsInput),
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
+    let patch: CanvasStatePatch = match json_body(request).await {
+        Ok(patch) => patch,
         Err(response) => return response,
     };
-    let node_paths = match input {
-        Input::All(AllInput { all: true }) => None,
-        Input::All(AllInput { all: false }) => {
-            return invalid_input("reset layout requires all to be true.");
-        }
-        Input::NodePaths(NodePathsInput { node_paths: paths }) => {
-            if paths.is_empty() {
-                return invalid_input("selective reset layout requires at least one node path.");
-            }
-            let path_count = paths.len();
-            let unique = paths.into_iter().collect::<BTreeSet<_>>();
-            if unique.len() != path_count {
-                return invalid_input("selective reset layout node paths must be unique.");
-            }
-            Some(unique)
-        }
-    };
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::ResetCanvasLayout {
-            canvas_id,
-            node_paths,
-        },
-    )
-}
-
-pub(super) async fn canvas_layouts(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, canvas_id)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Update {
-        project_relative_path: String,
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    enum Interaction {
-        Move,
-        Resize,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        interaction: Interaction,
-        node_layouts: Vec<Update>,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
-    };
-    if input.node_layouts.is_empty() {
-        return invalid_input("Canvas layout update requires at least one node layout.");
-    }
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::UpdateCanvasLayouts {
-            canvas_id,
-            interaction: match input.interaction {
-                Interaction::Move => CanvasLayoutInteraction::Move,
-                Interaction::Resize => CanvasLayoutInteraction::Resize,
-            },
-            updates: input
-                .node_layouts
-                .into_iter()
-                .map(|update| CanvasNodeLayoutUpdate {
-                    project_relative_path: update.project_relative_path,
-                    x: update.x,
-                    y: update.y,
-                    width: update.width,
-                    height: update.height,
-                })
-                .collect(),
-        },
-    )
-}
-
-pub(super) async fn canvas_video_playback(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, canvas_id)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Update {
-        project_relative_path: String,
-        current_time_ms: u64,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        updates: Vec<Update>,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
-    };
-    if input.updates.is_empty() {
-        return invalid_input("Canvas video playback update requires at least one target.");
-    }
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::UpdateCanvasVideoPlayback {
-            canvas_id,
-            updates: input
-                .updates
-                .into_iter()
-                .map(|update| CanvasVideoPlaybackUpdate {
-                    project_relative_path: update.project_relative_path,
-                    current_time_ms: update.current_time_ms,
-                })
-                .collect(),
-        },
-    )
-}
-
-pub(super) async fn canvas_text_viewport(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, canvas_id)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Update {
-        project_relative_path: String,
-        scroll_top: f64,
-        scroll_left: f64,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        updates: Vec<Update>,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
-    };
-    if input.updates.is_empty() {
-        return invalid_input("Canvas text viewport update requires at least one target.");
-    }
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::UpdateCanvasTextViewports {
-            canvas_id,
-            updates: input
-                .updates
-                .into_iter()
-                .map(|update| CanvasTextViewportUpdate {
-                    project_relative_path: update.project_relative_path,
-                    scroll_top: update.scroll_top,
-                    scroll_left: update.scroll_left,
-                })
-                .collect(),
-        },
-    )
+    command_for_scope(&state, &scope, ProjectCommand::PatchCanvasState { patch })
 }
 
 pub(super) async fn image_preview(
@@ -1308,7 +1123,7 @@ pub(super) async fn terminal_create(
     };
     match runtime
         .terminals()
-        .create(&scope.project_id, &input.cwd_project_relative_path)
+        .create(&scope.canonical_root, &input.cwd_project_relative_path)
     {
         Ok(session) => (StatusCode::CREATED, Json(json!({"session": session}))).into_response(),
         Err(error) => terminal_error(error),
@@ -1318,10 +1133,13 @@ pub(super) async fn terminal_create(
 pub(super) async fn terminal_close(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, terminal_id)): Path<(String, String)>,
+    Path((_binding_id, terminal_id)): Path<(String, String)>,
 ) -> Response {
     let runtime = Arc::clone(&state.services);
-    match runtime.terminals().close(&scope.project_id, &terminal_id) {
+    match runtime
+        .terminals()
+        .close(&scope.canonical_root, &terminal_id)
+    {
         Ok(()) => Json(json!({"ok": true})).into_response(),
         Err(error) => terminal_error(error),
     }
@@ -1330,10 +1148,14 @@ pub(super) async fn terminal_close(
 pub(super) async fn terminal_websocket(
     State(state): State<WorkbenchRouterState>,
     Extension(workbench_connection): Extension<WorkbenchConnectionContext>,
-    Path(project_id): Path<String>,
+    Path(binding_id): Path<String>,
     request: Request,
 ) -> Response {
     let runtime = Arc::clone(&state.services);
+    let canonical_root = workbench_connection
+        .canonical_root
+        .clone()
+        .expect("authorized Terminal binding has a canonical root");
     let upgrade = match WebSocketUpgrade::from_request(request) {
         Ok(upgrade) => upgrade,
         Err(response) => return response,
@@ -1343,7 +1165,8 @@ pub(super) async fn terminal_websocket(
             connection,
             runtime,
             workbench_connection.browser_session,
-            project_id,
+            binding_id,
+            canonical_root,
         ));
     })
 }
@@ -1352,7 +1175,8 @@ async fn run_terminal_websocket(
     connection: WebSocketConnection,
     runtime: Arc<WorkbenchRuntimeServices>,
     browser_session: String,
-    project_id: String,
+    binding_id: String,
+    canonical_root: String,
 ) {
     let (mut reader, mut writer) = tokio::io::split(connection.into_io());
     let first = tokio::time::timeout(
@@ -1379,13 +1203,13 @@ async fn run_terminal_websocket(
     let Some(mut project_lifetime) = runtime.connections().subscribe_project_lifetime(
         &browser_session,
         &connection_credential,
-        &project_id,
+        &binding_id,
     ) else {
         let _ = write_close(&mut writer).await;
         return;
     };
     let observer_id = uuid::Uuid::new_v4().to_string();
-    let topology = match runtime.terminals().subscribe_topology(&project_id) {
+    let topology = match runtime.terminals().subscribe_topology(&canonical_root) {
         Ok(topology) => topology,
         Err(_) => {
             let _ = write_close(&mut writer).await;
@@ -1471,7 +1295,7 @@ async fn run_terminal_websocket(
                 };
                 if handle_terminal_client_frame(
                     &runtime,
-                    &project_id,
+                    &canonical_root,
                     &observer_id,
                     frame,
                     &sender,
@@ -1495,7 +1319,7 @@ async fn run_terminal_websocket(
     }
     let _ = runtime
         .terminals()
-        .detach_attachment(&project_id, &observer_id);
+        .detach_attachment(&canonical_root, &observer_id);
     let _ = tokio::time::timeout(
         TERMINAL_HUB_WRITER_SHUTDOWN_TIMEOUT,
         sender.send(TerminalOutboundMessage::Close),
@@ -1525,7 +1349,7 @@ enum TerminalOutboundMessage {
 
 async fn handle_terminal_client_frame(
     runtime: &WorkbenchRuntimeServices,
-    project_id: &str,
+    canonical_root: &str,
     observer_id: &str,
     frame: TerminalClientFrame,
     sender: &mpsc::Sender<TerminalOutboundMessage>,
@@ -1560,7 +1384,7 @@ async fn handle_terminal_client_frame(
             let observation =
                 match runtime
                     .terminals()
-                    .observe(project_id, &terminal_id, observer_id)
+                    .observe(canonical_root, &terminal_id, observer_id)
                 {
                     Ok(observation) => observation,
                     Err(error) => {
@@ -1606,7 +1430,7 @@ async fn handle_terminal_client_frame(
         } => {
             execute_terminal_control(sender, || {
                 match runtime.terminals().write_input(
-                    project_id,
+                    canonical_root,
                     &terminal_id,
                     observer_id,
                     sequence,
@@ -1634,10 +1458,13 @@ async fn handle_terminal_client_frame(
             rows,
         } => {
             execute_terminal_control(sender, || {
-                match runtime
-                    .terminals()
-                    .resize(project_id, &terminal_id, observer_id, cols, rows)
-                {
+                match runtime.terminals().resize(
+                    canonical_root,
+                    &terminal_id,
+                    observer_id,
+                    cols,
+                    rows,
+                ) {
                     Ok(session) => TerminalServerFrame::Resized {
                         request_id,
                         session,
@@ -1835,25 +1662,29 @@ fn command_for_scope(
         Ok(session) => session,
         Err(response) => return response,
     };
-    execute_command(&session, command)
+    execute_command(&session, &scope.binding_id, command)
 }
 
-fn execute_command(session: &ProjectSession, command: ProjectCommand) -> Response {
+fn execute_command(
+    session: &ProjectSession,
+    binding_id: &str,
+    command: ProjectCommand,
+) -> Response {
     match session.execute(command) {
-        Ok(result) => command_response(session, result),
+        Ok(result) => command_response(binding_id, result),
         Err(error) => project_error(error),
     }
 }
 
 fn command_response(
-    session: &ProjectSession,
+    binding_id: &str,
     result: ProjectRevisionResult<ProjectCommandResult>,
 ) -> Response {
     let body = match command_response_body(result.value) {
         Ok(body) => body,
         Err(error) => return service_error_response(error),
     };
-    match project_response(session, result.project_revision, body) {
+    match project_response(binding_id, result.project_revision, body) {
         Ok(body) => Json(body).into_response(),
         Err(error) => service_error_response(error),
     }
@@ -1861,23 +1692,16 @@ fn command_response(
 
 fn command_response_body(result: ProjectCommandResult) -> Result<Value, RuntimeHttpServiceError> {
     Ok(match result {
-        ProjectCommandResult::Snapshot(_)
-        | ProjectCommandResult::CanvasChanged { .. }
-        | ProjectCommandResult::CanvasMapPathAdded { .. }
-        | ProjectCommandResult::CanvasFeedbackUpdated { .. } => json!({}),
+        ProjectCommandResult::Snapshot(_) | ProjectCommandResult::CanvasFeedbackUpdated { .. } => {
+            json!({})
+        }
         ProjectCommandResult::CanvasCreated { canvas_id, .. } => json!({
             "activeCanvasId": canvas_id
         }),
         ProjectCommandResult::CanvasDeleted {
             active_canvas_id, ..
-        }
-        | ProjectCommandResult::CanvasRegistryRepaired {
-            active_canvas_id, ..
         } => json!({
             "activeCanvasId": active_canvas_id
-        }),
-        ProjectCommandResult::CanvasLayoutReset { reset_count, .. } => json!({
-            "resetCount": reset_count
         }),
         ProjectCommandResult::TextFileSaved { file, .. } => {
             json!({"file": public_text_file(file)})
@@ -1894,24 +1718,8 @@ fn project_session(
 ) -> Result<std::sync::Arc<ProjectSession>, Response> {
     runtime
         .projects()
-        .get(&scope.project_id)
+        .get(std::path::Path::new(&scope.canonical_root))
         .map_err(project_error)
-}
-
-fn with_project_root(
-    state: &WorkbenchRouterState,
-    scope: &ProjectAuthorization,
-    operation: impl FnOnce(&WorkbenchRuntimeServices, &std::path::Path) -> Result<Value, ProjectError>,
-) -> Response {
-    let runtime = Arc::clone(&state.services);
-    let session = match project_session(&runtime, scope) {
-        Ok(session) => session,
-        Err(response) => return response,
-    };
-    match operation(&runtime, session.root()) {
-        Ok(value) => Json(value).into_response(),
-        Err(error) => project_error(error),
-    }
 }
 
 #[derive(Deserialize)]

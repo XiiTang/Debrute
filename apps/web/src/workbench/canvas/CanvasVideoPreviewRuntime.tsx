@@ -14,9 +14,9 @@ import {
   canvasPreviewCanonicalSourceIdentity,
   canvasPreviewContinuityKey,
   type CanvasPreviewCanonicalSourceIdentity,
-  type CanvasPreviewTargetKey,
-  type ProjectedCanvasNode
+  type CanvasPreviewTargetKey
 } from '@debrute/canvas-core';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { CanvasSceneActions } from './CanvasSceneActions.js';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
 import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
@@ -33,7 +33,7 @@ import {
   sameCanvasRasterPreviewRequest,
   type CanvasRasterPreviewRequest
 } from './CanvasRasterPreviewPresentation.js';
-import { canvasRawFileProjectId } from './canvasRawFileUrls.js';
+import { canvasRawFileBindingId } from './canvasRawFileUrls.js';
 import { orderCanvasPreviewItemsByNode } from './CanvasPreviewScheduling.js';
 import {
   canvasVideoPreviewProbeWindow,
@@ -539,14 +539,14 @@ export function canvasVideoRasterPreviewRequest(input: {
   return {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'video',
-      projectId: target.projectId,
+      bindingId: target.bindingId,
       canvasId: target.canvasId,
       projectRelativePath: target.projectRelativePath,
       continuityIdentity: `${targetIdentity}\u001f${canonicalSource.canonicalSourceIdentity}`
     }),
     variantTarget: {
       mediaKind: 'video',
-      projectId: target.projectId,
+      bindingId: target.bindingId,
       canvasId: target.canvasId,
       projectRelativePath: target.projectRelativePath,
       targetIdentity,
@@ -573,7 +573,7 @@ export function canvasVideoPreviewTargetsForNodes(input: {
       continue;
     }
     targets.push({
-      projectId: canvasRawFileProjectId(node.availability.fileUrl),
+      bindingId: canvasRawFileBindingId(node.availability.fileUrl),
       canvasId: input.canvasId,
       projectRelativePath: node.projectRelativePath,
       sourceRevision: node.availability.revision,

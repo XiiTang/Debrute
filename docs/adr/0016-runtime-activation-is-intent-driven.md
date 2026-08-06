@@ -21,6 +21,15 @@ Runtime has no default frontend, implicit frontend selection, or fallback from
 one frontend to another. It also has no pre-ready activation queue, intent id,
 deduplication cache, or cross-instance replay.
 
+Activation distinguishes lifecycle or routing rejection from a Project that
+could not be opened. The latter is a closed `project_open_failed` response
+containing the requested absolute Project root, the Runtime Project error code,
+and its message. Desktop transports those fields unchanged through its native
+command result; it does not collapse Project-root failures into
+`invalid_activation`. If the activating launcher has already entered Desktop
+host admission, a failed Project open rolls that admission back and retains no
+Desktop host or window topology.
+
 Desktop Project activation first focuses an existing Desktop window already
 routed to the target. Otherwise Runtime may bind one live, root-routed Desktop
 document which has never accepted a Project binding: the initiating window when
@@ -33,3 +42,5 @@ Workbench binding operations defined by
 empty-window binding, window creation, or ownership transfer is a direct
 outcome of the submitted intent, not a retry, second destination confirmation,
 or timeout fallback.
+
+Invalid Canvas or Feedback state fails Project opening.

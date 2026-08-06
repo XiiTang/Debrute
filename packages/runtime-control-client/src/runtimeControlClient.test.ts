@@ -83,8 +83,8 @@ describe('Runtime Control client', () => {
         expect(message.request).toEqual({
           command: 'activate',
           intent: {
-            kind: 'open_known_project',
-            project_id: 'project-alpha',
+            kind: 'open_project',
+            project_root: '/projects/alpha',
             frontend: 'desktop'
           },
           preferred_desktop_window_key: 'window-1'
@@ -97,8 +97,8 @@ describe('Runtime Control client', () => {
     }, async (socketPath) => {
       const client = await connectClient(socketPath, 'launcher');
       await expect(client.activate({
-        kind: 'open_known_project',
-        project_id: 'project-alpha',
+        kind: 'open_project',
+        project_root: '/projects/alpha',
         frontend: 'desktop'
       }, 'window-1')).resolves.toEqual({
         result: 'activation',
@@ -118,8 +118,8 @@ describe('Runtime Control client', () => {
         expect(message.request).toEqual({
           command: 'activate',
           intent: {
-            kind: 'open_known_project',
-            project_id: 'project-alpha',
+            kind: 'open_project',
+            project_root: '/projects/alpha',
             frontend: 'desktop'
           },
           preferred_desktop_window_key: ''
@@ -132,8 +132,8 @@ describe('Runtime Control client', () => {
     }, async (socketPath) => {
       const client = await connectClient(socketPath, 'launcher');
       await expect(client.activate({
-        kind: 'open_known_project',
-        project_id: 'project-alpha',
+        kind: 'open_project',
+        project_root: '/projects/alpha',
         frontend: 'desktop'
       }, '')).resolves.toEqual({
         result: 'rejected',
@@ -340,7 +340,7 @@ describe('Runtime Control client', () => {
           event: {
             event: 'desktop_window_open_requested',
             window_key: 'window-1',
-            route: { kind: 'project', project_id: 'project-1' }
+            route: { kind: 'open_project', canonical_root: '/projects/one' }
           }
         });
         writeFrame(socket, {
@@ -364,7 +364,7 @@ describe('Runtime Control client', () => {
         {
           event: 'desktop_window_open_requested',
           window_key: 'window-1',
-          route: { kind: 'project', project_id: 'project-1' }
+          route: { kind: 'open_project', canonical_root: '/projects/one' }
         },
         { event: 'desktop_window_focus_requested', window_key: 'window-1' },
         { event: 'product_replacing' }

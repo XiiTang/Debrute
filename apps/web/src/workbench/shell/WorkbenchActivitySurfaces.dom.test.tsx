@@ -9,7 +9,7 @@ import { WorkbenchActivitySurfaces } from './WorkbenchActivitySurfaces.js';
 const notice: ActivityRecord = {
   id: 'notice-1',
   source: 'canvas',
-  project: { projectId: 'project-1', projectName: 'Alpha' },
+  project: { canonicalRoot: 'project-1', projectName: 'Alpha' },
   createdAt: '2026-08-02T00:00:00.000Z',
   updatedAt: '2026-08-02T00:00:00.000Z',
   type: 'notice',
@@ -19,7 +19,7 @@ const notice: ActivityRecord = {
 const task: ActivityRecord = {
   id: 'task-1',
   source: 'model-request',
-  project: { projectId: 'project-1', projectName: 'Alpha' },
+  project: { canonicalRoot: 'project-1', projectName: 'Alpha' },
   createdAt: '2026-08-02T00:00:00.000Z',
   updatedAt: '2026-08-02T00:00:01.000Z',
   type: 'task',
