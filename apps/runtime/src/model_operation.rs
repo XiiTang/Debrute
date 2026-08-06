@@ -1,7 +1,7 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    fmt,
-    path::{Path, PathBuf},
+    collections::{BTreeMap, HashMap, VecDeque},
+    fmt, fs, io,
+    path::{Component, Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -14,14 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::{
-    now_rfc3339,
-    project::{
-        DebruteProjectMetadata, GeneratedArtifactRole, PROJECT_FILE, ProjectCapabilityFs,
-        assert_project_tree_visible_mutation_path, is_valid_stable_project_id,
-        normalize_project_path_basename,
-    },
-};
+use crate::now_rfc3339;
 
 pub const MAX_MODEL_OPERATION_INPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TERMINAL_OPERATIONS: usize = 100;
@@ -29,7 +22,7 @@ const DEFAULT_BATCH_CONCURRENCY: usize = 1;
 const DEFAULT_MODEL_TIMEOUT_SECONDS: u64 = 10 * 60;
 const DEFAULT_VIDEO_TIMEOUT_SECONDS: u64 = 30 * 60;
 const OBSERVER_DISCONNECT_POLL: Duration = Duration::from_millis(100);
-const MAX_PROJECT_METADATA_BYTES: usize = 1024 * 1024;
+const MAX_OPERATION_DIAGNOSTICS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -51,10 +44,8 @@ pub enum ExecutionShape {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelOutput {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub directory: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub filename: Option<String>,
+    pub directory: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,16 +53,14 @@ pub struct ModelOutput {
 pub struct ModelRequest {
     pub model: String,
     pub arguments: Map<String, Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<ModelOutput>,
+    pub output: ModelOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactPointer {
     pub artifact_index: u64,
-    pub role: GeneratedArtifactRole,
-    pub project_relative_path: String,
+    pub output_path: String,
     pub mime_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
@@ -149,14 +138,27 @@ impl ModelOperationExecution {
 pub struct ModelOperationSnapshot {
     pub id: String,
     pub model_kind: ModelKind,
-    pub project_root: String,
-    pub project_id: String,
-    pub project_name: String,
     pub state: OperationState,
     pub accepted_at: String,
     pub execution: ModelOperationExecution,
+    pub diagnostics: Vec<ModelOperationDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOperationDiagnostic {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ModelOperationCommitWarnings {
+    pub provenance_failures: usize,
+    pub artifact_cleanup_failures: usize,
 }
 
 pub(crate) type ModelOperationObserver = Arc<dyn Fn(ModelOperationSnapshot) + Send + Sync>;
@@ -189,7 +191,7 @@ impl BatchItemOutcome {
 
 #[derive(Debug, Clone)]
 pub struct SubmitModelOperation {
-    pub project_root: PathBuf,
+    pub invocation_cwd: PathBuf,
     pub shape: ExecutionShape,
     pub requests: Vec<ModelRequest>,
     pub concurrency: Option<usize>,
@@ -228,7 +230,6 @@ impl OperationListState {
 pub struct ModelOperationListQuery {
     pub state: Option<OperationListState>,
     pub model_kind: Option<ModelKind>,
-    pub project_root: Option<PathBuf>,
     pub limit: usize,
     pub cursor: Option<String>,
 }
@@ -238,7 +239,6 @@ impl Default for ModelOperationListQuery {
         Self {
             state: None,
             model_kind: None,
-            project_root: None,
             limit: 25,
             cursor: None,
         }
@@ -254,13 +254,13 @@ pub struct ModelOperationList {
 }
 
 #[derive(Debug, Clone)]
-pub struct ModelRunError {
+pub struct ModelRequestExecutionError {
     code: &'static str,
     log: String,
     cancelled: bool,
 }
 
-impl ModelRunError {
+impl ModelRequestExecutionError {
     #[must_use]
     pub fn failed(log: impl Into<String>) -> Self {
         Self {
@@ -283,7 +283,7 @@ impl ModelRunError {
     pub fn cancelled() -> Self {
         Self {
             code: "operation_cancelled",
-            log: "Model Run was cancelled.".to_owned(),
+            log: "Model request was cancelled.".to_owned(),
             cancelled: true,
         }
     }
@@ -299,13 +299,13 @@ impl ModelRunError {
     }
 }
 
-impl fmt::Display for ModelRunError {
+impl fmt::Display for ModelRequestExecutionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.log)
     }
 }
 
-impl std::error::Error for ModelRunError {}
+impl std::error::Error for ModelRequestExecutionError {}
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelCancellation(Arc<AtomicBool>);
@@ -325,9 +325,9 @@ impl ModelCancellation {
     /// # Errors
     ///
     /// Returns `operation_cancelled` when the cancellation flag is set.
-    pub fn check(&self) -> Result<(), ModelRunError> {
+    pub fn check(&self) -> Result<(), ModelRequestExecutionError> {
         if self.is_cancelled() {
-            Err(ModelRunError::cancelled())
+            Err(ModelRequestExecutionError::cancelled())
         } else {
             Ok(())
         }
@@ -345,7 +345,7 @@ pub(crate) trait ModelOperationExecutor: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns an internal validation error when configuration cannot be read.
-    fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError>;
+    fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRequestExecutionError>;
 
     /// Resolves one unique Model from the submission configuration snapshot.
     ///
@@ -356,7 +356,7 @@ pub(crate) trait ModelOperationExecutor: Send + Sync + 'static {
         &self,
         snapshot: &Self::ConfigSnapshot,
         model_id: &str,
-    ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError>;
+    ) -> Result<(ModelKind, Self::ModelBinding), ModelRequestExecutionError>;
 
     /// Materializes and validates one request against its accepted Model binding.
     ///
@@ -367,9 +367,9 @@ pub(crate) trait ModelOperationExecutor: Send + Sync + 'static {
         &self,
         binding: &Self::ModelBinding,
         request: &mut ModelRequest,
-    ) -> Result<(), ModelRunError>;
+    ) -> Result<(), ModelRequestExecutionError>;
 
-    /// Performs the interruptible Model Run without publishing artifacts.
+    /// Performs the interruptible Model request without publishing artifacts.
     ///
     /// # Errors
     ///
@@ -377,34 +377,38 @@ pub(crate) trait ModelOperationExecutor: Send + Sync + 'static {
     fn run(
         &self,
         binding: &Self::ModelBinding,
-        project_root: &Path,
+        invocation_cwd: &Path,
         request: &ModelRequest,
         timeout: Duration,
         cancellation: &ModelCancellation,
-    ) -> Result<Self::Prepared, ModelRunError>;
+    ) -> Result<Self::Prepared, ModelRequestExecutionError>;
 
     /// Stages completed output bytes without publishing their target paths.
     ///
     /// # Errors
     ///
-    /// Returns an error when artifact publication or provenance recording fails.
+    /// Returns an error when artifact staging or provenance preparation fails.
     fn stage(
         &self,
         binding: &Self::ModelBinding,
-        project_capability: &ProjectCapabilityFs,
         operation_id: &str,
+        item_index: usize,
         request: &ModelRequest,
         replace: bool,
         prepared: Self::Prepared,
-    ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError>;
+    ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRequestExecutionError>;
 
     /// Publishes already-staged outputs and their provenance at the short,
     /// non-interruptible completion boundary.
     ///
     /// # Errors
     ///
-    /// Returns an error when artifact publication or provenance recording fails.
-    fn commit(&self, project_root: &Path, staged: Self::Staged) -> Result<(), ModelRunError>;
+    /// Returns an error when artifact publication fails. The successful result
+    /// reports bounded cleanup and provenance warnings after publication.
+    fn commit(
+        &self,
+        staged: Self::Staged,
+    ) -> Result<ModelOperationCommitWarnings, ModelRequestExecutionError>;
 }
 
 #[derive(Debug, Clone)]
@@ -461,10 +465,7 @@ struct OperationRecord<ModelBinding> {
     sequence: u64,
     id: String,
     model_kind: ModelKind,
-    project_root: PathBuf,
-    project_id: String,
-    project_name: String,
-    project_capability: ProjectCapabilityFs,
+    invocation_cwd: PathBuf,
     state: OperationState,
     accepted_at: String,
     accepted_requests: Vec<AcceptedModelRequest<ModelBinding>>,
@@ -479,9 +480,11 @@ struct OperationRecord<ModelBinding> {
     succeeded: usize,
     failed: usize,
     outcomes: Vec<BatchItemOutcome>,
-    claimed_outputs: HashSet<String>,
     log: Option<String>,
     cancellation_failure: Option<String>,
+    provenance_failures: usize,
+    artifact_cleanup_failures: usize,
+    diagnostics: Vec<ModelOperationDiagnostic>,
     change: u64,
 }
 
@@ -505,12 +508,10 @@ impl<ModelBinding> OperationRecord<ModelBinding> {
         ModelOperationSnapshot {
             id: self.id.clone(),
             model_kind: self.model_kind,
-            project_root: self.project_root.to_string_lossy().into_owned(),
-            project_id: self.project_id.clone(),
-            project_name: self.project_name.clone(),
             state: self.state,
             accepted_at: self.accepted_at.clone(),
             execution,
+            diagnostics: self.diagnostics.clone(),
             log: self.log.clone(),
         }
     }
@@ -555,10 +556,7 @@ pub struct ModelOperationService<Executor: ModelOperationExecutor> {
 }
 
 struct ValidatedSubmission<ModelBinding> {
-    project_root: PathBuf,
-    project_id: String,
-    project_name: String,
-    project_capability: ProjectCapabilityFs,
+    invocation_cwd: PathBuf,
     model_kind: ModelKind,
     timeout_seconds: u64,
     concurrency: usize,
@@ -567,8 +565,6 @@ struct ValidatedSubmission<ModelBinding> {
 
 type BatchItemExecutionContext<ModelBinding> = (
     PathBuf,
-    String,
-    ProjectCapabilityFs,
     ModelRequest,
     Duration,
     Arc<Mutex<()>>,
@@ -615,7 +611,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     ///
     /// # Errors
     ///
-    /// Returns a closed input, Project, executor-validation, or task-start error before
+    /// Returns a closed input, executor-validation, or task-start error before
     /// acceptance. An execution task that cannot start after acceptance is recorded as failed.
     ///
     /// # Panics
@@ -663,10 +659,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 sequence,
                 id: id.clone(),
                 model_kind: validated.model_kind,
-                project_root: validated.project_root,
-                project_id: validated.project_id,
-                project_name: validated.project_name,
-                project_capability: validated.project_capability,
+                invocation_cwd: validated.invocation_cwd,
                 state: OperationState::Queued,
                 accepted_at,
                 accepted_requests: validated.accepted_requests,
@@ -681,9 +674,11 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 succeeded: 0,
                 failed: 0,
                 outcomes: Vec::new(),
-                claimed_outputs: HashSet::new(),
                 log: None,
                 cancellation_failure: None,
+                provenance_failures: 0,
+                artifact_cleanup_failures: 0,
+                diagnostics: Vec::new(),
                 change: 1,
             };
             let snapshot = record.snapshot();
@@ -748,21 +743,14 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         &self,
         input: &mut SubmitModelOperation,
     ) -> Result<ValidatedSubmission<Executor::ModelBinding>, ModelOperationError> {
-        let (project_root, project_id, project_name, project_capability) =
-            validate_project(&input.project_root)?;
+        let invocation_cwd = validate_invocation_cwd(&input.invocation_cwd)?;
         validate_shape(input.shape, &input.requests, input.concurrency)?;
-        let mut output_names = HashSet::new();
-        for request in &input.requests {
+        for request in &mut input.requests {
             validate_model_request(request)?;
-            if let Some(output) = &request.output
-                && let Some(filename) = &output.filename
-                && !output_names.insert((output.directory.clone(), filename.clone()))
-            {
-                return Err(ModelOperationError::new(
-                    "invalid_input",
-                    "Batch contains duplicate explicit output names.",
-                ));
-            }
+            request.output.directory =
+                validate_output_directory(&request.output.directory, &invocation_cwd)?
+                    .to_string_lossy()
+                    .into_owned();
         }
         let config_snapshot = self
             .executor
@@ -818,7 +806,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         if timeout_seconds == 0 {
             return Err(ModelOperationError::new(
                 "invalid_input",
-                "Model Run timeout must be representable and positive.",
+                "Model request timeout must be representable and positive.",
             ));
         }
         let concurrency = match input.shape {
@@ -835,10 +823,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             ));
         }
         Ok(ValidatedSubmission {
-            project_root,
-            project_id,
-            project_name,
-            project_capability,
+            invocation_cwd,
             model_kind,
             timeout_seconds,
             concurrency,
@@ -967,7 +952,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     ///
     /// # Errors
     ///
-    /// Returns an input, cursor, or Project error when a filter is invalid.
+    /// Returns an input or cursor error when a filter is invalid.
     pub fn list(
         &self,
         query: &ModelOperationListQuery,
@@ -983,11 +968,6 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             .as_deref()
             .map(|cursor| self.parse_cursor(cursor))
             .transpose()?;
-        let project = query
-            .project_root
-            .as_deref()
-            .map(validate_project)
-            .transpose()?;
         let state = self.lock_state();
         let mut records = state
             .operations
@@ -1002,11 +982,6 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 query
                     .model_kind
                     .is_none_or(|kind| kind == record.model_kind)
-            })
-            .filter(|record| {
-                project.as_ref().is_none_or(|(root, project_id, _, _)| {
-                    root == &record.project_root && project_id == &record.project_id
-                })
             })
             .collect::<Vec<_>>();
         records.sort_by_key(|record| std::cmp::Reverse(record.sequence));
@@ -1053,17 +1028,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     }
 
     fn execute_single(&self, id: &str) {
-        let (
-            root,
-            project_id,
-            project_capability,
-            request,
-            binding,
-            timeout,
-            cancellation,
-            completion,
-            replace,
-        ) = {
+        let (cwd, request, binding, timeout, cancellation, completion, replace) = {
             let mut state = self.lock_state();
             let Some(record) = state.operations.get_mut(id) else {
                 return;
@@ -1078,9 +1043,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 .take()
                 .expect("running Single Operation must own its accepted Model binding");
             (
-                record.project_root.clone(),
-                record.project_id.clone(),
-                record.project_capability.clone(),
+                record.invocation_cwd.clone(),
                 request,
                 binding,
                 Duration::from_secs(record.timeout_seconds),
@@ -1089,20 +1052,12 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                 record.replace,
             )
         };
-        let staged = validate_project_identity(&root, &project_id)
-            .and_then(|()| {
-                self.executor
-                    .run(&binding, &root, &request, timeout, &cancellation)
-            })
+        let staged = self
+            .executor
+            .run(&binding, &cwd, &request, timeout, &cancellation)
             .and_then(|prepared| {
-                self.executor.stage(
-                    &binding,
-                    &project_capability,
-                    id,
-                    &request,
-                    replace,
-                    prepared,
-                )
+                self.executor
+                    .stage(&binding, id, 0, &request, replace, prepared)
             });
         drop(binding);
         match staged {
@@ -1112,18 +1067,16 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                     self.finish_cancelled(id);
                     return;
                 }
-                if let Err(error) = validate_project_identity(&root, &project_id) {
-                    self.finish_failed(id, error.log());
-                    return;
-                }
-                match self.executor.commit(&root, staged) {
-                    Ok(()) => {
+                let committed = self.executor.commit(staged);
+                match committed {
+                    Ok(warnings) => {
                         let observation = {
                             let mut state = self.lock_state();
                             let Some(record) = state.operations.get_mut(id) else {
                                 return;
                             };
                             record.single_artifacts = artifacts;
+                            record_commit_warnings(record, warnings);
                             record.state = OperationState::Succeeded;
                             record.release_model_bindings();
                             record.change += 1;
@@ -1171,38 +1124,18 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                         if item_index >= item_count {
                             return;
                         }
-                        let Some((
-                            root,
-                            project_id,
-                            project_capability,
-                            request,
-                            timeout,
-                            completion,
-                            replace,
-                            binding,
-                        )) = service.begin_item(id, item_index)
+                        let Some((cwd, request, timeout, completion, replace, binding)) =
+                            service.begin_item(id, item_index)
                         else {
                             return;
                         };
-                        let staged = validate_project_identity(&root, &project_id)
-                            .and_then(|()| {
-                                service.executor.run(
-                                    &binding,
-                                    &root,
-                                    &request,
-                                    timeout,
-                                    &cancellation,
-                                )
-                            })
+                        let staged = service
+                            .executor
+                            .run(&binding, &cwd, &request, timeout, &cancellation)
                             .and_then(|prepared| {
-                                service.executor.stage(
-                                    &binding,
-                                    &project_capability,
-                                    id,
-                                    &request,
-                                    replace,
-                                    prepared,
-                                )
+                                service
+                                    .executor
+                                    .stage(&binding, id, item_index, &request, replace, prepared)
                             });
                         drop(binding);
                         match staged {
@@ -1210,8 +1143,6 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
                                 id,
                                 item_index,
                                 request.model,
-                                &root,
-                                &project_id,
                                 &cancellation,
                                 &completion,
                                 staged,
@@ -1261,9 +1192,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         record.active += 1;
         record.change += 1;
         Some((
-            record.project_root.clone(),
-            record.project_id.clone(),
-            record.project_capability.clone(),
+            record.invocation_cwd.clone(),
             request,
             Duration::from_secs(record.timeout_seconds),
             Arc::clone(&record.completion),
@@ -1272,17 +1201,15 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         ))
     }
 
-    #[allow(
+    #[expect(
         clippy::too_many_arguments,
-        reason = "the Batch completion boundary keeps its Operation and Project inputs explicit"
+        reason = "the Batch completion boundary keeps its Operation and output inputs explicit"
     )]
     fn commit_batch_item(
         &self,
         id: &str,
         item_index: usize,
         model: String,
-        project_root: &Path,
-        project_id: &str,
         cancellation: &ModelCancellation,
         completion: &Mutex<()>,
         staged: Executor::Staged,
@@ -1290,39 +1217,19 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
     ) {
         let _completion = lock(completion, "Model Operation completion");
         let result = if cancellation.is_cancelled() {
-            Err(ModelRunError::cancelled())
-        } else if let Err(error) = validate_project_identity(project_root, project_id) {
-            Err(error)
-        } else if let Err(error) = self.claim_batch_outputs(id, &artifacts) {
-            Err(error)
+            Err(ModelRequestExecutionError::cancelled())
         } else {
-            self.executor
-                .commit(project_root, staged)
-                .map(|()| artifacts)
+            self.executor.commit(staged).map(|warnings| {
+                if warnings != ModelOperationCommitWarnings::default() {
+                    let mut state = self.lock_state();
+                    if let Some(record) = state.operations.get_mut(id) {
+                        record_commit_warnings(record, warnings);
+                    }
+                }
+                artifacts
+            })
         };
         self.finish_item(id, item_index, model, result);
-    }
-
-    fn claim_batch_outputs(
-        &self,
-        id: &str,
-        artifacts: &[ArtifactPointer],
-    ) -> Result<(), ModelRunError> {
-        let mut item_paths = HashSet::with_capacity(artifacts.len());
-        let mut state = self.lock_state();
-        let record = state.operations.get_mut(id).ok_or_else(|| {
-            ModelRunError::failed("Model Operation disappeared before output commit.")
-        })?;
-        for artifact in artifacts {
-            let path = &artifact.project_relative_path;
-            if !item_paths.insert(path.clone()) || record.claimed_outputs.contains(path) {
-                return Err(ModelRunError::failed(format!(
-                    "Batch items resolved to the same output path: {path}"
-                )));
-            }
-        }
-        record.claimed_outputs.extend(item_paths);
-        Ok(())
     }
 
     fn finish_item(
@@ -1330,7 +1237,7 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
         id: &str,
         item_index: usize,
         model: String,
-        result: Result<Vec<ArtifactPointer>, ModelRunError>,
+        result: Result<Vec<ArtifactPointer>, ModelRequestExecutionError>,
     ) {
         let observation = {
             let mut state = self.lock_state();
@@ -1556,6 +1463,74 @@ fn lock<'a, T>(mutex: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
         .unwrap_or_else(|_| panic!("{name} lock poisoned"))
 }
 
+fn record_provenance_failures<ModelBinding>(
+    record: &mut OperationRecord<ModelBinding>,
+    failures: usize,
+) {
+    if failures == 0 {
+        return;
+    }
+    record.provenance_failures = record
+        .provenance_failures
+        .checked_add(failures)
+        .expect("Model Artifact provenance failure count exhausted");
+    let message = format!(
+        "Outputs were published, but Model Artifact provenance could not be saved for {} artifact(s).",
+        record.provenance_failures
+    );
+    if let Some(diagnostic) = record
+        .diagnostics
+        .iter_mut()
+        .find(|diagnostic| diagnostic.code == "model_artifact_provenance_persistence_failed")
+    {
+        diagnostic.message = message;
+    } else if record.diagnostics.len() < MAX_OPERATION_DIAGNOSTICS {
+        record.diagnostics.push(ModelOperationDiagnostic {
+            code: "model_artifact_provenance_persistence_failed".to_owned(),
+            message,
+            item_index: None,
+        });
+    }
+}
+
+fn record_artifact_cleanup_failures<ModelBinding>(
+    record: &mut OperationRecord<ModelBinding>,
+    failures: usize,
+) {
+    if failures == 0 {
+        return;
+    }
+    record.artifact_cleanup_failures = record
+        .artifact_cleanup_failures
+        .checked_add(failures)
+        .expect("Model Artifact cleanup failure count exhausted");
+    let message = format!(
+        "Outputs were published, but Runtime could not remove {} temporary artifact file(s).",
+        record.artifact_cleanup_failures
+    );
+    if let Some(diagnostic) = record
+        .diagnostics
+        .iter_mut()
+        .find(|diagnostic| diagnostic.code == "model_artifact_cleanup_failed")
+    {
+        diagnostic.message = message;
+    } else if record.diagnostics.len() < MAX_OPERATION_DIAGNOSTICS {
+        record.diagnostics.push(ModelOperationDiagnostic {
+            code: "model_artifact_cleanup_failed".to_owned(),
+            message,
+            item_index: None,
+        });
+    }
+}
+
+fn record_commit_warnings<ModelBinding>(
+    record: &mut OperationRecord<ModelBinding>,
+    warnings: ModelOperationCommitWarnings,
+) {
+    record_provenance_failures(record, warnings.provenance_failures);
+    record_artifact_cleanup_failures(record, warnings.artifact_cleanup_failures);
+}
+
 /// Parses the complete strict JSONL input for one Model Operation.
 ///
 /// # Errors
@@ -1611,48 +1586,105 @@ pub fn parse_model_requests(
     }
 }
 
-fn validate_project(
-    root: &Path,
-) -> Result<(PathBuf, String, String, ProjectCapabilityFs), ModelOperationError> {
-    let root = root
+fn validate_invocation_cwd(cwd: &Path) -> Result<PathBuf, ModelOperationError> {
+    let cwd = cwd
         .canonicalize()
-        .map_err(|error| ModelOperationError::new("project_invalid", error.to_string()))?;
-    if !root.is_dir() {
+        .map_err(|error| ModelOperationError::new("invalid_input", error.to_string()))?;
+    if !cwd.is_dir() {
         return Err(ModelOperationError::new(
-            "project_invalid",
-            "Project root must be a directory.",
+            "invalid_input",
+            "CLI working directory must be a directory.",
         ));
     }
-    let capability = ProjectCapabilityFs::open_current(&root)
-        .map_err(|error| ModelOperationError::new("project_invalid", error.to_string()))?;
-    let metadata = capability
-        .read_limited(PROJECT_FILE, MAX_PROJECT_METADATA_BYTES)
-        .map_err(|error| ModelOperationError::new("project_invalid", error.to_string()))?;
-    let metadata = serde_json::from_slice::<DebruteProjectMetadata>(&metadata)
-        .map_err(|error| ModelOperationError::new("project_invalid", error.to_string()))?;
-    if !is_valid_stable_project_id(&metadata.project.id)
-        || metadata.project.name.is_empty()
-        || metadata.project.created_at.is_empty()
-        || metadata.project.updated_at.is_empty()
-    {
+    if cwd.to_str().is_none() {
         return Err(ModelOperationError::new(
-            "project_invalid",
-            "Debrute Project metadata is invalid.",
+            "invalid_input",
+            "CLI working directory must be a UTF-8 path.",
         ));
     }
-    Ok((root, metadata.project.id, metadata.project.name, capability))
+    Ok(cwd)
 }
 
-fn validate_project_identity(root: &Path, expected_id: &str) -> Result<(), ModelRunError> {
-    let (_, current_id, _, _) =
-        validate_project(root).map_err(|error| ModelRunError::failed(error.to_string()))?;
-    if current_id == expected_id {
-        Ok(())
-    } else {
-        Err(ModelRunError::failed(
-            "Project identity changed before Model output commit.",
-        ))
+fn validate_output_directory(
+    value: &str,
+    invocation_cwd: &Path,
+) -> Result<PathBuf, ModelOperationError> {
+    if value.is_empty() || value.contains('\0') {
+        return Err(ModelOperationError::new(
+            "output_directory_invalid",
+            "Model Request output.directory must be a non-empty filesystem path.",
+        ));
     }
+    let supplied = Path::new(value);
+    let absolute = if supplied.is_absolute() {
+        supplied.to_path_buf()
+    } else {
+        invocation_cwd.join(supplied)
+    };
+    let absolute = normalize_absolute_path(&absolute)?;
+    let mut existing = absolute.clone();
+    let mut missing = Vec::new();
+    loop {
+        match fs::symlink_metadata(&existing) {
+            Ok(_) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let name = existing.file_name().ok_or_else(|| {
+                    ModelOperationError::new(
+                        "output_directory_invalid",
+                        "Model Request output.directory has no existing ancestor.",
+                    )
+                })?;
+                missing.push(name.to_owned());
+                existing.pop();
+            }
+            Err(error) => {
+                return Err(ModelOperationError::new(
+                    "output_directory_invalid",
+                    error.to_string(),
+                ));
+            }
+        }
+    }
+    let mut canonical = existing
+        .canonicalize()
+        .map_err(|error| ModelOperationError::new("output_directory_invalid", error.to_string()))?;
+    if !canonical.is_dir() {
+        return Err(ModelOperationError::new(
+            "output_directory_invalid",
+            "Model Request output.directory has a non-directory existing ancestor.",
+        ));
+    }
+    for component in missing.into_iter().rev() {
+        canonical.push(component);
+    }
+    if canonical.to_str().is_none() {
+        return Err(ModelOperationError::new(
+            "output_directory_invalid",
+            "Model Request output.directory must be a UTF-8 path.",
+        ));
+    }
+    Ok(canonical)
+}
+
+fn normalize_absolute_path(path: &Path) -> Result<PathBuf, ModelOperationError> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(Path::new(std::path::MAIN_SEPARATOR_STR)),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(ModelOperationError::new(
+                        "output_directory_invalid",
+                        "Model Request output.directory escapes the filesystem root.",
+                    ));
+                }
+            }
+            Component::Normal(segment) => normalized.push(segment),
+        }
+    }
+    Ok(normalized)
 }
 
 fn validate_shape(
@@ -1688,25 +1720,14 @@ fn validate_model_request(request: &ModelRequest) -> Result<(), ModelOperationEr
             "Model Request model must be non-empty and unpadded.",
         ));
     }
-    let Some(output) = &request.output else {
-        return Ok(());
-    };
-    if output.directory.is_none() && output.filename.is_none() {
+    if request.output.name.is_empty()
+        || matches!(request.output.name.as_str(), "." | "..")
+        || request.output.name.contains(['/', '\\', '\0'])
+    {
         return Err(ModelOperationError::new(
             "invalid_input",
-            "Model Request output must specify directory or filename.",
+            "Model Request output.name must be an ordinary basename without path separators.",
         ));
-    }
-    if let Some(directory) = &output.directory
-        && directory != "."
-    {
-        let probe = format!("{directory}/debrute-output");
-        assert_project_tree_visible_mutation_path(&probe)
-            .map_err(|error| ModelOperationError::new("invalid_input", error.to_string()))?;
-    }
-    if let Some(filename) = &output.filename {
-        normalize_project_path_basename(filename)
-            .map_err(|error| ModelOperationError::new("invalid_input", error.to_string()))?;
     }
     Ok(())
 }
@@ -1739,7 +1760,9 @@ mod tests {
     use super::*;
 
     struct FixtureExecutor {
-        outcomes: Mutex<VecDeque<Result<Vec<ArtifactPointer>, ModelRunError>>>,
+        outcomes: Mutex<VecDeque<Result<Vec<ArtifactPointer>, ModelRequestExecutionError>>>,
+        provenance_failures_per_commit: usize,
+        artifact_cleanup_failures_per_commit: usize,
     }
 
     struct CleanupFailureExecutor {
@@ -1796,7 +1819,7 @@ mod tests {
         type Prepared = ();
         type Staged = ();
 
-        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRequestExecutionError> {
             self.snapshot_reads.fetch_add(1, Ordering::AcqRel);
             Ok(42)
         }
@@ -1805,10 +1828,10 @@ mod tests {
             &self,
             snapshot: &Self::ConfigSnapshot,
             model_id: &str,
-        ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+        ) -> Result<(ModelKind, Self::ModelBinding), ModelRequestExecutionError> {
             self.bind_attempts.fetch_add(1, Ordering::AcqRel);
             if self.rejected_model.as_deref() == Some(model_id) {
-                return Err(ModelRunError::validation(
+                return Err(ModelRequestExecutionError::validation(
                     "model_unavailable",
                     format!("Model is unavailable: {model_id}"),
                 ));
@@ -1827,18 +1850,18 @@ mod tests {
             &self,
             _binding: &Self::ModelBinding,
             _request: &mut ModelRequest,
-        ) -> Result<(), ModelRunError> {
+        ) -> Result<(), ModelRequestExecutionError> {
             Ok(())
         }
 
         fn run(
             &self,
             binding: &Self::ModelBinding,
-            _project_root: &Path,
+            _invocation_cwd: &Path,
             request: &ModelRequest,
             _timeout: Duration,
             cancellation: &ModelCancellation,
-        ) -> Result<Self::Prepared, ModelRunError> {
+        ) -> Result<Self::Prepared, ModelRequestExecutionError> {
             cancellation.check()?;
             self.runs
                 .lock()
@@ -1850,17 +1873,20 @@ mod tests {
         fn stage(
             &self,
             _binding: &Self::ModelBinding,
-            _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
+            _item_index: usize,
             _request: &ModelRequest,
             _replace: bool,
             _prepared: Self::Prepared,
-        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError> {
+        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRequestExecutionError> {
             Ok(((), Vec::new()))
         }
 
-        fn commit(&self, _project_root: &Path, _staged: Self::Staged) -> Result<(), ModelRunError> {
-            Ok(())
+        fn commit(
+            &self,
+            _staged: Self::Staged,
+        ) -> Result<ModelOperationCommitWarnings, ModelRequestExecutionError> {
+            Ok(ModelOperationCommitWarnings::default())
         }
     }
 
@@ -1869,7 +1895,9 @@ mod tests {
             type ConfigSnapshot = ();
             type ModelBinding = ();
 
-            fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+            fn read_config_snapshot(
+                &self,
+            ) -> Result<Self::ConfigSnapshot, ModelRequestExecutionError> {
                 Ok(())
             }
 
@@ -1877,7 +1905,7 @@ mod tests {
                 &self,
                 _snapshot: &Self::ConfigSnapshot,
                 _model_id: &str,
-            ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+            ) -> Result<(ModelKind, Self::ModelBinding), ModelRequestExecutionError> {
                 Ok((ModelKind::Image, ()))
             }
 
@@ -1885,7 +1913,7 @@ mod tests {
                 &self,
                 _binding: &Self::ModelBinding,
                 _request: &mut ModelRequest,
-            ) -> Result<(), ModelRunError> {
+            ) -> Result<(), ModelRequestExecutionError> {
                 Ok(())
             }
         };
@@ -1899,32 +1927,35 @@ mod tests {
         fn run(
             &self,
             _binding: &Self::ModelBinding,
-            _project_root: &Path,
+            _invocation_cwd: &Path,
             _request: &ModelRequest,
             _timeout: Duration,
             cancellation: &ModelCancellation,
-        ) -> Result<Self::Prepared, ModelRunError> {
+        ) -> Result<Self::Prepared, ModelRequestExecutionError> {
             self.started.store(true, Ordering::Release);
             while !cancellation.is_cancelled() {
                 thread::yield_now();
             }
-            Err(ModelRunError::cancelled())
+            Err(ModelRequestExecutionError::cancelled())
         }
 
         fn stage(
             &self,
             _binding: &Self::ModelBinding,
-            _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
+            _item_index: usize,
             _request: &ModelRequest,
             _replace: bool,
             prepared: Self::Prepared,
-        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError> {
+        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRequestExecutionError> {
             Ok((prepared.clone(), prepared))
         }
 
-        fn commit(&self, _project_root: &Path, _staged: Self::Staged) -> Result<(), ModelRunError> {
-            Ok(())
+        fn commit(
+            &self,
+            _staged: Self::Staged,
+        ) -> Result<ModelOperationCommitWarnings, ModelRequestExecutionError> {
+            Ok(ModelOperationCommitWarnings::default())
         }
     }
 
@@ -1936,11 +1967,11 @@ mod tests {
         fn run(
             &self,
             _binding: &Self::ModelBinding,
-            _project_root: &Path,
+            _invocation_cwd: &Path,
             _request: &ModelRequest,
             _timeout: Duration,
             cancellation: &ModelCancellation,
-        ) -> Result<Self::Prepared, ModelRunError> {
+        ) -> Result<Self::Prepared, ModelRequestExecutionError> {
             cancellation.check()?;
             Ok(Vec::new())
         }
@@ -1948,21 +1979,24 @@ mod tests {
         fn stage(
             &self,
             _binding: &Self::ModelBinding,
-            _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
+            _item_index: usize,
             _request: &ModelRequest,
             _replace: bool,
             prepared: Self::Prepared,
-        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError> {
+        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRequestExecutionError> {
             Ok((prepared.clone(), prepared))
         }
 
-        fn commit(&self, _project_root: &Path, _staged: Self::Staged) -> Result<(), ModelRunError> {
+        fn commit(
+            &self,
+            _staged: Self::Staged,
+        ) -> Result<ModelOperationCommitWarnings, ModelRequestExecutionError> {
             self.commit_started.store(true, Ordering::Release);
             while !self.release.load(Ordering::Acquire) {
                 thread::yield_now();
             }
-            Ok(())
+            Ok(ModelOperationCommitWarnings::default())
         }
     }
 
@@ -1974,32 +2008,35 @@ mod tests {
         fn run(
             &self,
             _binding: &Self::ModelBinding,
-            _project_root: &Path,
+            _invocation_cwd: &Path,
             _request: &ModelRequest,
             _timeout: Duration,
             cancellation: &ModelCancellation,
-        ) -> Result<Self::Prepared, ModelRunError> {
+        ) -> Result<Self::Prepared, ModelRequestExecutionError> {
             self.started.store(true, Ordering::Release);
             while !cancellation.is_cancelled() {
                 thread::yield_now();
             }
-            Err(ModelRunError::failed("cleanup failed"))
+            Err(ModelRequestExecutionError::failed("cleanup failed"))
         }
 
         fn stage(
             &self,
             _binding: &Self::ModelBinding,
-            _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
+            _item_index: usize,
             _request: &ModelRequest,
             _replace: bool,
             prepared: Self::Prepared,
-        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError> {
+        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRequestExecutionError> {
             Ok((prepared.clone(), prepared))
         }
 
-        fn commit(&self, _project_root: &Path, _staged: Self::Staged) -> Result<(), ModelRunError> {
-            Ok(())
+        fn commit(
+            &self,
+            _staged: Self::Staged,
+        ) -> Result<ModelOperationCommitWarnings, ModelRequestExecutionError> {
+            Ok(ModelOperationCommitWarnings::default())
         }
     }
 
@@ -2009,7 +2046,7 @@ mod tests {
         type Prepared = ();
         type Staged = ();
 
-        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRequestExecutionError> {
             Ok(())
         }
 
@@ -2017,7 +2054,7 @@ mod tests {
             &self,
             _snapshot: &Self::ConfigSnapshot,
             _model_id: &str,
-        ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+        ) -> Result<(ModelKind, Self::ModelBinding), ModelRequestExecutionError> {
             Ok((ModelKind::Image, ()))
         }
 
@@ -2025,7 +2062,7 @@ mod tests {
             &self,
             _binding: &Self::ModelBinding,
             request: &mut ModelRequest,
-        ) -> Result<(), ModelRunError> {
+        ) -> Result<(), ModelRequestExecutionError> {
             request
                 .arguments
                 .entry("delivery".to_owned())
@@ -2036,11 +2073,11 @@ mod tests {
         fn run(
             &self,
             _binding: &Self::ModelBinding,
-            _project_root: &Path,
+            _invocation_cwd: &Path,
             request: &ModelRequest,
             _timeout: Duration,
             cancellation: &ModelCancellation,
-        ) -> Result<Self::Prepared, ModelRunError> {
+        ) -> Result<Self::Prepared, ModelRequestExecutionError> {
             cancellation.check()?;
             *self.executed_request.lock().expect("executed request") = Some(request.clone());
             Ok(())
@@ -2049,27 +2086,30 @@ mod tests {
         fn stage(
             &self,
             _binding: &Self::ModelBinding,
-            _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
+            _item_index: usize,
             _request: &ModelRequest,
             _replace: bool,
             _prepared: Self::Prepared,
-        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError> {
+        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRequestExecutionError> {
             Ok(((), Vec::new()))
         }
 
-        fn commit(&self, _project_root: &Path, _staged: Self::Staged) -> Result<(), ModelRunError> {
-            Ok(())
+        fn commit(
+            &self,
+            _staged: Self::Staged,
+        ) -> Result<ModelOperationCommitWarnings, ModelRequestExecutionError> {
+            Ok(ModelOperationCommitWarnings::default())
         }
     }
 
     impl ModelOperationExecutor for FixtureExecutor {
         type ConfigSnapshot = ();
         type ModelBinding = ();
-        type Prepared = Result<Vec<ArtifactPointer>, ModelRunError>;
+        type Prepared = Result<Vec<ArtifactPointer>, ModelRequestExecutionError>;
         type Staged = ();
 
-        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRunError> {
+        fn read_config_snapshot(&self) -> Result<Self::ConfigSnapshot, ModelRequestExecutionError> {
             Ok(())
         }
 
@@ -2077,7 +2117,7 @@ mod tests {
             &self,
             _snapshot: &Self::ConfigSnapshot,
             model_id: &str,
-        ) -> Result<(ModelKind, Self::ModelBinding), ModelRunError> {
+        ) -> Result<(ModelKind, Self::ModelBinding), ModelRequestExecutionError> {
             let kind = if model_id.starts_with("video-") {
                 ModelKind::Video
             } else {
@@ -2090,18 +2130,18 @@ mod tests {
             &self,
             _binding: &Self::ModelBinding,
             _request: &mut ModelRequest,
-        ) -> Result<(), ModelRunError> {
+        ) -> Result<(), ModelRequestExecutionError> {
             Ok(())
         }
 
         fn run(
             &self,
             _binding: &Self::ModelBinding,
-            _project_root: &std::path::Path,
+            _invocation_cwd: &std::path::Path,
             _request: &ModelRequest,
             _timeout: Duration,
             cancellation: &ModelCancellation,
-        ) -> Result<Self::Prepared, ModelRunError> {
+        ) -> Result<Self::Prepared, ModelRequestExecutionError> {
             cancellation.check()?;
             Ok(self
                 .outcomes
@@ -2114,21 +2154,23 @@ mod tests {
         fn stage(
             &self,
             _binding: &Self::ModelBinding,
-            _project_capability: &ProjectCapabilityFs,
             _operation_id: &str,
+            _item_index: usize,
             _request: &ModelRequest,
             _replace: bool,
             prepared: Self::Prepared,
-        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRunError> {
+        ) -> Result<(Self::Staged, Vec<ArtifactPointer>), ModelRequestExecutionError> {
             prepared.map(|artifacts| ((), artifacts))
         }
 
         fn commit(
             &self,
-            _project_root: &std::path::Path,
             _staged: Self::Staged,
-        ) -> Result<(), ModelRunError> {
-            Ok(())
+        ) -> Result<ModelOperationCommitWarnings, ModelRequestExecutionError> {
+            Ok(ModelOperationCommitWarnings {
+                provenance_failures: self.provenance_failures_per_commit,
+                artifact_cleanup_failures: self.artifact_cleanup_failures_per_commit,
+            })
         }
     }
 
@@ -2138,7 +2180,7 @@ mod tests {
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2171,7 +2213,7 @@ mod tests {
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2192,8 +2234,72 @@ mod tests {
         );
         let terminal = snapshots.last().expect("terminal observer snapshot");
         assert_eq!(terminal.id, accepted.id);
-        assert_eq!(terminal.project_name, "Fixture");
         assert_eq!(terminal.state, OperationState::Succeeded);
+    }
+
+    #[test]
+    fn batch_aggregates_provenance_failures_into_one_operation_diagnostic() {
+        let fixture = Fixture::with_provenance_failures(
+            vec![
+                Ok(vec![artifact("generated/first.jpg")]),
+                Ok(vec![artifact("generated/second.jpg")]),
+            ],
+            1,
+        );
+        let accepted = fixture
+            .service
+            .submit(SubmitModelOperation {
+                invocation_cwd: fixture.project.clone(),
+                shape: ExecutionShape::Batch,
+                requests: vec![request("image-model"), request("image-model")],
+                concurrency: Some(1),
+                timeout_seconds: None,
+                replace: false,
+            })
+            .unwrap();
+        let terminal = fixture
+            .service
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(terminal.diagnostics, vec![ModelOperationDiagnostic {
+            code: "model_artifact_provenance_persistence_failed".to_owned(),
+            message: "Outputs were published, but Model Artifact provenance could not be saved for 2 artifact(s).".to_owned(),
+            item_index: None,
+        }]);
+    }
+
+    #[test]
+    fn successful_output_cleanup_failures_are_reported_as_one_warning() {
+        let fixture =
+            Fixture::with_commit_warnings(vec![Ok(vec![artifact("generated/first.jpg")])], 0, 2);
+        let accepted = fixture
+            .service
+            .submit(SubmitModelOperation {
+                invocation_cwd: fixture.project.clone(),
+                shape: ExecutionShape::Single,
+                requests: vec![request("image-model")],
+                concurrency: None,
+                timeout_seconds: None,
+                replace: false,
+            })
+            .unwrap();
+        let terminal = fixture
+            .service
+            .wait(&accepted.id, || true, |_| true, |_| true)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(terminal.state, OperationState::Succeeded);
+        assert_eq!(
+            terminal.diagnostics,
+            vec![ModelOperationDiagnostic {
+                code: "model_artifact_cleanup_failed".to_owned(),
+                message: "Outputs were published, but Runtime could not remove 2 temporary artifact file(s).".to_owned(),
+                item_index: None,
+            }]
+        );
     }
 
     #[test]
@@ -2215,7 +2321,7 @@ mod tests {
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2268,7 +2374,7 @@ mod tests {
         fixture.service.lock_state().next_sequence = u64::MAX;
 
         let _ = fixture.service.submit(SubmitModelOperation {
-            project_root: fixture.project.clone(),
+            invocation_cwd: fixture.project.clone(),
             shape: ExecutionShape::Single,
             requests: vec![request("image-model")],
             concurrency: None,
@@ -2284,7 +2390,7 @@ mod tests {
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Batch,
                 requests: vec![request("image-model")],
                 concurrency: Some(1),
@@ -2323,7 +2429,7 @@ mod tests {
         )));
         let accepted = service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2351,7 +2457,7 @@ mod tests {
         let service = Arc::new(ModelOperationService::new(Arc::clone(&executor)));
         let accepted = service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Batch,
                 requests: vec![
                     request("image-one"),
@@ -2391,7 +2497,7 @@ mod tests {
         let service = Arc::new(ModelOperationService::new(Arc::clone(&executor)));
         let error = service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Batch,
                 requests: vec![request("image-one"), request("image-missing")],
                 concurrency: Some(1),
@@ -2418,13 +2524,13 @@ mod tests {
     #[test]
     fn batch_item_failures_are_retained_in_settlement_order_but_batch_succeeds() {
         let fixture = Fixture::new(vec![
-            Err(ModelRunError::failed("first failed")),
+            Err(ModelRequestExecutionError::failed("first failed")),
             Ok(vec![artifact("generated/second.jpg")]),
         ]);
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Batch,
                 requests: vec![request("image-one"), request("image-two")],
                 concurrency: Some(1),
@@ -2461,7 +2567,7 @@ mod tests {
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2481,20 +2587,7 @@ mod tests {
     fn cancellation_cleanup_failure_fails_the_batch_after_local_work_drains() {
         let root = std::env::temp_dir().join(format!("debrute-operation-{}", Uuid::new_v4()));
         let project = root.join("project");
-        fs::create_dir_all(project.join(".debrute")).unwrap();
-        fs::write(
-            project.join(".debrute/project.json"),
-            serde_json::to_vec(&json!({
-                "project": {
-                    "id": Uuid::new_v4().to_string(),
-                    "name": "Fixture",
-                    "createdAt": "2026-01-01T00:00:00.000Z",
-                    "updatedAt": "2026-01-01T00:00:00.000Z"
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+        fs::create_dir_all(&project).unwrap();
         let started = Arc::new(AtomicBool::new(false));
         let service = Arc::new(ModelOperationService::new(Arc::new(
             CleanupFailureExecutor {
@@ -2503,7 +2596,7 @@ mod tests {
         )));
         let accepted = service
             .submit(SubmitModelOperation {
-                project_root: project,
+                invocation_cwd: project,
                 shape: ExecutionShape::Batch,
                 requests: vec![request("image-model")],
                 concurrency: Some(1),
@@ -2541,7 +2634,7 @@ mod tests {
         let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2562,6 +2655,19 @@ mod tests {
             .wait(&accepted.id, || true, |_| true, |_| true)
             .expect("wait")
             .expect("test observer remains connected");
+        let observer_deadline = Instant::now() + Duration::from_secs(2);
+        while observed
+            .lock()
+            .unwrap()
+            .last()
+            .is_none_or(|state| !state.is_terminal())
+        {
+            assert!(
+                Instant::now() < observer_deadline,
+                "terminal observer snapshot was not delivered"
+            );
+            thread::yield_now();
+        }
         let observed_before_repeat = observed.lock().unwrap().len();
         match terminal.state {
             OperationState::Cancelled => {
@@ -2592,7 +2698,7 @@ mod tests {
             let accepted = fixture
                 .service
                 .submit(SubmitModelOperation {
-                    project_root: fixture.project.clone(),
+                    invocation_cwd: fixture.project.clone(),
                     shape: ExecutionShape::Single,
                     requests: vec![request(&format!("image-{index}"))],
                     concurrency: None,
@@ -2606,6 +2712,7 @@ mod tests {
                 .expect("wait")
                 .expect("test observer remains connected");
         }
+        fixture.service.shutdown();
         let first = fixture
             .service
             .list(&ModelOperationListQuery {
@@ -2640,22 +2747,20 @@ mod tests {
 
     #[test]
     fn strict_jsonl_has_one_shape_contract_and_a_complete_source_limit() {
-        let one = parse_model_requests(
-            b"{\"model\":\"image-model\",\"arguments\":{}}\n",
-            ExecutionShape::Single,
-        )
-        .expect("one JSONL record");
+        const REQUEST: &str = r#"{"model":"image-model","arguments":{},"output":{"directory":".","name":"artifact"}}"#;
+        let one = parse_model_requests(format!("{REQUEST}\n").as_bytes(), ExecutionShape::Single)
+            .expect("one JSONL record");
         assert_eq!(one.len(), 1);
         for source in [
-            b"\n".as_slice(),
-            b"# comment\n".as_slice(),
-            b"\xef\xbb\xbf{\"model\":\"image-model\",\"arguments\":{}}\n".as_slice(),
-            b"{\"model\":\"image-model\",\"arguments\":{}}\n\n".as_slice(),
+            b"\n".to_vec(),
+            b"# comment\n".to_vec(),
+            format!("\u{feff}{REQUEST}\n").into_bytes(),
+            format!("{REQUEST}\n\n").into_bytes(),
         ] {
-            assert!(parse_model_requests(source, ExecutionShape::Batch).is_err());
+            assert!(parse_model_requests(&source, ExecutionShape::Batch).is_err());
         }
-        let two = b"{\"model\":\"image-model\",\"arguments\":{}}\n{\"model\":\"image-model\",\"arguments\":{}}\n";
-        assert!(parse_model_requests(two, ExecutionShape::Single).is_err());
+        let two = format!("{REQUEST}\n{REQUEST}\n");
+        assert!(parse_model_requests(two.as_bytes(), ExecutionShape::Single).is_err());
         assert_eq!(
             parse_model_requests(
                 &vec![b'x'; MAX_MODEL_OPERATION_INPUT_BYTES + 1],
@@ -2668,69 +2773,6 @@ mod tests {
     }
 
     #[test]
-    fn project_identity_recheck_rejects_a_replaced_root() {
-        let fixture = Fixture::new(Vec::new());
-        let (_, accepted_id, _, _) = validate_project(&fixture.project).unwrap();
-        let replacement_id = Uuid::new_v4().to_string();
-        fs::write(
-            fixture.project.join(".debrute/project.json"),
-            serde_json::to_vec(&json!({
-                "project": {
-                    "id": replacement_id,
-                    "name": "Replacement",
-                    "createdAt": "2026-01-01T00:00:00.000Z",
-                    "updatedAt": "2026-01-01T00:00:00.000Z"
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        assert!(validate_project_identity(&fixture.project, &accepted_id).is_err());
-    }
-
-    #[test]
-    fn project_filter_matches_the_current_stable_identity_not_reused_path_text() {
-        let fixture = Fixture::new(vec![Ok(Vec::new())]);
-        let accepted = fixture
-            .service
-            .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
-                shape: ExecutionShape::Single,
-                requests: vec![request("image-model")],
-                concurrency: None,
-                timeout_seconds: None,
-                replace: false,
-            })
-            .unwrap();
-        fixture
-            .service
-            .wait(&accepted.id, || true, |_| true, |_| true)
-            .unwrap()
-            .unwrap();
-        fs::write(
-            fixture.project.join(PROJECT_FILE),
-            serde_json::to_vec(&json!({
-                "project": {
-                    "id": Uuid::new_v4().to_string(),
-                    "name": "Replacement",
-                    "createdAt": "2026-01-01T00:00:00.000Z",
-                    "updatedAt": "2026-01-01T00:00:00.000Z"
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let listed = fixture
-            .service
-            .list(&ModelOperationListQuery {
-                project_root: Some(fixture.project.clone()),
-                ..ModelOperationListQuery::default()
-            })
-            .unwrap();
-        assert!(listed.operations.is_empty());
-    }
-
-    #[test]
     fn runtime_shutdown_cancels_and_joins_owned_operation_workers() {
         let fixture = Fixture::new(Vec::new());
         let started = Arc::new(AtomicBool::new(false));
@@ -2739,7 +2781,7 @@ mod tests {
         })));
         let accepted = service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2769,7 +2811,7 @@ mod tests {
         )));
         let accepted = service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Single,
                 requests: vec![request("image-model")],
                 concurrency: None,
@@ -2801,65 +2843,24 @@ mod tests {
     }
 
     #[test]
-    fn batch_rejects_names_that_resolve_to_the_same_default_directory() {
-        let fixture = Fixture::new(Vec::new());
+    fn batch_accepts_duplicate_output_names_for_items_to_commit_independently() {
+        let fixture = Fixture::new(vec![Ok(Vec::new()), Ok(Vec::new())]);
         let mut first = request("image-one");
-        first.output = Some(ModelOutput {
-            directory: None,
-            filename: Some("cover".to_owned()),
-        });
+        first.output.name = "cover".to_owned();
         let mut second = request("image-two");
         second.output = first.output.clone();
 
-        let error = fixture
+        let accepted = fixture
             .service
             .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
+                invocation_cwd: fixture.project.clone(),
                 shape: ExecutionShape::Batch,
                 requests: vec![first, second],
                 concurrency: None,
                 timeout_seconds: None,
                 replace: false,
             })
-            .unwrap_err();
-
-        assert_eq!(error.code(), "invalid_input");
-        assert!(
-            fixture
-                .service
-                .list(&ModelOperationListQuery::default())
-                .unwrap()
-                .operations
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn batch_rejects_output_paths_that_collide_after_artifact_naming() {
-        let shared = artifact("generated/cover_1.jpg");
-        let fixture = Fixture::new(vec![Ok(vec![shared.clone()]), Ok(vec![shared])]);
-        let mut first = request("image-one");
-        first.output = Some(ModelOutput {
-            directory: Some("generated".to_owned()),
-            filename: Some("cover".to_owned()),
-        });
-        let mut second = request("image-two");
-        second.output = Some(ModelOutput {
-            directory: Some("generated".to_owned()),
-            filename: Some("cover_1".to_owned()),
-        });
-        let accepted = fixture
-            .service
-            .submit(SubmitModelOperation {
-                project_root: fixture.project.clone(),
-                shape: ExecutionShape::Batch,
-                requests: vec![first, second],
-                concurrency: Some(1),
-                timeout_seconds: None,
-                replace: true,
-            })
             .unwrap();
-
         let terminal = fixture
             .service
             .wait(&accepted.id, || true, |_| true, |_| true)
@@ -2872,35 +2873,24 @@ mod tests {
         else {
             panic!("expected Batch execution");
         };
-        assert_eq!((succeeded, failed), (1, 1));
-        let outcomes = fixture
-            .service
-            .lock_state()
-            .operations
-            .get(&accepted.id)
-            .unwrap()
-            .outcomes
-            .clone();
-        assert_eq!(outcomes[1].status, BatchItemStatus::Failed);
-        assert_eq!(
-            outcomes[1].log.as_deref(),
-            Some("Batch items resolved to the same output path: generated/cover_1.jpg")
-        );
+        assert_eq!((succeeded, failed), (2, 0));
     }
 
     fn request(model: &str) -> ModelRequest {
         ModelRequest {
             model: model.to_owned(),
             arguments: Map::new(),
-            output: None,
+            output: ModelOutput {
+                directory: ".".to_owned(),
+                name: "artifact".to_owned(),
+            },
         }
     }
 
     fn artifact(path: &str) -> ArtifactPointer {
         ArtifactPointer {
             artifact_index: 0,
-            role: crate::project::GeneratedArtifactRole::PrimaryImage,
-            project_relative_path: path.to_owned(),
+            output_path: path.to_owned(),
             mime_type: "image/jpeg".to_owned(),
             width: Some(1024),
             height: Some(1024),
@@ -2922,25 +2912,29 @@ mod tests {
     }
 
     impl Fixture {
-        fn new(outcomes: Vec<Result<Vec<ArtifactPointer>, ModelRunError>>) -> Self {
+        fn new(outcomes: Vec<Result<Vec<ArtifactPointer>, ModelRequestExecutionError>>) -> Self {
+            Self::with_provenance_failures(outcomes, 0)
+        }
+
+        fn with_provenance_failures(
+            outcomes: Vec<Result<Vec<ArtifactPointer>, ModelRequestExecutionError>>,
+            provenance_failures_per_commit: usize,
+        ) -> Self {
+            Self::with_commit_warnings(outcomes, provenance_failures_per_commit, 0)
+        }
+
+        fn with_commit_warnings(
+            outcomes: Vec<Result<Vec<ArtifactPointer>, ModelRequestExecutionError>>,
+            provenance_failures_per_commit: usize,
+            artifact_cleanup_failures_per_commit: usize,
+        ) -> Self {
             let root = std::env::temp_dir().join(format!("debrute-operation-{}", Uuid::new_v4()));
             let project = root.join("project");
-            fs::create_dir_all(project.join(".debrute")).expect("Project directory");
-            fs::write(
-                project.join(".debrute/project.json"),
-                serde_json::to_vec_pretty(&json!({
-                    "project": {
-                        "id": Uuid::new_v4().to_string(),
-                        "name": "Fixture",
-                        "createdAt": "2026-01-01T00:00:00.000Z",
-                        "updatedAt": "2026-01-01T00:00:00.000Z"
-                    }
-                }))
-                .expect("metadata"),
-            )
-            .expect("Project metadata");
+            fs::create_dir_all(&project).expect("output directory");
             let service = Arc::new(ModelOperationService::new(Arc::new(FixtureExecutor {
                 outcomes: Mutex::new(VecDeque::from(outcomes)),
+                provenance_failures_per_commit,
+                artifact_cleanup_failures_per_commit,
             })));
             Self {
                 root,

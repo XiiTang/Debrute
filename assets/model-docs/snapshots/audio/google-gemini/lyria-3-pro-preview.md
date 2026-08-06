@@ -19,8 +19,9 @@ with `x-goog-api-key: <key>` and `Content-Type: application/json`.
 ## Agent request fields
 
 - `prompt` is required.
-- `image` is an optional ordered array of at most ten Project-relative image
-  paths, public HTTP(S) URLs, or `data:image` URIs.
+- `image` is an optional ordered array of at most ten absolute or
+  CLI-working-directory-relative local image paths, public HTTP(S) URLs, or
+  `data:image` URIs.
 - `format` is optional and selects `mp3` or `wav`.
 
 Debrute builds typed text and image input blocks, fixes `model` to

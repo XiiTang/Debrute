@@ -43,8 +43,9 @@ Model does not create or poll a remote task.
   1,300 tokens for the Qwen Image 2.0 series.
 - `image` is an optional ordered string array. Its absence means
   text-to-image. One to three values mean image editing or reference generation,
-  with the intent expressed by `prompt`. Runtime resolves each Project-relative
-  image path, public HTTP(S) URL, or image data URL and emits one
+  with the intent expressed by `prompt`. Runtime resolves each absolute or
+  CLI-working-directory-relative local image path, public HTTP(S) URL, or image
+  data URL and emits one
   `{ "image": value }` content item in the same order, before the text item.
   The provider assigns Image 1, Image 2, and Image 3 from this order.
 - `negative_prompt` is an optional string describing content to avoid. The
@@ -100,13 +101,13 @@ text instruction follows them:
 }
 ```
 
-## Response and Project artifacts
+## Response and Model Artifacts
 
 A successful response contains
 `output.choices[].message.content[].image`. Each `image` value is a PNG result
 URL that expires after 24 hours. Runtime traverses choices and their content in
 provider order, immediately downloads every URL, and stores every result as a
-`PrimaryImage` Project artifact. Existing artifact indexes preserve this order.
+Model Artifact. Artifact indexes preserve provider response order.
 
 Runtime requires a non-empty choices array, non-empty content for each choice,
 and a non-empty image URL for every content item. It does not retain an

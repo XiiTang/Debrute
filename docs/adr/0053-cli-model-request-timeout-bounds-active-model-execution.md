@@ -3,7 +3,7 @@
 Model Request commands replace the ambiguous whole-command timeout with a
 dedicated active model-execution timeout. It bounds one continuous active phase:
 from invoking the Debrute Model through upstream request submission, any remote
-task polling, response reads, and Generated Asset download. It does not include
+task polling, response reads, and Model Artifact download. It does not include
 the brief execution-task handoff, Project commit, cleanup, or CLI observation.
 A Single Model Operation uses one clock rather than resetting it for individual
 HTTP requests. Every Batch uses an independent clock for each Item; its

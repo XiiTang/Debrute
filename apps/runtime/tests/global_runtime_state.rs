@@ -41,7 +41,7 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
             }
         })
     );
-    assert!(initial.chrome.recent_projects.is_empty());
+    assert!(initial.chrome.recent_project_roots.is_empty());
     assert_eq!(initial.models.image.len(), 13);
     assert_eq!(initial.models.video.len(), 4);
     assert_eq!(initial.models.audio.len(), 16);
@@ -49,26 +49,23 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     for index in 0..14 {
         let root = project_root(&home, &index.to_string());
         store
-            .remember_recent_project(&format!("project-{index}"), &root, &catalog)
+            .remember_recent_project(&root, &catalog)
             .expect("recent Project should persist");
     }
     let project_five = project_root(&home, "5");
     store
-        .remember_recent_project("project-5", &project_five, &catalog)
+        .remember_recent_project(&project_five, &catalog)
         .expect("duplicate should move to the front");
     let recent = store
         .read_view(&catalog)
         .expect("saved settings should load")
         .chrome
-        .recent_projects;
+        .recent_project_roots;
     assert_eq!(recent.len(), 12);
-    assert_eq!(recent[0].project_root, project_five);
-    assert_eq!(recent[1].project_root, project_root(&home, "13"));
+    assert_eq!(recent[0], project_five);
+    assert_eq!(recent[1], project_root(&home, "13"));
     assert_eq!(
-        recent
-            .iter()
-            .filter(|entry| entry.project_id == "project-5")
-            .count(),
+        recent.iter().filter(|root| **root == project_five).count(),
         1
     );
 
@@ -150,29 +147,26 @@ fn canvas_text_appearance_patch_with(field: &str, value: serde_json::Value) -> s
 }
 
 #[test]
-fn stable_project_id_cannot_be_remapped_to_another_recent_root() {
-    let home = temporary_home("stable-project-id");
+fn distinct_canonical_roots_are_independent_recent_projects() {
+    let home = temporary_home("canonical-roots");
     let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
     let store = GlobalConfigStore::new(&home);
     let alpha = project_root(&home, "alpha");
     let copied_alpha = project_root(&home, "copied-alpha");
 
     store
-        .remember_recent_project("project-alpha", &alpha, &catalog)
-        .expect("initial stable Project mapping should persist");
-    let error = store
-        .remember_recent_project("project-alpha", &copied_alpha, &catalog)
-        .expect_err("one stable Project id must not move to another root");
-    assert!(matches!(error, GlobalSettingsError::Validation(_)));
+        .remember_recent_project(&alpha, &catalog)
+        .expect("first canonical root should persist");
+    store
+        .remember_recent_project(&copied_alpha, &catalog)
+        .expect("second canonical root should persist independently");
 
     let recent = store
         .read_view(&catalog)
         .expect("saved settings should remain readable")
         .chrome
-        .recent_projects;
-    assert_eq!(recent.len(), 1);
-    assert_eq!(recent[0].project_id, "project-alpha");
-    assert_eq!(recent[0].project_root, alpha);
+        .recent_project_roots;
+    assert_eq!(recent, vec![copied_alpha, alpha]);
 
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
@@ -480,7 +474,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
         .settings_save(&json!({ "workbench": { "locale": "zh-CN" } }))
         .expect("no-op patch should succeed");
     service
-        .remember_recent_project("project-alpha", &alpha)
+        .remember_recent_project(&alpha)
         .expect("recent Project should persist");
     service.integrations_rescan();
 
@@ -495,9 +489,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     assert!(matches!(
         events[1].change,
         GlobalRuntimeChange::RecentProjectsChanged(ref entries)
-            if entries.len() == 1
-                && entries[0].project_id == "project-alpha"
-                && entries[0].project_root == alpha
+            if entries == &[alpha]
     ));
     assert_eq!(events[2].revision, 3);
     assert!(matches!(
@@ -759,7 +751,7 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     let alpha = project_root(&home, "alpha");
     let beta = project_root(&home, "beta");
     service
-        .remember_recent_project("project-alpha", &alpha)
+        .remember_recent_project(&alpha)
         .expect("seed Project should persist");
     events.lock().expect("event recorder should lock").clear();
 
@@ -777,7 +769,7 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     let remember = thread::spawn(move || {
         remember_barrier.wait();
         remember_service
-            .remember_recent_project("project-beta", &beta)
+            .remember_recent_project(&beta)
             .expect("remember should commit")
     });
     barrier.wait();
@@ -788,7 +780,7 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
         .settings_get()
         .expect("settings should remain readable")
         .chrome
-        .recent_projects;
+        .recent_project_roots;
     let events = events.lock().expect("event recorder should lock");
     assert_eq!(events.len(), 2);
     let GlobalRuntimeChange::RecentProjectsChanged(event_projects) = &events[1].change else {
@@ -860,7 +852,7 @@ fn an_external_integration_scan_does_not_block_recent_project_commits() {
     let recent_service = Arc::clone(&service);
     let (recent_done, recent_completion) = mpsc::sync_channel(1);
     let recent = thread::spawn(move || {
-        let result = recent_service.remember_recent_project("project-alpha", &alpha);
+        let result = recent_service.remember_recent_project(&alpha);
         recent_done
             .send(result)
             .expect("recent mutation result should be observable");
@@ -878,13 +870,7 @@ fn an_external_integration_scan_does_not_block_recent_project_commits() {
     let view = service
         .settings_get()
         .expect("settings should remain readable after Integration discovery");
-    assert_eq!(
-        view.chrome.recent_projects,
-        [debrute_runtime::global::RecentProjectEntry {
-            project_id: "project-alpha".to_owned(),
-            project_root: expected_alpha,
-        }]
-    );
+    assert_eq!(view.chrome.recent_project_roots, [expected_alpha]);
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
 

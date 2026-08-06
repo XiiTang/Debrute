@@ -1,6 +1,6 @@
 # Model Configuration Is Per Debrute Model
 
-Every supported generation integration is addressed by one Debrute Model ID
+Every supported Model Request integration is addressed by one Debrute Model ID
 with catalog defaults, optional endpoint and request-model overrides, and one
 write-only API key stored for that same ID. This was chosen over provider-level
 accounts, shared credentials, key pools, enable switches, and generic request
@@ -28,7 +28,7 @@ the cost of keeping those contracts closed and separately reviewable.
 
 Only model-agnostic mechanisms may be shared: HTTP execution, authorization
 header construction, Base64 and data-URL decoding, MIME detection, public-URL
-safety, redaction, and Project artifact commit primitives. A shared utility
+safety, redaction, and Model Artifact commit primitives. A shared utility
 stops being model-agnostic when it knows a Model ID, provider field name,
 default, endpoint choice, or response path; that behavior belongs in the exact
 Model adapter instead.

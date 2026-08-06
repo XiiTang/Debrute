@@ -19,20 +19,20 @@ A waiting Model Request may first emit sparse blocks beginning with:
 debrute progress cmd=<command> event=<event>
 ```
 
-Named `operation`, `batch_item`, `artifact`, `model`, and diagnostic records
+Named `operation`, `batch_item`, `artifact`, `model`, and `diagnostic` records
 follow on separate lines. Error records may contain a redacted `log`; they do
 not have a generic message field. Exit status is deliberately coarse: `0`
 means success, `2` means CLI syntax or input is invalid, and `1` means every
-other failure. An invalid Project is caller input and also exits `2`. A Batch
+other failure. An invalid command root is caller input and also exits `2`. A Batch
 whose accepted Items all settled is successful even when
 some Items failed, so its final Operation record exits `0` and reports the Item
 failures in progress records.
 
-A diagnostic record presents one Project Diagnostic through its `error` or
-`warning` severity, code, message, and optional Project path. Project health
-counts only errors and warnings. The record has no source field: its name and
-command-scoped Project already identify its owner, and Debrute has no generic
-cross-domain diagnostic-source taxonomy.
+A diagnostic record presents either one Project Diagnostic or one Model
+Operation warning. Both carry severity, code, and message. A Project Diagnostic
+may add Project path and stable id; an Operation warning may add Batch item
+index. The record has no source field because its surrounding command and
+parent record identify its owner.
 
 `apps/runtime/src/cli/spec.rs` is the executable public-command inventory used
 by `debrute commands`, `debrute help`, the parser, and official Skills. Each
@@ -70,21 +70,28 @@ action; Runtime owns discovery and the durable update transaction.
 
 ## Model Requests
 
-Single and Batch use the same strict UTF-8 JSONL record:
+Single accepts either one strict UTF-8 JSONL record or one request written
+directly as CLI options:
 
 ```json
-{"model":"gpt-image-2","arguments":{"prompt":"Cover image"},"output":{"directory":"generated","filename":"cover"}}
+{"model":"gpt-image-2","arguments":{"prompt":"Cover image"},"output":{"directory":"generated","name":"cover"}}
 ```
 
 `model` is a globally unique Debrute Model id. `arguments` contains only the
-selected Model's arguments. Optional `output.directory` and `output.filename`
-are separate Project-relative naming fields; `filename` has no generated-file
-extension. Runtime derives the extension from the actual Artifact MIME type.
+selected Model's arguments, including local media paths in the exact fields
+declared by that Model. Required `output.directory` and `output.name` are
+separate publication fields. `directory` is absolute or relative to the CLI
+working directory. `name` is an ordinary basename without a path separator;
+Runtime derives the extension from each actual Artifact MIME type.
 
 ```sh
-debrute request single /path/to/project --input request.jsonl
-debrute request batch /path/to/project --input requests.jsonl --concurrency 3
-cat request.jsonl | debrute request single /path/to/project --input - --timeout 10m
+debrute request single --input request.jsonl
+debrute request single \
+  --model gpt-image-2 \
+  --arguments '{"prompt":"Cover image"}' \
+  --output '{"directory":"generated","name":"cover"}'
+debrute request batch --input requests.jsonl --concurrency 3
+cat request.jsonl | debrute request single --input - --timeout 10m
 ```
 
 Input is exactly one JSONL record for `single` and one or more records for
@@ -92,6 +99,17 @@ Input is exactly one JSONL record for `single` and one or more records for
 input above 16 MiB are rejected. All Batch records must resolve to the same
 Model Kind. Batch concurrency defaults to `1` and controls only that Batch;
 Runtime has no additional global request-count capacity.
+
+`request single` rejects `--input` combined with any of `--model`,
+`--arguments`, or `--output` as `conflicting_request_sources`. Direct options
+must supply all three values, and both JSON option values must be objects.
+Batch remains JSONL-only. The caller is responsible for the contents of every
+JSONL record; the CLI does not add a duplicate-output-path preflight layer.
+
+The CLI captures its canonical working directory when it submits the
+Operation. Runtime resolves `output.directory` and every Model-declared local
+path in `arguments` against that directory. Model Requests have no Project
+positional and do not open or bind a Project.
 
 The CLI waits by default. `--no-wait` returns after acceptance; use the returned
 Operation id with:
@@ -110,16 +128,17 @@ snapshot. Either wait then replays retained Batch Item Outcomes and follows new
 ones until the Operation is terminal.
 
 `--timeout` is a positive integer followed by `s`, `m`, or `h`. It bounds each
-active Model Run, not queue time or output commit. The default is 30 minutes for
+active Model Request execution, not queue time or output commit. The default is 30 minutes for
 video and 10 minutes for image, TTS, music, and sound-effect. There is no
 automatic retry. `--replace` applies only when actual generated files commit;
 without it, an occupied target fails that Single or Batch Item.
 
-When `output.directory` is absent, Runtime uses an Operation-unique directory.
-When `output.filename` is absent, it generates a unique basename. One Artifact
-named `covers` becomes `covers.<actual-extension>`; multiple Artifacts become
-`covers_1.<ext>`, `covers_2.<ext>`, and so on. Runtime imposes no generic
-Artifact-count ceiling.
+For each actual extension independently, one Artifact named `covers` becomes
+`covers.<actual-extension>`; multiple Artifacts of that extension become
+`covers_1.<ext>`, `covers_2.<ext>`, and so on. For example, two MP4 and two JPEG
+outputs become `covers_1.mp4`, `covers_2.mp4`, `covers_1.jpg`, and
+`covers_2.jpg`. Runtime does not classify outputs before their actual MIME
+types are known and imposes no generic Artifact-count ceiling.
 
 Agent Records on stdout are the only CLI observation stream. A caller may
 redirect a foreground request or `operation wait` when it needs to retain that
@@ -139,8 +158,10 @@ debrute models sfx list
 ```
 
 Descriptions provide official source URLs, repository snapshots, Debrute
-examples, and the authoritative `arguments_schema`. API keys remain in local
-Runtime settings and must not be included in Model Request input.
+examples, and the authoritative `arguments_schema`, including which exact
+Model fields accept local paths. They describe the caller-visible request
+contract, not internal adapter conversion. API keys remain in local Runtime
+settings and must not be included in Model Request input.
 
 Other common commands include:
 
@@ -149,15 +170,15 @@ debrute runtime status
 debrute runtime doctor
 debrute runtime stop
 debrute skills status
-debrute project init /path/to/project
+debrute project status /path/to/project
 debrute project validate /path/to/project
 debrute workbench start /path/to/project --frontend desktop
-debrute canvas-map push /path/to/project canvas-1
-debrute generated-asset lookup /path/to/project --path generated/example.png
+debrute model-artifact lookup --path generated/example.png
 debrute commands
 ```
 
-Project commands resolve the supplied root before crossing the local bridge.
+Project roots and Model Artifact lookup paths may be absolute or relative to the
+CLI working directory. Runtime uses their admitted canonical absolute paths.
 Generic filesystem reads and writes remain the external Agent's responsibility.
-See [Model generation](./model-generation.md), [Generated Assets](./generated-assets.md),
+See [Model Requests](./model-requests.md), [Model Artifacts](./model-artifacts.md),
 and [Product model](./product-model.md) for the underlying contracts.

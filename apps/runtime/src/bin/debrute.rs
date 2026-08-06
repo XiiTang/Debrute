@@ -1,4 +1,4 @@
-#![allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
+#![allow(clippy::needless_pass_by_value)]
 
 use std::{
     fs::File,
@@ -17,7 +17,7 @@ use debrute_runtime::{
     control::{
         ActivationIntent, ActivationOutcome, ClientRole, ControlErrorCode, ControlRequest,
         ControlResponse, NativeControlClient, NativeControlClientError, ProjectFrontend,
-        RuntimeStatus, endpoint::ControlEndpointAdapter,
+        ProjectOpenFailure, RuntimeStatus, endpoint::ControlEndpointAdapter,
     },
 };
 use serde_json::{Value, json};
@@ -140,7 +140,7 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
         "browser" => ProjectFrontend::Browser,
         _ => unreachable!("the parser enforces the frontend value set"),
     };
-    let intent = match (&parsed.project_root, frontend) {
+    let intent = match (&parsed.root, frontend) {
         (None, ProjectFrontend::Desktop) => ActivationIntent::OpenDesktop,
         (None, ProjectFrontend::Browser) => ActivationIntent::OpenBrowser,
         (Some(project_root), frontend) => ActivationIntent::OpenProject {
@@ -164,13 +164,16 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
             "command": parsed.command,
             "fields": {
                 "frontend": frontend,
-                "target": parsed.project_root.as_ref().map_or_else(
+                "target": parsed.root.as_ref().map_or_else(
                     || "root".to_owned(),
                     |path| path.to_string_lossy().into_owned()
                 ),
                 "outcome": activation_outcome(outcome)
             }
         }))),
+        ControlResponse::ProjectOpenFailed { failure } => {
+            Err(project_open_cli_failure(parsed.command, failure))
+        }
         ControlResponse::Rejected { code } => Err(rejected_failure(parsed.command, code)),
         _ => Err(CliRunError::new(
             parsed.command,
@@ -218,10 +221,7 @@ async fn run_http(parsed: &ParsedCliCommand, stream: bool) -> Result<CliResult, 
 }
 
 async fn run_submit(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
-    let input_path = parsed.options.get("input").ok_or_else(|| {
-        CliRunError::new(parsed.command, "missing_argument", "--input is required.")
-    })?;
-    let input = read_model_input(input_path, parsed.command)?;
+    let input = model_request_input(parsed)?;
     let deadline = Instant::now() + RUNTIME_STARTUP_TIMEOUT;
     let mut control = ensure_runtime(deadline)?;
     let (origin, authorization) = create_cli_authorization(&mut control, deadline)?;
@@ -300,7 +300,8 @@ async fn run_submit(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError>
         "command": "operation.wait",
         "positional": [operation_id],
         "options": {},
-        "projectRoot": null
+        "root": null,
+        "cwd": parsed.cwd
     });
     let result = post_request(
         parsed.command,
@@ -337,8 +338,54 @@ fn command_request(parsed: &ParsedCliCommand) -> Value {
         "command": parsed.command,
         "positional": parsed.positional,
         "options": parsed.options,
-        "projectRoot": parsed.project_root.as_ref().map(|path| path.to_string_lossy().into_owned())
+        "root": parsed.root.as_ref().map(|path| path.to_string_lossy().into_owned()),
+        "cwd": parsed.cwd
     })
+}
+
+fn model_request_input(parsed: &ParsedCliCommand) -> Result<Vec<u8>, CliRunError> {
+    if let Some(path) = parsed.options.get("input") {
+        return read_model_input(path, parsed.command);
+    }
+    let model = parsed
+        .options
+        .get("model")
+        .expect("the parser requires a complete direct Model Request");
+    let arguments = parse_json_object_option(parsed, "arguments")?;
+    let output = parse_json_object_option(parsed, "output")?;
+    serde_json::to_vec(&json!({
+        "model": model,
+        "arguments": arguments,
+        "output": output
+    }))
+    .map_err(|error| CliRunError::new(parsed.command, "internal_error", error.to_string()))
+}
+
+fn parse_json_object_option(
+    parsed: &ParsedCliCommand,
+    name: &str,
+) -> Result<serde_json::Map<String, Value>, CliRunError> {
+    let source = parsed
+        .options
+        .get(name)
+        .expect("the parser requires a complete direct Model Request");
+    serde_json::from_str::<Value>(source)
+        .map_err(|error| {
+            CliRunError::new(
+                parsed.command,
+                "invalid_json_input",
+                format!("--{name} must be a JSON object: {error}"),
+            )
+        })?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| {
+            CliRunError::new(
+                parsed.command,
+                "invalid_json_input",
+                format!("--{name} must be a JSON object."),
+            )
+        })
 }
 
 async fn post_request(
@@ -729,6 +776,12 @@ fn rejected_failure(command: &str, code: ControlErrorCode) -> CliRunError {
     CliRunError::new(command, error_code, message)
 }
 
+fn project_open_cli_failure(command: &str, failure: ProjectOpenFailure) -> CliRunError {
+    let mut error = CliRunError::new(command, failure.code, failure.message);
+    error.fields.insert("path", failure.canonical_root.into());
+    error
+}
+
 fn control_failure(command: &str, error: &NativeControlClientError) -> CliRunError {
     let code = if matches!(error, NativeControlClientError::RuntimeReadyTimeout) {
         "runtime_ready_timeout"
@@ -857,8 +910,8 @@ mod tests {
     use debrute_runtime::control::{ClientRole, NativeControlClient};
 
     use super::{
-        CliFields, control_failure, exit_code_for_result, failure, normalize_http_error,
-        readiness_control_failure,
+        CliFields, ProjectOpenFailure, control_failure, exit_code_for_result, failure,
+        normalize_http_error, project_open_cli_failure, readiness_control_failure,
     };
 
     #[test]
@@ -871,6 +924,24 @@ mod tests {
         assert_eq!(
             readiness_control_failure("runtime", &error).code,
             "runtime_ready_timeout"
+        );
+    }
+
+    #[test]
+    fn project_open_failure_preserves_runtime_code_message_and_root() {
+        let failure = project_open_cli_failure(
+            "workbench.start",
+            ProjectOpenFailure {
+                canonical_root: "/missing/project".to_owned(),
+                code: "project_not_found".to_owned(),
+                message: "Project root does not exist.".to_owned(),
+            },
+        );
+        assert_eq!(failure.code, "project_not_found");
+        assert_eq!(failure.message, "Project root does not exist.");
+        assert_eq!(
+            failure.fields.get("path").and_then(|value| value.as_str()),
+            Some("/missing/project")
         );
     }
 

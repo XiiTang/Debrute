@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_lines)]
-
 use super::service::CliFailure;
 use crate::global::ModelRequestExample;
 
@@ -52,18 +50,18 @@ pub(super) fn describe_model(
         }
     };
     let timeout_note = if model_kind == "image" {
-        "The default active image Model Run timeout is 10 minutes."
+        "The default active image Model request timeout is 10 minutes."
     } else if model_kind == "video" {
-        "The default active video Model Run timeout is 30 minutes."
+        "The default active video Model request timeout is 30 minutes."
     } else {
-        "The default active audio Model Run timeout is 10 minutes."
+        "The default active audio Model request timeout is 10 minutes."
     };
     Ok(ModelDocumentation {
         source_urls: source.urls,
         snapshot_path: source.path,
         captured_at: source.captured_at,
         description_markdown: format!(
-            "# {model_id}\n\nOfficial documentation:\n{urls}\n\nRepository snapshot:\n- {}\n\n{body}\n\n## Debrute command\n\n{timeout_note} Save the following one-line JSON object as UTF-8 JSONL, then submit it with `debrute request single <project> --input request.jsonl`; use `--timeout <Ns|Nm|Nh>` when an override is needed.\n\n```json\n{example}\n```",
+            "# {model_id}\n\nOfficial documentation:\n{urls}\n\nRepository snapshot:\n- {}\n\n{body}\n\n## Debrute command\n\n{timeout_note} Save the following one-line JSON object as UTF-8 JSONL, then submit it with `debrute request single --input request.jsonl`; use `--timeout <Ns|Nm|Nh>` when an override is needed. The JSONL record is self-contained: `output.directory` may be absolute or relative to the directory where `debrute` is invoked.\n\n```json\n{example}\n```",
             source.path,
         ),
     })

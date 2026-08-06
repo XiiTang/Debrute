@@ -10,7 +10,7 @@ generic Operation ledger, reconstruct Operations, or replay accepted work
 after restart.
 
 Durable outcomes belong to the domain that owns the fact. A successful Model
-Operation commits Project files and Generated Asset provenance. If a feature
+Operation commits Project files and Model Artifact provenance. If a feature
 requires durable history or audit, that context defines its own redacted record
 rather than extending the Operation registry. Cancellation and failure details
 remain current-instance coordination results unless their owning domain

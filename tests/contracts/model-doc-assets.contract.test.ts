@@ -9,7 +9,7 @@ interface CatalogModel {
   argumentsSchema: { properties: Record<string, unknown> };
   requestExample: {
     command: string;
-    input: { arguments: Record<string, unknown>; output?: Record<string, string> };
+    input: { arguments: Record<string, unknown>; output: Record<string, string> };
   };
 }
 
@@ -62,11 +62,10 @@ describe('Runtime model documentation assets', () => {
       expect(model.requestExample.command, model.debruteModelId).toBe('request.single');
       expect(model.requestExample.input.model, model.debruteModelId).toBe(model.debruteModelId);
       expect(model.requestExample.input.arguments, model.debruteModelId).toEqual(expect.any(Object));
-      if (model.requestExample.input.output !== undefined) {
-        const outputFields = Object.keys(model.requestExample.input.output);
-        expect(outputFields.length, model.debruteModelId).toBeGreaterThan(0);
-        expect(outputFields.every((field) => field === 'directory' || field === 'filename')).toBe(true);
-      }
+      expect(Object.keys(model.requestExample.input.output), model.debruteModelId)
+        .toEqual(['directory', 'name']);
+      expect(model.requestExample.input.output.directory, model.debruteModelId).toBeTruthy();
+      expect(model.requestExample.input.output.name, model.debruteModelId).toBeTruthy();
     }
   });
 });

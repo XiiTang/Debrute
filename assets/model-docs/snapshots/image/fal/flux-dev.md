@@ -88,5 +88,6 @@ Their provider defaults already produce the intended normal one-image JPEG
 result, so omission remains visible as omission in the canonical request.
 
 Debrute does not expose fal's `sync_mode` transport switch. The normal endpoint
-response supplies HTTP image URLs, which Runtime downloads into the Project.
+response supplies HTTP image URLs, which Runtime downloads into the accepted
+output directory.
 Debrute neither requests nor decodes the alternate data-URI response shape.

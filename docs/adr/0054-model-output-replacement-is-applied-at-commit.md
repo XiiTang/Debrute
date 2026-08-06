@@ -1,61 +1,44 @@
-# Model Output Replacement Is Applied At Commit
+# Model Output Naming And Replacement Are Applied At Commit
 
-Optional `output` is the sole explicit Model Request naming policy. Its
-`directory` member is a Project-relative directory and its `filename` member
-is an extension-free file base name without path separators. Either member may
-be omitted independently. Runtime supplies an Operation-unique directory when
-`directory` is absent and a generated file base name when `filename` is absent;
-`directory: "."` explicitly selects the Project root. Model Request input has
-no combined output path or output-path array.
+Every Model Request requires one output object:
 
-Runtime applies the existing portable Project-path rules rather than defining a
-Model Operation validator. `directory` rejects absolute paths, traversal,
-backslashes, invalid segments, and Project escape; `"."` maps explicitly to the
-Project root, and missing valid directories are created. `filename` must be one
-portable basename and cannot contain a path separator. Periods remain literal
-basename characters, so `covers.v2` may produce `covers.v2.jpg`. Invalid input
-is rejected without character replacement, path correction, or fallback
-location. Commit rechecks the accepted stable Project identity and applies the
-portable no-symlink path boundary before publication.
+```json
+{"directory":"generated","name":"covers"}
+```
 
-Runtime appends the extension that corresponds to each Artifact's actual MIME
-type and performs no implicit transcoding. If the Model Run produces exactly
-one Artifact, `directory: "generated"` and `filename: "covers"` produce
-`generated/covers.jpg`. If it produces multiple Artifacts, Runtime inserts the
-one-based Artifact position before each real extension, producing such paths
-as `generated/covers_1.mp4` and `generated/covers_2.jpg`. `artifactIndex`
-remains zero-based, so index `0` maps to suffix `_1`. Actual Artifact count, not
-a requested estimate, decides whether suffixes appear.
+`directory` is an absolute filesystem path or is resolved against the CLI's
+captured canonical working directory. Runtime canonicalizes the nearest
+existing ancestor at Operation admission and retains the resulting absolute
+destination. Missing suffix directories are created during commit. A regular
+file, symbolic link, inaccessible path, or unsafe component fails the affected
+work; Runtime never repairs the path or chooses a fallback location.
 
-Runtime imposes no generic per-ModelRun Artifact-count ceiling. Count follows
-the selected Model's validated argument schema and its Adapter's actual output
-mapping. The prelaunch implementation removes the existing global `16` check
-without a replacement, truncation rule, or fallback selection; a concrete
-Model may add a source-backed constraint if a real requirement appears.
+`name` is one ordinary non-empty basename. It may contain periods, so
+`covers.v2` can produce `covers.v2.jpg`, but it cannot be `.`, `..`, or contain
+a slash, backslash, or NUL. Runtime never generates a missing name and does not
+accept a combined output path or output-role map.
 
-Operation acceptance validates and resolves naming input but does not inspect
-the current output files. Runtime creates no candidate-output enumeration,
-exclusive output claim, reservation, acceptance-time hash, or filesystem
-baseline. Independent Operations may select the same explicit name. A Batch
-still rejects duplicate explicit `directory` plus `filename` declarations as
-`invalid_input`, because allowing them would make concurrent completion order
-choose the winning Item. Runtime-generated names remain unique without a
-shared output-claim protocol.
+Runtime derives each extension from the actual Artifact MIME type. Naming
+counts Artifacts with the same extension independently:
 
-The command-level `--replace` option is immutable execution policy and applies
-uniformly to every explicit model output. Model Request and Batch Item records
-cannot override it. Runtime uses the option only when each actual model output
-file is committed, after Artifact count, MIME type, and extension are known.
-Without `--replace`, commit uses create-only semantics and an occupied actual target
-fails the Single or Batch Item. With `--replace`, commit atomically replaces the
-file then present without comparing it with an earlier version. Model Item
-commits for one Project share the Generated Asset commit lock, so two
-independent replacing Operations resolve by actual commit order and cannot
-interleave file rollback with another Item's provenance commit.
+- one output of an extension is `covers.ext`;
+- multiple outputs of that extension are `covers_1.ext`, `covers_2.ext`, and so
+  on.
 
-There is no silent skip, fallback rename, saved previous version, `--force`,
-`--overwrite-existing`, compatibility alias, or pre-acceptance
-`output_conflict`. A file created or changed after Operation acceptance is
-treated exactly like any other file present at commit. This deliberately trades
-early conflict detection and lost-update protection for ordinary local
-create-or-replace semantics and a substantially smaller submission protocol.
+Two MP4 and two JPEG outputs therefore become `covers_1.mp4`, `covers_2.mp4`,
+`covers_1.jpg`, and `covers_2.jpg`. This is a naming rule discovered from the
+actual outputs, not an input classification or Artifact role. `artifactIndex`
+continues to expose zero-based provider response order independently of each
+extension's suffix counter.
+
+Runtime imposes no generic per-request Artifact-count ceiling and does no
+implicit transcoding. Model-specific result mapping determines the actual
+outputs.
+
+Operation acceptance does not inspect candidate output files, reserve names,
+or reject duplicate paths within a Batch. The caller owns the submitted JSONL.
+Without `--replace`, publication is create-only and an occupied actual target
+fails that Single or Batch Item. With `--replace`, Runtime atomically replaces
+the file present at commit without comparing an earlier version. It never
+silently skips, renames, saves a previous version, or exposes another overwrite
+alias.

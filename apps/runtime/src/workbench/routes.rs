@@ -2,8 +2,7 @@
     clippy::items_after_statements,
     clippy::manual_let_else,
     clippy::needless_pass_by_value,
-    clippy::result_large_err,
-    clippy::too_many_lines
+    clippy::result_large_err
 )]
 
 use std::{
@@ -47,12 +46,9 @@ use super::{
         BrowserSession, CliRequestAuthorization, ProjectAuthorization, WorkbenchRouterState,
         browser_session_cookie, error_response,
     },
-    services::public_canvas_projection,
 };
 
 const MAX_JSON_BODY_BYTES: usize = 2 * 1024 * 1024;
-pub(super) const MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES: usize =
-    crate::project::MAX_EDITABLE_PROJECT_TEXT_BYTES as usize * 6 + 512;
 const STREAM_CHANNEL_CAPACITY: usize = 64;
 
 pub(super) async fn workbench_connection(
@@ -87,7 +83,7 @@ pub(super) async fn workbench_connection(
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
-        requested_project_id: Option<String>,
+        requested_project_root: Option<String>,
         desktop_launch_ticket: Option<String>,
     }
     let input: Input = match json_body(request).await {
@@ -98,51 +94,52 @@ pub(super) async fn workbench_connection(
     if let Err(error) = services.ensure_accepting_workbench_connections() {
         return service_error_response(error);
     }
-    let (browser_session, desktop, requested_project_id) =
-        if let Some(ticket) = input.desktop_launch_ticket.as_deref() {
-            let Some(consumption) = state.launch_service.consume_desktop_ticket(ticket) else {
+    let (browser_session, desktop, requested_project_root) = if let Some(ticket) =
+        input.desktop_launch_ticket.as_deref()
+    {
+        let Some(consumption) = state.launch_service.consume_desktop_ticket(ticket) else {
+            return error_response(
+                StatusCode::FORBIDDEN,
+                "desktop_launch_ticket_invalid",
+                "Desktop launch ticket is invalid or already consumed.",
+            );
+        };
+        let reusable_empty = matches!(consumption.route, crate::control::WorkbenchRoute::Root);
+        let route_project_root = match consumption.route {
+            crate::control::WorkbenchRoute::Root => None,
+            crate::control::WorkbenchRoute::OpenProject { canonical_root } => Some(canonical_root),
+        };
+        if input.requested_project_root != route_project_root {
+            return error_response(
+                StatusCode::CONFLICT,
+                "desktop_launch_route_mismatch",
+                "Desktop launch route does not match the requested Project.",
+            );
+        }
+        (
+            consumption.browser_session,
+            Some(DesktopConnectionAdmission {
+                binding: consumption.desktop,
+                reusable_empty,
+            }),
+            route_project_root,
+        )
+    } else {
+        let browser_session = match browser_session_cookie(&headers) {
+            Ok(Some(session)) if services.connections().browser_session_is_live(session) => {
+                session.to_owned()
+            }
+            Ok(_) => WorkbenchLaunchService::create_browser_session(),
+            Err(()) => {
                 return error_response(
                     StatusCode::FORBIDDEN,
-                    "desktop_launch_ticket_invalid",
-                    "Desktop launch ticket is invalid or already consumed.",
-                );
-            };
-            let reusable_empty = matches!(consumption.route, crate::control::WorkbenchRoute::Root);
-            let route_project_id = match consumption.route {
-                crate::control::WorkbenchRoute::Root => None,
-                crate::control::WorkbenchRoute::Project { project_id } => Some(project_id),
-            };
-            if input.requested_project_id != route_project_id {
-                return error_response(
-                    StatusCode::CONFLICT,
-                    "desktop_launch_route_mismatch",
-                    "Desktop launch route does not match the requested Project.",
+                    "workbench_session_invalid",
+                    "Workbench session cookie is invalid.",
                 );
             }
-            (
-                consumption.browser_session,
-                Some(DesktopConnectionAdmission {
-                    binding: consumption.desktop,
-                    reusable_empty,
-                }),
-                route_project_id,
-            )
-        } else {
-            let browser_session = match browser_session_cookie(&headers) {
-                Ok(Some(session)) if services.connections().browser_session_is_live(session) => {
-                    session.to_owned()
-                }
-                Ok(_) => WorkbenchLaunchService::create_browser_session(),
-                Err(()) => {
-                    return error_response(
-                        StatusCode::FORBIDDEN,
-                        "workbench_session_invalid",
-                        "Workbench session cookie is invalid.",
-                    );
-                }
-            };
-            (browser_session, None, input.requested_project_id)
         };
+        (browser_session, None, input.requested_project_root)
+    };
     let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
     let Some((context, cancellation)) =
         services
@@ -281,26 +278,28 @@ pub(super) async fn workbench_connection(
             }
         }
     });
-    if let Some(project_id) = requested_project_id {
+    if let Some(project_root) = requested_project_root {
         let project_services = Arc::clone(&services);
         let project_sender = sender.clone();
         let project_browser_session = browser_session.clone();
         let project_credential = context.credential.clone();
         tokio::task::spawn_blocking(move || {
-            if let Err(error) = project_services.bind_connection_project_id(
+            let result = project_services.bind_connection_project_root(
                 &project_browser_session,
                 &project_credential,
-                &project_id,
-            ) {
-                let _ = project_sender.try_send(json!({
+                &project_root,
+            );
+            if let Err(error) = result {
+                let frame = json!({
                     "type": "project.open_failed",
-                    "projectId": project_id,
+                    "canonicalRoot": project_root,
                     "error": {
                         "code": error.code,
                         "message": error.message,
                         "details": error.details
                     }
-                }));
+                });
+                let _ = project_sender.try_send(frame);
             }
         });
     }
@@ -350,7 +349,7 @@ pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
         .route("/projects/choose", post(project_choose))
         .route("/projects/replace", post(project_replace))
         .route(
-            "/projects/{project_id}/photoshop/send",
+            "/workbench/bindings/{binding_id}/photoshop/send",
             post(photoshop_send),
         )
         .merge(project_domain_router())
@@ -359,149 +358,137 @@ pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
 fn project_domain_router() -> Router<WorkbenchRouterState> {
     Router::new()
         .route(
-            "/projects/{project_id}/activities/notices",
+            "/workbench/bindings/{binding_id}/activities/notices",
             post(report_project_activity_notice),
         )
         .route(
-            "/projects/{project_id}/working-copies/text/{*path}",
+            "/workbench/bindings/{binding_id}/working-copies/text/{*path}",
             put(text_working_copy).delete(text_working_copy),
         )
         .route(
-            "/projects/{project_id}/working-copies/feedback/{item_id}",
+            "/workbench/bindings/{binding_id}/working-copies/feedback/{item_id}",
             put(feedback_working_copy).delete(feedback_working_copy),
         )
         .route(
-            "/projects/{project_id}/files/text/{*path}",
+            "/workbench/bindings/{binding_id}/files/text/{*path}",
             get(super::project_routes::text_file).put(super::project_routes::text_file),
         )
         .route(
-            "/projects/{project_id}/files/raw/{*path}",
+            "/workbench/bindings/{binding_id}/files/raw/{*path}",
             get(super::project_routes::raw_file).head(super::project_routes::raw_file),
         )
         .route(
-            "/projects/{project_id}/files",
+            "/workbench/bindings/{binding_id}/files",
             post(super::project_routes::create_path),
         )
         .route(
-            "/projects/{project_id}/files/load-directory",
+            "/workbench/bindings/{binding_id}/files/load-directory",
             post(super::project_routes::load_directory),
         )
         .route(
-            "/projects/{project_id}/files/import/local",
+            "/workbench/bindings/{binding_id}/files/import/local",
             post(super::project_routes::import_local),
         )
         .route(
-            "/projects/{project_id}/files/import/uploads",
+            "/workbench/bindings/{binding_id}/files/import/uploads",
             post(super::project_routes::import_uploads),
         )
         .route(
-            "/projects/{project_id}/files/batch/copy",
+            "/workbench/bindings/{binding_id}/files/batch/copy",
             post(super::project_routes::batch_copy),
         )
         .route(
-            "/projects/{project_id}/files/batch/move",
+            "/workbench/bindings/{binding_id}/files/batch/move",
             post(super::project_routes::batch_move),
         )
         .route(
-            "/projects/{project_id}/files/batch/delete-permanently",
+            "/workbench/bindings/{binding_id}/files/batch/delete-permanently",
             post(super::project_routes::batch_delete),
         )
         .route(
-            "/projects/{project_id}/files/path/batch/copy-to-system-clipboard",
+            "/workbench/bindings/{binding_id}/files/path/batch/copy-to-system-clipboard",
             post(super::project_routes::copy_paths_to_system_clipboard),
         )
         .route(
-            "/projects/{project_id}/files/path/batch/trash",
+            "/workbench/bindings/{binding_id}/files/path/batch/trash",
             post(super::project_routes::trash_paths),
         )
         .route(
-            "/projects/{project_id}/files/path/{*path}",
+            "/workbench/bindings/{binding_id}/files/path/{*path}",
             patch(super::project_routes::project_path).post(super::project_routes::project_path),
         )
         .route(
-            "/projects/{project_id}/generated-assets/lookup",
-            post(super::project_routes::generated_asset_lookup),
+            "/workbench/bindings/{binding_id}/model-artifacts/lookup",
+            post(super::project_routes::model_artifact_lookup),
         )
         .route(
-            "/projects/{project_id}/canvas-feedback",
+            "/workbench/bindings/{binding_id}/canvas-feedback",
             get(super::project_routes::feedback_get).patch(super::project_routes::feedback_patch),
         )
         .route(
-            "/projects/{project_id}/canvases",
+            "/workbench/bindings/{binding_id}/canvases",
             post(super::project_routes::canvas_create),
         )
         .route(
-            "/projects/{project_id}/canvases/index",
+            "/workbench/bindings/{binding_id}/canvases/reset-workspace",
+            post(super::project_routes::canvas_workspace_reset),
+        )
+        .route(
+            "/workbench/bindings/{binding_id}/canvases/order",
             put(super::project_routes::canvas_reorder),
         )
         .route(
-            "/projects/{project_id}/canvases/index/repair",
-            post(super::project_routes::canvas_repair),
-        )
-        .route(
-            "/projects/{project_id}/canvases/{canvas_id}",
+            "/workbench/bindings/{binding_id}/canvases/{canvas_id}",
             get(super::project_routes::canvas_item)
                 .patch(super::project_routes::canvas_item)
                 .delete(super::project_routes::canvas_item),
         )
         .route(
-            "/projects/{project_id}/canvases/{canvas_id}/canvas-map/project-paths",
-            post(super::project_routes::canvas_map_add),
+            "/workbench/bindings/{binding_id}/canvases/{canvas_id}/activate",
+            post(super::project_routes::canvas_activate),
         )
         .route(
-            "/projects/{project_id}/canvases/{canvas_id}/reset-layout",
-            post(super::project_routes::canvas_reset),
+            "/workbench/bindings/{binding_id}/canvases/state",
+            patch(super::project_routes::canvas_state_patch),
         )
         .route(
-            "/projects/{project_id}/canvases/{canvas_id}/node-layouts",
-            patch(super::project_routes::canvas_layouts),
-        )
-        .route(
-            "/projects/{project_id}/canvases/{canvas_id}/video-playback",
-            patch(super::project_routes::canvas_video_playback),
-        )
-        .route(
-            "/projects/{project_id}/canvases/{canvas_id}/text-viewport",
-            patch(super::project_routes::canvas_text_viewport),
-        )
-        .route(
-            "/projects/{project_id}/canvas-image-preview",
+            "/workbench/bindings/{binding_id}/canvas-image-preview",
             get(super::project_routes::image_preview).head(super::project_routes::image_preview),
         )
         .route(
-            "/projects/{project_id}/canvas-text-previews/source",
+            "/workbench/bindings/{binding_id}/canvas-text-previews/source",
             post(super::project_routes::text_preview_source_save),
         )
         .route(
-            "/projects/{project_id}/canvas-text-previews/sources",
+            "/workbench/bindings/{binding_id}/canvas-text-previews/sources",
             post(super::project_routes::text_preview_sources),
         )
         .route(
-            "/projects/{project_id}/canvas-text-preview",
+            "/workbench/bindings/{binding_id}/canvas-text-preview",
             get(super::project_routes::text_preview).head(super::project_routes::text_preview),
         )
         .route(
-            "/projects/{project_id}/canvas-video-previews/probe",
+            "/workbench/bindings/{binding_id}/canvas-video-previews/probe",
             post(super::project_routes::video_preview_probe),
         )
         .route(
-            "/projects/{project_id}/canvas-video-previews/ensure",
+            "/workbench/bindings/{binding_id}/canvas-video-previews/ensure",
             post(super::project_routes::video_preview_ensure),
         )
         .route(
-            "/projects/{project_id}/canvas-video-preview",
+            "/workbench/bindings/{binding_id}/canvas-video-preview",
             get(super::project_routes::video_preview).head(super::project_routes::video_preview),
         )
         .route(
-            "/projects/{project_id}/terminals",
+            "/workbench/bindings/{binding_id}/terminals",
             post(super::project_routes::terminal_create),
         )
         .route(
-            "/projects/{project_id}/terminals/{terminal_id}",
+            "/workbench/bindings/{binding_id}/terminals/{terminal_id}",
             delete(super::project_routes::terminal_close),
         )
         .route(
-            "/projects/{project_id}/terminals/ws",
+            "/workbench/bindings/{binding_id}/terminals/ws",
             get(super::project_routes::terminal_websocket),
         )
 }
@@ -541,7 +528,10 @@ async fn report_project_activity_notice(
             "Global Activity notices cannot claim a Project scope.",
         );
     }
-    let project = match state.services.project_activity_context(&scope.project_id) {
+    let project = match state
+        .services
+        .project_activity_context(&scope.canonical_root)
+    {
         Ok(project) => project,
         Err(error) => return service_error_response(error),
     };
@@ -575,7 +565,7 @@ async fn clear_terminal_activities(State(state): State<WorkbenchRouterState>) ->
 async fn text_working_copy(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, path)): Path<(String, String)>,
+    Path((_binding_id, path)): Path<(String, String)>,
     request: Request,
 ) -> Response {
     let services = Arc::clone(&state.services);
@@ -593,7 +583,7 @@ async fn text_working_copy(
                 Err(response) => return response,
             };
             match services.put_text_working_copy(
-                &scope.project_id,
+                &scope.canonical_root,
                 TextWorkingCopy {
                     project_relative_path: path,
                     content: input.content,
@@ -605,7 +595,7 @@ async fn text_working_copy(
                 Err(error) => service_error_response(error),
             }
         }
-        Method::DELETE => match services.clear_text_working_copy(&scope.project_id, &path) {
+        Method::DELETE => match services.clear_text_working_copy(&scope.canonical_root, &path) {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
             Err(error) => service_error_response(error),
         },
@@ -616,7 +606,7 @@ async fn text_working_copy(
 async fn feedback_working_copy(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
-    Path((_project_id, item_id)): Path<(String, String)>,
+    Path((_binding_id, item_id)): Path<(String, String)>,
     request: Request,
 ) -> Response {
     let services = Arc::clone(&state.services);
@@ -633,15 +623,17 @@ async fn feedback_working_copy(
                     "Feedback Working Copy itemId must match the request path.",
                 );
             }
-            match services.put_feedback_working_copy(&scope.project_id, working_copy) {
+            match services.put_feedback_working_copy(&scope.canonical_root, working_copy) {
                 Ok(working_copy) => Json(working_copy).into_response(),
                 Err(error) => service_error_response(error),
             }
         }
-        Method::DELETE => match services.clear_feedback_working_copy(&scope.project_id, &item_id) {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(error) => service_error_response(error),
-        },
+        Method::DELETE => {
+            match services.clear_feedback_working_copy(&scope.canonical_root, &item_id) {
+                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                Err(error) => service_error_response(error),
+            }
+        }
         _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
     }
 }
@@ -743,11 +735,11 @@ async fn product_apply(
     };
     let initiator = if connection.desktop.is_some() {
         ProductUpdateInitiator::Desktop {
-            project_id: connection.project_id,
+            canonical_root: connection.canonical_root,
         }
     } else {
         ProductUpdateInitiator::Browser {
-            project_id: connection.project_id,
+            canonical_root: connection.canonical_root,
         }
     };
     product_call(&state, ProductCall::Apply(initiator), input).await
@@ -787,28 +779,17 @@ async fn project_open(
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
-        project_root: Option<String>,
-        project_id: Option<String>,
+        project_root: String,
     }
     let input: Input = match json_body(request).await {
         Ok(body) => body,
         Err(response) => return response,
     };
-    let result = match (input.project_root, input.project_id) {
-        (Some(project_root), None) => {
-            services.bind_connection_project_root(&browser.0, &connection.credential, &project_root)
-        }
-        (None, Some(project_id)) => {
-            services.bind_connection_project_id(&browser.0, &connection.credential, &project_id)
-        }
-        _ => {
-            return service_error_response(RuntimeHttpServiceError::new(
-                StatusCode::BAD_REQUEST,
-                "project_target_invalid",
-                "OpenProject requires exactly one of projectRoot or projectId.",
-            ));
-        }
-    };
+    let result = services.bind_connection_project_root(
+        &browser.0,
+        &connection.credential,
+        &input.project_root,
+    );
     result.map_or_else(service_error_response, project_binding_response)
 }
 
@@ -878,12 +859,13 @@ fn project_binding_response(outcome: WorkbenchProjectBindingOutcome) -> Response
     match outcome {
         WorkbenchProjectBindingOutcome::Bound(opened) => Json(json!({
             "outcome": "bound",
-            "projectId": opened.project_id
+            "bindingId": opened.binding_id,
+            "canonicalRoot": opened.canonical_root
         }))
         .into_response(),
-        WorkbenchProjectBindingOutcome::FocusedExistingDesktop { project_id } => Json(json!({
+        WorkbenchProjectBindingOutcome::FocusedExistingDesktop { canonical_root } => Json(json!({
             "outcome": "focused_existing_desktop",
-            "projectId": project_id
+            "canonicalRoot": canonical_root
         }))
         .into_response(),
     }
@@ -905,7 +887,10 @@ async fn photoshop_send(
         Ok(body) => body,
         Err(response) => return response,
     };
-    let project = match state.services.project_activity_context(&scope.project_id) {
+    let project = match state
+        .services
+        .project_activity_context(&scope.canonical_root)
+    {
         Ok(project) => project,
         Err(error) => return service_error_response(error),
     };
@@ -921,7 +906,7 @@ async fn photoshop_send(
         .services
         .photoshop()
         .send_project_file(
-            &scope.project_id,
+            &scope.canonical_root,
             &input.project_relative_path,
             &input.plugin_session_id,
             input.document_id,
@@ -1107,7 +1092,7 @@ fn global_event_value(event: GlobalRuntimeEvent) -> Value {
         GlobalRuntimeChange::RecentProjectsChanged(recent_projects) => json!({
             "type": "recentProjects.changed",
             "revision": event.revision,
-            "recentProjects": recent_projects
+            "recentProjectRoots": recent_projects
         }),
         GlobalRuntimeChange::IntegrationsChanged(integrations) => json!({
             "type": "integrations.changed",
@@ -1144,24 +1129,25 @@ fn activity_event_value(event: ActivityEvent) -> Value {
 
 pub(crate) fn project_stream_value(
     item: ProjectStreamItem,
+    binding_id: &str,
 ) -> Result<Value, RuntimeHttpServiceError> {
     Ok(match item {
         ProjectStreamItem::Snapshot(sync) => {
-            let snapshot = public_project_snapshot(&sync.snapshot, &sync.project_id)?;
+            let snapshot = public_project_snapshot(&sync.snapshot, binding_id)?;
             json!({
             "type": "sync",
             "domain": "project",
-            "projectId": sync.project_id,
+            "bindingId": binding_id,
             "revision": sync.project_revision,
             "snapshot": snapshot
             })
         }
         ProjectStreamItem::Event(event) => match event.change {
             ProjectChange::ProjectChanged(snapshot) => {
-                let snapshot = public_project_snapshot(&snapshot, &event.project_id)?;
+                let snapshot = public_project_snapshot(&snapshot, binding_id)?;
                 json!({
                 "type": "project.changed",
-                "projectId": event.project_id,
+                "bindingId": binding_id,
                 "projectRevision": event.project_revision,
                 "snapshot": snapshot
                 })
@@ -1170,28 +1156,18 @@ pub(crate) fn project_stream_value(
                 project_relative_path,
                 snapshot,
             } => {
-                let snapshot = public_project_snapshot(&snapshot, &event.project_id)?;
+                let snapshot = public_project_snapshot(&snapshot, binding_id)?;
                 json!({
                 "type": "project.fileChanged",
-                "projectId": event.project_id,
+                "bindingId": binding_id,
                 "projectRevision": event.project_revision,
                 "event": {"projectRelativePath": project_relative_path},
                 "snapshot": snapshot
                 })
             }
-            ProjectChange::CanvasChanged { canvas, projection } => {
-                let projection = public_canvas_projection(&projection, &event.project_id)?;
-                json!({
-                    "type": "canvas.changed",
-                    "projectId": event.project_id,
-                    "projectRevision": event.project_revision,
-                    "canvas": canvas,
-                    "projection": projection
-                })
-            }
             ProjectChange::CanvasFeedbackChanged { feedback, .. } => json!({
                 "type": "canvas.feedback.changed",
-                "projectId": event.project_id,
+                "bindingId": binding_id,
                 "projectRevision": event.project_revision,
                 "feedback": feedback
             }),
@@ -1310,38 +1286,6 @@ fn one_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<Option<&
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn editable_text_json_limit_accepts_a_full_boundary_body_after_escaping() {
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct Input {
-            content: String,
-            expected_revision: String,
-        }
-        let content = "\"".repeat(
-            usize::try_from(crate::project::MAX_EDITABLE_PROJECT_TEXT_BYTES)
-                .expect("editable text limit should fit usize"),
-        );
-        let body = serde_json::to_vec(&json!({
-            "content": content,
-            "expectedRevision": "sha256:revision"
-        }))
-        .expect("fixture should serialize");
-        assert!(body.len() > MAX_JSON_BODY_BYTES);
-        let request = Request::new(Body::from(body));
-
-        let input: Input = json_body_with_limit(request, MAX_EDITABLE_PROJECT_TEXT_JSON_BODY_BYTES)
-            .await
-            .expect("the complete editable text envelope should fit its transport limit");
-
-        assert_eq!(
-            input.content.len(),
-            usize::try_from(crate::project::MAX_EDITABLE_PROJECT_TEXT_BYTES)
-                .expect("editable text limit should fit usize")
-        );
-        assert_eq!(input.expected_revision, "sha256:revision");
-    }
-
     #[test]
     fn cli_product_work_admission_follows_the_closed_command_write_contract() {
         for command in [
@@ -1357,7 +1301,6 @@ mod tests {
             );
         }
         for command in [
-            "project.init",
             "canvas.create",
             "operation.cancel",
             "request.single",
@@ -1378,12 +1321,7 @@ mod tests {
     fn project_and_global_events_have_closed_snapshot_first_envelopes() {
         let global = global_event_value(GlobalRuntimeEvent {
             revision: 2,
-            change: GlobalRuntimeChange::RecentProjectsChanged(vec![
-                crate::global::RecentProjectEntry {
-                    project_id: "project-id".to_owned(),
-                    project_root: "/project".to_owned(),
-                },
-            ]),
+            change: GlobalRuntimeChange::RecentProjectsChanged(vec!["/project".to_owned()]),
         });
         assert_eq!(global["type"], "recentProjects.changed");
         assert_eq!(global["revision"], 2);

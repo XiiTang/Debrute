@@ -23,7 +23,7 @@ pub enum ActivitySource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityProjectContext {
-    pub project_id: String,
+    pub canonical_root: String,
     pub project_name: String,
 }
 
@@ -41,8 +41,9 @@ pub enum CanvasActivityOperation {
     SaveTextViewport,
     SaveLayout,
     SaveVideoPlayback,
-    AddToCanvasMap,
-    RepairRegistry,
+    SetDirectoryDisclosure,
+    RevealPath,
+    RaiseSelection,
     Create,
     Rename,
     Delete,
@@ -690,7 +691,7 @@ mod tests {
 
     fn project() -> ActivityProjectContext {
         ActivityProjectContext {
-            project_id: "project-1".to_owned(),
+            canonical_root: "project-1".to_owned(),
             project_name: "Project One".to_owned(),
         }
     }

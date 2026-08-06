@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, error::Error, fmt, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    error::Error,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use super::spec::{CliCommandPolicy, CliCommandSpec, CliOptionKind, command_spec, command_specs};
 
@@ -9,7 +14,8 @@ pub struct ParsedCliCommand {
     pub command_path: Vec<String>,
     pub positional: Vec<String>,
     pub options: BTreeMap<String, String>,
-    pub project_root: Option<PathBuf>,
+    pub root: Option<PathBuf>,
+    pub cwd: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,8 +62,17 @@ impl Error for CliParseError {}
 ///
 /// # Errors
 /// Returns a typed parse failure for unknown commands/options, missing values,
-/// ambiguous forms, or a Project path that cannot be made absolute.
+/// ambiguous forms, or a filesystem root that cannot be made absolute.
 pub fn parse_cli_args(argv: &[String]) -> Result<ParsedCliCommand, CliParseError> {
+    let cwd = std::env::current_dir()
+        .and_then(|directory| directory.canonicalize())
+        .map_err(|error| {
+            CliParseError::new(
+                "internal_error",
+                format!("Unable to resolve the CLI working directory: {error}"),
+                "root",
+            )
+        })?;
     let normalized = normalize_help(argv);
     let spec = matching_spec(&normalized).ok_or_else(|| {
         let command = command_name(&normalized);
@@ -70,14 +85,13 @@ pub fn parse_cli_args(argv: &[String]) -> Result<ParsedCliCommand, CliParseError
     let rest = &normalized[spec.path.len()..];
     let (positional, mut options) = parse_values(spec, rest)?;
     validate(spec, &positional, &options)?;
-    let project_root = spec
-        .project_positional
+    let root = spec
+        .root_positional
         .and_then(|index| positional.get(index))
-        .map(absolute_path)
-        .transpose()?;
-    for option in spec.options.iter().filter(|option| option.project_path) {
+        .map(|value| absolute_path(value, &cwd));
+    for option in spec.options.iter().filter(|option| option.root_path) {
         if let Some(value) = options.get_mut(option.name) {
-            *value = absolute_path(value)?.to_string_lossy().into_owned();
+            *value = absolute_path(value, &cwd).to_string_lossy().into_owned();
         }
     }
     Ok(ParsedCliCommand {
@@ -86,7 +100,8 @@ pub fn parse_cli_args(argv: &[String]) -> Result<ParsedCliCommand, CliParseError
         command_path: spec.path.iter().map(|value| (*value).to_owned()).collect(),
         positional,
         options,
-        project_root,
+        root,
+        cwd,
     })
 }
 
@@ -223,18 +238,41 @@ fn validate(
     {
         return Err(required_option(spec.command, option.name));
     }
-    if spec.command == "canvas.reset-layout" {
-        let all = options.get("all").is_some_and(|value| value == "true");
-        let has_paths = options.contains_key("path");
-        if all == has_paths {
-            return Err(CliParseError::new(
-                "invalid_input",
-                "canvas.reset-layout requires --all or at least one --path.",
-                spec.command,
-            ));
-        }
+    if spec.command == "request.single" {
+        validate_single_request_source(options)?;
     }
     Ok(())
+}
+
+fn validate_single_request_source(options: &BTreeMap<String, String>) -> Result<(), CliParseError> {
+    let has_input = options.contains_key("input");
+    let direct = ["model", "arguments", "output"];
+    let direct_count = direct
+        .iter()
+        .filter(|name| options.contains_key(**name))
+        .count();
+    if has_input && direct_count > 0 {
+        return Err(CliParseError::new(
+            "conflicting_request_sources",
+            "--input cannot be combined with --model, --arguments, or --output.",
+            "request.single",
+        ));
+    }
+    if has_input || direct_count == direct.len() {
+        return Ok(());
+    }
+    if direct_count == 0 {
+        return Err(CliParseError::new(
+            "missing_argument",
+            "request.single requires --input or all of --model, --arguments, and --output.",
+            "request.single",
+        ));
+    }
+    let missing = direct
+        .iter()
+        .find(|name| !options.contains_key(**name))
+        .expect("an incomplete direct request has a missing option");
+    Err(required_option("request.single", missing))
 }
 
 fn command_name(argv: &[String]) -> String {
@@ -248,20 +286,12 @@ fn command_name(argv: &[String]) -> String {
     )
 }
 
-fn absolute_path(value: &String) -> Result<PathBuf, CliParseError> {
+fn absolute_path(value: &str, cwd: &Path) -> PathBuf {
     let path = PathBuf::from(value);
     if path.is_absolute() {
-        return Ok(path);
+        return path;
     }
-    std::env::current_dir()
-        .map(|directory| directory.join(path))
-        .map_err(|error| {
-            CliParseError::new(
-                "internal_error",
-                format!("Unable to resolve Project path: {error}"),
-                "project",
-            )
-        })
+    cwd.join(path)
 }
 
 fn required_positionals(command: &str) -> &'static str {

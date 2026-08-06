@@ -74,14 +74,7 @@ pub struct CanvasSettings {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChromeSettings {
-    pub recent_projects: Vec<RecentProjectEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RecentProjectEntry {
-    pub project_id: String,
-    pub project_root: String,
+    pub recent_project_roots: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,7 +125,7 @@ pub struct GlobalMutationResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentProjectsMutationResult {
-    pub recent_projects: Vec<RecentProjectEntry>,
+    pub recent_project_roots: Vec<String>,
     pub changed: bool,
 }
 
@@ -177,12 +170,12 @@ impl GlobalConfigStore {
     pub fn read_desktop_presentation(
         &self,
         catalog: &ModelCatalog,
-    ) -> Result<(Vec<RecentProjectEntry>, String), GlobalSettingsError> {
+    ) -> Result<(Vec<String>, String), GlobalSettingsError> {
         let _guard = self.lock();
         let snapshot = self.read_snapshot_unlocked()?;
         validate_snapshot(&snapshot, catalog)?;
         Ok((
-            snapshot.settings.chrome.recent_projects,
+            snapshot.settings.chrome.recent_project_roots,
             snapshot.settings.workbench.theme_preference,
         ))
     }
@@ -258,7 +251,7 @@ impl GlobalConfigStore {
         })
     }
 
-    /// Remembers one stable Project id and canonical root in most-recent-first order.
+    /// Remembers one canonical root in most-recent-first order.
     ///
     /// # Errors
     ///
@@ -266,63 +259,40 @@ impl GlobalConfigStore {
     /// be persisted.
     pub fn remember_recent_project(
         &self,
-        project_id: &str,
-        project_root: &str,
+        canonical_root: &str,
         catalog: &ModelCatalog,
     ) -> Result<RecentProjectsMutationResult, GlobalSettingsError> {
-        if project_id.is_empty()
-            || project_id.trim() != project_id
-            || project_root.is_empty()
-            || project_root.trim() != project_root
-            || !Path::new(project_root).is_absolute()
+        if canonical_root.is_empty()
+            || canonical_root.trim() != canonical_root
+            || !Path::new(canonical_root).is_absolute()
         {
-            return validation("Recent Project requires a stable id and absolute canonical root.");
+            return validation("Recent Project requires an absolute canonical root.");
         }
         let _guard = self.lock();
         let mut snapshot = self.read_snapshot_unlocked()?;
         validate_snapshot(&snapshot, catalog)?;
-        if snapshot
-            .settings
-            .chrome
-            .recent_projects
-            .iter()
-            .any(|entry| entry.project_root == project_root && entry.project_id != project_id)
-        {
-            return validation("Recent Project root is already associated with another id.");
-        }
-        if snapshot
-            .settings
-            .chrome
-            .recent_projects
-            .iter()
-            .any(|entry| entry.project_id == project_id && entry.project_root != project_root)
-        {
-            return validation("Recent Project id is already associated with another root.");
-        }
-        let previous = snapshot.settings.chrome.recent_projects.clone();
+        let previous = snapshot.settings.chrome.recent_project_roots.clone();
         snapshot
             .settings
             .chrome
-            .recent_projects
-            .retain(|entry| entry.project_id != project_id);
-        snapshot.settings.chrome.recent_projects.insert(
-            0,
-            RecentProjectEntry {
-                project_id: project_id.to_owned(),
-                project_root: project_root.to_owned(),
-            },
-        );
+            .recent_project_roots
+            .retain(|root| root != canonical_root);
         snapshot
             .settings
             .chrome
-            .recent_projects
+            .recent_project_roots
+            .insert(0, canonical_root.to_owned());
+        snapshot
+            .settings
+            .chrome
+            .recent_project_roots
             .truncate(RECENT_PROJECT_LIMIT);
-        let changed = previous != snapshot.settings.chrome.recent_projects;
+        let changed = previous != snapshot.settings.chrome.recent_project_roots;
         if changed {
             write_json_atomic(&self.settings_path, &snapshot.settings, false)?;
         }
         Ok(RecentProjectsMutationResult {
-            recent_projects: snapshot.settings.chrome.recent_projects,
+            recent_project_roots: snapshot.settings.chrome.recent_project_roots,
             changed,
         })
     }
@@ -340,16 +310,16 @@ impl GlobalConfigStore {
         let _guard = self.lock();
         let mut snapshot = self.read_snapshot_unlocked()?;
         validate_snapshot(&snapshot, catalog)?;
-        if snapshot.settings.chrome.recent_projects.is_empty() {
+        if snapshot.settings.chrome.recent_project_roots.is_empty() {
             return Ok(RecentProjectsMutationResult {
-                recent_projects: Vec::new(),
+                recent_project_roots: Vec::new(),
                 changed: false,
             });
         }
-        snapshot.settings.chrome.recent_projects.clear();
+        snapshot.settings.chrome.recent_project_roots.clear();
         write_json_atomic(&self.settings_path, &snapshot.settings, false)?;
         Ok(RecentProjectsMutationResult {
-            recent_projects: Vec::new(),
+            recent_project_roots: Vec::new(),
             changed: true,
         })
     }
@@ -492,7 +462,7 @@ fn validate_snapshot(
 ) -> Result<(), GlobalSettingsError> {
     validate_workbench(&snapshot.settings.workbench)?;
     validate_canvas_text_appearance(&snapshot.settings.canvas.text_appearance)?;
-    validate_recent_projects(&snapshot.settings.chrome.recent_projects)?;
+    validate_recent_projects(&snapshot.settings.chrome.recent_project_roots)?;
     validate_model_configs(&snapshot.settings.models, catalog)?;
     validate_secret_map(&snapshot.secrets.model_api_keys, catalog)?;
     Ok(())
@@ -537,27 +507,18 @@ fn has_decimal_precision(value: f64, scale: f64) -> bool {
     (scaled - scaled.round()).abs() <= f64::EPSILON * scale * 8.0
 }
 
-fn validate_recent_projects(
-    recent_projects: &[RecentProjectEntry],
-) -> Result<(), GlobalSettingsError> {
-    if recent_projects.len() > RECENT_PROJECT_LIMIT {
-        return validation("Workbench chrome recentProjects contains more than 12 entries.");
+fn validate_recent_projects(recent_project_roots: &[String]) -> Result<(), GlobalSettingsError> {
+    if recent_project_roots.len() > RECENT_PROJECT_LIMIT {
+        return validation("Workbench chrome recentProjectRoots contains more than 12 entries.");
     }
-    for (index, entry) in recent_projects.iter().enumerate() {
-        if entry.project_id.is_empty()
-            || entry.project_id.trim() != entry.project_id
-            || entry.project_root.is_empty()
-            || entry.project_root.trim() != entry.project_root
-            || !Path::new(&entry.project_root).is_absolute()
-        {
+    for (index, root) in recent_project_roots.iter().enumerate() {
+        if root.is_empty() || root.trim() != root || !Path::new(root).is_absolute() {
             return validation(
-                "Workbench chrome recentProjects entries require canonical ids and absolute roots.",
+                "Workbench chrome recentProjectRoots entries must be absolute canonical roots.",
             );
         }
-        if recent_projects[..index].iter().any(|current| {
-            current.project_id == entry.project_id || current.project_root == entry.project_root
-        }) {
-            return validation("Workbench chrome recentProjects contains a duplicate id or root.");
+        if recent_project_roots[..index].contains(root) {
+            return validation("Workbench chrome recentProjectRoots contains a duplicate root.");
         }
     }
     Ok(())
@@ -844,5 +805,33 @@ impl Error for GlobalSettingsError {
             Self::Json(error) => Some(error),
             Self::Validation(_) | Self::Persistence(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn remembering_a_recent_root_is_idempotent() {
+        let home =
+            std::env::temp_dir().join(format!("debrute-global-initialize-{}", Uuid::new_v4()));
+        let project = home.join("project");
+        fs::create_dir_all(&project).unwrap();
+        let project_root = project.to_string_lossy().into_owned();
+        let catalog = ModelCatalog::bundled().unwrap();
+        let store = GlobalConfigStore::new(&home);
+        store
+            .remember_recent_project(&project_root, &catalog)
+            .unwrap();
+        store
+            .remember_recent_project(&project_root, &catalog)
+            .unwrap();
+
+        let (recent, _) = store.read_desktop_presentation(&catalog).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0], project_root);
+        fs::remove_dir_all(home).unwrap();
     }
 }

@@ -37,16 +37,17 @@ Official request fields used by Debrute:
 
 - `model`: the Ark model id, including `doubao-seedream-5-0-260128` and the Lite id `doubao-seedream-5-0-lite-260128`.
 - `prompt`: text instruction for generation or editing.
-- `image`: optional string array for input images. Each Agent value is a
-  Project-relative image path, public HTTP(S) URL, or `data:image` URL. One
+- `image`: optional string array for input images. Each Agent value is an
+  absolute or CLI-working-directory-relative local image path, public HTTP(S)
+  URL, or `data:image` URL. One
   reference still uses a one-element array. Runtime preserves an explicit empty
   array for provider validation rather than rejecting it or rewriting it as
   omission; every present element is resolved and sent in order.
 - `size`: output size such as `2K`, `4K`, or explicit dimensions supported by the service.
 - `output_format`: Seedream 5.0 Lite supports `png` and `jpeg`. Debrute
-  materializes `png` as the normal lossless Project artifact format. The
+  materializes `png` as the normal lossless Model Artifact format. The
   currently readable official contract does not state a stable omission
-  default for this new field, so the value fixes a Project artifact property
+  default for this new field, so the value fixes a Model Artifact property
   rather than copying an unambiguous provider default. Explicit `jpeg` remains
   available when the Agent prefers a smaller lossy file.
 - `response_format`: `url` or `b64_json`; URL results are valid for 24 hours
@@ -55,10 +56,10 @@ Official request fields used by Debrute:
   exceed Runtime's bounded model-JSON response. The official field is optional
   but its current reference does not state an explicit stable default, so this
   fixes Debrute's response transport rather than merely copying an unambiguous
-  provider default. Runtime immediately downloads every URL into the Project,
-  so the expiring URL is not the generated asset.
+  provider default. Runtime immediately downloads every URL into the accepted
+  output directory, so the expiring URL is not the Model Artifact.
   Explicit `b64_json` remains supported: Runtime decodes the returned bytes,
-  detects their real image MIME, and saves the same Project artifact shape. It
+  detects their real image MIME, and saves the same Model Artifact shape. It
   never changes the requested format or retries after one format fails.
 - `watermark`: boolean; `true` adds an AI-generated watermark and `false` omits it.
 - `sequential_image_generation`: `disabled` for single image or `auto` for grouped image generation.
@@ -84,7 +85,7 @@ official single/group controls above. It does not translate an `n` alias into
 unknown field for this exact Debrute Model.
 
 Debrute does not expose the provider's `stream` switch for this model. A Model
-Operation publishes complete Project artifacts rather than partial remote
+Operation publishes complete Model Artifacts rather than partial remote
 response events, so a stream flag would add no Agent capability. Runtime uses
 one bounded non-streaming JSON response and does not maintain an SSE parser or
 stream-to-buffer transition layer.

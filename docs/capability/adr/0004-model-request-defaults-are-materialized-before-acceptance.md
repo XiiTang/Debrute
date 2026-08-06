@@ -4,7 +4,7 @@ Each optional Model Request argument that has a Debrute default declares that
 value in its Debrute Model catalog schema. Runtime materializes omitted defaults
 before accepting a Single or Batch Model Request, so the
 canonical request retained by the Model Operation, consumed by the exact model
-adapter, and recorded in redacted Model Run provenance has one complete shape.
+adapter, and recorded in redacted Model Artifact provenance has one complete shape.
 This was chosen over provider-owned defaults and adapter-local insertion so
 Agent documentation, validation, execution, observation, and provenance cannot
 silently disagree. Explicit Agent values are never replaced, and default
@@ -19,7 +19,7 @@ do not turn default materialization into provider-schema admission.
 A declared default always exists in the canonical request. Materialization is
 recursive and creates a missing object path when a descendant property declares
 a default. Catalog authors therefore reserve defaults for the minimum stable
-values needed to make Debrute's executable request or generated-artifact
+values needed to make Debrute's executable request or Model Artifact
 contract unambiguous, such as a response transport or output file format. A
 creative option, optimization feature, or tuning control that is not always
 intended does not receive a default merely because the provider has one; it

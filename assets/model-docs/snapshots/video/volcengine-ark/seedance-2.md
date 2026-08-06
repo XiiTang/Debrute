@@ -68,4 +68,6 @@ Debrute owns media routing:
 - `audio_driven` maps one audio reference to the driver-audio role.
 - `extend` maps video references to extension or stitching inputs.
 
-Project-local video files require a Debrute upload service that returns a Seedance-reachable URL. Without that service, Debrute returns `video_reference_upload_unavailable` before creating a Seedance task.
+Local video files require a Debrute upload service that returns a
+Seedance-reachable URL. Without that service, Debrute returns
+`video_reference_upload_unavailable` before creating a Seedance task.

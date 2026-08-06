@@ -9,7 +9,7 @@ another Model Kind.
 The Runtime dispatches `tts`, `music`, and `sound-effect` directly into that one
 internal audio execution family. Empty per-Kind forwarding modules would not
 preserve a domain boundary: catalog resolution, the resolved Model Kind, and
-the resulting Artifact Role already retain the three distinct contracts.
+the resulting MIME type and response-order Artifact Index already retain the three distinct contracts.
 
 The closed protocol accepts both `single` and `batch` for all five kinds.
 Kind-specific Batch Item input and result variants remain closed and validated

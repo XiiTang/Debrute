@@ -86,4 +86,4 @@ The Debrute `wan2.7-image` default set currently contains only
 A successful synchronous response includes `output.choices`, each with an
 assistant message whose `content` array contains generated `image` entries.
 Generated image URLs are retained for 24 hours, so Runtime downloads them into
-the Project before completing the Model Operation.
+the accepted output directory before completing the Model Operation.

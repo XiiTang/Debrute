@@ -1,8 +1,4 @@
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::needless_pass_by_value,
-    clippy::too_many_lines
-)]
+#![allow(clippy::missing_errors_doc, clippy::needless_pass_by_value)]
 
 use std::{
     env,
@@ -27,7 +23,6 @@ use crate::{
     cli::{CliResult, CliStreamEvent},
     control::{DesktopOpenResult, RuntimeControlState, WorkbenchRoute},
     executable_path::resolve_executable,
-    generation::GenerationService,
     global::{
         GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent, GlobalRuntimeService,
         ModelCatalog,
@@ -37,10 +32,11 @@ use crate::{
         ModelKind, ModelOperationExecution, ModelOperationService, ModelOperationSnapshot,
         OperationState,
     },
+    model_request::{ModelArtifactProvenanceStore, ModelRequestExecutor},
     photoshop::PhotoshopIntegration,
     project::{
-        CanvasFeedbackArtifacts, GeneratedAssetMetadataService, MediaToolPaths,
-        NativeProjectNodeAdapter, OpenProjectSession, ProjectNativeShellService, ProjectSession,
+        CanvasFeedbackArtifacts, MediaToolPaths, NativeProjectNodeAdapter, OpenProjectSession,
+        ProjectNativeShellService, ProjectPathStateReconciler, ProjectSession,
         ProjectSessionRegistry, ProjectStreamItem, ProjectSubscription, ProjectSyncSnapshot,
         ProjectUse, ProjectUseKind,
     },
@@ -75,8 +71,8 @@ pub trait RuntimeProductHttpService: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProductUpdateInitiator {
-    Desktop { project_id: Option<String> },
-    Browser { project_id: Option<String> },
+    Desktop { canonical_root: Option<String> },
+    Browser { canonical_root: Option<String> },
 }
 
 pub trait RuntimeCliHttpService: Send + Sync {
@@ -136,17 +132,17 @@ impl RuntimeHttpServiceError {
 }
 
 pub struct BoundWorkbenchProject {
-    pub project_id: String,
+    pub binding_id: String,
+    pub canonical_root: String,
     pub response: Value,
 }
 
 pub enum WorkbenchProjectBindingOutcome {
     Bound(BoundWorkbenchProject),
-    FocusedExistingDesktop { project_id: String },
+    FocusedExistingDesktop { canonical_root: String },
 }
 
 struct PreparedWorkbenchProjectBinding {
-    session: Arc<ProjectSession>,
     project_use: ProjectUse,
     response: Value,
     bound_event: Value,
@@ -162,15 +158,15 @@ pub struct WorkbenchRuntimeServices {
     previews: Arc<crate::project::ProjectPreviewService>,
     native_shell: Arc<ProjectNativeShellService>,
     terminals: TerminalService,
-    generated_assets: Arc<GeneratedAssetMetadataService>,
-    model_operations: Arc<ModelOperationService<GenerationService>>,
+    provenance: Arc<ModelArtifactProvenanceStore>,
+    model_operations: Arc<ModelOperationService<ModelRequestExecutor>>,
     photoshop: Arc<PhotoshopIntegration>,
     connections: Arc<WorkbenchConnectionRegistry>,
     connection_closer: WorkbenchConnectionCloser,
     global_events: broadcast::Sender<GlobalRuntimeEvent>,
     activity: Arc<ActivityService>,
     activity_events: broadcast::Sender<ActivityEvent>,
-    working_copies: WorkingCopyStore,
+    working_copies: Arc<WorkingCopyStore>,
 }
 
 impl WorkbenchRuntimeServices {
@@ -230,14 +226,17 @@ impl WorkbenchRuntimeServices {
             ffmpeg: resolve_executable("ffmpeg", &env_path, platform, &path_ext),
             ffprobe: resolve_executable("ffprobe", &env_path, platform, &path_ext),
         };
-        let previews = Arc::new(crate::project::ProjectPreviewService::new(
+        let previews = Arc::new(crate::project::ProjectPreviewService::new_with_home(
             &workers,
             media_tools,
+            &debrute_home,
         ));
         let feedback = Arc::new(
             CanvasFeedbackArtifacts::new(Arc::clone(&previews))
                 .map_err(RuntimeHttpServiceError::from_project)?,
         );
+        let working_copies = Arc::new(WorkingCopyStore::new(&debrute_home));
+        let path_state_reconciler: Arc<dyn ProjectPathStateReconciler> = working_copies.clone();
         let photoshop_holder = Arc::new(Mutex::new(Weak::<PhotoshopIntegration>::new()));
         let project_photoshop_holder = Arc::clone(&photoshop_holder);
         let node_adapter = Arc::new(NativeProjectNodeAdapter::new(Arc::clone(&previews)));
@@ -251,19 +250,21 @@ impl WorkbenchRuntimeServices {
             }
         });
         let projects = match project_watcher {
-            ProjectWatcherComposition::Production => ProjectSessionRegistry::with_change_callback(
+            ProjectWatcherComposition::Production => ProjectSessionRegistry::with_change_callback_and_path_state(
                 &debrute_home,
                 node_adapter,
                 feedback,
                 on_project_change,
+                path_state_reconciler,
             ),
             #[cfg(feature = "test-support")]
             ProjectWatcherComposition::Deterministic => {
-                ProjectSessionRegistry::with_change_callback_and_deterministic_watcher(
+                ProjectSessionRegistry::with_change_callback_and_deterministic_watcher_and_path_state(
                     &debrute_home,
                     node_adapter,
                     feedback,
                     on_project_change,
+                    path_state_reconciler,
                 )
             }
         };
@@ -283,13 +284,13 @@ impl WorkbenchRuntimeServices {
             Arc::clone(&catalog),
             integrations,
         ));
-        let generated_assets = Arc::new(GeneratedAssetMetadataService::new());
-        let generation = Arc::new(GenerationService::new(
+        let provenance = Arc::new(ModelArtifactProvenanceStore::new(&debrute_home));
+        let model_request = Arc::new(ModelRequestExecutor::new(
             Arc::clone(&catalog),
             global_store,
-            Arc::clone(&generated_assets),
+            Arc::clone(&provenance),
         ));
-        let model_operations = Arc::new(ModelOperationService::new(Arc::clone(&generation)));
+        let model_operations = Arc::new(ModelOperationService::new(Arc::clone(&model_request)));
         let activity = Arc::new(ActivityService::new());
         let (activity_events, _) = broadcast::channel(GLOBAL_EVENT_CAPACITY);
         let activity_event_sender = activity_events.clone();
@@ -331,16 +332,7 @@ impl WorkbenchRuntimeServices {
         if !global.install_observer(Arc::new(move |event| {
             match &event.change {
                 GlobalRuntimeChange::RecentProjectsChanged(projects) => {
-                    presentation_state.set_recent_projects(
-                        event.revision,
-                        projects
-                            .iter()
-                            .map(|project| crate::control::RecentProject {
-                                project_id: project.project_id.clone(),
-                                project_root: project.project_root.clone(),
-                            })
-                            .collect(),
-                    );
+                    presentation_state.set_recent_projects(event.revision, projects.clone());
                 }
                 GlobalRuntimeChange::GlobalSettingsChanged(settings) => {
                     presentation_state.set_theme_preference(&settings.workbench.theme_preference);
@@ -368,7 +360,7 @@ impl WorkbenchRuntimeServices {
             previews,
             native_shell,
             terminals,
-            generated_assets,
+            provenance,
             model_operations,
             photoshop,
             connections,
@@ -376,22 +368,15 @@ impl WorkbenchRuntimeServices {
             global_events,
             activity,
             activity_events,
-            working_copies: WorkingCopyStore::new(&debrute_home),
+            working_copies,
         });
         let (recent_projects, theme_preference) = services
             .global
             .desktop_presentation_snapshot()
             .map_err(RuntimeHttpServiceError::from_global)?;
-        services.runtime_state.set_recent_projects(
-            services.global.revision(),
-            recent_projects
-                .iter()
-                .map(|project| crate::control::RecentProject {
-                    project_id: project.project_id.clone(),
-                    project_root: project.project_root.clone(),
-                })
-                .collect(),
-        );
+        services
+            .runtime_state
+            .set_recent_projects(services.global.revision(), recent_projects.clone());
         services
             .runtime_state
             .set_theme_preference(&theme_preference);
@@ -420,15 +405,15 @@ impl WorkbenchRuntimeServices {
 
     pub fn project_activity_context(
         &self,
-        project_id: &str,
+        canonical_root: &str,
     ) -> Result<ActivityProjectContext, RuntimeHttpServiceError> {
         let summary = self
             .projects
-            .get(project_id)
+            .get(Path::new(canonical_root))
             .and_then(|session| session.summary())
             .map_err(RuntimeHttpServiceError::from_project)?;
         Ok(ActivityProjectContext {
-            project_id: summary.project_id,
+            canonical_root: summary.canonical_root,
             project_name: summary.project_name,
         })
     }
@@ -449,12 +434,12 @@ impl WorkbenchRuntimeServices {
     }
 
     #[must_use]
-    pub fn generated_assets(&self) -> &Arc<GeneratedAssetMetadataService> {
-        &self.generated_assets
+    pub fn provenance(&self) -> &Arc<ModelArtifactProvenanceStore> {
+        &self.provenance
     }
 
     #[must_use]
-    pub fn model_operations(&self) -> &Arc<ModelOperationService<GenerationService>> {
+    pub fn model_operations(&self) -> &Arc<ModelOperationService<ModelRequestExecutor>> {
         &self.model_operations
     }
 
@@ -502,7 +487,7 @@ impl WorkbenchRuntimeServices {
                     "Workbench connection is not live.",
                 )
             })?;
-        if context.project_id.is_some() {
+        if context.binding_id.is_some() {
             return Err(RuntimeHttpServiceError::new(
                 StatusCode::CONFLICT,
                 "project_already_bound",
@@ -510,16 +495,6 @@ impl WorkbenchRuntimeServices {
             ));
         }
         self.bind_opened_project(connection_credential, project_root)
-    }
-
-    pub fn bind_connection_project_id(
-        &self,
-        browser_session: &str,
-        connection_credential: &str,
-        project_id: &str,
-    ) -> Result<WorkbenchProjectBindingOutcome, RuntimeHttpServiceError> {
-        let project_root = self.project_root_for_stable_id(project_id)?;
-        self.bind_connection_project_root(browser_session, connection_credential, &project_root)
     }
 
     pub fn replace_connection_project_root(
@@ -545,7 +520,7 @@ impl WorkbenchRuntimeServices {
                 "Desktop Project opens require native Desktop activation.",
             ));
         }
-        let source_project_id = context.project_id.clone().ok_or_else(|| {
+        let source_binding_id = context.binding_id.clone().ok_or_else(|| {
             RuntimeHttpServiceError::new(
                 StatusCode::CONFLICT,
                 "project_not_bound",
@@ -553,28 +528,34 @@ impl WorkbenchRuntimeServices {
             )
         })?;
         let opened = self.open_project_use(project_root, ProjectUseKind::Workbench)?;
-        let target_project_id = opened.session.project_id().to_owned();
+        let canonical_root = canonical_root_string(&opened.session);
         self.remember_recent_project(&opened.session)?;
-        let prepared = self.prepare_project_binding(connection_credential, opened)?;
-        let project_session = Arc::clone(&prepared.session);
+        let target_binding_id = if context.canonical_root.as_deref() == Some(&canonical_root) {
+            source_binding_id.clone()
+        } else {
+            uuid::Uuid::new_v4().to_string()
+        };
+        let prepared =
+            self.prepare_project_binding(connection_credential, opened, target_binding_id.clone())?;
         let outcome = self
             .connections
             .replace_project(
                 connection_credential,
-                &source_project_id,
+                &source_binding_id,
                 context.binding_generation,
                 ProjectBindingCommit {
-                    project_id: target_project_id.clone(),
+                    binding_id: target_binding_id.clone(),
+                    canonical_root: canonical_root.clone(),
                     project_use: prepared.project_use,
                     bound_event: prepared.bound_event,
                 },
             )
             .map_err(project_replacement_error)?;
         if outcome == ProjectBindOutcome::AlreadyBound {
-            project_session.start_background_file_index();
             return Ok(WorkbenchProjectBindingOutcome::Bound(
                 BoundWorkbenchProject {
-                    project_id: target_project_id,
+                    binding_id: source_binding_id,
+                    canonical_root,
                     response: prepared.response,
                 },
             ));
@@ -592,7 +573,7 @@ impl WorkbenchRuntimeServices {
         }
         if let Err(error) = self.start_connection_project_stream(
             connection_credential,
-            &target_project_id,
+            &target_binding_id,
             generation,
             prepared.sender,
             prepared.subscription,
@@ -600,10 +581,10 @@ impl WorkbenchRuntimeServices {
             self.close_workbench_connection(connection_credential);
             return Err(error);
         }
-        project_session.start_background_file_index();
         Ok(WorkbenchProjectBindingOutcome::Bound(
             BoundWorkbenchProject {
-                project_id: target_project_id,
+                binding_id: target_binding_id,
+                canonical_root,
                 response: prepared.response,
             },
         ))
@@ -649,27 +630,6 @@ impl WorkbenchRuntimeServices {
         }
     }
 
-    pub fn project_root_for_stable_id(
-        &self,
-        project_id: &str,
-    ) -> Result<String, RuntimeHttpServiceError> {
-        let (recent_projects, _) = self
-            .global
-            .desktop_presentation_snapshot()
-            .map_err(RuntimeHttpServiceError::from_global)?;
-        recent_projects
-            .into_iter()
-            .find(|project| project.project_id == project_id)
-            .map(|project| project.project_root)
-            .ok_or_else(|| {
-                RuntimeHttpServiceError::new(
-                    StatusCode::NOT_FOUND,
-                    "project_not_discovered",
-                    "Project id is not present in Recent Projects.",
-                )
-            })
-    }
-
     /// Focuses an existing Desktop owner or binds the selected true-empty
     /// Desktop connection, opening a new Project-routed window when neither
     /// destination exists.
@@ -680,13 +640,12 @@ impl WorkbenchRuntimeServices {
     /// or focusing the committed destination fails.
     pub fn activate_desktop_project(
         &self,
-        project_id: &str,
-        project_root: &str,
+        canonical_root: &str,
         preferred_window_key: Option<&str>,
     ) -> Result<DesktopOpenResult, RuntimeHttpServiceError> {
         if self
             .runtime_state
-            .focus_desktop_project_window(project_id)
+            .focus_desktop_project_window(canonical_root)
             .map_err(desktop_activation_error)?
         {
             return Ok(DesktopOpenResult::FocusedExisting);
@@ -697,13 +656,13 @@ impl WorkbenchRuntimeServices {
         else {
             return self
                 .runtime_state
-                .open_desktop_window(&WorkbenchRoute::Project {
-                    project_id: project_id.to_owned(),
+                .open_desktop_window(&WorkbenchRoute::OpenProject {
+                    canonical_root: canonical_root.to_owned(),
                 })
                 .map_err(desktop_activation_error);
         };
         let binding = connection.binding;
-        match self.bind_opened_project(&connection.credential, project_root)? {
+        match self.bind_opened_project(&connection.credential, canonical_root)? {
             WorkbenchProjectBindingOutcome::FocusedExistingDesktop { .. } => {
                 Ok(DesktopOpenResult::FocusedExisting)
             }
@@ -740,20 +699,22 @@ impl WorkbenchRuntimeServices {
                 )
             })?;
         let opened = self.open_project_use(project_root, ProjectUseKind::Workbench)?;
-        let project_id = opened.session.project_id().to_owned();
+        let canonical_root = canonical_root_string(&opened.session);
+        let binding_id = uuid::Uuid::new_v4().to_string();
         self.remember_recent_project(&opened.session)?;
-        if let Some(outcome) = self.desktop_existing_owner_outcome(&context, &project_id)? {
+        if let Some(outcome) = self.desktop_existing_owner_outcome(&context, &canonical_root)? {
             return Ok(outcome);
         }
-        let prepared = self.prepare_project_binding(connection_credential, opened)?;
-        let project_session = Arc::clone(&prepared.session);
+        let prepared =
+            self.prepare_project_binding(connection_credential, opened, binding_id.clone())?;
         let outcome = self
             .connections
             .bind_project(
                 connection_credential,
                 context.binding_generation,
                 ProjectBindingCommit {
-                    project_id: project_id.clone(),
+                    binding_id: binding_id.clone(),
+                    canonical_root: canonical_root.clone(),
                     project_use: prepared.project_use,
                     bound_event: prepared.bound_event,
                 },
@@ -768,8 +729,8 @@ impl WorkbenchRuntimeServices {
                 if let Some(binding) = context.desktop.as_ref() {
                     self.runtime_state.retarget_desktop_window(
                         binding,
-                        crate::control::WorkbenchRoute::Project {
-                            project_id: project_id.clone(),
+                        crate::control::WorkbenchRoute::OpenProject {
+                            canonical_root: canonical_root.clone(),
                         },
                     );
                 }
@@ -779,7 +740,7 @@ impl WorkbenchRuntimeServices {
                 }
                 if let Err(error) = self.start_connection_project_stream(
                     connection_credential,
-                    &project_id,
+                    &binding_id,
                     generation,
                     prepared.sender,
                     prepared.subscription,
@@ -789,10 +750,10 @@ impl WorkbenchRuntimeServices {
                 }
             }
         }
-        project_session.start_background_file_index();
         Ok(WorkbenchProjectBindingOutcome::Bound(
             BoundWorkbenchProject {
-                project_id,
+                binding_id,
+                canonical_root,
                 response: prepared.response,
             },
         ))
@@ -801,12 +762,12 @@ impl WorkbenchRuntimeServices {
     fn desktop_existing_owner_outcome(
         &self,
         requester: &super::WorkbenchConnectionContext,
-        project_id: &str,
+        canonical_root: &str,
     ) -> Result<Option<WorkbenchProjectBindingOutcome>, RuntimeHttpServiceError> {
         if requester.desktop.is_none() {
             return Ok(None);
         }
-        let Some(owner) = self.connections.project_owner(project_id) else {
+        let Some(owner) = self.connections.project_owner(canonical_root) else {
             return Ok(None);
         };
         if owner.credential == requester.credential {
@@ -834,7 +795,7 @@ impl WorkbenchRuntimeServices {
         }
         Ok(Some(
             WorkbenchProjectBindingOutcome::FocusedExistingDesktop {
-                project_id: project_id.to_owned(),
+                canonical_root: canonical_root.to_owned(),
             },
         ))
     }
@@ -845,7 +806,7 @@ impl WorkbenchRuntimeServices {
         kind: ProjectUseKind,
     ) -> Result<OpenProjectSession, RuntimeHttpServiceError> {
         self.projects
-            .open_project_deferred(project_root, kind)
+            .open_project(project_root, kind)
             .map_err(RuntimeHttpServiceError::from_project)
     }
 
@@ -861,7 +822,7 @@ impl WorkbenchRuntimeServices {
             )
         })?;
         self.global
-            .remember_recent_project(session.project_id(), project_root)
+            .remember_recent_project(project_root)
             .map_err(RuntimeHttpServiceError::from_global)?;
         Ok(())
     }
@@ -870,6 +831,7 @@ impl WorkbenchRuntimeServices {
         &self,
         connection_credential: &str,
         opened: OpenProjectSession,
+        binding_id: String,
     ) -> Result<PreparedWorkbenchProjectBinding, RuntimeHttpServiceError> {
         let sender = self
             .connections
@@ -881,7 +843,7 @@ impl WorkbenchRuntimeServices {
                     "Workbench connection ended before Project binding.",
                 )
             })?;
-        let project_id = opened.session.project_id().to_owned();
+        let canonical_root = canonical_root_string(&opened.session);
         let mut subscription = opened
             .session
             .subscribe()
@@ -892,15 +854,14 @@ impl WorkbenchRuntimeServices {
         else {
             unreachable!("Project subscription must begin with its snapshot barrier")
         };
-        let response = public_project_sync(&sync)?;
-        let working_copies = self.working_copies.load(&project_id)?;
+        let response = public_project_sync(&sync, &binding_id)?;
+        let working_copies = self.working_copies.load(&canonical_root)?;
         let bound_event = json!({
             "type": "project.bound",
             "project": response,
             "workingCopies": working_copies
         });
         Ok(PreparedWorkbenchProjectBinding {
-            session: opened.session,
             project_use: opened.project_use,
             response,
             bound_event,
@@ -912,30 +873,31 @@ impl WorkbenchRuntimeServices {
     fn start_connection_project_stream(
         &self,
         connection_credential: &str,
-        project_id: &str,
+        binding_id: &str,
         binding_generation: u64,
         sender: mpsc::Sender<Value>,
         mut subscription: ProjectSubscription,
     ) -> Result<(), RuntimeHttpServiceError> {
         let credential = connection_credential.to_owned();
-        let project_id = project_id.to_owned();
+        let binding_id = binding_id.to_owned();
         let connections = Arc::clone(&self.connections);
         thread::Builder::new()
             .name("debrute-workbench-project-stream".to_owned())
             .spawn(move || {
                 loop {
                     if connections.context(&credential).is_none_or(|context| {
-                        context.project_id.as_deref() != Some(&project_id)
+                        context.binding_id.as_deref() != Some(&binding_id)
                             || context.binding_generation != binding_generation
                     }) {
                         return;
                     }
                     match subscription.recv_timeout(Duration::from_millis(100)) {
                         Ok(Some(item)) => {
-                            let Ok(value) = super::routes::project_stream_value(item) else {
+                            let Ok(value) = super::routes::project_stream_value(item, &binding_id)
+                            else {
                                 connections.close_project_stream(
                                     &credential,
-                                    &project_id,
+                                    &binding_id,
                                     binding_generation,
                                 );
                                 return;
@@ -943,7 +905,7 @@ impl WorkbenchRuntimeServices {
                             if sender.try_send(value).is_err() {
                                 connections.close_project_stream(
                                     &credential,
-                                    &project_id,
+                                    &binding_id,
                                     binding_generation,
                                 );
                                 return;
@@ -953,7 +915,7 @@ impl WorkbenchRuntimeServices {
                         Err(_) => {
                             connections.close_project_stream(
                                 &credential,
-                                &project_id,
+                                &binding_id,
                                 binding_generation,
                             );
                             return;
@@ -973,35 +935,36 @@ impl WorkbenchRuntimeServices {
 
     pub fn put_text_working_copy(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         working_copy: TextWorkingCopy,
     ) -> Result<TextWorkingCopy, RuntimeHttpServiceError> {
-        self.working_copies.put_text(project_id, working_copy)
+        self.working_copies.put_text(canonical_root, working_copy)
     }
 
     pub fn clear_text_working_copy(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         project_relative_path: &str,
     ) -> Result<(), RuntimeHttpServiceError> {
         self.working_copies
-            .clear_text(project_id, project_relative_path)
+            .clear_text(canonical_root, project_relative_path)
     }
 
     pub fn put_feedback_working_copy(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         working_copy: FeedbackWorkingCopy,
     ) -> Result<FeedbackWorkingCopy, RuntimeHttpServiceError> {
-        self.working_copies.put_feedback(project_id, working_copy)
+        self.working_copies
+            .put_feedback(canonical_root, working_copy)
     }
 
     pub fn clear_feedback_working_copy(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         item_id: &str,
     ) -> Result<(), RuntimeHttpServiceError> {
-        self.working_copies.clear_feedback(project_id, item_id)
+        self.working_copies.clear_feedback(canonical_root, item_id)
     }
 
     #[must_use]
@@ -1014,14 +977,32 @@ impl WorkbenchRuntimeServices {
         self.activity_events.subscribe()
     }
 
-    pub fn discover_project(&self, project_root: &str) -> Result<String, RuntimeHttpServiceError> {
-        let opened = self
-            .projects
-            .open_project_deferred(project_root, ProjectUseKind::Request)
-            .map_err(RuntimeHttpServiceError::from_project)?;
-        let project_id = opened.session.project_id().to_owned();
-        self.remember_recent_project(&opened.session)?;
-        Ok(project_id)
+    pub fn preflight_project_root(
+        &self,
+        project_root: &str,
+    ) -> Result<String, RuntimeHttpServiceError> {
+        let requested = Path::new(project_root);
+        let canonical = requested.canonicalize().map_err(|error| {
+            RuntimeHttpServiceError::from_project(if error.kind() == std::io::ErrorKind::NotFound {
+                crate::project::ProjectError::ProjectNotFound(project_root.to_owned())
+            } else {
+                crate::project::ProjectError::from(error)
+            })
+        })?;
+        if !canonical.is_dir() {
+            return Err(RuntimeHttpServiceError::new(
+                StatusCode::BAD_REQUEST,
+                "project_invalid",
+                "Project root must be a directory.",
+            ));
+        }
+        canonical.to_str().map(str::to_owned).ok_or_else(|| {
+            RuntimeHttpServiceError::new(
+                StatusCode::BAD_REQUEST,
+                "project_root_invalid",
+                "Project root is not valid UTF-8.",
+            )
+        })
     }
 
     pub fn integration_operation(
@@ -1108,10 +1089,7 @@ fn publish_model_operation_activity(activity: &ActivityService, snapshot: &Model
     }
     let _ = activity.upsert_task(
         format!("model-operation:{}", snapshot.id),
-        Some(ActivityProjectContext {
-            project_id: snapshot.project_id.clone(),
-            project_name: snapshot.project_name.clone(),
-        }),
+        None,
         ActivityMessage::ModelRequest {
             model_kind,
             item_count,
@@ -1135,6 +1113,10 @@ fn desktop_activation_error(error: impl std::fmt::Display) -> RuntimeHttpService
         "desktop_window_activation_failed",
         error.to_string(),
     )
+}
+
+fn canonical_root_string(session: &ProjectSession) -> String {
+    session.canonical_root().to_owned()
 }
 
 fn project_initial_binding_error(error: ProjectBindError) -> RuntimeHttpServiceError {
@@ -1173,12 +1155,6 @@ fn project_binding_error(
 impl RuntimeHttpServiceError {
     pub(crate) fn from_project(error: crate::project::ProjectError) -> Self {
         let code = error.code();
-        let details = (code == "project_text_file_too_large").then(|| {
-            serde_json::json!({
-                "actualBytes": error.field("actual_bytes").and_then(|value| value.parse::<u64>().ok()),
-                "maxBytes": error.field("max_bytes").and_then(|value| value.parse::<u64>().ok())
-            })
-        });
         Self {
             status: if matches!(
                 error,
@@ -1186,14 +1162,12 @@ impl RuntimeHttpServiceError {
                     | crate::project::ProjectError::ProjectNotOpen(_)
             ) {
                 StatusCode::NOT_FOUND
-            } else if code == "project_text_file_too_large" {
-                StatusCode::PAYLOAD_TOO_LARGE
             } else {
                 StatusCode::BAD_REQUEST
             },
             code,
             message: error.to_string(),
-            details,
+            details: None,
         }
     }
 
@@ -1234,10 +1208,14 @@ impl RuntimeHttpServiceError {
     }
 }
 
-pub fn public_project_sync(sync: &ProjectSyncSnapshot) -> Result<Value, RuntimeHttpServiceError> {
-    let snapshot = public_project_snapshot(&sync.snapshot, &sync.project_id)?;
+pub fn public_project_sync(
+    sync: &ProjectSyncSnapshot,
+    binding_id: &str,
+) -> Result<Value, RuntimeHttpServiceError> {
+    let snapshot = public_project_snapshot(&sync.snapshot, binding_id)?;
     Ok(json!({
-        "projectId": sync.project_id,
+        "bindingId": binding_id,
+        "canonicalRoot": sync.snapshot.canonical_root,
         "projectRevision": sync.project_revision,
         "snapshot": snapshot
     }))
@@ -1245,13 +1223,18 @@ pub fn public_project_sync(sync: &ProjectSyncSnapshot) -> Result<Value, RuntimeH
 
 pub fn public_project_snapshot(
     snapshot: &crate::project::ProjectSnapshot,
-    project_id: &str,
+    binding_id: &str,
 ) -> Result<Value, RuntimeHttpServiceError> {
-    let projections = snapshot
-        .projections
-        .iter()
-        .map(|projection| public_canvas_projection(projection, project_id))
-        .collect::<Result<Vec<_>, _>>()?;
+    let active_canvas_resources = match &snapshot.canvas_workspace {
+        crate::project::CanvasWorkspaceSnapshot::Available {
+            active_canvas_resources,
+            ..
+        } => Some(public_canvas_resource_view(
+            active_canvas_resources,
+            binding_id,
+        )?),
+        crate::project::CanvasWorkspaceSnapshot::Unavailable { .. } => None,
+    };
     let mut value = serde_json::to_value(snapshot)
         .map_err(|error| RuntimeHttpServiceError::serialization(&error))?;
     let Some(object) = value.as_object_mut() else {
@@ -1261,7 +1244,6 @@ pub fn public_project_snapshot(
             "Project snapshot did not serialize to an object.",
         ));
     };
-    object.remove("projectRoot");
     let health = object
         .get_mut("health")
         .and_then(Value::as_object_mut)
@@ -1273,47 +1255,67 @@ pub fn public_project_snapshot(
             )
         })?;
     health.remove("runtimeDataLocation");
-    object.insert("projections".to_owned(), Value::Array(projections));
+    if let Some(active_canvas_resources) = active_canvas_resources {
+        let canvas_workspace = object
+            .get_mut("canvasWorkspace")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| {
+                RuntimeHttpServiceError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "serialization_failed",
+                    "Available Canvas workspace did not serialize to an object.",
+                )
+            })?;
+        canvas_workspace.insert("activeCanvasResources".to_owned(), active_canvas_resources);
+    }
     Ok(value)
 }
 
-pub(crate) fn public_canvas_projection(
-    projection: &crate::project::CanvasProjection,
-    project_id: &str,
+pub(crate) fn public_canvas_resource_view(
+    resources: &crate::project::CanvasResourceView,
+    binding_id: &str,
 ) -> Result<Value, RuntimeHttpServiceError> {
-    let mut public_projection = projection.clone();
-    for node in &mut public_projection.nodes {
-        if let crate::project::CanvasNodeAvailability::Available {
-            file_url, revision, ..
-        } = &mut node.availability
+    let mut public_resources = resources.clone();
+    for resource in &mut public_resources.resources {
+        if let crate::project::CanvasResource::File {
+            project_relative_path,
+            availability,
+            video_presentation,
+            ..
+        } = resource
         {
-            *file_url = project_file_url(project_id, &node.node.project_relative_path, revision);
-        }
-        if let Some(presentation) = &mut node.video_presentation {
-            for track in &mut presentation.text_tracks {
-                track.file_url = Some(project_file_url(
-                    project_id,
-                    &track.project_relative_path,
-                    &track.revision,
-                ));
+            if let crate::project::CanvasNodeAvailability::Available {
+                file_url, revision, ..
+            } = availability.as_mut()
+            {
+                *file_url = project_file_url(binding_id, project_relative_path, revision);
+            }
+            if let Some(presentation) = video_presentation {
+                for track in &mut presentation.text_tracks {
+                    track.file_url = Some(project_file_url(
+                        binding_id,
+                        &track.project_relative_path,
+                        &track.revision,
+                    ));
+                }
             }
         }
     }
-    serde_json::to_value(public_projection)
+    serde_json::to_value(public_resources)
         .map_err(|error| RuntimeHttpServiceError::serialization(&error))
 }
 
-fn project_file_url(project_id: &str, project_relative_path: &str, revision: &str) -> String {
+fn project_file_url(binding_id: &str, project_relative_path: &str, revision: &str) -> String {
     format!(
-        "/api/projects/{}/files/raw/{}?v={}",
-        percent_encode_segment(project_id),
+        "/api/workbench/bindings/{}/files/raw/{}?v={}",
+        percent_encode_segment(binding_id),
         encode_project_path(project_relative_path),
         percent_encode_segment(revision)
     )
 }
 
 pub(crate) fn project_response(
-    session: &ProjectSession,
+    binding_id: &str,
     revision: u64,
     body: Value,
 ) -> Result<Value, RuntimeHttpServiceError> {
@@ -1324,10 +1326,7 @@ pub(crate) fn project_response(
             "Project command response did not serialize to an object.",
         ));
     };
-    object.insert(
-        "projectId".to_owned(),
-        Value::String(session.project_id().to_owned()),
-    );
+    object.insert("bindingId".to_owned(), Value::String(binding_id.to_owned()));
     object.insert("projectRevision".to_owned(), Value::from(revision));
     Ok(Value::Object(object))
 }
@@ -1367,9 +1366,6 @@ fn current_platform() -> Platform {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::StatusCode;
-    use serde_json::json;
-
     use crate::{
         activity::{ActivityPayload, ActivityProgress, ActivityService, ActivityTaskStatus},
         model_operation::{
@@ -1377,28 +1373,7 @@ mod tests {
         },
     };
 
-    use super::{RuntimeHttpServiceError, publish_model_operation_activity};
-
-    #[test]
-    fn oversized_project_text_maps_to_typed_public_details() {
-        let project_error = crate::project::ProjectError::service_with_fields(
-            "project_text_file_too_large",
-            "too large",
-            [
-                ("actual_bytes".to_owned(), "1048577".to_owned()),
-                ("max_bytes".to_owned(), "1048576".to_owned()),
-            ],
-        );
-
-        let error = RuntimeHttpServiceError::from_project(project_error);
-
-        assert_eq!(error.status, StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(error.code, "project_text_file_too_large");
-        assert_eq!(
-            error.details,
-            Some(json!({ "actualBytes": 1_048_577, "maxBytes": 1_048_576 }))
-        );
-    }
+    use super::publish_model_operation_activity;
 
     #[test]
     fn model_operation_activity_uses_real_batch_progress_and_indeterminate_cancelling() {
@@ -1406,9 +1381,6 @@ mod tests {
         let snapshot = |state, succeeded, failed| ModelOperationSnapshot {
             id: "operation-1".to_owned(),
             model_kind: ModelKind::Video,
-            project_root: "/tmp/project".to_owned(),
-            project_id: "project-1".to_owned(),
-            project_name: "Project One".to_owned(),
             state,
             accepted_at: "2026-08-02T00:00:00Z".to_owned(),
             execution: ModelOperationExecution::Batch {
@@ -1420,6 +1392,7 @@ mod tests {
                 failed,
             },
             log: None,
+            diagnostics: Vec::new(),
         };
 
         publish_model_operation_activity(&activity, &snapshot(OperationState::Running, 1, 0));

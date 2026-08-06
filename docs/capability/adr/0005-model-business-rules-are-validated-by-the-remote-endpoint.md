@@ -39,8 +39,8 @@ resource limit.
 Runtime applies these checks while resolving each input, before avoidable
 allocation, decoding, Project reads, or remote download where the size is
 known, and rejects rather than truncates an oversized request. Input-media
-downloads use this input contract and do not consume Generated Asset download
-accounting. Generated Assets retain their independent 256 MiB per-asset and
+downloads use this input contract and do not consume Model Artifact download
+accounting. Model Artifacts retain their independent 256 MiB per-asset and
 512 MiB per Model Operation limits.
 
 The Catalog is descriptive documentation, not an executable provider-schema
@@ -74,4 +74,4 @@ an error-text size limit. It does not add a parallel provider-error object,
 expose arbitrary response headers or the complete response body, replace a
 useful remote rejection with a generic model-business-error message, change
 arguments, or submit a fallback request. The otherwise-unobservable
-`GenerationError.details` and `GenerationError.logs` layers are removed.
+The Operation exposes no parallel details/logs error layers.

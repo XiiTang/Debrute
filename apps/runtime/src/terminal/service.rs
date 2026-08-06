@@ -183,7 +183,7 @@ pub struct TerminalTopologySubscription {
     pub snapshot: TerminalTopologySnapshot,
     receiver: mpsc::Receiver<TerminalTopologySnapshot>,
     service: Weak<TerminalServiceInner>,
-    project_id: String,
+    canonical_root: String,
     observer_id: Uuid,
 }
 
@@ -225,7 +225,7 @@ impl Drop for TerminalTopologySubscription {
             .projects
             .lock()
             .expect("Terminal project registry lock poisoned");
-        if let Some(project) = projects.get_mut(&self.project_id) {
+        if let Some(project) = projects.get_mut(&self.canonical_root) {
             project.observers.remove(&self.observer_id);
         }
     }
@@ -277,7 +277,7 @@ struct TerminalHandle {
 
 struct TerminalReservation {
     service: Weak<TerminalServiceInner>,
-    project_id: String,
+    canonical_root: String,
     active: bool,
 }
 
@@ -298,22 +298,22 @@ impl TerminalService {
     /// Returns a typed error for an invalid Project/cwd, PTY failure, or exhausted topology.
     pub fn create(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         cwd_project_relative_path: &str,
     ) -> Result<TerminalSessionView, TerminalError> {
         let session = self
             .inner
             .registry
-            .get(project_id)
+            .get(Path::new(canonical_root))
             .map_err(project_terminal_error)?;
         let cwd = resolve_terminal_cwd(session.root(), cwd_project_relative_path)?;
         let cols = DEFAULT_COLS;
         let rows = DEFAULT_ROWS;
-        let mut reservation = self.reserve_terminal(project_id)?;
+        let mut reservation = self.reserve_terminal(canonical_root)?;
         let project_use = self
             .inner
             .registry
-            .acquire_use(project_id, ProjectUseKind::RunningTerminal)
+            .acquire_use(Path::new(canonical_root), ProjectUseKind::RunningTerminal)
             .map_err(project_terminal_error)?;
         let id = Uuid::new_v4().to_string();
         let now = crate::now_rfc3339();
@@ -337,7 +337,7 @@ impl TerminalService {
         let terminal = spawn_terminal(view, cwd, project_use)?;
         let result = terminal.view();
         let mut projects = lock(&self.inner.projects, "Terminal project registry");
-        let project = projects.entry(project_id.to_owned()).or_default();
+        let project = projects.entry(canonical_root.to_owned()).or_default();
         reservation.commit(project);
         project.sessions.insert(id, terminal);
         if let Err(error) = publish_topology(project) {
@@ -351,7 +351,7 @@ impl TerminalService {
         Ok(result)
     }
 
-    fn reserve_terminal(&self, project_id: &str) -> Result<TerminalReservation, TerminalError> {
+    fn reserve_terminal(&self, canonical_root: &str) -> Result<TerminalReservation, TerminalError> {
         let mut projects = self
             .inner
             .projects
@@ -359,7 +359,7 @@ impl TerminalService {
             .expect("Terminal project registry lock poisoned");
         let mut retired = Vec::new();
         loop {
-            let project = projects.entry(project_id.to_owned()).or_default();
+            let project = projects.entry(canonical_root.to_owned()).or_default();
             if project.sessions.len() + project.reservations < MAX_TERMINALS_PER_PROJECT {
                 break;
             }
@@ -367,7 +367,7 @@ impl TerminalService {
                 return Err(TerminalError::new(
                     "terminal_project_limit_reached",
                     format!(
-                        "Project Terminal limit reached ({MAX_TERMINALS_PER_PROJECT}): {project_id}"
+                        "Project Terminal limit reached ({MAX_TERMINALS_PER_PROJECT}): {canonical_root}"
                     ),
                 ));
             };
@@ -384,7 +384,7 @@ impl TerminalService {
             if runtime_count < MAX_TERMINALS_PER_RUNTIME {
                 break;
             }
-            let Some((retired_project_id, terminal_id)) =
+            let Some((retired_canonical_root, terminal_id)) =
                 oldest_runtime_retired_terminal(&projects)
             else {
                 return Err(TerminalError::new(
@@ -392,21 +392,21 @@ impl TerminalService {
                     format!("Runtime Terminal limit reached ({MAX_TERMINALS_PER_RUNTIME})."),
                 ));
             };
-            if let Some(project) = projects.get_mut(&retired_project_id)
+            if let Some(project) = projects.get_mut(&retired_canonical_root)
                 && let Some(terminal) = project.sessions.remove(&terminal_id)
             {
                 retired.push(terminal);
                 publish_topology(project)?;
             }
         }
-        let project = projects.entry(project_id.to_owned()).or_default();
+        let project = projects.entry(canonical_root.to_owned()).or_default();
         project.reservations = project
             .reservations
             .checked_add(1)
             .expect("Terminal reservation count overflow");
         let reservation = TerminalReservation {
             service: Arc::downgrade(&self.inner),
-            project_id: project_id.to_owned(),
+            canonical_root: canonical_root.to_owned(),
             active: true,
         };
         drop(projects);
@@ -420,11 +420,11 @@ impl TerminalService {
     /// Returns a typed error when the Terminal is absent or its actor is unavailable.
     pub fn observe(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         terminal_id: &str,
         observer_id: impl Into<String>,
     ) -> Result<TerminalObservation, TerminalError> {
-        let terminal = self.terminal(project_id, terminal_id)?;
+        let terminal = self.terminal(canonical_root, terminal_id)?;
         let observer_id = observer_id.into();
         validate_observer_id(&observer_id)?;
         let observation_id = Uuid::new_v4();
@@ -503,7 +503,7 @@ impl TerminalService {
     /// Returns an error for a missing observation, stale sequence, stopped Terminal, or PTY failure.
     pub fn write_input(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         terminal_id: &str,
         observer_id: &str,
         sequence: u64,
@@ -516,7 +516,7 @@ impl TerminalService {
                 format!("Terminal input exceeds the {MAX_TERMINAL_INPUT_BYTES}-byte frame limit."),
             ));
         }
-        let terminal = self.terminal(project_id, terminal_id)?;
+        let terminal = self.terminal(canonical_root, terminal_id)?;
         let (reply, result) = mpsc::channel();
         terminal.send(ActorCommand::Input {
             observer_id: observer_id.to_owned(),
@@ -541,7 +541,7 @@ impl TerminalService {
     /// Returns an error for invalid dimensions, a missing observation, or PTY failure.
     pub fn resize(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         terminal_id: &str,
         observer_id: &str,
         cols: u16,
@@ -549,7 +549,7 @@ impl TerminalService {
     ) -> Result<TerminalSessionView, TerminalError> {
         validate_observer_id(observer_id)?;
         validate_dimensions(cols, rows)?;
-        let terminal = self.terminal(project_id, terminal_id)?;
+        let terminal = self.terminal(canonical_root, terminal_id)?;
         let (reply, result) = mpsc::channel();
         terminal.send(ActorCommand::Resize {
             observer_id: observer_id.to_owned(),
@@ -575,12 +575,12 @@ impl TerminalService {
     /// Returns an error if any affected Terminal actor cannot acknowledge the detach.
     pub fn detach_attachment(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         observer_id: &str,
     ) -> Result<(), TerminalError> {
         validate_observer_id(observer_id)?;
         let terminals = lock(&self.inner.projects, "Terminal project registry")
-            .get(project_id)
+            .get(canonical_root)
             .map(|project| project.sessions.values().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         for terminal in terminals {
@@ -606,11 +606,11 @@ impl TerminalService {
     ///
     /// # Errors
     /// Returns a typed error when the Terminal does not exist or process-tree cleanup fails.
-    pub fn close(&self, project_id: &str, terminal_id: &str) -> Result<(), TerminalError> {
-        let terminal = self.terminal(project_id, terminal_id)?;
+    pub fn close(&self, canonical_root: &str, terminal_id: &str) -> Result<(), TerminalError> {
+        let terminal = self.terminal(canonical_root, terminal_id)?;
         terminal.close()?;
         let mut projects = lock(&self.inner.projects, "Terminal project registry");
-        if let Some(project) = projects.get_mut(project_id) {
+        if let Some(project) = projects.get_mut(canonical_root) {
             project.sessions.remove(terminal_id);
             publish_topology(project)?;
         }
@@ -623,14 +623,14 @@ impl TerminalService {
     /// Returns an error when the Project is not open.
     pub fn subscribe_topology(
         &self,
-        project_id: &str,
+        canonical_root: &str,
     ) -> Result<TerminalTopologySubscription, TerminalError> {
         self.inner
             .registry
-            .get(project_id)
+            .get(Path::new(canonical_root))
             .map_err(project_terminal_error)?;
         let mut projects = lock(&self.inner.projects, "Terminal project registry");
-        let project = projects.entry(project_id.to_owned()).or_default();
+        let project = projects.entry(canonical_root.to_owned()).or_default();
         if project.observers.len() >= MAX_TERMINAL_TOPOLOGY_OBSERVERS {
             return Err(TerminalError::new(
                 "terminal_topology_observer_limit_reached",
@@ -645,7 +645,7 @@ impl TerminalService {
             snapshot,
             receiver,
             service: Arc::downgrade(&self.inner),
-            project_id: project_id.to_owned(),
+            canonical_root: canonical_root.to_owned(),
             observer_id,
         })
     }
@@ -658,10 +658,10 @@ impl TerminalService {
     pub fn close_all(&self) -> Result<(), TerminalError> {
         let terminals = lock(&self.inner.projects, "Terminal project registry")
             .iter()
-            .flat_map(|(project_id, project)| {
+            .flat_map(|(canonical_root, project)| {
                 project.sessions.iter().map(|(terminal_id, terminal)| {
                     (
-                        project_id.clone(),
+                        canonical_root.clone(),
                         terminal_id.clone(),
                         Arc::clone(terminal),
                     )
@@ -669,11 +669,11 @@ impl TerminalService {
             })
             .collect::<Vec<_>>();
         let mut first_error = None;
-        for (project_id, terminal_id, terminal) in terminals {
+        for (canonical_root, terminal_id, terminal) in terminals {
             match terminal.close() {
                 Ok(()) => {
                     let mut projects = lock(&self.inner.projects, "Terminal project registry");
-                    if let Some(project) = projects.get_mut(&project_id) {
+                    if let Some(project) = projects.get_mut(&canonical_root) {
                         project.sessions.remove(&terminal_id);
                         if let Err(error) = publish_topology(project)
                             && first_error.is_none()
@@ -691,7 +691,7 @@ impl TerminalService {
 
     fn terminal(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         terminal_id: &str,
     ) -> Result<Arc<TerminalHandle>, TerminalError> {
         let projects = self
@@ -700,7 +700,7 @@ impl TerminalService {
             .lock()
             .expect("Terminal project registry lock poisoned");
         projects
-            .get(project_id)
+            .get(canonical_root)
             .and_then(|project| project.sessions.get(terminal_id))
             .cloned()
             .ok_or_else(|| {
@@ -753,10 +753,10 @@ fn oldest_runtime_retired_terminal(
     projects: &HashMap<String, ProjectTerminals>,
 ) -> Option<(String, String)> {
     let mut retired = Vec::new();
-    for (project_id, project) in projects {
+    for (canonical_root, project) in projects {
         for terminal in project.sessions.values() {
             if let Some(key) = terminal.retired_sort_key() {
-                retired.push((key, project_id.clone(), terminal.id.clone()));
+                retired.push((key, canonical_root.clone(), terminal.id.clone()));
             }
         }
     }
@@ -764,7 +764,7 @@ fn oldest_runtime_retired_terminal(
     retired
         .into_iter()
         .next()
-        .map(|(_, project_id, terminal_id)| (project_id, terminal_id))
+        .map(|(_, canonical_root, terminal_id)| (canonical_root, terminal_id))
 }
 
 fn publish_topology(project: &mut ProjectTerminals) -> Result<(), TerminalError> {
@@ -934,7 +934,7 @@ impl Drop for TerminalReservation {
             .projects
             .lock()
             .expect("Terminal project registry lock poisoned");
-        if let Some(project) = projects.get_mut(&self.project_id) {
+        if let Some(project) = projects.get_mut(&self.canonical_root) {
             project.reservations = project
                 .reservations
                 .checked_sub(1)
@@ -1141,7 +1141,7 @@ fn spawn_terminal(
 }
 
 // PTY acquisition and every rollback edge form one startup transaction.
-#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value)]
 fn start_terminal_actor(
     mut view: TerminalSessionView,
     shared_view: Arc<Mutex<TerminalSessionView>>,
@@ -1373,7 +1373,7 @@ fn read_terminal_output(
 }
 
 #[allow(clippy::needless_pass_by_value)] // The actor thread owns its receiver.
-#[allow(clippy::too_many_lines)] // One actor match is the serialized PTY authority.
+// One actor match is the serialized PTY authority.
 fn run_terminal_actor(mut actor: TerminalActor, receiver: mpsc::Receiver<ActorCommand>) {
     let mut pending = VecDeque::new();
     loop {
@@ -2128,8 +2128,8 @@ fn terminal_test_project_service() -> (PathBuf, ProjectSessionRegistry, String, 
     let opened = registry
         .open_project(&root, ProjectUseKind::Workbench)
         .expect("project should open");
-    let project_id = opened.session.project_id().to_owned();
-    (root, registry, project_id, opened.project_use)
+    let canonical_root = opened.session.canonical_root().to_owned();
+    (root, registry, canonical_root, opened.project_use)
 }
 
 #[cfg(test)]
@@ -2271,17 +2271,17 @@ mod writer_tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn terminal_actor_remains_closable_when_the_pty_writer_queue_is_full() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         let _observation = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("terminal should be observed");
         service
             .write_input(
-                &project_id,
+                &canonical_root,
                 &session.id,
                 "hub",
                 1,
@@ -2289,7 +2289,7 @@ mod writer_tests {
             )
             .expect("fixture command should enter cmd.exe");
         let terminal = service
-            .terminal(&project_id, &session.id)
+            .terminal(&canonical_root, &session.id)
             .expect("terminal should remain registered");
         let input = "x".repeat(MAX_TERMINAL_INPUT_BYTES);
         for sequence in 2..=80 {
@@ -2336,20 +2336,20 @@ mod writer_tests {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]
     fn writer_failure_marks_the_terminal_failed_and_terminates_its_process_tree() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         let observation = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("terminal should be observed");
         assert_eq!(
             observation.session, session,
             "observation must expose the session state from the checkpoint barrier"
         );
         let terminal = service
-            .terminal(&project_id, &session.id)
+            .terminal(&canonical_root, &session.id)
             .expect("terminal should remain registered");
 
         terminal
@@ -2398,7 +2398,7 @@ mod writer_tests {
         );
 
         service
-            .close(&project_id, &session.id)
+            .close(&canonical_root, &session.id)
             .expect("failed terminal should close");
         drop(open_use);
         registry.close().expect("registry should close");
@@ -2435,28 +2435,34 @@ mod tests {
 
     #[test]
     fn terminal_requires_observation_and_acks_ordered_input() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         assert_eq!(session.status, TerminalSessionStatus::Running);
         assert_eq!(session.cwd_project_relative_path, "");
         assert_eq!((session.cols, session.rows), (DEFAULT_COLS, DEFAULT_ROWS));
         assert_eq!(
             service
-                .write_input(&project_id, &session.id, "hub", 1, "echo no\n".to_owned())
+                .write_input(
+                    &canonical_root,
+                    &session.id,
+                    "hub",
+                    1,
+                    "echo no\n".to_owned()
+                )
                 .expect_err("unobserved input should fail")
                 .code(),
             "terminal_not_observed"
         );
         let observation = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("terminal should be observed");
         assert_eq!(
             service
                 .write_input(
-                    &project_id,
+                    &canonical_root,
                     &session.id,
                     "hub",
                     1,
@@ -2467,7 +2473,7 @@ mod tests {
         );
         assert_eq!(
             service
-                .write_input(&project_id, &session.id, "hub", 1, String::new())
+                .write_input(&canonical_root, &session.id, "hub", 1, String::new())
                 .expect_err("duplicate input should fail")
                 .code(),
             "terminal_input_out_of_order"
@@ -2488,7 +2494,7 @@ mod tests {
         });
         assert!(output.is_some());
         service
-            .close(&project_id, &session.id)
+            .close(&canonical_root, &session.id)
             .expect("terminal should close");
         service.close_all().expect("all terminals should close");
         drop(open_use);
@@ -2498,16 +2504,16 @@ mod tests {
 
     #[test]
     fn natural_exit_retires_the_actor_and_releases_the_running_project_use() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         let observation = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("terminal should be observed");
         service
-            .write_input(&project_id, &session.id, "hub", 1, "exit\n".to_owned())
+            .write_input(&canonical_root, &session.id, "hub", 1, "exit\n".to_owned())
             .expect("exit input should be acknowledged");
         let exited = (0..50).any(|_| {
             matches!(
@@ -2519,7 +2525,7 @@ mod tests {
         });
         assert!(exited, "terminal should publish its natural exit");
         let retired_observation = service
-            .observe(&project_id, &session.id, "late-hub")
+            .observe(&canonical_root, &session.id, "late-hub")
             .expect("retired terminal should expose its final observation");
         assert_eq!(
             retired_observation.session.status,
@@ -2528,7 +2534,7 @@ mod tests {
         );
         drop(open_use);
         let released = (0..50).any(|_| {
-            if registry.get(&project_id).is_err() {
+            if registry.get(Path::new(&canonical_root)).is_err() {
                 true
             } else {
                 thread::sleep(Duration::from_millis(20));
@@ -2540,7 +2546,7 @@ mod tests {
             "natural exit must release the RunningTerminal project_use"
         );
         service
-            .close(&project_id, &session.id)
+            .close(&canonical_root, &session.id)
             .expect("retired terminal record should close");
         registry.close().expect("registry should close");
         fs::remove_dir_all(root).expect("fixture should clean up");
@@ -2549,17 +2555,17 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn natural_exit_retires_even_when_a_background_child_held_the_pty() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         let _observation = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("terminal should be observed");
         service
             .write_input(
-                &project_id,
+                &canonical_root,
                 &session.id,
                 "hub",
                 1,
@@ -2568,7 +2574,7 @@ mod tests {
             .expect("exit input should be acknowledged");
         drop(open_use);
         let released = (0..150).any(|_| {
-            if registry.get(&project_id).is_err() {
+            if registry.get(Path::new(&canonical_root)).is_err() {
                 true
             } else {
                 thread::sleep(Duration::from_millis(20));
@@ -2580,7 +2586,7 @@ mod tests {
             "a background PTY holder must not retain the actor or Project project_use"
         );
         service
-            .close(&project_id, &session.id)
+            .close(&canonical_root, &session.id)
             .expect("retired terminal record should close");
         registry.close().expect("registry should close");
         fs::remove_dir_all(root).expect("fixture should clean up");
@@ -2588,17 +2594,17 @@ mod tests {
 
     #[test]
     fn terminal_capacity_is_reserved_before_spawning_and_released_on_failure() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let reservations = (0..MAX_TERMINALS_PER_PROJECT)
-            .map(|_| service.reserve_terminal(&project_id).unwrap())
+            .map(|_| service.reserve_terminal(&canonical_root).unwrap())
             .collect::<Vec<_>>();
-        let Err(error) = service.reserve_terminal(&project_id) else {
+        let Err(error) = service.reserve_terminal(&canonical_root) else {
             panic!("the pre-spawn Project cap should reject the next reservation");
         };
         assert_eq!(error.code(), "terminal_project_limit_reached");
         drop(reservations);
-        drop(service.reserve_terminal(&project_id).unwrap());
+        drop(service.reserve_terminal(&canonical_root).unwrap());
         drop(open_use);
         registry.close().unwrap();
         fs::remove_dir_all(root).unwrap();
@@ -2610,7 +2616,7 @@ mod tests {
         let mut project = ProjectTerminals::default();
         let mut reservation = TerminalReservation {
             service: Weak::new(),
-            project_id: "project-1".to_owned(),
+            canonical_root: "project-1".to_owned(),
             active: true,
         };
 
@@ -2619,20 +2625,20 @@ mod tests {
 
     #[test]
     fn topology_is_independently_revisioned() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let topology = service
-            .subscribe_topology(&project_id)
+            .subscribe_topology(&canonical_root)
             .expect("topology should subscribe");
         assert_eq!(topology.snapshot.revision, 0);
         let session = service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         let created = topology.recv().expect("create topology should publish");
         assert_eq!(created.revision, 1);
         assert_eq!(created.sessions.len(), 1);
         service
-            .close(&project_id, &session.id)
+            .close(&canonical_root, &session.id)
             .expect("terminal should close");
         let closed = topology.recv().expect("close topology should publish");
         assert_eq!(closed.revision, 2);
@@ -2644,22 +2650,22 @@ mod tests {
 
     #[test]
     fn observer_replacement_is_generation_safe_and_attachment_detach_releases_sequence() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         let session = service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         let first = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("first observation should start");
         let second = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("replacement observation should start");
         drop(first);
         assert_eq!(
             service
                 .write_input(
-                    &project_id,
+                    &canonical_root,
                     &session.id,
                     "hub",
                     1,
@@ -2670,31 +2676,31 @@ mod tests {
         );
         drop(second);
         let third = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("same attachment should observe again");
         assert_eq!(
             service
-                .write_input(&project_id, &session.id, "hub", 1, String::new())
+                .write_input(&canonical_root, &session.id, "hub", 1, String::new())
                 .expect_err("the same attachment keeps its input sequence")
                 .code(),
             "terminal_input_out_of_order"
         );
         drop(third);
         service
-            .detach_attachment(&project_id, "hub")
+            .detach_attachment(&canonical_root, "hub")
             .expect("attachment state should detach");
         let fourth = service
-            .observe(&project_id, &session.id, "hub")
+            .observe(&canonical_root, &session.id, "hub")
             .expect("a new attachment should observe");
         assert_eq!(
             service
-                .write_input(&project_id, &session.id, "hub", 1, String::new())
+                .write_input(&canonical_root, &session.id, "hub", 1, String::new())
                 .expect("a new attachment starts a new input sequence"),
             1
         );
         drop(fourth);
         service
-            .close(&project_id, &session.id)
+            .close(&canonical_root, &session.id)
             .expect("terminal should close");
         drop(open_use);
         registry.close().expect("registry should close");
@@ -2703,12 +2709,12 @@ mod tests {
 
     #[test]
     fn terminal_dimensions_and_input_frames_are_bounded() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         assert_eq!(
             service
                 .resize(
-                    &project_id,
+                    &canonical_root,
                     "missing",
                     "hub",
                     MAX_TERMINAL_COLS + 1,
@@ -2721,7 +2727,7 @@ mod tests {
         assert_eq!(
             service
                 .write_input(
-                    &project_id,
+                    &canonical_root,
                     "missing",
                     "hub",
                     1,
@@ -2738,10 +2744,10 @@ mod tests {
 
     #[test]
     fn dropping_the_service_closes_terminal_project_uses() {
-        let (root, registry, project_id, open_use) = terminal_test_project_service();
+        let (root, registry, canonical_root, open_use) = terminal_test_project_service();
         let service = TerminalService::new(registry.clone());
         service
-            .create(&project_id, "")
+            .create(&canonical_root, "")
             .expect("terminal should start");
         drop(service);
         drop(open_use);

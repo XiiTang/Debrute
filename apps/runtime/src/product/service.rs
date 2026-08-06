@@ -83,9 +83,9 @@ enum InstallFailureStage {
     Committing,
 }
 
-fn resume_target(project_id: Option<String>) -> ResumeTarget {
-    project_id.map_or(ResumeTarget::Root, |project_id| ResumeTarget::Project {
-        project_id,
+fn resume_target(canonical_root: Option<String>) -> ResumeTarget {
+    canonical_root.map_or(ResumeTarget::Root, |canonical_root| ResumeTarget::Project {
+        canonical_root,
     })
 }
 
@@ -152,7 +152,10 @@ impl RuntimeProductService {
     ///
     /// Returns [`RuntimeHttpServiceError`] if the fixed official release client
     /// cannot be initialized.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the single Runtime composition root keeps Product identity and its owned runtime dependencies explicit"
+    )]
     pub fn official(
         current_version: String,
         platform: ReleasePlatform,
@@ -200,33 +203,6 @@ impl RuntimeProductService {
                 current_version: current_version.clone(),
             },
         };
-        Ok(Self::new(
-            current_version,
-            platform,
-            architecture,
-            debrute_home,
-            store,
-            native,
-            runtime,
-            global,
-            source,
-            initial_update,
-        ))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        current_version: String,
-        platform: ReleasePlatform,
-        architecture: ReleaseArchitecture,
-        debrute_home: PathBuf,
-        store: Arc<ProductStore>,
-        native: NativeUpdatePlatform,
-        runtime: Arc<RuntimeControlState>,
-        global: Arc<GlobalRuntimeService>,
-        source: Arc<dyn ProductReleaseSource>,
-        initial_update: UpdateState,
-    ) -> Arc<Self> {
         let service = Arc::new(Self {
             projection: Arc::new(Mutex::new(ProductProjection {
                 update: initial_update,
@@ -246,7 +222,7 @@ impl RuntimeProductService {
             automatic_discovery_in_flight: AtomicBool::new(false),
         });
         service.publish_state();
-        service
+        Ok(service)
     }
 
     fn product_state(&self) -> Value {
@@ -502,11 +478,11 @@ impl RuntimeProductService {
 
     fn resolve_resume_source(initiator: ProductUpdateInitiator) -> ProductResumeSource {
         match initiator {
-            ProductUpdateInitiator::Desktop { project_id } => ProductResumeSource::Desktop {
-                target: resume_target(project_id),
+            ProductUpdateInitiator::Desktop { canonical_root } => ProductResumeSource::Desktop {
+                target: resume_target(canonical_root),
             },
-            ProductUpdateInitiator::Browser { project_id } => ProductResumeSource::Browser {
-                target: resume_target(project_id),
+            ProductUpdateInitiator::Browser { canonical_root } => ProductResumeSource::Browser {
+                target: resume_target(canonical_root),
             },
         }
     }
@@ -676,7 +652,6 @@ impl RuntimeProductHttpService for RuntimeProductService {
         Ok(self.perform_check(DiscoveryOrigin::Manual))
     }
 
-    #[allow(clippy::too_many_lines)]
     fn apply(
         self: Arc<Self>,
         input: &Value,
@@ -829,32 +804,36 @@ mod tests {
         for (initiator, expected) in [
             (
                 ProductUpdateInitiator::Desktop {
-                    project_id: Some("desktop-project".to_owned()),
+                    canonical_root: Some("desktop-project".to_owned()),
                 },
                 ResumeIntent::Desktop {
                     target: ResumeTarget::Project {
-                        project_id: "desktop-project".to_owned(),
+                        canonical_root: "desktop-project".to_owned(),
                     },
                 },
             ),
             (
-                ProductUpdateInitiator::Desktop { project_id: None },
+                ProductUpdateInitiator::Desktop {
+                    canonical_root: None,
+                },
                 ResumeIntent::Desktop {
                     target: ResumeTarget::Root,
                 },
             ),
             (
                 ProductUpdateInitiator::Browser {
-                    project_id: Some("browser-project".to_owned()),
+                    canonical_root: Some("browser-project".to_owned()),
                 },
                 ResumeIntent::Browser {
                     target: ResumeTarget::Project {
-                        project_id: "browser-project".to_owned(),
+                        canonical_root: "browser-project".to_owned(),
                     },
                 },
             ),
             (
-                ProductUpdateInitiator::Browser { project_id: None },
+                ProductUpdateInitiator::Browser {
+                    canonical_root: None,
+                },
                 ResumeIntent::Browser {
                     target: ResumeTarget::Root,
                 },

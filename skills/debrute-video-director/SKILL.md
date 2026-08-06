@@ -1,6 +1,6 @@
 ---
 name: debrute-video-director
-description: Use for any task related to video generation or video editing in a Debrute project through the debrute command.
+description: Use for any task related to video generation or video editing through the debrute command.
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
@@ -18,26 +18,29 @@ Use `debrute` as the execution interface for video generation and editing.
 - Build Model `arguments` from the returned Debrute schema and documentation.
   For Seedance adapters use the documented `prompt`, `intent`, and `references`;
   do not assemble provider `content` arrays or include API keys.
-- Submit strict JSONL with
-  `debrute request single /path/to/project --input video-request.jsonl` or use
-  `request batch` for multiple video requests.
-- Optional `output` is separate from `arguments`; specify a Project-relative
-  directory and extension-free filename. Runtime derives the actual extension.
-- Video Model Runs default to `30m`; `--timeout` accepts only positive `s`, `m`,
+- Submit Single through strict JSONL or direct `--model`, `--arguments`, and
+  `--output` options; never combine the two sources. Use JSONL-only
+  `request batch --input <requests.jsonl>` for multiple requests.
+- Required `output` is separate from `arguments` and contains `directory` plus
+  ordinary basename `name`. The directory may be absolute or relative to the
+  CLI working directory. Runtime derives actual extensions.
+- Video Model requests default to `30m`; `--timeout` accepts only positive `s`, `m`,
   or `h` durations and covers active submission, polling, reads, and downloads.
 - The CLI waits by default. `--no-wait` returns an Operation id and does not
   cancel work when the CLI exits.
-- Project-local image and audio references are normalized only when supported.
-  Project-local video references still require upload support unless already
-  represented by a supported remote or asset URL.
+- Put local paths only in the exact fields named by the selected Model's
+  description. CLI passes strings without media classification; the Model
+  adapter owns supported path conversion. A local video reference still needs
+  that Model's upload support unless it is already a supported native or remote
+  reference.
 - Use `--replace` only when replacing the file present at commit is intended.
-- Update and push the Canvas Map before generation when planned outputs should
-  appear on a Canvas, and report Artifact records and structured errors.
+- An output inside an open Project becomes an ordinary Project Tree entry and
+  therefore belongs to every Canvas automatically. Report Artifact records and
+  structured errors.
 
 ## Workflow
 
-1. Inspect the brief and only required source media.
+1. Inspect the brief and only required local source media.
 2. List, select, and describe a configured video Model.
 3. Write one or more schema-valid JSONL Model Requests.
-4. Update and push the Canvas Map when needed.
-5. Submit one Single or Batch Operation and report its settled results.
+4. Submit one Single or Batch Operation and report its settled results.

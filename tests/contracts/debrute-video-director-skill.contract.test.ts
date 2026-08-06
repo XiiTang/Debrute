@@ -10,9 +10,9 @@ describe('Debrute video director Skill', () => {
     );
     expect(skill).toContain('name: debrute-video-director');
     expect(skill).toContain('debrute models video describe <model-id>');
-    expect(skill).toContain('debrute request single /path/to/project --input');
-    expect(skill).toContain('request batch');
+    expect(skill).toContain('direct `--model`, `--arguments`, and');
+    expect(skill).toContain('request batch --input');
     expect(skill).toContain('default to `30m`');
-    expect(skill).toContain('extension-free filename');
+    expect(skill).toContain('ordinary basename `name`');
   });
 });

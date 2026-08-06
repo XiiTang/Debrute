@@ -48,14 +48,15 @@ The adapter has no fallback intent.
 
 Each reference is a closed object with only:
 
-- `source`: required string containing a Project path, data URI, public HTTP(S)
-  URL, or Ark `asset://` URL.
+- `source`: required string containing an absolute or
+  CLI-working-directory-relative local path, data URI, public HTTP(S) URL, or
+  Ark `asset://` URL.
 - `media_type`: optional `image`, `video`, or `audio`. When omitted, Debrute
   infers it from a supported data URI or file extension.
 
 Any other reference child field is rejected before task submission. Supported
-Project image and audio references are encoded inline. Public HTTP(S) and Ark
-`asset://` references remain URLs. A Project-local or inline video cannot be
+Local image and audio references are encoded inline. Public HTTP(S) and Ark
+`asset://` references remain URLs. A local or inline video cannot be
 made model-reachable by this adapter and fails with
 `video_reference_upload_unavailable` before task submission.
 

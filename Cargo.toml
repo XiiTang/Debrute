@@ -35,7 +35,6 @@ rs-vips = "=0.7.0"
 semver = "1.0.27"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-serde_yaml = "0.9.34"
 sha2 = "0.10.9"
 time = { version = "0.3.45", features = ["formatting", "parsing"] }
 tao = "=0.35.3"
@@ -55,6 +54,11 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+# Parameter count is an interface-design signal. Intentional exceptions use
+# function-local `#[expect(clippy::too_many_arguments, reason = "...")]`.
+too_many_arguments = "warn"
+# Function length is reviewed by cohesion, authority, and transaction shape.
+too_many_lines = "allow"
 
 [profile.test]
 debug = false

@@ -17,7 +17,7 @@ use super::{
     },
 };
 
-const MAX_PROJECT_ID_BYTES: usize = 1024;
+const MAX_CANONICAL_ROOT_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -128,7 +128,7 @@ pub enum ResumeIntent {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResumeTarget {
     Root,
-    Project { project_id: String },
+    Project { canonical_root: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -725,12 +725,15 @@ fn validate_resume_intent(intent: &ResumeIntent) -> Result<(), String> {
 fn validate_resume_target(target: &ResumeTarget) -> Result<(), String> {
     match target {
         ResumeTarget::Root => Ok(()),
-        ResumeTarget::Project { project_id }
-            if !project_id.trim().is_empty() && project_id.len() <= MAX_PROJECT_ID_BYTES =>
+        ResumeTarget::Project { canonical_root }
+            if !canonical_root.trim().is_empty()
+                && canonical_root.len() <= MAX_CANONICAL_ROOT_BYTES =>
         {
             Ok(())
         }
-        ResumeTarget::Project { .. } => Err("Project resume id must be non-empty".to_owned()),
+        ResumeTarget::Project { .. } => {
+            Err("Project resume root must be non-empty and bounded".to_owned())
+        }
     }
 }
 

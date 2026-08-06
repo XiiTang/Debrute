@@ -47,7 +47,7 @@ pub struct PhotoshopStateView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhotoshopProjectView {
-    pub project_id: String,
+    pub canonical_root: String,
     pub name: String,
     pub revision: u64,
 }
@@ -71,13 +71,13 @@ pub enum PluginPhotoshopMessage {
     )]
     ProjectDirectoriesRequest {
         request_id: String,
-        project_id: String,
+        canonical_root: String,
         revision: u64,
     },
     #[serde(rename = "photoshop.export.start", rename_all = "camelCase")]
     ExportStart {
         command_id: String,
-        project_id: String,
+        canonical_root: String,
         project_revision: u64,
         directory: String,
         items: Vec<PhotoshopExportItem>,
@@ -146,7 +146,7 @@ pub enum RuntimePhotoshopMessage {
     )]
     ProjectDirectoriesSnapshot {
         request_id: String,
-        project_id: String,
+        canonical_root: String,
         revision: u64,
         directories: Vec<String>,
     },

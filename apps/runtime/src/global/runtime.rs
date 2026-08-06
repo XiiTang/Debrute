@@ -12,7 +12,7 @@ use super::{
     models::{ModelCatalog, ModelSettingsView},
     store::{
         ChromeSettings, GlobalConfigStore, GlobalSettingsError, GlobalSettingsView,
-        RecentProjectEntry, WorkbenchSettings,
+        WorkbenchSettings,
     },
 };
 
@@ -36,7 +36,7 @@ pub struct GlobalRuntimeEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GlobalRuntimeChange {
     GlobalSettingsChanged(DebruteGlobalSettingsView),
-    RecentProjectsChanged(Vec<RecentProjectEntry>),
+    RecentProjectsChanged(Vec<String>),
     IntegrationsChanged(IntegrationSettingsView),
     PhotoshopChanged(PhotoshopStateView),
     ProductChanged(Value),
@@ -113,7 +113,7 @@ impl GlobalRuntimeService {
     /// Returns [`GlobalSettingsError`] when persisted global state is invalid.
     pub fn desktop_presentation_snapshot(
         &self,
-    ) -> Result<(Vec<RecentProjectEntry>, String), GlobalSettingsError> {
+    ) -> Result<(Vec<String>, String), GlobalSettingsError> {
         self.store.read_desktop_presentation(&self.catalog)
     }
 
@@ -200,19 +200,18 @@ impl GlobalRuntimeService {
     /// Returns [`GlobalSettingsError`] for persistence failures.
     pub fn remember_recent_project(
         &self,
-        project_id: &str,
-        project_root: &str,
+        canonical_root: &str,
     ) -> Result<bool, GlobalSettingsError> {
         let _delivery = self.lock_delivery();
         let (changed, change) = {
             let _commit = self.lock_commit();
-            let result =
-                self.store
-                    .remember_recent_project(project_id, project_root, &self.catalog)?;
+            let result = self
+                .store
+                .remember_recent_project(canonical_root, &self.catalog)?;
             let change = result
                 .changed
                 .then_some(GlobalRuntimeChange::RecentProjectsChanged(
-                    result.recent_projects,
+                    result.recent_project_roots,
                 ));
             (result.changed, change)
         };
@@ -235,7 +234,7 @@ impl GlobalRuntimeService {
             let change = result
                 .changed
                 .then_some(GlobalRuntimeChange::RecentProjectsChanged(
-                    result.recent_projects,
+                    result.recent_project_roots,
                 ));
             (result.changed, change)
         };

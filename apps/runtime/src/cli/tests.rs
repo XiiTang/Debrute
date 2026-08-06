@@ -37,18 +37,14 @@ fn registry_exactly_matches_the_final_cli_matrix() {
             "models.music.describe",
             "models.sfx.list",
             "models.sfx.describe",
-            "project.init",
             "project.status",
             "project.validate",
             "workbench.start",
-            "canvas-map.push",
             "canvas.create",
             "canvas.rename",
             "canvas.delete",
             "canvas.reorder",
-            "canvas.repair-index",
-            "canvas.reset-layout",
-            "generated-asset.lookup",
+            "model-artifact.lookup",
             "request.single",
             "request.batch",
             "operation.list",
@@ -114,7 +110,6 @@ fn parser_accepts_the_final_request_and_operation_forms() {
     let single = parse_cli_args(&[
         "request".into(),
         "single".into(),
-        "fixture-project".into(),
         "--input".into(),
         "request.jsonl".into(),
         "--timeout".into(),
@@ -124,6 +119,8 @@ fn parser_accepts_the_final_request_and_operation_forms() {
     ])
     .expect("single request form should parse");
     assert_eq!(single.command, "request.single");
+    assert!(single.root.is_none());
+    assert!(single.cwd.is_absolute());
     assert_eq!(
         single.options.get("input").map(String::as_str),
         Some("request.jsonl")
@@ -144,7 +141,6 @@ fn parser_accepts_the_final_request_and_operation_forms() {
     let batch = parse_cli_args(&[
         "request".into(),
         "batch".into(),
-        "fixture-project".into(),
         "--input".into(),
         "-".into(),
         "--concurrency".into(),
@@ -165,8 +161,6 @@ fn parser_accepts_the_final_request_and_operation_forms() {
         "active".into(),
         "--model-kind".into(),
         "image".into(),
-        "--project".into(),
-        "fixture-project".into(),
         "--limit".into(),
         "25".into(),
         "--cursor".into(),
@@ -174,7 +168,6 @@ fn parser_accepts_the_final_request_and_operation_forms() {
     ])
     .expect("operation list form should parse");
     assert_eq!(list.command, "operation.list");
-    assert!(PathBuf::from(list.options.get("project").unwrap()).is_absolute());
 
     for command in ["inspect", "wait", "cancel"] {
         let parsed = parse_cli_args(&[
@@ -202,10 +195,20 @@ fn parser_enforces_registered_syntax_shapes() {
         parse_cli_args(&["runtime".into(), "status".into(), "extra".into()]).unwrap_err();
     assert_eq!(unexpected.code(), "invalid_argument");
 
-    let missing_required =
-        parse_cli_args(&["request".into(), "single".into(), "project".into()]).unwrap_err();
+    let missing_required = parse_cli_args(&["request".into(), "single".into()]).unwrap_err();
     assert_eq!(missing_required.code(), "missing_argument");
-    assert!(missing_required.message().contains("--input"));
+    assert!(missing_required.message().contains("--input or all of"));
+
+    let conflicting_sources = parse_cli_args(&[
+        "request".into(),
+        "single".into(),
+        "--input".into(),
+        "request.jsonl".into(),
+        "--model".into(),
+        "gpt-image-2".into(),
+    ])
+    .unwrap_err();
+    assert_eq!(conflicting_sources.code(), "conflicting_request_sources");
 
     let invalid_allowed_value = parse_cli_args(&[
         "workbench".into(),
@@ -244,45 +247,6 @@ fn parser_enforces_registered_syntax_shapes() {
         .unwrap_err();
         assert_eq!(invalid_operation_filter.code(), "invalid_input");
     }
-
-    let repeated = parse_cli_args(&[
-        "canvas".into(),
-        "reset-layout".into(),
-        "project".into(),
-        "canvas-1".into(),
-        "--path".into(),
-        "first".into(),
-        "--path".into(),
-        "second".into(),
-    ])
-    .expect("repeatable path shape should parse");
-    assert_eq!(
-        repeated.options.get("path").unwrap(),
-        r#"["first","second"]"#
-    );
-
-    let mixed_reset = parse_cli_args(&[
-        "canvas".into(),
-        "reset-layout".into(),
-        "project".into(),
-        "canvas-1".into(),
-        "--all".into(),
-        "--path".into(),
-        "first".into(),
-    ])
-    .unwrap_err();
-    assert_eq!(mixed_reset.code(), "invalid_input");
-
-    let obsolete_glob = parse_cli_args(&[
-        "canvas".into(),
-        "reset-layout".into(),
-        "project".into(),
-        "canvas-1".into(),
-        "--glob".into(),
-        "assets/**".into(),
-    ])
-    .unwrap_err();
-    assert_eq!(obsolete_glob.code(), "invalid_argument");
 }
 
 #[test]
@@ -313,14 +277,14 @@ fn agent_records_match_the_unversioned_golden_encoding() {
                 "event": "batch_item.settled",
                 "records": [
                     {"name": "batch_item", "fields": {"item_index": 0, "model": "gpt-image-2", "status": "succeeded"}},
-                    {"name": "artifact", "fields": {"artifact_index": 0, "role": "primary-image", "project_relative_path": "generated/cover.jpg", "mime_type": "image/jpeg"}}
+                    {"name": "artifact", "fields": {"artifact_index": 0, "output_path": "/project/generated/cover.jpg", "mime_type": "image/jpeg"}}
                 ]
             })).expect("closed progress")
         ),
         concat!(
             "debrute progress cmd=request.batch event=batch_item.settled\n",
             "batch_item item_index=0 model=gpt-image-2 status=succeeded\n",
-            "artifact artifact_index=0 role=primary-image project_relative_path=generated/cover.jpg mime_type=image/jpeg"
+            "artifact artifact_index=0 output_path=/project/generated/cover.jpg mime_type=image/jpeg"
         )
     );
 }
@@ -351,7 +315,8 @@ fn runtime_observation_reports_the_ready_native_tray_contract() {
             .run(&json!({
                 "command": command,
                 "positional": [],
-                "options": {}
+                "options": {},
+                "cwd": fixture.root
             }))
             .expect("Runtime observation should run");
         let result = serde_json::to_value(result).unwrap();
@@ -369,7 +334,8 @@ fn runtime_cli_service_owns_model_and_project_commands() {
         .run(&json!({
             "command": "models.image.list",
             "positional": [],
-            "options": {}
+            "options": {},
+            "cwd": fixture.root
         }))
         .expect("model command should return a record");
     let models = serde_json::to_value(models).unwrap();
@@ -379,64 +345,47 @@ fn runtime_cli_service_owns_model_and_project_commands() {
 
     let project = fixture.root.join("project");
     fs::create_dir(&project).expect("Project root should exist");
-    let initialized = fixture
-        .service
-        .run(&json!({
-            "command": "project.init",
-            "positional": [project.to_string_lossy()],
-            "options": {},
-            "projectRoot": project.to_string_lossy()
-        }))
-        .expect("Project init should return a record");
-    let initialized = serde_json::to_value(initialized).unwrap();
-    assert_eq!(initialized["status"], "ok", "{initialized}");
-    assert_eq!(initialized["fields"]["canvases"], 1);
-    assert!(project.join(".debrute/project.json").is_file());
-}
-
-#[test]
-fn project_status_never_initializes_an_uninitialized_directory() {
-    let fixture = CliFixture::new();
-    let project = fixture.root.join("uninitialized-project");
-    fs::create_dir(&project).expect("Project root should exist");
-    let status = fixture
+    let opened = fixture
         .service
         .run(&json!({
             "command": "project.status",
             "positional": [project.to_string_lossy()],
             "options": {},
-            "projectRoot": project.to_string_lossy()
+            "root": project.to_string_lossy(),
+            "cwd": fixture.root
         }))
-        .expect("Project status business error should return");
-    let status = serde_json::to_value(status).unwrap();
-    assert_eq!(status["status"], "error");
-    assert_eq!(status["code"], "project_not_found");
-    assert!(!project.join(".debrute").exists());
+        .expect("Project status should return a record");
+    let opened = serde_json::to_value(opened).unwrap();
+    assert_eq!(opened["status"], "ok", "{opened}");
+    assert_eq!(opened["fields"]["canvases"], 1);
 }
 
 #[test]
-fn project_validate_completes_the_file_index_before_checking_canvas_map_drift() {
+fn project_validate_is_read_only_for_sparse_canvas_state() {
     let fixture = CliFixture::new();
     let project = fixture.root.join("validation-project");
     fs::create_dir(&project).expect("Project root should exist");
-    let initialized = fixture
+    let opened = fixture
         .service
         .run(&json!({
-            "command": "project.init",
+            "command": "project.status",
             "positional": [project.to_string_lossy()],
             "options": {},
-            "projectRoot": project
+            "root": project,
+            "cwd": fixture.root
         }))
-        .expect("Project init should return");
-    let initialized = serde_json::to_value(initialized).unwrap();
-    assert_eq!(initialized["status"], "ok", "{initialized}");
-    fs::create_dir(project.join("nested")).expect("nested fixture should exist");
-    fs::write(project.join("nested/asset.txt"), "asset").expect("asset should write");
-    fs::write(
-        project.join(".debrute/canvas-maps/canvas-1.yaml"),
-        "paths:\n  - nested/asset.txt\n",
-    )
-    .expect("Canvas Map should drift");
+        .expect("Project status should return");
+    let opened = serde_json::to_value(opened).unwrap();
+    assert_eq!(opened["status"], "ok", "{opened}");
+    let canonical_root = project
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let canvas_path =
+        crate::global::root_state_directory(&fixture.root.join("home"), &canonical_root)
+            .join("canvas.json");
+    let before = fs::read_to_string(&canvas_path).expect("Canvas state should exist");
 
     let validated = fixture
         .service
@@ -444,24 +393,15 @@ fn project_validate_completes_the_file_index_before_checking_canvas_map_drift() 
             "command": "project.validate",
             "positional": [project.to_string_lossy()],
             "options": {},
-            "projectRoot": project
+            "root": project,
+            "cwd": fixture.root
         }))
         .expect("Project validation should return");
     let validated = serde_json::to_value(validated).unwrap();
 
     assert_eq!(validated["status"], "ok", "{validated}");
-    assert_eq!(validated["fields"]["warnings"], 1);
-    assert!(validated["records"].as_array().is_some_and(|records| {
-        records
-            .iter()
-            .any(|record| record["fields"]["code"] == "document_drift")
-    }));
-    let canvas = fs::read_to_string(project.join(".debrute/canvases/canvas-1.json"))
-        .expect("Canvas should remain readable");
-    assert!(
-        !canvas.contains("nested/asset.txt"),
-        "validation must not push Canvas Map drift"
-    );
+    assert_eq!(validated["fields"]["warnings"], 0);
+    assert_eq!(fs::read_to_string(canvas_path).unwrap(), before);
 }
 
 #[test]
@@ -472,7 +412,8 @@ fn model_describe_uses_the_request_command() {
         .run(&json!({
             "command": "models.image.describe",
             "positional": ["gpt-image-2"],
-            "options": {}
+            "options": {},
+            "cwd": fixture.root
         }))
         .expect("model describe should return a record");
     let described = serde_json::to_value(described).unwrap();
@@ -480,7 +421,9 @@ fn model_describe_uses_the_request_command() {
     let markdown = described["fields"]["description_markdown"]
         .as_str()
         .expect("description");
-    assert!(markdown.contains("debrute request single <project>"));
+    assert!(markdown.contains("debrute request single"));
+    assert!(markdown.contains("debrute request single --input request.jsonl"));
+    assert!(!markdown.contains("request single <project>"));
 }
 
 #[test]
@@ -488,54 +431,31 @@ fn model_operation_submission_is_atomic_before_acceptance() {
     let fixture = CliFixture::new();
     let project = fixture.root.join("project");
     fs::create_dir_all(&project).unwrap();
-    let initialized = fixture
-        .service
-        .run(&json!({
-            "command": "project.init",
-            "positional": [project.to_string_lossy()],
-            "options": {},
-            "projectRoot": project,
-        }))
-        .unwrap();
-    let initialized = serde_json::to_value(initialized).unwrap();
-    assert_eq!(initialized["status"], "ok", "{initialized}");
-
     let rejected = fixture
         .service
         .submit(
             &json!({
                 "command": "request.single",
-                "positional": [project.to_string_lossy()],
+                "positional": [],
                 "options": {"input": "request.jsonl"},
-                "projectRoot": project,
+                "root": null,
+                "cwd": project,
             }),
-            br#"{"model":"missing-model","arguments":{}}"#,
+            br#"{"model":"missing-model","arguments":{},"output":{"directory":"generated","name":"artifact"}}"#,
         )
         .unwrap();
     let rejected = serde_json::to_value(rejected).unwrap();
     assert_eq!(rejected["status"], "error");
     assert_eq!(rejected["code"], "model_unavailable");
 
-    let absent = fixture.root.join("absent-project");
-    let invalid_project = fixture
-        .service
-        .submit(
-            &json!({
-                "command": "request.single",
-                "positional": [absent.to_string_lossy()],
-                "options": {"input": "request.jsonl"},
-                "projectRoot": absent,
-            }),
-            br#"{"model":"missing-model","arguments":{}}"#,
-        )
-        .unwrap();
-    let invalid_project = serde_json::to_value(invalid_project).unwrap();
-    assert_eq!(invalid_project["status"], "error");
-    assert_eq!(invalid_project["code"], "project_invalid");
-
     let listed = fixture
         .service
-        .run(&json!({"command": "operation.list", "positional": [], "options": {}}))
+        .run(&json!({
+            "command": "operation.list",
+            "positional": [],
+            "options": {},
+            "cwd": fixture.root
+        }))
         .unwrap();
     assert_eq!(listed.error_code(), None);
     assert!(listed.records().is_empty());
@@ -545,8 +465,8 @@ fn model_operation_submission_is_atomic_before_acceptance() {
 fn runtime_cli_requires_both_argument_collections() {
     let fixture = CliFixture::new();
     for request in [
-        json!({"command": "runtime.status", "options": {}}),
-        json!({"command": "runtime.status", "positional": []}),
+        json!({"command": "runtime.status", "options": {}, "cwd": fixture.root}),
+        json!({"command": "runtime.status", "positional": [], "cwd": fixture.root}),
     ] {
         let error = fixture
             .service
@@ -567,7 +487,8 @@ async fn operation_wait_ends_when_its_control_credential_is_no_longer_live() {
                 "command": "operation.wait",
                 "positional": [Uuid::new_v4().to_string()],
                 "options": {},
-                "projectRoot": null,
+                "root": null,
+                "cwd": fixture.root,
             }),
             Arc::new(|| false),
         )
@@ -595,7 +516,7 @@ impl CliFixture {
             Arc::clone(services.models()),
             Arc::clone(services.global()),
             services.projects().clone(),
-            Arc::clone(services.generated_assets()),
+            Arc::clone(services.provenance()),
             Arc::clone(services.model_operations()),
             None,
         );

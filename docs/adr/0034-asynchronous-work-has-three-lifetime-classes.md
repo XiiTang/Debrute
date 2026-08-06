@@ -1,40 +1,25 @@
 # Asynchronous Work Has Three Lifetime Classes
 
 Runtime classifies asynchronous work by ownership rather than elapsed time.
-Bounded `RequestTask` reads, mutations, and saves complete within their caller
-and hold only a request Project Use when they need Project state.
 
-The initial Operation subsystem covers only Model Requests. Every accepted
-Single or Batch becomes a Runtime-owned `ModelOperation` with identity,
-observable state, cancellation, a canonical Project root, and a stable Project
-id. The Project reference is immutable result scope: Runtime uses a filesystem
-capability rooted at that Project to commit Project-relative outputs and
-Generated Asset metadata. It is not a live Project ownership object. The
-Operation survives its initiating CLI connection without opening a Project
-session, holding a Project Use, requiring a Workbench, or keeping the Project
-open. Integration changes, Product Update, and professional-tool transfers
-retain their existing domain-specific lifetimes unless a later explicit
-decision adopts the Operation contract.
+A bounded `RequestTask` read, mutation, or save completes within its caller and
+holds only a request Project Use when it needs Project state.
+
+Every accepted Single or Batch Model Request becomes a Runtime-owned
+`ModelOperation` with identity, observable state, and cancellation. Its
+requests already contain canonical absolute output directories and any admitted
+local input paths, all resolved from the submitting CLI's captured working
+directory. A Model Operation has no Project identity, opens no Project Session,
+holds no Project Use, and survives its initiating CLI connection. It commits
+ordinary files and then attempts Runtime-global provenance.
 
 Rebuildable Canvas preview, derived-feedback, indexing, and cache work is a
-`MaintenanceJob`. These work kinds are excluded from the Operation registry:
-they have no public identity or terminal history and may be cancelled,
-coalesced, or superseded when their owner closes, their target changes, or
-Runtime transitions. Terminals remain separate stateful resources whose
-running instances hold `running-terminal` Project Uses. Product Quit terminates
-Operations and terminals directly, without asking a Workbench to flush or
-confirm. Runtime cancels and joins the worker threads it owns before its
-process exits, whether service supervision ended through Product Quit or an
-internal Runtime error. Terminal destruction sends one shutdown request; if
-that request cannot complete, the owner force-kills the exact process tree and
-still joins the actor. It never retries the actor command or detaches the owned
-thread. PTY writes use bounded, non-blocking admission; saturation fails only
-that Terminal and terminates its process tree so its actor remains available
-for shutdown. Multiplexed Terminal controls carry request identities, and a
-Terminal-scoped control failure settles only that request without closing the
-shared hub.
+`MaintenanceJob`. These work kinds have no public Operation identity or
+terminal history and may be cancelled, coalesced, or superseded when their
+owner closes or target changes.
 
-Source code classifies each known work type; work is never promoted because it
-crossed an elapsed-time threshold. A future non-model Operation requires
-an explicit protocol and lifecycle decision rather than inheriting Operation
-behavior merely because it runs for a long time.
+Terminals remain separate stateful resources whose running instances hold
+`running-terminal` Project Uses. Product Quit terminates Operations and
+terminals directly and joins owned workers. Source code classifies each known
+work type; duration never promotes work into another class. A future non-model
+Operation requires an explicit lifecycle decision.

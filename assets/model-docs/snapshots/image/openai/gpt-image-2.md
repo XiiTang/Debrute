@@ -22,8 +22,8 @@ or `POST https://api.openai.com/v1/images/edits` with
 ## Agent request fields
 
 - `prompt` is required.
-- `image` is an optional array of Project-relative image paths, public HTTP(S)
-  URLs, or `data:image` URIs.
+- `image` is an optional array of absolute or CLI-working-directory-relative
+  local image paths, public HTTP(S) URLs, or `data:image` URIs.
 - `mask` is one optional image reference in the same string form.
 - `size`, `quality`, `background`, `output_format`, `moderation`, and `user`
   are optional strings.
@@ -35,7 +35,7 @@ limits. Debrute materializes no default for this Model; OpenAI owns current
 enum, range, cardinality, and cross-field validation.
 
 Public-URL-only edits use the documented JSON request. An edit containing a
-Project image or data URI uses multipart. Debrute selects one transport before
+local image or data URI uses multipart. Debrute selects one transport before
 submission and does not retry through the other.
 
 ## Response

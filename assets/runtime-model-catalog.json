@@ -39,7 +39,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "size": {
             "type": "string"
@@ -89,6 +89,10 @@
           "model": "doubao-seedream-5-0-lite-260128",
           "arguments": {
             "prompt": "A bilingual product poster with clean Chinese and English headline text"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -131,7 +135,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "size": {
             "type": "string"
@@ -169,6 +173,10 @@
           "model": "doubao-seedream-5-0-pro-260628",
           "arguments": {
             "prompt": "Create a bilingual campaign poster with precise small Chinese and English typography"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -258,6 +266,10 @@
           "model": "fal-ai/flux/dev",
           "arguments": {
             "prompt": "A cinematic product render on a black acrylic surface"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -299,7 +311,7 @@
           "image_url": {
             "type": "string",
             "debruteImageInput": true,
-            "description": "One Project-relative image path, public http(s) URL, or data:image URI."
+            "description": "One absolute or CLI-working-directory-relative image path, public http(s) URL, or data:image URI."
           },
           "strength": {
             "type": "number"
@@ -339,6 +351,10 @@
           "arguments": {
             "prompt": "Restyle this product photo as a glossy studio render",
             "image_url": "assets/product.png"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -380,7 +396,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "aspect_ratio": {
             "type": "string"
@@ -404,6 +420,10 @@
           "model": "gemini-3.1-flash-image",
           "arguments": {
             "prompt": "A minimalist storefront facade, strong geometry, bright midday sun"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -444,7 +464,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "aspect_ratio": {
             "type": "string"
@@ -468,6 +488,10 @@
           "model": "gemini-3-pro-image",
           "arguments": {
             "prompt": "A high-detail architectural interior concept with natural light"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -512,12 +536,12 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "mask": {
             "type": "string",
             "debruteImageInput": true,
-            "description": "Project-relative image path, public http(s) URL, or data:image URI."
+            "description": "Absolute or CLI-working-directory-relative image path, public http(s) URL, or data:image URI."
           },
           "size": {
             "type": "string"
@@ -558,6 +582,10 @@
           "model": "gpt-image-1",
           "arguments": {
             "prompt": "A clean app icon with readable Debrute lettering"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -600,12 +628,12 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "mask": {
             "type": "string",
             "debruteImageInput": true,
-            "description": "Project-relative image path, public http(s) URL, or data:image URI."
+            "description": "Absolute or CLI-working-directory-relative image path, public http(s) URL, or data:image URI."
           },
           "size": {
             "type": "string"
@@ -643,6 +671,10 @@
           "model": "gpt-image-2",
           "arguments": {
             "prompt": "A clean hero image for a productivity app landing page with readable headline text"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -685,6 +717,10 @@
           "arguments": {
             "prompt": "A fast concept sketch of a futuristic city gateway",
             "aspect_ratio": "16:9"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -756,7 +792,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           }
         },
         "required": [
@@ -770,6 +806,10 @@
           "model": "image-01",
           "arguments": {
             "prompt": "A character poster with consistent costume and confident pose"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -812,7 +852,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "negative_prompt": {
             "type": "string"
@@ -845,6 +885,10 @@
           "model": "qwen-image-2.0-pro-2026-06-22",
           "arguments": {
             "prompt": "A premium editorial cover with exact bilingual typography and realistic materials"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -887,7 +931,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "negative_prompt": {
             "type": "string"
@@ -920,6 +964,10 @@
           "model": "qwen-image-2.0-2026-03-03",
           "arguments": {
             "prompt": "Rapid concept art for a luminous product launch stage"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -959,7 +1007,7 @@
               "type": "string"
             },
             "debruteImageInput": true,
-            "description": "Ordered Project-relative image paths, public http(s) URLs, or data:image URIs."
+            "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
           },
           "size": {
             "type": "string"
@@ -1004,6 +1052,10 @@
           "model": "wan2.7-image",
           "arguments": {
             "prompt": "A quiet Jiangnan canal town in misty morning light"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "image"
           }
         }
       }
@@ -1049,7 +1101,7 @@
       "listParameters": {
         "prompt": "required text brief",
         "intent": "generate|reference|audio_driven|extend|edit",
-        "references": "project file path, http(s) URL, asset:// URL, or data URL references; media type inferred when possible",
+        "references": "absolute or CLI-working-directory-relative local file path, http(s) URL, asset:// URL, or data URL references; media type inferred when possible",
         "ratio": "16:9|4:3|1:1|3:4|9:16|21:9|adaptive",
         "resolution": "480p|720p|1080p",
         "duration": "Seedance-supported duration range from official docs",
@@ -1190,7 +1242,7 @@
         ],
         "additionalProperties": false
       },
-      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute builds the official Volcengine Ark content array internally. Project-local image references are encoded as supported image data URLs. Project-local audio references are encoded as supported audio data URLs. Project-local video references require a Debrute upload service; http(s) and asset:// video references pass through. `service_tier: flex` is not supported for the Seedance 2.0 series.",
+      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute builds the official Volcengine Ark content array internally. Absolute or CLI-working-directory-relative image references are encoded as supported image data URLs. Local audio references are encoded as supported audio data URLs. Local video references require a Debrute upload service; http(s) and asset:// video references pass through. `service_tier: flex` is not supported for the Seedance 2.0 series.",
       "requestExample": {
         "command": "request.single",
         "input": {
@@ -1204,6 +1256,10 @@
             "duration": 5,
             "generate_audio": true,
             "watermark": false
+          },
+          "output": {
+            "directory": "generated",
+            "name": "video"
           }
         }
       }
@@ -1246,7 +1302,7 @@
       "listParameters": {
         "prompt": "required text brief",
         "intent": "generate|reference|audio_driven|extend|edit",
-        "references": "project file path, http(s) URL, asset:// URL, or data URL references; media type inferred when possible",
+        "references": "absolute or CLI-working-directory-relative local file path, http(s) URL, asset:// URL, or data URL references; media type inferred when possible",
         "ratio": "16:9|4:3|1:1|3:4|9:16|21:9|adaptive",
         "resolution": "480p|720p",
         "duration": "Seedance-supported duration range from official docs",
@@ -1386,7 +1442,7 @@
         ],
         "additionalProperties": false
       },
-      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute builds the official Volcengine Ark content array internally. Project-local image references are encoded as supported image data URLs. Project-local audio references are encoded as supported audio data URLs. Project-local video references require a Debrute upload service; http(s) and asset:// video references pass through. `service_tier: flex` is not supported for the Seedance 2.0 series.",
+      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute builds the official Volcengine Ark content array internally. Absolute or CLI-working-directory-relative image references are encoded as supported image data URLs. Local audio references are encoded as supported audio data URLs. Local video references require a Debrute upload service; http(s) and asset:// video references pass through. `service_tier: flex` is not supported for the Seedance 2.0 series.",
       "requestExample": {
         "command": "request.single",
         "input": {
@@ -1400,6 +1456,10 @@
             "duration": 5,
             "generate_audio": true,
             "watermark": false
+          },
+          "output": {
+            "directory": "generated",
+            "name": "video"
           }
         }
       }
@@ -1408,7 +1468,7 @@
       "debruteModelId": "doubao-seedance-2-0-mini-260615",
       "summary": "Volcengine Ark Doubao Seedance 2.0 Mini video generation.",
       "chooseWhen": "lowest-cost Seedance 2.0 generation up to 720p with multimodal references, generated audio, or pure-text Web Search",
-      "avoidWhen": "you need 1080p or 4K output, first-class provider task controls, or Project-local video upload",
+      "avoidWhen": "you need 1080p or 4K output, first-class remote task controls, or local video upload",
       "supportsTextToVideo": true,
       "supportsImageReferences": true,
       "supportsVideoReferences": true,
@@ -1443,7 +1503,7 @@
       "listParameters": {
         "prompt": "required text brief",
         "intent": "generate|reference|audio_driven|extend|edit",
-        "references": "ordered Project paths, public http(s) URLs, asset:// URLs, or supported data URLs; Project-local video is not uploadable",
+        "references": "ordered absolute or CLI-working-directory-relative paths, public http(s) URLs, asset:// URLs, or supported data URLs; local video is not uploadable",
         "generate_audio": "boolean provider audio-generation control",
         "tools": "optional [{type: web_search}] for pure-text requests",
         "return_last_frame": "boolean",
@@ -1560,7 +1620,7 @@
         ],
         "additionalProperties": false
       },
-      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute constructs official Seedance content roles internally. Project-local image and audio references may be encoded as supported data URLs. Project-local video references fail before submission; model-reachable http(s) and asset:// video references pass through. Web Search is documented only for pure-text requests, and the remote endpoint owns that cross-field rule.",
+      "usageNotes": "Use Debrute-native prompt, intent, and references arguments. Debrute constructs official Seedance content roles internally. Absolute or CLI-working-directory-relative image and audio references may be encoded as supported data URLs. Local video references fail before submission; model-reachable http(s) and asset:// video references pass through. Web Search is documented only for pure-text requests, and the remote endpoint owns that cross-field rule.",
       "requestExample": {
         "command": "request.single",
         "input": {
@@ -1571,6 +1631,10 @@
             "ratio": "16:9",
             "duration": 5,
             "generate_audio": true
+          },
+          "output": {
+            "directory": "generated",
+            "name": "video"
           }
         }
       }
@@ -1799,7 +1863,7 @@
         ],
         "additionalProperties": false
       },
-      "usageNotes": "Use MiniMax H3's native Direct Generation content structure. Runtime injects the effective request model id, preserves provider-native URL/data/mm_file references, and converts recognized Project-relative media files in native URL fields to data URLs. callback_url belongs to a caller-owned public service and does not replace Debrute polling. The China endpoint documents optional aigc_watermark; it remains an unlisted pass-through field under the global default contract. Catalog provider requirements are descriptive and are not Runtime admission rules. H3-Context-IR and Video Regeneration are separate unsupported tasks.",
+      "usageNotes": "Use MiniMax H3's native Direct Generation content structure. Runtime injects the effective request model id and preserves model-native URL/data/mm_file references. Every other string in a native media URL field is treated as an absolute or CLI-working-directory-relative local path; an existing recognizable media file is converted to a data URL, while a missing or unrecognized local file fails. callback_url belongs to a caller-owned public service and does not replace Debrute polling. The China endpoint documents optional aigc_watermark; it remains an unlisted pass-through field under the global default contract. Catalog requirements are descriptive and are not Runtime admission rules. H3-Context-IR and Video Regeneration are separate unsupported tasks.",
       "requestExample": {
         "command": "request.single",
         "input": {
@@ -1814,6 +1878,10 @@
             "resolution": "2K",
             "duration": 5,
             "ratio": "16:9"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "video"
           }
         }
       }
@@ -1866,6 +1934,10 @@
           "arguments": {
             "text": "Welcome to Debrute.",
             "voice": "Cherry"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }
@@ -1928,6 +2000,10 @@
           "arguments": {
             "text": "Welcome to Debrute.",
             "speaker": "zh_female_vv_uranus_bigtts"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }
@@ -2028,6 +2104,10 @@
             "text": "A concise multilingual narration line.",
             "voice_id": "JBFqnCBsd6RMkjVDRZzb",
             "output_format": "mp3_44100_128"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }
@@ -2087,7 +2167,7 @@
           },
           "output": {
             "directory": "generated",
-            "filename": "demo-music"
+            "name": "demo-music"
           }
         }
       }
@@ -2144,7 +2224,7 @@
           },
           "output": {
             "directory": "generated",
-            "filename": "chime"
+            "name": "chime"
           }
         }
       }
@@ -2211,6 +2291,10 @@
             "text": "A cinematic narration line.",
             "voice_id": "JBFqnCBsd6RMkjVDRZzb",
             "output_format": "mp3_44100_128"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }
@@ -2277,6 +2361,10 @@
           "arguments": {
             "prompt": "A distant sci-fi door opening with a soft hydraulic hiss.",
             "duration": 4
+          },
+          "output": {
+            "directory": "generated",
+            "name": "sound-effect"
           }
         }
       }
@@ -2333,7 +2421,7 @@
           },
           "output": {
             "directory": "generated",
-            "filename": "stable-audio"
+            "name": "stable-audio"
           }
         }
       }
@@ -2403,6 +2491,10 @@
           "arguments": {
             "text": "Say warmly: Welcome to Debrute.",
             "speech_config": [{"voice": "Kore"}]
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }
@@ -2448,6 +2540,10 @@
           "model": "google-lyria-3-clip-preview",
           "arguments": {
             "prompt": "A bright synth pop loop for a product reveal."
+          },
+          "output": {
+            "directory": "generated",
+            "name": "music"
           }
         }
       }
@@ -2499,6 +2595,10 @@
           "arguments": {
             "prompt": "Cinematic orchestral underscore with hopeful momentum.",
             "format": "wav"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "music"
           }
         }
       }
@@ -2552,6 +2652,10 @@
           "arguments": {
             "prompt": "Upbeat technology demo music.",
             "is_instrumental": true
+          },
+          "output": {
+            "directory": "generated",
+            "name": "music"
           }
         }
       }
@@ -2636,6 +2740,10 @@
           "arguments": {
             "text": "Welcome to Debrute.",
             "voice_setting": {"voice_id": "male-qn-qingse"}
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }
@@ -2723,7 +2831,7 @@
           },
           "output": {
             "directory": "generated",
-            "filename": "voiceover"
+            "name": "voiceover"
           }
         }
       }
@@ -2800,6 +2908,10 @@
             "text": "Welcome to Debrute.",
             "voice": "alloy",
             "format": "mp3"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }
@@ -2876,6 +2988,10 @@
             "text": "Welcome to Debrute.",
             "voice": "nova",
             "format": "mp3"
+          },
+          "output": {
+            "directory": "generated",
+            "name": "speech"
           }
         }
       }

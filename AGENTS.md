@@ -25,6 +25,8 @@ Debrute is a pnpm TypeScript monorepo with a Cargo workspace for the Rust Runtim
 
 Use strict TypeScript ESM with `.js` extensions in relative imports that compile to JavaScript. Follow existing formatting: two-space indentation, single quotes, semicolons, `camelCase` functions/variables, `PascalCase` classes/types/components, and `UPPER_SNAKE_CASE` only for true constants. Prefer `@debrute/*` workspace aliases over deep cross-package imports. Keep package boundaries aligned with `packages/architecture-rules`.
 
+Rust interfaces use a seven-parameter Clippy threshold as a design signal. When an interface exceeds it, introduce an input type only when that type hides real invariants or gives callers a deeper module; do not create field-for-field parameter bags solely to satisfy Clippy. Intentional exceptions must use function-local `#[expect(clippy::too_many_arguments, reason = "...")]`, never file-level or unreasoned allowances. Function length is reviewed by cohesion, authority, and transaction or state-machine integrity rather than a fixed line count.
+
 ## Testing Guidelines
 
 Vitest discovers `tests/**/*.test.ts`, `packages/**/*.test.ts`, `apps/**/*.test.ts`, and `apps/**/*.test.tsx`. Add tests near changed behavior or in top-level `tests/` for cross-package contracts. For Canvas performance, interaction, image loading, viewport culling, render scheduler, stage DOM write, or trace/debug work, start with:
@@ -51,7 +53,7 @@ pnpm exec vitest run \
 pnpm check
 ```
 
-Do not run real browser tests or diagnostics unless explicitly requested. For requested live Canvas diagnostics, start the development Workbench with `pnpm dev -- --canvas-perf` or `pnpm dev:electron -- --canvas-perf`, use `window.__debruteCanvasPerf.startCapture()` before the interaction and `window.__debruteCanvasPerf.stopCapture()` after it, then inspect `trace.events`, `trace.sessions`, `counterTotals`, and `canvas`.
+Use real-browser or Electron diagnostics when the behavior depends on actual layout, loaded fonts, media decoding or playback, browser APIs, window topology, or timing that focused automated tests cannot establish. For live Canvas diagnostics, start the development Workbench with `pnpm dev -- --canvas-perf` or `pnpm dev:electron -- --canvas-perf`, use `window.__debruteCanvasPerf.startCapture()` before the interaction and `window.__debruteCanvasPerf.stopCapture()` after it, then inspect `trace.events`, `trace.sessions`, `counterTotals`, and `canvas`.
 
 During implementation, run the smallest affected Vitest files, Cargo targets, and type checks. Complete code review before the final whole-repository gate, then run `pnpm verify:all` once. `build:artifacts` scripts are internal verified-pipeline composition targets; developers and agents use the standalone `pnpm build` command instead.
 

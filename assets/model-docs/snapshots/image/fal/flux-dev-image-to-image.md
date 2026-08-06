@@ -22,10 +22,10 @@ Input file fields accept hosted URLs or Base64 data URIs. Hosted URLs must be pu
 
 Official input fields used by Debrute:
 
-- `image_url`: required single string image reference. The Agent may provide a
-  Project-relative image path, public HTTP(S) URL, or `data:image` URI; Runtime
-  resolves it to exactly one provider string. Arrays, objects, and `null` are
-  not alternate input shapes.
+- `image_url`: required single string image reference. The Agent may provide an
+  absolute or CLI-working-directory-relative local image path, public HTTP(S)
+  URL, or `data:image` URI; Runtime resolves it to exactly one provider string.
+  Arrays, objects, and `null` are not alternate input shapes.
 
   A public URL needs no filename extension. Runtime validates its HTTP(S)
   target and public-network safety but does not prefetch it or infer media type
@@ -74,7 +74,8 @@ Their provider defaults already produce the intended normal one-image JPEG
 result, so omission remains visible as omission in the canonical request.
 
 Debrute does not expose fal's `sync_mode` transport switch. The normal endpoint
-response supplies HTTP image URLs, which Runtime downloads into the Project.
+response supplies HTTP image URLs, which Runtime downloads into the accepted
+output directory.
 Debrute neither requests nor decodes the alternate data-URI response shape.
 
 Debrute also does not expose `image_size` for this image-to-image endpoint. It

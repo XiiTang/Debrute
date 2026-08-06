@@ -16,7 +16,7 @@ controlling surface requires an explicit product decision rather than
 inheriting access from Project visibility.
 
 Workbench learns about committed model results through ordinary Project changes
-and Generated Asset metadata, not through Model Operation snapshots. Product
+and Model Artifact metadata, not through Model Operation snapshots. Product
 Quit terminates active Model Operations directly without exposing generic
 Operation control through Control or Workbench. This was chosen to preserve the
 current product surface, where only the `debrute` CLI submits Model Requests,

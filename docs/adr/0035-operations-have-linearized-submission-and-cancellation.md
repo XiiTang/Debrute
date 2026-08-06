@@ -1,73 +1,46 @@
 # Operations Have Linearized Submission And Cancellation
 
-An Operation moves only through `queued`, `running`, `cancelling`, and one of
-`succeeded`, `failed`, or `cancelled`. Submission is one atomic
-`SubmitModelOperation` request. Runtime validates the live CLI session
-credential, canonical Project root and id, current Model Request envelope, and
-output path rules. One validated Global configuration and secret snapshot
-supplies one immutable Accepted Model Binding for each unique Model ID in the
-submission; repeated requests for one Model share its binding. Every binding
-and request validates before Runtime creates a `queued` Operation with
-a Runtime-issued canonical lowercase UUID v4 id and returns its first snapshot.
-The id has no prefix and encodes no time, Model Kind, Project, sequence, or
-Runtime instance; it is opaque control identity rather than a credential.
-Rejection creates no Operation, opens no Project session, and starts no work.
-Model Operation submission does not
-compare a Project-wide revision. Acceptance retains the canonical root and
-stable Project identity; it registers no Project Use and requires no open
-Workbench. Runtime rechecks that identity before Model execution and again
-before output commit. Output and provenance writes use the
-filesystem capability captured at acceptance rather than resolving the path
-again. A replacement observed before commit fails the affected work; a path
-replacement racing the noninterruptible commit cannot redirect writes into the
-replacement Project.
+A Model Operation moves only through `queued`, `running`, `cancelling`, and one
+of `succeeded`, `failed`, or `cancelled`. Submission is one atomic
+`SubmitModelOperation` request containing the CLI's canonical invocation working
+directory, one execution shape, one or more Model Requests, and immutable
+timeout, replace, and concurrency policy.
 
-Model execution likewise uses only the route and credential captured in its
-Accepted Model Binding. Runtime does not re-resolve Model Settings after
-acceptance, so later Settings changes affect only later Operations. Explicit
-Operation cancellation is the revocation boundary for accepted pending work.
-Bindings remain private Runtime memory while usable and are absent from public
-snapshots, logs, Project data, provenance, and retained terminal records.
+Before acceptance Runtime resolves every required `output.directory` and each
+Model-declared local argument path against the invocation directory. It
+validates the closed request envelope and creates one immutable Accepted Model
+Binding for each unique Model id from one Global configuration snapshot. Every
+request and binding must validate before Runtime creates an Operation and issues
+its opaque UUID. Rejection creates no Operation, opens no Project, and starts no
+work.
 
-Submission rejection uses one closed caller-visible set. `invalid_input` covers
-CLI arguments, JSONL and Model Request validation, mixed Model Kinds, execution
-options, source-size limits, and invalid output paths. `project_invalid` covers
-an absent, uninitialized, uncanonicalizable, or inaccessible Project.
-`model_unavailable` combines an unknown Model id, missing required local
-configuration, and an unavailable Product adapter. Duplicate explicit output
-names inside one Batch are `invalid_input`. Unexpected failure before atomic acceptance uses `internal_error`.
-There is no separate request, Batch, Model-kind-mismatch, output-exists,
-model-not-configured, `output_conflict`, or Provider rejection code. Acceptance
-does not inspect, hash, reserve, or claim output files.
+Accepted absolute paths are immutable values, not Project ownership or long-
+lived directory capabilities. Immediately before publication Runtime safely
+opens or creates the exact output directory. A regular file, symbolic link,
+inaccessible path, or unsafe component fails the affected Item without
+redirecting it. A short-lived directory capability stages and publishes the
+complete Item; Artifact Pointers and provenance use those actual absolute paths.
 
-`queued` is only the accepted Operation's handoff to its execution task.
-Runtime imposes no process-wide model-execution concurrency limit: independent
-Operations start independently, and a batch's own concurrency controls only
-how many of its Batch Items it executes at once.
+Acceptance never inspects candidate output files, hashes or reserves names,
+claims destinations, or rejects duplicate paths across Batch records. The
+caller owns the submitted JSONL. `--replace` is applied only at the actual file
+commit. Global provenance is attempted after file publication.
 
-Submission has no reservation, caller idempotency key, or automatic transport
-retry. If the client loses the response after sending a submission, it reports
-`submission_outcome_unknown`. The caller may inspect recent Operations by
-Project, Model Kind, and state in newest-first issuance order, but Runtime does not
-promise exact correlation without the returned Operation id and the caller must
-not blindly submit the same paid work again. Runtime adds no input digest,
-submission nonce, or deduplication protocol for this low-probability local
-failure. An id absent from the current registry returns `operation_not_found`,
-whether it was never issued, its terminal record was retired, or Runtime was
-replaced. Once accepted, Operation lifetime is independent of its initiating
-connection and is never replayed after Runtime loss.
+`queued` is only the accepted Operation's handoff to its execution task. Runtime
+has no process-wide Model Request concurrency limit; each Batch's concurrency
+controls only its own Items.
 
-Canceling queued work completes immediately. Canceling running work first
-enters `cancelling` and reaches `cancelled` only after Debrute-owned execution
-and cleanup stop; failure of that local cleanup produces a redacted `failed`
-result. An exact adapter may also make one bounded best-effort provider
-cancellation request when the provider and observed remote state permit it.
-Failure, rejection, or timeout of that remote attempt is ignored and never
-turns accepted local cancellation into failure. Already committed Batch Items
-stay committed and do not prevent cancellation of the remaining work. An Item
-inside its short noninterruptible commit section may finish before execution
-drains, but no later Item starts or commits. For a Single, artifact commit and
-the transition to `succeeded` are one linearized completion, so cancellation
-races only with the Operation's terminal transition. This gives acceptance,
-user cancellation, external side effects, and Project commits one observable
-order without exposing an Item-level cancellation race protocol.
+Submission has no idempotency key, input digest, deduplication protocol, or
+automatic retry. If transport is lost after submission but before the Operation
+id arrives, CLI reports `submission_outcome_unknown`. Operation listing can
+narrow by Model Kind and state but cannot prove correlation without the returned
+id. A missing id returns `operation_not_found`, whether it was never issued,
+retired, or belonged to a replaced Runtime.
+
+Cancelling queued work completes immediately. Cancelling running work enters
+`cancelling` and reaches `cancelled` only after Debrute-owned execution stops.
+An exact adapter may make one bounded best-effort remote cancellation call;
+failure of that call does not change accepted local cancellation. Already
+committed Batch Items remain committed. A Single's artifact commit and terminal
+success are linearized, so cancellation races with one terminal transition
+rather than an exposed Item-level protocol.

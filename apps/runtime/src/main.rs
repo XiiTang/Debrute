@@ -27,10 +27,10 @@ use debrute_runtime::control::endpoint::{WindowsControlEndpoint, WindowsControlO
 use debrute_runtime::{
     cli::RuntimeCliService,
     control::{
-        ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY, ClientRole,
-        ControlErrorCode, ControlRequest, DesktopOpenError, DesktopOpenResult, NativeControlClient,
-        ProjectFrontend, RuntimeActionError, RuntimeActivationService, RuntimeControlState,
-        WorkbenchRoute,
+        ActivationFailure, ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY,
+        ClientRole, ControlErrorCode, ControlRequest, DesktopOpenError, DesktopOpenResult,
+        NativeControlClient, ProjectFrontend, ProjectOpenFailure, RuntimeActionError,
+        RuntimeActivationService, RuntimeControlState, WorkbenchRoute,
         endpoint::{
             ControlEndpointAdapter, ControlEndpointOwnerAdapter, EndpointClaim, EndpointError,
         },
@@ -648,7 +648,6 @@ fn stable_runtime_entrypoint(arguments: &[OsString]) -> Result<PathBuf, Box<dyn 
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-#[allow(clippy::too_many_lines)]
 fn run_runtime_services(
     owner: PlatformControlOwner,
     state: &Arc<RuntimeControlState>,
@@ -763,7 +762,7 @@ fn run_runtime_services(
             Arc::clone(runtime_services.models()),
             Arc::clone(runtime_services.global()),
             runtime_services.projects().clone(),
-            Arc::clone(runtime_services.generated_assets()),
+            Arc::clone(runtime_services.provenance()),
             Arc::clone(runtime_services.model_operations()),
             active_product.clone(),
         ));
@@ -974,8 +973,8 @@ fn activation_for_resume_target(
             ProjectFrontend::Desktop => ActivationIntent::OpenDesktop,
             ProjectFrontend::Browser => ActivationIntent::OpenBrowser,
         },
-        ResumeTarget::Project { project_id } => ActivationIntent::OpenKnownProject {
-            project_id: project_id.clone(),
+        ResumeTarget::Project { canonical_root } => ActivationIntent::OpenProject {
+            project_root: canonical_root.clone(),
             frontend,
         },
     }
@@ -994,49 +993,33 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ControlErrorCode> {
+    ) -> Result<ActivationOutcome, ActivationFailure> {
         match intent {
             ActivationIntent::EnsureRuntime => Ok(ActivationOutcome::Ensured),
-            ActivationIntent::OpenDesktop => self.open_desktop(&WorkbenchRoute::Root),
-            ActivationIntent::OpenBrowser => self.open_browser(&WorkbenchRoute::Root),
+            ActivationIntent::OpenDesktop => self
+                .open_desktop(&WorkbenchRoute::Root)
+                .map_err(ActivationFailure::from),
+            ActivationIntent::OpenBrowser => self
+                .open_browser(&WorkbenchRoute::Root)
+                .map_err(ActivationFailure::from),
             ActivationIntent::OpenProject {
                 project_root,
                 frontend,
             } => {
-                let project_id = self
+                let canonical_root = self
                     .services
-                    .discover_project(project_root)
-                    .map_err(|_| ControlErrorCode::InvalidActivation)?;
-                let target = WorkbenchRoute::Project { project_id };
-                match frontend {
-                    ProjectFrontend::Desktop => self.open_desktop_project(
-                        &target,
-                        project_root,
-                        preferred_desktop_window_key,
-                    ),
-                    ProjectFrontend::Browser => self.open_browser(&target),
-                }
-            }
-            ActivationIntent::OpenKnownProject {
-                project_id,
-                frontend,
-            } => {
-                let target = WorkbenchRoute::Project {
-                    project_id: project_id.clone(),
+                    .preflight_project_root(project_root)
+                    .map_err(|error| project_open_failure(project_root, error))?;
+                let target = WorkbenchRoute::OpenProject {
+                    canonical_root: canonical_root.clone(),
                 };
                 match frontend {
                     ProjectFrontend::Desktop => {
-                        let project_root = self
-                            .services
-                            .project_root_for_stable_id(project_id)
-                            .map_err(|_| ControlErrorCode::InvalidActivation)?;
-                        self.open_desktop_project(
-                            &target,
-                            &project_root,
-                            preferred_desktop_window_key,
-                        )
+                        self.open_desktop_project(&target, preferred_desktop_window_key)
                     }
-                    ProjectFrontend::Browser => self.open_browser(&target),
+                    ProjectFrontend::Browser => {
+                        self.open_browser(&target).map_err(ActivationFailure::from)
+                    }
                 }
             }
         }
@@ -1048,31 +1031,30 @@ impl PlatformRuntimeActivation {
     fn open_desktop_project(
         &self,
         target: &WorkbenchRoute,
-        project_root: &str,
         preferred_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ControlErrorCode> {
+    ) -> Result<ActivationOutcome, ActivationFailure> {
         let _launch = self
             .desktop_launch
             .lock()
             .expect("Desktop launch lock poisoned");
         if !self.state.has_desktop_host() {
-            Self::launch_desktop_host(target)?;
+            Self::launch_desktop_host(target).map_err(ActivationFailure::from)?;
             return Ok(ActivationOutcome::Opened);
         }
-        let WorkbenchRoute::Project { project_id } = target else {
-            return Err(ControlErrorCode::InvalidRoute);
+        let WorkbenchRoute::OpenProject { canonical_root } = target else {
+            return Err(ControlErrorCode::InvalidRoute.into());
         };
         self.services
-            .activate_desktop_project(project_id, project_root, preferred_window_key)
+            .activate_desktop_project(canonical_root, preferred_window_key)
             .map(|outcome| match outcome {
                 DesktopOpenResult::Opened => ActivationOutcome::Opened,
                 DesktopOpenResult::FocusedExisting => ActivationOutcome::FocusedExisting,
             })
             .map_err(|error| match error.code {
                 "desktop_window_activation_failed" | "desktop_window_focus_failed" => {
-                    ControlErrorCode::DesktopUnavailable
+                    ControlErrorCode::DesktopUnavailable.into()
                 }
-                _ => ControlErrorCode::InvalidActivation,
+                _ => project_open_failure(canonical_root, error),
             })
     }
 
@@ -1105,8 +1087,8 @@ impl PlatformRuntimeActivation {
         .ok_or(ControlErrorCode::DesktopUnavailable)?;
         let entrypoint = configured.executable;
         let mut arguments = configured.arguments;
-        if let WorkbenchRoute::Project { project_id } = target {
-            arguments.push(format!("--debrute-project-id={project_id}"));
+        if let WorkbenchRoute::OpenProject { canonical_root } = target {
+            arguments.push(format!("--debrute-project-root={canonical_root}"));
         }
         Command::new(entrypoint)
             .args(&arguments)
@@ -1131,6 +1113,18 @@ impl PlatformRuntimeActivation {
             .map(|()| ActivationOutcome::Opened)
             .map_err(|_| ControlErrorCode::InvalidActivation)
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn project_open_failure(
+    project_root: &str,
+    error: debrute_runtime::workbench::RuntimeHttpServiceError,
+) -> ActivationFailure {
+    ActivationFailure::ProjectOpen(ProjectOpenFailure {
+        canonical_root: project_root.to_owned(),
+        code: error.code.to_owned(),
+        message: error.message,
+    })
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

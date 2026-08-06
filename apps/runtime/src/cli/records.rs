@@ -361,7 +361,6 @@ fn record_field_order(name: &str) -> &'static [&'static str] {
         "operation" => &[
             "id",
             "model_kind",
-            "project_root",
             "state",
             "accepted_at",
             "shape",
@@ -377,13 +376,12 @@ fn record_field_order(name: &str) -> &'static [&'static str] {
         "batch_item" => &["item_index", "model", "status", "log"],
         "artifact" => &[
             "artifact_index",
-            "role",
-            "project_relative_path",
+            "output_path",
             "mime_type",
             "width",
             "height",
         ],
-        "diagnostic" => &["id", "severity", "code", "message", "path"],
+        "diagnostic" => &["id", "severity", "code", "message", "path", "item_index"],
         "command" => &[
             "name", "scope", "risk", "requires", "writes", "input", "output", "errors",
         ],
@@ -399,7 +397,7 @@ fn result_field_order(command: &str) -> &'static [&'static str] {
             "runtime_instance",
             "diagnostics",
         ],
-        "project.init" | "project.status" | "project.validate" => &[
+        "project.status" | "project.validate" => &[
             "project_root",
             "project_name",
             "canvases",

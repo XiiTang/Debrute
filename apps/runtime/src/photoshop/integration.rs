@@ -15,9 +15,9 @@ use crate::{
         ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathKind,
         ProjectSessionRegistry, ProjectSessionSummary, ProjectUploadEntry, ProjectUse,
         ProjectUseKind, assert_project_tree_visible_mutation_path,
-        assert_project_tree_visible_path, is_project_fixed_heavy_path, list_project_directory,
-        normalize_project_directory_path, open_no_symlink_existing_project_file,
-        resolve_no_symlink_existing_project_path, resolve_project_path,
+        assert_project_tree_visible_path, list_project_directory, normalize_project_directory_path,
+        open_no_symlink_existing_project_file, resolve_no_symlink_existing_project_path,
+        resolve_project_path,
     },
 };
 
@@ -56,7 +56,7 @@ struct PlaceCommand {
 
 struct ExportCommand {
     session_id: String,
-    project_id: String,
+    canonical_root: String,
     project_revision: u64,
     directory: String,
     items: HashMap<String, String>,
@@ -229,19 +229,19 @@ impl PhotoshopIntegration {
             }
             PluginPhotoshopMessage::ProjectDirectoriesRequest {
                 request_id,
-                project_id,
+                canonical_root,
                 revision,
-            } => self.send_directories(session_id, request_id, project_id, revision),
+            } => self.send_directories(session_id, request_id, canonical_root, revision),
             PluginPhotoshopMessage::ExportStart {
                 command_id,
-                project_id,
+                canonical_root,
                 project_revision,
                 directory,
                 items,
             } => self.begin_export(
                 session_id,
                 &command_id,
-                project_id,
+                canonical_root,
                 project_revision,
                 &directory,
                 items,
@@ -275,13 +275,13 @@ impl PhotoshopIntegration {
     /// Returns an error when the source, target session, Document, or placement fails.
     pub async fn send_project_file(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         project_relative_path: &str,
         plugin_session_id: &str,
         document_id: u64,
     ) -> Result<PhotoshopSendResult, PhotoshopError> {
         let (receiver, result) = self.prepare_place(
-            project_id,
+            canonical_root,
             project_relative_path,
             plugin_session_id,
             document_id,
@@ -346,7 +346,7 @@ impl PhotoshopIntegration {
         if byte_length > PHOTOSHOP_MAX_FILE_BYTES {
             return Err(file_too_large());
         }
-        let (project_id, revision, directory, source_name) = {
+        let (canonical_root, revision, directory, source_name) = {
             let mut state = self.lock();
             let session_id = session_for_bearer(&state, bearer)?.to_owned();
             let Some(Command::Export(command)) = state.commands.get_mut(command_id) else {
@@ -374,14 +374,14 @@ impl PhotoshopIntegration {
             command.consumed_items.insert(item_id.to_owned());
             command.uploaded_bytes += byte_length;
             (
-                command.project_id.clone(),
+                command.canonical_root.clone(),
                 command.project_revision,
                 command.directory.clone(),
                 source_name,
             )
         };
         let result =
-            self.commit_export_item(&project_id, revision, &directory, &source_name, bytes);
+            self.commit_export_item(&canonical_root, revision, &directory, &source_name, bytes);
         let mut state = self.lock();
         let command = match state.commands.get_mut(command_id) {
             Some(Command::Export(command)) => command,
@@ -456,7 +456,7 @@ impl PhotoshopIntegration {
 
     fn prepare_place(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         project_relative_path: &str,
         plugin_session_id: &str,
         document_id: u64,
@@ -474,10 +474,10 @@ impl PhotoshopIntegration {
         let document_title =
             self.reserve_place_session(plugin_session_id, &command_id, document_id, mime_type)?;
         let prepared = (|| {
-            let session = self.projects.get(project_id)?;
+            let session = self.projects.get(Path::new(canonical_root))?;
             let project_use = self
                 .projects
-                .acquire_use(project_id, ProjectUseKind::Transfer)?;
+                .acquire_use(Path::new(canonical_root), ProjectUseKind::Transfer)?;
             let file_name = Path::new(&relative)
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -583,10 +583,10 @@ impl PhotoshopIntegration {
         &self,
         session_id: &str,
         request_id: String,
-        project_id: String,
+        canonical_root: String,
         revision: u64,
     ) -> Result<(), PhotoshopError> {
-        let Ok(session) = self.projects.get(&project_id) else {
+        let Ok(session) = self.projects.get(Path::new(&canonical_root)) else {
             return self.send_current_projects(session_id);
         };
         let summary = session.summary()?;
@@ -598,7 +598,7 @@ impl PhotoshopIntegration {
             session_id,
             RuntimePhotoshopMessage::ProjectDirectoriesSnapshot {
                 request_id,
-                project_id,
+                canonical_root,
                 revision,
                 directories,
             },
@@ -609,7 +609,7 @@ impl PhotoshopIntegration {
         &self,
         session_id: &str,
         command_id: &str,
-        project_id: String,
+        canonical_root: String,
         project_revision: u64,
         directory: &str,
         items: Vec<PhotoshopExportItem>,
@@ -633,7 +633,7 @@ impl PhotoshopIntegration {
         }
         self.reserve_export_session(session_id, command_id)?;
         let prepared = (|| {
-            let project = self.projects.get(&project_id)?;
+            let project = self.projects.get(Path::new(&canonical_root))?;
             if project.summary()?.project_revision != project_revision {
                 return Err(revision_changed());
             }
@@ -645,12 +645,6 @@ impl PhotoshopIntegration {
                         "Photoshop target directory is not visible.",
                     )
                 })?;
-                if is_project_fixed_heavy_path(&directory) {
-                    return Err(PhotoshopError::new(
-                        PhotoshopErrorCode::TargetDirectoryNotVisible,
-                        "Photoshop target directory is not visible.",
-                    ));
-                }
             }
             let directory_path =
                 resolve_no_symlink_existing_project_path(project.root(), &directory).map_err(
@@ -669,7 +663,7 @@ impl PhotoshopIntegration {
             }
             let project_use = self
                 .projects
-                .acquire_use(&project_id, ProjectUseKind::Transfer)?;
+                .acquire_use(Path::new(&canonical_root), ProjectUseKind::Transfer)?;
             Ok::<_, PhotoshopError>((directory, project_use))
         })();
         let (directory, project_use) =
@@ -689,7 +683,7 @@ impl PhotoshopIntegration {
                         command_id.to_owned(),
                         Command::Export(ExportCommand {
                             session_id: session_id.to_owned(),
-                            project_id,
+                            canonical_root,
                             project_revision,
                             directory,
                             items: item_map,
@@ -839,13 +833,13 @@ impl PhotoshopIntegration {
 
     fn commit_export_item(
         &self,
-        project_id: &str,
+        canonical_root: &str,
         revision: u64,
         directory: &str,
         source_name: &str,
         bytes: &[u8],
     ) -> Result<(String, u64), PhotoshopError> {
-        let session = self.projects.get(project_id)?;
+        let session = self.projects.get(Path::new(canonical_root))?;
         if session.summary()?.project_revision != revision {
             return Err(revision_changed());
         }
@@ -956,7 +950,6 @@ fn list_photoshop_target_directories(root: &Path) -> Result<Vec<String>, Project
     while let Some(parent) = pending.pop() {
         for entry in list_project_directory(root, &parent)? {
             if entry.kind != ProjectPathKind::Directory
-                || is_project_fixed_heavy_path(&entry.project_relative_path)
                 || assert_project_tree_visible_mutation_path(&entry.project_relative_path).is_err()
             {
                 continue;
@@ -1039,7 +1032,7 @@ fn project_views(projects: Vec<ProjectSessionSummary>) -> Vec<PhotoshopProjectVi
     let mut projects = projects
         .into_iter()
         .map(|project| PhotoshopProjectView {
-            project_id: project.project_id,
+            canonical_root: project.canonical_root,
             name: project.project_name,
             revision: project.project_revision,
         })
@@ -1047,7 +1040,7 @@ fn project_views(projects: Vec<ProjectSessionSummary>) -> Vec<PhotoshopProjectVi
     projects.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
-            .then_with(|| left.project_id.cmp(&right.project_id))
+            .then_with(|| left.canonical_root.cmp(&right.canonical_root))
     });
     projects
 }
@@ -1341,9 +1334,9 @@ mod tests {
         fs::write(&source_path, b"accepted bytes").unwrap();
         let projects = registry(home.as_ref());
         let opened = projects
-            .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
-        let project_id = opened.session.summary().unwrap().project_id;
+        let canonical_root = opened.session.summary().unwrap().canonical_root;
         let integration = PhotoshopIntegration::new(
             "runtime-1".to_owned(),
             ready_runtime_state(),
@@ -1365,7 +1358,12 @@ mod tests {
         );
 
         let (completion, result) = integration
-            .prepare_place(&project_id, "source.png", &admission.plugin_session_id, 10)
+            .prepare_place(
+                &canonical_root,
+                "source.png",
+                &admission.plugin_session_id,
+                10,
+            )
             .unwrap();
         assert_eq!(result.document_title, "A.psd");
         assert!(matches!(
@@ -1403,14 +1401,24 @@ mod tests {
         );
         assert_eq!(
             integration
-                .prepare_place(&project_id, "source.png", &admission.plugin_session_id, 999,)
+                .prepare_place(
+                    &canonical_root,
+                    "source.png",
+                    &admission.plugin_session_id,
+                    999,
+                )
                 .unwrap_err()
                 .code(),
             PhotoshopErrorCode::DocumentClosed
         );
 
         let (failure_completion, failure) = integration
-            .prepare_place(&project_id, "source.png", &admission.plugin_session_id, 10)
+            .prepare_place(
+                &canonical_root,
+                "source.png",
+                &admission.plugin_session_id,
+                10,
+            )
             .unwrap();
         assert!(matches!(
             outbound.try_recv().unwrap(),
@@ -1444,9 +1452,9 @@ mod tests {
         fs::write(project.as_ref().join("cover.avif"), b"avif bytes").unwrap();
         let projects = registry(home.as_ref());
         let opened = projects
-            .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
-        let project_id = opened.session.summary().unwrap().project_id;
+        let canonical_root = opened.session.summary().unwrap().canonical_root;
         let integration = PhotoshopIntegration::new(
             "runtime-1".to_owned(),
             ready_runtime_state(),
@@ -1469,7 +1477,7 @@ mod tests {
         assert_eq!(
             integration
                 .prepare_place(
-                    &project_id,
+                    &canonical_root,
                     "cover.avif",
                     &incompatible.plugin_session_id,
                     10,
@@ -1499,7 +1507,12 @@ mod tests {
             documents,
         );
         let (completion, result) = integration
-            .prepare_place(&project_id, "cover.avif", &compatible.plugin_session_id, 10)
+            .prepare_place(
+                &canonical_root,
+                "cover.avif",
+                &compatible.plugin_session_id,
+                10,
+            )
             .unwrap();
         assert!(matches!(
             compatible_outbound.try_recv().unwrap(),
@@ -1556,9 +1569,9 @@ mod tests {
         fs::write(project.as_ref().join(".git/hidden.png"), b"hidden bytes").unwrap();
         let projects = registry(home.as_ref());
         let opened = projects
-            .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
-        let project_id = opened.session.summary().unwrap().project_id;
+        let canonical_root = opened.session.summary().unwrap().canonical_root;
         let integration = PhotoshopIntegration::new(
             "runtime-1".to_owned(),
             ready_runtime_state(),
@@ -1574,7 +1587,12 @@ mod tests {
         );
 
         let (completion, active) = integration
-            .prepare_place(&project_id, "source.png", &admission.plugin_session_id, 10)
+            .prepare_place(
+                &canonical_root,
+                "source.png",
+                &admission.plugin_session_id,
+                10,
+            )
             .unwrap();
         assert!(matches!(
             outbound.try_recv().unwrap(),
@@ -1582,7 +1600,12 @@ mod tests {
         ));
         assert_eq!(
             integration
-                .prepare_place(&project_id, "missing.png", &admission.plugin_session_id, 10,)
+                .prepare_place(
+                    &canonical_root,
+                    "missing.png",
+                    &admission.plugin_session_id,
+                    10,
+                )
                 .unwrap_err()
                 .code(),
             PhotoshopErrorCode::Busy
@@ -1603,7 +1626,7 @@ mod tests {
         assert_eq!(
             integration
                 .prepare_place(
-                    &project_id,
+                    &canonical_root,
                     ".git/hidden.png",
                     &admission.plugin_session_id,
                     10,
@@ -1669,8 +1692,6 @@ mod tests {
         let project = TemporaryDirectory::new("filtered-directory-project");
         let home = TemporaryDirectory::new("filtered-directory-home");
         for directory in [
-            ".debrute/canvas-maps",
-            ".debrute/canvases",
             "exports",
             "ignored/kept",
             "nested/kept",
@@ -1681,7 +1702,7 @@ mod tests {
         fs::write(project.as_ref().join(".gitignore"), "ignored/\n").unwrap();
         let projects = registry(home.as_ref());
         let opened = projects
-            .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
         let integration = PhotoshopIntegration::new(
@@ -1697,7 +1718,7 @@ mod tests {
                 &admission.plugin_session_id,
                 PluginPhotoshopMessage::ProjectDirectoriesRequest {
                     request_id: "directories-1".to_owned(),
-                    project_id: summary.project_id.clone(),
+                    canonical_root: summary.canonical_root.clone(),
                     revision: summary.project_revision,
                 },
             )
@@ -1707,7 +1728,7 @@ mod tests {
             outbound.blocking_recv(),
             Some(RuntimePhotoshopMessage::ProjectDirectoriesSnapshot {
                 request_id: "directories-1".to_owned(),
-                project_id: summary.project_id.clone(),
+                canonical_root: summary.canonical_root.clone(),
                 revision: summary.project_revision,
                 directories: vec![
                     "exports".to_owned(),
@@ -1715,20 +1736,19 @@ mod tests {
                     "ignored/kept".to_owned(),
                     "nested".to_owned(),
                     "nested/kept".to_owned(),
+                    "node_modules".to_owned(),
+                    "node_modules/package".to_owned(),
                 ],
             })
         );
 
-        for (index, directory) in [".debrute/canvases", "node_modules"]
-            .into_iter()
-            .enumerate()
-        {
+        for (index, directory) in [".git/objects"].into_iter().enumerate() {
             let error = integration
                 .handle_message(
                     &admission.plugin_session_id,
                     PluginPhotoshopMessage::ExportStart {
                         command_id: format!("filtered-export-{index}"),
-                        project_id: summary.project_id.clone(),
+                        canonical_root: summary.canonical_root.clone(),
                         project_revision: summary.project_revision,
                         directory: directory.to_owned(),
                         items: vec![PhotoshopExportItem {
@@ -1746,7 +1766,7 @@ mod tests {
                 &admission.plugin_session_id,
                 PluginPhotoshopMessage::ExportStart {
                     command_id: "gitignored-export".to_owned(),
-                    project_id: summary.project_id,
+                    canonical_root: summary.canonical_root,
                     project_revision: summary.project_revision,
                     directory: "ignored/kept".to_owned(),
                     items: vec![PhotoshopExportItem {
@@ -1769,7 +1789,7 @@ mod tests {
         let home = TemporaryDirectory::new("outgoing-home");
         let projects = registry(home.as_ref());
         let opened = projects
-            .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
         let integration = PhotoshopIntegration::new(
@@ -1791,7 +1811,7 @@ mod tests {
                 &admission.plugin_session_id,
                 PluginPhotoshopMessage::ExportStart {
                     command_id: command_id.clone(),
-                    project_id: summary.project_id,
+                    canonical_root: summary.canonical_root,
                     project_revision: summary.project_revision,
                     directory: String::new(),
                     items: vec![
@@ -1871,7 +1891,7 @@ mod tests {
         let home = TemporaryDirectory::new("product-update-home");
         let projects = registry(home.as_ref());
         let opened = projects
-            .open_project_deferred(project.as_ref(), ProjectUseKind::Workbench)
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
         let runtime_state = ready_runtime_state();
@@ -1888,7 +1908,7 @@ mod tests {
                 &admitted.plugin_session_id,
                 PluginPhotoshopMessage::ExportStart {
                     command_id: "admitted-export".to_owned(),
-                    project_id: summary.project_id.clone(),
+                    canonical_root: summary.canonical_root.clone(),
                     project_revision: summary.project_revision,
                     directory: String::new(),
                     items: vec![PhotoshopExportItem {
@@ -1925,7 +1945,7 @@ mod tests {
                 &rejected.plugin_session_id,
                 PluginPhotoshopMessage::ExportStart {
                     command_id: "rejected-export".to_owned(),
-                    project_id: summary.project_id,
+                    canonical_root: summary.canonical_root,
                     project_revision: summary.project_revision,
                     directory: String::new(),
                     items: vec![PhotoshopExportItem {

@@ -23,9 +23,9 @@ to `gemini-3.1-flash-image`, `store` to `false`, and requests image output.
 ## Agent request fields
 
 - `prompt` is required and becomes one typed text input block.
-- `image` is an optional ordered string array. Each item is a Project-relative
-  image path, public HTTP(S) URL, or `data:image` URI and becomes one typed
-  image input block.
+- `image` is an optional ordered string array. Each item is an absolute or
+  CLI-working-directory-relative local image path, public HTTP(S) URL, or
+  `data:image` URI and becomes one typed image input block.
 - `aspect_ratio`, `image_size`, and `delivery` are optional strings.
 
 Current image sizes include `512`, `1K`, `2K`, and `4K`. Debrute materializes

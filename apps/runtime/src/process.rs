@@ -166,7 +166,7 @@ impl BoundedProcessSupervisor {
     }
 
     // Process admission, capture, cancellation, and teardown are one linear state machine.
-    #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+    #[allow(clippy::needless_pass_by_value)]
     pub(crate) fn run(
         &self,
         request: ProcessRequest,

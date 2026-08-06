@@ -196,7 +196,7 @@ fn one_pending_commit_recovers_forward_from_each_durable_phase() {
                 fixture.desktop_asset("0.0.4"),
                 ResumeIntent::Browser {
                     target: ResumeTarget::Project {
-                        project_id: "project-id".to_owned(),
+                        canonical_root: "project-id".to_owned(),
                     },
                 },
             )
@@ -620,7 +620,7 @@ fn pending_state_rejects_gaps_oversize_and_invalid_resume_target() {
     let coordinator = fixture.coordinator(RecordingPlatform::new(&fixture.root, "0.0.4"));
     let invalid_target = ResumeIntent::Desktop {
         target: ResumeTarget::Project {
-            project_id: String::new(),
+            canonical_root: String::new(),
         },
     };
     assert!(matches!(

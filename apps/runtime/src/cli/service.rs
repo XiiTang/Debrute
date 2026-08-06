@@ -1,11 +1,7 @@
-#![allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_lines,
-    clippy::unused_self
-)]
+#![allow(clippy::needless_pass_by_value, clippy::unused_self)]
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -15,18 +11,18 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    generation::GenerationService,
     global::{AudioModelKind, GlobalRuntimeService, ModelCatalog},
     model_operation::{
         BatchItemOutcome, ExecutionShape, ModelKind, ModelOperationExecution,
         ModelOperationListQuery, ModelOperationService, ModelOperationSnapshot, OperationListState,
         SubmitModelOperation, parse_model_requests,
     },
+    model_request::{
+        ModelArtifactProvenanceLookup, ModelArtifactProvenanceStore, ModelRequestExecutor,
+    },
     project::{
-        GeneratedAssetMetadataLookup, GeneratedAssetMetadataService, PROJECT_FILE, ProjectCommand,
-        ProjectCommandResult, ProjectDiagnostic, ProjectDiagnosticSeverity, ProjectError,
-        ProjectSessionRegistry, ProjectSnapshot, ProjectUseKind,
-        open_no_symlink_existing_project_file,
+        ProjectCommand, ProjectCommandResult, ProjectDiagnostic, ProjectDiagnosticSeverity,
+        ProjectError, ProjectSessionRegistry, ProjectSnapshot, ProjectUseKind,
     },
     workbench::{RuntimeCliHttpService, RuntimeCliRecordStream, RuntimeHttpServiceError},
 };
@@ -38,8 +34,8 @@ pub struct RuntimeCliService {
     models: Arc<ModelCatalog>,
     global: Arc<GlobalRuntimeService>,
     projects: ProjectSessionRegistry,
-    generated_assets: Arc<GeneratedAssetMetadataService>,
-    model_operations: Arc<ModelOperationService<GenerationService>>,
+    provenance: Arc<ModelArtifactProvenanceStore>,
+    model_operations: Arc<ModelOperationService<ModelRequestExecutor>>,
     active_product: Option<PathBuf>,
 }
 
@@ -49,7 +45,8 @@ pub(super) struct CliCommandRequest {
     pub(super) command: String,
     pub(super) positional: Vec<String>,
     pub(super) options: BTreeMap<String, String>,
-    pub(super) project_root: Option<PathBuf>,
+    pub(super) root: Option<PathBuf>,
+    pub(super) cwd: PathBuf,
 }
 
 #[derive(Debug)]
@@ -80,20 +77,19 @@ impl CliFailure {
 
 impl RuntimeCliService {
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         models: Arc<ModelCatalog>,
         global: Arc<GlobalRuntimeService>,
         projects: ProjectSessionRegistry,
-        generated_assets: Arc<GeneratedAssetMetadataService>,
-        model_operations: Arc<ModelOperationService<GenerationService>>,
+        provenance: Arc<ModelArtifactProvenanceStore>,
+        model_operations: Arc<ModelOperationService<ModelRequestExecutor>>,
         active_product: Option<PathBuf>,
     ) -> Self {
         Self {
             models,
             global,
             projects,
-            generated_assets,
+            provenance,
             model_operations,
             active_product,
         }
@@ -116,15 +112,11 @@ impl RuntimeCliService {
             "models.sfx.describe" => {
                 self.describe_audio_model(request, AudioModelKind::SoundEffect)
             }
-            "project.init" | "project.status" | "project.validate" => self.project_command(request),
-            "canvas-map.push"
-            | "canvas.create"
-            | "canvas.rename"
-            | "canvas.delete"
-            | "canvas.reorder"
-            | "canvas.repair-index"
-            | "canvas.reset-layout" => self.canvas_command(request),
-            "generated-asset.lookup" => self.generated_asset_lookup(request),
+            "project.status" | "project.validate" => self.project_command(request),
+            "canvas.create" | "canvas.rename" | "canvas.delete" | "canvas.reorder" => {
+                self.canvas_command(request)
+            }
+            "model-artifact.lookup" => self.model_artifact_lookup(request),
             "operation.list" => self.operation_list(request),
             "operation.inspect" => self.operation_inspect(request),
             "operation.cancel" => self.operation_cancel(request),
@@ -397,10 +389,8 @@ impl RuntimeCliService {
     }
 
     fn project_command(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        let root = required_project_root(request)?;
-        if request.command != "project.init" {
-            ensure_project_initialized(root)?;
-        }
+        let root = required_root(request)?;
+        validate_project_root(root)?;
         let opened = self.open_project(root)?;
         let snapshot = if request.command == "project.validate" {
             let refreshed = opened
@@ -440,15 +430,10 @@ impl RuntimeCliService {
     }
 
     fn canvas_command(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        let root = required_project_root(request)?;
-        ensure_project_initialized(root)?;
+        let root = required_root(request)?;
+        validate_project_root(root)?;
         let opened = self.open_project(root)?;
         let command = project_mutation(request)?;
-        let result_canvas_id = match &command {
-            ProjectCommand::PushCanvasMap { canvas_id }
-            | ProjectCommand::ResetCanvasLayout { canvas_id, .. } => Some(canvas_id.clone()),
-            _ => None,
-        };
         let result = opened.session.execute(command).map_err(project_failure)?;
         let fields = match result.value {
             ProjectCommandResult::CanvasCreated { canvas_id, .. } => {
@@ -456,37 +441,23 @@ impl RuntimeCliService {
             }
             ProjectCommandResult::CanvasDeleted {
                 active_canvas_id, ..
-            }
-            | ProjectCommandResult::CanvasRegistryRepaired {
-                active_canvas_id, ..
             } => json!({"active_canvas": active_canvas_id}),
-            ProjectCommandResult::CanvasLayoutReset { reset_count, .. } => json!({
-                "canvas": result_canvas_id.expect("layout reset command has a validated Canvas id"),
-                "mode": if request.options.get("all").is_some_and(|value| value == "true") { "all" } else { "paths" },
-                "reset": reset_count
-            }),
-            _ if request.command == "canvas-map.push" => json!({
-                "canvas": result_canvas_id.expect("Canvas Map push command has a validated Canvas id")
-            }),
             _ => json!({}),
         };
         Ok(ok(&request.command, fields))
     }
 
-    fn generated_asset_lookup(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        let root = required_project_root(request)?;
-        ensure_project_initialized(root)?;
-        let _opened = self.open_project(root)?;
+    fn model_artifact_lookup(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let path = request
             .options
             .get("path")
             .filter(|path| !path.is_empty())
             .ok_or_else(|| CliFailure::new("missing_argument", "--path is required."))?;
         let lookup = self
-            .generated_assets
-            .lookup(root, path)
-            .map_err(project_failure)?;
-        Ok(ok(&request.command, generated_asset_fields(&lookup)))
+            .provenance
+            .lookup(Path::new(path))
+            .map_err(|error| CliFailure::new("model_artifact_unavailable", error.to_string()))?;
+        Ok(ok(&request.command, model_artifact_fields(&lookup)))
     }
 
     fn operation_list(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
@@ -500,15 +471,6 @@ impl RuntimeCliService {
                 .options
                 .get("model-kind")
                 .map(|value| parse_model_kind(value))
-                .transpose()?,
-            project_root: request
-                .options
-                .get("project")
-                .map(|value| {
-                    PathBuf::from(value)
-                        .canonicalize()
-                        .map_err(|error| CliFailure::new("project_invalid", error.to_string()))
-                })
                 .transpose()?,
             limit: request
                 .options
@@ -571,7 +533,7 @@ impl RuntimeCliService {
 
     fn open_project(&self, root: &Path) -> Result<crate::project::OpenProjectSession, CliFailure> {
         self.projects
-            .open_project_deferred(root, ProjectUseKind::Request)
+            .open_project(root, ProjectUseKind::Request)
             .map_err(project_failure)
     }
 }
@@ -599,7 +561,6 @@ impl RuntimeCliHttpService for RuntimeCliService {
             }
         };
         let result = (|| {
-            let root = required_project_root(&request)?.to_path_buf();
             let requests = parse_model_requests(input, shape).map_err(operation_failure)?;
             let concurrency = request
                 .options
@@ -614,7 +575,7 @@ impl RuntimeCliHttpService for RuntimeCliService {
             let snapshot = self
                 .model_operations
                 .submit(SubmitModelOperation {
-                    project_root: root,
+                    invocation_cwd: request.cwd.clone(),
                     shape,
                     requests,
                     concurrency,
@@ -731,20 +692,17 @@ fn one_positional(request: &CliCommandRequest) -> Result<&str, CliFailure> {
     }
 }
 
-fn required_project_root(request: &CliCommandRequest) -> Result<&Path, CliFailure> {
-    request.project_root.as_deref().ok_or_else(|| {
+fn required_root(request: &CliCommandRequest) -> Result<&Path, CliFailure> {
+    request.root.as_deref().ok_or_else(|| {
         CliFailure::new(
             "missing_argument",
-            format!("{} requires projectRoot.", request.command),
+            format!("{} requires root.", request.command),
         )
     })
 }
 
 fn project_mutation(request: &CliCommandRequest) -> Result<ProjectCommand, CliFailure> {
     match request.command.as_str() {
-        "canvas-map.push" => Ok(ProjectCommand::PushCanvasMap {
-            canvas_id: positional(request, 1)?,
-        }),
         "canvas.create" => Ok(ProjectCommand::CreateCanvas),
         "canvas.rename" => Ok(ProjectCommand::RenameCanvas {
             canvas_id: positional(request, 1)?,
@@ -764,32 +722,6 @@ fn project_mutation(request: &CliCommandRequest) -> Result<ProjectCommand, CliFa
                 order: request.positional[1..].to_vec(),
             })
         }
-        "canvas.repair-index" => Ok(ProjectCommand::RepairCanvasRegistry),
-        "canvas.reset-layout" => {
-            let all = request
-                .options
-                .get("all")
-                .is_some_and(|value| value == "true");
-            let paths = string_array_option(request, "path")?;
-            if all != paths.is_empty() {
-                return Err(CliFailure::new(
-                    "invalid_input",
-                    "canvas.reset-layout requires --all or at least one --path.",
-                ));
-            }
-            let path_count = paths.len();
-            let node_paths = paths.into_iter().collect::<BTreeSet<_>>();
-            if node_paths.len() != path_count {
-                return Err(CliFailure::new(
-                    "invalid_input",
-                    "canvas.reset-layout node paths must be unique.",
-                ));
-            }
-            Ok(ProjectCommand::ResetCanvasLayout {
-                canvas_id: positional(request, 1)?,
-                node_paths: (!all).then_some(node_paths),
-            })
-        }
         _ => Err(CliFailure::new(
             "invalid_command",
             "Unsupported Canvas command.",
@@ -804,20 +736,6 @@ fn positional(request: &CliCommandRequest, index: usize) -> Result<String, CliFa
             format!("{} requires more arguments.", request.command),
         )
     })
-}
-
-fn string_array_option(request: &CliCommandRequest, key: &str) -> Result<Vec<String>, CliFailure> {
-    request.options.get(key).map_or_else(
-        || Ok(Vec::new()),
-        |value| {
-            serde_json::from_str(value).map_err(|_| {
-                CliFailure::new(
-                    "invalid_input",
-                    format!("--{key} must be one or more strings."),
-                )
-            })
-        },
-    )
 }
 
 fn model_detail(
@@ -876,16 +794,35 @@ fn project_snapshot_fields(snapshot: &ProjectSnapshot) -> Value {
     let mut fields = diagnostic_count_map(snapshot);
     fields.insert(
         "project_root".to_owned(),
-        Value::String(snapshot.project_root.clone()),
+        Value::String(snapshot.canonical_root.clone()),
     );
     fields.insert(
         "project_name".to_owned(),
         Value::String(snapshot.health.project_name.clone()),
     );
-    fields.insert(
-        "canvases".to_owned(),
-        Value::from(snapshot.health.canvas_count),
-    );
+    match &snapshot.canvas_workspace {
+        crate::project::CanvasWorkspaceSnapshot::Available { workspace, .. } => {
+            fields.insert(
+                "canvas_workspace".to_owned(),
+                Value::String("available".to_owned()),
+            );
+            fields.insert("canvases".to_owned(), Value::from(workspace.canvases.len()));
+        }
+        crate::project::CanvasWorkspaceSnapshot::Unavailable { code, message } => {
+            fields.insert(
+                "canvas_workspace".to_owned(),
+                Value::String("unavailable".to_owned()),
+            );
+            fields.insert(
+                "canvas_workspace_error_code".to_owned(),
+                Value::String(code.as_str().to_owned()),
+            );
+            fields.insert(
+                "canvas_workspace_error_message".to_owned(),
+                Value::String(message.clone()),
+            );
+        }
+    }
     Value::Object(fields)
 }
 
@@ -920,28 +857,12 @@ fn diagnostic_record(diagnostic: &ProjectDiagnostic) -> Value {
     }})
 }
 
-fn generated_asset_fields(lookup: &GeneratedAssetMetadataLookup) -> Value {
-    match lookup {
-        GeneratedAssetMetadataLookup::Matched {
-            fingerprint,
-            records,
-            ..
-        } => json!({
-            "status": "matched", "hash": fingerprint.hash, "records": records.len(),
-            "metadata": serde_json::to_string(lookup).expect("lookup serializes")
-        }),
-        GeneratedAssetMetadataLookup::Unmatched { fingerprint, .. } => json!({
-            "status": "unmatched", "hash": fingerprint.hash, "records": 0,
-            "metadata": serde_json::to_string(lookup).expect("lookup serializes")
-        }),
-        GeneratedAssetMetadataLookup::Unavailable {
-            reason, message, ..
-        } => json!({
-            "status": "unavailable",
-            "reason": serde_json::to_value(reason).expect("reason serializes"),
-            "message": message
-        }),
-    }
+fn model_artifact_fields(lookup: &ModelArtifactProvenanceLookup) -> Value {
+    json!({
+        "status": if lookup.record.is_some() { "matched" } else { "unmatched" },
+        "hash": lookup.sha256,
+        "metadata": serde_json::to_string(lookup).expect("lookup serializes")
+    })
 }
 
 fn audio_kind_name(kind: AudioModelKind) -> &'static str {
@@ -958,10 +879,6 @@ fn operation_records(snapshot: &ModelOperationSnapshot) -> Vec<Value> {
         (
             "model_kind".to_owned(),
             Value::String(model_kind_name(snapshot.model_kind).to_owned()),
-        ),
-        (
-            "project_root".to_owned(),
-            Value::String(snapshot.project_root.clone()),
         ),
         (
             "state".to_owned(),
@@ -1010,6 +927,17 @@ fn operation_records(snapshot: &ModelOperationSnapshot) -> Vec<Value> {
     for artifact in snapshot.execution.single_artifacts() {
         records.push(artifact_record(artifact));
     }
+    records.extend(snapshot.diagnostics.iter().map(|diagnostic| {
+        json!({
+            "name": "diagnostic",
+            "fields": {
+                "severity": "warning",
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "item_index": diagnostic.item_index,
+            }
+        })
+    }));
     records
 }
 
@@ -1060,8 +988,7 @@ fn artifact_record(artifact: &crate::model_operation::ArtifactPointer) -> Value 
         "name": "artifact",
         "fields": {
             "artifact_index": artifact.artifact_index,
-            "role": serde_json::to_value(artifact.role).expect("Artifact role serializes"),
-            "project_relative_path": artifact.project_relative_path,
+            "output_path": artifact.output_path,
             "mime_type": artifact.mime_type,
             "width": artifact.width,
             "height": artifact.height,
@@ -1177,7 +1104,7 @@ pub(super) fn project_failure(error: ProjectError) -> CliFailure {
     failure
 }
 
-pub(super) fn ensure_project_initialized(root: &Path) -> Result<(), CliFailure> {
+pub(super) fn validate_project_root(root: &Path) -> Result<(), CliFailure> {
     let canonical = root.canonicalize().map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             CliFailure::new(
@@ -1189,16 +1116,14 @@ pub(super) fn ensure_project_initialized(root: &Path) -> Result<(), CliFailure> 
         }
         .with_field("path", root.to_string_lossy().into_owned())
     })?;
-    match open_no_symlink_existing_project_file(&canonical, PROJECT_FILE) {
-        Ok(_) => Ok(()),
-        Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(CliFailure::new(
-                "project_not_found",
-                "Debrute Project metadata was not found.",
-            )
-            .with_field("path", root.to_string_lossy().into_owned()))
-        }
-        Err(error) => Err(project_failure(error)),
+    if canonical.is_dir() {
+        Ok(())
+    } else {
+        Err(CliFailure::new(
+            "project_invalid",
+            "Debrute Project root must be a directory.",
+        )
+        .with_field("path", root.to_string_lossy().into_owned()))
     }
 }
 
@@ -1260,7 +1185,10 @@ fn typed_records(records: Vec<Value>) -> Vec<CliRecord> {
 #[cfg(test)]
 mod operation_record_tests {
     use super::*;
-    use crate::model_operation::{ModelOperationExecution, OperationState};
+    use crate::cli::agent_record;
+    use crate::model_operation::{
+        ModelOperationDiagnostic, ModelOperationExecution, OperationState,
+    };
 
     fn snapshot(
         state: OperationState,
@@ -1269,13 +1197,11 @@ mod operation_record_tests {
         ModelOperationSnapshot {
             id: "operation-1".to_owned(),
             model_kind: ModelKind::Image,
-            project_root: "/project".to_owned(),
-            project_id: "project-1".to_owned(),
-            project_name: "Project One".to_owned(),
             state,
             accepted_at: "2026-07-20T00:00:00Z".to_owned(),
             execution,
             log: (state == OperationState::Failed).then(|| "upstream failed".to_owned()),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -1330,6 +1256,35 @@ mod operation_record_tests {
         assert_eq!(cancelled["status"], "error");
         assert_eq!(cancelled["code"], "operation_cancelled");
         assert!(cancelled.get("log").is_none());
+    }
+
+    #[test]
+    fn operation_records_expose_artifacts_and_provenance_warnings() {
+        let mut snapshot = snapshot(
+            OperationState::Succeeded,
+            ModelOperationExecution::Single {
+                model: "image-model".to_owned(),
+                timeout_seconds: 600,
+                artifacts: vec![crate::model_operation::ArtifactPointer {
+                    artifact_index: 0,
+                    output_path: "/project/generated/cover.jpg".to_owned(),
+                    mime_type: "image/jpeg".to_owned(),
+                    width: Some(1024),
+                    height: Some(1024),
+                }],
+            },
+        );
+        snapshot.diagnostics.push(ModelOperationDiagnostic {
+            code: "model_artifact_provenance_persistence_failed".to_owned(),
+            message: "Model output was committed, but provenance could not be stored.".to_owned(),
+            item_index: None,
+        });
+
+        let rendered = agent_record(&terminal_operation_result("request.single", &snapshot));
+        assert!(rendered.contains(
+            "diagnostic severity=warning code=model_artifact_provenance_persistence_failed"
+        ));
+        assert!(rendered.contains("output_path=/project/generated/cover.jpg"));
     }
 
     #[test]

@@ -68,7 +68,7 @@ Documented aspect ratio options:
 
 The only Debrute `image-01` default is `response_format: base64`, which
 deliberately differs from MiniMax's current provider default `url` so the normal
-Project artifact does not depend on an expiring URL. Count and geometry remain
+Model Artifact does not depend on an expiring URL. Count and geometry remain
 absent unless the Agent supplies them.
 
 Debrute does not add a mutual-exclusion rule that MiniMax does not have. If the
@@ -79,7 +79,7 @@ allowed provider request into a local error.
 
 MiniMax owns the current business validation of prompt length, numeric ranges,
 documented option values, paired dimensions, divisibility, and parameter
-combinations. Debrute validates its own request structure, Project media,
+combinations. Debrute validates its own request structure, local media,
 public-URL safety, and resource limits, then sends the Agent's exact canonical
 arguments. If MiniMax rejects them, Runtime returns MiniMax's status, code, and
 original explanatory message in the Model Operation's single Agent-visible
@@ -100,9 +100,10 @@ Official image-to-image request fields used by Debrute:
 
 MiniMax receives subject references as objects with `type: "character"` and an
 `image_file` URL. Debrute does not expose that provider object as a second Agent
-input shape. The Agent supplies an array of Project-relative image paths,
-public HTTP(S) URLs, or `data:image` URLs. Runtime validates and resolves each
-string, then the exact adapter constructs the fixed MiniMax character-reference
+input shape. The Agent supplies an array of absolute or
+CLI-working-directory-relative local image paths, public HTTP(S) URLs, or
+`data:image` URLs. Runtime validates and resolves each string, then the exact
+adapter constructs the fixed MiniMax character-reference
 object.
 
 The array may be empty. Runtime forwards an explicit empty array rather than
@@ -125,5 +126,5 @@ provider objects are not accepted Agent inputs.
 Successful responses include a trace `id`, a `data` object with generated image
 URLs or Base64 data depending on `response_format`, `metadata` with success and
 failure counts, and `base_resp` status information. Debrute supports both
-documented response shapes and commits either one as the same Project-owned
-generated image artifacts.
+documented response shapes and commits either one as the same generated-image
+Model Artifacts.

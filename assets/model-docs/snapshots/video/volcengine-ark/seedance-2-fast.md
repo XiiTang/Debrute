@@ -48,8 +48,8 @@ Debrute returns that error without changing the value or retrying.
 
 Debrute constructs the exact typed `content` array from the prompt and ordered
 references. Publicly reachable URLs and Ark `asset://` values remain URLs.
-Supported Project image and audio values may become data URIs. A Project-local
-video without a model-reachable URL fails before task creation.
+Supported local image and audio values may become data URIs. A local video
+without a model-reachable URL fails before task creation.
 
 ## Response
 

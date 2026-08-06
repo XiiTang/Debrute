@@ -37,8 +37,9 @@ Official request fields used by Debrute:
 - `model`: the exact Ark model id `doubao-seedream-5-0-pro-260628`.
 - `prompt`: the text instruction for generation or editing. Region coordinates
   and their intended transformation belong in this instruction.
-- `image`: an optional ordered string array. Each Agent value is a
-  Project-relative image path, safe public HTTP(S) URL, or `data:image` URL. A
+- `image`: an optional ordered string array. Each Agent value is an absolute or
+  CLI-working-directory-relative local image path, safe public HTTP(S) URL, or
+  `data:image` URL. A
   single reference uses a one-element array. Runtime resolves every present
   value and preserves its order. An explicit empty array is preserved for the
   remote endpoint to validate.
@@ -46,14 +47,14 @@ Official request fields used by Debrute:
   The provider currently defaults an omitted value to 2K; Debrute leaves this
   field absent unless the Agent chooses an output size.
 - `output_format`: `png` or `jpeg`. Debrute materializes `png` as its normal
-  lossless Project artifact format.
+  lossless Model Artifact format.
 - `response_format`: `url` or `b64_json`. Debrute materializes `url`; Runtime
-  immediately downloads each result into the Project because an official
-  result URL remains available for only 24 hours. When an Agent explicitly
-  selects `b64_json`, Runtime decodes the returned bytes and detects their real
-  image MIME before saving the same Project artifact shape.
-- `watermark`: boolean. Debrute materializes `false`, so the ordinary Project
-  artifact has no provider watermark.
+  immediately downloads each result into the accepted output directory because
+  an official result URL remains available for only 24 hours. When an Agent
+  explicitly selects `b64_json`, Runtime decodes the returned bytes and detects
+  their real image MIME before saving the same Model Artifact shape.
+- `watermark`: boolean. Debrute materializes `false`, so the ordinary Model
+  Artifact has no provider watermark.
 - `optimize_prompt_options.mode`: optional prompt-optimization mode. Debrute
   does not materialize a mode; a supplied string reaches the remote endpoint
   for current model-business validation.
@@ -72,7 +73,7 @@ inputs and the prompt states the intended result.
 The official input contract accepts image URLs or Base64 values and documents
 JPEG, PNG, WebP, BMP, TIFF, GIF, HEIC, and HEIF. Each input image must remain
 under 30 MB and 36 megapixels. The service owns these current format, count,
-dimension, ratio, and file-size business limits; Runtime owns Project media
+dimension, ratio, and file-size business limits; Runtime owns local-media
 classification, safe media resolution, and request-size safety.
 
 For explicit output dimensions, the official contract documents a total-pixel

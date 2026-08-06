@@ -10,8 +10,8 @@ describe('Debrute audio director Skill', () => {
     );
     expect(skill).toContain('peer Model Kinds TTS, music, and sound-effect');
     expect(skill).toContain('debrute models tts|music|sfx list');
-    expect(skill).toContain('debrute request single /path/to/project --input');
-    expect(skill).toContain('debrute request batch /path/to/project --input');
+    expect(skill).toContain('direct `--model`, `--arguments`, and');
+    expect(skill).toContain('debrute request batch --input');
     expect(skill).toContain('default to `10m`');
     expect(skill).toContain('Batch supports every audio Model Kind');
     expect(skill).toContain('exit 0 with failed Items');
