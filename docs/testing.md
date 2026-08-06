@@ -238,11 +238,12 @@ the diagnostic chain.
    instance argument on the applicable platform.
 3. Open the same stable Project route in a real browser. Web must take the
    Project, while the existing Desktop window stays open with its last
-   presentation, becomes read-only, and exposes **Open Here**.
+   confirmed presentation frozen, has no Project command authority, and exposes
+   **Open Here**.
 4. Choose **Open Here** in Desktop. Desktop must regain the Project and the Web
-   page must become the corresponding detached, read-only presentation. Neither
-   direction reconnects, retries, closes the other container, or loses its
-   frontend-local view state.
+   page must retain the corresponding detached presentation in a frozen state
+   without Project command authority. Neither direction reconnects, retries,
+   closes the other container, or loses its frontend-local view state.
 5. Inspect representative raster `<img>` elements before and after a real
    Canvas zoom. Their `currentSrc` width and `naturalWidth` must advance when a
    higher quantized tier is needed, while the previously loaded image remains

@@ -62,8 +62,6 @@ export interface ProjectPathEntry {
 export type ProjectDirectoryState = 'unloaded' | 'loaded' | 'error';
 
 export interface ProjectTreeEntry extends ProjectPathEntry {
-  ignored: boolean;
-  hidden: boolean;
   directoryState?: ProjectDirectoryState;
   directoryError?: string;
 }

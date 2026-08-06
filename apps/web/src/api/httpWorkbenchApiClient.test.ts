@@ -647,7 +647,7 @@ function snapshotFixture(canonicalRoot: string, projectName: string) {
         nodeStates: {},
         occlusionOrder: []
       },
-      canvasResources: { resources: [], diagnostics: [] }
+      canvasResources: { resources: [] }
     },
     projectTree: [],
     diagnostics: [],

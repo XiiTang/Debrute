@@ -34,7 +34,7 @@ export type { NativeEditCommandId, NativeMenuCommand, NativeMenuCommandId } from
 
 export type CanvasNodeKind = 'directory' | 'file';
 export type CanvasMediaKind = 'image' | 'video' | 'audio' | 'text' | 'unknown';
-export type ProjectDiagnosticSeverity = 'error' | 'warning';
+type ProjectDiagnosticSeverity = 'error' | 'warning';
 
 export interface ProjectDiagnostic {
   id: string;
@@ -47,7 +47,7 @@ export interface ProjectDiagnostic {
   entityId?: string;
 }
 
-export interface CanvasManualLayout {
+interface CanvasManualLayout {
   x: number;
   y: number;
   width: number;
@@ -63,7 +63,7 @@ export interface CanvasTextViewportState {
   scrollLeft: number;
 }
 
-export interface CanvasNodeState {
+interface CanvasNodeState {
   manualLayout?: CanvasManualLayout;
   videoPlayback?: CanvasVideoPlaybackState;
   textViewport?: CanvasTextViewportState;
@@ -75,7 +75,7 @@ export interface CanvasState {
   occlusionOrder: string[];
 }
 
-export type CanvasNodeAvailability =
+type CanvasNodeAvailability =
   | {
       state: 'available';
       size: number;
@@ -83,13 +83,12 @@ export type CanvasNodeAvailability =
       fileUrl: string;
       canvasImagePreviewable?: boolean;
       canvasImagePreviewSourceWidth?: number;
-      mtimeMs?: number;
       revision: string;
     }
   | { state: 'missing'; message: string }
   | { state: 'unreadable'; message: string };
 
-export interface CanvasVideoTextTrack {
+interface CanvasVideoTextTrack {
   projectRelativePath: string;
   fileUrl?: string;
   revision: string;
@@ -99,7 +98,7 @@ export interface CanvasVideoTextTrack {
   default: boolean;
 }
 
-export interface CanvasVideoPresentation {
+interface CanvasVideoPresentation {
   kind: 'video';
   width: number;
   height: number;
@@ -107,12 +106,12 @@ export interface CanvasVideoPresentation {
   textTracks: CanvasVideoTextTrack[];
 }
 
-export interface CanvasImageDimensions {
+interface CanvasImageDimensions {
   width: number;
   height: number;
 }
 
-export type CanvasResource =
+type CanvasResource =
   | { projectRelativePath: string; nodeKind: 'directory' }
   | {
       projectRelativePath: string;
@@ -126,7 +125,6 @@ export type CanvasResource =
 
 export interface CanvasResourceView {
   resources: CanvasResource[];
-  diagnostics: ProjectDiagnostic[];
 }
 
 export const CANVAS_FEEDBACK_MARKS = [
@@ -144,7 +142,7 @@ export type CanvasFeedbackGeometry =
   | { type: 'point'; x: number; y: number }
   | { type: 'rect'; x: number; y: number; width: number; height: number };
 
-export interface CanvasFeedbackMomentRef {
+interface CanvasFeedbackMomentRef {
   label: string;
   currentTimeSeconds: number;
 }
@@ -205,17 +203,16 @@ export type UpdateCanvasFeedbackInput =
   | { operation: 'update-item'; projectRelativePath: string; itemId: string; geometry?: CanvasFeedbackGeometry; comment?: string }
   | { operation: 'delete-item'; projectRelativePath: string; itemId: string };
 
-interface ProjectHealthSummary {
+export interface WorkbenchProjectHealthSummary {
   projectName: string;
   diagnosticCounts: {
     errors: number;
     warnings: number;
   };
-  runtimeDataLocation: string;
   checkedAt: string;
 }
 
-export interface CanvasWorkspaceDocument extends CanvasState {
+interface CanvasWorkspaceDocument extends CanvasState {
   canonicalRoot: string;
 }
 
@@ -226,10 +223,10 @@ const CANVAS_WORKSPACE_UNAVAILABLE_CODES = [
   'canvas_workspace_persistence_failed'
 ] as const;
 
-export type CanvasWorkspaceUnavailableCode =
+type CanvasWorkspaceUnavailableCode =
   typeof CANVAS_WORKSPACE_UNAVAILABLE_CODES[number];
 
-export type CanvasWorkspaceSnapshot =
+type CanvasWorkspaceSnapshot =
   | {
       status: 'available';
       workspace: CanvasWorkspaceDocument;
@@ -241,18 +238,14 @@ export type CanvasWorkspaceSnapshot =
       message: string;
     };
 
-interface ProjectSessionSnapshot {
+export interface WorkbenchProjectSessionSnapshot {
   canonicalRoot: string;
   projectTree: ProjectTreeEntry[];
   canvasWorkspace: CanvasWorkspaceSnapshot;
   diagnostics: ProjectDiagnostic[];
-  health: ProjectHealthSummary;
+  health: WorkbenchProjectHealthSummary;
 }
 
-export type WorkbenchProjectHealthSummary = Omit<ProjectHealthSummary, 'runtimeDataLocation'>;
-export type WorkbenchProjectSessionSnapshot = Omit<ProjectSessionSnapshot, 'health'> & {
-  health: WorkbenchProjectHealthSummary;
-};
 export type WorkbenchProjectTextFile = Omit<ProjectTextFile, 'absolutePath'>;
 
 export interface RevisionedProjectResult {
@@ -719,7 +712,7 @@ export interface DebruteProductState {
   update: ProductUpdateState;
 }
 
-export interface ModelArtifactProvenanceRecord {
+interface ModelArtifactProvenanceRecord {
   operationId: string;
   itemIndex: number;
   artifactIndex: number;
@@ -738,14 +731,14 @@ export interface ModelArtifactProvenanceLookup {
   record: ModelArtifactProvenanceRecord | null;
 }
 
-export interface CanvasNodeStateUpdate {
+interface CanvasNodeStateUpdate {
   projectRelativePath: string;
   manualLayout?: CanvasManualLayout | null;
   videoPlayback?: CanvasVideoPlaybackState | null;
   textViewport?: CanvasTextViewportState | null;
 }
 
-export interface PatchCanvasStateInput {
+interface PatchCanvasStateInput {
   expandedDirectories?: string[];
   nodeStateUpdates?: CanvasNodeStateUpdate[];
   occlusionOrder?: string[];
@@ -1315,13 +1308,9 @@ function isProjectTreeEntry(value: unknown): boolean {
       'projectRelativePath',
       'kind',
       'sizeBytes',
-      'ignored',
-      'hidden',
       'directoryState',
       'directoryError'
     ].includes(key))
-    || typeof value.ignored !== 'boolean'
-    || typeof value.hidden !== 'boolean'
     || !isProjectPathEntry({
       projectRelativePath: value.projectRelativePath,
       kind: value.kind,
@@ -1423,11 +1412,9 @@ function isCanvasNodeState(value: unknown): boolean {
 
 function isCanvasResourceView(value: unknown): boolean {
   return isProtocolObject(value)
-    && hasExactKeys(value, ['resources', 'diagnostics'])
+    && hasExactKeys(value, ['resources'])
     && Array.isArray(value.resources)
-    && value.resources.every(isCanvasResource)
-    && Array.isArray(value.diagnostics)
-    && value.diagnostics.every(isProjectDiagnostic);
+    && value.resources.every(isCanvasResource);
 }
 
 function isCanvasResource(value: unknown): boolean {
@@ -1483,20 +1470,26 @@ function isCanvasNodeAvailability(value: unknown): boolean {
     return false;
   }
   if (value.state === 'missing' || value.state === 'unreadable') {
-    return typeof value.message === 'string';
+    return hasExactKeys(value, ['state', 'message'])
+      && typeof value.message === 'string';
   }
   return value.state === 'available'
+    && hasExactKeys(
+      value,
+      ['state', 'size', 'mimeType', 'fileUrl', 'revision'],
+      ['canvasImagePreviewable', 'canvasImagePreviewSourceWidth']
+    )
     && isFiniteNumber(value.size)
     && typeof value.mimeType === 'string'
     && typeof value.fileUrl === 'string'
     && typeof value.revision === 'string'
     && (value.canvasImagePreviewable === undefined || typeof value.canvasImagePreviewable === 'boolean')
-    && (value.canvasImagePreviewSourceWidth === undefined || isFiniteNumber(value.canvasImagePreviewSourceWidth))
-    && (value.mtimeMs === undefined || isFiniteNumber(value.mtimeMs));
+    && (value.canvasImagePreviewSourceWidth === undefined || isFiniteNumber(value.canvasImagePreviewSourceWidth));
 }
 
 function isCanvasVideoPresentation(value: unknown): boolean {
   return isProtocolObject(value)
+    && hasExactKeys(value, ['kind', 'width', 'height', 'textTracks'], ['durationSeconds'])
     && value.kind === 'video'
     && isFiniteNumber(value.width)
     && isFiniteNumber(value.height)
@@ -1507,6 +1500,11 @@ function isCanvasVideoPresentation(value: unknown): boolean {
 
 function isCanvasVideoTextTrack(value: unknown): boolean {
   return isProtocolObject(value)
+    && hasExactKeys(
+      value,
+      ['projectRelativePath', 'revision', 'kind', 'label', 'default'],
+      ['fileUrl', 'srclang']
+    )
     && typeof value.projectRelativePath === 'string'
     && (value.fileUrl === undefined || typeof value.fileUrl === 'string')
     && typeof value.revision === 'string'

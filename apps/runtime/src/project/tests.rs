@@ -41,6 +41,85 @@ fn available_canvas_workspace(snapshot: &ProjectSnapshot) -> &CanvasWorkspaceDoc
 }
 
 #[test]
+fn canvas_resource_media_facts_use_exact_shared_classification() {
+    let base = std::env::temp_dir().join(format!("debrute-project-media-{}", Uuid::new_v4()));
+    let home = base.join("home");
+    let root = base.join("project");
+    fs::create_dir_all(&root).unwrap();
+    let expected = [
+        ("image.png", CanvasMediaKind::Image, "image/png"),
+        ("image.jpg", CanvasMediaKind::Image, "image/jpeg"),
+        ("image.jpeg", CanvasMediaKind::Image, "image/jpeg"),
+        ("image.jpe", CanvasMediaKind::Image, "image/jpeg"),
+        ("frame.jfif", CanvasMediaKind::Image, "image/jpeg"),
+        ("animation.gif", CanvasMediaKind::Image, "image/gif"),
+        ("image.webp", CanvasMediaKind::Image, "image/webp"),
+        ("image.avif", CanvasMediaKind::Image, "image/avif"),
+        ("image.tif", CanvasMediaKind::Image, "image/tiff"),
+        ("image.tiff", CanvasMediaKind::Image, "image/tiff"),
+        ("image.svg", CanvasMediaKind::Image, "image/svg+xml"),
+        ("image.svgz", CanvasMediaKind::Image, "image/svg+xml"),
+        ("video.mp4", CanvasMediaKind::Video, "video/mp4"),
+        ("video.webm", CanvasMediaKind::Video, "video/webm"),
+        ("video.mov", CanvasMediaKind::Video, "video/quicktime"),
+        ("clip.m4v", CanvasMediaKind::Video, "video/x-m4v"),
+        ("audio.mp3", CanvasMediaKind::Audio, "audio/mpeg"),
+        ("audio.wav", CanvasMediaKind::Audio, "audio/wav"),
+        ("audio.wave", CanvasMediaKind::Audio, "audio/wav"),
+        ("audio.ogg", CanvasMediaKind::Audio, "audio/ogg"),
+        ("audio.oga", CanvasMediaKind::Audio, "audio/ogg"),
+        ("sound.opus", CanvasMediaKind::Audio, "audio/ogg"),
+        ("audio.m4a", CanvasMediaKind::Audio, "audio/mp4"),
+        ("audio.aac", CanvasMediaKind::Audio, "audio/mp4"),
+        ("audio.flac", CanvasMediaKind::Audio, "audio/flac"),
+        ("audio.weba", CanvasMediaKind::Audio, "audio/webm"),
+        ("launch", CanvasMediaKind::Text, "text/x-shellscript"),
+    ];
+    for (path, _, _) in expected {
+        fs::write(root.join(path), []).unwrap();
+    }
+    fs::write(root.join("launch"), "#!/bin/sh\necho ready\n").unwrap();
+
+    let service = ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let snapshot = service.snapshot();
+    let resources = match &snapshot.canvas_workspace {
+        CanvasWorkspaceSnapshot::Available {
+            canvas_resources, ..
+        } => &canvas_resources.resources,
+        CanvasWorkspaceSnapshot::Unavailable { code, message } => {
+            panic!("Canvas Workspace unavailable ({code:?}): {message}")
+        }
+    };
+    for (path, expected_kind, expected_mime_type) in expected {
+        let resource = resources
+            .iter()
+            .find(|resource| resource.project_relative_path() == path)
+            .unwrap();
+        let CanvasResource::File {
+            media_kind,
+            availability,
+            ..
+        } = resource
+        else {
+            panic!("expected Canvas file resource for {path}")
+        };
+        assert_eq!(
+            *media_kind, expected_kind,
+            "unexpected media kind for {path}"
+        );
+        let CanvasNodeAvailability::Available { mime_type, .. } = availability.as_ref() else {
+            panic!("expected available Canvas resource for {path}")
+        };
+        assert_eq!(
+            mime_type, expected_mime_type,
+            "unexpected MIME type for {path}"
+        );
+    }
+
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn plain_directory_is_a_project_and_identity_is_its_canonical_root() {
     let (base, root, registry) = fixture();
     let first = registry
@@ -288,12 +367,10 @@ fn watcher_echo_does_not_erase_state_carried_by_a_runtime_rename() {
         ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
 
     fs::rename(root.join("before.txt"), root.join("after.txt")).unwrap();
-    service
-        .reconcile_committed_path_mutation(
-            &["after.txt".to_owned()],
-            &[("before.txt".to_owned(), "after.txt".to_owned())],
-        )
-        .unwrap();
+    service.reconcile_committed_path_mutation(
+        &["after.txt".to_owned()],
+        &[("before.txt".to_owned(), "after.txt".to_owned())],
+    );
     let snapshot = service
         .refresh_watched_paths(&[watcher::ProjectWatchPath {
             project_relative_path: "after.txt".to_owned(),
@@ -308,7 +385,7 @@ fn watcher_echo_does_not_erase_state_carried_by_a_runtime_rename() {
 }
 
 #[test]
-fn runtime_text_save_preserves_sparse_canvas_state() {
+fn runtime_text_save_preserves_state_only_for_its_committed_identity() {
     let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
     let home = base.join("home");
     let root = base.join("project");
@@ -338,10 +415,8 @@ fn runtime_text_save_preserves_sparse_canvas_state() {
         ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
     let current = read_project_text_file(&root, "note.txt").unwrap();
 
-    write_project_text_file(&root, "note.txt", "after", &current.revision).unwrap();
-    let snapshot = service
-        .reconcile_committed_content_change("note.txt")
-        .unwrap();
+    let committed = write_project_text_file(&root, "note.txt", "after", &current.revision).unwrap();
+    let snapshot = service.reconcile_committed_content_change("note.txt", committed.identity);
 
     let document = available_canvas_workspace(&snapshot);
     let state = &document.state.node_states["note.txt"];
@@ -352,6 +427,55 @@ fn runtime_text_save_preserves_sparse_canvas_state() {
             scroll_top: 12.0,
             scroll_left: 4.0,
         })
+    );
+
+    let current = read_project_text_file(&root, "note.txt").unwrap();
+    let committed =
+        write_project_text_file(&root, "note.txt", "runtime", &current.revision).unwrap();
+    fs::remove_file(root.join("note.txt")).unwrap();
+    fs::write(root.join("note.txt"), "external").unwrap();
+    let snapshot = service.reconcile_committed_content_change("note.txt", committed.identity);
+    assert!(
+        !available_canvas_workspace(&snapshot)
+            .state
+            .node_states
+            .contains_key("note.txt")
+    );
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn committed_text_save_reports_following_project_refresh_failure() {
+    let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
+    let home = base.join("home");
+    let root = base.join("project");
+    fs::create_dir_all(root.join(".debrute/feedback")).unwrap();
+    fs::write(root.join("note.txt"), "before").unwrap();
+    fs::write(root.join("second.txt"), "before").unwrap();
+    let mut service =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let current = read_project_text_file(&root, "note.txt").unwrap();
+
+    let committed = write_project_text_file(&root, "note.txt", "after", &current.revision).unwrap();
+    fs::write(root.join(CANVAS_FEEDBACK_PROJECT_PATH), "{not json").unwrap();
+    let snapshot = service.reconcile_committed_content_change("note.txt", committed.identity);
+
+    assert_eq!(fs::read_to_string(root.join("note.txt")).unwrap(), "after");
+    assert!(snapshot.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "project_refresh_failed"
+            && diagnostic.message.contains("Project file changed")
+    }));
+    let current = read_project_text_file(&root, "second.txt").unwrap();
+    let committed =
+        write_project_text_file(&root, "second.txt", "after", &current.revision).unwrap();
+    let snapshot = service.reconcile_committed_content_change("second.txt", committed.identity);
+    assert_eq!(
+        snapshot
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "project_refresh_failed")
+            .count(),
+        1
     );
     fs::remove_dir_all(base).unwrap();
 }
@@ -369,7 +493,7 @@ fn text_files_larger_than_two_mib_are_read_and_written_in_full() {
     assert_eq!(current.content, before);
     let saved = write_project_text_file(&root, "large.txt", &after, &current.revision).unwrap();
 
-    assert_eq!(saved.content, after);
+    assert_eq!(saved.file.content, after);
     assert_eq!(fs::read_to_string(root.join("large.txt")).unwrap(), after);
     fs::remove_dir_all(base).unwrap();
 }
@@ -453,6 +577,63 @@ fn rename_rewrites_accepted_feedback_and_both_working_copy_kinds() {
     );
     drop(opened);
     registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn runtime_path_reconciliation_prunes_a_concurrently_missing_sibling() {
+    let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
+    let home = base.join("home");
+    let root = base.join("project");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("source.txt"), "source").unwrap();
+    fs::write(root.join("sibling.txt"), "sibling").unwrap();
+    let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
+    let store = CanvasWorkspaceStore::new(&home, &canonical_root);
+    let mut document = default_canvas_workspace(&canonical_root);
+    document.state.node_states.insert(
+        "sibling.txt".to_owned(),
+        CanvasNodeState {
+            manual_layout: Some(CanvasManualLayout {
+                x: 100.0,
+                y: 200.0,
+                width: 300.0,
+                height: 400.0,
+            }),
+            ..CanvasNodeState::default()
+        },
+    );
+    store.save(&document).unwrap();
+    let mut service =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let feedback = serde_json::from_value(serde_json::json!({
+        "operation": "set-mark",
+        "projectRelativePaths": ["sibling.txt"],
+        "mark": "like",
+        "selected": true
+    }))
+    .unwrap();
+    service.update_canvas_feedback(&feedback).unwrap();
+
+    fs::remove_file(root.join("sibling.txt")).unwrap();
+    fs::rename(root.join("source.txt"), root.join("target.txt")).unwrap();
+    let snapshot = service.reconcile_committed_path_mutation(
+        &["target.txt".to_owned()],
+        &[("source.txt".to_owned(), "target.txt".to_owned())],
+    );
+
+    assert!(
+        !available_canvas_workspace(&snapshot)
+            .state
+            .node_states
+            .contains_key("sibling.txt")
+    );
+    assert!(
+        !service
+            .canvas_feedback()
+            .entries
+            .contains_key("sibling.txt")
+    );
     fs::remove_dir_all(base).unwrap();
 }
 

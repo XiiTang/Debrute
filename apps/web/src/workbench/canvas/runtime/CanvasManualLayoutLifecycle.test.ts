@@ -203,7 +203,7 @@ function moveState(path: string, originX: number, currentX: number): Extract<Can
 }
 
 function projection(...nodes: ProjectedCanvasNode[]): CanvasProjection {
-  return { nodes, edges: [], diagnostics: [] };
+  return { nodes, edges: [] };
 }
 
 function node(projectRelativePath: string, x: number, z = 1): ProjectedCanvasNode {

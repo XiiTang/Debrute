@@ -388,8 +388,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     snapshot.projectTree = [{
       projectRelativePath: 'assets',
       kind: 'directory',
-      ignored: false,
-      hidden: false,
       directoryState: 'unloaded'
     }];
     const loadProjectDirectory = vi.fn(async () => ({
@@ -527,8 +525,13 @@ describe('WorkbenchApp preferences and project behavior', () => {
     const dialogLayer = container.querySelector('[data-testid="workbench-connection-ended-dialog-layer"]');
     const dialog = dialogLayer?.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain('revision gap');
+    expect(dialog?.textContent).toContain('The last confirmed Project view is frozen.');
+    expect(dialog?.textContent).toContain('Project commands are unavailable.');
+    expect(dialog?.textContent).toContain('Reloading creates a new Workbench connection.');
+    expect(dialog?.textContent).not.toContain('read-only');
     expect(dialog?.hasAttribute('aria-modal')).toBe(false);
     expect(container.querySelector('[data-testid="canvas-surface"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="canvas-layer"]')?.hasAttribute('inert')).toBe(true);
     expect(container.textContent).toContain('Demo');
     await unmount(root, container);
   });
@@ -1141,7 +1144,7 @@ function snapshotFixture(
         nodeStates: {},
         occlusionOrder: []
       },
-      canvasResources: { resources: [], diagnostics: [] }
+      canvasResources: { resources: [] }
     },
     projectTree: [],
     diagnostics: [],

@@ -49,8 +49,8 @@ _Avoid_: Project Tree, live editor state
 
 **Canvas Resource View**:
 The Runtime view produced from Canvas State and the shared Project Tree. It
-adds visible paths, current availability, node kinds, media facts, and Project
-Diagnostics without calculating geometry.
+adds visible paths, current availability, node kinds, and media facts without
+calculating geometry.
 _Avoid_: Canvas State, scene projection
 
 **Canvas Scene Projection**:

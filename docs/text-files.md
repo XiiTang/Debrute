@@ -45,15 +45,18 @@ A text write requires an existing Project-visible regular file, rejects final
 symlinks, and compares the current content hash with the required
 `expectedRevision`. A mismatch returns `project_file_revision_conflict` without
 changing the file. A successful write creates a managed sibling temporary file,
-preserves permission bits, atomically renames it over the target, and returns the
-new content revision.
+preserves permission bits, captures that staged file's stable identity,
+atomically renames it over the target, and returns the new content revision. The
+following Project refresh preserves path-keyed Canvas and Feedback state only
+while the target still has that committed identity; a subsequent external
+same-path replacement invalidates the old state.
 
 The write path does not parse or validate JSON, YAML, or any other structured
 format. Project-visible `.debrute/feedback/feedback.json` can therefore be edited
 through the same text API, as can other visible `.debrute/**` content. The
 committed file remains successful even if the following Project refresh exposes
 an invalid Feedback document or cannot build a new Project snapshot; normal
-diagnostics report that state.
+diagnostics report that state as `project_refresh_failed`.
 
 ## Workbench Text Buffers
 

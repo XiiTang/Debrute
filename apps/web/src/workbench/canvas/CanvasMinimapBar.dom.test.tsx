@@ -59,7 +59,6 @@ describe('CanvasMinimapBar', () => {
         nodeFixture('flow/selected.png', 800, 400)
       ],
       edges: [],
-      diagnostics: []
     };
     const placement = placeCanvasMinimapPanel({
       buttonRect: canvasMinimapButtonRect({ x: 0, y: 0, width: 1000, height: 700 }),
@@ -127,7 +126,7 @@ describe('CanvasMinimapBar', () => {
       nodeFixture('flow/a.png', 0, 0),
       nodeFixture('flow/selected.png', 800, 400)
     ];
-    const runtime = runtimeFixture({ nodes, edges: [], diagnostics: [] });
+    const runtime = runtimeFixture({ nodes, edges: [] });
 
     await withRenderedMinimap({
       runtime
@@ -149,7 +148,6 @@ describe('CanvasMinimapBar', () => {
     const projection = {
       nodes: [nodeFixture('flow/a.png', 0, 0)],
       edges: [],
-      diagnostics: []
     } satisfies CanvasProjection;
     const runtime = runtimeFixture(projection);
     const getPresentedNodes = vi.spyOn(runtime.scene, 'getPresentedNodes');
@@ -176,7 +174,7 @@ describe('CanvasMinimapBar', () => {
       nodeFixture('flow/c.png', 600, 0)
     ];
     const runtime = createCanvasEditorRuntime({
-      initialProjection: { nodes, edges: [], diagnostics: [] },
+      initialProjection: { nodes, edges: [] },
       submitManualLayout: async () => undefined,
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
     });
@@ -221,7 +219,7 @@ describe('CanvasMinimapBar', () => {
       nodeFixture('flow/c.png', 600, 0)
     ];
     const runtime = createCanvasEditorRuntime({
-      initialProjection: { nodes, edges: [], diagnostics: [] },
+      initialProjection: { nodes, edges: [] },
       submitManualLayout: async () => undefined
     });
     runtime.bindSurface({
@@ -314,7 +312,6 @@ function createRuntime(input: {
         ? input.selection.projectRelativePaths.map((path) => nodeFixture(path, 0, 0))
         : []),
       edges: [],
-      diagnostics: []
     },
     submitManualLayout: async () => undefined,
     camera: input.camera,

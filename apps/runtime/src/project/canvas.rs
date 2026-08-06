@@ -5,7 +5,8 @@ use serde::{Deserialize, Deserializer};
 use super::{
     CanvasManualLayout, CanvasMediaKind, CanvasNodeState, CanvasState, CanvasTextViewportState,
     CanvasVideoPlaybackState, ProjectError, ProjectTreeEntry, assert_project_tree_visible_path,
-    normalize_project_directory_path, project_text_file_type_for_path, rewrite_project_path,
+    normalize_project_directory_path, project_content_type, project_media_kind_from_content_type,
+    project_text_file_type_for_path, rewrite_project_path,
 };
 
 pub const CANVAS_VIDEO_TIME_MAX_MS: u64 = 9_007_199_254_740_991;
@@ -215,32 +216,12 @@ pub(super) fn prune_canvas_state_path(state: &CanvasState, removed: &str) -> Can
 
 #[must_use]
 pub(super) fn canvas_media_kind_from_path(path: &str) -> CanvasMediaKind {
-    let path = path.to_ascii_lowercase();
-    if [
-        ".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".webp", ".avif", ".tif", ".tiff", ".svg",
-        ".svgz",
-    ]
-    .iter()
-    .any(|extension| path.ends_with(extension))
-    {
-        CanvasMediaKind::Image
-    } else if [".mp4", ".webm", ".mov", ".m4v"]
-        .iter()
-        .any(|extension| path.ends_with(extension))
-    {
-        CanvasMediaKind::Video
-    } else if [
-        ".mp3", ".wav", ".wave", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".flac", ".weba",
-    ]
-    .iter()
-    .any(|extension| path.ends_with(extension))
-    {
-        CanvasMediaKind::Audio
-    } else if project_text_file_type_for_path(&path, None).is_some() {
-        CanvasMediaKind::Text
-    } else {
-        CanvasMediaKind::Unknown
+    let media_kind = project_media_kind_from_content_type(project_content_type(path));
+    if media_kind != CanvasMediaKind::Unknown {
+        return media_kind;
     }
+    project_text_file_type_for_path(path, None)
+        .map_or(CanvasMediaKind::Unknown, |_| CanvasMediaKind::Text)
 }
 
 fn apply_patch_field<T: Clone>(target: &mut Option<T>, patch: &CanvasPatchField<T>) {
@@ -393,8 +374,6 @@ mod tests {
             project_relative_path: path.to_owned(),
             kind,
             size_bytes: (kind == ProjectPathKind::File).then_some(1),
-            ignored: false,
-            hidden: false,
             directory_state: (kind == ProjectPathKind::Directory)
                 .then_some(ProjectDirectoryState::Loaded),
             directory_error: None,

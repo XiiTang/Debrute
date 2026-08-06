@@ -34,10 +34,10 @@ candidate. Runtime opens a new Project-routed BrowserWindow when no such window
 is selected. It leaves Project-bound and detached documents unchanged and
 rejects the replacement endpoint for Desktop connections.
 
-A displaced page remains loaded on a detached, read-only surface with its last
-presentation but has no Project command authority. It alone offers **Open Here**,
-which is an explicit request to acquire that same Project back under the same
-rule. For Desktop, Runtime retargets the displaced window's topology route to
+A displaced page remains loaded with its last confirmed presentation frozen
+but has no Project command authority. It alone offers **Open Here**, which is an
+explicit request to acquire that same Project back under the same rule. For
+Desktop, Runtime retargets the displaced window's topology route to
 Root without erasing that renderer-local presentation. Ownership transfer does
 not close either browser tab or native window and does not transfer frontend
 presentation state.

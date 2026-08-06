@@ -177,7 +177,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('image-production/cover.png', 120, 80)],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -197,7 +196,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
@@ -249,7 +247,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
     const raiseCanvasSelection = vi.fn(async () => undefined);
@@ -287,7 +284,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [directoryFixture('', 10, 10)],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
     const setCanvasDirectoryExpanded = vi.fn(async () => undefined);
@@ -353,7 +349,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/cover.png', 0, 0)],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
 
@@ -394,7 +389,6 @@ describe('CanvasSurface', () => {
         nodeFixture('flow/b.png', 240, 0)
       ],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
     const targetChanges: Array<CanvasFeedbackBarTarget | undefined> = [];
@@ -491,7 +485,6 @@ describe('CanvasSurface', () => {
         nodeFixture('flow/c.png', 480, 0)
       ],
       edges: [],
-      diagnostics: []
     };
 
     const runtime = canvasRuntimeFixture(projection, {
@@ -530,7 +523,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
@@ -680,7 +672,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
     const elementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
@@ -756,7 +747,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [node],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
 
@@ -850,7 +840,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [node],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
 
@@ -904,7 +893,6 @@ describe('CanvasSurface', () => {
         nodeFixture('flow/c.png', 480, 0)
       ],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png', 'flow/b.png'] }
@@ -1019,7 +1007,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [node, missingNode, unreadableNode],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
     const onOpenContextMenu = vi.fn();
@@ -1155,7 +1142,6 @@ describe('CanvasSurface', () => {
         }
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection));
@@ -1191,7 +1177,6 @@ describe('CanvasSurface', () => {
         directoryFixture('flow/offscreen-dir', 9000, 0)
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1219,7 +1204,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/visible.png', 0, 0)],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1248,7 +1232,6 @@ describe('CanvasSurface', () => {
         }
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1280,7 +1263,6 @@ describe('CanvasSurface', () => {
         textProjectionNode('flow/b.md', 300, 0, 'rev-b')
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1306,7 +1288,6 @@ describe('CanvasSurface', () => {
         textProjectionNode('flow/inactive.md', 300, 0, 'rev-inactive')
       ],
       edges: [],
-      diagnostics: []
     };
 
     try {
@@ -1337,7 +1318,6 @@ describe('CanvasSurface', () => {
         textProjectionNode('flow/b.md', 300, 0, 'rev-b')
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1362,7 +1342,6 @@ describe('CanvasSurface', () => {
         audioProjectionNode('media/theme.mp3', 700, 0)
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1384,7 +1363,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [videoNode],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath ] }
@@ -1428,7 +1406,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [videoNode],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath] }
@@ -1478,7 +1455,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [videoNode],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection, {
       selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath ] }
@@ -1562,7 +1538,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [videoNode],
       edges: [],
-      diagnostics: []
     };
     const updateCanvasVideoPlaybackState = vi.fn(async () => {
       throw new Error('persistence failed');
@@ -1613,7 +1588,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [videoNode],
       edges: [],
-      diagnostics: []
     };
     const firstUpdate = deferred<void>();
     const secondUpdate = deferred<void>();
@@ -1668,7 +1642,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [videoNode],
       edges: [],
-      diagnostics: []
     };
     const targetChanges: Array<CanvasFeedbackBarTarget | undefined> = [];
     const runtime = canvasRuntimeFixture(projection);
@@ -1776,7 +1749,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [node],
       edges: [],
-      diagnostics: []
     };
     const readCanvasTextPreviewSources = vi.fn(async (
       input: Parameters<WorkbenchActions['readCanvasTextPreviewSources']>[0]
@@ -1861,7 +1833,6 @@ describe('CanvasSurface', () => {
         sourceProjectRelativePath: 'flow/top-a.png',
         targetProjectRelativePath: 'flow/top-b.png'
       }],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection));
@@ -1877,7 +1848,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1914,7 +1884,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1950,7 +1919,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -1992,7 +1960,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -2019,7 +1986,6 @@ describe('CanvasSurface', () => {
         videoProjectionNode('flow/clip.mp4', 380, 80)
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -2089,7 +2055,6 @@ describe('CanvasSurface', () => {
         directoryFixture('flow/assets', 640, 80)
       ],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -2160,7 +2125,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/visible.png', 0, 0)],
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection));
@@ -2201,7 +2165,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [directoryFixture('', 0, 0)],
       edges: [],
-      diagnostics: []
     };
     const targetChanges: Array<CanvasFeedbackBarTarget | undefined> = [];
 
@@ -2281,7 +2244,6 @@ describe('CanvasSurface', () => {
         nodeFixture('flow/b.png', 300, 100)
       ],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection);
     const targetChanges: Array<CanvasFeedbackBarTarget | undefined> = [];
@@ -2341,7 +2303,6 @@ describe('CanvasSurface', () => {
         height: 1200
       })),
       edges: [],
-      diagnostics: []
     };
 
     const html = renderToStaticMarkup(surface(projection, {
@@ -2381,7 +2342,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [node],
       edges: [],
-      diagnostics: []
     };
     const runtime = canvasRuntimeFixture(projection, {
       camera: { x: 0, y: 0, z: 0.1 },
@@ -2433,7 +2393,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [{ ...nodeFixture('flow/cover.png', 0, 0), width: 2400, height: 1200 }],
       edges: [],
-      diagnostics: []
     };
     const html = renderToStaticMarkup(
       <CanvasEditor
@@ -2464,7 +2423,6 @@ describe('CanvasSurface', () => {
         nodeFixture('flow/second.png', 700, 100)
       ],
       edges: [],
-      diagnostics: []
     };
     const overlayRuntime = createCanvasOverlayRuntime();
     const handleTargetChange = vi.fn();
@@ -2532,7 +2490,6 @@ describe('CanvasSurface', () => {
     const projection: CanvasProjection = {
       nodes: [],
       edges: [],
-      diagnostics: []
     };
     const invalidateTarget = vi.fn();
 

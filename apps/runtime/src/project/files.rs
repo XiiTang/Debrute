@@ -52,6 +52,11 @@ pub enum ProjectUploadEntry {
     },
 }
 
+pub(crate) struct CommittedProjectTextFile {
+    pub(crate) file: ProjectTextFile,
+    pub(crate) identity: debrute_native_fs::PathIdentity,
+}
+
 /// Reads a visible UTF-8 Project file with a binary guard.
 ///
 /// # Errors
@@ -92,7 +97,7 @@ pub(crate) fn write_project_text_file(
     relative: &str,
     content: &str,
     expected_revision: &str,
-) -> Result<ProjectTextFile, ProjectError> {
+) -> Result<CommittedProjectTextFile, ProjectError> {
     let relative = assert_project_tree_visible_path(relative)?;
     let absolute = resolve_no_symlink_existing_project_path(root, &relative)?;
     let metadata = fs::metadata(&absolute)?;
@@ -122,6 +127,9 @@ pub(crate) fn write_project_text_file(
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
         fs::set_permissions(&temporary, metadata.permissions())?;
+        let identity = debrute_native_fs::file_identity(&file).map_err(|error| {
+            project_io_error("read committed text staging identity", &temporary, &error)
+        })?;
         let saved = project_text_file(
             relative.clone(),
             &absolute,
@@ -129,7 +137,10 @@ pub(crate) fn write_project_text_file(
             &fs::metadata(&temporary)?,
         )?;
         replace_file(&temporary, &absolute)?;
-        Ok::<ProjectTextFile, ProjectError>(saved)
+        Ok::<CommittedProjectTextFile, ProjectError>(CommittedProjectTextFile {
+            file: saved,
+            identity,
+        })
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);

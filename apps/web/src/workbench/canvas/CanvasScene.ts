@@ -5,7 +5,6 @@ import type {
   CanvasState,
   CanvasTextViewportState,
   CanvasVideoPlaybackState,
-  ProjectDiagnostic,
   ProjectTextLanguageId
 } from '@debrute/app-protocol';
 
@@ -62,7 +61,6 @@ export interface CanvasStructureEdgeProjection {
 export interface CanvasProjection {
   nodes: ProjectedCanvasNode[];
   edges: CanvasStructureEdgeProjection[];
-  diagnostics: ProjectDiagnostic[];
 }
 
 interface CanvasSceneProjectionResult {
@@ -163,8 +161,7 @@ export function projectCanvasScene(input: {
   return {
     projection: {
       nodes,
-      edges,
-      diagnostics: input.resources.diagnostics
+      edges
     },
     occlusionOrder
   };

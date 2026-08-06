@@ -384,9 +384,9 @@ annotations, handles, feedback, and overlay placement.
 Project Open, Project opening, and failed Project opening render centered status
 content directly over the Canvas background without a page, card, or
 full-viewport surface. Content is centered within the main viewport below the
-title-bar hit area. A retained Project that has become read-only because it was
-preempted or because the Runtime connection ended keeps its last Canvas
-visible. A solid, non-dismissible dialog blocks the Canvas, floating bars,
+title-bar hit area. A Project whose command authority was removed by preemption
+or an ended Runtime connection keeps its last confirmed Canvas visible but
+frozen. A solid, non-dismissible dialog blocks the Canvas, floating bars,
 panels, title bar, and Activity surfaces without dimming or covering the Canvas.
 The blocker is the highest shell layer and freezes every surface beneath it.
 

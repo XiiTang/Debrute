@@ -43,4 +43,6 @@ empty-window binding, window creation, or ownership transfer is a direct
 outcome of the submitted intent, not a retry, second destination confirmation,
 or timeout fallback.
 
-Invalid Canvas or Feedback state fails Project opening.
+Invalid Feedback state fails Project opening. Invalid, unreadable, or
+root-mismatched Canvas state leaves Canvas unavailable without blocking the
+Project.

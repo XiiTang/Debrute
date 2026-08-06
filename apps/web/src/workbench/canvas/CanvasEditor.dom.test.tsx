@@ -27,8 +27,7 @@ describe('CanvasEditor', () => {
     const root = createRoot(container);
     const projection: CanvasProjection = {
       nodes: [],
-      edges: [],
-      diagnostics: []
+      edges: []
     };
     const textFileBuffers = {};
 

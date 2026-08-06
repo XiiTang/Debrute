@@ -854,7 +854,7 @@ impl WorkbenchRuntimeServices {
         else {
             unreachable!("Project subscription must begin with its snapshot barrier")
         };
-        let response = public_project_sync(&sync, &binding_id)?;
+        let response = public_project_sync(&sync, &binding_id);
         let working_copies = self.working_copies.load(&canonical_root)?;
         let bound_event = json!({
             "type": "project.bound",
@@ -893,15 +893,7 @@ impl WorkbenchRuntimeServices {
                     }
                     match subscription.recv_timeout(Duration::from_millis(100)) {
                         Ok(Some(item)) => {
-                            let Ok(value) = super::routes::project_stream_value(item, &binding_id)
-                            else {
-                                connections.close_project_stream(
-                                    &credential,
-                                    &binding_id,
-                                    binding_generation,
-                                );
-                                return;
-                            };
+                            let value = super::routes::project_stream_value(item, &binding_id);
                             if sender.try_send(value).is_err() {
                                 connections.close_project_stream(
                                     &credential,
@@ -1208,69 +1200,54 @@ impl RuntimeHttpServiceError {
     }
 }
 
-pub fn public_project_sync(
-    sync: &ProjectSyncSnapshot,
-    binding_id: &str,
-) -> Result<Value, RuntimeHttpServiceError> {
-    let snapshot = public_project_snapshot(&sync.snapshot, binding_id)?;
-    Ok(json!({
+#[must_use]
+pub fn public_project_sync(sync: &ProjectSyncSnapshot, binding_id: &str) -> Value {
+    let snapshot = public_project_snapshot(&sync.snapshot, binding_id);
+    json!({
         "bindingId": binding_id,
         "canonicalRoot": sync.snapshot.canonical_root,
         "projectRevision": sync.project_revision,
         "snapshot": snapshot
-    }))
+    })
 }
 
+#[must_use]
 pub fn public_project_snapshot(
     snapshot: &crate::project::ProjectSnapshot,
     binding_id: &str,
-) -> Result<Value, RuntimeHttpServiceError> {
-    let canvas_resources = match &snapshot.canvas_workspace {
+) -> Value {
+    let canvas_workspace = match &snapshot.canvas_workspace {
         crate::project::CanvasWorkspaceSnapshot::Available {
-            canvas_resources, ..
-        } => Some(public_canvas_resource_view(canvas_resources, binding_id)?),
-        crate::project::CanvasWorkspaceSnapshot::Unavailable { .. } => None,
+            workspace,
+            canvas_resources,
+        } => json!({
+            "status": "available",
+            "workspace": workspace,
+            "canvasResources": public_canvas_resource_view(canvas_resources, binding_id)
+        }),
+        crate::project::CanvasWorkspaceSnapshot::Unavailable { code, message } => json!({
+            "status": "unavailable",
+            "code": code,
+            "message": message
+        }),
     };
-    let mut value = serde_json::to_value(snapshot)
-        .map_err(|error| RuntimeHttpServiceError::serialization(&error))?;
-    let Some(object) = value.as_object_mut() else {
-        return Err(RuntimeHttpServiceError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "serialization_failed",
-            "Project snapshot did not serialize to an object.",
-        ));
-    };
-    let health = object
-        .get_mut("health")
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| {
-            RuntimeHttpServiceError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "serialization_failed",
-                "Project snapshot health did not serialize to an object.",
-            )
-        })?;
-    health.remove("runtimeDataLocation");
-    if let Some(canvas_resources) = canvas_resources {
-        let canvas_workspace = object
-            .get_mut("canvasWorkspace")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| {
-                RuntimeHttpServiceError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "serialization_failed",
-                    "Available Canvas workspace did not serialize to an object.",
-                )
-            })?;
-        canvas_workspace.insert("canvasResources".to_owned(), canvas_resources);
-    }
-    Ok(value)
+    json!({
+        "canonicalRoot": snapshot.canonical_root,
+        "projectTree": snapshot.project_tree,
+        "canvasWorkspace": canvas_workspace,
+        "diagnostics": snapshot.diagnostics,
+        "health": {
+            "projectName": snapshot.health.project_name,
+            "diagnosticCounts": snapshot.health.diagnostic_counts,
+            "checkedAt": snapshot.health.checked_at
+        }
+    })
 }
 
 pub(crate) fn public_canvas_resource_view(
     resources: &crate::project::CanvasResourceView,
     binding_id: &str,
-) -> Result<Value, RuntimeHttpServiceError> {
+) -> crate::project::CanvasResourceView {
     let mut public_resources = resources.clone();
     for resource in &mut public_resources.resources {
         if let crate::project::CanvasResource::File {
@@ -1297,8 +1274,7 @@ pub(crate) fn public_canvas_resource_view(
             }
         }
     }
-    serde_json::to_value(public_resources)
-        .map_err(|error| RuntimeHttpServiceError::serialization(&error))
+    public_resources
 }
 
 fn project_file_url(binding_id: &str, project_relative_path: &str, revision: &str) -> String {

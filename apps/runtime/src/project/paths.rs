@@ -7,17 +7,12 @@ use std::{
 };
 
 use cap_std::{ambient_authority, fs::Dir};
-use ignore::{
-    Match,
-    gitignore::{Gitignore, GitignoreBuilder},
-};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::{ProjectDirectoryState, ProjectError, ProjectPathKind, ProjectTreeEntry};
 
-const MAX_PROJECT_GITIGNORE_BYTES: usize = 1024 * 1024;
 /// Normalizes a non-root Project-relative path.
 ///
 /// # Errors
@@ -584,7 +579,7 @@ fn assert_path_inside(root: &Path, target: &Path, relative: &str) -> Result<(), 
 /// Requires a normalized path to be visible in the Project Tree.
 ///
 /// # Errors
-/// Returns an error when the path is invalid or hidden by Project policy.
+/// Returns an error when the path is invalid or excluded by Project policy.
 pub fn assert_project_tree_visible_path(path: &str) -> Result<String, ProjectError> {
     let normalized = normalize_project_relative_path(path)?;
     if !is_project_visible_path(&normalized) {
@@ -598,7 +593,7 @@ pub fn assert_project_tree_visible_path(path: &str) -> Result<String, ProjectErr
 /// Requires a visible path that may be mutated through the Project filesystem API.
 ///
 /// # Errors
-/// Returns an error when the path is invalid or hidden.
+/// Returns an error when the path is invalid or excluded.
 pub fn assert_project_tree_visible_mutation_path(path: &str) -> Result<String, ProjectError> {
     assert_project_tree_visible_path(path)
 }
@@ -658,38 +653,30 @@ pub fn list_project_directory(
         )));
     }
     let project = ProjectCapabilityFs::open(root)?;
-    let ignore_stack = ProjectIgnoreStack::for_visible_directory(&project, root, &directory)?;
     let current = project.open_directory(&directory)?;
     let mut result = Vec::new();
     for entry in current.entries()? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        let hidden = name.starts_with('.');
         let relative = if directory.is_empty() {
             name
         } else {
             format!("{directory}/{name}")
         };
         if file_type.is_dir() && !file_type.is_symlink() && is_project_visible_path(&relative) {
-            let ignored = ignore_stack.is_ignored(&root.join(&relative), true);
             result.push(ProjectTreeEntry {
                 project_relative_path: relative,
                 kind: ProjectPathKind::Directory,
                 size_bytes: None,
-                ignored,
-                hidden,
                 directory_state: Some(ProjectDirectoryState::Unloaded),
                 directory_error: None,
             });
         } else if file_type.is_file() && is_project_visible_path(&relative) {
-            let ignored = ignore_stack.is_ignored(&root.join(&relative), false);
             result.push(ProjectTreeEntry {
                 project_relative_path: relative,
                 kind: ProjectPathKind::File,
                 size_bytes: Some(entry.metadata()?.len()),
-                ignored,
-                hidden,
                 directory_state: None,
                 directory_error: None,
             });
@@ -697,95 +684,6 @@ pub fn list_project_directory(
     }
     result.sort_by(compare_project_tree_entries);
     Ok(result)
-}
-
-#[derive(Clone, Default)]
-struct ProjectIgnoreStack {
-    matchers: Vec<Gitignore>,
-}
-
-impl ProjectIgnoreStack {
-    fn for_visible_directory(
-        project: &ProjectCapabilityFs,
-        root: &Path,
-        directory: &str,
-    ) -> Result<Self, ProjectError> {
-        let mut stack = Self::default().with_directory(project, root, "")?;
-        if directory.is_empty() {
-            return Ok(stack);
-        }
-        let mut prefix = String::new();
-        for segment in directory.split('/') {
-            prefix = if prefix.is_empty() {
-                segment.to_owned()
-            } else {
-                format!("{prefix}/{segment}")
-            };
-            stack = stack.with_directory(project, root, &prefix)?;
-        }
-        Ok(stack)
-    }
-
-    fn with_directory(
-        &self,
-        project: &ProjectCapabilityFs,
-        root: &Path,
-        directory: &str,
-    ) -> Result<Self, ProjectError> {
-        let ignore_relative = if directory.is_empty() {
-            ".gitignore".to_owned()
-        } else {
-            format!("{directory}/.gitignore")
-        };
-        let metadata = match project.root.symlink_metadata(&ignore_relative) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(self.clone()),
-            Err(error) => return Err(error.into()),
-        };
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Ok(self.clone());
-        }
-        let bytes = project.read_limited(&ignore_relative, MAX_PROJECT_GITIGNORE_BYTES)?;
-        let source = root.join(&ignore_relative);
-        let matcher_root = if directory.is_empty() {
-            root.to_path_buf()
-        } else {
-            root.join(directory)
-        };
-        let mut builder = GitignoreBuilder::new(matcher_root);
-        for (index, line) in String::from_utf8_lossy(&bytes).lines().enumerate() {
-            let line = if index == 0 {
-                line.trim_start_matches('\u{feff}')
-            } else {
-                line
-            };
-            if let Err(error) = builder.add_line(Some(source.clone()), line) {
-                eprintln!(
-                    "Debrute ignored invalid Project ignore rule at {}:{}: {error}",
-                    source.display(),
-                    index + 1
-                );
-            }
-        }
-        let Ok(matcher) = builder.build() else {
-            return Ok(self.clone());
-        };
-        let mut next = self.clone();
-        next.matchers.push(matcher);
-        Ok(next)
-    }
-
-    fn is_ignored(&self, absolute: &Path, is_dir: bool) -> bool {
-        let mut ignored = false;
-        for matcher in &self.matchers {
-            match matcher.matched_path_or_any_parents(absolute, is_dir) {
-                Match::Ignore(_) => ignored = true,
-                Match::Whitelist(_) => ignored = false,
-                Match::None => {}
-            }
-        }
-        ignored
-    }
 }
 
 /// Compares two Project Tree siblings using the shared presentation order.
@@ -869,33 +767,10 @@ mod tests {
     #[test]
     fn protected_visibility_is_case_insensitive_across_every_segment() {
         for path in [".GIT/objects/one", "nested/.Git/objects/one"] {
-            assert!(!is_project_visible_path(path), "{path} must stay hidden");
+            assert!(!is_project_visible_path(path), "{path} must stay excluded");
         }
         assert!(is_project_visible_path(".debrute/feedback/feedback.json"));
         assert!(is_project_visible_path("nested/.Debrute/CACHE/preview.png"));
-    }
-
-    #[test]
-    fn project_directory_marks_ignored_entries_and_skips_invalid_rules() {
-        let root = std::env::temp_dir().join(format!("debrute-ignore-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("vendor-cache")).unwrap();
-        fs::write(root.join("vendor-cache/large.bin"), "ignored").unwrap();
-        fs::write(root.join(".gitignore"), "\u{feff}vendor-cache/\n").unwrap();
-        let entries = list_project_directory(&root, "").unwrap();
-        let vendor = entries
-            .iter()
-            .find(|entry| entry.project_relative_path == "vendor-cache")
-            .unwrap();
-        assert!(vendor.ignored);
-
-        fs::write(root.join(".gitignore"), "invalid\\\n").unwrap();
-        let entries = list_project_directory(&root, "").unwrap();
-        assert!(
-            entries
-                .iter()
-                .any(|entry| { entry.project_relative_path == "vendor-cache" && !entry.ignored })
-        );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

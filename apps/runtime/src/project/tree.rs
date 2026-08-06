@@ -14,7 +14,7 @@ use super::{
 #[derive(Clone)]
 struct IndexedProjectTreeEntry {
     public: ProjectTreeEntry,
-    identity: Option<debrute_native_fs::PathIdentity>,
+    identity: debrute_native_fs::PathIdentity,
 }
 
 #[derive(Clone)]
@@ -38,8 +38,6 @@ impl ProjectTree {
                 project_relative_path: String::new(),
                 kind: super::ProjectPathKind::Directory,
                 size_bytes: None,
-                ignored: false,
-                hidden: false,
                 directory_state: Some(super::ProjectDirectoryState::Unloaded),
                 directory_error: None,
             },
@@ -94,11 +92,15 @@ impl ProjectTree {
     }
 
     pub(crate) fn reload_loaded(&mut self) -> Result<ProjectTreeChange, ProjectError> {
+        self.refresh_transaction(Self::reload_loaded_inner)
+    }
+
+    fn reload_loaded_inner(&mut self) -> Result<ProjectTreeChange, ProjectError> {
         let mut change = ProjectTreeChange::default();
         for directory in self.loaded_directory_paths() {
             match list_project_directory(&self.root, &directory) {
                 Ok(children) => {
-                    change.extend(self.replace_directory_entries(&directory, children));
+                    change.extend(self.replace_directory_entries(&directory, children)?);
                 }
                 Err(error) if directory.is_empty() => return Err(error),
                 Err(error) => self.set_directory_error(&directory, &error.to_string()),
@@ -109,6 +111,13 @@ impl ProjectTree {
     }
 
     pub(crate) fn load_directories(
+        &mut self,
+        directories: &[String],
+    ) -> Result<ProjectTreeChange, ProjectError> {
+        self.refresh_transaction(|tree| tree.load_directories_inner(directories))
+    }
+
+    fn load_directories_inner(
         &mut self,
         directories: &[String],
     ) -> Result<ProjectTreeChange, ProjectError> {
@@ -123,7 +132,6 @@ impl ProjectTree {
             return Ok(ProjectTreeChange::default());
         }
 
-        let checkpoint = self.entries.clone();
         let mut blocked_roots = Vec::<String>::new();
         let mut change = ProjectTreeChange::default();
         for directory in directories {
@@ -135,7 +143,7 @@ impl ProjectTree {
             }
             match list_project_directory(&self.root, &directory) {
                 Ok(children) => {
-                    change.extend(self.replace_directory_entries(&directory, children));
+                    change.extend(self.replace_directory_entries(&directory, children)?);
                 }
                 Err(error)
                     if matches!(&error, ProjectError::Io(error) if error.kind() == std::io::ErrorKind::NotFound)
@@ -145,10 +153,7 @@ impl ProjectTree {
                     change.confirmed_missing_paths.push(directory.clone());
                     blocked_roots.push(directory);
                 }
-                Err(error) if directory.is_empty() => {
-                    self.entries = checkpoint;
-                    return Err(error);
-                }
+                Err(error) if directory.is_empty() => return Err(error),
                 Err(error) => {
                     self.set_directory_error(&directory, &error.to_string());
                     blocked_roots.push(directory);
@@ -160,6 +165,33 @@ impl ProjectTree {
     }
 
     pub(crate) fn refresh_watched_paths(
+        &mut self,
+        paths: &[ProjectWatchPath],
+    ) -> Result<ProjectTreeChange, ProjectError> {
+        self.refresh_transaction(|tree| tree.refresh_watched_paths_inner(paths))
+    }
+
+    pub(crate) fn refresh_committed_content_change(
+        &mut self,
+        project_relative_path: &str,
+        expected_identity: debrute_native_fs::PathIdentity,
+    ) -> Result<ProjectTreeChange, ProjectError> {
+        let mut change = self.refresh_watched_paths(&[ProjectWatchPath::modified(
+            project_relative_path.to_owned(),
+        )])?;
+        if self
+            .entries
+            .get(project_relative_path)
+            .is_some_and(|entry| entry.identity == expected_identity)
+        {
+            change
+                .identity_reset_paths
+                .retain(|path| path != project_relative_path);
+        }
+        Ok(change)
+    }
+
+    fn refresh_watched_paths_inner(
         &mut self,
         paths: &[ProjectWatchPath],
     ) -> Result<ProjectTreeChange, ProjectError> {
@@ -175,7 +207,7 @@ impl ProjectTree {
                 )
             })
             .collect::<Vec<_>>();
-        let mut directories = paths
+        let directories = paths
             .iter()
             .flat_map(|path| {
                 let parent = path
@@ -186,25 +218,11 @@ impl ProjectTree {
             })
             .filter(|directory| self.directory_is_loaded(directory))
             .collect::<BTreeSet<_>>();
-        for path in paths {
-            if basename(&path.project_relative_path) == ".gitignore" {
-                let parent = parent_path(&path.project_relative_path);
-                directories.extend(
-                    self.loaded_directory_paths()
-                        .into_iter()
-                        .filter(|directory| {
-                            parent.is_empty()
-                                || directory == parent
-                                || directory.starts_with(&format!("{parent}/"))
-                        }),
-                );
-            }
-        }
         let mut change = ProjectTreeChange::default();
         for directory in directories {
             match list_project_directory(&self.root, &directory) {
                 Ok(children) => {
-                    change.extend(self.replace_directory_entries(&directory, children));
+                    change.extend(self.replace_directory_entries(&directory, children)?);
                 }
                 Err(error) if directory.is_empty() => return Err(error),
                 Err(error) => self.set_directory_error(&directory, &error.to_string()),
@@ -215,8 +233,7 @@ impl ProjectTree {
                 .into_iter()
                 .filter(|(path, previous)| {
                     let current = self.entries.get(path).map(|entry| entry.identity);
-                    previous.is_none_or(|identity| identity.is_none())
-                        || current.is_some_and(|identity| identity.is_none())
+                    previous.is_none() || previous != &current
                 })
                 .map(|(path, _)| path),
         );
@@ -229,7 +246,17 @@ impl ProjectTree {
         removed_paths: &[String],
         rewrites: &[(String, String)],
     ) -> Result<ProjectTreeChange, ProjectError> {
-        self.rewrite_paths(removed_paths, rewrites);
+        self.refresh_transaction(|tree| {
+            tree.rewrite_paths(removed_paths, rewrites);
+            tree.refresh_after_mutation_inner(removed_paths, rewrites)
+        })
+    }
+
+    fn refresh_after_mutation_inner(
+        &mut self,
+        removed_paths: &[String],
+        rewrites: &[(String, String)],
+    ) -> Result<ProjectTreeChange, ProjectError> {
         let changed_paths = removed_paths
             .iter()
             .cloned()
@@ -239,30 +266,16 @@ impl ProjectTree {
                     .flat_map(|(source, target)| [source.clone(), target.clone()]),
             )
             .collect::<HashSet<_>>();
-        let mut directories = changed_paths
+        let directories = changed_paths
             .iter()
             .map(|path| parent_path(path).to_owned())
             .filter(|directory| self.directory_is_loaded(directory))
             .collect::<BTreeSet<_>>();
-        for changed in &changed_paths {
-            if basename(changed) == ".gitignore" {
-                let parent = parent_path(changed);
-                directories.extend(
-                    self.loaded_directory_paths()
-                        .into_iter()
-                        .filter(|directory| {
-                            parent.is_empty()
-                                || directory == parent
-                                || directory.starts_with(&format!("{parent}/"))
-                        }),
-                );
-            }
-        }
         let mut change = ProjectTreeChange::default();
         for directory in directories {
             match list_project_directory(&self.root, &directory) {
                 Ok(children) => {
-                    change.extend(self.replace_directory_entries(&directory, children));
+                    change.extend(self.replace_directory_entries(&directory, children)?);
                 }
                 Err(error) if directory.is_empty() => return Err(error),
                 Err(error) => self.set_directory_error(&directory, &error.to_string()),
@@ -270,6 +283,20 @@ impl ProjectTree {
         }
         normalize_change(&mut change);
         Ok(change)
+    }
+
+    fn refresh_transaction(
+        &mut self,
+        refresh: impl FnOnce(&mut Self) -> Result<ProjectTreeChange, ProjectError>,
+    ) -> Result<ProjectTreeChange, ProjectError> {
+        let checkpoint = self.clone();
+        match refresh(self) {
+            Ok(change) => Ok(change),
+            Err(error) => {
+                *self = checkpoint;
+                Err(error)
+            }
+        }
     }
 
     fn directory_is_loaded(&self, directory: &str) -> bool {
@@ -308,8 +335,17 @@ impl ProjectTree {
     fn replace_directory_entries(
         &mut self,
         directory: &str,
-        mut children: Vec<ProjectTreeEntry>,
-    ) -> ProjectTreeChange {
+        children: Vec<ProjectTreeEntry>,
+    ) -> Result<ProjectTreeChange, ProjectError> {
+        let mut identified_children = Vec::with_capacity(children.len());
+        let mut disappeared_children = Vec::new();
+        for child in children {
+            if let Some(identity) = path_identity(&self.root, &child.project_relative_path)? {
+                identified_children.push((child, identity));
+            } else {
+                disappeared_children.push(child.project_relative_path);
+            }
+        }
         let direct_child = |path: &str| {
             path.rsplit_once('/')
                 .map_or(directory.is_empty(), |(parent, _)| parent == directory)
@@ -319,18 +355,21 @@ impl ProjectTree {
             .keys()
             .filter(|path| direct_child(path))
             .filter(|path| {
-                !children
+                !identified_children
                     .iter()
-                    .any(|entry| entry.project_relative_path == **path)
+                    .any(|(entry, _)| entry.project_relative_path == **path)
             })
             .cloned()
+            .chain(disappeared_children)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .collect::<Vec<_>>();
         for path in &missing {
             self.remove_path(path);
         }
 
         let mut recreated = Vec::new();
-        for child in &mut children {
+        for (mut child, identity) in identified_children {
             if child.kind == ProjectPathKind::Directory
                 && let Some(previous) = self.entries.get(&child.project_relative_path)
                 && previous.public.kind == ProjectPathKind::Directory
@@ -344,22 +383,17 @@ impl ProjectTree {
                     .directory_error
                     .clone_from(&previous.public.directory_error);
             }
-            let identity = path_identity(&self.root, &child.project_relative_path);
             if self
                 .entries
                 .get(&child.project_relative_path)
-                .is_some_and(|previous| {
-                    previous.identity.is_some()
-                        && identity.is_some()
-                        && previous.identity != identity
-                })
+                .is_some_and(|previous| previous.identity != identity)
             {
                 recreated.push(child.project_relative_path.clone());
             }
             self.entries.insert(
                 child.project_relative_path.clone(),
                 IndexedProjectTreeEntry {
-                    public: child.clone(),
+                    public: child,
                     identity,
                 },
             );
@@ -373,10 +407,10 @@ impl ProjectTree {
             self.root_entry.directory_state = Some(ProjectDirectoryState::Loaded);
             self.root_entry.directory_error = None;
         }
-        ProjectTreeChange {
+        Ok(ProjectTreeChange {
             confirmed_missing_paths: missing,
             identity_reset_paths: recreated,
-        }
+        })
     }
 
     fn set_directory_error(&mut self, directory: &str, message: &str) {
@@ -422,16 +456,26 @@ impl ProjectTree {
     }
 }
 
-fn path_identity(root: &Path, path: &str) -> Option<debrute_native_fs::PathIdentity> {
-    debrute_native_fs::path_identity(&root.join(path)).ok()
+fn path_identity(
+    root: &Path,
+    path: &str,
+) -> Result<Option<debrute_native_fs::PathIdentity>, ProjectError> {
+    match debrute_native_fs::path_identity(&root.join(path)) {
+        Ok(identity) => Ok(Some(identity)),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(ProjectError::Io(error)),
+    }
 }
 
 fn parent_path(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(parent, _)| parent)
-}
-
-fn basename(path: &str) -> &str {
-    path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
 fn normalize_change(change: &mut ProjectTreeChange) {

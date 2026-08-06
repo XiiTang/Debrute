@@ -165,8 +165,7 @@ describe('workbench context menu commands', () => {
       ]),
       canvasProjection: {
         nodes: [node('a.png'), node('b.png')],
-        edges: [],
-        diagnostics: []
+        edges: []
       },
       canvasRuntime: runtime,
       resetCanvasNodeLayouts
@@ -185,8 +184,7 @@ describe('workbench context menu commands', () => {
       ]),
       canvasProjection: {
         nodes: [node('a.png')],
-        edges: [],
-        diagnostics: []
+        edges: []
       },
       resetCanvasNodeLayouts
     });

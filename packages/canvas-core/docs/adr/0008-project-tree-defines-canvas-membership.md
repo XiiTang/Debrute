@@ -25,10 +25,11 @@ this index.
 
 Entries are directories before files, followed by case-insensitive natural
 basename order with deterministic original-name and full-path tie-breakers.
-Hidden names and Git-ignored entries remain visible and retain their flags.
-Version-control internals, fixed operating-system debris, symbolic links, and
-other non-regular entries are excluded. Large directories are not excluded and
-do not incur descendant enumeration until loaded.
+Dotfiles, `.gitignore`, and paths named by `.gitignore` rules remain ordinary
+visible entries; Runtime does not interpret ignore rules. Version-control
+internals, fixed operating-system debris, symbolic links, and other non-regular
+entries are excluded. Large directories are not excluded and do not incur
+descendant enumeration until loaded.
 
 A successful parent enumeration can confirm that a child is absent. Shallow
 snapshots, watcher bursts, and directory read failures cannot. Runtime prunes
@@ -49,8 +50,8 @@ state. Explorer disclosure is independent Workbench view state.
 Visible Canvas resources are the root plus every indexed entry whose complete
 ancestor chain is disclosed. Runtime publishes one `canvasResources`
 view containing paths, kinds, availability, media facts, intrinsic image or
-video dimensions, and diagnostics. It publishes no rectangles, overlap
-results, hierarchy edges, or z values.
+video dimensions. It publishes no rectangles, overlap results, hierarchy
+edges, z values, or Project Diagnostics.
 
 ## Workbench Scene Projection
 

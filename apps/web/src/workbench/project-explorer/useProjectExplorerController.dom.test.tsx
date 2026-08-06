@@ -445,9 +445,7 @@ function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
     canvasWorkspace: emptyCanvasWorkspace('/projects/project-1'),
     projectTree: paths.map((projectRelativePath) => ({
       projectRelativePath,
-      kind: 'file' as const,
-      ignored: false,
-      hidden: false
+      kind: 'file' as const
     })),
     diagnostics: [],
     health: {
@@ -467,6 +465,6 @@ function emptyCanvasWorkspace(canonicalRoot: string): WorkbenchProjectSessionSna
       nodeStates: {},
       occlusionOrder: []
     },
-    canvasResources: { resources: [], diagnostics: [] }
+    canvasResources: { resources: [] }
   };
 }

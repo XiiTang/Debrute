@@ -12,7 +12,6 @@ describe('CanvasScene', () => {
       canonicalRoot: '/Users/example/ecommerce',
       resources: {
         resources: [{ projectRelativePath: '', nodeKind: 'directory' }],
-        diagnostics: []
       },
       state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
       measureLabelWidth: () => 100
@@ -51,7 +50,6 @@ describe('CanvasScene', () => {
             }
           }
         ],
-        diagnostics: []
       },
       state: { expandedDirectories: ['assets'], nodeStates: {}, occlusionOrder: [] },
       measureLabelWidth: (label) => label === 'ecommerce' ? 100 : 50
@@ -82,7 +80,6 @@ describe('CanvasScene', () => {
           { projectRelativePath: 'a', nodeKind: 'directory' },
           { projectRelativePath: 'b', nodeKind: 'directory' }
         ],
-        diagnostics: []
       },
       state: {
         expandedDirectories: [],
@@ -146,7 +143,6 @@ describe('CanvasScene', () => {
             }
           }
         ],
-        diagnostics: []
       },
       state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
       measureLabelWidth: () => 20

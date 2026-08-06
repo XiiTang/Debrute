@@ -806,6 +806,43 @@ fn canvas_state_patch_accepts_one_complete_sparse_patch() {
     assert_eq!(response.status().as_u16(), 200);
 
     let changed = events.next_of_type("project.changed");
+    let snapshot = changed["snapshot"]
+        .as_object()
+        .expect("Project snapshot should be an object");
+    assert_eq!(snapshot.len(), 5);
+    for key in [
+        "canonicalRoot",
+        "projectTree",
+        "canvasWorkspace",
+        "diagnostics",
+        "health",
+    ] {
+        assert!(snapshot.contains_key(key), "missing Project field {key}");
+    }
+    let health = snapshot["health"]
+        .as_object()
+        .expect("Project health should be an object");
+    assert_eq!(health.len(), 3);
+    for key in ["projectName", "diagnosticCounts", "checkedAt"] {
+        assert!(
+            health.contains_key(key),
+            "missing Project health field {key}"
+        );
+    }
+    let canvas_workspace = snapshot["canvasWorkspace"]
+        .as_object()
+        .expect("available Canvas workspace should be an object");
+    assert_eq!(
+        canvas_workspace.len(),
+        3,
+        "available Canvas workspace should expose exactly three fields"
+    );
+    for key in ["status", "workspace", "canvasResources"] {
+        assert!(
+            canvas_workspace.contains_key(key),
+            "missing Canvas workspace field {key}"
+        );
+    }
     let canvas = &changed["snapshot"]["canvasWorkspace"]["workspace"];
     assert_eq!(
         canvas["nodeStates"]["note.txt"]["manualLayout"],

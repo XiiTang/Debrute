@@ -6,7 +6,7 @@ use std::{
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
 
 use super::{
@@ -18,10 +18,10 @@ use super::{
     ProjectPathKind, ProjectSnapshot, ProjectTree, ProjectTreeChange, ProjectTreeEntry,
     UpdateCanvasFeedbackInput, apply_canvas_state_patch, canvas_media_kind_from_path,
     normalize_feedback_path, open_no_symlink_existing_project_file, project_content_hash,
-    project_media_revision, project_text_file_type_for_path, prune_canvas_state_path,
-    read_canvas_feedback_state, resolve_no_symlink_existing_project_path,
-    rewrite_canvas_state_path, update_canvas_feedback_document, visible_canvas_entries,
-    write_canvas_feedback_document,
+    project_content_type, project_media_kind_from_content_type, project_media_revision,
+    project_text_file_type_for_path, prune_canvas_state_path, read_canvas_feedback_state,
+    resolve_no_symlink_existing_project_path, rewrite_canvas_state_path,
+    update_canvas_feedback_document, visible_canvas_entries, write_canvas_feedback_document,
 };
 
 type CanvasNodeAdapterData = (
@@ -98,7 +98,6 @@ pub struct ProjectService {
     root: PathBuf,
     canonical_root: String,
     capability: ProjectCapabilityFs,
-    debrute_home: PathBuf,
     node_adapter: Arc<dyn ProjectNodeAdapter>,
     canvas_store: CanvasWorkspaceStore,
     canvas_workspace: Result<CanvasWorkspaceDocument, CanvasWorkspaceUnavailable>,
@@ -152,8 +151,7 @@ impl ProjectService {
             })?
             .to_owned();
         let capability = ProjectCapabilityFs::bind_session_root(&root)?;
-        let debrute_home = debrute_home.as_ref().to_path_buf();
-        let canvas_store = CanvasWorkspaceStore::new(&debrute_home, &canonical_root);
+        let canvas_store = CanvasWorkspaceStore::new(debrute_home.as_ref(), &canonical_root);
         let canvas_workspace = canvas_store.load_or_create();
         let feedback_document = CanvasFeedbackDocument::empty(crate::now_rfc3339())?;
         let project_tree = ProjectTree::new(root.clone());
@@ -162,7 +160,6 @@ impl ProjectService {
                 workspace: workspace.clone(),
                 canvas_resources: CanvasResourceView {
                     resources: Vec::new(),
-                    diagnostics: Vec::new(),
                 },
             },
             Err(unavailable) => CanvasWorkspaceSnapshot::Unavailable {
@@ -181,7 +178,6 @@ impl ProjectService {
                     errors: 0,
                     warnings: 0,
                 },
-                runtime_data_location: debrute_home.join("runtime").to_string_lossy().into_owned(),
                 checked_at: crate::now_rfc3339(),
             },
         };
@@ -189,7 +185,6 @@ impl ProjectService {
             root,
             canonical_root,
             capability,
-            debrute_home,
             node_adapter,
             canvas_store,
             canvas_workspace,
@@ -462,14 +457,49 @@ impl ProjectService {
     }
 
     pub fn watch_refresh_failed(&mut self, path: &str, message: &str) -> ProjectSnapshot {
-        let id = format!("project-tree.watch-failed:{}", project_content_hash(path));
+        self.record_project_refresh_failure(
+            format!("project-tree.watch-failed:{}", project_content_hash(path)),
+            ProjectDiagnosticSeverity::Warning,
+            "project_tree_watch_failed",
+            path,
+            message,
+        )
+    }
+
+    fn committed_project_refresh_failed(
+        &mut self,
+        path: &str,
+        error: &ProjectError,
+    ) -> ProjectSnapshot {
+        let subject = if path.is_empty() {
+            "Project files changed"
+        } else {
+            "Project file changed"
+        };
+        self.record_project_refresh_failure(
+            "project.refresh-failed".to_owned(),
+            ProjectDiagnosticSeverity::Error,
+            "project_refresh_failed",
+            path,
+            &format!("{subject}, but Project state could not refresh: {error}"),
+        )
+    }
+
+    fn record_project_refresh_failure(
+        &mut self,
+        id: String,
+        severity: ProjectDiagnosticSeverity,
+        code: &str,
+        path: &str,
+        message: &str,
+    ) -> ProjectSnapshot {
         self.snapshot
             .diagnostics
             .retain(|diagnostic| diagnostic.id != id);
         self.snapshot.diagnostics.push(ProjectDiagnostic {
             id,
-            severity: ProjectDiagnosticSeverity::Warning,
-            code: "project_tree_watch_failed".to_owned(),
+            severity,
+            code: code.to_owned(),
             message: message.to_owned(),
             file_path: (!path.is_empty())
                 .then(|| self.root.join(path).to_string_lossy().into_owned()),
@@ -523,17 +553,28 @@ impl ProjectService {
     pub(crate) fn reconcile_committed_content_change(
         &mut self,
         project_relative_path: &str,
-    ) -> Result<ProjectSnapshot, ProjectError> {
-        let change = self.project_tree.refresh_watched_paths(&[
-            super::watcher::ProjectWatchPath::modified(project_relative_path.to_owned()),
-        ])?;
-        let mut change = change;
-        change
-            .identity_reset_paths
-            .retain(|path| path != project_relative_path);
-        let mut invalidated = self.apply_project_tree_change(&change)?;
+        expected_identity: debrute_native_fs::PathIdentity,
+    ) -> ProjectSnapshot {
+        let refresh = self
+            .project_tree
+            .refresh_committed_content_change(project_relative_path, expected_identity);
+        let (mut invalidated, refresh_error) = match refresh {
+            Ok(change) => match self.apply_project_tree_change(&change) {
+                Ok(invalidated) => (invalidated, None),
+                Err(error) => (HashSet::new(), Some(error)),
+            },
+            Err(error) => (HashSet::new(), Some(error)),
+        };
         invalidated.insert(project_relative_path.to_owned());
-        self.rebuild_snapshot(&invalidated, true)
+        let snapshot = match self.rebuild_snapshot(&invalidated, true) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                return self.committed_project_refresh_failed(project_relative_path, &error);
+            }
+        };
+        refresh_error.map_or(snapshot, |error| {
+            self.committed_project_refresh_failed(project_relative_path, &error)
+        })
     }
 
     pub fn patch_canvas_state(
@@ -714,10 +755,7 @@ impl ProjectService {
                     .collect();
                 CanvasWorkspaceSnapshot::Available {
                     workspace,
-                    canvas_resources: CanvasResourceView {
-                        resources,
-                        diagnostics: Vec::new(),
-                    },
+                    canvas_resources: CanvasResourceView { resources },
                 }
             }
             Err(unavailable) => CanvasWorkspaceSnapshot::Unavailable {
@@ -738,11 +776,6 @@ impl ProjectService {
                     errors: 0,
                     warnings: 0,
                 },
-                runtime_data_location: self
-                    .debrute_home
-                    .join("runtime")
-                    .to_string_lossy()
-                    .into_owned(),
                 checked_at: crate::now_rfc3339(),
             },
         };
@@ -819,8 +852,7 @@ impl ProjectService {
         {
             return cached.resource.clone();
         }
-        let mtime_ms = system_time_ms(modified);
-        let resource = self.inspect_canvas_file(entry, media_kind, &mut file, &metadata, mtime_ms);
+        let resource = self.inspect_canvas_file(entry, &mut file, &metadata);
         self.inspection_cache.insert(
             entry.project_relative_path.clone(),
             CachedCanvasFileInspection {
@@ -836,39 +868,34 @@ impl ProjectService {
     fn inspect_canvas_file(
         &self,
         entry: &ProjectTreeEntry,
-        media_kind: CanvasMediaKind,
         file: &mut fs::File,
         metadata: &fs::Metadata,
-        mtime_ms: f64,
     ) -> CanvasResource {
         let revision = match project_media_revision(file) {
             Ok(revision) => revision,
             Err(error) => {
                 return unavailable_canvas_file_resource(
                     entry,
-                    media_kind,
+                    canvas_media_kind_from_path(&entry.project_relative_path),
                     CanvasNodeAvailability::Unreadable {
                         message: error.to_string(),
                     },
                 );
             }
         };
-        let text_line = if media_kind == CanvasMediaKind::Text {
-            match read_text_classification_line(file) {
-                Ok(line) => line,
+        let (media_kind, mime_type, text_language) =
+            match classify_canvas_file(&entry.project_relative_path, file) {
+                Ok(classification) => classification,
                 Err(error) => {
                     return unavailable_canvas_file_resource(
                         entry,
-                        media_kind,
+                        canvas_media_kind_from_path(&entry.project_relative_path),
                         CanvasNodeAvailability::Unreadable {
                             message: error.to_string(),
                         },
                     );
                 }
-            }
-        } else {
-            None
-        };
+            };
         let (preview, presentation) =
             match self.inspect_node_adapter_data(&entry.project_relative_path, media_kind) {
                 Ok(adapter) => adapter,
@@ -876,11 +903,6 @@ impl ProjectService {
                     return unavailable_canvas_file_resource(entry, media_kind, availability);
                 }
             };
-        let (mime_type, text_language) = project_content_type(
-            &entry.project_relative_path,
-            media_kind,
-            text_line.as_deref(),
-        );
         CanvasResource::File {
             project_relative_path: entry.project_relative_path.clone(),
             media_kind,
@@ -891,7 +913,6 @@ impl ProjectService {
                 canvas_image_previewable: preview.map(|preview| preview.previewable),
                 canvas_image_preview_source_width: preview
                     .and_then(|preview| preview.dimensions.map(|dimensions| dimensions.width)),
-                mtime_ms: Some(mtime_ms),
                 revision,
             }),
             image_dimensions: preview.and_then(|preview| preview.dimensions),
@@ -926,16 +947,31 @@ impl ProjectService {
         Ok((preview, presentation))
     }
 
-    pub(crate) fn reconcile_canvas_path_mutation(
+    pub(crate) fn reconcile_committed_path_mutation(
         &mut self,
         removed_paths: &[String],
         rewrites: &[(String, String)],
-    ) -> Result<ProjectSnapshot, ProjectError> {
-        self.project_tree
-            .refresh_after_mutation(removed_paths, rewrites)?;
+    ) -> ProjectSnapshot {
+        let (project_tree_change, project_tree_refresh_error) = match self
+            .project_tree
+            .refresh_after_mutation(removed_paths, rewrites)
+        {
+            Ok(change) => (change, None),
+            Err(error) => (ProjectTreeChange::default(), Some(error)),
+        };
+        let mut reconciled_removed_paths = removed_paths.to_vec();
+        reconciled_removed_paths.extend(
+            project_tree_change
+                .confirmed_missing_paths
+                .iter()
+                .chain(&project_tree_change.identity_reset_paths)
+                .cloned(),
+        );
+        reconciled_removed_paths.sort();
+        reconciled_removed_paths.dedup();
         let next_workspace = self.canvas_workspace.as_ref().ok().map(|workspace| {
             let mut document = workspace.clone();
-            for removed in removed_paths {
+            for removed in &reconciled_removed_paths {
                 document.state = prune_canvas_state_path(&document.state, removed);
             }
             for (source, target) in rewrites {
@@ -944,7 +980,7 @@ impl ProjectService {
             document
         });
         let mut persistence_errors = Vec::new();
-        if let Err(error) = self.reconcile_feedback_paths(removed_paths, rewrites) {
+        if let Err(error) = self.reconcile_feedback_paths(&reconciled_removed_paths, rewrites) {
             persistence_errors.push(error.to_string());
         }
         if let Some(document) = next_workspace
@@ -952,7 +988,7 @@ impl ProjectService {
         {
             persistence_errors.push(error.to_string());
         }
-        let changed = removed_paths
+        let changed = reconciled_removed_paths
             .iter()
             .cloned()
             .chain(
@@ -961,12 +997,16 @@ impl ProjectService {
                     .flat_map(|(source, target)| [source.clone(), target.clone()]),
             )
             .collect::<HashSet<_>>();
-        self.rebuild_snapshot(&changed, false)?;
-        if persistence_errors.is_empty() {
-            Ok(self.snapshot.clone())
-        } else {
-            Ok(self.record_path_state_persistence_failure(&persistence_errors.join("; ")))
+        let mut snapshot = self
+            .rebuild_snapshot(&changed, false)
+            .expect("rebuilding without a Feedback refresh is infallible");
+        if let Some(error) = project_tree_refresh_error {
+            snapshot = self.committed_project_refresh_failed("", &error);
         }
+        if !persistence_errors.is_empty() {
+            snapshot = self.record_path_state_persistence_failure(&persistence_errors.join("; "));
+        }
+        snapshot
     }
 
     fn reconcile_feedback_paths(
@@ -981,6 +1021,11 @@ impl ProjectService {
         let rewritten = next
             .entries
             .iter()
+            .filter(|(path, _)| {
+                !removed_paths
+                    .iter()
+                    .any(|removed| super::project_path_is_same_or_descendant(path, removed))
+            })
             .filter_map(|(path, entry)| {
                 rewrites
                     .iter()
@@ -1012,14 +1057,6 @@ impl ProjectService {
         )?));
         self.feedback_document = next;
         Ok(())
-    }
-
-    pub(crate) fn reconcile_committed_path_mutation(
-        &mut self,
-        removed_paths: &[String],
-        rewrites: &[(String, String)],
-    ) -> Result<ProjectSnapshot, ProjectError> {
-        self.reconcile_canvas_path_mutation(removed_paths, rewrites)
     }
 
     fn require_project_directory(&self, path: &str) -> Result<(), ProjectError> {
@@ -1117,29 +1154,37 @@ fn project_path_ancestors(path: &str) -> Vec<String> {
         .collect()
 }
 
-fn system_time_ms(time: SystemTime) -> f64 {
-    time.duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs_f64()
-        * 1000.0
-}
-
-fn project_content_type(
+fn classify_canvas_file(
     project_relative_path: &str,
-    media_kind: CanvasMediaKind,
-    first_line: Option<&str>,
-) -> (String, Option<String>) {
-    match media_kind {
-        CanvasMediaKind::Image => (mime_guess_for_path(project_relative_path, "image/*"), None),
-        CanvasMediaKind::Video => (mime_guess_for_path(project_relative_path, "video/*"), None),
-        CanvasMediaKind::Audio => (mime_guess_for_path(project_relative_path, "audio/*"), None),
-        CanvasMediaKind::Text => project_text_file_type_for_path(project_relative_path, first_line)
-            .map_or_else(
-                || ("text/plain".to_owned(), Some("plaintext".to_owned())),
-                |(language, mime_type)| (mime_type.to_owned(), Some(language.to_owned())),
-            ),
-        CanvasMediaKind::Unknown => ("application/octet-stream".to_owned(), None),
+    file: &mut fs::File,
+) -> Result<(CanvasMediaKind, String, Option<String>), ProjectError> {
+    let content_type = project_content_type(project_relative_path);
+    let media_kind = project_media_kind_from_content_type(content_type);
+    if media_kind != CanvasMediaKind::Unknown {
+        return Ok((media_kind, content_type.to_owned(), None));
     }
+    if let Some((language, mime_type)) =
+        project_text_file_type_for_path(project_relative_path, None)
+    {
+        return Ok((
+            CanvasMediaKind::Text,
+            mime_type.to_owned(),
+            Some(language.to_owned()),
+        ));
+    }
+    let first_line = read_text_classification_line(file)?;
+    Ok(
+        project_text_file_type_for_path(project_relative_path, first_line.as_deref()).map_or_else(
+            || (CanvasMediaKind::Unknown, content_type.to_owned(), None),
+            |(language, mime_type)| {
+                (
+                    CanvasMediaKind::Text,
+                    mime_type.to_owned(),
+                    Some(language.to_owned()),
+                )
+            },
+        ),
+    )
 }
 
 fn unavailable_canvas_file_resource(
@@ -1155,28 +1200,6 @@ fn unavailable_canvas_file_resource(
         text_language: None,
         video_presentation: None,
     }
-}
-
-fn mime_guess_for_path(path: &str, fallback: &str) -> String {
-    let extension = Path::new(path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match extension.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "mp4" => "video/mp4",
-        "mov" => "video/quicktime",
-        "webm" => "video/webm",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "flac" => "audio/flac",
-        _ => fallback,
-    }
-    .to_owned()
 }
 
 fn read_text_classification_line(file: &mut fs::File) -> Result<Option<String>, ProjectError> {

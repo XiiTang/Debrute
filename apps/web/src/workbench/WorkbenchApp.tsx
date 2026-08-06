@@ -1467,7 +1467,8 @@ function WorkbenchBoundProjectApp({
             <div className="boot-screen boot-screen--with-titlebar boot-screen--blocking" role="alert" data-testid="workbench-connection-ended">
               <strong>Debrute Runtime connection ended.</strong>
               <span>{connectionEnded.message}</span>
-              <span>Refresh this page to start a new Workbench connection.</span>
+              <span>No Project view was accepted before the connection ended.</span>
+              <span>Reloading creates a new Workbench connection.</span>
             </div>
           </div>
         </WorkbenchIconProvider>
@@ -1635,7 +1636,8 @@ function WorkbenchBoundProjectApp({
               title="Debrute Runtime connection ended."
             >
               <span>{connectionEnded.message}</span>
-              <span>This Project is read-only. Refresh this page to start a new Workbench connection.</span>
+              <span>The last confirmed Project view is frozen. Project commands are unavailable.</span>
+              <span>Reloading creates a new Workbench connection.</span>
             </WorkbenchCanvasDialog>
           ) : projectDetached ? (
             <WorkbenchCanvasDialog
@@ -1643,7 +1645,7 @@ function WorkbenchBoundProjectApp({
               titleId="workbench-detached-dialog-title"
               title="This Project is active in another Workbench."
             >
-              <span>This window is read-only. Your local drafts remain visible here.</span>
+              <span>This window no longer owns the Project. Its last confirmed view and local drafts are frozen here.</span>
               <Button autoFocus disabled={isProjectOpening} onClick={() => { void reopenDetachedProject(); }}>Open Here</Button>
               {projectOpenError ? <span className="db-form-error" role="alert">{projectOpenError}</span> : null}
             </WorkbenchCanvasDialog>

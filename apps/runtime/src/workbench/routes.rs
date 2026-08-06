@@ -1105,13 +1105,10 @@ fn activity_event_value(event: ActivityEvent) -> Value {
     }
 }
 
-pub(crate) fn project_stream_value(
-    item: ProjectStreamItem,
-    binding_id: &str,
-) -> Result<Value, RuntimeHttpServiceError> {
-    Ok(match item {
+pub(crate) fn project_stream_value(item: ProjectStreamItem, binding_id: &str) -> Value {
+    match item {
         ProjectStreamItem::Snapshot(sync) => {
-            let snapshot = public_project_snapshot(&sync.snapshot, binding_id)?;
+            let snapshot = public_project_snapshot(&sync.snapshot, binding_id);
             json!({
             "type": "sync",
             "domain": "project",
@@ -1122,7 +1119,7 @@ pub(crate) fn project_stream_value(
         }
         ProjectStreamItem::Event(event) => match event.change {
             ProjectChange::ProjectChanged(snapshot) => {
-                let snapshot = public_project_snapshot(&snapshot, binding_id)?;
+                let snapshot = public_project_snapshot(&snapshot, binding_id);
                 json!({
                 "type": "project.changed",
                 "bindingId": binding_id,
@@ -1134,7 +1131,7 @@ pub(crate) fn project_stream_value(
                 project_relative_path,
                 snapshot,
             } => {
-                let snapshot = public_project_snapshot(&snapshot, binding_id)?;
+                let snapshot = public_project_snapshot(&snapshot, binding_id);
                 json!({
                 "type": "project.fileChanged",
                 "bindingId": binding_id,
@@ -1150,7 +1147,7 @@ pub(crate) fn project_stream_value(
                 "feedback": feedback
             }),
         },
-    })
+    }
 }
 
 struct JsonEventStream {

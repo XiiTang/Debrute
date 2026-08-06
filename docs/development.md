@@ -167,6 +167,9 @@ persistence, and required-input errors remain visible. A rejected tab-local
 Workbench view snapshot is reported and discarded as one disposable
 presentation value before first-open defaults are used. Expected Runtime
 failures use typed results; an unexpected panic terminates the Runtime process.
+After a filesystem mutation commits, a following Project refresh error remains
+visible as an Error diagnostic without changing the truthful successful command
+outcome.
 
 Cross-surface trust boundaries are documented in
 [`security.md`](./security.md). Local test classification, scheduling,

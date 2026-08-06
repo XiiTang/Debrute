@@ -413,16 +413,15 @@ Runtime refreshes only loaded dependency paths and Debrute-managed documents.
 Runtime-authored Feedback events are discarded before refresh when their
 content hash matches the accepted document. Ordinary path events update the
 flat path index and rederive Canvas only when it displays or retains state for the
-affected subtree. A changed `.gitignore` re-enumerates every loaded descendant
-whose inherited ignore facts may change. A full watcher rescan additionally
-compares session-only filesystem identities so deletion plus recreation at the
-same path receives default Canvas state.
+affected subtree. A full watcher rescan additionally compares session-only
+filesystem identities so deletion plus recreation at the same path receives
+default Canvas state.
 Version-control internals, fixed operating-system debris, symbolic links, and
-non-regular entries are excluded. `.debrute/`, other dotfiles, and ignored
-entries remain visible; `.gitignore` contributes an `ignored` fact rather than
-membership. Directories such as `node_modules`, `target`, `dist`, and `build`
-are ordinary on-demand folders. Watcher events observed during initial
-publication queue behind its barrier and are applied afterward.
+non-regular entries are excluded. `.debrute/`, other dotfiles, `.gitignore`,
+and paths named by `.gitignore` rules remain ordinary visible entries; Runtime
+does not interpret ignore rules. Directories such as `node_modules`, `target`,
+`dist`, and `build` are ordinary on-demand folders. Watcher events observed
+during initial publication queue behind its barrier and are applied afterward.
 
 Global Canvas state, root-scoped Working Copies, Project-local Feedback, and
 global Model Artifact provenance each deserialize as one closed current document
@@ -459,10 +458,10 @@ Workbench owner without a second destination confirmation. Preparation does
 not modify either owner; a failure leaves both bindings unchanged. Runtime sends
 `project.preempted` only when an ownership transfer commits. A displaced Desktop
 window stays open on the unbound topology route, while its renderer preserves
-the last Project presentation as a read-only detached surface with **Open
-Here**. It is not closed, silently rebound, or allowed to retain Project command
-authority. **Open Here** is another explicit request to acquire that same
-Project under this rule.
+the last confirmed Project presentation as a frozen detached surface with
+**Open Here**. It is not closed, silently rebound, or allowed to retain Project
+command authority. **Open Here** is another explicit request to acquire that
+same Project under this rule.
 
 Project mutations are serialized and semantically validated. Commands return
 their outcome; ordered stream events carry authoritative state. A stale or
@@ -472,14 +471,21 @@ Tree. Runtime subsequently applies the same path change to the root-scoped
 Canvas document, accepted Feedback, text Working Copies, and Feedback Working
 Copies. Rename and Move rewrite the source prefix; Delete prunes it; overwrite
 prunes the destination before rewriting the source. Watcher reconciliation
-prunes only a path confirmed missing by a successful parent enumeration.
+prunes only a path absent from a successful parent enumeration, or an enumerated
+path whose immediately following identity lookup returns the expected
+`NotFound` or `NotADirectory` result. Permission and other I/O errors fail the
+refresh without authorizing cleanup.
+Runtime-owned atomic text replacement carries its committed file identity into
+that refresh, so only the Runtime's exact output preserves path-keyed state; an
+external replacement between commit and refresh does not.
 
 These updates are intentionally not a durable transaction with ordinary
-Project files. If secondary-state persistence fails, Runtime preserves the
-filesystem result, does not retry or roll it back, and publishes the successful
-command with one Error diagnostic named
-`project_path_state_persistence_failed` in that same Project revision. Ordinary
-refresh does not clear it; the next successful related path mutation does.
+Project files. If Project refresh fails after the filesystem commit, Runtime
+preserves the filesystem result, does not retry or roll it back, and publishes
+the successful command with one `project_refresh_failed` Error diagnostic. If
+secondary-state persistence also fails, it additionally publishes the Error
+diagnostic `project_path_state_persistence_failed`; ordinary refresh does not
+clear that diagnostic, while the next successful related path mutation does.
 Runtime writes no filesystem or Native Trash recovery journal, Canvas byte
 snapshot, expected output hash, or commit marker. Native Trash retains only
 immediate same-filesystem quarantine around the operating-system action.

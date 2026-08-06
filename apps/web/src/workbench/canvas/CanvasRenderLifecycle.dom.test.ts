@@ -229,7 +229,7 @@ function createFixture(input: {
 }
 
 function projection(nodes: ProjectedCanvasNode[]): CanvasProjection {
-  return { nodes, edges: [], diagnostics: [] };
+  return { nodes, edges: [] };
 }
 
 function directoryNode(path: string, x: number, y: number, z: number): ProjectedCanvasNode {

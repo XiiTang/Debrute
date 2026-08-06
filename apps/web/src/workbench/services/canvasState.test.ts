@@ -16,8 +16,7 @@ describe('Canvas selection context', () => {
   const state = {
     canvasProjection: {
       nodes: [first, second],
-      edges: [],
-      diagnostics: []
+      edges: []
     },
     snapshot: {
       diagnostics: [diagnostic]

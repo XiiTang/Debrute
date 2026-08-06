@@ -86,8 +86,7 @@ describe('Inspector property density', () => {
               z: 0,
               availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
             }],
-            edges: [],
-            diagnostics: []
+            edges: []
           },
           snapshot: {
             diagnostics: []
@@ -137,8 +136,7 @@ describe('Inspector property density', () => {
               layoutMode: 'manual',
               availability: { state: 'available', revision: 'rev', size: 1, mimeType: 'image/png', fileUrl: '/file.png' }
             }],
-            edges: [],
-            diagnostics: []
+            edges: []
           },
           snapshot: {
             diagnostics: []

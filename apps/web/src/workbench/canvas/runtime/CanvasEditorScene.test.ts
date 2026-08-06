@@ -92,7 +92,7 @@ function projection(
   nodes: ProjectedCanvasNode[],
   edges: CanvasProjection['edges'] = []
 ): CanvasProjection {
-  return { nodes, edges, diagnostics: [] };
+  return { nodes, edges };
 }
 
 function edge(id: string, sourceProjectRelativePath: string, targetProjectRelativePath: string) {

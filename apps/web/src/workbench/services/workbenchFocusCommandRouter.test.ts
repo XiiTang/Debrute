@@ -17,8 +17,7 @@ describe('workbench focus command router', () => {
   it('uses Escape priority: pointer interaction, Cut, then node selection', () => {
     const projection = {
       nodes: [node('a.png'), node('b.png')],
-      edges: [],
-      diagnostics: []
+      edges: []
     };
     const runtime = createCanvasEditorRuntime({
       initialProjection: projection,
@@ -53,7 +52,7 @@ describe('workbench focus command router', () => {
   });
 
   it('consumes Canvas commands even when selection makes them unavailable', () => {
-    const projection = { nodes: [], edges: [], diagnostics: [] };
+    const projection = { nodes: [], edges: [] };
     const runtime = createCanvasEditorRuntime({
       initialProjection: projection,
       submitManualLayout: async () => undefined
@@ -73,8 +72,7 @@ describe('workbench focus command router', () => {
   it('selects every current Projection node and routes file commands through one Canvas target', () => {
     const projection = {
       nodes: [node('b.png'), directoryNode('assets')],
-      edges: [],
-      diagnostics: []
+      edges: []
     };
     const runtime = createCanvasEditorRuntime({
       initialProjection: projection,

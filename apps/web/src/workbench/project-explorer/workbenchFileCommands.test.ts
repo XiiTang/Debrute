@@ -171,13 +171,11 @@ function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
         nodeStates: {},
         occlusionOrder: []
       },
-      canvasResources: { resources: [], diagnostics: [] }
+      canvasResources: { resources: [] }
     },
     projectTree: paths.map((projectRelativePath) => ({
       projectRelativePath,
-      kind: 'file' as const,
-      ignored: false,
-      hidden: false
+      kind: 'file' as const
     })),
     diagnostics: [],
     health: {

@@ -1232,8 +1232,6 @@ mod tests {
                     project_relative_path: "assets/source.png".to_owned(),
                     kind: ProjectPathKind::File,
                     size_bytes: None,
-                    ignored: false,
-                    hidden: false,
                     directory_state: None,
                     directory_error: None,
                 }],

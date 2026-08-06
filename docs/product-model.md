@@ -11,9 +11,10 @@ root. The directory is the source of truth for its files.
 Runtime owns one Project Session and one shared Project Tree per live canonical
 root. Explorer and Canvas are independent projections of that tree. The tree
 loads the root immediately and other directories on demand. Dotfiles,
-Git-ignored entries, and `.debrute/` remain visible. Version-control internals,
-fixed operating-system debris, symbolic links, and non-regular entries are
-excluded. Partial or failed reads never prove deletion.
+`.gitignore`, paths named by `.gitignore` rules, and `.debrute/` remain visible;
+Runtime does not interpret ignore rules. Version-control internals, fixed
+operating-system debris, symbolic links, and non-regular entries are excluded.
+Partial or failed reads never prove deletion.
 
 The only Debrute-owned Project state is Feedback:
 
@@ -51,10 +52,12 @@ Layout.
 Known Rename or Move operations prefix-rewrite sparse Canvas paths, accepted
 Feedback paths, and text and Feedback Working Copies. Confirmed deletion prunes
 them; overwrite prunes the destination before rewriting the source. Watcher
-uncertainty, shallow projections, and directory read failures never authorize
-cleanup. A secondary-state persistence failure does not roll back the completed
-filesystem mutation; the same Project revision contains one Error diagnostic
-until the next successful related path mutation.
+uncertainty, shallow projections, and unexpected directory or identity read
+failures never authorize cleanup. Absence from a successful parent enumeration,
+or an expected missing result from the immediately following identity lookup,
+does. A Project refresh or secondary-state persistence failure does not roll
+back the completed filesystem mutation; the same Project revision contains the
+corresponding Error diagnostic.
 
 Invalid, unreadable, or root-mismatched Canvas state remains unchanged but does
 not block the Project. Explorer, editor, and terminal remain available while

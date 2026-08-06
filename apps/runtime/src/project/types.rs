@@ -43,8 +43,6 @@ pub struct ProjectTreeEntry {
     pub kind: ProjectPathKind,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub size_bytes: Option<u64>,
-    pub ignored: bool,
-    pub hidden: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub directory_state: Option<ProjectDirectoryState>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -165,8 +163,6 @@ pub enum CanvasNodeAvailability {
             skip_serializing_if = "Option::is_none"
         )]
         canvas_image_preview_source_width: Option<u64>,
-        #[serde(rename = "mtimeMs", skip_serializing_if = "Option::is_none")]
-        mtime_ms: Option<f64>,
         revision: String,
     },
     Missing {
@@ -265,7 +261,6 @@ impl CanvasResource {
 #[serde(rename_all = "camelCase")]
 pub struct CanvasResourceView {
     pub resources: Vec<CanvasResource>,
-    pub diagnostics: Vec<ProjectDiagnostic>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -289,8 +284,7 @@ impl CanvasWorkspaceUnavailableCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanvasWorkspaceUnavailable {
     pub code: CanvasWorkspaceUnavailableCode,
     pub message: String,
@@ -311,8 +305,7 @@ impl CanvasWorkspaceUnavailable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "status", rename_all = "lowercase")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CanvasWorkspaceSnapshot {
     Available {
         workspace: CanvasWorkspaceDocument,
@@ -331,17 +324,14 @@ pub struct ProjectDiagnosticCounts {
     pub warnings: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectHealthSummary {
     pub project_name: String,
     pub diagnostic_counts: ProjectDiagnosticCounts,
-    pub runtime_data_location: String,
     pub checked_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProjectSnapshot {
     pub canonical_root: String,
     pub project_tree: Vec<ProjectTreeEntry>,
@@ -350,8 +340,7 @@ pub struct ProjectSnapshot {
     pub health: ProjectHealthSummary,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProjectSyncSnapshot {
     pub project_revision: u64,
     pub snapshot: ProjectSnapshot,

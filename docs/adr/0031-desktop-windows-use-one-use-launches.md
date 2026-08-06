@@ -57,6 +57,6 @@ cannot invoke the browser Project-replacement endpoint.
 
 A browser preemption retargets the old Desktop window to Root in Runtime
 topology, but the renderer keeps its last Project presentation visible as a
-detached, read-only surface. That document is not an empty-window reuse
+detached, frozen surface without Project command authority. That document is not an empty-window reuse
 candidate. An explicit **Open Here** action may preempt back in that same window.
 Closing the window removes its topology entry.

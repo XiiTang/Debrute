@@ -86,7 +86,7 @@ replacement endpoint for a Desktop connection, so Desktop cannot bypass native
 multi-window activation.
 
 A browser may still displace a Desktop Project owner. The Electron window then
-remains open with its last Project presentation, becomes read-only, and alone
+remains open with its last confirmed Project presentation frozen and alone
 offers **Open Here**. Runtime treats that detached window as unbound in Desktop
 topology; the preserved presentation is frontend-local context, not Project
 command authority. Because it previously accepted a Project binding, it is not

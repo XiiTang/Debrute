@@ -82,15 +82,17 @@ prefix-rewrite retained Canvas state, accepted Feedback paths, text Working
 Copies, and Feedback Working Copies, including descendants of a moved
 directory. Confirmed deletion prunes all four; overwrite prunes the target
 before rewriting the source. Shallow reads, watcher bursts, and directory
-errors cannot prove deletion, so watcher reconciliation prunes only confirmed
-missing paths.
+errors cannot prove deletion. Watcher reconciliation confirms a missing path
+through a successful parent enumeration that omits it, or through the expected
+missing result when resolving an enumerated entry's identity; other identity
+errors do not authorize cleanup.
 
-The filesystem mutation is primary. If related Canvas or Feedback state cannot
-be persisted after a successful Rename, Move, Delete, or overwrite, Runtime
-does not roll back or retry the filesystem command. The successful command's
-Project revision contains one Error diagnostic with code
-`project_path_state_persistence_failed`. Ordinary refresh does not clear it;
-the next successful related path mutation does.
+The filesystem mutation is primary. A following Project refresh failure does
+not roll back or retry a successful filesystem command; its Project revision
+contains the Error diagnostic `project_refresh_failed`. If related Canvas or
+Feedback state cannot be persisted, the corresponding Error diagnostic is
+`project_path_state_persistence_failed`. Ordinary refresh does not clear the
+latter; the next successful related path mutation does.
 
 Missing Canvas state creates default empty Canvas state. Unreadable or malformed
 Canvas JSON, a stored canonical-root mismatch, or a Canvas persistence failure

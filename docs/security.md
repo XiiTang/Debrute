@@ -62,6 +62,13 @@ Unexpected filesystem errors fail closed. Only explicitly expected missing-path
 cases become absence; permission, invalid-link, IO, and other resolution errors
 are not converted into a successful fallback.
 
+Once a Runtime filesystem mutation has committed, a later Project refresh
+error cannot make that completed mutation fail closed. Runtime preserves the
+filesystem result, does not retry or roll it back, and reports the refresh
+failure as an Error diagnostic on the successful command result. That outcome
+describes the already committed mutation; it is not a successful fallback for
+the failed refresh.
+
 The same boundary protects Project Tree mutations, Feedback writes and derived
 artifacts, Canvas preview reads, terminal working directories, native
 reveal/trash operations, and professional-tool transfers. `.debrute/` is visible Project content; only version-control

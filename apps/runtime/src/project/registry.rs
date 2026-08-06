@@ -987,8 +987,10 @@ impl ProjectSession {
     /// revision admission lane as every filesystem mutation.
     ///
     /// # Errors
-    /// Returns a stale revision before any native effect, or the exact native
-    /// shell/refresh error. Runtime does not automatically retry a native effect.
+    /// Returns a stale revision before any native effect or the exact native
+    /// shell error. A refresh failure after trash commits is reported on the
+    /// successful result as a diagnostic. Runtime does not automatically retry
+    /// a native effect.
     pub fn trash_paths(
         &self,
         native_shell: &ProjectNativeShellService,
@@ -1013,7 +1015,7 @@ impl ProjectSession {
                     .iter()
                     .map(|entry| entry.project_relative_path.clone())
                     .collect::<Vec<_>>();
-                let snapshot = service.reconcile_committed_path_mutation(&changed_paths, &[])?;
+                let snapshot = service.reconcile_committed_path_mutation(&changed_paths, &[]);
                 let mut mutation = ProjectMutation::changed(
                     ProjectCommandResult::PathsChanged {
                         results,
@@ -1507,16 +1509,17 @@ fn execute_single_file_command(
             content,
             expected_revision,
         } => {
-            let file = write_project_text_file(
+            let committed = write_project_text_file(
                 service.root(),
                 &project_relative_path,
                 &content,
                 &expected_revision,
             )?;
-            let snapshot = service.reconcile_committed_content_change(&project_relative_path)?;
+            let snapshot = service
+                .reconcile_committed_content_change(&project_relative_path, committed.identity);
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::TextFileSaved {
-                    file,
+                    file: committed.file,
                     snapshot: snapshot.clone(),
                 },
                 ProjectChange::ProjectFileChanged {
@@ -1534,7 +1537,7 @@ fn execute_single_file_command(
                 create_project_path(service.root(), &parent_project_relative_path, &name, kind)?;
             let path = result.project_relative_path.clone();
             let snapshot =
-                service.reconcile_committed_path_mutation(std::slice::from_ref(&path), &[])?;
+                service.reconcile_committed_path_mutation(std::slice::from_ref(&path), &[]);
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::PathChanged {
                     result,
@@ -1552,7 +1555,7 @@ fn execute_single_file_command(
             let snapshot = service.reconcile_committed_path_mutation(
                 std::slice::from_ref(&target),
                 &[(project_relative_path, target.clone())],
-            )?;
+            );
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::PathChanged {
                     result,
@@ -1636,7 +1639,7 @@ fn execute_file_batch_command(
         }
         _ => unreachable!("non-batch command reached the file batch executor"),
     };
-    let snapshot = service.reconcile_committed_path_mutation(&removed, &rewrites)?;
+    let snapshot = service.reconcile_committed_path_mutation(&removed, &rewrites);
     Ok(ProjectMutation::changed(
         ProjectCommandResult::PathsChanged {
             results,
@@ -1768,7 +1771,6 @@ fn snapshots_equivalent(left: &ProjectSnapshot, right: &ProjectSnapshot) -> bool
         && left.diagnostics == right.diagnostics
         && left.health.project_name == right.health.project_name
         && left.health.diagnostic_counts == right.health.diagnostic_counts
-        && left.health.runtime_data_location == right.health.runtime_data_location
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

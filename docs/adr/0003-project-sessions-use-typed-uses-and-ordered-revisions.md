@@ -92,7 +92,7 @@ React keys Project-scoped presentation by binding generation. Accepting a new
 `project.bound` disposes the previous Project subtree and mounts a fresh one.
 Connection state, product settings, global notifications, and the unbound open
 surface remain outside that subtree. Detach removes command authority and keeps
-the last snapshot read-only; it does not create a new generation.
+the last confirmed snapshot frozen; it does not create a new generation.
 
 ## Working Copies
 

@@ -476,7 +476,6 @@ describe('CanvasEditorRuntime', () => {
           marqueeNode('se.png', 110, 110)
         ],
         edges: [],
-        diagnostics: []
       },
       submitManualLayout: async () => undefined
     });
@@ -544,7 +543,6 @@ describe('CanvasEditorRuntime', () => {
           marqueeNode('outside.png', 21, 50)
         ],
         edges: [],
-        diagnostics: []
       },
       submitManualLayout: async () => undefined
     });
@@ -579,7 +577,6 @@ describe('CanvasEditorRuntime', () => {
     runtime.acceptProjection({
       nodes: [marqueeNode('flow/b.png', 150, 150)],
       edges: [],
-      diagnostics: []
     });
 
     expect(runtime.getSnapshot().selection).toEqual({
@@ -702,7 +699,7 @@ describe('CanvasEditorRuntime', () => {
       { ...canvasProjection('flow/b.png', 30).nodes[0]!, y: 40 }
     ];
     const runtime = createCanvasEditorRuntime({
-      initialProjection: { nodes: base, edges: [], diagnostics: [] },
+      initialProjection: { nodes: base, edges: [] },
       submitManualLayout,
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
     });
@@ -811,7 +808,6 @@ describe('CanvasEditorRuntime', () => {
             { ...canvasProjection('right.png', 120).nodes[0]!, z: 1 }
           ],
           edges: [],
-          diagnostics: []
         },
         submitManualLayout: async () => undefined
       });
@@ -965,7 +961,6 @@ function canvasProjection(projectRelativePath: string, x: number) {
       }
     }],
     edges: [],
-    diagnostics: []
   };
 }
 
@@ -996,7 +991,6 @@ function createRuntime(input?: {
         }
       ],
       edges: [],
-      diagnostics: []
     },
     submitManualLayout: async () => undefined,
     ...input
@@ -1011,7 +1005,6 @@ function createMarqueeRuntime() {
         marqueeNode('flow/b.png', 150, 150)
       ],
       edges: [],
-      diagnostics: []
     },
     submitManualLayout: async () => undefined
   });

@@ -109,6 +109,61 @@ describe('Workbench event decoding', () => {
     expect(decodeWorkbenchEvent(event)).toEqual(event);
   });
 
+  it('rejects unknown fields in nested Canvas resource facts', () => {
+    const resource = {
+      projectRelativePath: 'clips/demo.mp4',
+      nodeKind: 'file' as const,
+      mediaKind: 'video' as const,
+      availability: {
+        state: 'available' as const,
+        size: 42,
+        mimeType: 'video/mp4',
+        fileUrl: '/api/workbench/bindings/project-1/files/clips/demo.mp4',
+        revision: 'sha256:demo'
+      },
+      videoPresentation: {
+        kind: 'video' as const,
+        width: 1920,
+        height: 1080,
+        textTracks: [{
+          projectRelativePath: 'clips/demo.vtt',
+          revision: 'sha256:track',
+          kind: 'subtitles' as const,
+          label: 'English',
+          default: true
+        }]
+      }
+    };
+    const event = projectEventWithCanvasResource(resource);
+
+    expect(decodeWorkbenchEvent(event)).toEqual(event);
+    for (const invalid of [
+      {
+        ...resource,
+        availability: { ...resource.availability, extra: true }
+      },
+      {
+        ...resource,
+        videoPresentation: { ...resource.videoPresentation, extra: true }
+      },
+      {
+        ...resource,
+        videoPresentation: {
+          ...resource.videoPresentation,
+          textTracks: [{ ...resource.videoPresentation.textTracks[0], extra: true }]
+        }
+      },
+      {
+        projectRelativePath: resource.projectRelativePath,
+        nodeKind: resource.nodeKind,
+        mediaKind: resource.mediaKind,
+        availability: { state: 'missing', message: 'gone', extra: true }
+      }
+    ]) {
+      expect(decodeWorkbenchEvent(projectEventWithCanvasResource(invalid))).toBeUndefined();
+    }
+  });
+
   it('accepts the live Photoshop session and Document projection', () => {
     const event = {
       type: 'photoshop.state.changed',
@@ -277,8 +332,7 @@ function snapshotFixture() {
         ...emptyCanvasState()
       },
       canvasResources: {
-        resources: [],
-        diagnostics: []
+        resources: []
       }
     },
     projectTree: [],
@@ -287,6 +341,22 @@ function snapshotFixture() {
       projectName: 'Demo',
       diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-07-23T00:00:00.000Z'
+    }
+  };
+}
+
+function projectEventWithCanvasResource(resource: unknown) {
+  const snapshot = snapshotFixture();
+  return {
+    type: 'project.changed',
+    bindingId: 'project-1',
+    projectRevision: 2,
+    snapshot: {
+      ...snapshot,
+      canvasWorkspace: {
+        ...snapshot.canvasWorkspace,
+        canvasResources: { resources: [resource] }
+      }
     }
   };
 }
