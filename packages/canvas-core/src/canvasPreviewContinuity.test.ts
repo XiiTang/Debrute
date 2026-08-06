@@ -6,7 +6,6 @@ describe('canvasPreviewContinuityKey', () => {
     const base = canvasPreviewContinuityKey({
       mediaKind: 'video',
       bindingId: 'project-a',
-      canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-a'
     });
@@ -14,35 +13,24 @@ describe('canvasPreviewContinuityKey', () => {
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
       bindingId: 'project-a',
-      canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-a'
     })).toBe(base);
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
       bindingId: 'project-b',
-      canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-a'
     })).not.toBe(base);
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
       bindingId: 'project-a',
-      canvasId: 'canvas-b',
-      projectRelativePath: 'media/clip.mp4',
-      continuityIdentity: 'sha256:source-a'
-    })).not.toBe(base);
-    expect(canvasPreviewContinuityKey({
-      mediaKind: 'video',
-      bindingId: 'project-a',
-      canvasId: 'canvas-a',
       projectRelativePath: 'media/other.mp4',
       continuityIdentity: 'sha256:source-a'
     })).not.toBe(base);
     expect(canvasPreviewContinuityKey({
       mediaKind: 'video',
       bindingId: 'project-a',
-      canvasId: 'canvas-a',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: 'sha256:source-b'
     })).not.toBe(base);

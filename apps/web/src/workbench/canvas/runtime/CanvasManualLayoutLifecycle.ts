@@ -25,13 +25,9 @@ interface SubmittedManualLayoutDraft {
 }
 
 export function createCanvasManualLayoutLifecycle(input: {
-  canvasId: string;
   initialProjection: CanvasProjection;
   submitManualLayout(mutation: Pick<CanvasManualLayoutDraft, 'interaction' | 'nodeLayouts'>): Promise<void>;
 }): CanvasManualLayoutLifecycle {
-  if (input.initialProjection.canvasId !== input.canvasId) {
-    throw new Error(`Manual Layout lifecycle for ${input.canvasId} cannot start from Projection ${input.initialProjection.canvasId}.`);
-  }
   let projection = input.initialProjection;
   let active: CanvasManualLayoutDraft | undefined;
   let submitted: SubmittedManualLayoutDraft[] = [];
@@ -40,7 +36,6 @@ export function createCanvasManualLayoutLifecycle(input: {
 
   const draftFromInteraction = (interaction: CanvasRuntimeLayoutInteraction): CanvasManualLayoutDraft => (
     canvasManualLayoutDraftFromInteraction({
-      canvasId: input.canvasId,
       interaction,
       point: interaction.current ?? interaction.start
     })
@@ -68,7 +63,7 @@ export function createCanvasManualLayoutLifecycle(input: {
     },
     async submitFinishedInteraction(interaction) {
       if (disposed) {
-        throw new Error(`Manual Layout lifecycle for ${input.canvasId} is disposed.`);
+        throw new Error('Manual Layout lifecycle is disposed.');
       }
       const draft = draftFromInteraction(interaction);
       active = undefined;
@@ -109,9 +104,6 @@ export function createCanvasManualLayoutLifecycle(input: {
     acceptProjection(nextProjection) {
       if (disposed) {
         return;
-      }
-      if (nextProjection.canvasId !== input.canvasId) {
-        throw new Error(`Manual Layout lifecycle for ${input.canvasId} cannot accept Projection ${nextProjection.canvasId}.`);
       }
       projection = nextProjection;
       const nodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));

@@ -104,7 +104,7 @@ If the agent cannot control the selected frontend, report that limitation instea
 
 ## Canvas and Project files
 
-Every regular Project file and directory appears on every Canvas. The Project
+Every regular Project file and directory appears on the Canvas. The Project
 folder hierarchy defines Canvas hierarchy and structure edges. A user controls
 the currently visible descendants by expanding or collapsing folders on that
 Canvas; Explorer expansion is independent.

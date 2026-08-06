@@ -547,106 +547,11 @@ pub(super) async fn feedback_patch(
     )
 }
 
-pub(super) async fn canvas_create(
+pub(super) async fn canvas_reset(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
 ) -> Response {
-    command_for_scope(&state, &scope, ProjectCommand::CreateCanvas)
-}
-
-pub(super) async fn canvas_workspace_reset(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-) -> Response {
-    command_for_scope(&state, &scope, ProjectCommand::ResetCanvasWorkspace)
-}
-
-pub(super) async fn canvas_reorder(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    request: Request,
-) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        canvas_order: Vec<String>,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
-    };
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::ReorderCanvases {
-            order: input.canvas_order,
-        },
-    )
-}
-
-pub(super) async fn canvas_item(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_binding_id, canvas_id)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    let method = request.method().clone();
-    if method == Method::GET {
-        let runtime = Arc::clone(&state.services);
-        return match runtime
-            .projects()
-            .get(std::path::Path::new(&scope.canonical_root))
-            .and_then(|session| session.sync_snapshot())
-        {
-            Ok(sync) => match sync.snapshot.canvas_workspace {
-                crate::project::CanvasWorkspaceSnapshot::Available { workspace, .. } => workspace
-                    .canvases
-                    .into_iter()
-                    .find(|canvas| canvas.id == canvas_id)
-                    .map_or_else(
-                        || StatusCode::NOT_FOUND.into_response(),
-                        |canvas| Json(canvas).into_response(),
-                    ),
-                crate::project::CanvasWorkspaceSnapshot::Unavailable { code, message } => {
-                    project_error(crate::project::ProjectError::service(
-                        code.as_str(),
-                        message,
-                    ))
-                }
-            },
-            Err(error) => project_error(error),
-        };
-    }
-    let command = if method == Method::DELETE {
-        ProjectCommand::DeleteCanvas { canvas_id }
-    } else {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Input {
-            operation: String,
-            name: String,
-        }
-        let input: Input = match json_body(request).await {
-            Ok(input) => input,
-            Err(response) => return response,
-        };
-        if input.operation != "rename" {
-            return invalid_input("Canvas operation must be rename.");
-        }
-        ProjectCommand::RenameCanvas {
-            canvas_id,
-            name: input.name,
-        }
-    };
-    command_for_scope(&state, &scope, command)
-}
-
-pub(super) async fn canvas_activate(
-    State(state): State<WorkbenchRouterState>,
-    Extension(scope): Extension<ProjectAuthorization>,
-    Path((_binding_id, canvas_id)): Path<(String, String)>,
-) -> Response {
-    command_for_scope(&state, &scope, ProjectCommand::ActivateCanvas { canvas_id })
+    command_for_scope(&state, &scope, ProjectCommand::ResetCanvas)
 }
 
 pub(super) async fn canvas_state_patch(
@@ -707,7 +612,6 @@ pub(super) async fn text_preview_source_save(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Metadata {
-        canvas_id: String,
         project_relative_path: String,
         target_identity: String,
     }
@@ -739,7 +643,6 @@ pub(super) async fn text_preview_source_save(
     };
     match runtime.previews().save_text_preview_source(
         session.root(),
-        &metadata.canvas_id,
         &target,
         &source.temporary_path,
     ) {
@@ -770,7 +673,6 @@ pub(super) async fn text_preview_sources(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
-        canvas_id: String,
         sources: Vec<Target>,
     }
     let input: Input = match json_body(request).await {
@@ -792,7 +694,7 @@ pub(super) async fn text_preview_sources(
         .collect::<Vec<_>>();
     let sources = runtime
         .previews()
-        .read_text_preview_sources(session.root(), &input.canvas_id, &targets)
+        .read_text_preview_sources(session.root(), &targets)
         .into_iter()
         .map(|source| (source.target.project_relative_path.clone(), source))
         .map(|(path, source)| {
@@ -832,10 +734,6 @@ pub(super) async fn text_preview(
         Ok(target_identity) => target_identity.to_owned(),
         Err(response) => return response,
     };
-    let canvas_id = match required_query_value(&query, "canvasId") {
-        Ok(canvas_id) => canvas_id.to_owned(),
-        Err(response) => return response,
-    };
     let target = CanvasTextPreviewSourceTarget {
         project_relative_path,
         target_identity,
@@ -851,13 +749,7 @@ pub(super) async fn text_preview(
         method == Method::HEAD,
         PreviewCachePolicy::Revalidate,
         move |cancellation| {
-            previews.resolve_text_preview_variant(
-                &project_root,
-                &canvas_id,
-                &target,
-                width,
-                cancellation,
-            )
+            previews.resolve_text_preview_variant(&project_root, &target, width, cancellation)
         },
     )
     .await
@@ -878,7 +770,6 @@ pub(super) async fn video_preview_probe(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
-        canvas_id: String,
         targets: Vec<Target>,
     }
     let input: Input = match json_body(request).await {
@@ -921,11 +812,10 @@ pub(super) async fn video_preview_probe(
         .collect::<Vec<_>>();
     let previews = Arc::clone(runtime.previews());
     let project_root = session.root().to_path_buf();
-    let canvas_id = input.canvas_id;
     let sources = match blocking_preview_task(move |cancellation| {
         previews
             .video()
-            .probe_sources(&project_root, &canvas_id, &targets, cancellation)
+            .probe_sources(&project_root, &targets, cancellation)
     })
     .await
     {
@@ -982,7 +872,6 @@ pub(super) async fn video_preview_ensure(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
-        canvas_id: String,
         target: Target,
         canonical_source_identity: String,
     }
@@ -1008,7 +897,6 @@ pub(super) async fn video_preview_ensure(
     let result = match blocking_preview_task(move |cancellation| {
         previews.video().ensure_source(
             &project_root,
-            &input.canvas_id,
             &target,
             &input.canonical_source_identity,
             cancellation,
@@ -1069,10 +957,6 @@ pub(super) async fn video_preview(
         Ok(revision) => revision.to_owned(),
         Err(response) => return response,
     };
-    let canvas_id = match required_query_value(&query, "canvasId") {
-        Ok(canvas_id) => canvas_id.to_owned(),
-        Err(response) => return response,
-    };
     let canonical_source_identity = match required_query_value(&query, "canonicalSourceIdentity") {
         Ok(canonical_source_identity) => canonical_source_identity.to_owned(),
         Err(response) => return response,
@@ -1095,7 +979,6 @@ pub(super) async fn video_preview(
         move |cancellation| {
             previews.video().resolve_variant(
                 &project_root,
-                &canvas_id,
                 &target,
                 &canonical_source_identity,
                 width,
@@ -1695,14 +1578,6 @@ fn command_response_body(result: ProjectCommandResult) -> Result<Value, RuntimeH
         ProjectCommandResult::Snapshot(_) | ProjectCommandResult::CanvasFeedbackUpdated { .. } => {
             json!({})
         }
-        ProjectCommandResult::CanvasCreated { canvas_id, .. } => json!({
-            "activeCanvasId": canvas_id
-        }),
-        ProjectCommandResult::CanvasDeleted {
-            active_canvas_id, ..
-        } => json!({
-            "activeCanvasId": active_canvas_id
-        }),
         ProjectCommandResult::TextFileSaved { file, .. } => {
             json!({"file": public_text_file(file)})
         }

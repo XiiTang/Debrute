@@ -1,8 +1,9 @@
 # Product Update Relaunch Follows Its Initiating Surface
 
 Every product update records one fixed continuation derived from its initiating
-surface. A Desktop update opens Desktop after the target Runtime is ready, a
-browser update opens one newly authenticated browser page. The CLI cannot
+surface. A Desktop update opens one root-routed Desktop window after the target
+Runtime is ready, and a browser update opens one newly authenticated root page.
+Neither continuation reopens the initiating or last Project. The CLI cannot
 initiate an update. Continuation never substitutes or falls back to another
 surface.
 

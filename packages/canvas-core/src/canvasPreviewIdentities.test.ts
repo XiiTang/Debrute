@@ -14,7 +14,6 @@ describe('Canvas preview identities', () => {
     const projectATargetKey = canvasPreviewTargetKey({
       mediaKind: 'video',
       bindingId: 'project-a',
-      canvasId: 'canvas-a',
       projectRelativePath: 'clips/a.mp4',
       targetIdentity
     });
@@ -22,14 +21,12 @@ describe('Canvas preview identities', () => {
     expect(projectATargetKey).not.toBe(canvasPreviewTargetKey({
       mediaKind: 'video',
       bindingId: 'project-b',
-      canvasId: 'canvas-a',
       projectRelativePath: 'clips/a.mp4',
       targetIdentity
     }));
     expect(projectATargetKey).not.toBe(canvasPreviewTargetKey({
       mediaKind: 'video',
       bindingId: 'project-a',
-      canvasId: 'canvas-b',
       projectRelativePath: 'clips/b.mp4',
       targetIdentity
     }));
@@ -60,14 +57,12 @@ describe('Canvas preview identities', () => {
     expect(canvasPreviewVariantKey({
       mediaKind: 'text',
       bindingId: 'project-a',
-      canvasId: 'canvas-a',
       projectRelativePath: 'notes/a.md',
       targetIdentity,
       width: 800
     })).not.toBe(canvasPreviewVariantKey({
       mediaKind: 'text',
       bindingId: 'project-a',
-      canvasId: 'canvas-a',
       projectRelativePath: 'notes/b.md',
       targetIdentity,
       width: 800

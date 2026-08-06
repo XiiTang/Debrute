@@ -11,7 +11,6 @@ describe('CanvasScene', () => {
     const result = projectCanvasScene({
       canonicalRoot: '/Users/example/ecommerce',
       resources: {
-        canvasId: 'canvas-1',
         resources: [{ projectRelativePath: '', nodeKind: 'directory' }],
         diagnostics: []
       },
@@ -35,7 +34,6 @@ describe('CanvasScene', () => {
     const result = projectCanvasScene({
       canonicalRoot: '/Users/example/ecommerce',
       resources: {
-        canvasId: 'canvas-1',
         resources: [
           { projectRelativePath: '', nodeKind: 'directory' },
           { projectRelativePath: 'assets', nodeKind: 'directory' },
@@ -79,7 +77,6 @@ describe('CanvasScene', () => {
     const result = projectCanvasScene({
       canonicalRoot: '/project',
       resources: {
-        canvasId: 'canvas-1',
         resources: [
           { projectRelativePath: '', nodeKind: 'directory' },
           { projectRelativePath: 'a', nodeKind: 'directory' },
@@ -119,7 +116,6 @@ describe('CanvasScene', () => {
     const result = projectCanvasScene({
       canonicalRoot: '/project',
       resources: {
-        canvasId: 'canvas-1',
         resources: [
           { projectRelativePath: '', nodeKind: 'directory' },
           { projectRelativePath: 'folder', nodeKind: 'directory' },

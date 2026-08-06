@@ -36,7 +36,6 @@ export interface CanvasRasterPreviewEnvironment {
 export interface CanvasRasterPreviewVariantTarget {
   mediaKind: CanvasPreviewResourceKind;
   bindingId: string;
-  canvasId?: string | undefined;
   projectRelativePath: string;
   targetIdentity: CanvasPreviewTargetIdentity;
   canonicalSourceIdentity?: CanvasPreviewCanonicalSourceIdentity | undefined;
@@ -74,7 +73,6 @@ export function sameCanvasRasterPreviewRequest(
   return left.continuityKey === right.continuityKey
     && leftTarget?.mediaKind === rightTarget?.mediaKind
     && leftTarget?.bindingId === rightTarget?.bindingId
-    && leftTarget?.canvasId === rightTarget?.canvasId
     && leftTarget?.projectRelativePath === rightTarget?.projectRelativePath
     && leftTarget?.targetIdentity === rightTarget?.targetIdentity
     && leftTarget?.canonicalSourceIdentity === rightTarget?.canonicalSourceIdentity
@@ -505,7 +503,6 @@ function canvasRasterPreviewDesiredSource(input: {
   const sourceKey = canvasPreviewVariantKey({
     mediaKind: target.mediaKind,
     bindingId: target.bindingId,
-    canvasId: target.canvasId,
     projectRelativePath: target.projectRelativePath,
     targetIdentity: target.targetIdentity,
     canonicalSourceIdentity: target.canonicalSourceIdentity,

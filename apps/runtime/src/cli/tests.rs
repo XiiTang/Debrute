@@ -40,10 +40,6 @@ fn registry_exactly_matches_the_final_cli_matrix() {
             "project.status",
             "project.validate",
             "workbench.start",
-            "canvas.create",
-            "canvas.rename",
-            "canvas.delete",
-            "canvas.reorder",
             "model-artifact.lookup",
             "request.single",
             "request.batch",
@@ -182,15 +178,6 @@ fn parser_accepts_the_final_request_and_operation_forms() {
 
 #[test]
 fn parser_enforces_registered_syntax_shapes() {
-    let missing_name = parse_cli_args(&[
-        "canvas".into(),
-        "rename".into(),
-        "project".into(),
-        "canvas-1".into(),
-    ])
-    .unwrap_err();
-    assert_eq!(missing_name.code(), "missing_argument");
-
     let unexpected =
         parse_cli_args(&["runtime".into(), "status".into(), "extra".into()]).unwrap_err();
     assert_eq!(unexpected.code(), "invalid_argument");
@@ -357,7 +344,6 @@ fn runtime_cli_service_owns_model_and_project_commands() {
         .expect("Project status should return a record");
     let opened = serde_json::to_value(opened).unwrap();
     assert_eq!(opened["status"], "ok", "{opened}");
-    assert_eq!(opened["fields"]["canvases"], 1);
 }
 
 #[test]

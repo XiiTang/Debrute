@@ -137,7 +137,6 @@ describe('CanvasTextPreviewTaskRegistry', { tags: ['canvas-text'] }, () => {
 function target(projectRelativePath: string, targetIdentity: string) {
   return {
     bindingId: 'project-1',
-    canvasId: 'canvas-1',
     projectRelativePath,
     targetIdentity: canvasPreviewTargetIdentityFromDigest(targetIdentity),
     contentDigest: `sha256:${targetIdentity}`,

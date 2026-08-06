@@ -7,7 +7,7 @@ results or a global image loading plan. This was chosen over a Canvas-wide image
 asset runtime so camera movement and shell culling cannot erase loaded images,
 quality replacements can hand off without placeholder flashes, and one source
 change or failure invalidates only its node. The trade-off is stable mounting of
-image nodes while they remain on the active Canvas, with expensive work paced
+image nodes while they remain on the Canvas, with expensive work paced
 by the shared scheduler instead of component destruction. Exact-viewport
 culling changes shell display only; it does not bound or gate resource
 production.

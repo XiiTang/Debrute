@@ -7,7 +7,6 @@ describe('Canvas Manual Layout lifecycle', () => {
   it('keeps a submitted draft visible until the Canvas Projection confirms it', async () => {
     const submitted: unknown[] = [];
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0)),
       submitManualLayout: async (nodeLayouts) => {
         submitted.push(nodeLayouts);
@@ -37,7 +36,6 @@ describe('Canvas Manual Layout lifecycle', () => {
 
   it('discards older drafts when a newer rectangle for the same node is confirmed', async () => {
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0)),
       submitManualLayout: async () => undefined
     });
@@ -54,7 +52,6 @@ describe('Canvas Manual Layout lifecycle', () => {
     const second = deferred<void>();
     const submitManualLayout = submissionSequence(first.promise, second.promise);
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0), node('flow/b.png', 0)),
       submitManualLayout
     });
@@ -78,7 +75,6 @@ describe('Canvas Manual Layout lifecycle', () => {
     const first = deferred<void>();
     const second = deferred<void>();
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0), node('flow/b.png', 0)),
       submitManualLayout: submissionSequence(first.promise, second.promise)
     });
@@ -99,7 +95,6 @@ describe('Canvas Manual Layout lifecycle', () => {
   it('removes a failed submission after an intervening unconfirmed Projection', async () => {
     const request = deferred<void>();
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0)),
       submitManualLayout: () => request.promise
     });
@@ -114,7 +109,6 @@ describe('Canvas Manual Layout lifecycle', () => {
 
   it('keeps the newer same-node draft when an older Projection arrives first', async () => {
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0)),
       submitManualLayout: async () => undefined
     });
@@ -130,7 +124,6 @@ describe('Canvas Manual Layout lifecycle', () => {
 
   it('drops drafts for nodes removed from the Projection', async () => {
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0)),
       submitManualLayout: async () => undefined
     });
@@ -144,7 +137,6 @@ describe('Canvas Manual Layout lifecycle', () => {
   it('submits an active move returned to its origin and rejects a disappeared batch', async () => {
     const submitManualLayout = vi.fn(async () => undefined);
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0), node('flow/b.png', 20)),
       submitManualLayout
     });
@@ -166,7 +158,6 @@ describe('Canvas Manual Layout lifecycle', () => {
   it('does not republish a late request after disposal', async () => {
     const request = deferred<void>();
     const lifecycle = createCanvasManualLayoutLifecycle({
-      canvasId: 'canvas-1',
       initialProjection: projection(node('flow/a.png', 0)),
       submitManualLayout: () => request.promise
     });
@@ -212,7 +203,7 @@ function moveState(path: string, originX: number, currentX: number): Extract<Can
 }
 
 function projection(...nodes: ProjectedCanvasNode[]): CanvasProjection {
-  return { canvasId: 'canvas-1', nodes, edges: [], diagnostics: [] };
+  return { nodes, edges: [], diagnostics: [] };
 }
 
 function node(projectRelativePath: string, x: number, z = 1): ProjectedCanvasNode {

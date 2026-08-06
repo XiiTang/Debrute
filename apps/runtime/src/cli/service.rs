@@ -113,9 +113,6 @@ impl RuntimeCliService {
                 self.describe_audio_model(request, AudioModelKind::SoundEffect)
             }
             "project.status" | "project.validate" => self.project_command(request),
-            "canvas.create" | "canvas.rename" | "canvas.delete" | "canvas.reorder" => {
-                self.canvas_command(request)
-            }
             "model-artifact.lookup" => self.model_artifact_lookup(request),
             "operation.list" => self.operation_list(request),
             "operation.inspect" => self.operation_inspect(request),
@@ -429,24 +426,6 @@ impl RuntimeCliService {
         ))
     }
 
-    fn canvas_command(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        let root = required_root(request)?;
-        validate_project_root(root)?;
-        let opened = self.open_project(root)?;
-        let command = project_mutation(request)?;
-        let result = opened.session.execute(command).map_err(project_failure)?;
-        let fields = match result.value {
-            ProjectCommandResult::CanvasCreated { canvas_id, .. } => {
-                json!({"active_canvas": canvas_id})
-            }
-            ProjectCommandResult::CanvasDeleted {
-                active_canvas_id, ..
-            } => json!({"active_canvas": active_canvas_id}),
-            _ => json!({}),
-        };
-        Ok(ok(&request.command, fields))
-    }
-
     fn model_artifact_lookup(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         let path = request
             .options
@@ -701,43 +680,6 @@ fn required_root(request: &CliCommandRequest) -> Result<&Path, CliFailure> {
     })
 }
 
-fn project_mutation(request: &CliCommandRequest) -> Result<ProjectCommand, CliFailure> {
-    match request.command.as_str() {
-        "canvas.create" => Ok(ProjectCommand::CreateCanvas),
-        "canvas.rename" => Ok(ProjectCommand::RenameCanvas {
-            canvas_id: positional(request, 1)?,
-            name: positional(request, 2)?,
-        }),
-        "canvas.delete" => Ok(ProjectCommand::DeleteCanvas {
-            canvas_id: positional(request, 1)?,
-        }),
-        "canvas.reorder" => {
-            if request.positional.len() < 2 {
-                return Err(CliFailure::new(
-                    "missing_argument",
-                    "canvas.reorder requires at least one Canvas id.",
-                ));
-            }
-            Ok(ProjectCommand::ReorderCanvases {
-                order: request.positional[1..].to_vec(),
-            })
-        }
-        _ => Err(CliFailure::new(
-            "invalid_command",
-            "Unsupported Canvas command.",
-        )),
-    }
-}
-
-fn positional(request: &CliCommandRequest, index: usize) -> Result<String, CliFailure> {
-    request.positional.get(index).cloned().ok_or_else(|| {
-        CliFailure::new(
-            "missing_argument",
-            format!("{} requires more arguments.", request.command),
-        )
-    })
-}
-
 fn model_detail(
     command: &str,
     model_id: &str,
@@ -801,12 +743,11 @@ fn project_snapshot_fields(snapshot: &ProjectSnapshot) -> Value {
         Value::String(snapshot.health.project_name.clone()),
     );
     match &snapshot.canvas_workspace {
-        crate::project::CanvasWorkspaceSnapshot::Available { workspace, .. } => {
+        crate::project::CanvasWorkspaceSnapshot::Available { .. } => {
             fields.insert(
                 "canvas_workspace".to_owned(),
                 Value::String("available".to_owned()),
             );
-            fields.insert("canvases".to_owned(), Value::from(workspace.canvases.len()));
         }
         crate::project::CanvasWorkspaceSnapshot::Unavailable { code, message } => {
             fields.insert(
@@ -1096,7 +1037,7 @@ fn operation_failure(error: crate::model_operation::ModelOperationError) -> CliF
 pub(super) fn project_failure(error: ProjectError) -> CliFailure {
     let code = error.code();
     let mut failure = CliFailure::new(code, error.to_string());
-    for key in ["path", "canvas_id", "project_relative_path"] {
+    for key in ["path", "project_relative_path"] {
         if let Some(value) = error.field(key) {
             failure.fields.insert(key.to_owned(), value.into());
         }

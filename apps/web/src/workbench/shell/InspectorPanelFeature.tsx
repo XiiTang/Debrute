@@ -8,22 +8,19 @@ import { Inspector } from './Inspector.js';
 export function WorkbenchInspectorPanelFeature({
   locale,
   state,
-  activeCanvasId,
-  activeCanvasRuntime,
+  canvasRuntime,
   actions
 }: {
   locale: WorkbenchLocale;
   state: WorkbenchState;
-  activeCanvasId: string | undefined;
-  activeCanvasRuntime: CanvasEditorRuntime | undefined;
+  canvasRuntime: CanvasEditorRuntime | undefined;
   actions: WorkbenchActions;
 }): React.ReactElement {
   return (
     <I18nProvider locale={locale}>
       <Inspector
         state={state}
-        activeCanvasId={activeCanvasId}
-        selection={activeCanvasRuntime?.getSnapshot().selection}
+        selection={canvasRuntime?.getSnapshot().selection}
         actions={actions}
       />
     </I18nProvider>

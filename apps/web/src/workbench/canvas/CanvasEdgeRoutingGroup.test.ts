@@ -53,7 +53,7 @@ describe('CanvasEdgeRoutingGroup', () => {
 });
 
 function projection(nodes: ProjectedCanvasNode[], edges: CanvasProjection['edges']): CanvasProjection {
-  return { canvasId: 'canvas', nodes, edges, diagnostics: [] };
+  return { nodes, edges, diagnostics: [] };
 }
 
 function edge(id: string, sourceProjectRelativePath: string, targetProjectRelativePath: string) {

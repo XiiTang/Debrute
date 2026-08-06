@@ -277,8 +277,8 @@ accepted HTTP Project opens read it with direct `JSON.parse`. An absent entry
 uses the current first-open defaults. This disposable browser layout has no
 schema validation, repair, removal, reset Activity, compatibility layer, or
 try/catch fallback. If a present value is malformed, the parse error is exposed
-as an implementation/runtime failure. The Runtime-owned Canvas Workspace
-`activeCanvasId` is the sole persisted active-Canvas value.
+as an implementation/runtime failure. Runtime owns the single persisted Canvas
+state for the canonical Project root.
 
 Canvas floating bars use separate placement helpers because they are attached
 to Canvas objects or reserved screen edges. Their collision and viewport rules
@@ -455,8 +455,8 @@ described in [`runtime-architecture.md`](./runtime-architecture.md).
 Explorer derives its tree from the current Project snapshot, excludes `.git`
 metadata, sorts directories before files, and naturally sorts names.
 Opening a Project loads the root's direct visible children. Expanding a
-collapsed Explorer directory, disclosing a Canvas directory, activating a
-Canvas, or revealing a file loads the required direct children through the same
+collapsed Explorer directory, disclosing a Canvas directory, or revealing a
+file loads the required direct children through the same
 Runtime-owned Project Tree. A revisioned load adds those children to the next
 complete snapshot without rescanning unrelated directories; repeated loads are
 no-ops. Creating inside a collapsed directory first loads that parent. Loaded

@@ -92,7 +92,6 @@ interface CanvasTextPreviewAvailabilityRequest {
 
 interface CanvasTextPreviewTargetInput {
   readonly bindingId: string;
-  readonly canvasId: string;
   readonly projectRelativePath: string;
   readonly contentDigest?: string | undefined;
   readonly dirtyContent?: string | undefined;
@@ -162,7 +161,6 @@ export function useCanvasTextPreviewNode(node: ProjectedCanvasNode): CanvasTextP
 }
 
 export function CanvasTextPreviewProvider({
-  canvasId,
   nodes,
   activeInlineTextPath,
   textFileBuffers,
@@ -173,7 +171,6 @@ export function CanvasTextPreviewProvider({
   previewResourceScheduler,
   children
 }: {
-  canvasId: string;
   nodes: ProjectedCanvasNode[];
   activeInlineTextPath?: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
@@ -205,7 +202,6 @@ export function CanvasTextPreviewProvider({
   const sourceAvailabilityRef = useRef(sourceAvailability);
   const previewErrorsRef = useRef(previewErrors);
   const changedNodePathsRef = useRef(new Set<string>());
-  const currentCanvasIdRef = useRef(canvasId);
   const textFileBuffersRef = useRef(textFileBuffers);
   const activeInlineTextPathRef = useRef(activeInlineTextPath);
   const styleKeyRef = useRef(styleKeyState.key);
@@ -252,7 +248,6 @@ export function CanvasTextPreviewProvider({
       changedNodePathsRef.current.add(path);
     }
   }, []);
-  currentCanvasIdRef.current = canvasId;
   textFileBuffersRef.current = textFileBuffers;
   activeInlineTextPathRef.current = activeInlineTextPath;
   styleKeyRef.current = styleKeyState.key;
@@ -304,7 +299,6 @@ export function CanvasTextPreviewProvider({
   const isCurrentTarget = useCallback((epoch: number, target: CanvasTextPreviewTarget): boolean => (
     mountedRef.current
     && epoch === runtimeEpochRef.current
-    && target.canvasId === currentCanvasIdRef.current
     && currentTargetKeysRef.current.get(target.projectRelativePath) === canvasTextPreviewTargetKey(target)
   ), []);
 
@@ -412,7 +406,7 @@ export function CanvasTextPreviewProvider({
         previewResourceScheduler.cancel('text', path);
       }
     };
-  }, [canvasId, previewResourceScheduler]);
+  }, [previewResourceScheduler]);
 
   useEffect(() => {
     coverageJobRef.current?.abortController.abort();
@@ -476,7 +470,6 @@ export function CanvasTextPreviewProvider({
         continue;
       }
       const targetInput = canvasTextPreviewTargetInput({
-        canvasId,
         node,
         buffer: textFileBuffers[path],
         styleKey: styleKeyState.key
@@ -542,7 +535,7 @@ export function CanvasTextPreviewProvider({
         markChangedNodeRecords
       });
     });
-  }, [activeInlineTextPath, canvasId, markChangedNodeRecords, nodes, recordTextPreviewCounter, styleKeyState.key, textFileBuffers]);
+  }, [activeInlineTextPath, markChangedNodeRecords, nodes, recordTextPreviewCounter, styleKeyState.key, textFileBuffers]);
 
   useEffect(() => {
     const path = activeInlineTextPath;
@@ -626,7 +619,6 @@ export function CanvasTextPreviewProvider({
     availabilityInFlightRef.current = request;
     recordTextPreviewCounter('text-preview-source-check-requested', { count: checking.length });
     void actions.readCanvasTextPreviewSources({
-      canvasId,
       sources: checking.map(canvasTextPreviewSourceTargetForApi)
     }).then((result) => {
       if (availabilityInFlightRef.current !== request
@@ -704,7 +696,6 @@ export function CanvasTextPreviewProvider({
     });
   }, [
     actions,
-    canvasId,
     availabilitySettlementVersion,
     interactionResumeVersion,
     markChangedNodeRecords,
@@ -1021,7 +1012,6 @@ export function CanvasTextPreviewProvider({
     });
     void actions.saveCanvasTextPreviewSource({
       ...canvasTextPreviewSourceTargetForApi(target),
-      canvasId: target.canvasId,
       sourcePng: raster.sourcePng
     }).then(() => {
       if (!mountedRef.current || epoch !== runtimeEpochRef.current) {
@@ -1086,7 +1076,6 @@ export function CanvasTextPreviewProvider({
       return undefined;
     }
     const renderedInput = canvasTextPreviewTargetInput({
-      canvasId: currentCanvasIdRef.current,
       node,
       buffer: textFileBuffersRef.current[node.projectRelativePath],
       styleKey
@@ -1163,7 +1152,6 @@ function isStableCanvasTextNode(node: ProjectedCanvasNode): boolean {
 }
 
 function canvasTextPreviewTargetInput(input: {
-  canvasId: string;
   node: ProjectedCanvasNode;
   buffer: TextFileBuffer | undefined;
   styleKey: string;
@@ -1175,7 +1163,6 @@ function canvasTextPreviewTargetInput(input: {
   const geometry = canvasTextPresentationGeometry(node);
   return {
     bindingId: canvasRawFileBindingId(node.availability.fileUrl),
-    canvasId: input.canvasId,
     projectRelativePath: node.projectRelativePath,
     ...(buffer?.dirty
       ? { dirtyContent: buffer.content }
@@ -1201,7 +1188,6 @@ async function resolveCanvasTextPreviewTarget(
   const sourceSize = canvasTextPreviewSourceSize(targetInput);
   const candidate: CanvasTextPreviewCandidate = {
     bindingId: targetInput.bindingId,
-    canvasId: targetInput.canvasId,
     projectRelativePath: targetInput.projectRelativePath,
     contentDigest,
     estimatedBytes: dirtyIdentity?.bytes ?? targetInput.estimatedBytes,
@@ -1231,7 +1217,6 @@ function canvasTextPreviewTargetInputsEqual(
   right: CanvasTextPreviewTargetInput
 ): boolean {
   return left.bindingId === right.bindingId
-    && left.canvasId === right.canvasId
     && left.projectRelativePath === right.projectRelativePath
     && left.contentDigest === right.contentDigest
     && left.dirtyContent === right.dirtyContent
@@ -1371,7 +1356,6 @@ export function canvasTextRasterPreviewRequest(input: {
   const continuityKey = canvasPreviewContinuityKey({
     mediaKind: 'text',
     bindingId: target.bindingId,
-    canvasId: target.canvasId,
     projectRelativePath: target.projectRelativePath,
     continuityIdentity: target.targetIdentity
   });
@@ -1383,13 +1367,11 @@ export function canvasTextRasterPreviewRequest(input: {
     variantTarget: {
       mediaKind: 'text',
       bindingId: target.bindingId,
-      canvasId: target.canvasId,
       projectRelativePath: target.projectRelativePath,
       targetIdentity: target.targetIdentity,
       sourceWidth: target.sourcePixelWidth,
       srcForWidth: (width) => {
         const params = new URLSearchParams({
-          canvasId: target.canvasId,
           path: target.projectRelativePath,
           targetIdentity: target.targetIdentity,
           w: String(width)

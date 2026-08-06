@@ -377,13 +377,9 @@ function canvasMessage(i18n: WorkbenchI18n, operation: CanvasActivityOperation):
     case 'set-directory-disclosure': return i18n.t('shell.activities.message.canvas.saveLayoutFailed');
     case 'reveal-path': return i18n.t('shell.activities.message.canvas.saveLayoutFailed');
     case 'raise-selection': return i18n.t('shell.activities.message.canvas.saveLayoutFailed');
-    case 'create': return i18n.t('shell.activities.message.canvas.createFailed');
-    case 'rename': return i18n.t('shell.activities.message.canvas.renameFailed');
-    case 'delete': return i18n.t('shell.activities.message.canvas.deleteFailed');
-    case 'reorder': return i18n.t('shell.activities.message.canvas.reorderFailed');
     case 'reset-auto-layout': return i18n.t('shell.activities.message.canvas.resetAutoLayoutFailed');
     case 'reset-layout': return i18n.t('shell.activities.message.canvas.resetLayoutFailed');
-    case 'reset-workspace': return i18n.t('shell.activities.message.canvas.resetWorkspaceFailed');
+    case 'reset-canvas': return i18n.t('shell.activities.message.canvas.resetCanvasFailed');
     case 'copy-path': return i18n.t('shell.activities.message.canvas.copyPathFailed');
   }
 }

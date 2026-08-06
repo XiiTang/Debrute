@@ -4,28 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{ProjectError, feedback::CanvasFeedbackDocument};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CanvasCatalogEntry {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CanvasWorkspaceCanvas {
-    pub id: String,
-    pub name: String,
-    #[serde(flatten)]
-    pub state: CanvasState,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CanvasWorkspaceDocument {
     pub canonical_root: String,
-    pub active_canvas_id: String,
-    pub canvases: Vec<CanvasWorkspaceCanvas>,
+    #[serde(flatten)]
+    pub state: CanvasState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,7 +264,6 @@ impl CanvasResource {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasResourceView {
-    pub canvas_id: String,
     pub resources: Vec<CanvasResource>,
     pub diagnostics: Vec<ProjectDiagnostic>,
 }
@@ -333,8 +316,7 @@ impl CanvasWorkspaceUnavailable {
 pub enum CanvasWorkspaceSnapshot {
     Available {
         workspace: CanvasWorkspaceDocument,
-        #[serde(rename = "activeCanvasResources")]
-        active_canvas_resources: CanvasResourceView,
+        canvas_resources: CanvasResourceView,
     },
     Unavailable {
         code: CanvasWorkspaceUnavailableCode,

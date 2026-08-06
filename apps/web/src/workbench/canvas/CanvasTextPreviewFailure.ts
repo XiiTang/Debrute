@@ -9,7 +9,6 @@ export type CanvasTextPreviewFailureStage =
   | 'variant_failed';
 
 export interface CanvasTextPreviewFailureFields {
-  canvasId: string;
   projectRelativePath: string;
   targetIdentity: CanvasPreviewTargetIdentity;
   cssWidth?: number | undefined;
@@ -21,10 +20,9 @@ export interface CanvasTextPreviewFailureFields {
 
 export function canvasTextPreviewFailureFieldsForTarget(input: Pick<
   CanvasTextPreviewFailureFields,
-  'canvasId' | 'projectRelativePath' | 'targetIdentity'
+  'projectRelativePath' | 'targetIdentity'
 >): CanvasTextPreviewFailureFields {
   return {
-    canvasId: input.canvasId,
     projectRelativePath: input.projectRelativePath,
     targetIdentity: input.targetIdentity
   };

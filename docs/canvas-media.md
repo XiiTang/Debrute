@@ -80,8 +80,8 @@ Identity that binds the Canvas Video Preview Source Version to the target frame.
 Workbench stores, compares, and returns that identity without parsing or deriving
 it.
 
-Workbench owns one latest-wins Video Preview registry per mounted Canvas. The
-registry is keyed by Canvas ID and Project path, while the Preview Target
+Workbench owns one latest-wins Video Preview registry for the mounted Canvas.
+The registry is keyed by Project path, while the Preview Target
 Identity comprises the Source Revision and frame time in milliseconds. Runtime's
 opaque Canonical Preview Source Identity completes producer policy. Active
 players retain any current preview target and mounted DOM for continuity, while
@@ -102,17 +102,17 @@ One invalid target does not cancel a Probe window; its stale result is rejected
 while the remaining results settle independently. An obsolete Ensure is
 actively cancelled when its own target becomes ineligible or changes identity.
 Camera movement and priority changes do not cancel in-flight work. Whole
-Project, Canvas, provider, or connection invalidation cancels its scoped
+Project, provider, or connection invalidation cancels its scoped
 requests.
 
-Cache identity includes Canvas ID, Project path key, Source Revision, and
+Cache identity includes Project path key, Source Revision, and
 Canonical Preview Source Identity. The source directory contains one extracted
 JPEG; width-specific JPEG variants add the same Raster Preview Engine Version
 used by image and text:
 
 ```text
 ~/.debrute/cache/roots/<rootKey>/canvas/canvas-video-previews/
-  <canvas>/<path-key>/<source-revision>/<canonical-source-identity>/
+  <path-key>/<source-revision>/<canonical-source-identity>/
     source.jpg
     raster-engine-v<version>/
       preview-w<width>.jpg

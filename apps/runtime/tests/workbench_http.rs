@@ -661,11 +661,11 @@ fn passive_media_routes_reject_missing_or_empty_identity_values() {
             project.binding_id()
         ),
         format!(
-            "/api/workbench/bindings/{}/canvas-text-preview?w=64&path=image.png&targetIdentity=target",
+            "/api/workbench/bindings/{}/canvas-text-preview?w=64&path=image.png&targetIdentity=",
             project.binding_id()
         ),
         format!(
-            "/api/workbench/bindings/{}/canvas-video-preview?w=64&frameTimeMs=0&path=image.png&sourceRevision=revision&canvasId=canvas-1",
+            "/api/workbench/bindings/{}/canvas-video-preview?w=64&frameTimeMs=0&path=image.png&sourceRevision=revision",
             project.binding_id()
         ),
     ] {
@@ -771,10 +771,14 @@ fn canvas_state_patch_accepts_one_complete_sparse_patch() {
     fs::write(Path::new(&project.root).join("note.txt"), "note")
         .expect("text fixture should be written");
     let client = test_client();
-    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
+    assert_eq!(
+        events.next_of_type("project.bound")["type"],
+        "project.bound"
+    );
     let endpoint = format!(
-        "{}/api/workbench/bindings/{}/canvases/state",
+        "{}/api/workbench/bindings/{}/canvas/state",
         runtime.origin(),
         project.binding_id()
     );
@@ -785,7 +789,6 @@ fn canvas_state_patch_accepts_one_complete_sparse_patch() {
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
-            "canvasId": "main",
             "expandedDirectories": [],
             "nodeStateUpdates": [{
                 "projectRelativePath": "note.txt",
@@ -802,19 +805,8 @@ fn canvas_state_patch_accepts_one_complete_sparse_patch() {
         .expect("Canvas state patch should complete");
     assert_eq!(response.status().as_u16(), 200);
 
-    let canvas = client
-        .get(format!(
-            "{}/api/workbench/bindings/{}/canvases/main",
-            runtime.origin(),
-            project.binding_id()
-        ))
-        .header(ORIGIN, runtime.origin())
-        .header(COOKIE, &cookie)
-        .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .send()
-        .expect("Canvas read should complete")
-        .json::<Value>()
-        .expect("Canvas should be JSON");
+    let changed = events.next_of_type("project.changed");
+    let canvas = &changed["snapshot"]["canvasWorkspace"]["workspace"];
     assert_eq!(
         canvas["nodeStates"]["note.txt"]["manualLayout"],
         json!({ "x": 10.0, "y": 20.0, "width": 320.0, "height": 180.0 })
@@ -826,7 +818,7 @@ fn canvas_state_patch_accepts_one_complete_sparse_patch() {
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, cookie)
         .header(WORKBENCH_CONNECTION_HEADER, credential)
-        .json(&json!({ "canvasId": "main", "unexpectedField": true }))
+        .json(&json!({ "unexpectedField": true }))
         .send()
         .expect("invalid Canvas state patch should complete");
     assert_eq!(invalid.status().as_u16(), 400);
@@ -1222,7 +1214,6 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
-            "canvasId": "canvas-1",
             "targets": [{
                 "projectRelativePath": "media/clip.mp4",
                 "sourceRevision": source_revision,
@@ -1257,7 +1248,6 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
-            "canvasId": "canvas-1",
             "target": {
                 "projectRelativePath": "media/clip.mp4",
                 "sourceRevision": source_revision,

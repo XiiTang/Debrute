@@ -200,8 +200,8 @@ retained presentation synchronously before it can become visible.
 
 ## Preview Identity
 
-A Canvas text-preview resource key is scoped by Canvas ID and project-relative
-path around a SHA-256 Preview Target Identity. The target identity includes every
+A Canvas text-preview resource key is scoped by Project binding and
+project-relative path around a SHA-256 Preview Target Identity. The target identity includes every
 current pixel-affecting input owned by the pipeline:
 
 - the `Canvas Text Preview Source Version`, which changes with the browser
@@ -235,7 +235,7 @@ For the current Project Root Key, cache paths are therefore:
 
 ```text
 ~/.debrute/cache/roots/<rootKey>/canvas/canvas-text-previews/
-  <canvas-id>/<source-path-key>/<target-identity-key>/
+  <source-path-key>/<target-identity-key>/
     source.png
     raster-engine-v<version>/
       preview-w<width>.png
@@ -254,8 +254,8 @@ quota, LRU, or TTL applies to width variants.
 
 ## Capture Pipeline
 
-`CanvasTextPreviewRuntime` owns one real-time task registry keyed by Canvas ID
-and project-relative path; the current target identity is the task version. Every
+`CanvasTextPreviewRuntime` owns one real-time task registry keyed by
+project-relative path; the current target identity is the task version. Every
 stable missing-or-stale target is admitted, including offscreen nodes. The same
 path is latest-wins: new input replaces pending work, invalidates a running target,
 and makes any stale read, capture,

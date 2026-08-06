@@ -32,7 +32,7 @@ only their settings and implementation group.
   exit 0 with failed Items because Batch success means all Items settled.
 - Use `--replace` only when actual commit-time replacement is intended.
 - An output inside an open Project becomes an ordinary Project Tree entry and
-  therefore belongs to every Canvas automatically. Report Artifact paths and
+  therefore belongs to the Canvas automatically. Report Artifact paths and
   structured errors.
 
 ## Workflow

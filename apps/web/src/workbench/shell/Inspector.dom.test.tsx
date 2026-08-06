@@ -59,7 +59,6 @@ describe('Inspector property density', () => {
   it('starts with selection content and does not repeat the shell title', () => {
     const html = renderStaticWithI18n(
       <Inspector
-        activeCanvasId={undefined}
         selection={undefined}
         state={{ snapshot: undefined } as unknown as WorkbenchState}
         actions={{} as WorkbenchActions}
@@ -73,11 +72,9 @@ describe('Inspector property density', () => {
   it('keeps default selected-node details focused on actionable properties', () => {
     const html = renderStaticWithI18n(
       <Inspector
-        activeCanvasId="canvas"
         selection={{ kind: 'nodes', projectRelativePaths: ['flow/cover.png'] }}
         state={{
           canvasProjection: {
-            canvasId: 'canvas',
             nodes: [{
               projectRelativePath: 'flow/cover.png',
               nodeKind: 'file',
@@ -116,11 +113,9 @@ describe('Inspector property density', () => {
   it('summarizes many selected nodes without presenting single-node fields', () => {
     const html = renderStaticWithI18n(
       <Inspector
-        activeCanvasId="canvas"
         selection={{ kind: 'nodes', projectRelativePaths: ['flow/assets', 'flow/cover.png'] }}
         state={{
           canvasProjection: {
-            canvasId: 'canvas',
             nodes: [{
               projectRelativePath: 'flow/assets',
               nodeKind: 'directory',
@@ -173,7 +168,6 @@ describe('Inspector property density', () => {
     } satisfies ProjectDiagnostic;
     const html = renderStaticWithI18n(
       <Inspector
-        activeCanvasId={undefined}
         selection={{ kind: 'diagnostic', id: diagnostic.id }}
         state={{
           snapshot: {

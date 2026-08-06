@@ -149,14 +149,12 @@ function textPreviewRequest() {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'text',
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       continuityIdentity: targetIdentity
     }),
     variantTarget: {
       mediaKind: 'text' as const,
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       targetIdentity,
       sourceWidth: 700,

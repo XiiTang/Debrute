@@ -57,16 +57,11 @@ function snapshotFixture(projectName: string): WorkbenchProjectSessionSnapshot {
       status: 'available',
       workspace: {
         canonicalRoot: '/projects/example',
-        activeCanvasId: 'main',
-        canvases: [{
-          id: 'main',
-          name: 'Main',
-          expandedDirectories: [],
-          nodeStates: {},
-          occlusionOrder: []
-        }]
+        expandedDirectories: [],
+        nodeStates: {},
+        occlusionOrder: []
       },
-      activeCanvasResources: { canvasId: 'main', resources: [], diagnostics: [] }
+      canvasResources: { resources: [], diagnostics: [] }
     },
     projectTree: [],
     diagnostics: [],

@@ -1,8 +1,13 @@
 ---
-status: accepted
+status: superseded
+superseded-by: 0010-canvas-workspace-contains-one-canvas-state.md
 ---
 
 # Canvas Workspace Is Root-Scoped Global State
+
+This decision is retained as history. ADR 0010 removes the Canvas catalog,
+identity, naming, activation, and management model while preserving the
+root-scoped storage boundary.
 
 The canonical absolute Project root is the complete Project identity. For root
 `R`, Runtime computes `rootKey = lowercaseHex(SHA256(UTF8(R)))` and stores one

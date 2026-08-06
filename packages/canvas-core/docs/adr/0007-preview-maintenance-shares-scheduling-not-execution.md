@@ -57,8 +57,8 @@ authoritative Project bytes, while uncommitted text uses a local content digest.
 Each type-specific producer turns the applicable content identity and its
 pixel-affecting target inputs into a Preview Target Identity; a producer-owned
 Canonical Preview Source Identity may complete the materialized source.
-Requested width then produces a Preview Variant Identity. Canonical Root, Canvas ID,
-and Project Path scope resource keys but are not pixel identity, while retry
+Requested width then produces a Preview Variant Identity. Project binding and
+Project Path scope resource keys but are not pixel identity, while retry
 attempts are neither source nor variant identity.
 
 One Preview Continuity Key states whether already-mounted pixels may remain

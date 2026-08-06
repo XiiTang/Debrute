@@ -163,16 +163,15 @@ describe('workbench context menu commands', () => {
         { projectRelativePath: 'b.png', kind: 'file' },
         { projectRelativePath: 'a.png', kind: 'file' }
       ]),
-      activeProjection: {
-        canvasId: 'canvas-1',
+      canvasProjection: {
         nodes: [node('a.png'), node('b.png')],
         edges: [],
         diagnostics: []
       },
-      activeCanvasRuntime: runtime,
+      canvasRuntime: runtime,
       resetCanvasNodeLayouts
     });
-    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith('canvas-1', ['a.png', 'b.png']);
+    expect(resetCanvasNodeLayouts).toHaveBeenCalledWith(['a.png', 'b.png']);
     expect(setSelection).not.toHaveBeenCalled();
   });
 
@@ -184,8 +183,7 @@ describe('workbench context menu commands', () => {
         { projectRelativePath: 'a.png', kind: 'file' },
         { projectRelativePath: 'removed.png', kind: 'file' }
       ]),
-      activeProjection: {
-        canvasId: 'canvas-1',
+      canvasProjection: {
         nodes: [node('a.png')],
         edges: [],
         diagnostics: []
@@ -205,8 +203,8 @@ function run(overrides: {
   openTerminalPanel?: Parameters<typeof runProjectPathCommand>[0]['openTerminalPanel'];
   confirmTrash?: Parameters<typeof runProjectPathCommand>[0]['confirmTrash'];
   confirmPermanentDelete?: Parameters<typeof runProjectPathCommand>[0]['confirmPermanentDelete'];
-  activeProjection?: Parameters<typeof runProjectPathCommand>[0]['activeProjection'];
-  activeCanvasRuntime?: unknown;
+  canvasProjection?: Parameters<typeof runProjectPathCommand>[0]['canvasProjection'];
+  canvasRuntime?: unknown;
   resetCanvasNodeLayouts?: Parameters<typeof runProjectPathCommand>[0]['resetCanvasNodeLayouts'];
   fileClipboard?: Parameters<typeof runProjectPathCommand>[0]['fileClipboard'];
   getProjectSnapshot?: Parameters<typeof runProjectPathCommand>[0]['getProjectSnapshot'];
@@ -223,8 +221,8 @@ function run(overrides: {
     } as AcceptedProjectPathCommandScope,
     command: overrides.command,
     contextMenu: { target: overrides.target, position: { x: 0, y: 0 } },
-    activeProjection: overrides.activeProjection,
-    activeCanvasRuntime: overrides.activeCanvasRuntime as Parameters<typeof runProjectPathCommand>[0]['activeCanvasRuntime'],
+    canvasProjection: overrides.canvasProjection,
+    canvasRuntime: overrides.canvasRuntime as Parameters<typeof runProjectPathCommand>[0]['canvasRuntime'],
     revealInCanvas: overrides.revealInCanvas ?? noop,
     fileClipboard: overrides.fileClipboard,
     resetCanvasNodeLayouts: overrides.resetCanvasNodeLayouts ?? (() => undefined),

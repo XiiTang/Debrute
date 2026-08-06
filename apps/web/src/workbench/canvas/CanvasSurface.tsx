@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type {
-  CanvasCatalogEntry,
   CanvasFeedbackDocument,
   CanvasFeedbackEntry,
   CanvasFeedbackGeometry,
@@ -106,7 +105,6 @@ interface CanvasPreviewActivationCandidate {
 }
 
 interface CanvasSurfaceProps {
-  canvas: CanvasCatalogEntry;
   canvasState?: CanvasState | undefined;
   projection: CanvasProjection;
   runtime: CanvasEditorRuntime;
@@ -123,7 +121,6 @@ interface CanvasSurfaceProps {
 }
 
 export function CanvasSurface({
-  canvas,
   canvasState = EMPTY_CANVAS_STATE,
   projection,
   runtime,
@@ -163,7 +160,6 @@ export function CanvasSurface({
 
   return (
     <CanvasSurfaceRuntime
-      canvas={canvas}
       canvasState={canvasState}
       projection={projection}
       runtime={runtime}
@@ -183,7 +179,6 @@ export function CanvasSurface({
 }
 
 function CanvasSurfaceRuntime({
-  canvas,
   canvasState = EMPTY_CANVAS_STATE,
   projection,
   runtime,
@@ -218,7 +213,7 @@ function CanvasSurfaceRuntime({
   ));
   const resourceZoomRef = useRef(resourceZoom);
   resourceZoomRef.current = resourceZoom;
-  const fittedCanvasIdRef = useRef<string | undefined>(undefined);
+  const fittedCanvasRef = useRef(false);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const canvasPerfPointerInteractionSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const reactCommitCountRef = useRef(0);
@@ -311,7 +306,7 @@ function CanvasSurfaceRuntime({
   const devicePixelRatio = devicePixelRatioValue();
   const instrumentationMonitor = perfMonitor;
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
-  const interactionRuntime = useMemo(() => createCanvasInteractionRuntime(), [canvas.id]);
+  const interactionRuntime = useMemo(() => createCanvasInteractionRuntime(), []);
   useEffect(() => {
     let lastSubmittedSelection = '';
     let pointerInteraction: CanvasRuntimePointerInteraction | undefined;
@@ -330,7 +325,6 @@ function CanvasSurfaceRuntime({
       }
       lastSubmittedSelection = key;
       void actions.raiseCanvasSelection({
-        canvasId: canvas.id,
         projectRelativePaths: paths
       }).catch(() => {
         lastSubmittedSelection = '';
@@ -367,7 +361,7 @@ function CanvasSurfaceRuntime({
       unsubscribeSelection();
       unsubscribePointer();
     };
-  }, [actions, canvas.id, runtime]);
+  }, [actions, runtime]);
   const renderLifecycle = useMemo(() => createCanvasRenderLifecycle({
     runtime,
     stageRuntime,
@@ -392,7 +386,6 @@ function CanvasSurfaceRuntime({
   }), [devicePixelRatio, instrumentationMonitor, previewResourceScheduler, resourceZoom]);
 
   canvasPerfDebugContextRef.current = {
-    canvasId: canvas.id,
     runtime,
     resourceZoom,
     renderSnapshot,
@@ -505,7 +498,7 @@ function CanvasSurfaceRuntime({
 
   useEffect(() => {
     if (
-      fittedCanvasIdRef.current === canvas.id
+      fittedCanvasRef.current
       || !surfaceSize
       || surfaceSize.width <= 0
       || surfaceSize.height <= 0
@@ -517,10 +510,10 @@ function CanvasSurfaceRuntime({
       surfaceSize
     });
     if (camera) {
-      fittedCanvasIdRef.current = canvas.id;
+      fittedCanvasRef.current = true;
       runtime.camera.setCamera(camera);
     }
-  }, [canvas.id, projectedNodes, runtime, surfaceSize]);
+  }, [projectedNodes, runtime, surfaceSize]);
 
   useLayoutEffect(() => runtime.subscribeCamera((liveCamera) => {
     const snapshot = runtime.getSnapshot();
@@ -642,7 +635,7 @@ function CanvasSurfaceRuntime({
     const nextResourceZoom = initialCanvasResourceZoom(runtime.getSnapshot().camera.z);
     resourceZoomRef.current = nextResourceZoom;
     setResourceZoom(nextResourceZoom);
-  }, [canvas.id, runtime]);
+  }, [runtime]);
 
   const pointerScreenPoint = useCallback((
     event: Pick<React.PointerEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>
@@ -821,7 +814,6 @@ function CanvasSurfaceRuntime({
       : undefined;
     if (directoryTogglePath !== undefined) {
       void actions.setCanvasDirectoryExpanded({
-        canvasId: canvas.id,
         projectRelativePath: directoryTogglePath,
         expanded: !canvasState.expandedDirectories.includes(directoryTogglePath)
       });
@@ -860,7 +852,7 @@ function CanvasSurfaceRuntime({
         // Pointer capture may already have ended in the browser.
       }
     }
-  }, [actions, canvas.id, canvasState.expandedDirectories, interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
+  }, [actions, canvasState.expandedDirectories, interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
 
   const handlePointerUpEvent = useCallback((event: React.PointerEvent<Element>) => {
     void handlePointerUp(event).catch(() => undefined);
@@ -997,10 +989,10 @@ function CanvasSurfaceRuntime({
     if (node?.mediaKind !== 'video') {
       return;
     }
-    const updateKey = `${canvas.id}\u0000${projectRelativePath}`;
+    const updateKey = projectRelativePath;
     const version = (videoPlaybackUpdateVersionsRef.current.get(updateKey) ?? 0) + 1;
     videoPlaybackUpdateVersionsRef.current.set(updateKey, version);
-    void actions.updateCanvasVideoPlaybackState(canvas.id, {
+    void actions.updateCanvasVideoPlaybackState({
       updates: [{ projectRelativePath, currentTimeMs }]
     }).then(() => {
       if (videoPlaybackUpdateVersionsRef.current.get(updateKey) === version) {
@@ -1021,7 +1013,7 @@ function CanvasSurfaceRuntime({
         .get(projectRelativePath)
         ?.restorePersistedTime(durableNode.videoPlayback?.currentTimeMs ?? 0);
     });
-  }, [actions, canvas.id]);
+  }, [actions]);
   const handleUpdateTextViewport = useCallback((projectRelativePath: string, viewport: CanvasTextViewportState) => {
     const node = projectedNodesRef.current.find((candidate) => (
       candidate.projectRelativePath === projectRelativePath
@@ -1029,10 +1021,10 @@ function CanvasSurfaceRuntime({
     if (node?.mediaKind !== 'text') {
       return;
     }
-    void actions.updateCanvasTextViewportState(canvas.id, {
+    void actions.updateCanvasTextViewportState({
       updates: [{ projectRelativePath, ...viewport }]
     }).catch(() => undefined);
-  }, [actions, canvas.id]);
+  }, [actions]);
 
   useEffect(() => {
     const videoPaths = new Set(projectedNodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
@@ -1364,7 +1356,6 @@ function CanvasSurfaceRuntime({
         />
         <CanvasRasterPreviewEnvironmentProvider value={rasterPreviewEnvironment}>
           <CanvasVideoPreviewProvider
-            canvasId={canvas.id}
             nodes={projectedNodes}
             activeVideoPaths={activeVideoPaths}
             actions={actions}
@@ -1372,7 +1363,6 @@ function CanvasSurfaceRuntime({
             previewResourceScheduler={previewResourceScheduler}
           >
             <CanvasTextPreviewProvider
-              canvasId={canvas.id}
               nodes={projectedNodes}
               activeInlineTextPath={activeInlineTextPath}
               textFileBuffers={textFileBuffers}

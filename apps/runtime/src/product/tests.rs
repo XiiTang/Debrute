@@ -15,7 +15,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use super::ProductBootstrap;
 use super::commit::{
     CommitPhase, InstalledDesktopIdentity, ProductCommitCoordinator, ProductCommitError,
-    ProductIdentity, ProductUpdateFailureStage, ResumeIntent, ResumeTarget, RunningProductIdentity,
+    ProductIdentity, ProductUpdateFailureStage, ResumeIntent, RunningProductIdentity,
     UpdatePlatformAdapter,
 };
 use super::manifest::{
@@ -26,9 +26,7 @@ use super::manifest::{
 use super::store::{CommitPlatform, ProductStore};
 
 fn desktop_resume() -> ResumeIntent {
-    ResumeIntent::Desktop {
-        target: ResumeTarget::Root,
-    }
+    ResumeIntent::Desktop
 }
 use super::store::{VerifiedDesktopInstaller, VerifiedRuntimeEntrypoint};
 use ed25519_dalek::{Signer as _, SigningKey};
@@ -194,11 +192,7 @@ fn one_pending_commit_recovers_forward_from_each_durable_phase() {
             .begin(
                 &target,
                 fixture.desktop_asset("0.0.4"),
-                ResumeIntent::Browser {
-                    target: ResumeTarget::Project {
-                        canonical_root: "project-id".to_owned(),
-                    },
-                },
+                ResumeIntent::Browser,
             )
             .unwrap();
         if cut != CommitPhase::Staged {
@@ -262,14 +256,7 @@ fn unrelated_or_older_callers_cannot_continue_or_downgrade_a_pending_commit() {
 
 #[test]
 fn target_runtime_ready_resumes_then_removes_previous_and_pending() {
-    let intents = [
-        ResumeIntent::Desktop {
-            target: ResumeTarget::Root,
-        },
-        ResumeIntent::Browser {
-            target: ResumeTarget::Root,
-        },
-    ];
+    let intents = [ResumeIntent::Desktop, ResumeIntent::Browser];
     for intent in intents {
         let fixture = Fixture::new();
         fixture.bootstrap_product("0.0.3");
@@ -613,21 +600,11 @@ fn recovery_reverifies_signed_evidence_instead_of_trusting_pending_fields() {
 }
 
 #[test]
-fn pending_state_rejects_gaps_oversize_and_invalid_resume_target() {
+fn pending_state_rejects_gaps_and_oversize_documents() {
     let fixture = Fixture::new();
     fixture.bootstrap_product("0.0.3");
     let target = fixture.materialize_product("0.0.4");
     let coordinator = fixture.coordinator(RecordingPlatform::new(&fixture.root, "0.0.4"));
-    let invalid_target = ResumeIntent::Desktop {
-        target: ResumeTarget::Project {
-            canonical_root: String::new(),
-        },
-    };
-    assert!(matches!(
-        coordinator.begin(&target, fixture.desktop_asset("0.0.4"), invalid_target),
-        Err(ProductCommitError::InvalidResumeIntent(_))
-    ));
-
     coordinator
         .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
@@ -728,9 +705,7 @@ fn native_resume_claim_is_durable_and_intent_bound() {
             .unwrap()
     );
 
-    let different_intent = ResumeIntent::Browser {
-        target: ResumeTarget::Root,
-    };
+    let different_intent = ResumeIntent::Browser;
     assert!(
         fixture
             .store

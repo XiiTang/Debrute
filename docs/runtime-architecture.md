@@ -392,19 +392,19 @@ load state, sibling ordering, and non-persistent filesystem identity. Directory
 loading is a revisioned session command that asks the module to enumerate one
 directory's direct children. Every loaded directory stays indexed until the
 session closes; disclosure changes never unload it. The public Project snapshot
-is derived output. Explorer consumes the ordered tree; the active Canvas
+is derived output. Explorer consumes the ordered tree; Canvas
 consumes a disclosure-filtered resource view. Workbench derives Canvas scene
 geometry from that view.
 
 Each directory has explicit `unloaded`, `loaded`, or `error` state.
 An unloaded or failed directory is never represented as empty and never
-authorizes sparse-state cleanup. Only the active Canvas restores its disclosed
-directory closure. Canvas activation expands each retained disclosure to its
-complete ancestor-plus-self closure, continues loading independent branches
-when one branch fails, and publishes the batch through one final resource view.
+authorizes sparse-state cleanup. Canvas restores its disclosed directory
+closure by expanding each retained disclosure to its complete
+ancestor-plus-self closure, continues loading independent branches when one
+branch fails, and publishes the batch through one final resource view.
 Read failures remain indexed as `error`; only authoritative not-found after
 ancestor enumeration confirms absence. Explorer expansion, Canvas expansion,
-Canvas activation, and Reveal in Canvas all request the same directory-load
+and Reveal in Canvas all request the same directory-load
 operation. There is no complete background traversal.
 
 The supported macOS FSEvents and Windows backends each use one native recursive
@@ -412,7 +412,7 @@ root subscription. Watcher bursts are sorted and delivered as a batch, but
 Runtime refreshes only loaded dependency paths and Debrute-managed documents.
 Runtime-authored Feedback events are discarded before refresh when their
 content hash matches the accepted document. Ordinary path events update the
-flat path index and rederive only Canvases that display or retain state for the
+flat path index and rederive Canvas only when it displays or retains state for the
 affected subtree. A changed `.gitignore` re-enumerates every loaded descendant
 whose inherited ignore facts may change. A full watcher rescan additionally
 compares session-only filesystem identities so deletion plus recreation at the

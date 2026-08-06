@@ -390,8 +390,8 @@ Preview caches use structural reconciliation rather than a byte quota, LRU,
 TTL, or background cleanup timer. Image caches retain requested quantized-width
 variants only for the current visible source and file revision under the exact
 current engine path.
-Text caches resolve only the exact requested source identity for each Canvas and
-Project path; superseded target-identity directories do not participate in current
+Text caches resolve only the exact requested source identity for each Project
+path; superseded target-identity directories do not participate in current
 lookup. Video caches retain the current source revision and the source identity
 implied by its persisted Playback Position; superseded frame identities do not
 participate in current lookup. Current-identity width variants remain reusable

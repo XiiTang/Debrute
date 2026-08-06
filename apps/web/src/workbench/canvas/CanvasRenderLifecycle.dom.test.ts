@@ -191,7 +191,6 @@ function createFixture(input: {
   const canceledFrames: number[] = [];
   const initialProjection = projection(input.nodes ?? [directoryNode('near', 0, 0, 1)]);
   const runtime = createCanvasEditorRuntime({
-    canvasId: initialProjection.canvasId,
     initialProjection,
     submitManualLayout: async () => undefined
   });
@@ -230,7 +229,7 @@ function createFixture(input: {
 }
 
 function projection(nodes: ProjectedCanvasNode[]): CanvasProjection {
-  return { canvasId: 'canvas', nodes, edges: [], diagnostics: [] };
+  return { nodes, edges: [], diagnostics: [] };
 }
 
 function directoryNode(path: string, x: number, y: number, z: number): ProjectedCanvasNode {

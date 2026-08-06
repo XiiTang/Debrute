@@ -17,7 +17,7 @@ second cache or frontend authority merely to activate late. The production
 manifest and gzip budget enforce these code-loading boundaries.
 
 Runtime owns one on-demand Project Tree and one watcher per loaded canonical
-root. Explorer disclosure and active-Canvas Folder Disclosure request directory
+root. Explorer disclosure and Canvas Folder Disclosure request directory
 loads through that same tree; no background full-tree index runs beside it.
 The watcher admits changes only for loaded directory dependencies and refreshes
 the shared tree before Runtime publishes the next complete Project snapshot.

@@ -83,12 +83,6 @@ impl ProjectMutation<ProjectCommandResult> {
     fn replace_snapshot(&mut self, snapshot: &ProjectSnapshot) {
         match &mut self.value {
             ProjectCommandResult::Snapshot(current)
-            | ProjectCommandResult::CanvasCreated {
-                snapshot: current, ..
-            }
-            | ProjectCommandResult::CanvasDeleted {
-                snapshot: current, ..
-            }
             | ProjectCommandResult::TextFileSaved {
                 snapshot: current, ..
             }
@@ -123,21 +117,7 @@ pub enum ProjectCommand {
     LoadDirectory {
         project_relative_directory: String,
     },
-    CreateCanvas,
-    ResetCanvasWorkspace,
-    RenameCanvas {
-        canvas_id: String,
-        name: String,
-    },
-    ReorderCanvases {
-        order: Vec<String>,
-    },
-    DeleteCanvas {
-        canvas_id: String,
-    },
-    ActivateCanvas {
-        canvas_id: String,
-    },
+    ResetCanvas,
     PatchCanvasState {
         patch: CanvasStatePatch,
     },
@@ -186,14 +166,6 @@ pub enum ProjectCommand {
 /// Typed result produced by one successfully accepted [`ProjectCommand`].
 pub enum ProjectCommandResult {
     Snapshot(ProjectSnapshot),
-    CanvasCreated {
-        canvas_id: String,
-        snapshot: ProjectSnapshot,
-    },
-    CanvasDeleted {
-        active_canvas_id: String,
-        snapshot: ProjectSnapshot,
-    },
     CanvasFeedbackUpdated {
         feedback: CanvasFeedbackDocument,
     },
@@ -1473,13 +1445,9 @@ fn execute_project_command(
                 Ok(project_snapshot_mutation(snapshot))
             }
         }
-        command @ (ProjectCommand::CreateCanvas
-        | ProjectCommand::ResetCanvasWorkspace
-        | ProjectCommand::RenameCanvas { .. }
-        | ProjectCommand::ReorderCanvases { .. }
-        | ProjectCommand::DeleteCanvas { .. }
-        | ProjectCommand::ActivateCanvas { .. }) => {
-            execute_canvas_management_command(service, command)
+        ProjectCommand::ResetCanvas => {
+            let snapshot = service.reset_canvas()?;
+            Ok(project_snapshot_mutation(snapshot))
         }
         ProjectCommand::PatchCanvasState { patch } => {
             let (snapshot, changed) = service.patch_canvas_state(&patch)?;
@@ -1527,58 +1495,6 @@ fn is_path_state_command(command: &ProjectCommand) -> bool {
             | ProjectCommand::ImportLocalPaths { .. }
             | ProjectCommand::ImportUploadEntries { .. }
     )
-}
-
-fn execute_canvas_management_command(
-    service: &mut ProjectService,
-    command: ProjectCommand,
-) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
-    match command {
-        ProjectCommand::ResetCanvasWorkspace => {
-            let snapshot = service.reset_canvas_workspace()?;
-            Ok(project_snapshot_mutation(snapshot))
-        }
-        ProjectCommand::CreateCanvas => {
-            let (canvas_id, snapshot) = service.create_canvas()?;
-            Ok(ProjectMutation::changed(
-                ProjectCommandResult::CanvasCreated {
-                    canvas_id,
-                    snapshot: snapshot.clone(),
-                },
-                ProjectChange::ProjectChanged(snapshot),
-            ))
-        }
-        ProjectCommand::RenameCanvas { canvas_id, name } => {
-            let snapshot = service.rename_canvas(&canvas_id, &name)?;
-            Ok(project_snapshot_mutation(snapshot))
-        }
-        ProjectCommand::ReorderCanvases { order } => {
-            let snapshot = service.reorder_canvases(&order)?;
-            Ok(project_snapshot_mutation(snapshot))
-        }
-        ProjectCommand::DeleteCanvas { canvas_id } => {
-            let (active_canvas_id, snapshot) = service.delete_canvas(&canvas_id)?;
-            Ok(ProjectMutation::changed(
-                ProjectCommandResult::CanvasDeleted {
-                    active_canvas_id,
-                    snapshot: snapshot.clone(),
-                },
-                ProjectChange::ProjectChanged(snapshot),
-            ))
-        }
-        ProjectCommand::ActivateCanvas { canvas_id } => {
-            let previous = service.snapshot().clone();
-            let snapshot = service.activate_canvas(&canvas_id)?;
-            if snapshots_equivalent(&previous, &snapshot) {
-                Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
-                    snapshot,
-                )))
-            } else {
-                Ok(project_snapshot_mutation(snapshot))
-            }
-        }
-        _ => unreachable!("non-management command reached the Canvas management executor"),
-    }
 }
 
 fn execute_single_file_command(

@@ -518,7 +518,6 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       const tree = (
         <CanvasTextRenderProfileGate profile={TEST_PROFILE} pending={null}>
           <CanvasTextPreviewProvider
-            canvasId="canvas-1"
             nodes={input.nodes}
             activeInlineTextPath={input.activeInlineTextPath}
             textFileBuffers={buffers}

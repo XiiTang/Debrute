@@ -195,11 +195,9 @@ describe('Runtime Workbench connection', () => {
     };
 
     await expect(client.probeCanvasVideoPreviewSources({
-      canvasId: 'canvas-1',
       targets: [target]
     })).resolves.toEqual({ sources: {} });
     await expect(client.ensureCanvasVideoPreviewSource({
-      canvasId: 'canvas-1',
       target,
       canonicalSourceIdentity: 'frame-key'
     })).resolves.toEqual({ status: 'source-changed' });
@@ -207,9 +205,8 @@ describe('Runtime Workbench connection', () => {
     const [probe, ensure] = harness.calls.slice(-2);
     expect(probe?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/probe');
     expect(ensure?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/ensure');
-    expect(JSON.parse(String(probe?.init?.body))).toEqual({ canvasId: 'canvas-1', targets: [target] });
+    expect(JSON.parse(String(probe?.init?.body))).toEqual({ targets: [target] });
     expect(JSON.parse(String(ensure?.init?.body))).toEqual({
-      canvasId: 'canvas-1',
       target,
       canonicalSourceIdentity: 'frame-key'
     });
@@ -345,11 +342,11 @@ describe('Runtime Workbench connection', () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
     await client.openProject({ projectRoot: '/tmp/project-1' });
-    const mutation = client.createCanvas();
+    const mutation = client.resetCanvas();
     let completed = false;
     void mutation.then(() => { completed = true; });
 
-    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/workbench/bindings/project-1/canvases'));
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/workbench/bindings/project-1/canvas/reset'));
     await Promise.resolve();
     expect(completed).toBe(false);
 
@@ -367,9 +364,9 @@ describe('Runtime Workbench connection', () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
     await client.openProject({ projectRoot: '/tmp/project-1' });
-    const mutation = client.createCanvas();
+    const mutation = client.resetCanvas();
 
-    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/workbench/bindings/project-1/canvases'));
+    await vi.waitFor(() => expect(harness.calls.at(-1)?.path).toBe('/api/workbench/bindings/project-1/canvas/reset'));
     harness.close();
 
     await expect(mutation).rejects.toThrow('ended unexpectedly');
@@ -564,7 +561,7 @@ function createHarness(globalRevision = 1) {
     if (path === '/api/activities') {
       return Response.json({ ok: true, cleared: 1 });
     }
-    if (path === '/api/workbench/bindings/project-1/canvases') {
+    if (path === '/api/workbench/bindings/project-1/canvas/reset') {
       return Response.json({
         bindingId: 'project-1',
         projectRevision: 2
@@ -646,16 +643,11 @@ function snapshotFixture(canonicalRoot: string, projectName: string) {
       status: 'available',
       workspace: {
         canonicalRoot,
-        activeCanvasId: 'canvas-1',
-        canvases: [{
-          id: 'canvas-1',
-          name: 'Canvas 1',
-          expandedDirectories: [],
-          nodeStates: {},
-          occlusionOrder: []
-        }]
+        expandedDirectories: [],
+        nodeStates: {},
+        occlusionOrder: []
       },
-      activeCanvasResources: { canvasId: 'canvas-1', resources: [], diagnostics: [] }
+      canvasResources: { resources: [], diagnostics: [] }
     },
     projectTree: [],
     diagnostics: [],

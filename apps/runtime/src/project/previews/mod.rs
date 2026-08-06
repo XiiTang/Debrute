@@ -387,11 +387,10 @@ impl ProjectPreviewService {
     pub fn save_text_preview_source(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         target: &CanvasTextPreviewSourceTarget,
         temporary_source: &Path,
     ) -> Result<(), ProjectError> {
-        let source_path = text_source_project_path(canvas_id, target)?;
+        let source_path = text_source_project_path(target)?;
         let source = File::open(temporary_source)?;
         let metadata = source.metadata()?;
         if !metadata.is_file() || metadata.len() > MAX_TEXT_PREVIEW_SOURCE_BYTES {
@@ -417,14 +416,13 @@ impl ProjectPreviewService {
     pub fn read_text_preview_sources(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         targets: &[CanvasTextPreviewSourceTarget],
     ) -> Vec<CanvasTextPreviewSourceView> {
         targets
             .iter()
             .cloned()
             .map(|target| {
-                let status = match text_source_project_path(canvas_id, &target).and_then(|path| {
+                let status = match text_source_project_path(&target).and_then(|path| {
                     self.cache_root(project_root)
                         .and_then(|cache_root| existing_file(&cache_root, &path))
                         .map(|path| path.map(|_| ()))
@@ -445,12 +443,11 @@ impl ProjectPreviewService {
     pub fn resolve_text_preview_variant(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         target: &CanvasTextPreviewSourceTarget,
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
-        let source_path = text_source_project_path(canvas_id, target)?;
+        let source_path = text_source_project_path(target)?;
         let cache_root = self.cache_root(project_root)?;
         let source = existing_file(&cache_root, &source_path)?.ok_or_else(|| {
             ProjectError::service_with_fields(
@@ -464,7 +461,6 @@ impl ProjectPreviewService {
                         "project_relative_path".to_owned(),
                         target.project_relative_path.clone(),
                     ),
-                    ("canvas_id".to_owned(), canvas_id.to_owned()),
                     ("target_identity".to_owned(), target.target_identity.clone()),
                 ],
             )
@@ -477,7 +473,7 @@ impl ProjectPreviewService {
                 source_path: source,
                 source_file: file,
                 source_content_type: Some("image/png"),
-                cache_directory: text_preview_base_project_path(canvas_id, target)?,
+                cache_directory: text_preview_base_project_path(target)?,
                 width,
                 output_policy: RasterPreviewVariantOutputPolicy::Png,
                 invalid_width_message: format!(
@@ -641,41 +637,26 @@ fn direct_image_content_type(path: &str) -> Option<&'static str> {
 }
 
 fn text_source_project_path(
-    canvas_id: &str,
     target: &CanvasTextPreviewSourceTarget,
 ) -> Result<String, ProjectError> {
     Ok(format!(
         "{}/source.png",
-        text_preview_base_project_path(canvas_id, target)?
+        text_preview_base_project_path(target)?
     ))
 }
 
 fn text_preview_base_project_path(
-    canvas_id: &str,
     target: &CanvasTextPreviewSourceTarget,
 ) -> Result<String, ProjectError> {
-    if !is_canvas_id(canvas_id) {
-        return Err(ProjectError::Validation(
-            "Canvas text preview canvas id must be a valid id.".to_owned(),
-        ));
-    }
     let relative = normalize_project_relative_path(&target.project_relative_path)?;
     Ok(format!(
-        "canvas-text-previews/{canvas_id}/{}/{}",
+        "canvas-text-previews/{}/{}",
         project_relative_path_cache_key(&relative)?,
         safe_cache_segment(
             &target.target_identity,
             "Canvas text preview target identity"
         )?
     ))
-}
-
-fn is_canvas_id(value: &str) -> bool {
-    !value.is_empty()
-        && !matches!(value, "." | "..")
-        && value.bytes().enumerate().all(|(index, byte)| {
-            byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'_' | b'.' | b'-'))
-        })
 }
 
 fn existing_open_file(
@@ -1166,16 +1147,10 @@ mod tests {
             target_identity: "style:one".to_owned(),
         };
         service
-            .save_text_preview_source(&root, "canvas-1", &target, &root.join("assets/source.png"))
+            .save_text_preview_source(&root, &target, &root.join("assets/source.png"))
             .unwrap();
         let variant = service
-            .resolve_text_preview_variant(
-                &root,
-                "canvas-1",
-                &target,
-                4,
-                &PreviewCancellation::default(),
-            )
+            .resolve_text_preview_variant(&root, &target, 4, &PreviewCancellation::default())
             .unwrap();
         assert!(
             variant
@@ -1203,17 +1178,11 @@ mod tests {
             target_identity: "style:direct".to_owned(),
         };
         service
-            .save_text_preview_source(&root, "canvas-1", &target, &root.join("assets/source.png"))
+            .save_text_preview_source(&root, &target, &root.join("assets/source.png"))
             .unwrap();
 
         let result = service
-            .resolve_text_preview_variant(
-                &root,
-                "canvas-1",
-                &target,
-                8,
-                &PreviewCancellation::default(),
-            )
+            .resolve_text_preview_variant(&root, &target, 8, &PreviewCancellation::default())
             .unwrap();
 
         assert!(result.absolute_path.ends_with("source.png"));

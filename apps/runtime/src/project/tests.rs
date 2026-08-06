@@ -74,7 +74,7 @@ fn plain_directory_is_a_project_and_identity_is_its_canonical_root() {
 }
 
 #[test]
-fn one_canvas_workspace_is_persisted_outside_the_project() {
+fn canvas_workspace_is_persisted_outside_the_project() {
     let (base, root, registry) = fixture();
     let home = base.join("home");
     let opened = registry
@@ -82,7 +82,7 @@ fn one_canvas_workspace_is_persisted_outside_the_project() {
         .unwrap();
     let snapshot = opened.session.sync_snapshot().unwrap().snapshot;
     let document = available_canvas_workspace(&snapshot);
-    assert_eq!(document.canvases.len(), 1);
+    assert!(document.state.expanded_directories.is_empty());
     assert!(
         crate::global::root_state_directory(&home, root.canonicalize().unwrap().to_str().unwrap())
             .join("canvas.json")
@@ -115,14 +115,10 @@ fn invalid_canvas_workspace_does_not_block_project_and_reset_replaces_it() {
         }
     ));
 
-    opened
-        .session
-        .execute(ProjectCommand::ResetCanvasWorkspace)
-        .unwrap();
+    opened.session.execute(ProjectCommand::ResetCanvas).unwrap();
     let after = opened.session.sync_snapshot().unwrap().snapshot;
     let workspace = available_canvas_workspace(&after);
-    assert_eq!(workspace.active_canvas_id, "main");
-    assert!(workspace.canvases[0].state.expanded_directories.is_empty());
+    assert!(workspace.state.expanded_directories.is_empty());
     assert_eq!(
         serde_json::from_slice::<CanvasWorkspaceDocument>(&fs::read(canvas_path).unwrap()).unwrap(),
         *workspace
@@ -134,7 +130,7 @@ fn invalid_canvas_workspace_does_not_block_project_and_reset_replaces_it() {
 }
 
 #[test]
-fn reset_canvas_workspace_returns_the_exact_persistence_failure() {
+fn reset_canvas_returns_the_exact_persistence_failure() {
     let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
     let home = base.join("home");
     let root = base.join("project");
@@ -180,7 +176,7 @@ fn reset_canvas_workspace_returns_the_exact_persistence_failure() {
     ));
     let error = opened
         .session
-        .execute(ProjectCommand::ResetCanvasWorkspace)
+        .execute(ProjectCommand::ResetCanvas)
         .unwrap_err();
     assert_eq!(error.code(), "canvas_workspace_persistence_failed");
     assert_eq!(opened.session.sync_snapshot().unwrap(), before);
@@ -206,7 +202,7 @@ fn confirmed_external_replacement_prunes_sparse_canvas_state() {
     let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
     let store = CanvasWorkspaceStore::new(&home, &canonical_root);
     let mut document = default_canvas_workspace(&canonical_root);
-    document.canvases[0].state = CanvasState {
+    document.state = CanvasState {
         expanded_directories: vec!["assets".to_owned()],
         node_states: BTreeMap::from([(
             "assets/a.txt".to_owned(),
@@ -251,7 +247,7 @@ fn confirmed_external_replacement_prunes_sparse_canvas_state() {
         .snapshot;
 
     let document = available_canvas_workspace(&snapshot);
-    let state = &document.canvases[0].state;
+    let state = &document.state;
     assert!(!state.node_states.contains_key("assets/a.txt"));
     assert!(!state.occlusion_order.contains(&"assets/a.txt".to_owned()));
     assert!(
@@ -275,7 +271,7 @@ fn watcher_echo_does_not_erase_state_carried_by_a_runtime_rename() {
     let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
     let store = CanvasWorkspaceStore::new(&home, &canonical_root);
     let mut document = default_canvas_workspace(&canonical_root);
-    document.canvases[0].state.node_states.insert(
+    document.state.node_states.insert(
         "before.txt".to_owned(),
         CanvasNodeState {
             manual_layout: Some(CanvasManualLayout {
@@ -307,12 +303,7 @@ fn watcher_echo_does_not_erase_state_carried_by_a_runtime_rename() {
         .snapshot;
 
     let document = available_canvas_workspace(&snapshot);
-    assert!(
-        document.canvases[0]
-            .state
-            .node_states
-            .contains_key("after.txt")
-    );
+    assert!(document.state.node_states.contains_key("after.txt"));
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -326,7 +317,7 @@ fn runtime_text_save_preserves_sparse_canvas_state() {
     let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
     let store = CanvasWorkspaceStore::new(&home, &canonical_root);
     let mut document = default_canvas_workspace(&canonical_root);
-    document.canvases[0].state.node_states.insert(
+    document.state.node_states.insert(
         "note.txt".to_owned(),
         CanvasNodeState {
             manual_layout: Some(CanvasManualLayout {
@@ -353,7 +344,7 @@ fn runtime_text_save_preserves_sparse_canvas_state() {
         .unwrap();
 
     let document = available_canvas_workspace(&snapshot);
-    let state = &document.canvases[0].state.node_states["note.txt"];
+    let state = &document.state.node_states["note.txt"];
     assert!(state.manual_layout.is_some());
     assert_eq!(
         state.text_viewport,
@@ -556,7 +547,7 @@ fn watcher_deletion_prunes_working_copies_when_secondary_persistence_fails() {
     let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
     let store = CanvasWorkspaceStore::new(&home, &canonical_root);
     let mut document = default_canvas_workspace(&canonical_root);
-    document.canvases[0].state.node_states.insert(
+    document.state.node_states.insert(
         "visible.txt".to_owned(),
         CanvasNodeState {
             manual_layout: Some(CanvasManualLayout {

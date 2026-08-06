@@ -45,49 +45,12 @@ pub struct CanvasNodeStateUpdate {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CanvasStatePatch {
-    pub canvas_id: String,
     #[serde(default)]
     pub expanded_directories: Option<Vec<String>>,
     #[serde(default)]
     pub node_state_updates: Option<Vec<CanvasNodeStateUpdate>>,
     #[serde(default)]
     pub occlusion_order: Option<Vec<String>>,
-}
-
-/// Validates a closed Canvas identifier.
-///
-/// # Errors
-/// Returns a validation error when the identifier is outside the Canvas grammar.
-pub(super) fn validate_canvas_id(id: &str) -> Result<(), ProjectError> {
-    let mut bytes = id.bytes();
-    let Some(first) = bytes.next() else {
-        return Err(ProjectError::Validation(format!("Invalid Canvas id: {id}")));
-    };
-    if !first.is_ascii_alphanumeric()
-        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
-        return Err(ProjectError::Validation(format!("Invalid Canvas id: {id}")));
-    }
-    Ok(())
-}
-
-/// Trims and validates a user-facing Canvas name.
-///
-/// # Errors
-/// Returns a validation error when the name is empty.
-pub(super) fn normalize_canvas_name(name: &str) -> Result<String, ProjectError> {
-    let normalized = name.trim();
-    if normalized.is_empty() {
-        return Err(ProjectError::Validation(
-            "Canvas name must be a non-empty string.".to_owned(),
-        ));
-    }
-    Ok(normalized.to_owned())
-}
-
-#[must_use]
-pub(super) fn create_canvas_state() -> CanvasState {
-    CanvasState::default()
 }
 
 /// Validates sparse Canvas state without deriving presentation geometry.
@@ -133,7 +96,6 @@ pub(super) fn apply_canvas_state_patch(
     state: &CanvasState,
     patch: &CanvasStatePatch,
 ) -> Result<CanvasState, ProjectError> {
-    validate_canvas_id(&patch.canvas_id)?;
     let mut next = state.clone();
     if let Some(expanded) = &patch.expanded_directories {
         next.expanded_directories.clone_from(expanded);
@@ -160,9 +122,8 @@ pub(super) fn apply_canvas_state_patch(
     if let Some(order) = &patch.occlusion_order {
         next.occlusion_order.clone_from(order);
     }
-    next = normalize_canvas_state(next);
     validate_canvas_state(&next)?;
-    Ok(next)
+    Ok(normalize_canvas_state(next))
 }
 
 #[must_use]
@@ -355,7 +316,7 @@ mod tests {
 
     #[test]
     fn default_canvas_keeps_root_structural() {
-        assert!(create_canvas_state().expanded_directories.is_empty());
+        assert!(CanvasState::default().expanded_directories.is_empty());
     }
 
     #[test]
@@ -364,7 +325,7 @@ mod tests {
             tree_entry("", ProjectPathKind::Directory),
             tree_entry("file.txt", ProjectPathKind::File),
         ];
-        let state = create_canvas_state();
+        let state = CanvasState::default();
         assert_eq!(
             visible_canvas_entries(&entries, &state)
                 .into_iter()
@@ -376,11 +337,10 @@ mod tests {
 
     #[test]
     fn generic_patch_distinguishes_omitted_null_and_value() {
-        let state = create_canvas_state();
+        let state = CanvasState::default();
         let with_layout = apply_canvas_state_patch(
             &state,
             &serde_json::from_value(serde_json::json!({
-                "canvasId": "canvas-1",
                 "nodeStateUpdates": [{
                     "projectRelativePath": "",
                     "manualLayout": {"x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0}
@@ -394,13 +354,38 @@ mod tests {
         let deleted = apply_canvas_state_patch(
             &with_layout,
             &serde_json::from_value(serde_json::json!({
-                "canvasId": "canvas-1",
                 "nodeStateUpdates": [{"projectRelativePath": "", "manualLayout": null}]
             }))
             .unwrap(),
         )
         .unwrap();
         assert!(!deleted.node_states.contains_key(""));
+    }
+
+    #[test]
+    fn generic_patch_rejects_duplicate_ordered_set_entries() {
+        let state = CanvasState::default();
+        let duplicate_disclosure = serde_json::from_value(serde_json::json!({
+            "expandedDirectories": ["assets", "assets"]
+        }))
+        .unwrap();
+        assert_eq!(
+            apply_canvas_state_patch(&state, &duplicate_disclosure)
+                .unwrap_err()
+                .to_string(),
+            "Canvas expandedDirectories contains a duplicate path: assets"
+        );
+
+        let duplicate_occlusion = serde_json::from_value(serde_json::json!({
+            "occlusionOrder": ["cover.png", "cover.png"]
+        }))
+        .unwrap();
+        assert_eq!(
+            apply_canvas_state_patch(&state, &duplicate_occlusion)
+                .unwrap_err()
+                .to_string(),
+            "Canvas occlusionOrder contains a duplicate path: cover.png"
+        );
     }
 
     fn tree_entry(path: &str, kind: ProjectPathKind) -> ProjectTreeEntry {

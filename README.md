@@ -69,7 +69,7 @@ A Debrute Project is a local folder identified by its canonical absolute path. P
 
 The local folder remains the source of truth. Agents can use normal filesystem tools to create project structure, prompts, references, generated outputs, and final assets. Debrute adds a visual layer over that folder so humans and agents can see the same project shape.
 
-Every Canvas presents the Project tree. Users disclose or collapse folders independently on each Canvas, then arrange, compare, select, and review the visible files.
+The Canvas presents the Project tree. Users disclose or collapse folders, then arrange, compare, select, and review the visible files.
 
 ## Official Skills
 

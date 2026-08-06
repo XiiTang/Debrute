@@ -47,11 +47,6 @@ export interface ProjectDiagnostic {
   entityId?: string;
 }
 
-export interface CanvasCatalogEntry {
-  id: string;
-  name: string;
-}
-
 export interface CanvasManualLayout {
   x: number;
   y: number;
@@ -130,7 +125,6 @@ export type CanvasResource =
     };
 
 export interface CanvasResourceView {
-  canvasId: string;
   resources: CanvasResource[];
   diagnostics: ProjectDiagnostic[];
 }
@@ -221,12 +215,8 @@ interface ProjectHealthSummary {
   checkedAt: string;
 }
 
-export type CanvasWorkspaceCanvas = CanvasCatalogEntry & CanvasState;
-
-export interface CanvasWorkspaceDocument {
+export interface CanvasWorkspaceDocument extends CanvasState {
   canonicalRoot: string;
-  activeCanvasId: string;
-  canvases: CanvasWorkspaceCanvas[];
 }
 
 const CANVAS_WORKSPACE_UNAVAILABLE_CODES = [
@@ -243,7 +233,7 @@ export type CanvasWorkspaceSnapshot =
   | {
       status: 'available';
       workspace: CanvasWorkspaceDocument;
-      activeCanvasResources: CanvasResourceView;
+      canvasResources: CanvasResourceView;
     }
   | {
       status: 'unavailable';
@@ -330,10 +320,6 @@ export interface SaveDebruteGlobalSettingsInput {
 export interface WorkbenchProjectFileOperationResult extends ProjectPathEntry, RevisionedProjectResult {}
 
 export interface WorkbenchProjectFileBatchOperationResult extends ProjectPathBatchOperationResult, RevisionedProjectResult {}
-
-export interface WorkbenchCanvasManagementResult extends RevisionedProjectResult {
-  activeCanvasId?: string;
-}
 
 interface WorkbenchProjectCopyPathsInput {
   entries: ProjectPathEntry[];
@@ -468,7 +454,6 @@ type CanvasTextPreviewSourceAvailabilityView = CanvasTextPreviewSourceTarget & (
 );
 
 export interface SaveCanvasTextPreviewSourceInput extends CanvasTextPreviewSourceTarget {
-  canvasId: string;
   sourcePng: Blob;
 }
 
@@ -478,7 +463,6 @@ export interface SaveCanvasTextPreviewSourceResult {
 }
 
 export interface CanvasTextPreviewSourceAvailabilityRequest {
-  canvasId: string;
   sources: CanvasTextPreviewSourceTarget[];
 }
 
@@ -509,7 +493,6 @@ export type CanvasVideoPreviewProbeView = CanvasVideoPreviewTarget & (
 );
 
 export interface CanvasVideoPreviewProbeRequest {
-  canvasId: string;
   targets: CanvasVideoPreviewTarget[];
 }
 
@@ -518,7 +501,6 @@ export interface CanvasVideoPreviewProbeResponse {
 }
 
 export interface CanvasVideoPreviewEnsureRequest {
-  canvasId: string;
   target: CanvasVideoPreviewTarget;
   canonicalSourceIdentity: string;
 }
@@ -764,7 +746,6 @@ export interface CanvasNodeStateUpdate {
 }
 
 export interface PatchCanvasStateInput {
-  canvasId: string;
   expandedDirectories?: string[];
   nodeStateUpdates?: CanvasNodeStateUpdate[];
   occlusionOrder?: string[];
@@ -937,13 +918,9 @@ export type CanvasActivityOperation =
   | 'set-directory-disclosure'
   | 'reveal-path'
   | 'raise-selection'
-  | 'create'
-  | 'rename'
-  | 'delete'
-  | 'reorder'
   | 'reset-auto-layout'
   | 'reset-layout'
-  | 'reset-workspace'
+  | 'reset-canvas'
   | 'copy-path';
 export type ExplorerActivityOperation =
   | 'load-directory'
@@ -1010,13 +987,9 @@ const CANVAS_ACTIVITY_OPERATIONS = new Set<CanvasActivityOperation>([
   'set-directory-disclosure',
   'reveal-path',
   'raise-selection',
-  'create',
-  'rename',
-  'delete',
-  'reorder',
   'reset-auto-layout',
   'reset-layout',
-  'reset-workspace',
+  'reset-canvas',
   'copy-path'
 ]);
 const EXPLORER_ACTIVITY_OPERATIONS = new Set<ExplorerActivityOperation>([
@@ -1372,20 +1345,16 @@ function isCanvasWorkspaceDocument(
   canonicalRoot: string
 ): value is CanvasWorkspaceDocument {
   if (!isProtocolObject(value)
-    || !hasExactKeys(value, ['canonicalRoot', 'activeCanvasId', 'canvases'])
+    || !hasExactKeys(value, ['canonicalRoot', 'expandedDirectories', 'nodeStates', 'occlusionOrder'])
     || value.canonicalRoot !== canonicalRoot
-    || typeof value.activeCanvasId !== 'string'
-    || !Array.isArray(value.canvases)
-    || value.canvases.length === 0
-    || !value.canvases.every(isCanvasWorkspaceCanvas)
   ) {
     return false;
   }
-  const canvasIds = value.canvases.map((canvas) => (
-    isProtocolObject(canvas) ? canvas.id : undefined
-  ));
-  return new Set(canvasIds).size === canvasIds.length
-    && canvasIds.includes(value.activeCanvasId);
+  return isCanvasState({
+    expandedDirectories: value.expandedDirectories,
+    nodeStates: value.nodeStates,
+    occlusionOrder: value.occlusionOrder
+  });
 }
 
 function isCanvasWorkspaceSnapshot(
@@ -1396,31 +1365,18 @@ function isCanvasWorkspaceSnapshot(
     return false;
   }
   if (value.status === 'available') {
-    if (!hasExactKeys(value, ['status', 'workspace', 'activeCanvasResources'])
+    if (!hasExactKeys(value, ['status', 'workspace', 'canvasResources'])
       || !isCanvasWorkspaceDocument(value.workspace, canonicalRoot)
-      || !isCanvasResourceView(value.activeCanvasResources)
+      || !isCanvasResourceView(value.canvasResources)
     ) {
       return false;
     }
-    const resources = value.activeCanvasResources as CanvasResourceView;
-    return resources.canvasId === value.workspace.activeCanvasId;
+    return true;
   }
   return value.status === 'unavailable'
     && hasExactKeys(value, ['status', 'code', 'message'])
     && CANVAS_WORKSPACE_UNAVAILABLE_CODES.includes(value.code as CanvasWorkspaceUnavailableCode)
     && typeof value.message === 'string';
-}
-
-function isCanvasWorkspaceCanvas(value: unknown): value is CanvasWorkspaceCanvas {
-  return isProtocolObject(value)
-    && hasExactKeys(value, ['id', 'name', 'expandedDirectories', 'nodeStates', 'occlusionOrder'])
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && isCanvasState({
-      expandedDirectories: value.expandedDirectories,
-      nodeStates: value.nodeStates,
-      occlusionOrder: value.occlusionOrder
-    });
 }
 
 function isCanvasState(value: unknown): value is CanvasState {
@@ -1467,7 +1423,7 @@ function isCanvasNodeState(value: unknown): boolean {
 
 function isCanvasResourceView(value: unknown): boolean {
   return isProtocolObject(value)
-    && typeof value.canvasId === 'string'
+    && hasExactKeys(value, ['resources', 'diagnostics'])
     && Array.isArray(value.resources)
     && value.resources.every(isCanvasResource)
     && Array.isArray(value.diagnostics)
@@ -1785,12 +1741,7 @@ export interface WorkbenchApiClient {
   lookupModelArtifactProvenance(input: { projectRelativePath: string }): Promise<ModelArtifactProvenanceLookup>;
   readCanvasFeedback(): Promise<CanvasFeedbackDocument>;
   updateCanvasFeedback(input: UpdateCanvasFeedbackInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
-  createCanvas(): Promise<WorkbenchCanvasManagementResult>;
-  resetCanvasWorkspace(): Promise<RevisionedProjectResult>;
-  renameCanvas(input: { canvasId: string; name: string }): Promise<WorkbenchCanvasManagementResult>;
-  deleteCanvas(input: { canvasId: string }): Promise<WorkbenchCanvasManagementResult>;
-  reorderCanvases(input: { canvasOrder: string[] }): Promise<WorkbenchCanvasManagementResult>;
-  activateCanvas(canvasId: string): Promise<RevisionedProjectResult>;
+  resetCanvas(): Promise<RevisionedProjectResult>;
   patchCanvasState(input: PatchCanvasStateInput): Promise<WorkbenchCanvasStateMutationResult>;
   integrationsRescan(): Promise<{ ok: true }>;
   integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;

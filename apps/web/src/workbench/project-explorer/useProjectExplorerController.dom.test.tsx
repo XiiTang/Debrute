@@ -367,7 +367,7 @@ function ControllerProbe({
   const controller = useProjectExplorerController({
     commandEffects: createProjectPathCommandEffects(api as WorkbenchApiClient),
     getSnapshot,
-    activeCanvasRuntime: undefined,
+    canvasRuntime: undefined,
     activities: {
       report: (input) => notify(input.kind)
     },
@@ -463,15 +463,10 @@ function emptyCanvasWorkspace(canonicalRoot: string): WorkbenchProjectSessionSna
     status: 'available',
     workspace: {
       canonicalRoot,
-      activeCanvasId: 'main',
-      canvases: [{
-        id: 'main',
-        name: 'Main',
-        expandedDirectories: [],
-        nodeStates: {},
-        occlusionOrder: []
-      }]
+      expandedDirectories: [],
+      nodeStates: {},
+      occlusionOrder: []
     },
-    activeCanvasResources: { canvasId: 'main', resources: [], diagnostics: [] }
+    canvasResources: { resources: [], diagnostics: [] }
   };
 }

@@ -39,7 +39,7 @@ Use `debrute` as the execution interface for image generation and editing.
   conversion. Preserve documented data URLs, native references, public HTTP(S)
   values, shapes, and media constraints.
 - An output inside an open Project becomes an ordinary Project Tree entry and
-  therefore belongs to every Canvas automatically. Do not maintain Canvas
+  therefore belongs to the Canvas automatically. Do not maintain Canvas
   membership.
 - Surface final Artifact paths and every structured error. A Batch can exit 0
   while individual Item progress records report failures.

@@ -11,7 +11,6 @@ import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRunti
 describe('Canvas Manual Layout drafts', () => {
   it('creates move-node layout overrides from drag delta', () => {
     const draft = canvasManualLayoutDraftFromMoveInteraction({
-      canvasId: 'canvas-1',
       interaction: moveState([
         origin('flow/a.png', 10, 20, 200, 120),
         origin('flow/b.png', 30, 40, 100, 80)
@@ -20,7 +19,6 @@ describe('Canvas Manual Layout drafts', () => {
     });
 
     expect(draft).toEqual({
-      canvasId: 'canvas-1',
       interaction: 'move',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 },
@@ -31,7 +29,6 @@ describe('Canvas Manual Layout drafts', () => {
 
   it('creates resize-node layout overrides from resize geometry', () => {
     const draft = canvasManualLayoutDraftFromResizeInteraction({
-      canvasId: 'canvas-1',
       interaction: resizeState({
         handle: 'se',
         start: { x: 0, y: 0 },
@@ -43,7 +40,6 @@ describe('Canvas Manual Layout drafts', () => {
     });
 
     expect(draft).toEqual({
-      canvasId: 'canvas-1',
       interaction: 'resize',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 220, height: 130 }
@@ -53,7 +49,6 @@ describe('Canvas Manual Layout drafts', () => {
 
   it('creates resize-node layout overrides with aspect ratio preserved', () => {
     const draft = canvasManualLayoutDraftFromResizeInteraction({
-      canvasId: 'canvas-1',
       interaction: resizeState({
         handle: 'se',
         start: { x: 0, y: 0 },
@@ -75,7 +70,6 @@ describe('Canvas Manual Layout drafts', () => {
 
   it('clamps resize-node layout overrides to the minimum size', () => {
     const draft = canvasManualLayoutDraftFromResizeInteraction({
-      canvasId: 'canvas-1',
       interaction: resizeState({
         handle: 'nw',
         start: { x: 100, y: 100 },
@@ -97,11 +91,9 @@ describe('Canvas Manual Layout drafts', () => {
 
   it('creates Manual Layout drafts for move and resize pointer interactions', () => {
     expect(canvasManualLayoutDraftFromInteraction({
-      canvasId: 'canvas-1',
       interaction: moveState([origin('flow/a.png', 10, 20, 200, 120)], { x: 5, y: 6 }),
       point: { x: 25, y: 36 }
     })).toEqual({
-      canvasId: 'canvas-1',
       interaction: 'move',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
@@ -109,7 +101,6 @@ describe('Canvas Manual Layout drafts', () => {
     });
 
     expect(canvasManualLayoutDraftFromInteraction({
-      canvasId: 'canvas-1',
       interaction: resizeState({
         handle: 'e',
         start: { x: 0, y: 0 },
@@ -119,7 +110,6 @@ describe('Canvas Manual Layout drafts', () => {
       }),
       point: { x: 30, y: 40 }
     })).toEqual({
-      canvasId: 'canvas-1',
       interaction: 'resize',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 230, height: 120 }

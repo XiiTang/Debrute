@@ -39,10 +39,10 @@ export function runProjectPathCommand(input: {
   command: ProjectPathCommand;
   photoshopTarget?: PhotoshopDocumentTarget;
   contextMenu: { target: WorkbenchContextMenuTarget; position: WorkbenchContextMenuPosition } | undefined;
-  activeProjection: CanvasProjection | undefined;
-  activeCanvasRuntime: CanvasEditorRuntime | undefined;
+  canvasProjection: CanvasProjection | undefined;
+  canvasRuntime: CanvasEditorRuntime | undefined;
   fileClipboard: WorkbenchFileClipboard | undefined;
-  resetCanvasNodeLayouts(canvasId: string, nodePaths: string[]): Promise<void> | undefined;
+  resetCanvasNodeLayouts(nodePaths: string[]): Promise<void> | undefined;
   openTerminalPanel(cwdProjectRelativePath: string): void;
   revealInCanvas(projectRelativePath: string): void;
   sendProjectFileToPhotoshop(
@@ -89,7 +89,7 @@ export function runProjectPathCommand(input: {
   }
   const projectRelativePath = primaryEntry.projectRelativePath;
 
-  const node = projectedContextMenuNode(input.activeProjection, projectRelativePath);
+  const node = projectedContextMenuNode(input.canvasProjection, projectRelativePath);
   if (!node) {
     input.closeContextMenu();
     return;
@@ -104,7 +104,7 @@ export function runProjectPathCommand(input: {
   if (input.command === 'reset-auto-layout') {
     const selectionEntries = resolveProjectPathCommandTarget(target).selectionEntries;
     const selectedNodes = selectionEntries.flatMap((entry) => {
-      const selectedNode = projectedContextMenuNode(input.activeProjection, entry.projectRelativePath);
+      const selectedNode = projectedContextMenuNode(input.canvasProjection, entry.projectRelativePath);
       return selectedNode ? [selectedNode] : [];
     });
     if (
@@ -114,19 +114,15 @@ export function runProjectPathCommand(input: {
       input.closeContextMenu();
       return;
     }
-    const canvasId = input.activeProjection?.canvasId;
-    if (canvasId) {
-      const request = input.resetCanvasNodeLayouts(
-        canvasId,
-        selectedNodes.map((selectedNode) => selectedNode.projectRelativePath)
-      );
-      void request?.catch(() => {
-        input.activities.report({
-          kind: 'canvas-operation-failed',
-          operation: 'reset-auto-layout'
-        });
+    const request = input.resetCanvasNodeLayouts(
+      selectedNodes.map((selectedNode) => selectedNode.projectRelativePath)
+    );
+    void request?.catch(() => {
+      input.activities.report({
+        kind: 'canvas-operation-failed',
+        operation: 'reset-auto-layout'
       });
-    }
+    });
   }
   input.closeContextMenu();
 }

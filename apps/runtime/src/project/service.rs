@@ -12,17 +12,16 @@ use std::{
 use super::{
     CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasImageDimensions, CanvasMediaKind,
     CanvasNodeAvailability, CanvasResource, CanvasResourceView, CanvasState, CanvasStatePatch,
-    CanvasVideoPresentation, CanvasWorkspaceCanvas, CanvasWorkspaceDocument,
-    CanvasWorkspaceSnapshot, CanvasWorkspaceStore, CanvasWorkspaceUnavailable, ProjectCapabilityFs,
-    ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectError,
-    ProjectHealthSummary, ProjectPathKind, ProjectSnapshot, ProjectTree, ProjectTreeChange,
-    ProjectTreeEntry, UpdateCanvasFeedbackInput, apply_canvas_state_patch,
-    canvas_media_kind_from_path, create_canvas_state, normalize_canvas_name,
+    CanvasVideoPresentation, CanvasWorkspaceDocument, CanvasWorkspaceSnapshot,
+    CanvasWorkspaceStore, CanvasWorkspaceUnavailable, ProjectCapabilityFs, ProjectDiagnostic,
+    ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectError, ProjectHealthSummary,
+    ProjectPathKind, ProjectSnapshot, ProjectTree, ProjectTreeChange, ProjectTreeEntry,
+    UpdateCanvasFeedbackInput, apply_canvas_state_patch, canvas_media_kind_from_path,
     normalize_feedback_path, open_no_symlink_existing_project_file, project_content_hash,
     project_media_revision, project_text_file_type_for_path, prune_canvas_state_path,
     read_canvas_feedback_state, resolve_no_symlink_existing_project_path,
-    rewrite_canvas_state_path, update_canvas_feedback_document, validate_canvas_id,
-    visible_canvas_entries, write_canvas_feedback_document,
+    rewrite_canvas_state_path, update_canvas_feedback_document, visible_canvas_entries,
+    write_canvas_feedback_document,
 };
 
 type CanvasNodeAdapterData = (
@@ -161,8 +160,7 @@ impl ProjectService {
         let canvas_workspace_snapshot = match &canvas_workspace {
             Ok(workspace) => CanvasWorkspaceSnapshot::Available {
                 workspace: workspace.clone(),
-                active_canvas_resources: CanvasResourceView {
-                    canvas_id: workspace.active_canvas_id.clone(),
+                canvas_resources: CanvasResourceView {
                     resources: Vec::new(),
                     diagnostics: Vec::new(),
                 },
@@ -296,7 +294,7 @@ impl ProjectService {
         let result = (|| {
             let change = self.project_tree.reload_loaded()?;
             let mut invalidated = self.apply_project_tree_change(&change)?;
-            invalidated.extend(self.load_active_canvas_directories()?);
+            invalidated.extend(self.load_canvas_directories()?);
             self.rebuild_snapshot(&invalidated, true)
         })();
         if result.is_err() {
@@ -312,7 +310,7 @@ impl ProjectService {
         let (mut invalidated, mut persistence_errors) =
             self.apply_watched_project_tree_change(&change);
         let mut refresh_error = None;
-        match self.load_active_canvas_directories_for_watcher() {
+        match self.load_canvas_directories_for_watcher() {
             Ok((active_invalidated, active_errors)) => {
                 invalidated.extend(active_invalidated);
                 persistence_errors.extend(active_errors);
@@ -538,108 +536,11 @@ impl ProjectService {
         self.rebuild_snapshot(&invalidated, true)
     }
 
-    pub fn create_canvas(&mut self) -> Result<(String, ProjectSnapshot), ProjectError> {
-        let mut document = self.available_canvas_workspace()?.clone();
-        let ids = document
-            .canvases
-            .iter()
-            .map(|canvas| canvas.id.clone())
-            .collect::<Vec<_>>();
-        let id = next_canvas_id(&ids);
-        document.canvases.push(CanvasWorkspaceCanvas {
-            id: id.clone(),
-            name: id.clone(),
-            state: create_canvas_state(),
-        });
-        self.commit_workspace(document)?;
-        Ok((id, self.snapshot.clone()))
-    }
-
-    pub fn rename_canvas(
-        &mut self,
-        canvas_id: &str,
-        name: &str,
-    ) -> Result<ProjectSnapshot, ProjectError> {
-        let name = normalize_canvas_name(name)?;
-        let mut document = self.available_canvas_workspace()?.clone();
-        let canvas = document
-            .canvases
-            .iter_mut()
-            .find(|canvas| canvas.id == canvas_id)
-            .ok_or_else(|| missing_canvas_error(canvas_id))?;
-        canvas.name = name;
-        self.commit_workspace(document)
-    }
-
-    pub fn reorder_canvases(&mut self, order: &[String]) -> Result<ProjectSnapshot, ProjectError> {
-        let mut document = self.available_canvas_workspace()?.clone();
-        let current = document
-            .canvases
-            .iter()
-            .map(|canvas| canvas.id.clone())
-            .collect::<Vec<_>>();
-        assert_complete_permutation(order, &current)?;
-        let mut by_id = std::mem::take(&mut document.canvases)
-            .into_iter()
-            .map(|canvas| (canvas.id.clone(), canvas))
-            .collect::<HashMap<_, _>>();
-        document.canvases = order
-            .iter()
-            .map(|id| by_id.remove(id).expect("Canvas permutation was validated"))
-            .collect();
-        self.commit_workspace(document)
-    }
-
-    pub fn delete_canvas(
-        &mut self,
-        canvas_id: &str,
-    ) -> Result<(String, ProjectSnapshot), ProjectError> {
-        let mut document = self.available_canvas_workspace()?.clone();
-        if document.canvases.len() == 1 {
-            return Err(ProjectError::service(
-                "canvas_workspace_invalid",
-                "Cannot delete the final Canvas.",
-            ));
-        }
-        let before = document.canvases.len();
-        document.canvases.retain(|canvas| canvas.id != canvas_id);
-        if document.canvases.len() == before {
-            return Err(missing_canvas_error(canvas_id));
-        }
-        if document.active_canvas_id == canvas_id {
-            document
-                .active_canvas_id
-                .clone_from(&document.canvases[0].id);
-        }
-        let active = document.active_canvas_id.clone();
-        let snapshot = self.commit_workspace(document)?;
-        Ok((active, snapshot))
-    }
-
-    pub fn activate_canvas(&mut self, canvas_id: &str) -> Result<ProjectSnapshot, ProjectError> {
-        self.required_canvas_state(canvas_id)?;
-        if self.available_canvas_workspace()?.active_canvas_id == canvas_id {
-            return Ok(self.snapshot.clone());
-        }
-        let directories = self
-            .available_canvas_workspace()?
-            .canvases
-            .iter()
-            .find(|canvas| canvas.id == canvas_id)
-            .map(|canvas| disclosed_directory_closure(&canvas.state))
-            .ok_or_else(|| missing_canvas_error(canvas_id))?;
-        let change = self.project_tree.load_directories(&directories)?;
-        self.apply_project_tree_change(&change)?;
-        let mut document = self.available_canvas_workspace()?.clone();
-        canvas_id.clone_into(&mut document.active_canvas_id);
-        self.commit_workspace(document)
-    }
-
     pub fn patch_canvas_state(
         &mut self,
         patch: &CanvasStatePatch,
     ) -> Result<(ProjectSnapshot, bool), ProjectError> {
-        let current = self.required_canvas_state(&patch.canvas_id)?.clone();
+        let current = self.available_canvas_workspace()?.state.clone();
         let next = apply_canvas_state_patch(&current, patch)?;
         let directories = disclosed_directory_closure(&next);
         let change = self.project_tree.load_directories(&directories)?;
@@ -654,12 +555,7 @@ impl ProjectService {
                 .map(|snapshot| (snapshot, true));
         }
         let mut document = self.available_canvas_workspace()?.clone();
-        document
-            .canvases
-            .iter_mut()
-            .find(|canvas| canvas.id == patch.canvas_id)
-            .expect("required Canvas exists")
-            .state = next;
+        document.state = next;
         self.persist_workspace(document)?;
         self.rebuild_snapshot(&invalidated, false)
             .map(|snapshot| (snapshot, true))
@@ -675,15 +571,7 @@ impl ProjectService {
         Ok(())
     }
 
-    fn commit_workspace(
-        &mut self,
-        document: CanvasWorkspaceDocument,
-    ) -> Result<ProjectSnapshot, ProjectError> {
-        self.persist_workspace(document)?;
-        self.rebuild_snapshot(&HashSet::new(), false)
-    }
-
-    pub fn reset_canvas_workspace(&mut self) -> Result<ProjectSnapshot, ProjectError> {
+    pub fn reset_canvas(&mut self) -> Result<ProjectSnapshot, ProjectError> {
         let document = super::default_canvas_workspace(&self.canonical_root);
         self.canvas_store
             .save(&document)
@@ -706,40 +594,22 @@ impl ProjectService {
         Ok(())
     }
 
-    fn load_active_canvas_directories(&mut self) -> Result<HashSet<String>, ProjectError> {
+    fn load_canvas_directories(&mut self) -> Result<HashSet<String>, ProjectError> {
         let Ok(workspace) = &self.canvas_workspace else {
             return Ok(HashSet::new());
         };
-        let Some(canvas) = self
-            .canvas_workspace
-            .as_ref()
-            .expect("Canvas workspace availability was checked")
-            .canvases
-            .iter()
-            .find(|canvas| canvas.id == workspace.active_canvas_id)
-        else {
-            return Err(ProjectError::service(
-                "canvas_workspace_invalid",
-                "Canvas workspace activeCanvasId does not identify a Canvas.",
-            ));
-        };
-        let directories = disclosed_directory_closure(&canvas.state);
+        let directories = disclosed_directory_closure(&workspace.state);
         let change = self.project_tree.load_directories(&directories)?;
         self.apply_project_tree_change(&change)
     }
 
-    fn load_active_canvas_directories_for_watcher(
+    fn load_canvas_directories_for_watcher(
         &mut self,
     ) -> Result<(HashSet<String>, Vec<String>), ProjectError> {
         let Ok(workspace) = &self.canvas_workspace else {
             return Ok((HashSet::new(), Vec::new()));
         };
-        let canvas = workspace
-            .canvases
-            .iter()
-            .find(|canvas| canvas.id == workspace.active_canvas_id)
-            .expect("accepted Canvas Workspace has an active Canvas");
-        let directories = disclosed_directory_closure(&canvas.state);
+        let directories = disclosed_directory_closure(&workspace.state);
         let change = self.project_tree.load_directories(&directories)?;
         Ok(self.apply_watched_project_tree_change(&change))
     }
@@ -807,10 +677,8 @@ impl ProjectService {
     ) -> Option<CanvasWorkspaceDocument> {
         let workspace = self.canvas_workspace.as_ref().ok()?;
         let mut document = workspace.clone();
-        for canvas in &mut document.canvases {
-            for path in invalidated {
-                canvas.state = prune_canvas_state_path(&canvas.state, path);
-            }
+        for path in invalidated {
+            document.state = prune_canvas_state_path(&document.state, path);
         }
         (workspace != &document).then_some(document)
     }
@@ -840,25 +708,13 @@ impl ProjectService {
         });
         let canvas_workspace = match self.canvas_workspace.clone() {
             Ok(workspace) => {
-                let canvas = workspace
-                    .canvases
-                    .iter()
-                    .find(|canvas| canvas.id == workspace.active_canvas_id)
-                    .ok_or_else(|| {
-                        ProjectError::service(
-                            "canvas_workspace_invalid",
-                            "Canvas workspace activeCanvasId does not identify a Canvas.",
-                        )
-                    })?
-                    .clone();
-                let resources = visible_canvas_entries(&project_tree, &canvas.state)
+                let resources = visible_canvas_entries(&project_tree, &workspace.state)
                     .iter()
                     .map(|entry| self.canvas_resource(entry))
                     .collect();
                 CanvasWorkspaceSnapshot::Available {
                     workspace,
-                    active_canvas_resources: CanvasResourceView {
-                        canvas_id: canvas.id,
+                    canvas_resources: CanvasResourceView {
                         resources,
                         diagnostics: Vec::new(),
                     },
@@ -1079,13 +935,11 @@ impl ProjectService {
             .refresh_after_mutation(removed_paths, rewrites)?;
         let next_workspace = self.canvas_workspace.as_ref().ok().map(|workspace| {
             let mut document = workspace.clone();
-            for canvas in &mut document.canvases {
-                for removed in removed_paths {
-                    canvas.state = prune_canvas_state_path(&canvas.state, removed);
-                }
-                for (source, target) in rewrites {
-                    canvas.state = rewrite_canvas_state_path(&canvas.state, source, target);
-                }
+            for removed in removed_paths {
+                document.state = prune_canvas_state_path(&document.state, removed);
+            }
+            for (source, target) in rewrites {
+                document.state = rewrite_canvas_state_path(&document.state, source, target);
             }
             document
         });
@@ -1166,16 +1020,6 @@ impl ProjectService {
         rewrites: &[(String, String)],
     ) -> Result<ProjectSnapshot, ProjectError> {
         self.reconcile_canvas_path_mutation(removed_paths, rewrites)
-    }
-
-    fn required_canvas_state(&self, canvas_id: &str) -> Result<&CanvasState, ProjectError> {
-        validate_canvas_id(canvas_id)?;
-        self.available_canvas_workspace()?
-            .canvases
-            .iter()
-            .find(|canvas| canvas.id == canvas_id)
-            .map(|canvas| &canvas.state)
-            .ok_or_else(|| missing_canvas_error(canvas_id))
     }
 
     fn require_project_directory(&self, path: &str) -> Result<(), ProjectError> {
@@ -1263,13 +1107,6 @@ fn disclosed_directory_closure(state: &CanvasState) -> Vec<String> {
     directories
 }
 
-fn missing_canvas_error(canvas_id: &str) -> ProjectError {
-    ProjectError::service(
-        "canvas_not_found",
-        format!("Canvas does not exist: {canvas_id}"),
-    )
-}
-
 fn project_path_ancestors(path: &str) -> Vec<String> {
     if path.is_empty() {
         return Vec::new();
@@ -1278,33 +1115,6 @@ fn project_path_ancestors(path: &str) -> Vec<String> {
     std::iter::once(String::new())
         .chain((1..segments.len()).map(|length| segments[..length].join("/")))
         .collect()
-}
-
-fn assert_complete_permutation(input: &[String], existing: &[String]) -> Result<(), ProjectError> {
-    if input.len() != existing.len() {
-        return Err(ProjectError::Validation(
-            "Canvas order must contain every Canvas exactly once.".to_owned(),
-        ));
-    }
-    let input_set = input.iter().collect::<HashSet<_>>();
-    let existing_set = existing.iter().collect::<HashSet<_>>();
-    if input_set.len() != input.len() || input_set != existing_set {
-        return Err(ProjectError::Validation(
-            "Canvas order must contain every Canvas exactly once.".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-fn next_canvas_id(ids: &[String]) -> String {
-    let mut number = 1_u64;
-    loop {
-        let candidate = format!("canvas-{number}");
-        if !ids.contains(&candidate) {
-            return candidate;
-        }
-        number = number.checked_add(1).expect("Canvas id space exhausted");
-    }
 }
 
 fn system_time_ms(time: SystemTime) -> f64 {

@@ -292,7 +292,6 @@ function targetFixture(): CanvasTextPreviewCaptureTarget {
 function candidateFixture(): Omit<CanvasTextPreviewTarget, 'targetIdentity'> {
   return {
     bindingId: 'project-1',
-    canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
     contentDigest: 'sha256:content',
     estimatedBytes: 7,
@@ -311,7 +310,6 @@ function candidateFixture(): Omit<CanvasTextPreviewTarget, 'targetIdentity'> {
 
 function failureFields() {
   return {
-    canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
     targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:target')
   };

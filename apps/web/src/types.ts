@@ -9,7 +9,6 @@ import type {
   PhotoshopStateView,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
-  WorkbenchCanvasManagementResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
@@ -86,21 +85,16 @@ export interface WorkbenchActions {
   reloadTextFileBuffer: (projectRelativePath: string) => Promise<void>;
   openTextEditorWindow: (projectRelativePath: string) => void;
   toggleTextFileWordWrap: (projectRelativePath: string) => void;
-  updateCanvasNodeLayouts: (canvasId: string, input: {
+  updateCanvasNodeLayouts: (input: {
     interaction: 'move' | 'resize';
     selectedProjectRelativePaths: string[];
     nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width: number; height: number }>;
   }) => Promise<void>;
-  resetCanvasNodeLayouts: (canvasId: string, input: { all: true } | { nodePaths: string[] }) => Promise<void>;
-  updateCanvasVideoPlaybackState: (canvasId: string, input: { updates: Array<{ projectRelativePath: string; currentTimeMs: number }> }) => Promise<void>;
-  updateCanvasTextViewportState: (canvasId: string, input: { updates: Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }> }) => Promise<void>;
-  setCanvasDirectoryExpanded: (input: { canvasId: string; projectRelativePath: string; expanded: boolean }) => Promise<void>;
-  raiseCanvasSelection: (input: { canvasId: string; projectRelativePaths: string[] }) => Promise<void>;
-  activateCanvas: (canvasId: string) => Promise<void>;
-  createCanvas: () => Promise<WorkbenchCanvasManagementResult>;
-  renameCanvas: (input: { canvasId: string; name: string }) => Promise<WorkbenchCanvasManagementResult>;
-  deleteCanvas: (input: { canvasId: string }) => Promise<WorkbenchCanvasManagementResult>;
-  reorderCanvases: (input: { canvasOrder: string[] }) => Promise<WorkbenchCanvasManagementResult>;
+  resetCanvasNodeLayouts: (input: { all: true } | { nodePaths: string[] }) => Promise<void>;
+  updateCanvasVideoPlaybackState: (input: { updates: Array<{ projectRelativePath: string; currentTimeMs: number }> }) => Promise<void>;
+  updateCanvasTextViewportState: (input: { updates: Array<{ projectRelativePath: string; scrollTop: number; scrollLeft: number }> }) => Promise<void>;
+  setCanvasDirectoryExpanded: (input: { projectRelativePath: string; expanded: boolean }) => Promise<void>;
+  raiseCanvasSelection: (input: { projectRelativePaths: string[] }) => Promise<void>;
   openProject: () => Promise<void>;
 }
 

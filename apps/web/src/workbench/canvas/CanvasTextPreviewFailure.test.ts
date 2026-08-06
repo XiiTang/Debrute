@@ -6,7 +6,6 @@ import {
 } from './CanvasTextPreviewFailure';
 
 const fields = {
-  canvasId: 'canvas-1',
   projectRelativePath: 'references/art/api/12_cma_1993.143.json',
   targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:current')
 };

@@ -18,17 +18,15 @@ import { useI18n, type WorkbenchI18n } from '../i18n';
 
 export function Inspector({
   state,
-  activeCanvasId,
   selection,
   actions
 }: {
   state: WorkbenchState;
-  activeCanvasId: string | undefined;
   selection: CanvasSelection | undefined;
   actions: WorkbenchActions;
 }): React.ReactElement {
   const i18n = useI18n();
-  const context = getSelectionContext(state, selection, activeCanvasId);
+  const context = getSelectionContext(state, selection);
   const diagnostics = context.diagnostics.length > 0 ? context.diagnostics : state.snapshot?.diagnostics.slice(0, 5) ?? [];
   return (
     <aside className="inspector">

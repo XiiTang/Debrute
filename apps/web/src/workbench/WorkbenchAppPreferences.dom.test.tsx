@@ -683,26 +683,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('activates a Canvas only when the active Canvas changes', async () => {
-    const activateCanvas = vi.fn(async () => ({ bindingId: 'project-1', projectRevision: 1 }));
-    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
-      activateCanvas
-    });
-
-    expect(activateCanvas).toHaveBeenCalledOnce();
-    await act(async () => {
-      emitWorkbenchEvent({
-        type: 'project.changed',
-        bindingId: 'project-1',
-        projectRevision: 2,
-        snapshot: snapshotFixture()
-      });
-    });
-
-    expect(activateCanvas).toHaveBeenCalledOnce();
-    await unmount(root, container);
-  });
-
   it('commits an opened project without waiting for Canvas feedback to load', async () => {
     const feedback = deferred<Awaited<ReturnType<WorkbenchApiClient['readCanvasFeedback']>>>();
     const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1', {
@@ -1032,7 +1012,6 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
       workingCopies: emptyWorkingCopies()
     })),
     chooseProjectRoot: vi.fn(async () => undefined),
-    activateCanvas: vi.fn(async () => ({ bindingId: 'project-1', projectRevision: 1 })),
     readCanvasFeedback: vi.fn(async () => ({ entries: {} })),
     putTextWorkingCopy: vi.fn(async (_bindingId, value) => value),
     clearTextWorkingCopy: vi.fn(async () => undefined),
@@ -1158,16 +1137,11 @@ function snapshotFixture(
       status: 'available',
       workspace: {
         canonicalRoot,
-        activeCanvasId: 'canvas-1',
-        canvases: [{
-          id: 'canvas-1',
-          name: 'Canvas 1',
-          expandedDirectories: [],
-          nodeStates: {},
-          occlusionOrder: []
-        }]
+        expandedDirectories: [],
+        nodeStates: {},
+        occlusionOrder: []
       },
-      activeCanvasResources: { canvasId: 'canvas-1', resources: [], diagnostics: [] }
+      canvasResources: { resources: [], diagnostics: [] }
     },
     projectTree: [],
     diagnostics: [],

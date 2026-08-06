@@ -60,7 +60,6 @@ export interface CanvasStructureEdgeProjection {
 }
 
 export interface CanvasProjection {
-  canvasId: string;
   nodes: ProjectedCanvasNode[];
   edges: CanvasStructureEdgeProjection[];
   diagnostics: ProjectDiagnostic[];
@@ -163,7 +162,6 @@ export function projectCanvasScene(input: {
   });
   return {
     projection: {
-      canvasId: input.resources.canvasId,
       nodes,
       edges,
       diagnostics: input.resources.diagnostics

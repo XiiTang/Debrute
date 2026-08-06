@@ -1,35 +1,31 @@
-import type { CanvasWorkspaceCanvas, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import type { ProjectDiagnostic } from '@debrute/app-protocol';
+import type { ProjectDiagnostic, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { WorkbenchState } from '../../types';
 import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection.js';
 
 export type SelectionContext =
   | { kind: 'empty'; diagnostics: ProjectDiagnostic[] }
-  | { kind: 'node'; canvasId: string; node: ProjectedCanvasNode; diagnostics: ProjectDiagnostic[] }
-  | { kind: 'nodes'; canvasId: string; nodes: ProjectedCanvasNode[]; diagnostics: ProjectDiagnostic[] }
+  | { kind: 'node'; node: ProjectedCanvasNode; diagnostics: ProjectDiagnostic[] }
+  | { kind: 'nodes'; nodes: ProjectedCanvasNode[]; diagnostics: ProjectDiagnostic[] }
   | { kind: 'diagnostic'; diagnostic: ProjectDiagnostic; diagnostics: ProjectDiagnostic[] };
 
 export function getSelectionContext(
   state: WorkbenchState,
-  selection: CanvasSelection | undefined,
-  activeCanvasId: string | undefined
+  selection: CanvasSelection | undefined
 ): SelectionContext {
   const snapshot = state.snapshot;
   if (!snapshot || !selection) {
     return { kind: 'empty', diagnostics: [] };
   }
   if (selection.kind === 'nodes') {
-    const projection = state.canvasProjection?.canvasId === activeCanvasId
-      ? state.canvasProjection
-      : undefined;
+    const projection = state.canvasProjection;
     const selectedPaths = new Set(selection.projectRelativePaths);
     const nodes = projection?.nodes.filter((node) => selectedPaths.has(node.projectRelativePath)) ?? [];
     if (projection && nodes.length === 1) {
-      return { kind: 'node', canvasId: projection.canvasId, node: nodes[0]!, diagnostics: [] };
+      return { kind: 'node', node: nodes[0]!, diagnostics: [] };
     }
     if (projection && nodes.length > 1) {
-      return { kind: 'nodes', canvasId: projection.canvasId, nodes, diagnostics: [] };
+      return { kind: 'nodes', nodes, diagnostics: [] };
     }
   }
   if (selection.kind === 'diagnostic') {
@@ -39,12 +35,6 @@ export function getSelectionContext(
     }
   }
   return { kind: 'empty', diagnostics: [] };
-}
-
-export function getCanvasById(snapshot: WorkbenchProjectSessionSnapshot | undefined, canvasId: string | undefined): CanvasWorkspaceCanvas | undefined {
-  return canvasId && snapshot?.canvasWorkspace.status === 'available'
-    ? snapshot.canvasWorkspace.workspace.canvases.find((canvas) => canvas.id === canvasId)
-    : undefined;
 }
 
 export function nodeStatusLabel(node: ProjectedCanvasNode): string {

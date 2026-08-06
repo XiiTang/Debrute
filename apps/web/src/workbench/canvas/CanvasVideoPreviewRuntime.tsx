@@ -98,7 +98,6 @@ export function useCanvasVideoPreviewNode(node: ProjectedCanvasNode): CanvasVide
 }
 
 export function CanvasVideoPreviewProvider({
-  canvasId,
   nodes,
   activeVideoPaths,
   actions,
@@ -106,7 +105,6 @@ export function CanvasVideoPreviewProvider({
   previewResourceScheduler,
   children
 }: {
-  canvasId: string;
   nodes: ProjectedCanvasNode[];
   activeVideoPaths: ReadonlySet<string>;
   actions: CanvasSceneActions;
@@ -175,7 +173,7 @@ export function CanvasVideoPreviewProvider({
     visibleRect: previewOrderSnapshot
   }), [nodesByPath, previewOrderSnapshot, tasks]);
   useEffect(() => {
-    const targets = canvasVideoPreviewTargetsForNodes({ canvasId, nodes });
+    const targets = canvasVideoPreviewTargetsForNodes(nodes);
     const workTargets = targets.filter((target) => !activeVideoPaths.has(target.projectRelativePath));
     const nextTargets = Object.fromEntries(targets.map((target) => [target.projectRelativePath, target]));
     const nextTargetKeys = new Map(targets.map((target) => [
@@ -224,7 +222,7 @@ export function CanvasVideoPreviewProvider({
       ensureRequest.abortController.abort();
       ensureRequestRef.current = undefined;
     }
-  }, [activeVideoPaths, canvasId, markChangedNodeRecords, nodes, updateTasks]);
+  }, [activeVideoPaths, markChangedNodeRecords, nodes, updateTasks]);
 
   useEffect(() => {
     if (interactionActiveRef.current || probeRequestRef.current) {
@@ -246,7 +244,6 @@ export function CanvasVideoPreviewProvider({
       current
     ));
     void actions.probeCanvasVideoPreviewSources({
-      canvasId,
       targets: selected.map(canvasVideoPreviewTargetForApi)
     }, request.abortController.signal).then((result) => {
       if (!mountedRef.current || probeRequestRef.current !== request) {
@@ -318,7 +315,7 @@ export function CanvasVideoPreviewProvider({
     function wakePendingVideoPreviewTasks(): void {
       updateTasks((current) => current.size > 0 ? new Map(current) : current);
     }
-  }, [actions, canvasId, interactionResumeVersion, orderedTasks, updateTasks]);
+  }, [actions, interactionResumeVersion, orderedTasks, updateTasks]);
 
   useEffect(() => {
     if (interactionActiveRef.current || ensureRequestRef.current) {
@@ -341,7 +338,6 @@ export function CanvasVideoPreviewProvider({
       canonicalSourceIdentity: target.canonicalSourceIdentity
     }));
     void actions.ensureCanvasVideoPreviewSource({
-      canvasId,
       target: canvasVideoPreviewTargetForApi(target),
       canonicalSourceIdentity: target.canonicalSourceIdentity
     }, request.abortController.signal).then((result) => {
@@ -392,7 +388,7 @@ export function CanvasVideoPreviewProvider({
     function wakePendingVideoPreviewTasks(): void {
       updateTasks((current) => current.size > 0 ? new Map(current) : current);
     }
-  }, [actions, canvasId, interactionResumeVersion, orderedTasks, updateTasks]);
+  }, [actions, interactionResumeVersion, orderedTasks, updateTasks]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -406,7 +402,7 @@ export function CanvasVideoPreviewProvider({
         previewResourceScheduler.cancel('video', projectRelativePath);
       }
     };
-  }, [canvasId, previewResourceScheduler]);
+  }, [previewResourceScheduler]);
 
   function publishCanonicalCanvasVideoPreviewSource(
     target: CanvasVideoPreviewTarget,
@@ -540,14 +536,12 @@ export function canvasVideoRasterPreviewRequest(input: {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'video',
       bindingId: target.bindingId,
-      canvasId: target.canvasId,
       projectRelativePath: target.projectRelativePath,
       continuityIdentity: `${targetIdentity}\u001f${canonicalSource.canonicalSourceIdentity}`
     }),
     variantTarget: {
       mediaKind: 'video',
       bindingId: target.bindingId,
-      canvasId: target.canvasId,
       projectRelativePath: target.projectRelativePath,
       targetIdentity,
       canonicalSourceIdentity: canonicalSource.canonicalSourceIdentity,
@@ -561,12 +555,9 @@ export function canvasVideoRasterPreviewRequest(input: {
   };
 }
 
-export function canvasVideoPreviewTargetsForNodes(input: {
-  canvasId: string;
-  nodes: ProjectedCanvasNode[];
-}): CanvasVideoPreviewTarget[] {
+export function canvasVideoPreviewTargetsForNodes(nodes: ProjectedCanvasNode[]): CanvasVideoPreviewTarget[] {
   const targets: CanvasVideoPreviewTarget[] = [];
-  for (const node of input.nodes) {
+  for (const node of nodes) {
     if (node.nodeKind !== 'file'
       || node.mediaKind !== 'video'
       || node.availability.state !== 'available') {
@@ -574,7 +565,6 @@ export function canvasVideoPreviewTargetsForNodes(input: {
     }
     targets.push({
       bindingId: canvasRawFileBindingId(node.availability.fileUrl),
-      canvasId: input.canvasId,
       projectRelativePath: node.projectRelativePath,
       sourceRevision: node.availability.revision,
       frameTimeMs: node.videoPlayback?.currentTimeMs ?? 0

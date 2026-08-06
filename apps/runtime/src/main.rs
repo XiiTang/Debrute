@@ -42,8 +42,7 @@ use debrute_runtime::{
         CommitPhase, CommitPlatform, DesktopHostRegistration, NativeUpdatePlatform,
         ProductBootstrap, ProductCommitCoordinator, ProductCommitError, ProductStore,
         ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform, ResumeIntent,
-        ResumeTarget, RuntimeProductService, launch_product_update_failure,
-        read_desktop_host_registration,
+        RuntimeProductService, launch_product_update_failure, read_desktop_host_registration,
     },
     project::initialize_raster_preview_engine,
     workbench::{
@@ -942,41 +941,18 @@ fn resume_product_surface(
     state: &Arc<RuntimeControlState>,
 ) -> Result<(), ProductCommitError> {
     match intent {
-        ResumeIntent::Browser { target } => state
-            .activate_intent(
-                &activation_for_resume_target(target, ProjectFrontend::Browser),
-                None,
-            )
+        ResumeIntent::Browser => state
+            .activate_intent(&ActivationIntent::OpenBrowser, None)
             .map(|_| ())
             .map_err(|error| {
                 ProductCommitError::Platform(format!("browser resume failed: {error:?}"))
             }),
-        ResumeIntent::Desktop { target } => state
-            .activate_intent(
-                &activation_for_resume_target(target, ProjectFrontend::Desktop),
-                None,
-            )
+        ResumeIntent::Desktop => state
+            .activate_intent(&ActivationIntent::OpenDesktop, None)
             .map(|_| ())
             .map_err(|error| {
                 ProductCommitError::Platform(format!("Desktop resume failed: {error:?}"))
             }),
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn activation_for_resume_target(
-    target: &ResumeTarget,
-    frontend: ProjectFrontend,
-) -> ActivationIntent {
-    match target {
-        ResumeTarget::Root => match frontend {
-            ProjectFrontend::Desktop => ActivationIntent::OpenDesktop,
-            ProjectFrontend::Browser => ActivationIntent::OpenBrowser,
-        },
-        ResumeTarget::Project { canonical_root } => ActivationIntent::OpenProject {
-            project_root: canonical_root.clone(),
-            frontend,
-        },
     }
 }
 

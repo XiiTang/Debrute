@@ -5,8 +5,8 @@ status: accepted
 # Project Tree Defines Canvas Membership
 
 Canvas is a visual file manager for the complete Project Tree. Every regular
-Project file and directory belongs to every Canvas. Per-Canvas Folder
-Disclosure decides which descendants are visible; Canvas state stores only
+Project file and directory belongs to the Canvas. Folder Disclosure decides
+which descendants are visible; Canvas state stores only
 user-authored presentation values that cannot be derived from the filesystem.
 
 ## Shared Project Tree
@@ -20,8 +20,8 @@ basename; Explorer omits only this root row.
 Opening a Project loads the root's direct children. Other directories are
 `unloaded`, `loaded`, or `error` and enumerate their direct children on demand.
 A loaded directory remains indexed and watched until the Project session ends.
-Explorer expansion, Canvas disclosure, Canvas activation, and Reveal in Canvas
-all load through this index.
+Explorer expansion, Canvas disclosure, and Reveal in Canvas all load through
+this index.
 
 Entries are directories before files, followed by case-insensitive natural
 basename order with deterministic original-name and full-path tie-breakers.
@@ -39,15 +39,15 @@ absolute coordinates while hierarchy edges change.
 
 ## Folder Disclosure
 
-Each Canvas persists an ordered-set value `expandedDirectories`. A new Canvas
-contains `[]`. The root is structurally expanded, is never stored in this
+Canvas persists an ordered-set value `expandedDirectories`. Default Canvas
+state contains `[]`. The root is structurally expanded, is never stored in this
 array, and always discloses its direct children; real child directories begin
 collapsed. Collapsing any child directory hides descendants without clearing their own
 disclosure, Manual Layout, Text Viewport, Playback Position, or other sparse
 state. Explorer disclosure is independent Workbench view state.
 
 Visible Canvas resources are the root plus every indexed entry whose complete
-ancestor chain is disclosed. Runtime publishes one `activeCanvasResources`
+ancestor chain is disclosed. Runtime publishes one `canvasResources`
 view containing paths, kinds, availability, media facts, intrinsic image or
 video dimensions, and diagnostics. It publishes no rectangles, overlap
 results, hierarchy edges, or z values.
@@ -105,7 +105,7 @@ derives presentation from that next Selection and the latest Runtime-confirmed
 Occlusion Order.
 
 Workbench serializes every operation that writes Occlusion Order per Project
-binding generation and Canvas. When an operation reaches the head of that lane,
+binding generation. When an operation reaches the head of that lane,
 it reads the latest Runtime-confirmed Canvas State, derives the complete next
 Occlusion Order, and submits one patch. This includes Selection Raise, Manual
 Layout commits, Manual Layout reset, ordering newly visible nodes after Folder
@@ -136,16 +136,16 @@ disclosure on pointer up when movement remains within the existing four-screen-
 pixel drag threshold. Crossing the threshold performs a Manual Layout drag.
 Modifier clicks change Selection without toggling disclosure.
 
-Explorer single-click changes Explorer Selection. Double-clicking a file and
-Reveal in Canvas expand and load every ancestor on the active Canvas, center
-the camera on the target, transfer interaction focus to Canvas, select the
-file, and apply the ordinary selection-raise rule. Explorer and Canvas drag
+Explorer single-click changes Explorer Selection. Double-clicking a file or
+using Reveal in Canvas expands and loads every ancestor on the Canvas, centers
+the camera on the target, transfers interaction focus to Canvas, selects the
+file, and applies the ordinary selection-raise rule. Explorer and Canvas drag
 operations remain local to their own surfaces.
 
 ## Mutation Contract
 
 Workbench sends every durable Canvas state change through one
-`patchCanvasState` command. A patch identifies one Canvas, may replace Folder
+`patchCanvasState` command. A patch may replace Folder
 Disclosure or `occlusionOrder`, and may set or delete complete node-local
 Manual Layout, Playback Position, and Text Viewport values. Runtime validates
 current Project paths, normalizes the sparse result, writes the Canvas Workspace
@@ -156,6 +156,6 @@ disclosure, reveal, selection raise, or scene projection.
 Malformed, unreadable, or root-mismatched Canvas JSON remains unchanged but
 does not block Project open. Project Tree, editor, and terminal remain
 available while Canvas is unavailable. The user may explicitly reset the whole
-Canvas workspace to one default `Main` Canvas without confirmation or backup;
-failure to persist that reset leaves Canvas unavailable. Feedback loading keeps
+Canvas state to the empty default without confirmation or backup; failure to
+persist that reset leaves Canvas unavailable. Feedback loading keeps
 its separate Project-owned contract.

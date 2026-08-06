@@ -15,7 +15,6 @@ describe('Canvas selection context', () => {
   const second = node('flow/b.png');
   const state = {
     canvasProjection: {
-      canvasId: 'canvas-1',
       nodes: [first, second],
       edges: [],
       diagnostics: []
@@ -26,47 +25,41 @@ describe('Canvas selection context', () => {
   } as unknown as WorkbenchState;
 
   it('distinguishes empty, one-node, many-node, and diagnostic selection', () => {
-    expect(getSelectionContext(state, undefined, 'canvas-1')).toEqual({
+    expect(getSelectionContext(state, undefined)).toEqual({
       kind: 'empty',
       diagnostics: []
     });
     expect(getSelectionContext(state, {
       kind: 'nodes',
       projectRelativePaths: ['flow/a.png']
-    }, 'canvas-1')).toEqual({
+    })).toEqual({
       kind: 'node',
-      canvasId: 'canvas-1',
       node: first,
       diagnostics: []
     });
     expect(getSelectionContext(state, {
       kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
-    }, 'canvas-1')).toEqual({
+    })).toEqual({
       kind: 'nodes',
-      canvasId: 'canvas-1',
       nodes: [first, second],
       diagnostics: []
     });
     expect(getSelectionContext(state, {
       kind: 'diagnostic',
       id: diagnostic.id
-    }, 'canvas-1')).toEqual({
+    })).toEqual({
       kind: 'diagnostic',
       diagnostic,
       diagnostics: [diagnostic]
     });
   });
 
-  it('does not expose stale or wrong-canvas node selections', () => {
+  it('does not expose stale node selections', () => {
     expect(getSelectionContext(state, {
       kind: 'nodes',
       projectRelativePaths: ['flow/missing.png']
-    }, 'canvas-1').kind).toBe('empty');
-    expect(getSelectionContext(state, {
-      kind: 'nodes',
-      projectRelativePaths: ['flow/a.png']
-    }, 'canvas-2').kind).toBe('empty');
+    }).kind).toBe('empty');
   });
 });
 

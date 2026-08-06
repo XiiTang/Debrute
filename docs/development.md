@@ -68,8 +68,7 @@ creates a unique temporary directory and prints its path; an explicit output
 path must not already exist. A real ten-schedule run changes all 200 contents
 before each schedule with
 `node scripts/prepare-canvas-text-preview-benchmark.mjs --bump <project> <1-10>`;
-it does not create ten Canvases or serialize every file mutation through one
-unrepresentative loop.
+each schedule exercises the same Canvas with new source revisions.
 
 ## Repository Layout
 
@@ -80,7 +79,7 @@ unrepresentative loop.
 - `apps/desktop` - trayless Electron window host for native windows, menus, folder picking, and Product packaging.
 - `apps/runtime` - single-process Rust Runtime, native tray, Control/Workbench/Photoshop transports, domain services, Product updater, and external Agent-facing `debrute` CLI.
 - `apps/photoshop-uxp-plugin` - Photoshop UXP plugin surface.
-- `packages/canvas-core` - shared Canvas persistence and protocol declarations. Rust Runtime owns Canvas state validation, persistence, Project resources, and feedback mutation; Workbench owns scene projection, automatic layout, geometry, overlap, occlusion order, interaction, and rendering.
+- `packages/canvas-core` - pure Canvas projection, preview identity, and presentation policy. Rust Runtime owns Canvas state validation, persistence, Project resources, and feedback mutation; Workbench owns scene projection, automatic layout, geometry, overlap, occlusion order, interaction, and rendering.
 - `packages/app-protocol` - protocol types shared across the app boundary.
 - `packages/runtime-control-client` - TypeScript native Control transport used by Desktop and development launchers.
 - `packages/architecture-rules` - repository architecture lint rules.
@@ -190,7 +189,7 @@ unknown fields fail without automatic migration or partial salvage.
 
 Project snapshots aggregate canonical root, shared `projectTree`, one exact
 available-or-unavailable `canvasWorkspace` union, diagnostics, and health. The
-available Canvas branch contains both the Workspace Document and active Canvas
+available Canvas branch contains both the Workspace Document and Canvas
 resources. Workbench receives a
 temporary `bindingId` for Project-scoped HTTP authority; the canonical root is
 the durable identity. Commands return outcomes while ordered Project events

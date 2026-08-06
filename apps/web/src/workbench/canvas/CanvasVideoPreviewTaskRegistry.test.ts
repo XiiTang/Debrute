@@ -80,7 +80,6 @@ describe('Canvas Video Preview task registry', { tags: ['canvas-video'] }, () =>
 function target(projectRelativePath: string, frameTimeMs: number): CanvasVideoPreviewTarget {
   return {
     bindingId: 'project-1',
-    canvasId: 'canvas-1',
     projectRelativePath,
     sourceRevision: 'revision-1',
     frameTimeMs

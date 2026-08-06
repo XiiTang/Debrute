@@ -15,8 +15,8 @@ not process boundaries or workspace package count.
 
 ## Relationships
 
-- **Project → Canvas**: every Canvas projects the shared Project Tree. Per-Canvas
-  Folder Disclosure controls which descendants are visible, while sparse visual
+- **Project → Canvas**: the Canvas projects the shared Project Tree. Folder
+  Disclosure controls which descendants are visible, while sparse visual
   state remains Canvas-owned.
 - **Capability → Project**: Project capabilities operate on files beneath a
   canonical Project root. Model Requests accept explicit local inputs and an

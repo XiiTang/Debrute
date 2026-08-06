@@ -1,6 +1,5 @@
 import React from 'react';
 import { IconButton, Map } from '../ui/index.js';
-import type { CanvasCatalogEntry } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { CANVAS_MINIMAP_PANEL_SIZE, type FloatingBarRect } from '../shell/floatingBars';
 import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';
@@ -22,7 +21,6 @@ import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { useI18n } from '../i18n';
 
 export function CanvasMinimapBar({
-  canvas,
   runtime,
   overlayRuntime,
   open,
@@ -30,7 +28,6 @@ export function CanvasMinimapBar({
   panelPlacement,
   interactionBlocked = false
 }: {
-  canvas: CanvasCatalogEntry | undefined;
   runtime: CanvasEditorRuntime | undefined;
   overlayRuntime: CanvasOverlayRuntime;
   open: boolean;
@@ -41,14 +38,13 @@ export function CanvasMinimapBar({
   const i18n = useI18n();
   const barRef = React.useRef<HTMLButtonElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
-  const matchingRuntime = runtime?.canvasId === canvas?.id ? runtime : undefined;
-  const runtimeView = useOptionalRuntimeView(matchingRuntime, open);
+  const runtimeView = useOptionalRuntimeView(runtime, open);
   const runtimeSnapshot = runtimeView?.snapshot;
   const nodes = runtimeView?.nodes;
   const modelCamera = runtimeSnapshot?.camera ?? DEFAULT_CANVAS_CAMERA;
-  const buttonIcon = matchingRuntime ? (
+  const buttonIcon = runtime ? (
     <CanvasMinimapZoomLabel
-      runtime={matchingRuntime}
+      runtime={runtime}
       className="canvas-minimap-button-zoom"
       testId="canvas-minimap-button-zoom"
     />
@@ -57,7 +53,7 @@ export function CanvasMinimapBar({
   );
   const enabled = Boolean(
     !interactionBlocked
-    && matchingRuntime
+    && runtime
     && runtimeView
     && hasValidMinimapNodes(runtimeView.scene.nodesByPath.values())
     && runtimeSnapshot?.surfaceSize
@@ -136,12 +132,12 @@ export function CanvasMinimapBar({
         onDoubleClick={stopCanvasMinimapEvent}
         onContextMenu={stopCanvasMinimapEvent}
       />
-      {open && enabled && staticModel && initialViewport && matchingRuntime ? (
+      {open && enabled && staticModel && initialViewport && runtime ? (
         <CanvasMinimapPanel
           ref={panelRef}
           staticModel={staticModel}
           initialViewportRect={initialViewport.viewportRect}
-          runtime={matchingRuntime}
+          runtime={runtime}
           overlayRuntime={overlayRuntime}
           panelPlacement={panelPlacement}
           overviewLabel={i18n.t('canvas.minimap.overview')}

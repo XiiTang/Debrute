@@ -30,7 +30,7 @@ describe('CanvasResetLayoutButton', () => {
     expect(onResetCanvasLayout).toHaveBeenCalled();
   });
 
-  it('stays disabled when the active canvas has no manual nodes', async () => {
+  it('stays disabled when the Canvas has no manual nodes', async () => {
     const onResetCanvasLayout = vi.fn();
 
     await withRenderedButton({ enabled: false, onResetCanvasLayout }, async ({ button }) => {

@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     fs, io,
     path::{Path, PathBuf},
 };
@@ -9,9 +8,8 @@ use uuid::Uuid;
 use crate::global::root_state_directory;
 
 use super::{
-    CanvasState, CanvasWorkspaceCanvas, CanvasWorkspaceDocument, CanvasWorkspaceUnavailable,
-    CanvasWorkspaceUnavailableCode, normalize_canvas_name, replace_file, validate_canvas_id,
-    validate_canvas_state,
+    CanvasState, CanvasWorkspaceDocument, CanvasWorkspaceUnavailable,
+    CanvasWorkspaceUnavailableCode, replace_file, validate_canvas_state,
 };
 
 const CANVAS_WORKSPACE_FILE: &str = "canvas.json";
@@ -101,12 +99,7 @@ fn canvas_workspace_unavailable(
 pub(crate) fn default_canvas_workspace(canonical_root: &str) -> CanvasWorkspaceDocument {
     CanvasWorkspaceDocument {
         canonical_root: canonical_root.to_owned(),
-        active_canvas_id: "main".to_owned(),
-        canvases: vec![CanvasWorkspaceCanvas {
-            id: "main".to_owned(),
-            name: "Main".to_owned(),
-            state: CanvasState::default(),
-        }],
+        state: CanvasState::default(),
     }
 }
 
@@ -120,49 +113,12 @@ pub(crate) fn validate_canvas_workspace(
             "Canvas workspace canonicalRoot does not match its root-state bucket.",
         ));
     }
-    if document.canvases.is_empty() {
-        return Err(canvas_workspace_unavailable(
+    validate_canvas_state(&document.state).map_err(|error| {
+        canvas_workspace_unavailable(
             CanvasWorkspaceUnavailableCode::CanvasWorkspaceInvalid,
-            "Canvas workspace must contain at least one Canvas.",
-        ));
-    }
-    let mut ids = HashSet::new();
-    for canvas in &document.canvases {
-        validate_canvas_id(&canvas.id).map_err(|error| {
-            canvas_workspace_unavailable(
-                CanvasWorkspaceUnavailableCode::CanvasWorkspaceInvalid,
-                error.to_string(),
-            )
-        })?;
-        normalize_canvas_name(&canvas.name).map_err(|error| {
-            canvas_workspace_unavailable(
-                CanvasWorkspaceUnavailableCode::CanvasWorkspaceInvalid,
-                error.to_string(),
-            )
-        })?;
-        validate_canvas_state(&canvas.state).map_err(|error| {
-            canvas_workspace_unavailable(
-                CanvasWorkspaceUnavailableCode::CanvasWorkspaceInvalid,
-                error.to_string(),
-            )
-        })?;
-        if !ids.insert(canvas.id.as_str()) {
-            return Err(canvas_workspace_unavailable(
-                CanvasWorkspaceUnavailableCode::CanvasWorkspaceInvalid,
-                format!(
-                    "Canvas workspace contains duplicate Canvas id: {}",
-                    canvas.id
-                ),
-            ));
-        }
-    }
-    if !ids.contains(document.active_canvas_id.as_str()) {
-        return Err(canvas_workspace_unavailable(
-            CanvasWorkspaceUnavailableCode::CanvasWorkspaceInvalid,
-            "Canvas workspace activeCanvasId does not identify a Canvas.",
-        ));
-    }
-    Ok(())
+            error.to_string(),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -201,6 +157,29 @@ mod tests {
                 .unwrap(),
             wrong
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn unknown_fields_are_rejected_without_replacing_the_document() {
+        let home = std::env::temp_dir().join(format!("dbrt-canvas-store-{}", Uuid::new_v4()));
+        let root = "/projects/campaign";
+        let store = CanvasWorkspaceStore::new(&home, root);
+        let bytes = br#"{
+            "canonicalRoot":"/projects/campaign",
+            "expandedDirectories":[],
+            "nodeStates":{},
+            "occlusionOrder":[],
+            "unexpected":true
+        }"#;
+        fs::create_dir_all(store.path.parent().unwrap()).unwrap();
+        fs::write(&store.path, bytes).unwrap();
+
+        assert_eq!(
+            store.load_or_create().unwrap_err().code.as_str(),
+            "canvas_workspace_invalid"
+        );
+        assert_eq!(fs::read(&store.path).unwrap(), bytes);
         fs::remove_dir_all(home).unwrap();
     }
 }

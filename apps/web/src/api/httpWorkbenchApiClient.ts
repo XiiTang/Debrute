@@ -19,7 +19,6 @@ import type {
   WorkbenchApiClient,
   WorkbenchCanvasStateMutationResult,
   WorkbenchCanvasFeedbackMutationResult,
-  WorkbenchCanvasManagementResult,
   WorkbenchProjectOpenResult,
   WorkbenchProjectTarget,
   WorkbenchProjectFileBatchOperationResult,
@@ -773,32 +772,13 @@ export function createHttpWorkbenchApiClient(options: {
     lookupModelArtifactProvenance: (input) => requestForCurrentProject<ModelArtifactProvenanceLookup>('POST', '/model-artifacts/lookup', input),
     readCanvasFeedback: () => requestForCurrentProject<CanvasFeedbackDocument>('GET', '/canvas-feedback'),
     updateCanvasFeedback: (input) => requestProjectMutation<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
-    createCanvas: () => requestProjectMutation<WorkbenchCanvasManagementResult>('POST', projectPath('/canvases')),
-    resetCanvasWorkspace: () => requestProjectMutation<RevisionedProjectCommandResult>(
+    resetCanvas: () => requestProjectMutation<RevisionedProjectCommandResult>(
       'POST',
-      projectPath('/canvases/reset-workspace')
-    ),
-    renameCanvas: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
-      'PATCH',
-      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`),
-      { operation: 'rename', name: input.name }
-    ),
-    deleteCanvas: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
-      'DELETE',
-      projectPath(`/canvases/${encodeURIComponent(input.canvasId)}`)
-    ),
-    reorderCanvases: (input) => requestProjectMutation<WorkbenchCanvasManagementResult>(
-      'PUT',
-      projectPath('/canvases/order'),
-      input
-    ),
-    activateCanvas: (canvasId) => requestProjectMutation<RevisionedProjectCommandResult>(
-      'POST',
-      projectPath(`/canvases/${encodeURIComponent(canvasId)}/activate`)
+      projectPath('/canvas/reset')
     ),
     patchCanvasState: (input) => requestProjectMutation<WorkbenchCanvasStateMutationResult>(
       'PATCH',
-      projectPath('/canvases/state'),
+      projectPath('/canvas/state'),
       input
     ),
     integrationsRescan: () => request<{ ok: true }>('POST', '/api/integrations/rescan', {}),
@@ -945,7 +925,6 @@ function uploadImportFormData(input: WorkbenchProjectUploadImportInput): FormDat
 function canvasTextPreviewSourceFormData(input: SaveCanvasTextPreviewSourceInput): FormData {
   const formData = new FormData();
   formData.append('metadata', JSON.stringify({
-    canvasId: input.canvasId,
     projectRelativePath: input.projectRelativePath,
     targetIdentity: input.targetIdentity
   }));

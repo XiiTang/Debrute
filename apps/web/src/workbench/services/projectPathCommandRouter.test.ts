@@ -13,8 +13,8 @@ describe('ProjectPathCommandRouter', () => {
       openTerminalPanel: vi.fn(),
       menuContext: { projection: undefined },
       commandContext: {
-        activeProjection: undefined,
-        activeCanvasRuntime: undefined,
+        canvasProjection: undefined,
+        canvasRuntime: undefined,
         revealInCanvas: vi.fn(),
         fileClipboard: undefined,
         explorerCommands: {
@@ -66,8 +66,8 @@ describe('ProjectPathCommandRouter', () => {
       openTerminalPanel: vi.fn(),
       menuContext: { projection: undefined },
       commandContext: {
-        activeProjection: undefined,
-        activeCanvasRuntime: undefined,
+        canvasProjection: undefined,
+        canvasRuntime: undefined,
         revealInCanvas: vi.fn(),
         fileClipboard: undefined,
         explorerCommands: {
@@ -128,8 +128,8 @@ describe('ProjectPathCommandRouter', () => {
       openTerminalPanel: vi.fn(),
       menuContext: { projection: undefined },
       commandContext: {
-        activeProjection: undefined,
-        activeCanvasRuntime: undefined,
+        canvasProjection: undefined,
+        canvasRuntime: undefined,
         revealInCanvas: vi.fn(),
         fileClipboard: undefined,
         explorerCommands: {

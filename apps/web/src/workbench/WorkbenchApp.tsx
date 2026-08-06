@@ -3,7 +3,6 @@ import { Loader2 } from './ui/index.js';
 import type {
   DebruteProductPlatform,
   DebruteWorkbenchRoute,
-  CanvasWorkspaceCanvas,
   NativeProjectOpenFailure,
   ProjectPathEntry
 } from '@debrute/app-protocol';
@@ -13,7 +12,6 @@ import {
 } from '../api/httpWorkbenchApiClient.js';
 import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
-import { CanvasCardBar } from './canvas/CanvasCardBar';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
 import {
@@ -32,7 +30,6 @@ import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtim
 import {
   canvasNodeSelection
 } from './canvas/runtime/canvasSelection.js';
-import { getCanvasById } from './services/canvasState';
 import {
   currentDebruteWorkbenchRoute,
   replaceWorkbenchProjectRoute,
@@ -97,7 +94,6 @@ import {
 } from './project-explorer/workbenchFileCommands';
 import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController.js';
 import {
-  canvasCardBarRect,
   feedbackBarPlacementForCanvasTarget,
   canvasMinimapButtonRect,
   canvasResetLayoutButtonRect,
@@ -331,7 +327,6 @@ function WorkbenchRuntimeApp({
         if (result.outcome === 'failed') {
           const attemptedPath = projectRootFromOpenError(result.error)
             ?? resolution.projectOpen?.attemptedPath;
-          const code = projectOpenErrorCode(result.error);
           const error: ProjectOpenStartupError = {
             code: 'project-open-failed',
             message: result.error.message
@@ -342,7 +337,6 @@ function WorkbenchRuntimeApp({
           );
           setProjectOpenPresentation({
             ...(attemptedPath ? { attemptedPath } : {}),
-            ...(code ? { code } : {}),
             ...(localizedError ? { error: localizedError } : {})
           });
         }
@@ -512,11 +506,8 @@ function WorkbenchBoundProjectApp({
     () => createInitialProjectPresentation(acceptedProject),
     []
   );
-  const [activeCanvasId, setActiveCanvasId] = useState<string | undefined>(
-    initialProjectPresentation.activeCanvasId
-  );
-  const [resettingCanvasWorkspace, setResettingCanvasWorkspace] = useState(false);
-  const [canvasWorkspaceResetError, setCanvasWorkspaceResetError] = useState<string>();
+  const [resettingCanvas, setResettingCanvas] = useState(false);
+  const [canvasResetError, setCanvasResetError] = useState<string>();
   const [mountedCanvasRuntime, setMountedCanvasRuntime] = useState<CanvasEditorRuntime>();
   const focusCommandRouterRef = useRef<WorkbenchFocusCommandRouter | undefined>(undefined);
   const canvasRuntimeScopeKey = projectProjection.generation;
@@ -556,16 +547,15 @@ function WorkbenchBoundProjectApp({
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
   const canvasOcclusionMutationLane = useMemo(() => createCanvasOcclusionMutationLane(), []);
   const enqueueCanvasOcclusionMutation = useCallback(<Result,>(
-    canvasId: string,
     mutation: (
       accepted: Extract<WorkbenchProjectProjectionState, { status: 'bound' }>
     ) => Promise<Result>
   ): Promise<Result> => {
     const generation = projectProjection.generation;
-    return canvasOcclusionMutationLane.run(`${generation}\u001f${canvasId}`, async () => {
+    return canvasOcclusionMutationLane.run(async () => {
       const accepted = api.projectProjection.getState();
       if (accepted.status !== 'bound' || accepted.generation !== generation) {
-        throw new Error(`Canvas ${canvasId} mutation belongs to an inactive Project.`);
+        throw new Error('Canvas mutation belongs to an inactive Project.');
       }
       return mutation(accepted);
     });
@@ -576,57 +566,46 @@ function WorkbenchBoundProjectApp({
   const availableCanvasWorkspace = snapshot?.canvasWorkspace.status === 'available'
     ? snapshot.canvasWorkspace
     : undefined;
-  const activeCanvas = getCanvasById(snapshot, activeCanvasId);
-  const activeCanvasAvailable = activeCanvas !== undefined;
-  const activeCanvasState = useMemo(
-    () => activeCanvas ? canvasStateFromWorkspaceCanvas(activeCanvas) : undefined,
-    [activeCanvas]
-  );
-  const activeCanvasRuntime = mountedCanvasRuntime?.canvasId === activeCanvas?.id
-    ? mountedCanvasRuntime
-    : undefined;
-  const activeScene = useMemo(() => (
-    activeCanvas
-    && activeCanvasState
-    && availableCanvasWorkspace?.activeCanvasResources.canvasId === activeCanvas.id
+  const canvasState = availableCanvasWorkspace?.workspace;
+  const canvasRuntime = mountedCanvasRuntime;
+  const canvasScene = useMemo(() => (
+    canvasState
+    && availableCanvasWorkspace
     && canonicalRoot
       ? projectCanvasScene({
           canonicalRoot,
-          resources: availableCanvasWorkspace.activeCanvasResources,
-          state: activeCanvasState
+          resources: availableCanvasWorkspace.canvasResources,
+          state: canvasState
         })
       : undefined
-  ), [activeCanvas, activeCanvasState, availableCanvasWorkspace, canonicalRoot]);
-  const activeProjection = activeScene?.projection;
-  const visibleCanvasPathsRef = useRef<{
-    canvasId: string;
-    paths: Set<string>;
-  } | undefined>(undefined);
+  ), [availableCanvasWorkspace, canonicalRoot, canvasState]);
+  const canvasProjection = canvasScene?.projection;
+  const visibleCanvasPathsRef = useRef<Set<string> | undefined>(undefined);
   useEffect(() => {
-    if (!activeCanvas || !activeCanvasState || !activeScene) {
+    if (!canvasState || !canvasScene) {
       visibleCanvasPathsRef.current = undefined;
       return;
     }
     const visiblePaths = new Set(
-      activeScene.projection.nodes.map((node) => node.projectRelativePath)
+      canvasScene.projection.nodes.map((node) => node.projectRelativePath)
     );
     const previous = visibleCanvasPathsRef.current;
-    visibleCanvasPathsRef.current = { canvasId: activeCanvas.id, paths: visiblePaths };
-    const newlyVisible = previous?.canvasId === activeCanvas.id
-      ? [...visiblePaths].filter((path) => !previous.paths.has(path))
+    visibleCanvasPathsRef.current = visiblePaths;
+    const newlyVisible = previous
+      ? [...visiblePaths].filter((path) => !previous.has(path))
       : [];
     const currentOcclusionOrder = newlyVisible.length === 0
-      ? activeScene.occlusionOrder
+      ? canvasScene.occlusionOrder
       : raiseProjectedCanvasSelection(
-          activeScene.occlusionOrder,
-          activeScene.projection.nodes,
+          canvasScene.occlusionOrder,
+          canvasScene.projection.nodes,
           newlyVisible
         );
-    if (equalStringArrays(activeCanvasState.occlusionOrder, currentOcclusionOrder)) {
+    if (equalStringArrays(canvasState.occlusionOrder, currentOcclusionOrder)) {
       return;
     }
-    void enqueueCanvasOcclusionMutation(activeCanvas.id, async (accepted) => {
-      const context = canvasMutationContext(accepted, activeCanvas.id);
+    void enqueueCanvasOcclusionMutation(async (accepted) => {
+      const context = canvasMutationContext(accepted);
       const scene = projectCanvasScene({
         canonicalRoot: accepted.canonicalRoot,
         resources: context.resources,
@@ -646,31 +625,31 @@ function WorkbenchBoundProjectApp({
       if (equalStringArrays(context.state.occlusionOrder, occlusionOrder)) {
         return;
       }
-      await api.patchCanvasState({ canvasId: activeCanvas.id, occlusionOrder });
+      await api.patchCanvasState({ occlusionOrder });
     }).catch(() => projectActivities.report({
       kind: 'canvas-operation-failed',
       operation: 'raise-selection'
     }));
-  }, [activeCanvas, activeCanvasState, activeScene, api, enqueueCanvasOcclusionMutation, projectActivities]);
+  }, [api, canvasScene, canvasState, enqueueCanvasOcclusionMutation, projectActivities]);
   const centerCanvasProjectionNode = useCallback((
     projection: CanvasProjection | undefined,
     projectRelativePath: string
   ) => {
     const node = projection?.nodes.find((item) => item.projectRelativePath === projectRelativePath);
-    const runtimeSnapshot = activeCanvasRuntime?.getSnapshot();
-    if (!node || !activeCanvasRuntime || !runtimeSnapshot?.surfaceSize) {
+    const runtimeSnapshot = canvasRuntime?.getSnapshot();
+    if (!node || !canvasRuntime || !runtimeSnapshot?.surfaceSize) {
       return;
     }
-    activeCanvasRuntime.setSelection(canvasNodeSelection([projectRelativePath]));
-    activeCanvasRuntime.camera.setCamera(cameraCenteredOnNode({
+    canvasRuntime.setSelection(canvasNodeSelection([projectRelativePath]));
+    canvasRuntime.camera.setCamera(cameraCenteredOnNode({
       node,
       surfaceSize: runtimeSnapshot.surfaceSize,
       camera: runtimeSnapshot.camera
     }));
-  }, [activeCanvasRuntime]);
+  }, [canvasRuntime]);
   const locateProjectFileInCanvas = useCallback(async (projectRelativePath: string) => {
     const scope = projectPathCommandIntake.tryAccept();
-    if (!scope || !activeCanvasId) {
+    if (!scope) {
       return;
     }
     try {
@@ -678,29 +657,30 @@ function WorkbenchBoundProjectApp({
       const snapshotBefore = acceptedBefore.status === 'unbound'
         ? undefined
         : acceptedBefore.snapshot;
-      const canvasBefore = getCanvasById(snapshotBefore, activeCanvasId);
-      if (!canvasBefore) {
+      const workspaceBefore = snapshotBefore?.canvasWorkspace.status === 'available'
+        ? snapshotBefore.canvasWorkspace.workspace
+        : undefined;
+      if (!workspaceBefore) {
         return;
       }
       const expandedDirectories = Array.from(new Set([
-        ...canvasStateFromWorkspaceCanvas(canvasBefore).expandedDirectories,
+        ...workspaceBefore.expandedDirectories,
         ...canvasPathAncestors(projectRelativePath)
       ]));
-      await api.patchCanvasState({ canvasId: activeCanvasId, expandedDirectories });
+      await api.patchCanvasState({ expandedDirectories });
       if (!scope.isCurrent()) {
         return;
       }
       const accepted = api.projectProjection.getState();
       const latestSnapshot = accepted.status === 'unbound' ? undefined : accepted.snapshot;
-      const latestCanvas = getCanvasById(latestSnapshot, activeCanvasId);
-      const resources = latestSnapshot?.canvasWorkspace.status === 'available'
-        ? latestSnapshot.canvasWorkspace.activeCanvasResources
+      const latestWorkspace = latestSnapshot?.canvasWorkspace.status === 'available'
+        ? latestSnapshot.canvasWorkspace
         : undefined;
-      const projection = latestCanvas && resources?.canvasId === activeCanvasId && canonicalRoot
+      const projection = latestWorkspace && canonicalRoot
         ? projectCanvasScene({
             canonicalRoot,
-            resources,
-            state: canvasStateFromWorkspaceCanvas(latestCanvas)
+            resources: latestWorkspace.canvasResources,
+            state: latestWorkspace.workspace
           }).projection
         : undefined;
       centerCanvasProjectionNode(projection, projectRelativePath);
@@ -710,7 +690,7 @@ function WorkbenchBoundProjectApp({
         projectActivities.report({ kind: 'canvas-operation-failed', operation: 'reveal-path' });
       }
     }
-  }, [activeCanvasId, api, canonicalRoot, centerCanvasProjectionNode, projectActivities, projectPathCommandIntake]);
+  }, [api, canonicalRoot, centerCanvasProjectionNode, projectActivities, projectPathCommandIntake]);
   const getAcceptedProjectSnapshot = useCallback(() => {
     const state = api.projectProjection.getState();
     return state.status === 'unbound' ? undefined : state.snapshot;
@@ -726,7 +706,7 @@ function WorkbenchBoundProjectApp({
     }
   }, [floatingPanels.panels.explorer.open, requestExplorerFeature]);
   const fileClipboard = explorerController?.fileClipboard;
-  const activeCanvasCutPaths = useMemo(() => (
+  const canvasCutPaths = useMemo(() => (
     fileClipboard?.operation === 'cut'
       ? fileClipboard.entries.map((entry) => entry.projectRelativePath)
       : []
@@ -872,30 +852,6 @@ function WorkbenchBoundProjectApp({
     refreshTextFileBuffer
   ]);
 
-  useEffect(() => {
-    if (!snapshot) {
-      return;
-    }
-    if (snapshot.canvasWorkspace.status !== 'available') {
-      setActiveCanvasId(undefined);
-      return;
-    }
-    const canvasIds = snapshot.canvasWorkspace.workspace.canvases.map((canvas) => canvas.id);
-    if (!activeCanvasId || !canvasIds.includes(activeCanvasId)) {
-      setActiveCanvasId(snapshot.canvasWorkspace.workspace.activeCanvasId);
-    }
-  }, [activeCanvasId, snapshot]);
-
-  useEffect(() => {
-    if (!activeCanvasId || !activeCanvasAvailable) {
-      return;
-    }
-    void api.activateCanvas(activeCanvasId).catch(() => projectActivities.report({
-      kind: 'canvas-operation-failed',
-      operation: 'set-directory-disclosure'
-    }));
-  }, [activeCanvasAvailable, activeCanvasId, api, projectActivities]);
-
   const toggleTextFileWordWrap = useCallback((projectRelativePath: string) => {
     setTextFileBuffers((buffers) => {
       const current = buffers[projectRelativePath];
@@ -918,10 +874,9 @@ function WorkbenchBoundProjectApp({
     void ensureTextFileBuffer(projectRelativePath);
   }, [ensureTextFileBuffer]);
 
-  const updateCanvasTextViewportState = useCallback<WorkbenchActions['updateCanvasTextViewportState']>(async (canvasId, input) => {
+  const updateCanvasTextViewportState = useCallback<WorkbenchActions['updateCanvasTextViewportState']>(async (input) => {
     try {
       await api.patchCanvasState({
-        canvasId,
         nodeStateUpdates: input.updates.map((update) => ({
           projectRelativePath: update.projectRelativePath,
           textViewport: { scrollTop: update.scrollTop, scrollLeft: update.scrollLeft }
@@ -936,10 +891,10 @@ function WorkbenchBoundProjectApp({
     }
   }, [api, projectActivities]);
 
-  const updateCanvasNodeLayouts = useCallback<WorkbenchActions['updateCanvasNodeLayouts']>(async (canvasId, input) => {
+  const updateCanvasNodeLayouts = useCallback<WorkbenchActions['updateCanvasNodeLayouts']>(async (input) => {
     try {
-      await enqueueCanvasOcclusionMutation(canvasId, async (accepted) => {
-        const context = canvasMutationContext(accepted, canvasId);
+      await enqueueCanvasOcclusionMutation(async (accepted) => {
+        const context = canvasMutationContext(accepted);
         const nextState = {
           ...context.state,
           nodeStates: { ...context.state.nodeStates }
@@ -961,7 +916,6 @@ function WorkbenchBoundProjectApp({
           state: nextState
         }).projection;
         await api.patchCanvasState({
-          canvasId,
           occlusionOrder: raiseProjectedCanvasSelection(
             context.state.occlusionOrder,
             projection.nodes,
@@ -987,9 +941,9 @@ function WorkbenchBoundProjectApp({
     }
   }, [api, enqueueCanvasOcclusionMutation, projectActivities]);
 
-  const resetCanvasNodeLayouts = useCallback<WorkbenchActions['resetCanvasNodeLayouts']>(async (canvasId, input) => {
-    await enqueueCanvasOcclusionMutation(canvasId, async (accepted) => {
-      const context = canvasMutationContext(accepted, canvasId);
+  const resetCanvasNodeLayouts = useCallback<WorkbenchActions['resetCanvasNodeLayouts']>(async (input) => {
+    await enqueueCanvasOcclusionMutation(async (accepted) => {
+      const context = canvasMutationContext(accepted);
       const nodePaths = 'all' in input
         ? Object.entries(context.state.nodeStates)
             .filter(([, nodeState]) => nodeState.manualLayout !== undefined)
@@ -1017,7 +971,6 @@ function WorkbenchBoundProjectApp({
         state: nextState
       });
       await api.patchCanvasState({
-        canvasId,
         occlusionOrder: scene.occlusionOrder,
         nodeStateUpdates: nodePaths.map((projectRelativePath) => ({
           projectRelativePath,
@@ -1027,10 +980,9 @@ function WorkbenchBoundProjectApp({
     });
   }, [api, enqueueCanvasOcclusionMutation]);
 
-  const updateCanvasVideoPlaybackState = useCallback<WorkbenchActions['updateCanvasVideoPlaybackState']>(async (canvasId, input) => {
+  const updateCanvasVideoPlaybackState = useCallback<WorkbenchActions['updateCanvasVideoPlaybackState']>(async (input) => {
     try {
       await api.patchCanvasState({
-        canvasId,
         nodeStateUpdates: input.updates.map((update) => ({
           projectRelativePath: update.projectRelativePath,
           videoPlayback: { currentTimeMs: update.currentTimeMs }
@@ -1049,15 +1001,17 @@ function WorkbenchBoundProjectApp({
     try {
       const accepted = api.projectProjection.getState();
       const acceptedSnapshot = accepted.status === 'unbound' ? undefined : accepted.snapshot;
-      const canvas = getCanvasById(acceptedSnapshot, input.canvasId);
-      if (!canvas) {
-        throw new Error(`Canvas ${input.canvasId} is unavailable.`);
+      const workspace = acceptedSnapshot?.canvasWorkspace.status === 'available'
+        ? acceptedSnapshot.canvasWorkspace.workspace
+        : undefined;
+      if (!workspace) {
+        throw new Error('Canvas is unavailable.');
       }
-      const current = canvasStateFromWorkspaceCanvas(canvas).expandedDirectories;
+      const current = workspace.expandedDirectories;
       const expandedDirectories = input.expanded
         ? Array.from(new Set([...current, input.projectRelativePath]))
         : current.filter((path) => path !== input.projectRelativePath);
-      await api.patchCanvasState({ canvasId: input.canvasId, expandedDirectories });
+      await api.patchCanvasState({ expandedDirectories });
     } catch {
       projectActivities.report({
         kind: 'canvas-operation-failed',
@@ -1068,15 +1022,14 @@ function WorkbenchBoundProjectApp({
 
   const raiseCanvasSelection = useCallback<WorkbenchActions['raiseCanvasSelection']>(async (input) => {
     try {
-      await enqueueCanvasOcclusionMutation(input.canvasId, async (accepted) => {
-        const context = canvasMutationContext(accepted, input.canvasId);
+      await enqueueCanvasOcclusionMutation(async (accepted) => {
+        const context = canvasMutationContext(accepted);
         const scene = projectCanvasScene({
           canonicalRoot: accepted.canonicalRoot,
           resources: context.resources,
           state: context.state
         });
         await api.patchCanvasState({
-          canvasId: input.canvasId,
           occlusionOrder: raiseProjectedCanvasSelection(
             context.state.occlusionOrder,
             scene.projection.nodes,
@@ -1092,34 +1045,6 @@ function WorkbenchBoundProjectApp({
       throw error;
     }
   }, [api, enqueueCanvasOcclusionMutation, projectActivities]);
-
-  const activateCanvas = useCallback<WorkbenchActions['activateCanvas']>(async (canvasId) => {
-    await api.activateCanvas(canvasId);
-  }, [api]);
-
-  const createCanvas = useCallback<WorkbenchActions['createCanvas']>(async () => {
-    const result = await api.createCanvas();
-    setActiveCanvasId(result.activeCanvasId);
-    return result;
-  }, []);
-
-  const renameCanvas = useCallback<WorkbenchActions['renameCanvas']>(async (input) => {
-    const result = await api.renameCanvas(input);
-    return result;
-  }, []);
-
-  const deleteCanvas = useCallback<WorkbenchActions['deleteCanvas']>(async (input) => {
-    const result = await api.deleteCanvas(input);
-    if (activeCanvasId === input.canvasId) {
-      setActiveCanvasId(result.activeCanvasId);
-    }
-    return result;
-  }, [activeCanvasId]);
-
-  const reorderCanvases = useCallback<WorkbenchActions['reorderCanvases']>(async (input) => {
-    const result = await api.reorderCanvases(input);
-    return result;
-  }, []);
 
   const presentProjectOpenFailure = useCallback((failure: Error | NativeProjectOpenFailure) => {
     if (hasAcceptedProject) {
@@ -1224,7 +1149,7 @@ function WorkbenchBoundProjectApp({
     : undefined;
   const state: WorkbenchState = {
     snapshot,
-    canvasProjection: activeProjection,
+    canvasProjection,
     bindingId: runtimeBindingId,
     canonicalRoot,
     titleBarState: effectiveTitleBarState,
@@ -1274,11 +1199,6 @@ function WorkbenchBoundProjectApp({
     updateCanvasTextViewportState,
     setCanvasDirectoryExpanded,
     raiseCanvasSelection,
-    activateCanvas,
-    createCanvas,
-    renameCanvas,
-    deleteCanvas,
-    reorderCanvases,
     openProject
   }), [
     ensureTextFileBuffer,
@@ -1294,11 +1214,6 @@ function WorkbenchBoundProjectApp({
     updateCanvasTextViewportState,
     setCanvasDirectoryExpanded,
     raiseCanvasSelection,
-    activateCanvas,
-    createCanvas,
-    renameCanvas,
-    deleteCanvas,
-    reorderCanvases,
     openProject
   ]);
   const openWorkbenchWindows = useMemo<WorkbenchWindowIdentity[]>(() => [
@@ -1366,23 +1281,19 @@ function WorkbenchBoundProjectApp({
     buttonRect: minimapButtonRect,
     viewportRect: workbenchViewportRect
   });
-  const resetLayoutButtonRect = activeCanvasState
+  const resetLayoutButtonRect = canvasState
     ? canvasResetLayoutButtonRect(workbenchViewportRect)
-    : undefined;
-  const cardBarRect = snapshot
-    ? canvasCardBarRect(workbenchViewportRect)
     : undefined;
   const floatingBarReservedRects = [
     TITLE_BAR_RESERVED_RECT(workbenchViewportRect.width),
     ...FIXED_TOP_FLOATING_BAR_RECTS,
     minimapButtonRect,
     ...(resetLayoutButtonRect ? [resetLayoutButtonRect] : []),
-    ...(canvasMinimapOpen ? [minimapPanelPlacement] : []),
-    ...(cardBarRect ? [cardBarRect] : [])
+    ...(canvasMinimapOpen ? [minimapPanelPlacement] : [])
   ];
   useEffect(() => {
     const target = feedbackInteraction.currentTarget;
-    if (!activeCanvasRuntime || !target) {
+    if (!canvasRuntime || !target) {
       return;
     }
     const syncFeedbackBarPlacement = (camera: CanvasRuntimeSnapshot['camera']) => {
@@ -1398,39 +1309,27 @@ function WorkbenchBoundProjectApp({
         canvasOverlayRuntime.clearFeedbackBarPlacement();
       }
     };
-    syncFeedbackBarPlacement(activeCanvasRuntime.camera.getCamera());
-    return activeCanvasRuntime.subscribeCamera(syncFeedbackBarPlacement);
+    syncFeedbackBarPlacement(canvasRuntime.camera.getCamera());
+    return canvasRuntime.subscribeCamera(syncFeedbackBarPlacement);
   }, [
-    activeCanvasRuntime,
+    canvasRuntime,
     canvasOverlayRuntime,
     feedbackInteraction.currentTarget,
     floatingBarReservedRects,
     workbenchViewportRect
   ]);
-  const canResetActiveCanvasLayout = Boolean(activeProjection?.nodes.some((node) => node.layoutMode === 'manual'));
-  const resetActiveCanvasLayout = useCallback(() => {
-    if (!activeCanvasId) {
-      return;
-    }
-    void actions.resetCanvasNodeLayouts(activeCanvasId, { all: true }).catch(() => {
+  const canResetCanvasLayout = Boolean(canvasProjection?.nodes.some((node) => node.layoutMode === 'manual'));
+  const resetCanvasLayout = useCallback(() => {
+    void actions.resetCanvasNodeLayouts({ all: true }).catch(() => {
       projectActivities.report({
         kind: 'canvas-operation-failed',
         operation: 'reset-layout'
       });
     });
-  }, [actions, activeCanvasId, projectActivities]);
+  }, [actions, projectActivities]);
   const readyPhotoshop = globalProjection.photoshop.status === 'ready'
     ? globalProjection.photoshop.value
     : undefined;
-  const workspaceCanvases = availableCanvasWorkspace?.workspace.canvases ?? [];
-  const canvasOrder = workspaceCanvases.map((canvas) => canvas.id);
-  const canvasCards = useMemo(() => {
-    const canvasesById = new Map(workspaceCanvases.map((canvas) => [canvas.id, canvas]));
-    return canvasOrder.flatMap((canvasId) => {
-      const canvas = canvasesById.get(canvasId);
-      return canvas ? [{ id: canvas.id, name: canvas.name }] : [];
-    });
-  }, [canvasOrder, workspaceCanvases]);
   const permanentDeleteConfirmationLabels = useMemo(() => ({
     directory: (path: string) => i18n.t('shell.confirm.permanentDeleteDirectory', { path }),
     file: (path: string) => i18n.t('shell.confirm.permanentDeleteFile', { path }),
@@ -1461,13 +1360,13 @@ function WorkbenchBoundProjectApp({
     commandEffects: projectPathCommandEffects,
     openTerminalPanel: openProjectPathTerminalPanel,
     menuContext: {
-      projection: activeProjection,
+      projection: canvasProjection,
       fileClipboard,
       photoshop: readyPhotoshop
     },
     commandContext: {
-      activeProjection,
-      activeCanvasRuntime,
+      canvasProjection,
+      canvasRuntime,
       fileClipboard,
       revealInCanvas: (projectRelativePath) => {
         void locateProjectFileInCanvas(projectRelativePath);
@@ -1479,15 +1378,15 @@ function WorkbenchBoundProjectApp({
       confirmPermanentDelete,
       confirmTrash,
       getProjectSnapshot: getAcceptedProjectSnapshot,
-      resetCanvasNodeLayouts: (canvasId, nodePaths) => (
-        resetCanvasNodeLayouts(canvasId, { nodePaths })
+      resetCanvasNodeLayouts: (nodePaths) => (
+        resetCanvasNodeLayouts({ nodePaths })
       ),
       confirmMoveOverwrite,
     }
     })
     : undefined, [
-    activeCanvasRuntime,
-    activeProjection,
+    canvasRuntime,
+    canvasProjection,
     closeWorkbenchContextMenu,
     confirmMoveOverwrite,
     confirmTrash,
@@ -1505,12 +1404,12 @@ function WorkbenchBoundProjectApp({
     projectPathCommandIntake
   ]);
   const focusCommandRouter = useMemo(() => createWorkbenchFocusCommandRouter({
-    getRuntime: () => activeCanvasRuntime,
-    getProjection: () => activeProjection,
+    getRuntime: () => canvasRuntime,
+    getProjection: () => canvasProjection,
     getCanvasRoot: () => document.querySelector<HTMLElement>('[data-testid="canvas-surface"]'),
     getProjectPathRouter: () => projectPathCommandRouter,
     getExplorerController: () => explorerController
-  }), [activeCanvasRuntime, activeProjection, explorerController, projectPathCommandRouter]);
+  }), [canvasRuntime, canvasProjection, explorerController, projectPathCommandRouter]);
   focusCommandRouterRef.current = focusCommandRouter;
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1642,9 +1541,8 @@ function WorkbenchBoundProjectApp({
 
   const canvasEditor = (
     <CanvasEditor
-      canvas={activeCanvas}
-      canvasState={activeCanvasState}
-      projection={activeProjection}
+      canvasState={canvasState}
+      projection={canvasProjection}
       hasProject={Boolean(snapshot)}
       projectOpenAttemptedPath={projectOpenAttemptedPath}
       projectOpenError={projectOpenError}
@@ -1656,14 +1554,14 @@ function WorkbenchBoundProjectApp({
       runtimeScopeKey={canvasRuntimeScopeKey}
       minimapOpen={canvasMinimapOpen}
       productPlatform={productPlatform}
-      cutPaths={activeCanvasCutPaths}
+      cutPaths={canvasCutPaths}
       feedbackInteraction={feedbackInteraction.canvas}
       onRuntimeChange={setMountedCanvasRuntime}
       onOpenContextMenu={openWorkbenchContextMenu}
       interactionBlocked={projectPresentationBlocked}
     />
   );
-  const profiledCanvasEditor = activeCanvas ? (
+  const profiledCanvasEditor = canvasState ? (
     <CanvasTextRenderProfileProvider profile={canvasTextRenderProfile}>
       {canvasEditor}
     </CanvasTextRenderProfileProvider>
@@ -1671,18 +1569,18 @@ function WorkbenchBoundProjectApp({
   const canvasWorkspaceUnavailable = snapshot?.canvasWorkspace.status === 'unavailable'
     ? snapshot.canvasWorkspace
     : undefined;
-  const resetCanvasWorkspace = () => {
-    setResettingCanvasWorkspace(true);
-    setCanvasWorkspaceResetError(undefined);
-    void api.resetCanvasWorkspace()
+  const resetCanvas = () => {
+    setResettingCanvas(true);
+    setCanvasResetError(undefined);
+    void api.resetCanvas()
       .catch((error) => {
-        setCanvasWorkspaceResetError(errorMessage(error));
+        setCanvasResetError(errorMessage(error));
         projectActivities.report({
           kind: 'canvas-operation-failed',
-          operation: 'reset-workspace'
+          operation: 'reset-canvas'
         });
       })
-      .finally(() => setResettingCanvasWorkspace(false));
+      .finally(() => setResettingCanvas(false));
   };
 
   return (
@@ -1692,7 +1590,7 @@ function WorkbenchBoundProjectApp({
           <WorkbenchExplorerControllerHost
             commandEffects={projectPathCommandEffects}
             getSnapshot={getAcceptedProjectSnapshot}
-            activeCanvasRuntime={activeCanvasRuntime}
+            canvasRuntime={canvasRuntime}
             activities={projectActivities}
             i18n={i18n}
             onController={setExplorerController}
@@ -1772,12 +1670,12 @@ function WorkbenchBoundProjectApp({
                 data-testid="canvas-workspace-unavailable"
               >
                 <strong>{i18n.t('canvas.workspaceUnavailable.title')}</strong>
-                <span>{canvasWorkspaceResetError ?? canvasWorkspaceUnavailable.message}</span>
+                <span>{canvasResetError ?? canvasWorkspaceUnavailable.message}</span>
                 <Button
-                  disabled={resettingCanvasWorkspace}
-                  onClick={resetCanvasWorkspace}
+                  disabled={resettingCanvas}
+                  onClick={resetCanvas}
                 >
-                  {resettingCanvasWorkspace
+                  {resettingCanvas
                     ? i18n.t('canvas.workspaceUnavailable.resetting')
                     : i18n.t('canvas.workspaceUnavailable.reset')}
                 </Button>
@@ -1810,18 +1708,17 @@ function WorkbenchBoundProjectApp({
             {availableCanvasWorkspace ? (
               <>
                 <CanvasMinimapBar
-                  canvas={activeCanvas}
-                  runtime={activeCanvasRuntime}
+                  runtime={canvasRuntime}
                   overlayRuntime={canvasOverlayRuntime}
                   open={canvasMinimapOpen}
                   onOpenChange={setCanvasMinimapOpen}
                   panelPlacement={minimapPanelPlacement}
                   interactionBlocked={projectPresentationBlocked}
                 />
-                {activeCanvasState ? (
+                {canvasState ? (
                   <CanvasResetLayoutButton
-                    enabled={canResetActiveCanvasLayout}
-                    onResetCanvasLayout={resetActiveCanvasLayout}
+                    enabled={canResetCanvasLayout}
+                    onResetCanvasLayout={resetCanvasLayout}
                   />
                 ) : null}
                 <CanvasFeedbackInteractionBar
@@ -1829,25 +1726,6 @@ function WorkbenchBoundProjectApp({
                   overlayRuntime={canvasOverlayRuntime}
                 />
               </>
-            ) : null}
-            {availableCanvasWorkspace ? (
-              <CanvasCardBar
-                canvases={canvasCards}
-                activeCanvasId={activeCanvasId}
-                onActiveCanvasChange={setActiveCanvasId}
-                onCreateCanvas={() => actions.createCanvas().then(() => undefined).catch(() => projectActivities.report({
-                  kind: 'canvas-operation-failed', operation: 'create'
-                }))}
-                onRenameCanvas={(input) => actions.renameCanvas(input).then(() => undefined).catch(() => projectActivities.report({
-                  kind: 'canvas-operation-failed', operation: 'rename'
-                }))}
-                onDeleteCanvas={(input) => actions.deleteCanvas(input).then(() => undefined).catch(() => projectActivities.report({
-                  kind: 'canvas-operation-failed', operation: 'delete'
-                }))}
-                onReorderCanvases={(input) => actions.reorderCanvases(input).then(() => undefined).catch(() => projectActivities.report({
-                  kind: 'canvas-operation-failed', operation: 'reorder'
-                }))}
-              />
             ) : null}
             {Object.values(textEditorWindows).some((windowState) => windowState.open) ? (
               <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
@@ -1949,8 +1827,7 @@ function WorkbenchBoundProjectApp({
                         <WorkbenchInspectorPanelFeature
                           locale={presentationController.locale}
                           state={state}
-                          activeCanvasId={activeCanvasId}
-                          activeCanvasRuntime={activeCanvasRuntime}
+                          canvasRuntime={canvasRuntime}
                           actions={actions}
                         />
                       </React.Suspense>
@@ -2060,7 +1937,6 @@ function createInitialProjectPresentation(
   project: Exclude<WorkbenchProjectProjectionState, { status: 'unbound' }> | undefined
 ): {
   viewportRect: ReturnType<typeof readWorkbenchViewportRect>;
-  activeCanvasId: string | undefined;
   floatingPanels: FloatingPanelState;
   textFileBuffers: Record<string, TextFileBuffer>;
 } {
@@ -2068,7 +1944,6 @@ function createInitialProjectPresentation(
   if (!project) {
     return {
       viewportRect,
-      activeCanvasId: undefined,
       floatingPanels: DEFAULT_FLOATING_PANEL_STATE,
       textFileBuffers: {}
     };
@@ -2078,12 +1953,8 @@ function createInitialProjectPresentation(
     canonicalRoot: project.canonicalRoot
   });
   const viewState = restoredViewState ?? { floatingPanels: DEFAULT_FLOATING_PANEL_STATE };
-  const canvasWorkspace = project.snapshot.canvasWorkspace.status === 'available'
-    ? project.snapshot.canvasWorkspace.workspace
-    : undefined;
   return {
     viewportRect,
-    activeCanvasId: canvasWorkspace?.activeCanvasId,
     floatingPanels: constrainOpenFloatingPanelsToViewport(
       viewState.floatingPanels,
       viewportRect
@@ -2109,7 +1980,6 @@ function errorMessage(error: unknown): string {
 
 interface ProjectOpenPresentation {
   attemptedPath?: string;
-  code?: string;
   error?: string;
 }
 
@@ -2120,37 +1990,20 @@ function projectOpenPresentationFromFailure(
   const projectRoot = failure instanceof Error
     ? projectRootFromOpenError(failure)
     : failure.projectRoot;
-  const code = failure instanceof Error
-    ? projectOpenErrorCode(failure)
-    : failure.code;
   return {
     ...(projectRoot ? { attemptedPath: projectRoot } : {}),
-    ...(code ? { code } : {}),
     error: i18n.t('projectOpen.openFailed', { message: failure.message })
   };
 }
 
-function canvasStateFromWorkspaceCanvas(canvas: CanvasWorkspaceCanvas) {
-  return {
-    expandedDirectories: canvas.expandedDirectories,
-    nodeStates: canvas.nodeStates,
-    occlusionOrder: canvas.occlusionOrder
-  };
-}
-
 function canvasMutationContext(
-  project: Extract<WorkbenchProjectProjectionState, { status: 'bound' }>,
-  canvasId: string
+  project: Extract<WorkbenchProjectProjectionState, { status: 'bound' }>
 ) {
-  const canvas = getCanvasById(project.snapshot, canvasId);
   if (project.snapshot.canvasWorkspace.status !== 'available') {
     throw new Error(project.snapshot.canvasWorkspace.message);
   }
-  const resources = project.snapshot.canvasWorkspace.activeCanvasResources;
-  if (!canvas || resources.canvasId !== canvasId) {
-    throw new Error(`Canvas ${canvasId} is unavailable.`);
-  }
-  const state = canvasStateFromWorkspaceCanvas(canvas);
+  const resources = project.snapshot.canvasWorkspace.canvasResources;
+  const state = project.snapshot.canvasWorkspace.workspace;
   return {
     resources,
     state
@@ -2159,10 +2012,6 @@ function canvasMutationContext(
 
 function equalStringArrays(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function projectOpenErrorCode(error: Error): string | undefined {
-  return error instanceof DebruteHttpRequestError ? error.code : undefined;
 }
 
 function projectRootFromOpenError(error: Error): string | undefined {

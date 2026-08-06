@@ -17,8 +17,6 @@ use super::{
     },
 };
 
-const MAX_CANONICAL_ROOT_BYTES: usize = 1024;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommitPhase {
@@ -120,15 +118,8 @@ pub enum RunningProductIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResumeIntent {
-    Desktop { target: ResumeTarget },
-    Browser { target: ResumeTarget },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ResumeTarget {
-    Root,
-    Project { canonical_root: String },
+    Desktop,
+    Browser,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -239,7 +230,7 @@ impl PendingCommit {
         {
             return Err("Desktop asset does not match targetVersion".to_owned());
         }
-        validate_resume_intent(&self.resume_intent)
+        Ok(())
     }
 
     pub(crate) fn same_transaction_as(&self, other: &Self) -> bool {
@@ -394,7 +385,6 @@ impl<P: UpdatePlatformAdapter> ProductCommitCoordinator<P> {
         }
         self.store
             .validate_staged_desktop_asset_unlocked(&desktop_asset, &target_version)?;
-        validate_resume_intent(&resume_intent).map_err(ProductCommitError::InvalidResumeIntent)?;
         let transaction_id = Uuid::new_v4().to_string();
         self.store.write_pending_unlocked(&PendingCommit {
             schema_version: 1,
@@ -714,29 +704,6 @@ fn desktop_identity_matches(
     &installed.product == expected_product
 }
 
-fn validate_resume_intent(intent: &ResumeIntent) -> Result<(), String> {
-    match intent {
-        ResumeIntent::Desktop { target } | ResumeIntent::Browser { target } => {
-            validate_resume_target(target)
-        }
-    }
-}
-
-fn validate_resume_target(target: &ResumeTarget) -> Result<(), String> {
-    match target {
-        ResumeTarget::Root => Ok(()),
-        ResumeTarget::Project { canonical_root }
-            if !canonical_root.trim().is_empty()
-                && canonical_root.len() <= MAX_CANONICAL_ROOT_BYTES =>
-        {
-            Ok(())
-        }
-        ResumeTarget::Project { .. } => {
-            Err("Project resume root must be non-empty and bounded".to_owned())
-        }
-    }
-}
-
 fn asset_matches_platform(asset: &TrustedReleaseAsset, platform: CommitPlatform) -> bool {
     matches!(
         (asset.platform(), platform),
@@ -756,7 +723,6 @@ pub enum ProductCommitError {
     InvalidStagedProduct(std::path::PathBuf),
     IncompatibleTargetProduct,
     DesktopAssetPlatformMismatch,
-    InvalidResumeIntent(String),
     UnexpectedCommitPhase {
         expected: CommitPhase,
         actual: CommitPhase,

@@ -78,7 +78,6 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
         previewResourceScheduler
       }}>
         <CanvasVideoPreviewProvider
-          canvasId="canvas-test"
           nodes={[]}
           activeVideoPaths={new Set()}
           actions={actionsFixture()}
@@ -86,7 +85,6 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
           previewResourceScheduler={previewResourceScheduler}
         >
           <CanvasTextPreviewProvider
-            canvasId="canvas-test"
             nodes={[]}
             textFileBuffers={{}}
             actions={actionsFixture()}
@@ -1116,18 +1114,16 @@ function textPreviewRequest(
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'text',
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       continuityIdentity: targetIdentity
     }),
     variantTarget: {
       mediaKind: 'text',
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'flow/readme.md',
       targetIdentity,
       sourceWidth: 700,
-      srcForWidth: (width) => `/api/workbench/bindings/p/canvas-text-preview?canvasId=canvas-1&path=flow%2Freadme.md&targetIdentity=${targetIdentity}&w=${width}`
+      srcForWidth: (width) => `/api/workbench/bindings/p/canvas-text-preview?path=flow%2Freadme.md&targetIdentity=${targetIdentity}&w=${width}`
     }
   };
 }

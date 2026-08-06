@@ -81,19 +81,6 @@ describe('Workbench event decoding', () => {
     })).toBeUndefined();
     expect(decodeWorkbenchProjectConnectionFrame({
       ...frame,
-      project: {
-        ...frame.project,
-        snapshot: {
-          ...snapshotWithCanvasTopology(),
-          canvasWorkspace: {
-            ...snapshotWithCanvasTopology().canvasWorkspace,
-            activeCanvasResources: { canvasId: 'canvas-unknown', resources: [], diagnostics: [] }
-          }
-        }
-      }
-    })).toBeUndefined();
-    expect(decodeWorkbenchProjectConnectionFrame({
-      ...frame,
       workingCopies: {
         text: {},
         feedback: {
@@ -190,17 +177,13 @@ describe('Workbench event decoding', () => {
       projectRevision: 2,
       snapshot: snapshotFixture()
     })).toBeUndefined();
-    const duplicateCanvasOrder = snapshotWithCanvasTopology();
-    duplicateCanvasOrder.canvasWorkspace.workspace.canvases.push({
-      id: 'canvas-1',
-      name: 'Duplicate',
-      ...emptyCanvasState()
-    });
+    const duplicateDisclosure = snapshotWithCanvasTopology();
+    duplicateDisclosure.canvasWorkspace.workspace.expandedDirectories = ['assets', 'assets'];
     expect(decodeWorkbenchEvent({
       type: 'project.changed',
       bindingId: 'project-1',
       projectRevision: 2,
-      snapshot: duplicateCanvasOrder
+      snapshot: duplicateDisclosure
     })).toBeUndefined();
   });
 
@@ -291,11 +274,9 @@ function snapshotFixture() {
       status: 'available' as const,
       workspace: {
         canonicalRoot: '/projects/project-1',
-        activeCanvasId: 'canvas-1',
-        canvases: [{ id: 'canvas-1', name: 'Canvas 1', ...emptyCanvasState() }]
+        ...emptyCanvasState()
       },
-      activeCanvasResources: {
-        canvasId: 'canvas-1',
+      canvasResources: {
         resources: [],
         diagnostics: []
       }

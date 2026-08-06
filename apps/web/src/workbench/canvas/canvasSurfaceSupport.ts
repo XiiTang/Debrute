@@ -55,7 +55,6 @@ export interface CanvasPerfRuntimeSession {
 }
 
 export interface CanvasPerfDebugSnapshotContext {
-  canvasId: string;
   runtime: Pick<CanvasEditorRuntime, 'getSnapshot'>;
   resourceZoom: number;
   renderSnapshot: CanvasSceneSnapshot;
@@ -281,7 +280,6 @@ export function canvasPerfDebugSnapshot(input: CanvasPerfDebugSnapshotContext): 
   const mountedNodeCount = input.renderSnapshot.nodesByPath.size;
   const cullingCounts = input.renderLifecycle.getCullingCounts();
   return {
-    canvasId: input.canvasId,
     camera: { ...snapshot.camera },
     cameraState: snapshot.cameraState,
     mountedNodeCount,

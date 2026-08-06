@@ -284,7 +284,6 @@ function createInteractionSource(initiallyActive: boolean): React.ComponentProps
 function targetFixture(projectRelativePath = 'notes/a.md'): CanvasTextPreviewCaptureTarget {
   return {
     bindingId: 'project-1',
-    canvasId: 'canvas-1',
     projectRelativePath,
     content: 'content',
     contentDigest: 'sha256:content',
@@ -321,7 +320,6 @@ function rasterResult(): CanvasTextPreviewCaptureResult {
 
 function failureFields() {
   return {
-    canvasId: 'canvas-1',
     projectRelativePath: 'notes/a.md',
     targetIdentity: canvasPreviewTargetIdentityFromDigest('sha256:notes/a.md')
   };

@@ -5,8 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 
 const TRIAL_COUNT = 10;
 const NODE_COUNT = 200;
-const BENCHMARK_CANVAS_ID = 'benchmark-200';
-const BENCHMARK_CONTRACT = 'debrute.canvas-text-preview-benchmark.v1';
+const BENCHMARK_CONTRACT = 'debrute.canvas-text-preview-benchmark.v2';
 if (process.argv[2] === '--bump') {
   await bumpBenchmarkFiles(resolveRequiredPath(process.argv[3]), Number(process.argv[4]));
   process.exit(0);
@@ -25,10 +24,9 @@ for (const file of files) {
   await writeFile(join(outputRoot, file.path), file.content, 'utf8');
 }
 
-await writeCanvas(BENCHMARK_CANVAS_ID, benchmarkNodes(files));
+await writeCanvasState(benchmarkNodes(files));
 await writeJson(join(outputRoot, '.debrute', 'canvas-text-preview-benchmark.json'), {
   contract: BENCHMARK_CONTRACT,
-  canvasId: BENCHMARK_CANVAS_ID,
   nodeCount: NODE_COUNT,
   paths: files.map((file) => file.path)
 });
@@ -45,31 +43,26 @@ process.stdout.write(`${JSON.stringify({
     .slice(0, 12)
 }, null, 2)}\n`);
 
-async function writeCanvas(canvasId, nodeElements) {
+async function writeCanvasState(nodeElements) {
   const userHome = process.platform === 'win32'
     ? (process.env.USERPROFILE ?? homedir())
     : (process.env.HOME ?? homedir());
   const rootKey = createHash('sha256').update(outputRoot, 'utf8').digest('hex');
   await writeJson(join(userHome, '.debrute', 'state', 'roots', rootKey, 'canvas.json'), {
     canonicalRoot: outputRoot,
-    activeCanvasId: canvasId,
-    canvases: [{
-      id: canvasId,
-      name: 'Benchmark 200',
-      expandedDirectories: ['text'],
-      nodeStates: Object.fromEntries(nodeElements.map((node) => [
-        node.projectRelativePath,
-        {
-          manualLayout: {
-            x: node.x,
-            y: node.y,
-            width: node.width,
-            height: node.height
-          }
+    expandedDirectories: ['text'],
+    nodeStates: Object.fromEntries(nodeElements.map((node) => [
+      node.projectRelativePath,
+      {
+        manualLayout: {
+          x: node.x,
+          y: node.y,
+          width: node.width,
+          height: node.height
         }
-      ])),
-      occlusionOrder: []
-    }]
+      }
+    ])),
+    occlusionOrder: []
   });
 }
 
@@ -145,7 +138,6 @@ async function bumpBenchmarkFiles(root, trial) {
   ));
   if (
     manifest.contract !== BENCHMARK_CONTRACT
-    || manifest.canvasId !== BENCHMARK_CANVAS_ID
     || manifest.nodeCount !== NODE_COUNT
     || !Array.isArray(manifest.paths)
     || manifest.paths.length !== NODE_COUNT

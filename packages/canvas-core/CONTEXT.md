@@ -6,21 +6,21 @@ Project files.
 ## Language
 
 **Canvas**:
-A visual file manager whose nodes represent Project files and directories. Each
-Canvas persists independent Folder Disclosure and sparse visual state. Canvas
-state is machine-local presentation associated with one canonical Project root.
+A visual file manager whose nodes represent Project files and directories. Its
+Folder Disclosure and sparse visual state are machine-local presentation
+associated with one canonical Project root.
 _Avoid_: Board, document layer
 
 **Project Tree**:
 The Runtime-owned, on-demand index of user-visible Project files and
 directories shared by Explorer and Canvas. Every indexed entry logically
-belongs to every Canvas.
+belongs to the Canvas.
 _Avoid_: Canvas membership, Explorer snapshot
 
 **Folder Disclosure**:
-The persisted per-Canvas set of directories whose children are visible. A new
-Canvas discloses the Project root, and the root can later be collapsed. Explorer
-expansion is independent view state.
+The persisted set of directories whose children are visible. The Project root
+is structurally disclosed and cannot be collapsed. Explorer expansion is
+independent view state.
 _Avoid_: Membership, filesystem loading, Explorer expansion
 
 **Canvas Node**:
@@ -41,20 +41,10 @@ Node Selection from every Canvas Node whose current displayed rectangle
 intersects it. It is not a selection state or persistent selection mode.
 _Avoid_: Selection box, lasso
 
-**Canvas ID**:
-The stable identity of one Canvas inside its root-scoped Canvas Workspace
-Document. It does not change when the Canvas is renamed.
-_Avoid_: Canvas name, title
-
-**Canvas Name**:
-The editable display label of a Canvas. It is presentation, not identity.
-_Avoid_: Canvas ID
-
 **Canvas State**:
-The sparse state for one Canvas: ID, Name, Folder Disclosure, non-default
-node-local state, and Occlusion Order. It is one member of the root-scoped
-Canvas Workspace Document; Project membership, hierarchy, Automatic Layout,
-Selection, and camera are derived or transient.
+The Canvas's sparse Folder Disclosure, non-default node-local state, and
+Occlusion Order. Project membership, hierarchy, Automatic Layout, Selection,
+and camera are derived or transient.
 _Avoid_: Project Tree, live editor state
 
 **Canvas Resource View**:
@@ -71,8 +61,7 @@ _Avoid_: Runtime projection, Canvas State
 
 **Canvas Workspace Document**:
 The one Runtime-global Canvas JSON document for a Project Canonical Root. It
-stores that root, Active Canvas ID, and the ordered complete Canvas states. It
-is not Project content.
+stores that root and the complete Canvas State. It is not Project content.
 _Avoid_: Project file
 
 **Automatic Layout**:
@@ -105,9 +94,9 @@ the resulting overlap-only Occlusion Order.
 _Avoid_: Drag raise, global stack order, bring-to-front command
 
 **Canvas Text Appearance**:
-The user's complete global typography value for Project text shown on every
-Canvas, comprising font selection, font size, line height, font weight request,
-letter spacing, and ligatures. Changing Projects or Canvases does not
+The user's complete global typography value for Project text shown on Canvas,
+comprising font selection, font size, line height, font weight request,
+letter spacing, and ligatures. Changing Projects does not
 override it. Runtime owns it as the complete `canvas.textAppearance` member of
 global settings rather than a Project, Canvas State, Workbench Theme, or
 field-level patch; it excludes named preset identity, syntax colors, editor
@@ -173,8 +162,8 @@ The media-specific identity of one exact canonical preview requested from
 current Project and Canvas state before raster-width selection. It includes the
 Source Revision when the target uses saved Project bytes, or a content digest
 for uncommitted text, plus every target input that can change the requested
-pixels. It does not include the Canonical Root, Canvas ID, or Project Path that
-owns a resource; those scope resource keys.
+pixels. It does not include the Project binding or Project Path that owns a
+resource; those scope resource keys.
 _Avoid_: Source Revision, resource key, cache path
 
 **Canonical Preview Source Identity**:

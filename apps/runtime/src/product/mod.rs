@@ -10,7 +10,7 @@ mod store;
 pub use commit::{
     CommitPhase, InstalledDesktopIdentity, PendingCommit, ProductCommitCoordinator,
     ProductCommitError, ProductIdentity, ProductUpdateFailure, ProductUpdateFailureStage,
-    ResumeIntent, ResumeTarget, RunningProductIdentity, UpdatePlatformAdapter,
+    ResumeIntent, RunningProductIdentity, UpdatePlatformAdapter,
 };
 pub use manifest::{
     ProductEntrypoints, ProductManifest, ProductManifestError, ProductManifestFile,

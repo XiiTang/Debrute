@@ -901,14 +901,12 @@ function previewSource(): CanvasRasterPreviewRequest {
     continuityKey: canvasPreviewContinuityKey({
       mediaKind: 'video',
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'media/clip.mp4',
       continuityIdentity: targetIdentity
     }),
     variantTarget: {
       mediaKind: 'video',
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'media/clip.mp4',
       targetIdentity,
       sourceWidth: 640,

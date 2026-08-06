@@ -103,21 +103,12 @@ const CANVAS_LOWER_LEFT_CONTROL_INSET = {
   bottom: 14
 } as const;
 const CANVAS_RESET_LAYOUT_GAP_PX = 4;
-const CANVAS_CARD_BAR_GAP_PX = 4;
 
 export const CANVAS_RESET_LAYOUT_BUTTON_SIZE = {
   left: CANVAS_LOWER_LEFT_CONTROL_INSET.left + CANVAS_MINIMAP_BUTTON_SIZE.width + CANVAS_RESET_LAYOUT_GAP_PX,
   bottom: CANVAS_LOWER_LEFT_CONTROL_INSET.bottom,
   width: 28,
   height: 28
-} as const;
-
-export const CANVAS_CARD_BAR_SIZE = {
-  left: CANVAS_RESET_LAYOUT_BUTTON_SIZE.left + CANVAS_RESET_LAYOUT_BUTTON_SIZE.width + CANVAS_CARD_BAR_GAP_PX,
-  bottom: CANVAS_LOWER_LEFT_CONTROL_INSET.bottom,
-  height: 28,
-  maxWidth: 720,
-  maxViewportWidthRatio: 0.58
 } as const;
 
 export const CANVAS_MINIMAP_PANEL_SIZE = {
@@ -261,20 +252,6 @@ export function canvasResetLayoutButtonRect(viewportRect: FloatingBarRect): Floa
     y: viewportRect.y + viewportRect.height - CANVAS_RESET_LAYOUT_BUTTON_SIZE.bottom - CANVAS_RESET_LAYOUT_BUTTON_SIZE.height,
     width: CANVAS_RESET_LAYOUT_BUTTON_SIZE.width,
     height: CANVAS_RESET_LAYOUT_BUTTON_SIZE.height
-  };
-}
-
-export function canvasCardBarRect(viewportRect: FloatingBarRect): FloatingBarRect {
-  const left = viewportRect.x + CANVAS_CARD_BAR_SIZE.left;
-  return {
-    x: left,
-    y: viewportRect.y + viewportRect.height - CANVAS_CARD_BAR_SIZE.bottom - CANVAS_CARD_BAR_SIZE.height,
-    width: Math.round(Math.min(
-      CANVAS_CARD_BAR_SIZE.maxWidth,
-      viewportRect.width * CANVAS_CARD_BAR_SIZE.maxViewportWidthRatio,
-      Math.max(0, viewportRect.x + viewportRect.width - left - VIEWPORT_PADDING_PX)
-    )),
-    height: CANVAS_CARD_BAR_SIZE.height
   };
 }
 

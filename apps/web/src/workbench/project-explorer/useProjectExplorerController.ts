@@ -79,7 +79,7 @@ export interface ProjectExplorerController {
 export interface ProjectExplorerControllerInput {
   commandEffects: ProjectPathCommandEffects;
   getSnapshot(): WorkbenchProjectSessionSnapshot | undefined;
-  activeCanvasRuntime: CanvasEditorRuntime | undefined;
+  canvasRuntime: CanvasEditorRuntime | undefined;
   activities: WorkbenchActivityNoticeReporter;
   i18n: WorkbenchI18n;
 }
@@ -93,8 +93,8 @@ export function useProjectExplorerController(
   const [inlineEdit, setInlineEdit] = useState<ProjectTreeInlineEditState>();
   const editIntentTokenRef = useRef(0);
   const pendingCreateParentLoadRef = useRef<PendingCreateParentLoad | undefined>(undefined);
-  const activeCanvasRuntimeRef = useRef(input.activeCanvasRuntime);
-  activeCanvasRuntimeRef.current = input.activeCanvasRuntime;
+  const canvasRuntimeRef = useRef(input.canvasRuntime);
+  canvasRuntimeRef.current = input.canvasRuntime;
   const acceptedSnapshot = input.getSnapshot();
   const reportExplorerFailure = useCallback((operation: ExplorerActivityOperation) => {
     input.activities.report({ kind: 'explorer-operation-failed', operation });
@@ -272,7 +272,7 @@ export function useProjectExplorerController(
         return;
       }
       const canvasRuntime = current.kind === 'renaming'
-        ? input.activeCanvasRuntime
+        ? input.canvasRuntime
         : undefined;
       const canvasSelection = canvasRuntime?.getSnapshot().selection;
       const canvasSelectionIntentRevision = canvasRuntime?.getSelectionIntentRevision();
@@ -284,7 +284,7 @@ export function useProjectExplorerController(
       if (
         current.kind === 'renaming'
         && canvasRuntime
-        && activeCanvasRuntimeRef.current === canvasRuntime
+        && canvasRuntimeRef.current === canvasRuntime
         && canvasRuntime.getSelectionIntentRevision() === canvasSelectionIntentRevision
       ) {
         canvasRuntime.setSelection(rewriteCanvasSelectionAfterPathChanges(
@@ -303,7 +303,7 @@ export function useProjectExplorerController(
         setInlineEdit({ ...current, submitting: false, error: errorMessage(error) });
       }
     }
-  }, [commandEffects, inlineEdit, input.activeCanvasRuntime, input.i18n, requestDirectory]);
+  }, [commandEffects, inlineEdit, input.canvasRuntime, input.i18n, requestDirectory]);
 
   const cancelEdit = useCallback(() => {
     editIntentTokenRef.current += 1;
@@ -343,7 +343,7 @@ export function useProjectExplorerController(
     targetDirectoryProjectRelativePath: string;
     overwrite?: boolean;
   }, scope: AcceptedProjectPathCommandScope): Promise<boolean> => {
-    const canvasRuntime = input.activeCanvasRuntime;
+    const canvasRuntime = input.canvasRuntime;
     const canvasSelection = canvasRuntime?.getSnapshot().selection;
     const canvasSelectionIntentRevision = canvasRuntime?.getSelectionIntentRevision();
     const request = commandEffects.moveProjectPaths(scope, moveInput);
@@ -355,7 +355,7 @@ export function useProjectExplorerController(
     if (
       applied
       && canvasRuntime
-      && activeCanvasRuntimeRef.current === canvasRuntime
+      && canvasRuntimeRef.current === canvasRuntime
       && canvasRuntime.getSelectionIntentRevision() === canvasSelectionIntentRevision
     ) {
       canvasRuntime.setSelection(
@@ -363,7 +363,7 @@ export function useProjectExplorerController(
       );
     }
     return applied;
-  }, [applyBatchResult, commandEffects, input.activeCanvasRuntime]);
+  }, [applyBatchResult, commandEffects, input.canvasRuntime]);
 
   const pasteEntries = useCallback((scope: AcceptedProjectPathCommandScope, pasteInput: {
     clipboard: WorkbenchFileClipboard;
@@ -407,9 +407,9 @@ export function useProjectExplorerController(
     snapshot: WorkbenchProjectSessionSnapshot
   ) => {
     const deletedPaths = entries.map((entry) => entry.projectRelativePath);
-    if (input.activeCanvasRuntime) {
-      const currentSelection = input.activeCanvasRuntime.getSnapshot().selection;
-      input.activeCanvasRuntime.setSelection(deletedPaths.reduce(
+    if (input.canvasRuntime) {
+      const currentSelection = input.canvasRuntime.getSnapshot().selection;
+      input.canvasRuntime.setSelection(deletedPaths.reduce(
         (current, deletedPath) => clearCanvasSelectionAfterDeletedPath(current, deletedPath),
         currentSelection
       ));
@@ -428,7 +428,7 @@ export function useProjectExplorerController(
       (clipboard, deletedPath) => clearClipboardAfterDeletedPath(clipboard, deletedPath),
       current
     ));
-  }, [input.activeCanvasRuntime]);
+  }, [input.canvasRuntime]);
 
   const deleteEntries = useCallback((
     scope: AcceptedProjectPathCommandScope,

@@ -27,8 +27,8 @@ Feedback targets ordinary Project files outside `.debrute`.
 ## Canvas
 
 Canvas is a visual file manager for one Project. Every Project Tree entry
-belongs to every Canvas. Folder Disclosure controls which descendants are
-visible independently on each Canvas; Explorer expansion remains independent.
+belongs to the Canvas. Folder Disclosure controls which descendants are
+visible; Explorer expansion remains independent.
 
 Canvas state is one Runtime-global document per canonical root:
 
@@ -38,12 +38,11 @@ Canvas state is one Runtime-global document per canonical root:
 
 `rootKey` is the lowercase SHA-256 of the canonical-root UTF-8 bytes. The
 document repeats `canonicalRoot` so Runtime can reject a mismatched bucket. It
-contains `activeCanvasId` and an ordered `canvases` array; each Canvas contains
-its ID, Name, Folder Disclosure, sparse node-local state, and bottom-to-top
-`occlusionOrder`. It does not persist Project membership, hierarchy, node kind,
-Automatic Layout, Selection, camera, or drag drafts.
+contains Folder Disclosure, sparse node-local state, and bottom-to-top
+`occlusionOrder` directly. It does not persist Project membership, hierarchy,
+node kind, Automatic Layout, Selection, camera, or drag drafts.
 
-Explorer file double-click and Reveal in Canvas disclose the active Canvas's
+Explorer file double-click and Reveal in Canvas disclose the Canvas's
 ancestors, center the target, focus Canvas, select it, and apply the ordinary
 selection raise rule. Canvas folder click toggles disclosure on pointer-up when
 movement stays within the activation threshold; dragging performs Manual
@@ -60,7 +59,7 @@ until the next successful related path mutation.
 Invalid, unreadable, or root-mismatched Canvas state remains unchanged but does
 not block the Project. Explorer, editor, and terminal remain available while
 the whole Canvas workspace is unavailable with one exact code and message. The
-user may explicitly reset it to one default `Main` Canvas without a second
+user may explicitly reset it to default empty Canvas state without a second
 confirmation or backup. Reset failure leaves Canvas unavailable.
 
 See [Canvas architecture](./canvas.md) for the complete contract.

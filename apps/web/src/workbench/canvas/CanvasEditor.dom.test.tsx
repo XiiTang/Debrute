@@ -1,7 +1,6 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CanvasCatalogEntry } from '@debrute/app-protocol';
 import type { CanvasProjection } from './CanvasScene.js';
 import type { CanvasEditorActions } from './CanvasSceneActions.js';
 import { CanvasEditor } from './CanvasEditor.js';
@@ -26,9 +25,7 @@ describe('CanvasEditor', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = canvasFixture('memoized-scene');
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [],
       edges: [],
       diagnostics: []
@@ -39,7 +36,6 @@ describe('CanvasEditor', () => {
       await act(async () => {
         root.render(
           <CanvasEditor
-            canvas={canvas}
             projection={projection}
             hasProject
             projectOpening={false}
@@ -57,7 +53,6 @@ describe('CanvasEditor', () => {
       await act(async () => {
         root.render(
           <CanvasEditor
-            canvas={canvas}
             projection={projection}
             hasProject
             projectOpenError="unrelated project-open presentation update"
@@ -80,13 +75,6 @@ describe('CanvasEditor', () => {
     }
   });
 });
-
-function canvasFixture(id: string): CanvasCatalogEntry {
-  return {
-    id,
-    name: id
-  };
-}
 
 const actions: CanvasEditorActions = {
   readProjectTextFile: async () => {

@@ -426,29 +426,11 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             get(super::project_routes::feedback_get).patch(super::project_routes::feedback_patch),
         )
         .route(
-            "/workbench/bindings/{binding_id}/canvases",
-            post(super::project_routes::canvas_create),
+            "/workbench/bindings/{binding_id}/canvas/reset",
+            post(super::project_routes::canvas_reset),
         )
         .route(
-            "/workbench/bindings/{binding_id}/canvases/reset-workspace",
-            post(super::project_routes::canvas_workspace_reset),
-        )
-        .route(
-            "/workbench/bindings/{binding_id}/canvases/order",
-            put(super::project_routes::canvas_reorder),
-        )
-        .route(
-            "/workbench/bindings/{binding_id}/canvases/{canvas_id}",
-            get(super::project_routes::canvas_item)
-                .patch(super::project_routes::canvas_item)
-                .delete(super::project_routes::canvas_item),
-        )
-        .route(
-            "/workbench/bindings/{binding_id}/canvases/{canvas_id}/activate",
-            post(super::project_routes::canvas_activate),
-        )
-        .route(
-            "/workbench/bindings/{binding_id}/canvases/state",
+            "/workbench/bindings/{binding_id}/canvas/state",
             patch(super::project_routes::canvas_state_patch),
         )
         .route(
@@ -734,13 +716,9 @@ async fn product_apply(
         Err(response) => return response,
     };
     let initiator = if connection.desktop.is_some() {
-        ProductUpdateInitiator::Desktop {
-            canonical_root: connection.canonical_root,
-        }
+        ProductUpdateInitiator::Desktop
     } else {
-        ProductUpdateInitiator::Browser {
-            canonical_root: connection.canonical_root,
-        }
+        ProductUpdateInitiator::Browser
     };
     product_call(&state, ProductCall::Apply(initiator), input).await
 }
@@ -1300,12 +1278,7 @@ mod tests {
                 "read-only command must remain observable: {command}"
             );
         }
-        for command in [
-            "canvas.create",
-            "operation.cancel",
-            "request.single",
-            "request.batch",
-        ] {
+        for command in ["operation.cancel", "request.single", "request.batch"] {
             assert!(
                 cli_request_requires_product_work(&json!({ "command": command })),
                 "mutating command must participate in Product work drain: {command}"

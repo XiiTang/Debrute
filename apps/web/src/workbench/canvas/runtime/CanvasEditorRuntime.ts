@@ -117,7 +117,6 @@ export interface CanvasInputController {
 }
 
 export interface CanvasEditorRuntime {
-  readonly canvasId: string;
   readonly camera: CanvasCameraController;
   readonly coordinates: CanvasCoordinateSystem;
   readonly input: CanvasInputController;
@@ -215,7 +214,6 @@ interface GestureState {
 }
 
 export function createCanvasEditorRuntime(initial: {
-  canvasId: string;
   initialProjection: CanvasProjection;
   submitManualLayout(mutation: {
     interaction: 'move' | 'resize';
@@ -237,7 +235,6 @@ export function createCanvasEditorRuntime(initial: {
     new Set(initial.initialProjection.nodes.map((node) => node.projectRelativePath))
   );
   const manualLayoutLifecycle = createCanvasManualLayoutLifecycle({
-    canvasId: initial.canvasId,
     initialProjection: initial.initialProjection,
     submitManualLayout: (mutation) => initial.submitManualLayout({
       ...mutation,
@@ -469,7 +466,7 @@ export function createCanvasEditorRuntime(initial: {
   const presentedNode = (projectRelativePath: string): ProjectedCanvasNode => {
     const node = scenePresentation.getPresentedNodes().get(projectRelativePath);
     if (!node) {
-      throw new Error(`Canvas node ${projectRelativePath} is not present in ${initial.canvasId}.`);
+      throw new Error(`Canvas node is not present: ${projectRelativePath}`);
     }
     return node;
   };
@@ -715,9 +712,6 @@ export function createCanvasEditorRuntime(initial: {
     if (projection === acceptedProjection) {
       return;
     }
-    if (projection.canvasId !== initial.canvasId) {
-      throw new Error(`Canvas editor runtime for ${initial.canvasId} cannot accept Projection ${projection.canvasId}.`);
-    }
     const currentPaths = new Set(projection.nodes.map((node) => node.projectRelativePath));
     const previousPointerInteraction = state.pointerInteraction;
     const previousSelection = state.selection;
@@ -784,7 +778,6 @@ export function createCanvasEditorRuntime(initial: {
   };
 
   const runtime: CanvasEditorRuntime = {
-    canvasId: initial.canvasId,
     camera: cameraController,
     coordinates,
     scene: scenePresentation,

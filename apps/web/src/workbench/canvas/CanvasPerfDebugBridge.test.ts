@@ -353,7 +353,6 @@ function monitor(input: {
 
 function snapshot(): DebruteCanvasPerfCanvasSnapshot {
   return {
-    canvasId: 'canvas-1',
     camera: { x: 10, y: 20, z: 1.25 },
     cameraState: 'idle',
     mountedNodeCount: 8,

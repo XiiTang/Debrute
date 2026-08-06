@@ -69,10 +69,10 @@ pub trait RuntimeProductHttpService: Send + Sync {
     ) -> Result<Value, RuntimeHttpServiceError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProductUpdateInitiator {
-    Desktop { canonical_root: Option<String> },
-    Browser { canonical_root: Option<String> },
+    Desktop,
+    Browser,
 }
 
 pub trait RuntimeCliHttpService: Send + Sync {
@@ -1225,14 +1225,10 @@ pub fn public_project_snapshot(
     snapshot: &crate::project::ProjectSnapshot,
     binding_id: &str,
 ) -> Result<Value, RuntimeHttpServiceError> {
-    let active_canvas_resources = match &snapshot.canvas_workspace {
+    let canvas_resources = match &snapshot.canvas_workspace {
         crate::project::CanvasWorkspaceSnapshot::Available {
-            active_canvas_resources,
-            ..
-        } => Some(public_canvas_resource_view(
-            active_canvas_resources,
-            binding_id,
-        )?),
+            canvas_resources, ..
+        } => Some(public_canvas_resource_view(canvas_resources, binding_id)?),
         crate::project::CanvasWorkspaceSnapshot::Unavailable { .. } => None,
     };
     let mut value = serde_json::to_value(snapshot)
@@ -1255,7 +1251,7 @@ pub fn public_project_snapshot(
             )
         })?;
     health.remove("runtimeDataLocation");
-    if let Some(active_canvas_resources) = active_canvas_resources {
+    if let Some(canvas_resources) = canvas_resources {
         let canvas_workspace = object
             .get_mut("canvasWorkspace")
             .and_then(Value::as_object_mut)
@@ -1266,7 +1262,7 @@ pub fn public_project_snapshot(
                     "Available Canvas workspace did not serialize to an object.",
                 )
             })?;
-        canvas_workspace.insert("activeCanvasResources".to_owned(), active_canvas_resources);
+        canvas_workspace.insert("canvasResources".to_owned(), canvas_resources);
     }
     Ok(value)
 }

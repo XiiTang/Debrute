@@ -9,15 +9,11 @@ export function canvasPreviewContinuityKey(input: CanvasPreviewOwner & {
 }): CanvasPreviewContinuityKey {
   assertNonEmptyString(input.bindingId, 'Canvas preview continuity Binding ID must be non-empty.');
   assertNonEmptyString(input.projectRelativePath, 'Canvas preview continuity Project path must be non-empty.');
-  if (input.canvasId !== undefined) {
-    assertNonEmptyString(input.canvasId, 'Canvas preview continuity Canvas ID must be non-empty.');
-  }
   assertNonEmptyString(input.continuityIdentity, 'Canvas preview continuity identity must be non-empty.');
   return JSON.stringify([
     'canvas-preview-continuity-v1',
     input.mediaKind,
     input.bindingId,
-    input.canvasId ?? null,
     input.projectRelativePath,
     input.continuityIdentity
   ]) as CanvasPreviewContinuityKey;

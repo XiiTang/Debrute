@@ -12,13 +12,11 @@ export interface CanvasLayoutOverride {
 }
 
 export interface CanvasManualLayoutDraft {
-  canvasId: string;
   interaction: 'move' | 'resize';
   nodeLayouts: CanvasLayoutOverride[];
 }
 
 export function canvasManualLayoutDraftFromMoveInteraction(input: {
-  canvasId: string;
   interaction: Extract<CanvasRuntimeLayoutInteraction, { kind: 'move-node' }>;
   point: CanvasPoint;
 }): CanvasManualLayoutDraft {
@@ -27,7 +25,6 @@ export function canvasManualLayoutDraftFromMoveInteraction(input: {
     y: input.point.y - input.interaction.start.y
   };
   return {
-    canvasId: input.canvasId,
     interaction: 'move',
     nodeLayouts: input.interaction.origins.map((origin) => ({
       projectRelativePath: origin.projectRelativePath,
@@ -40,7 +37,6 @@ export function canvasManualLayoutDraftFromMoveInteraction(input: {
 }
 
 export function canvasManualLayoutDraftFromResizeInteraction(input: {
-  canvasId: string;
   interaction: Extract<CanvasRuntimeLayoutInteraction, { kind: 'resize-node' }>;
   point: CanvasPoint;
 }): CanvasManualLayoutDraft {
@@ -55,7 +51,6 @@ export function canvasManualLayoutDraftFromResizeInteraction(input: {
     input.interaction.preserveAspect
   );
   return {
-    canvasId: input.canvasId,
     interaction: 'resize',
     nodeLayouts: [{
       projectRelativePath: input.interaction.node.projectRelativePath,
@@ -68,18 +63,15 @@ export function canvasManualLayoutDraftFromResizeInteraction(input: {
 }
 
 export function canvasManualLayoutDraftFromInteraction(input: {
-  canvasId: string;
   interaction: CanvasRuntimeLayoutInteraction;
   point: CanvasPoint;
 }): CanvasManualLayoutDraft {
   return input.interaction.kind === 'move-node'
     ? canvasManualLayoutDraftFromMoveInteraction({
-        canvasId: input.canvasId,
         interaction: input.interaction,
         point: input.point
       })
     : canvasManualLayoutDraftFromResizeInteraction({
-        canvasId: input.canvasId,
         interaction: input.interaction,
         point: input.point
       });

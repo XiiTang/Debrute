@@ -80,8 +80,8 @@ export function createProjectPathCommandRouter(input: {
         copyProjectPathsToSystemClipboard: (clipboardInput) => (
           input.commandEffects.copyProjectPathsToSystemClipboard(scope, clipboardInput)
         ),
-        resetCanvasNodeLayouts: (canvasId, nodePaths) => scope.canSubmit()
-          ? input.commandContext.resetCanvasNodeLayouts(canvasId, nodePaths)
+        resetCanvasNodeLayouts: (nodePaths) => scope.canSubmit()
+          ? input.commandContext.resetCanvasNodeLayouts(nodePaths)
           : undefined,
         openTerminalPanel: (cwdProjectRelativePath) => {
           input.openTerminalPanel(scope, cwdProjectRelativePath);

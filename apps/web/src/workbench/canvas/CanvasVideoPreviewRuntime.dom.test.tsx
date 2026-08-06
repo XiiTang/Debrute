@@ -37,22 +37,17 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
   });
 
   it('targets available videos with integer millisecond frame identity', () => {
-    expect(canvasVideoPreviewTargetsForNodes({
-      canvasId: 'canvas-1',
-      nodes: [
+    expect(canvasVideoPreviewTargetsForNodes([
         videoNode('media/a.mp4', 'rev-a', 4_250),
         videoNode('media/b.mp4', 'rev-b'),
         { ...videoNode('media/c.mp4', 'rev-c'), availability: { state: 'missing', message: 'missing' } }
-      ]
-    })).toEqual([{
+      ])).toEqual([{
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'media/a.mp4',
       sourceRevision: 'rev-a',
       frameTimeMs: 4_250
     }, {
       bindingId: 'p',
-      canvasId: 'canvas-1',
       projectRelativePath: 'media/b.mp4',
       sourceRevision: 'rev-b',
       frameTimeMs: 0
@@ -60,15 +55,12 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
   });
 
   it('rejects a video target whose raw-file URL is outside the Runtime contract', () => {
-    expect(() => canvasVideoPreviewTargetsForNodes({
-      canvasId: 'canvas-1',
-      nodes: [videoNode(
+    expect(() => canvasVideoPreviewTargetsForNodes([videoNode(
         'media/a.mp4',
         'rev-a',
         0,
         'http://127.0.0.1:17321/api/workbench/bindings/p/files/raw/media/a.mp4?v=rev-a'
-      )]
-    })).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
+      )])).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
   });
 
   it('keeps pending Probe work paused during interaction and resumes it afterward', async () => {
@@ -131,7 +123,7 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
 
     expect(ensure).not.toHaveBeenCalled();
     expect(previewSrc()).toBe(
-      '/api/workbench/bindings/p/canvas-video-preview?canvasId=canvas-1&path=media%2Fa.mp4&sourceRevision=rev-a&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
+      '/api/workbench/bindings/p/canvas-video-preview?path=media%2Fa.mp4&sourceRevision=rev-a&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
     );
   });
 
@@ -155,7 +147,6 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
 
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(ensure.mock.calls[0]?.[0]).toEqual({
-      canvasId: 'canvas-1',
       target: {
         projectRelativePath: 'media/a.mp4',
         sourceRevision: 'rev-a',
@@ -415,7 +406,6 @@ async function renderVideoPreviewProvider(input: {
     });
     root?.render(
       <CanvasVideoPreviewProvider
-        canvasId="canvas-1"
         nodes={nodes}
         activeVideoPaths={new Set()}
         actions={input.actions}

@@ -21,7 +21,7 @@ describe('public product documentation contract', () => {
   });
 
   it('describes Canvas as a Project Tree projection with sparse state', () => {
-    expect(combined).toContain('Every regular Project file and directory belongs to every Canvas');
+    expect(combined).toContain('Every regular Project file and directory belongs to the Canvas');
     expect(combined).toContain('`occlusionOrder` contains only visible nodes');
   });
 });

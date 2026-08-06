@@ -83,7 +83,6 @@ describe('CanvasEditorRuntime scene', () => {
 
 function createRuntime(initialProjection: CanvasProjection) {
   return createCanvasEditorRuntime({
-    canvasId: initialProjection.canvasId,
     initialProjection,
     submitManualLayout: async () => undefined
   });
@@ -93,7 +92,7 @@ function projection(
   nodes: ProjectedCanvasNode[],
   edges: CanvasProjection['edges'] = []
 ): CanvasProjection {
-  return { canvasId: 'canvas', nodes, edges, diagnostics: [] };
+  return { nodes, edges, diagnostics: [] };
 }
 
 function edge(id: string, sourceProjectRelativePath: string, targetProjectRelativePath: string) {

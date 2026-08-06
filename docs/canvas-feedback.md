@@ -17,7 +17,7 @@ The document is keyed by normalized project-relative path and stores only
 current entries. Missing storage means empty feedback. An entry is omitted when
 it has neither Feedback Marks nor Feedback Items. Feedback stays outside the
 Runtime-global Canvas Workspace so the same Project Path target keeps one
-review state across Canvas views and can be read by external Agents through
+review state independently of Canvas presentation and can be read by external Agents through
 ordinary filesystem access. `.debrute/` is ordinary visible Project content;
 Canvas and Explorer can disclose this document like any other visible file.
 
@@ -106,9 +106,8 @@ current placement immediately, a different node remains hidden until the new
 placement is written, and an empty result leaves the old Bar hidden until its
 ordinary target-loss clear completes. An active Canvas pointer interaction
 retains the existing target-loss lifecycle. A pending pointer interaction still
-retains its hover target.
-Every Canvas
-Node, including directories and the Project root, gets the fixed Feedback Marks
+retains its hover target. Every Canvas Node, including directories and the
+Project root, gets the fixed Feedback Marks
 and a node-comment authoring affordance. Image files also get pin and rectangle
 tools. Video files get moment-comment, moment-pin, and moment-rectangle tools
 only while a mounted player can supply a real timestamp.

@@ -7,7 +7,6 @@ export function canvasVideoPreviewUrl(input: {
   width: number;
 }): string {
   const params = new URLSearchParams({
-    canvasId: input.target.canvasId,
     path: input.target.projectRelativePath,
     sourceRevision: input.target.sourceRevision,
     frameTimeMs: String(input.target.frameTimeMs),

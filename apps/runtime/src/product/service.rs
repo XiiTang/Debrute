@@ -24,7 +24,7 @@ use crate::{
 use super::{
     CommitPhase, NativeUpdatePlatform, ProductCommitCoordinator, ProductStore,
     ProductUpdateFailureStage, ReleaseArchitecture, ReleaseAssetKind, ReleasePlatform,
-    ResumeIntent, ResumeTarget, TrustedReleaseManifest, extract_product_archive,
+    ResumeIntent, TrustedReleaseManifest, extract_product_archive,
     release::{GitHubProductReleaseSource, ProductReleaseSource},
 };
 
@@ -52,11 +52,6 @@ struct ProductProjection {
     available: Option<TrustedReleaseManifest>,
 }
 
-enum ProductResumeSource {
-    Desktop { target: ResumeTarget },
-    Browser { target: ResumeTarget },
-}
-
 #[derive(Clone, Copy)]
 enum DiscoveryOrigin {
     Automatic,
@@ -81,12 +76,6 @@ enum CommittingStage {
 enum InstallFailureStage {
     Preparing,
     Committing,
-}
-
-fn resume_target(canonical_root: Option<String>) -> ResumeTarget {
-    canonical_root.map_or(ResumeTarget::Root, |canonical_root| ResumeTarget::Project {
-        canonical_root,
-    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -476,21 +465,10 @@ impl RuntimeProductService {
         result
     }
 
-    fn resolve_resume_source(initiator: ProductUpdateInitiator) -> ProductResumeSource {
+    fn resume_intent(initiator: ProductUpdateInitiator) -> ResumeIntent {
         match initiator {
-            ProductUpdateInitiator::Desktop { canonical_root } => ProductResumeSource::Desktop {
-                target: resume_target(canonical_root),
-            },
-            ProductUpdateInitiator::Browser { canonical_root } => ProductResumeSource::Browser {
-                target: resume_target(canonical_root),
-            },
-        }
-    }
-
-    fn resume_intent(source: ProductResumeSource) -> ResumeIntent {
-        match source {
-            ProductResumeSource::Desktop { target } => ResumeIntent::Desktop { target },
-            ProductResumeSource::Browser { target } => ResumeIntent::Browser { target },
+            ProductUpdateInitiator::Desktop => ResumeIntent::Desktop,
+            ProductUpdateInitiator::Browser => ResumeIntent::Browser,
         }
     }
 
@@ -712,9 +690,8 @@ impl RuntimeProductHttpService for RuntimeProductService {
         let Some(release) = release else {
             return Ok(json!({ "state": self.product_state() }));
         };
-        let resume_source = Self::resolve_resume_source(initiator);
         let target_version = release.version().to_owned();
-        let resume_intent = Self::resume_intent(resume_source);
+        let resume_intent = Self::resume_intent(initiator);
         let service = Arc::clone(&self);
         self.start_transition(
             target_version,
@@ -800,47 +777,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn update_initiator_freezes_the_authorized_frontend_resume_target() {
+    fn update_initiator_freezes_the_authorized_resume_surface() {
         for (initiator, expected) in [
-            (
-                ProductUpdateInitiator::Desktop {
-                    canonical_root: Some("desktop-project".to_owned()),
-                },
-                ResumeIntent::Desktop {
-                    target: ResumeTarget::Project {
-                        canonical_root: "desktop-project".to_owned(),
-                    },
-                },
-            ),
-            (
-                ProductUpdateInitiator::Desktop {
-                    canonical_root: None,
-                },
-                ResumeIntent::Desktop {
-                    target: ResumeTarget::Root,
-                },
-            ),
-            (
-                ProductUpdateInitiator::Browser {
-                    canonical_root: Some("browser-project".to_owned()),
-                },
-                ResumeIntent::Browser {
-                    target: ResumeTarget::Project {
-                        canonical_root: "browser-project".to_owned(),
-                    },
-                },
-            ),
-            (
-                ProductUpdateInitiator::Browser {
-                    canonical_root: None,
-                },
-                ResumeIntent::Browser {
-                    target: ResumeTarget::Root,
-                },
-            ),
+            (ProductUpdateInitiator::Desktop, ResumeIntent::Desktop),
+            (ProductUpdateInitiator::Browser, ResumeIntent::Browser),
         ] {
-            let source = RuntimeProductService::resolve_resume_source(initiator);
-            assert_eq!(RuntimeProductService::resume_intent(source), expected);
+            assert_eq!(RuntimeProductService::resume_intent(initiator), expected);
         }
     }
 

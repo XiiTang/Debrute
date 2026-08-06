@@ -2,7 +2,6 @@ import React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { Boxes } from '../ui/index.js';
 import type {
-  CanvasCatalogEntry,
   CanvasFeedbackDocument,
   CanvasState
 } from '@debrute/app-protocol';
@@ -23,7 +22,6 @@ const EMPTY_CANVAS_STATE: CanvasState = {
 };
 
 export function CanvasEditor({
-  canvas,
   canvasState,
   projection,
   hasProject,
@@ -43,7 +41,6 @@ export function CanvasEditor({
   onOpenContextMenu,
   interactionBlocked = false,
 }: {
-  canvas: CanvasCatalogEntry | undefined;
   canvasState?: CanvasState | undefined;
   projection: CanvasProjection | undefined;
   hasProject: boolean;
@@ -64,13 +61,13 @@ export function CanvasEditor({
   interactionBlocked?: boolean | undefined;
 }): React.ReactElement {
   React.useEffect(() => {
-    if (!canvas || !projection) {
+    if (!projection) {
       feedbackInteraction?.handleTargetChange(undefined);
       onRuntimeChange?.(undefined);
     }
-  }, [canvas, feedbackInteraction, onRuntimeChange, projection]);
+  }, [feedbackInteraction, onRuntimeChange, projection]);
 
-  if (!canvas || !projection) {
+  if (!projection) {
     return (
       <EmptyCanvas
         hasProject={hasProject}
@@ -84,7 +81,6 @@ export function CanvasEditor({
 
   return (
     <CanvasScene
-      canvas={canvas}
       canvasState={canvasState ?? EMPTY_CANVAS_STATE}
       projection={projection}
       actions={actions}
@@ -104,7 +100,6 @@ export function CanvasEditor({
 }
 
 interface CanvasSceneProps {
-  canvas: CanvasCatalogEntry;
   canvasState: CanvasState;
   projection: CanvasProjection;
   actions: CanvasSceneActions;
@@ -122,7 +117,6 @@ interface CanvasSceneProps {
 }
 
 const CanvasScene = React.memo(function CanvasScene({
-  canvas,
   canvasState,
   projection,
   actions,
@@ -138,13 +132,12 @@ const CanvasScene = React.memo(function CanvasScene({
   onOpenContextMenu,
   interactionBlocked = false
 }: CanvasSceneProps): React.ReactElement {
-  const runtimeKey = `${canvas.id}\u001f${projection.canvasId}\u001f${runtimeScopeKey ?? 0}`;
+  const runtimeKey = String(runtimeScopeKey ?? 0);
   const actionsRef = React.useRef(actions);
   actionsRef.current = actions;
   const runtimeInput: Parameters<typeof createCanvasEditorRuntime>[0] = {
-    canvasId: canvas.id,
     initialProjection: projection,
-    submitManualLayout: (mutation) => actionsRef.current.updateCanvasNodeLayouts(canvas.id, {
+    submitManualLayout: (mutation) => actionsRef.current.updateCanvasNodeLayouts({
       interaction: mutation.interaction,
       selectedProjectRelativePaths: [...mutation.selectedProjectRelativePaths],
       nodeLayouts: [...mutation.nodeLayouts]
@@ -178,8 +171,7 @@ const CanvasScene = React.memo(function CanvasScene({
   return (
     <section className="canvas-shell">
       <CanvasSurface
-      canvas={canvas}
-      canvasState={canvasState}
+        canvasState={canvasState}
         projection={projection}
         runtime={runtime}
         actions={actions}

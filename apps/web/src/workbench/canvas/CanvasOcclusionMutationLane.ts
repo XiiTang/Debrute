@@ -1,19 +1,13 @@
 export interface CanvasOcclusionMutationLane {
-  run<Result>(canvasId: string, mutation: () => Promise<Result>): Promise<Result>;
+  run<Result>(mutation: () => Promise<Result>): Promise<Result>;
 }
 
 export function createCanvasOcclusionMutationLane(): CanvasOcclusionMutationLane {
-  const tails = new Map<string, Promise<void>>();
+  let tail = Promise.resolve();
   return {
-    run(canvasId, mutation) {
-      const result = (tails.get(canvasId) ?? Promise.resolve()).then(mutation);
-      const tail = result.then(() => undefined, () => undefined);
-      tails.set(canvasId, tail);
-      void tail.then(() => {
-        if (tails.get(canvasId) === tail) {
-          tails.delete(canvasId);
-        }
-      });
+    run(mutation) {
+      const result = tail.then(mutation);
+      tail = result.then(() => undefined, () => undefined);
       return result;
     }
   };

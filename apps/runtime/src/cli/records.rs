@@ -397,13 +397,9 @@ fn result_field_order(command: &str) -> &'static [&'static str] {
             "runtime_instance",
             "diagnostics",
         ],
-        "project.status" | "project.validate" => &[
-            "project_root",
-            "project_name",
-            "canvases",
-            "errors",
-            "warnings",
-        ],
+        "project.status" | "project.validate" => {
+            &["project_root", "project_name", "errors", "warnings"]
+        }
         "workbench.start" => &["frontend", "target", "outcome"],
         _ => &[],
     }

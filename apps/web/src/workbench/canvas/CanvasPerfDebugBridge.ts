@@ -8,7 +8,6 @@ import type {
 } from './CanvasPerfMonitor';
 
 export interface DebruteCanvasPerfCanvasSnapshot {
-  canvasId: string;
   camera: { x: number; y: number; z: number };
   cameraState: 'idle' | 'moving';
   mountedNodeCount: number;
@@ -206,7 +205,6 @@ function cloneCapture(capture: DebruteCanvasPerfCapture): DebruteCanvasPerfCaptu
 
 function cloneCanvasSnapshot(snapshot: DebruteCanvasPerfCanvasSnapshot): DebruteCanvasPerfCanvasSnapshot {
   return {
-    canvasId: snapshot.canvasId,
     camera: { ...snapshot.camera },
     cameraState: snapshot.cameraState,
     mountedNodeCount: snapshot.mountedNodeCount,

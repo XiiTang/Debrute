@@ -468,9 +468,7 @@ describe('CanvasEditorRuntime', () => {
 
   it('recomputes a marquee from live modifiers and every drag direction', () => {
     const runtime = createCanvasEditorRuntime({
-      canvasId: 'canvas-1',
       initialProjection: {
-        canvasId: 'canvas-1',
         nodes: [
           marqueeNode('nw.png', 50, 50),
           marqueeNode('ne.png', 110, 50),
@@ -538,9 +536,7 @@ describe('CanvasEditorRuntime', () => {
 
   it('includes edge-touching, overlapping, and offscreen Projection nodes without consulting DOM order', () => {
     const runtime = createCanvasEditorRuntime({
-      canvasId: 'canvas-1',
       initialProjection: {
-        canvasId: 'canvas-1',
         nodes: [
           { ...marqueeNode('touch.png', 20, 0), z: 1 },
           { ...marqueeNode('overlap-front.png', -40, -40), z: 20 },
@@ -581,7 +577,6 @@ describe('CanvasEditorRuntime', () => {
     });
 
     runtime.acceptProjection({
-      canvasId: 'canvas-1',
       nodes: [marqueeNode('flow/b.png', 150, 150)],
       edges: [],
       diagnostics: []
@@ -707,8 +702,7 @@ describe('CanvasEditorRuntime', () => {
       { ...canvasProjection('flow/b.png', 30).nodes[0]!, y: 40 }
     ];
     const runtime = createCanvasEditorRuntime({
-      canvasId: 'canvas-1',
-      initialProjection: { canvasId: 'canvas-1', nodes: base, edges: [], diagnostics: [] },
+      initialProjection: { nodes: base, edges: [], diagnostics: [] },
       submitManualLayout,
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
     });
@@ -811,9 +805,7 @@ describe('CanvasEditorRuntime', () => {
       { movingPath: 'right.png', deltaX: -120 }
     ]) {
       const runtime = createCanvasEditorRuntime({
-        canvasId: 'canvas-1',
         initialProjection: {
-          canvasId: 'canvas-1',
           nodes: [
             { ...canvasProjection('left.png', 0).nodes[0]!, z: 0 },
             { ...canvasProjection('right.png', 120).nodes[0]!, z: 1 }
@@ -874,7 +866,6 @@ describe('CanvasEditorRuntime', () => {
 
   it('starts a later drag from the Manual Layout geometry currently presented to the user', async () => {
     const runtime = createCanvasEditorRuntime({
-      canvasId: 'canvas-1',
       initialProjection: canvasProjection('flow/a.png', 0),
       submitManualLayout: async () => undefined
     });
@@ -902,7 +893,6 @@ describe('CanvasEditorRuntime', () => {
     const request = deferred<void>();
     const submitManualLayout = vi.fn(() => request.promise);
     const runtime = createCanvasEditorRuntime({
-      canvasId: 'canvas-1',
       initialProjection: canvasProjection('flow/a.png', 0),
       submitManualLayout
     });
@@ -956,7 +946,6 @@ describe('CanvasEditorRuntime', () => {
 
 function canvasProjection(projectRelativePath: string, x: number) {
   return {
-    canvasId: 'canvas-1',
     nodes: [{
       projectRelativePath,
       displayName: projectRelativePath,
@@ -984,9 +973,7 @@ function createRuntime(input?: {
   camera?: { x: number; y: number; z: number };
 }) {
   return createCanvasEditorRuntime({
-    canvasId: 'canvas-1',
     initialProjection: {
-      canvasId: 'canvas-1',
       nodes: [
         { ...canvasProjection('flow/a.png', 10).nodes[0]!, y: 20 },
         { ...canvasProjection('flow/b.png', 30).nodes[0]!, y: 40 },
@@ -1018,9 +1005,7 @@ function createRuntime(input?: {
 
 function createMarqueeRuntime() {
   return createCanvasEditorRuntime({
-    canvasId: 'canvas-1',
     initialProjection: {
-      canvasId: 'canvas-1',
       nodes: [
         marqueeNode('flow/a.png', 20, 20),
         marqueeNode('flow/b.png', 150, 150)

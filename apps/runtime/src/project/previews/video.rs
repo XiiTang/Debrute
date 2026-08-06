@@ -184,14 +184,13 @@ impl CanvasVideoPreviewService {
     pub fn probe_sources(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         targets: &[CanvasVideoPreviewTarget],
         cancellation: &PreviewCancellation,
     ) -> Result<Vec<CanvasVideoPreviewProbeView>, ProjectError> {
         let mut result = Vec::with_capacity(targets.len());
         for target in targets.iter().cloned() {
             cancellation.check()?;
-            let status = match self.probe_source(project_root, canvas_id, &target, cancellation) {
+            let status = match self.probe_source(project_root, &target, cancellation) {
                 Ok(status) => status,
                 Err(error) if error.code() == "canvas_preview_cancelled" => return Err(error),
                 Err(error) => CanvasVideoPreviewProbeStatus::Failed {
@@ -210,7 +209,6 @@ impl CanvasVideoPreviewService {
     pub fn ensure_source(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         target: &CanvasVideoPreviewTarget,
         canonical_source_identity: &str,
         cancellation: &PreviewCancellation,
@@ -220,7 +218,6 @@ impl CanvasVideoPreviewService {
         }
         match self.ensure_source_inner(
             project_root,
-            canvas_id,
             target,
             canonical_source_identity,
             cancellation,
@@ -253,14 +250,12 @@ impl CanvasVideoPreviewService {
     pub fn resolve_variant(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         target: &CanvasVideoPreviewTarget,
         canonical_source_identity: &str,
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
         let directory = video_source_directory(
-            canvas_id,
             &target.project_relative_path,
             &target.source_revision,
             canonical_source_identity,
@@ -277,7 +272,6 @@ impl CanvasVideoPreviewService {
                         target.project_relative_path
                     ),
                     [
-                        ("canvas_id".to_owned(), canvas_id.to_owned()),
                         (
                             "project_relative_path".to_owned(),
                             target.project_relative_path.clone(),
@@ -316,7 +310,6 @@ impl CanvasVideoPreviewService {
     fn probe_source(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         target: &CanvasVideoPreviewTarget,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasVideoPreviewProbeStatus, ProjectError> {
@@ -324,7 +317,6 @@ impl CanvasVideoPreviewService {
         assert_source_revision(project_root, target)?;
         let canonical_source_identity = frame_canonical_source_identity(target.frame_time_ms)?;
         let directory = video_source_directory(
-            canvas_id,
             &target.project_relative_path,
             &target.source_revision,
             &canonical_source_identity,
@@ -348,7 +340,6 @@ impl CanvasVideoPreviewService {
     fn ensure_source_inner(
         &self,
         project_root: &Path,
-        canvas_id: &str,
         target: &CanvasVideoPreviewTarget,
         canonical_source_identity: &str,
         cancellation: &PreviewCancellation,
@@ -357,7 +348,7 @@ impl CanvasVideoPreviewService {
         assert_source_revision(project_root, target)?;
         assert_canonical_source_identity_current(target, canonical_source_identity)?;
         let key = format!(
-            "{}\0{canvas_id}\0{}\0{}\0{canonical_source_identity}",
+            "{}\0{}\0{}\0{canonical_source_identity}",
             project_root.display(),
             target.project_relative_path,
             target.source_revision
@@ -366,7 +357,6 @@ impl CanvasVideoPreviewService {
         assert_source_revision(project_root, target)?;
         assert_canonical_source_identity_current(target, canonical_source_identity)?;
         let directory = video_source_directory(
-            canvas_id,
             &target.project_relative_path,
             &target.source_revision,
             canonical_source_identity,
@@ -871,23 +861,12 @@ fn assert_source_revision(
 }
 
 fn video_source_directory(
-    canvas_id: &str,
     video_path: &str,
     revision: &str,
     canonical_source_identity: &str,
 ) -> Result<String, ProjectError> {
-    if canvas_id.is_empty()
-        || matches!(canvas_id, "." | "..")
-        || !canvas_id.bytes().enumerate().all(|(index, byte)| {
-            byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'_' | b'.' | b'-'))
-        })
-    {
-        return Err(ProjectError::Validation(
-            "Canvas video preview canvas id must be a valid id.".to_owned(),
-        ));
-    }
     Ok(format!(
-        "canvas-video-previews/{canvas_id}/{}/{}/{}",
+        "canvas-video-previews/{}/{}/{}",
         project_relative_path_cache_key(video_path)?,
         project_revision_cache_key(revision)?,
         validate_cache_segment(
@@ -922,16 +901,10 @@ mod tests {
     }
 
     #[test]
-    fn source_identity_includes_canvas_path_revision_and_runtime_key() {
+    fn source_identity_includes_path_revision_and_runtime_key() {
         assert_eq!(
-            video_source_directory(
-                "canvas-1",
-                "assets/clip.mp4",
-                "1000:20",
-                "frame-v1--ms-1500",
-            )
-            .unwrap(),
-            "canvas-video-previews/canvas-1/assets%2Fclip.mp4--b00959a8cfb7dc12/1000%3A20/frame-v1--ms-1500"
+            video_source_directory("assets/clip.mp4", "1000:20", "frame-v1--ms-1500").unwrap(),
+            "canvas-video-previews/assets%2Fclip.mp4--b00959a8cfb7dc12/1000%3A20/frame-v1--ms-1500"
         );
     }
 
@@ -1015,7 +988,6 @@ mod tests {
         let sources = service
             .probe_sources(
                 &root,
-                "canvas-1",
                 std::slice::from_ref(&target),
                 &PreviewCancellation::default(),
             )

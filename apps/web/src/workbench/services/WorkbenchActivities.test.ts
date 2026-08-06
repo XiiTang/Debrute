@@ -102,7 +102,7 @@ describe('WorkbenchActivities', () => {
 
     scoped.report({ kind: 'canvas-operation-failed', operation: 'save-layout' });
     current = false;
-    scoped.report({ kind: 'canvas-operation-failed', operation: 'delete' });
+    scoped.report({ kind: 'canvas-operation-failed', operation: 'reset-layout' });
 
     expect(report).toHaveBeenCalledOnce();
     expect(report).toHaveBeenCalledWith({

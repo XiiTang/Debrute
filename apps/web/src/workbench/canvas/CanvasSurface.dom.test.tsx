@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  type CanvasCatalogEntry,
   type CanvasFeedbackDocument,
   type CanvasState
 } from '@debrute/app-protocol';
@@ -82,13 +81,6 @@ const {
     lastUpdatePlaybackTime: undefined as undefined | ((projectRelativePath: string, currentTimeMs: number) => void | Promise<void>)
   }
 }));
-
-function createCanvasDocument(input: { id: string }): CanvasCatalogEntry {
-  return {
-    id: input.id,
-    name: input.id
-  };
-}
 
 vi.mock('./CanvasVideoNodeContent', async () => {
   const ReactModule = await import('react');
@@ -182,15 +174,13 @@ describe('CanvasSurface', () => {
   });
 
   it('renders projected nodes without delete controls', () => {
-    const canvas = createCanvasDocument({ id: 'node-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('image-production/cover.png', 120, 80)],
       edges: [],
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       selection: { kind: 'nodes', projectRelativePaths: ['image-production/cover.png'] }
     }));
 
@@ -204,9 +194,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'repeat-selection-raise' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
       diagnostics: []
@@ -218,7 +206,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, {
+        root.render(surface(projection, {
           runtime,
           actions: { ...actions, raiseCanvasSelection }
         }));
@@ -245,7 +233,6 @@ describe('CanvasSurface', () => {
 
       expect(raiseCanvasSelection).toHaveBeenCalledTimes(1);
       expect(raiseCanvasSelection).toHaveBeenCalledWith({
-        canvasId: canvas.id,
         projectRelativePaths: ['flow/a.png']
       });
     } finally {
@@ -259,9 +246,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'manual-layout-single-raise' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
       diagnostics: []
@@ -271,7 +256,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, {
+        root.render(surface(projection, {
           runtime,
           actions: { ...actions, raiseCanvasSelection }
         }));
@@ -299,9 +284,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'directory-click' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [directoryFixture('', 10, 10)],
       edges: [],
       diagnostics: []
@@ -312,7 +295,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, {
+        root.render(surface(projection, {
           runtime,
           actions: { ...actions, setCanvasDirectoryExpanded },
           canvasState: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] }
@@ -367,9 +350,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'camera-hit-test-blocker' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/cover.png', 0, 0)],
       edges: [],
       diagnostics: []
@@ -378,7 +359,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, { runtime }));
+        root.render(surface(projection, { runtime }));
       });
       const blocker = container.querySelector<HTMLElement>('[data-canvas-hit-test-blocker="true"]');
       expect(blocker?.classList.contains('hidden')).toBe(true);
@@ -407,9 +388,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'camera-hover-gate' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/a.png', 0, 0),
         nodeFixture('flow/b.png', 240, 0)
@@ -428,7 +407,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -506,9 +484,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'multi-selection-presentation' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/a.png', 0, 0),
         nodeFixture('flow/b.png', 240, 0),
@@ -524,7 +500,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, { runtime, cutPaths: ['flow/b.png'] }));
+        root.render(surface(projection, { runtime, cutPaths: ['flow/b.png'] }));
       });
 
       expect(container.querySelectorAll('.canvas-node-shell[data-canvas-selected="true"]')).toHaveLength(2);
@@ -551,9 +527,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'marquee-adapter' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
       diagnostics: []
@@ -568,7 +542,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -677,7 +650,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -705,9 +677,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'active-move-hit-test' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/a.png', 10, 10)],
       edges: [],
       diagnostics: []
@@ -717,7 +687,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, { runtime }));
+        root.render(surface(projection, { runtime }));
       });
       const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
       const nodeElement = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/a.png"]')!;
@@ -782,10 +752,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'text-pointerup-activation' });
     const node = textProjectionNode('flow/readme.md', 0, 0, 'rev-text-activation');
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [node],
       edges: [],
       diagnostics: []
@@ -798,7 +766,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -879,10 +846,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'video-pointerup-activation' });
     const node = videoProjectionNode('media/clip.mp4', 0, 0);
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [node],
       edges: [],
       diagnostics: []
@@ -891,7 +856,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, { runtime }));
+        root.render(surface(projection, { runtime }));
       });
       const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
       const videoPreview = container.querySelector<HTMLElement>('[data-testid="mock-video-node"]')!;
@@ -932,9 +897,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'context-selection' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/a.png', 0, 0),
         nodeFixture('flow/b.png', 240, 0),
@@ -954,7 +917,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1041,7 +1003,6 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'context-menu-file-facts' });
     const node = nodeFixture('data/deep/cover.png', 0, 0);
     if (node.availability.state !== 'available') {
       throw new Error('fixture must be available');
@@ -1056,7 +1017,6 @@ describe('CanvasSurface', () => {
       availability: { state: 'unreadable' as const, message: 'File is unreadable.' }
     };
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [node, missingNode, unreadableNode],
       edges: [],
       diagnostics: []
@@ -1070,7 +1030,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1184,9 +1143,7 @@ describe('CanvasSurface', () => {
   });
 
   it('uses the fixed Canvas presentation for unavailable image text without scaling available image pixels', () => {
-    const canvas = createCanvasDocument({ id: 'image-availability-presentation' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/available.png', 0, 0),
         {
@@ -1201,7 +1158,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection));
+    const html = renderToStaticMarkup(surface(projection));
     const availableMarkup = html.slice(
       html.indexOf('data-canvas-node-path="flow/available.png"'),
       html.indexOf('data-canvas-node-path="flow/unavailable.jpg"')
@@ -1216,9 +1173,7 @@ describe('CanvasSurface', () => {
   });
 
   it('keeps every current Canvas node mounted regardless of media type or viewport', () => {
-    const canvas = createCanvasDocument({ id: 'stable-nodes' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/visible.png', 0, 0),
         nodeFixture('flow/offscreen.png', 6000, 0),
@@ -1239,7 +1194,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       textFileBuffers: {
         'flow/offscreen.txt': {
           projectRelativePath: 'flow/offscreen.txt',
@@ -1261,15 +1216,13 @@ describe('CanvasSurface', () => {
   });
 
   it('keeps camera transforms out of React stage markup', () => {
-    const canvas = createCanvasDocument({ id: 'viewport-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/visible.png', 0, 0)],
       edges: [],
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       camera: { x: 120, y: 80, z: 0.5 }
     }));
 
@@ -1279,9 +1232,7 @@ describe('CanvasSurface', () => {
   });
 
   it('retains offscreen text node content so camera movement does not create it later', () => {
-    const canvas = createCanvasDocument({ id: 'retained-text' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/visible.png', 0, 0),
         {
@@ -1300,7 +1251,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       textFileBuffers: {
         'flow/notes/offscreen.md': {
           projectRelativePath: 'flow/notes/offscreen.md',
@@ -1323,9 +1274,7 @@ describe('CanvasSurface', () => {
   });
 
   it('keeps selected-only canvas text nodes as inactive preview bodies', () => {
-    const canvas = createCanvasDocument({ id: 'text-editor-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         textProjectionNode('flow/a.md', 0, 0, 'rev-a'),
         textProjectionNode('flow/b.md', 300, 0, 'rev-b')
@@ -1334,7 +1283,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
       textFileBuffers: {
         'flow/a.md': textBufferFixture('flow/a.md', '# A', 'rev-a'),
@@ -1351,9 +1300,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'selected-text-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         textProjectionNode('flow/selected.md', 0, 0, 'rev-selected'),
         textProjectionNode('flow/inactive.md', 300, 0, 'rev-inactive')
@@ -1364,7 +1311,7 @@ describe('CanvasSurface', () => {
 
     try {
       await act(async () => {
-        root.render(surface(canvas, projection, {
+        root.render(surface(projection, {
           selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.md'] },
           contentInteractionProjectRelativePath: 'flow/selected.md',
           textFileBuffers: {
@@ -1384,9 +1331,7 @@ describe('CanvasSurface', () => {
   });
 
   it('renders every text node as a preview when text nodes are multi-selected', () => {
-    const canvas = createCanvasDocument({ id: 'multi-selected-text-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         textProjectionNode('flow/a.md', 0, 0, 'rev-a'),
         textProjectionNode('flow/b.md', 300, 0, 'rev-b')
@@ -1395,7 +1340,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       selection: {
         kind: 'nodes',
         projectRelativePaths: ['flow/a.md', 'flow/b.md']
@@ -1411,9 +1356,7 @@ describe('CanvasSurface', () => {
   });
 
   it('keeps multi-selected video and audio previews interaction-inactive', () => {
-    const canvas = createCanvasDocument({ id: 'multi-selected-media-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         videoProjectionNode('media/clip.mp4', 0, 0),
         audioProjectionNode('media/theme.mp3', 700, 0)
@@ -1422,7 +1365,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       selection: {
         kind: 'nodes',
         projectRelativePaths: ['media/clip.mp4', 'media/theme.mp3']
@@ -1437,10 +1380,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'video-hotkeys' });
     const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [videoNode],
       edges: [],
       diagnostics: []
@@ -1455,7 +1396,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1484,10 +1424,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'content-active-video-hotkeys' });
     const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [videoNode],
       edges: [],
       diagnostics: []
@@ -1503,7 +1441,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1537,10 +1474,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'blocked-video-hotkeys' });
     const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [videoNode],
       edges: [],
       diagnostics: []
@@ -1556,7 +1491,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1582,7 +1516,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1622,13 +1555,11 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'video-persistence-failure' });
     const videoNode = {
       ...videoProjectionNode('media/clip.mp4', 0, 0),
       videoPlayback: { currentTimeMs: 2_500 }
     };
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [videoNode],
       edges: [],
       diagnostics: []
@@ -1643,7 +1574,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
@@ -1660,7 +1590,7 @@ describe('CanvasSurface', () => {
         await Promise.resolve();
       });
 
-      expect(updateCanvasVideoPlaybackState).toHaveBeenCalledWith(canvas.id, {
+      expect(updateCanvasVideoPlaybackState).toHaveBeenCalledWith({
         updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeMs: 8_250 }]
       });
       expect(videoRestorePersistedTimeSpy).toHaveBeenCalledWith(2_500);
@@ -1676,13 +1606,11 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'video-persistence-order' });
     const videoNode = {
       ...videoProjectionNode('media/clip.mp4', 0, 0),
       videoPlayback: { currentTimeMs: 2_500 }
     };
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [videoNode],
       edges: [],
       diagnostics: []
@@ -1699,7 +1627,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
@@ -1721,7 +1648,7 @@ describe('CanvasSurface', () => {
         await Promise.resolve();
       });
 
-      expect(updateCanvasVideoPlaybackState).toHaveBeenNthCalledWith(2, canvas.id, {
+      expect(updateCanvasVideoPlaybackState).toHaveBeenNthCalledWith(2, {
         updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeMs: 9_500 }]
       });
       expect(videoRestorePersistedTimeSpy).not.toHaveBeenCalled();
@@ -1737,10 +1664,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'video-feedback-target' });
     const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [videoNode],
       edges: [],
       diagnostics: []
@@ -1757,7 +1682,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1848,10 +1772,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'strict-text-preview' });
     const node = textProjectionNode('flow/strict.md', 0, 0, 'rev-strict');
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [node],
       edges: [],
       diagnostics: []
@@ -1868,7 +1790,6 @@ describe('CanvasSurface', () => {
             <I18nProvider locale="en">
               <CanvasSurface
                 productPlatform="darwin"
-                canvas={canvas}
                 projection={projection}
                 runtime={runtime}
                 actions={{
@@ -1897,7 +1818,6 @@ describe('CanvasSurface', () => {
       );
 
       expect(readCanvasTextPreviewSources).toHaveBeenCalledWith({
-        canvasId: canvas.id,
         sources: [expect.objectContaining({ projectRelativePath: node.projectRelativePath })]
       });
       expect(previewImage?.getAttribute('data-preview-width')).toBe('80');
@@ -1914,9 +1834,7 @@ describe('CanvasSurface', () => {
   });
 
   it('keeps every current structure edge mounted for direct viewport culling', () => {
-    const canvas = createCanvasDocument({ id: 'edge-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/a.png', 0, 0),
         nodeFixture('flow/b.png', 300, 0),
@@ -1946,7 +1864,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection));
+    const html = renderToStaticMarkup(surface(projection));
 
     expect(html).toContain('data-canvas-edge-ids="edge:both edge:one-endpoint"');
     expect(html).toContain('data-canvas-edge-ids="edge:crossing"');
@@ -1956,15 +1874,13 @@ describe('CanvasSurface', () => {
   });
 
   it('passes image feedback entries to image node markup without rendering feedback bars inside nodes', () => {
-    const canvas = createCanvasDocument({ id: 'image-feedback-layer' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       canvasFeedback: feedbackDocument({
         'flow/cover.png': {
           projectRelativePath: 'flow/cover.png',
@@ -1995,15 +1911,13 @@ describe('CanvasSurface', () => {
   });
 
   it('omits accepted spatial geometry while its current Working Copy is empty', () => {
-    const canvas = createCanvasDocument({ id: 'suppressed-image-feedback-layer' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       canvasFeedback: feedbackDocument({
         'flow/cover.png': {
           projectRelativePath: 'flow/cover.png',
@@ -2033,15 +1947,13 @@ describe('CanvasSurface', () => {
   });
 
   it('renders persistent feedback frames for node-level marks and comments without comment text', () => {
-    const canvas = createCanvasDocument({ id: 'node-feedback-frame' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       canvasFeedback: feedbackDocument({
         'flow/cover.png': {
           projectRelativePath: 'flow/cover.png',
@@ -2077,15 +1989,13 @@ describe('CanvasSurface', () => {
   });
 
   it('does not render persistent feedback frames for empty feedback entries', () => {
-    const canvas = createCanvasDocument({ id: 'empty-feedback-frame' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       canvasFeedback: feedbackDocument({
         'flow/cover.png': {
           projectRelativePath: 'flow/cover.png',
@@ -2103,9 +2013,7 @@ describe('CanvasSurface', () => {
   });
 
   it('renders persistent feedback frames for text and video nodes', () => {
-    const canvas = createCanvasDocument({ id: 'text-video-feedback-frame' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         textProjectionNode('flow/readme.md', 120, 80, 'rev-a'),
         videoProjectionNode('flow/clip.mp4', 380, 80)
@@ -2114,7 +2022,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       canvasFeedback: feedbackDocument({
         'flow/readme.md': {
           projectRelativePath: 'flow/readme.md',
@@ -2152,7 +2060,6 @@ describe('CanvasSurface', () => {
   });
 
   it('renders persistent feedback frames for audio, directory, and unknown-file nodes', () => {
-    const canvas = createCanvasDocument({ id: 'other-node-kind-feedback-frame' });
     const audioNode: CanvasProjection['nodes'][number] = {
       ...nodeFixture('flow/sound.wav', 120, 80),
       mediaKind: 'audio',
@@ -2176,7 +2083,6 @@ describe('CanvasSurface', () => {
       }
     };
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         audioNode,
         unknownNode,
@@ -2186,7 +2092,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       canvasFeedback: feedbackDocument({
         'flow/sound.wav': {
           projectRelativePath: 'flow/sound.wav',
@@ -2251,15 +2157,13 @@ describe('CanvasSurface', () => {
   });
 
   it('does not render minimap UI inside the Canvas surface layer', () => {
-    const canvas = createCanvasDocument({ id: 'minimap-layer-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [nodeFixture('flow/visible.png', 0, 0)],
       edges: [],
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection));
+    const html = renderToStaticMarkup(surface(projection));
 
     expect(html).toContain('class="canvas-surface"');
     expect(html).not.toContain('data-testid="canvas-minimap-bar"');
@@ -2294,9 +2198,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'root-feedback-target' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [directoryFixture('', 0, 0)],
       edges: [],
       diagnostics: []
@@ -2309,7 +2211,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -2374,9 +2275,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'live-selection-feedback-target' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/a.png', 0, 0),
         nodeFixture('flow/b.png', 300, 100)
@@ -2393,7 +2292,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -2436,9 +2334,7 @@ describe('CanvasSurface', () => {
   });
 
   it('does not eagerly render image src attributes before node-local image state publishes image state', () => {
-    const canvas = createCanvasDocument({ id: 'resource-previews' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: Array.from({ length: 16 }, (_item, index) => ({
         ...nodeFixture(`flow/image-${index}.png`, index * 220, 0),
         width: 2400,
@@ -2448,7 +2344,7 @@ describe('CanvasSurface', () => {
       diagnostics: []
     };
 
-    const html = renderToStaticMarkup(surface(canvas, projection, {
+    const html = renderToStaticMarkup(surface(projection, {
       camera: { x: 0, y: 0, z: 0.1 }
     }));
 
@@ -2481,10 +2377,8 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'image-preview-zoom' });
     const node = largePreviewNodeFixture('flow/large.png');
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [node],
       edges: [],
       diagnostics: []
@@ -2500,7 +2394,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -2537,9 +2430,7 @@ describe('CanvasSurface', () => {
   });
 
   it('does not wait for Canvas settings before rendering the Canvas shell', () => {
-    const canvas = createCanvasDocument({ id: 'settings-loading-canvas' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [{ ...nodeFixture('flow/cover.png', 0, 0), width: 2400, height: 1200 }],
       edges: [],
       diagnostics: []
@@ -2547,7 +2438,6 @@ describe('CanvasSurface', () => {
     const html = renderToStaticMarkup(
       <CanvasEditor
         productPlatform="darwin"
-        canvas={canvas}
         projection={projection}
         hasProject
         projectOpening={false}
@@ -2568,9 +2458,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'focused-feedback-placement' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [
         nodeFixture('flow/first.png', 0, 0),
         nodeFixture('flow/second.png', 700, 100)
@@ -2596,7 +2484,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -2642,9 +2529,7 @@ describe('CanvasSurface', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const canvas = createCanvasDocument({ id: 'missing-feedback-target' });
     const projection: CanvasProjection = {
-      canvasId: canvas.id,
       nodes: [],
       edges: [],
       diagnostics: []
@@ -2657,7 +2542,6 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvas={canvas}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -3022,7 +2906,6 @@ describe('CanvasSurface', () => {
 });
 
 function surface(
-  canvas: ReturnType<typeof createCanvasDocument>,
   projection: CanvasProjection,
   input: {
     selection?: CanvasSelection;
@@ -3046,7 +2929,6 @@ function surface(
     <I18nProvider locale="en">
       <CanvasSurface
         productPlatform="darwin"
-        canvas={canvas}
         canvasState={input.canvasState}
         projection={projection}
         runtime={runtime}
@@ -3105,7 +2987,6 @@ function canvasRuntimeFixture(
   } = {}
 ) {
   return createCanvasEditorRuntime({
-    canvasId: projection.canvasId,
     initialProjection: projection,
     submitManualLayout: async () => undefined,
     ...(input.camera ? { camera: input.camera } : {}),
@@ -3391,19 +3272,6 @@ const actions: WorkbenchActions = {
   updateCanvasTextViewportState: async () => undefined,
   setCanvasDirectoryExpanded: async () => undefined,
   raiseCanvasSelection: async () => undefined,
-  activateCanvas: async () => undefined,
-  createCanvas: async () => {
-    throw new Error('not used');
-  },
-  renameCanvas: async () => {
-    throw new Error('not used');
-  },
-  deleteCanvas: async () => {
-    throw new Error('not used');
-  },
-  reorderCanvases: async () => {
-    throw new Error('not used');
-  },
   openProject: async () => undefined
 };
 

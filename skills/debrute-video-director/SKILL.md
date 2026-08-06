@@ -35,7 +35,7 @@ Use `debrute` as the execution interface for video generation and editing.
   reference.
 - Use `--replace` only when replacing the file present at commit is intended.
 - An output inside an open Project becomes an ordinary Project Tree entry and
-  therefore belongs to every Canvas automatically. Report Artifact records and
+  therefore belongs to the Canvas automatically. Report Artifact records and
   structured errors.
 
 ## Workflow

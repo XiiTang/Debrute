@@ -164,7 +164,7 @@ function actionCommands(items: ReturnType<typeof buildWorkbenchContextMenuItems>
 }
 
 function projection(nodes: CanvasProjection['nodes']): CanvasProjection {
-  return { canvasId: 'canvas-1', nodes, edges: [], diagnostics: [] };
+  return { nodes, edges: [], diagnostics: [] };
 }
 
 function node(path: string, layoutMode?: 'manual'): CanvasProjection['nodes'][number] {

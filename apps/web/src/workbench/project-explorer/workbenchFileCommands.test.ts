@@ -167,16 +167,11 @@ function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
       status: 'available',
       workspace: {
         canonicalRoot: '/projects/project-1',
-        activeCanvasId: 'main',
-        canvases: [{
-          id: 'main',
-          name: 'Main',
-          expandedDirectories: [],
-          nodeStates: {},
-          occlusionOrder: []
-        }]
+        expandedDirectories: [],
+        nodeStates: {},
+        occlusionOrder: []
       },
-      activeCanvasResources: { canvasId: 'main', resources: [], diagnostics: [] }
+      canvasResources: { resources: [], diagnostics: [] }
     },
     projectTree: paths.map((projectRelativePath) => ({
       projectRelativePath,

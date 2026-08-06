@@ -7,7 +7,7 @@ Canvas state; Workbench owns scene geometry and interaction.
 The complete contracts are
 [Project Tree membership](../packages/canvas-core/docs/adr/0008-project-tree-defines-canvas-membership.md)
 and
-[root-scoped Canvas storage](../packages/canvas-core/docs/adr/0009-canvas-workspace-is-root-scoped-global-state.md).
+[single root-scoped Canvas state](../packages/canvas-core/docs/adr/0010-canvas-workspace-contains-one-canvas-state.md).
 
 ## Runtime Authority
 
@@ -16,10 +16,10 @@ publishes the real root entry at project-relative path `""`, direct children of
 loaded directories, deterministic sibling order, visibility flags, file
 availability, media facts, and intrinsic image or video dimensions.
 
-Every regular Project file and directory belongs to every Canvas. The active
-Canvas's `expandedDirectories` selects the visible resource stream. The root is
-always structurally expanded and is never stored in `expandedDirectories`; a
-new Canvas therefore stores `[]` while showing the root and its direct
+Every regular Project file and directory belongs to the Canvas.
+`expandedDirectories` selects the visible resource stream. The root is always
+structurally expanded and is never stored in `expandedDirectories`; default
+Canvas state therefore stores `[]` while showing the root and its direct
 children. A child directory begins collapsed. Collapsing one hides descendants
 without clearing their retained state.
 
@@ -92,17 +92,17 @@ Project revision contains one Error diagnostic with code
 `project_path_state_persistence_failed`. Ordinary refresh does not clear it;
 the next successful related path mutation does.
 
-Missing Canvas state creates one default `main` Canvas. Unreadable or malformed
+Missing Canvas state creates default empty Canvas state. Unreadable or malformed
 Canvas JSON, a stored canonical-root mismatch, or a Canvas persistence failure
 does not block Project open. The Project Tree, editor, and terminal remain
 available while the entire Canvas workspace is unavailable with one exact code
 and message. Runtime does not repair, migrate, or fall back to another Canvas
 document, and it does not duplicate the failure as a Project Diagnostic.
 
-The unavailable surface offers one explicit **Reset Canvas Workspace** action.
+The unavailable surface offers one explicit **Reset Canvas** action.
 It performs no second confirmation and creates no backup. Runtime atomically
-replaces the damaged state with one default `main` Canvas named `Main`; if the
-write fails, Canvas remains unavailable with the exact persistence failure.
+replaces the damaged state with the default empty state; if the write fails,
+Canvas remains unavailable with the exact persistence failure.
 
 Every Project snapshot has `canonicalRoot`, `projectTree`, `canvasWorkspace`,
 `diagnostics`, and `health`. `canvasWorkspace` is exactly one of:
@@ -112,7 +112,7 @@ type CanvasWorkspaceSnapshot =
   | {
       status: 'available';
       workspace: CanvasWorkspaceDocument;
-      activeCanvasResources: CanvasResourceView;
+      canvasResources: CanvasResourceView;
     }
   | {
       status: 'unavailable';
@@ -125,10 +125,9 @@ type CanvasWorkspaceSnapshot =
     };
 ```
 
-There are no optional Canvas workspace members and Project health has no
-`canvasCount`. Persisted and wire Project/Canvas types belong to
-`@debrute/app-protocol`; `@debrute/canvas-core` owns only pure Canvas projection
-and preview identity.
+Canvas workspace members are required. Persisted and wire Project/Canvas types
+belong to `@debrute/app-protocol`; `@debrute/canvas-core` owns only pure Canvas
+projection and preview identity.
 
 Canvas state lives at
 `~/.debrute/state/roots/<rootKey>/canvas.json`. Project-local `.debrute/`
