@@ -32,7 +32,8 @@ This section groups Runtime, Desktop, and Web decisions. Model Operation and
 Agent Model Request decisions are grouped in the following sections. The
 packaged connection topology is defined jointly by ADR-0004, ADR-0020, and
 ADR-0065: deterministic private native control, one dynamic same-origin
-Workbench listener, and one bounded-pool Photoshop gateway.
+Workbench listener, and one conditionally enabled bounded-pool Photoshop
+gateway.
 
 - [Runtime Lifetime Is Independent Of Frontends](./0014-runtime-lifetime-is-independent-of-frontends.md)
 - [Runtime Uses One Process](./0015-runtime-uses-one-process.md)
@@ -62,6 +63,7 @@ Workbench listener, and one bounded-pool Photoshop gateway.
 - [Photoshop Gateway Uses A Bounded Loopback Port Pool](./0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md)
 - [Runtime Owns One Global Activity Stream](./0066-runtime-owns-one-global-activity-stream.md)
 - [Project Identity Is The Canonical Root](./0067-project-identity-is-the-canonical-root.md)
+- [Plugin Integration Enablement Is Runtime Owned](./0068-plugin-integration-enablement-is-runtime-owned.md)
 - [Unexpected Runtime Panics Fail The Process](./0056-unexpected-runtime-panics-fail-the-process.md)
 - [Model API Key Reveal Is Explicit And Transient](./0057-model-api-key-reveal-is-explicit-and-transient.md)
 

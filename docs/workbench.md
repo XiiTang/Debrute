@@ -58,7 +58,7 @@ mounts the Workbench composition root. Bootstrap keeps following ordered theme
 events and remains transparent until the presentation controller commits the
 current projection, then hands document-theme ownership to that controller.
 Theme, locale, recent Projects, Canvas
-Text Appearance, Product, Integration, and Photoshop presentation read that same
+Text Appearance, Plugin enablement, Product, Integration, and Photoshop presentation read that same
 ordered in-memory projection rather than receiving copied bootstrap props or
 maintaining a second frontend settings store. During that wait the renderer is transparent, so
 Electron's authoritative native launch background remains visible. Product,
@@ -144,8 +144,10 @@ Focused units own cohesive state:
   activation and then remains alive until that Workbench ends, independently
   of the open Settings panel. It owns Settings commands, Integration retry
   errors, and the Canvas Text Appearance save lifecycle while reconciling
-  accepted values from `WorkbenchGlobalProjection`; it does not own theme,
-  locale, or another accepted Global snapshot.
+  accepted values from `WorkbenchGlobalProjection`; it also exposes the
+  existing live Photoshop resource to the Plugins page without inventing
+  connection state. It does not own theme, locale, or another accepted Global
+  snapshot.
 - `useProjectExplorerController` loads only after Explorer or a file-command
   surface expresses intent, then owns selection, clipboard, inline edits, file
   commands, and invalidation when the project changes.
@@ -435,15 +437,25 @@ are documented in [`desktop-shell.md`](./desktop-shell.md).
 ## Settings, Theme, And Language
 
 Settings has one directory and one content surface. Its current pages are
-General; Appearance; Image, Video, TTS, Music, and SFX Models; and Integrations.
+General; Appearance; Image, Video, TTS, Music, and SFX Models; Plugins; and
+Integrations. Plugins and Integrations are distinct navigation groups: Plugins
+controls Runtime-hosted professional-tool gateways, while Integrations manages
+catalog-defined command-line tools.
 Appearance composes the Workbench Theme mode with the separate
 global Canvas Text Appearance controls; General retains language, product
 information, and updates. Runtime-owned Global Settings is
 ready before React mounts. Product and Integration projections retain their own
 loading and ready states because they arrive independently; connection failure
-still ends the Workbench. Photoshop live state has no persisted enablement,
-pairing, Project links, or separate refresh request. The initial stream and
-ordered Photoshop events are its only Workbench authority.
+still ends the Workbench. The Plugins page waits for both Global Settings and
+the live Photoshop resource. Its one **Photoshop Integration** row combines the
+default-off `plugins.photoshop.enabled` choice with `Off`, `Waiting for
+Photoshop`, `Connected · N instances`, or the exact port-pool Unavailable
+diagnostic. It has no Plugin Platform master, instance list, or manual
+connection action. A transfer disables only this switch and shows `Transfer in
+progress.` Runtime rejects the same stale disable atomically. HTTP success does
+not commit the switch locally; ordered settings and Photoshop events remain its
+only authority. Pairing, Project links, and a separate refresh request do not
+exist.
 
 Workbench sends closed partial settings mutations. Editable model text fields
 are trimmed before submission; Runtime accepts only already-canonical values
@@ -552,12 +564,15 @@ same accepted scope through lazy feature loading and rechecks it immediately
 before Terminal creates the requested session. Project Paths remain the
 browser's normal file identity across all invocation surfaces.
 
-For one Project-backed PNG, JPEG, WebP, or PSD file whose snapshot `sizeBytes`
-is at most 256 MiB, the shared Explorer/Canvas context menu adds **Send to
-Photoshop**. A bounded keyboard-accessible submenu lists every live Photoshop
-Document, including equal titles, and each row owns the exact plugin-session
-and Document identity. Selection closes the menu and sends immediately; there
-is no dialog, remembered target, or Photoshop Settings page. Runtime creates
+For one Project-backed PNG, JPEG, WebP, PSD, or AVIF file whose snapshot
+`sizeBytes` is at most 256 MiB, the shared Explorer/Canvas context menu adds
+**Send to Photoshop** only when at least one live Photoshop session has an open
+Document. The entire submenu is absent while off, waiting, unavailable,
+unhydrated, or connected without a Document. Once visible, its bounded
+keyboard-accessible rows list every live Photoshop Document, including equal
+titles, and each row owns the exact plugin-session and Document identity.
+Selection closes the menu and sends immediately; there is no dialog or
+remembered target. Runtime creates
 one Photoshop Activity task and updates that same record in place from sending
 to its terminal result.
 

@@ -11,7 +11,7 @@ use crate::photoshop::PhotoshopStateView;
 use super::{
     models::{ModelCatalog, ModelSettingsView},
     store::{
-        ChromeSettings, GlobalConfigStore, GlobalSettingsError, GlobalSettingsView,
+        ChromeSettings, GlobalConfigStore, GlobalSettingsError, GlobalSettingsView, PluginSettings,
         WorkbenchSettings,
     },
 };
@@ -24,6 +24,7 @@ pub struct DebruteGlobalSettingsView {
     pub workbench: WorkbenchSettings,
     pub canvas: super::store::CanvasSettings,
     pub chrome: ChromeSettings,
+    pub plugins: PluginSettings,
     pub models: ModelSettingsView,
 }
 
@@ -388,6 +389,7 @@ fn complete_view(projection: GlobalSettingsView) -> DebruteGlobalSettingsView {
         workbench: projection.workbench,
         canvas: projection.canvas,
         chrome: projection.chrome,
+        plugins: projection.plugins,
         models: projection.models,
     }
 }

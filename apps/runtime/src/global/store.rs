@@ -87,6 +87,18 @@ pub struct ChromeSettings {
     pub recent_project_roots: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PhotoshopPluginSettings {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PluginSettings {
+    pub photoshop: PhotoshopPluginSettings,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelConfig {
@@ -103,6 +115,7 @@ pub struct GlobalSettingsConfig {
     pub workbench: WorkbenchSettings,
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
+    pub plugins: PluginSettings,
     pub models: Vec<ModelConfig>,
 }
 
@@ -124,6 +137,7 @@ pub struct GlobalSettingsView {
     pub workbench: WorkbenchSettings,
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
+    pub plugins: PluginSettings,
     pub models: ModelSettingsView,
 }
 
@@ -353,6 +367,7 @@ fn project_view(snapshot: &GlobalConfigSnapshot, catalog: &ModelCatalog) -> Glob
         workbench: snapshot.settings.workbench.clone(),
         canvas: snapshot.settings.canvas.clone(),
         chrome: snapshot.settings.chrome.clone(),
+        plugins: snapshot.settings.plugins.clone(),
         models: settings_view(snapshot, catalog),
     }
 }
@@ -365,7 +380,7 @@ fn apply_patch(
     let patch = closed_patch_record(
         input,
         "Global settings patch",
-        &["workbench", "canvas", "modelSetting"],
+        &["workbench", "canvas", "plugins", "modelSetting"],
     )?;
     if let Some(value) = patch.get("workbench") {
         let workbench = closed_patch_record(
@@ -406,6 +421,26 @@ fn apply_patch(
                     )
                 })?;
         }
+    }
+    if let Some(value) = patch.get("plugins") {
+        let plugins = closed_patch_record(value, "Global settings plugins", &["photoshop"])?;
+        let photoshop = closed_patch_record(
+            plugins.get("photoshop").ok_or_else(|| {
+                GlobalSettingsError::Validation(
+                    "Global settings plugins must contain photoshop.".to_owned(),
+                )
+            })?,
+            "Global settings Photoshop plugin",
+            &["enabled"],
+        )?;
+        snapshot.settings.plugins.photoshop.enabled = boolean(
+            photoshop.get("enabled").ok_or_else(|| {
+                GlobalSettingsError::Validation(
+                    "Global settings Photoshop plugin must contain enabled.".to_owned(),
+                )
+            })?,
+            "Photoshop Integration enabled",
+        )?;
     }
     if let Some(value) = patch.get("modelSetting") {
         apply_model_patch(
@@ -657,6 +692,12 @@ fn string<'a>(value: &'a Value, label: &str) -> Result<&'a str, GlobalSettingsEr
     value
         .as_str()
         .ok_or_else(|| GlobalSettingsError::Validation(format!("{label} must be a string.")))
+}
+
+fn boolean(value: &Value, label: &str) -> Result<bool, GlobalSettingsError> {
+    value
+        .as_bool()
+        .ok_or_else(|| GlobalSettingsError::Validation(format!("{label} must be a boolean.")))
 }
 
 fn nullable_non_empty_string(

@@ -235,22 +235,29 @@ function separator(id: string): WorkbenchContextMenuItem {
 function photoshopSubmenu(
   state: PhotoshopStateView | undefined,
   format: PhotoshopPlacementFormat
-): WorkbenchContextMenuItem {
+): WorkbenchContextMenuItem | undefined {
+  if (state?.status !== 'connected') {
+    return undefined;
+  }
+  const targets = state.sessions.flatMap((session) => {
+    const compatible = session.placementMimeTypes.includes(format.mimeType);
+    return session.documents.map((document) => ({
+      pluginSessionId: session.pluginSessionId,
+      documentId: document.documentId,
+      title: document.title,
+      ...(compatible ? {} : {
+        disabled: true,
+        ...(format.requirement === undefined ? {} : { requirement: format.requirement })
+      })
+    }));
+  });
+  if (targets.length === 0) {
+    return undefined;
+  }
   return {
     kind: 'photoshop-submenu',
     command: 'send-to-photoshop',
-    targets: state?.sessions.flatMap((session) => {
-      const compatible = session.placementMimeTypes.includes(format.mimeType);
-      return session.documents.map((document) => ({
-        pluginSessionId: session.pluginSessionId,
-        documentId: document.documentId,
-        title: document.title,
-        ...(compatible ? {} : {
-          disabled: true,
-          ...(format.requirement === undefined ? {} : { requirement: format.requirement })
-        })
-      }));
-    }) ?? []
+    targets
   };
 }
 

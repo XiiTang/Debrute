@@ -231,6 +231,7 @@ function settingsFixture(): DebruteGlobalSettingsView {
       textAppearance: appearanceFixture(12)
     },
     chrome: { recentProjectRoots: [] },
+    plugins: { photoshop: { enabled: false } },
     models: { image: [], video: [], audio: [] }
   };
 }

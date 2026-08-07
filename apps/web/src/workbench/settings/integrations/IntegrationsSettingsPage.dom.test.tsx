@@ -326,6 +326,7 @@ function createState(overrides: Partial<SettingsPanelState> = {}): SettingsPanel
   return {
     globalSettings: { status: 'ready', value: globalSettingsFixture() },
     integrations: { status: 'ready', value: integrationSettingsFixture() },
+    photoshop: { status: 'ready', value: { status: 'off', transferActive: false, sessions: [] } },
     product: { status: 'ready', value: null },
     resolvedTheme: 'dark',
     ...overrides
@@ -392,6 +393,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       }
     },
     chrome: { recentProjectRoots: [] },
+    plugins: { photoshop: { enabled: false } },
     models: { image: [], video: [], audio: [] },
     ...overrides
   };

@@ -370,10 +370,14 @@ may use a local control background.
 close placement, continuous background, and body overflow. The shell renders
 each panel name once.
 
-Settings uses General, Appearance, Models, and Integrations navigation, one
-title per selected page, explicit loading/error/ready content, ordinary
+Settings uses General, Appearance, Models, Plugins, and Integrations navigation,
+one title per selected page, explicit loading/error/ready content, ordinary
 sections for General and Appearance settings, and cards only for independent
-repeated records.
+repeated records. Plugins and Integrations remain separate groups. The Plugins
+page presents one row per Runtime-hosted professional-tool Integration with an
+aggregate status and controlled switch; it does not present a platform master,
+connection list, or manual Connect action. Photoshop transfer activity disables
+only its row switch and uses one inline `Transfer in progress.` message.
 
 Explorer owns tree geometry and editing. Inspector owns selection properties,
 metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and
@@ -419,7 +423,9 @@ UXP maps the panel to light or night from Photoshop's host appearance, keeps
 host-owned chrome untouched, and uses the host font because
 [UXP does not support packaged `@font-face` files](https://developer.adobe.com/photoshop/uxp/guides/uxp_guide/unsupported/).
 The UXP panel preserves the shared control density and Photoshop integration
-behavior without introducing a second host-specific visual system.
+behavior without introducing a second host-specific visual system. Its
+connection indicator uses only the connected treatment for `Connected` and one
+shared waiting treatment for every non-ready discovery phase.
 
 ## Source Ownership
 

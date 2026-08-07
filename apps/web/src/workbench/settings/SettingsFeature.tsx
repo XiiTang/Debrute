@@ -44,6 +44,7 @@ export function WorkbenchSettingsPanelFeature({
   const state = {
     globalSettings: controller.globalSettings,
     integrations: controller.integrations,
+    photoshop: controller.photoshop,
     product: controller.product,
     resolvedTheme
   };

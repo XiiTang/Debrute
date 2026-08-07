@@ -43,6 +43,7 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
         })
     );
     assert!(initial.chrome.recent_project_roots.is_empty());
+    assert!(!initial.plugins.photoshop.enabled);
     assert_eq!(initial.models.image.len(), 13);
     assert_eq!(initial.models.video.len(), 4);
     assert_eq!(initial.models.audio.len(), 16);
@@ -69,6 +70,56 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
         recent.iter().filter(|root| **root == project_five).count(),
         1
     );
+
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
+fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
+    let home = temporary_home("photoshop-plugin-setting");
+    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let store = GlobalConfigStore::new(&home);
+
+    let enabled = store
+        .patch(
+            &json!({ "plugins": { "photoshop": { "enabled": true } } }),
+            &catalog,
+        )
+        .expect("Photoshop Integration should enable");
+    assert!(enabled.changed);
+    assert!(enabled.view.plugins.photoshop.enabled);
+    drop(store);
+    let store = GlobalConfigStore::new(&home);
+    assert!(
+        store
+            .read_view(&catalog)
+            .expect("Photoshop Integration setting should survive store reconstruction")
+            .plugins
+            .photoshop
+            .enabled
+    );
+
+    let no_op = store
+        .patch(
+            &json!({ "plugins": { "photoshop": { "enabled": true } } }),
+            &catalog,
+        )
+        .expect("repeated enable should be idempotent");
+    assert!(!no_op.changed);
+
+    for invalid in [
+        json!({ "plugins": {} }),
+        json!({ "plugins": { "photoshop": {} } }),
+        json!({ "plugins": { "photoshop": { "enabled": "yes" } } }),
+        json!({ "plugins": { "photoshop": { "enabled": true, "extra": true } } }),
+        json!({ "plugins": { "illustrator": { "enabled": true } } }),
+        json!({ "adobeBridge": { "enabled": true } }),
+    ] {
+        assert!(matches!(
+            store.patch(&invalid, &catalog),
+            Err(GlobalSettingsError::Validation(_))
+        ));
+    }
 
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
@@ -433,6 +484,23 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
         serde_json::to_string_pretty(&settings).expect("settings should serialize"),
     )
     .expect("obsolete settings fixture should write");
+    assert!(matches!(
+        store.read_view(&catalog),
+        Err(GlobalSettingsError::Json(_))
+    ));
+
+    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
+    settings
+        .as_object_mut()
+        .expect("settings should be an object")
+        .remove("plugins");
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
+    )
+    .expect("pre-Plugin settings fixture should write");
     assert!(matches!(
         store.read_view(&catalog),
         Err(GlobalSettingsError::Json(_))

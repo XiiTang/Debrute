@@ -36,7 +36,6 @@ use debrute_runtime::{
         serve_control_connection,
     },
     login::require_stable_runtime_entrypoint,
-    photoshop::PhotoshopGatewayServer,
     product::{
         CommitPhase, CommitPlatform, DesktopHostRegistration, NativeUpdatePlatform,
         ProductBootstrap, ProductCommitCoordinator, ProductCommitError, ProductStore,
@@ -787,8 +786,6 @@ fn run_runtime_services(
             .into());
         }
         workbench.check_running()?;
-        let _photoshop_gateway =
-            PhotoshopGatewayServer::start(Arc::clone(runtime_services.photoshop()));
         let requested_completion = std::env::var_os("DEBRUTE_COMPLETE_PRODUCT_UPDATE")
             .map(|expected_version| {
                 expected_version.into_string().map_err(|_| {

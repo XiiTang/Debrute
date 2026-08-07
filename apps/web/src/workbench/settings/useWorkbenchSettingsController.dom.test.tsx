@@ -211,6 +211,27 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     }));
     await rendered.unmount();
   });
+
+  it('exposes the ordered Photoshop resource to Settings without local connection state', async () => {
+    const rendered = await renderController(vi.fn(async () => ({ ok: true as const })));
+
+    expect(rendered.current.photoshop).toEqual({
+      status: 'ready',
+      value: { status: 'off', transferActive: false, sessions: [] }
+    });
+    await act(async () => {
+      rendered.projection.acceptEvent({
+        type: 'photoshop.state.changed',
+        revision: 1,
+        state: { status: 'waiting', transferActive: false, sessions: [] }
+      });
+    });
+    expect(rendered.current.photoshop).toEqual({
+      status: 'ready',
+      value: { status: 'waiting', transferActive: false, sessions: [] }
+    });
+    await rendered.unmount();
+  });
 });
 
 async function renderController(
@@ -229,6 +250,11 @@ async function renderController(
     type: 'integrations.changed',
     revision: 0,
     integrations: { integrations: [], backends: [] }
+  });
+  projection.acceptEvent({
+    type: 'photoshop.state.changed',
+    revision: 0,
+    state: { status: 'off', transferActive: false, sessions: [] }
   });
   const api = {
     globalSettingsSave,
@@ -316,6 +342,7 @@ function settingsFixture(
     workbench: { locale: 'en', themePreference: 'dark' },
     canvas: { hierarchyEdgesVisible: true, textAppearance: appearance },
     chrome: { recentProjectRoots: [] },
+    plugins: { photoshop: { enabled: false } },
     models: { image: [], video: [], audio: [] }
   };
 }

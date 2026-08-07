@@ -113,12 +113,15 @@ function settingsFixture(locale: 'en' | 'zh-CN' = 'en'): DebruteGlobalSettingsVi
       }
     },
     chrome: { recentProjectRoots: [] },
+    plugins: { photoshop: { enabled: false } },
     models: { image: [], video: [], audio: [] }
   };
 }
 
 function photoshopFixture(): PhotoshopStateView {
   return {
+    status: 'off',
+    transferActive: false,
     sessions: []
   };
 }

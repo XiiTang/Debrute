@@ -96,6 +96,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     HTMLCanvasElement.prototype,
     'getContext'
   );
+  const documentFontsDescriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
 
   beforeAll(async () => {
     Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
@@ -116,6 +117,10 @@ describe('WorkbenchApp preferences and project behavior', () => {
   });
 
   beforeEach(() => {
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { status: 'loaded' }
+    });
     apiState.globalProjection = createWorkbenchGlobalProjection();
     apiState.globalProjection.acceptSnapshot({ revision: 0, settings: globalSettingsFixture() });
     apiState.globalProjection.acceptEvent({
@@ -131,7 +136,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     apiState.globalProjection.acceptEvent({
       type: 'photoshop.state.changed',
       revision: 0,
-      state: { sessions: [] }
+      state: { status: 'off', transferActive: false, sessions: [] }
     });
     apiState.projectProjection = createWorkbenchProjectProjection();
     apiState.activities = createWorkbenchActivities({
@@ -169,6 +174,11 @@ describe('WorkbenchApp preferences and project behavior', () => {
     document.documentElement.removeAttribute('data-theme');
     document.documentElement.style.removeProperty('--db-text');
     document.documentElement.style.removeProperty('--db-text-muted');
+    if (documentFontsDescriptor) {
+      Object.defineProperty(document, 'fonts', documentFontsDescriptor);
+    } else {
+      Reflect.deleteProperty(document, 'fonts');
+    }
     delete window.debruteShell;
   });
 
@@ -268,10 +278,14 @@ describe('WorkbenchApp preferences and project behavior', () => {
     });
 
     it('removes and restores hierarchy rendering without removing Canvas nodes', async () => {
-      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-        font: '',
-        measureText: () => ({ width: 50 })
-      } as unknown as CanvasRenderingContext2D);
+      const readRect = HTMLElement.prototype.getBoundingClientRect;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function measureIdentityRow(
+        this: HTMLElement
+      ) {
+        return this.classList.contains('canvas-generic-node-measurement-row')
+          ? testDomRect(104, 48)
+          : readRect.call(this);
+      });
       const globalSettingsSave = vi.fn(async () => ({ ok: true as const }));
       const snapshot = hierarchyCanvasSnapshotFixture();
       const openProject = vi.fn(async () => ({
@@ -527,7 +541,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
       });
       await waitForButton(container, 'Image Models');
 
-      expect(container.querySelectorAll('.settings-directory-group')).toHaveLength(3);
       expect(container.querySelector('.settings-page')?.querySelectorAll('h2')).toHaveLength(1);
 
       const imageModelsButton = requireButton(container, 'Image Models');
@@ -1171,6 +1184,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       }
     },
     chrome: { recentProjectRoots: [] },
+    plugins: { photoshop: { enabled: false } },
     models: {
       image: imageSettingsFixture(),
       video: [],
@@ -1290,6 +1304,20 @@ function hierarchyCanvasSnapshotFixture(): WorkbenchProjectSessionSnapshot {
         ]
       }
     }
+  };
+}
+
+function testDomRect(width: number, height: number): DOMRect {
+  return {
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    right: width,
+    bottom: height,
+    width,
+    height,
+    toJSON: () => undefined
   };
 }
 

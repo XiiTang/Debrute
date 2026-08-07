@@ -35,29 +35,41 @@ The contract has five invariants:
    Photoshop-specific authority and Project-relative paths.
 4. Transfer is always an explicit user action. There is no automatic Send,
    drag-and-drop command, queue, replay, retry, or offline delivery.
-5. Session, destination, expansion, cache, command, and result state are
-   memory-only at their defined lifetimes. There is no transfer history,
-   pairing record, recent destination, or other persistent Photoshop state.
+5. Only the Runtime-owned Integration enable choice persists. Session,
+   destination, expansion, cache, command, and result state are memory-only at
+   their defined lifetimes. There is no transfer history, pairing record,
+   recent destination, or other persistent Photoshop state.
 
 ## Live Sessions And Discovery
 
-The Runtime opens one optional Photoshop gateway on the first available
-loopback port from `32124` through `32131`. The UXP plugin probes that closed
-pool at `/photoshop/session` with the exact `debrute.photoshop.v1` WebSocket
-subprotocol. Failure to bind the complete pool disables only Photoshop
-connectivity; Runtime and Workbench continue normally.
+Global Settings persists the closed, default-off
+`plugins.photoshop.enabled` choice. Runtime applies it at startup before the
+first Workbench Photoshop projection. Off binds no Photoshop port and retains
+no gateway route, session, bearer, or command authority. The Workbench
+**Plugins** page is the only current setting surface; there is no Plugin
+Platform master switch or per-instance connection control.
+
+On immediately attempts the first available loopback port from `32124` through
+`32131`. A successful bind publishes `waiting`; full-pool exhaustion keeps the
+choice on, publishes `unavailable`, and starts one non-overlapping complete-pool
+retry every five seconds. Runtime and Workbench otherwise continue normally.
+Disabling an idle Integration stops that retry and gateway, closes every
+session, and revokes its authority. Runtime rejects the complete settings patch
+with `photoshop_transfer_in_progress` while either transfer direction owns a
+reserved command, so an admitted transfer is not interrupted.
 
 The plugin starts at Photoshop startup, independently of whether its panel is
 open. While disconnected it runs one non-overlapping discovery round every
-five seconds. Each ordered port candidate has a 500 ms deadline inside that
-round, so a listener which accepts without completing the Photoshop handshake
-cannot consume the complete discovery budget or block later pool entries. Each
-accepted socket receives a new memory-only plugin session identity and HTTP
-bearer. Closing the socket revokes both, removes its Photoshop Documents from
-every Workbench, cancels that session's in-flight HTTP work before any later
-Photoshop host effect, and fails its active command. There is no pairing,
-persistent plugin identity, enable setting, Project link, offline queue, retry
-of transfers, replay, or transfer history.
+five seconds, including while the Runtime Integration is off. Each ordered port
+candidate has a 500 ms deadline inside the five-second whole-round bound, so a
+listener which accepts without completing the Photoshop handshake cannot block
+later pool entries. The next round starts only after the failed round has ended
+and another five seconds has elapsed. Each accepted socket receives a new
+memory-only plugin session identity and HTTP bearer. Closing the socket revokes
+both, removes its Photoshop Documents from every Workbench, cancels that
+session's in-flight HTTP work before any later Photoshop host effect, and fails
+its active command. There is no pairing, persistent plugin identity, Project
+link, offline queue, retry of transfers, replay, or transfer history.
 
 Each session start declares the exact native formats that its current
 Photoshop host can place as Embedded Smart Objects. The closed list is PNG,
@@ -81,10 +93,13 @@ and blank messages rather than treating them as Runtime errors.
 ## Debrute To Photoshop
 
 For one visible Project PNG, JPEG, WebP, PSD, or AVIF file at or below 256 MiB,
-the Workbench context menu shows **Send to Photoshop**. A Canvas context menu
-uses the clicked projected node's own availability facts, including its size;
-it does not depend on the Explorer's shallow directory listing. Its submenu
-lists every open Photoshop Document reported by every live plugin session.
+the Workbench context menu shows **Send to Photoshop** only when at least one
+live session reports an open Photoshop Document. Off, waiting, unavailable, an
+unhydrated projection, and connected sessions with no open Documents hide the
+entire submenu. A Canvas context menu uses the clicked projected node's own
+availability facts, including its size; it does not depend on the Explorer's
+shallow directory listing. Once visible, the submenu lists every open Photoshop
+Document reported by every live plugin session.
 Titles are presentation only, so duplicate titles remain separate command
 targets. A Document row remains visible but is disabled when that session did
 not declare the source format. An AVIF row gives the requirement
@@ -117,7 +132,10 @@ The plugin panel is one direct page with three fixed regions: compact
 connection and selection state, one flexible always-open destination browser,
 and the latest result plus Send action. Only the destination rows scroll. The
 selection summary is compact, for example `Poster.psd · 3 selected`; the panel
-does not repeat every selected layer name.
+does not repeat every selected layer name. Its connection presentation has only
+`Connected` after a completed Runtime handshake and `Waiting` for every other
+internal discovery phase. It cannot distinguish an intentionally disabled
+Runtime gateway from an absent Runtime and exposes no manual connection action.
 
 The destination browser is one always-visible Explorer-style directory tree.
 Every live Project is an independent top-level root, and Project roots and
@@ -231,7 +249,8 @@ system notifications, or persistent history.
 
 | State | Owner | Lifetime and invalidation |
 | --- | --- | --- |
-| Gateway port | Runtime | One Runtime process; first free port in the closed pool |
+| Photoshop Integration enable choice | Runtime Global Settings | Persists across Runtime restarts; defaults off and is changed only by a closed Runtime settings mutation |
+| Gateway port | Runtime | While enabled in one Runtime process; first free port in the closed pool, released on disable |
 | Plugin session identity and bearer | Runtime | One accepted WebSocket; revoked immediately when it closes |
 | Photoshop Document catalog and placement formats | UXP host snapshot projected by Runtime | Replaced atomically by live session snapshots; removed with the session |
 | Live Project identities and revisions | Runtime | Current canonical-root projection only |
@@ -270,8 +289,9 @@ The architectural rationale is recorded in ADRs
 [0061](./adr/0061-photoshop-transfers-bind-an-exact-document.md),
 [0062](./adr/0062-photoshop-receiver-lifetime-follows-photoshop.md),
 [0063](./adr/0063-photoshop-transfers-use-explicit-live-targets.md),
-[0064](./adr/0064-photoshop-connections-use-ephemeral-runtime-sessions.md), and
-[0065](./adr/0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md).
+[0064](./adr/0064-photoshop-connections-use-ephemeral-runtime-sessions.md),
+[0065](./adr/0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md), and
+[0068](./adr/0068-plugin-integration-enablement-is-runtime-owned.md).
 
 ## Explicit Non-Goals
 
@@ -282,8 +302,9 @@ The architectural rationale is recorded in ADRs
   favorites, recents, generated duplicate-name labels, drag and drop, native
   filesystem picker, folder creation, rename, delete, or multi-selection.
 - No persistent destination, expansion, scroll, cache, plugin identity,
-  authorization ceremony, pairing code, settings page, Project link, queue,
-  cancellation, retry, replay, progress percentage, or transfer history.
+  authorization ceremony, pairing code, Photoshop-panel settings, Project
+  link, queue, cancellation, transfer retry, replay, progress percentage, or
+  transfer history.
 - No manual reconnect action. Discovery and recovery are automatic and never
   restore or redirect an interrupted transfer.
 - No CEP implementation, generic professional-application protocol, vendor
@@ -294,17 +315,21 @@ The architectural rationale is recorded in ADRs
 
 ## Verification Contract
 
-Automated verification must cover strict protocol parsing, port-pool behavior,
-session and bearer revocation, exact target binding, immutable staging,
-capability-aware Workbench menus, isolated full-canvas PNG rendering,
-independent item settlement, directory filtering, tree state, keyboard
-interaction, fixed-region layout, and both-axis tree overflow. The repository
-gate is `pnpm verify`, followed by `git diff --check` and
+Automated verification must cover default-off persistence, closed Plugin
+settings, conditional gateway lifetime, unavailable retry, transfer-safe
+disable, strict protocol parsing, port-pool behavior, session and bearer
+revocation, exact target binding, immutable staging, live-Document-gated
+Workbench menus, isolated full-canvas PNG rendering, independent item
+settlement, directory filtering, tree state, keyboard interaction, the
+Connected/Waiting panel projection, fixed-region layout, and both-axis tree
+overflow. The repository gate is `pnpm verify`, followed by `git diff --check` and
 `pnpm package:photoshop-uxp-plugin` for a package candidate.
 
 Automated tests do not substitute for real Photoshop acceptance. macOS and
 Windows package candidates must be loaded through UXP Developer Tool or as the
-packaged CCX and exercise startup discovery, background receiver lifetime,
+packaged CCX and exercise both start orders, default-off and re-enable behavior,
+background receiver lifetime and automatic reconnection without opening the
+panel,
 exact-Document Embedded Smart Object placement, layer and group export,
 full-canvas alpha, deep destination selection, immutable targets while the UI
 changes, disconnect behavior, and package reload. AVIF acceptance additionally

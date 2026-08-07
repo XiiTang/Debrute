@@ -129,6 +129,34 @@
   gap: var(--db-space-6);
 }
 
+.plugin-settings-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--db-space-5);
+}
+
+.plugin-settings-row__body {
+  min-width: 0;
+  display: grid;
+  gap: var(--db-space-2);
+}
+
+.plugin-settings-row__header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--db-space-3);
+  flex-wrap: wrap;
+}
+
+.plugin-settings-row__header h3 {
+  margin: 0;
+  font-size: var(--db-font-lg);
+  font-weight: 500;
+}
+
 .settings-group {
   min-width: 0;
   display: grid;

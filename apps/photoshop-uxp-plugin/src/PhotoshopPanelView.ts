@@ -9,6 +9,7 @@ const TREE_INDENT_PX = 14;
 
 export interface PhotoshopPanelPresentation {
   connectionLabel: string;
+  connectionPresentation: 'connected' | 'waiting';
   sourceLabel: string;
   sourceProblem: string | null;
   destinationLabel: string;
@@ -59,9 +60,8 @@ export function panelPresentation(snapshot: PhotoshopPluginSnapshot): PhotoshopP
   const destinationValid = resolvePhotoshopDestination(snapshot) !== null;
   const activeExport = snapshot.activeExport;
   return {
-    connectionLabel: snapshot.connection.status === 'ready'
-      ? 'Connected'
-      : snapshot.connection.status === 'connecting' ? 'Connecting…' : 'Disconnected',
+    connectionLabel: snapshot.connection.status === 'ready' ? 'Connected' : 'Waiting',
+    connectionPresentation: snapshot.connection.status === 'ready' ? 'connected' : 'waiting',
     sourceLabel,
     sourceProblem,
     destinationLabel: destinationLabel(snapshot),
@@ -165,7 +165,7 @@ export class PhotoshopPanelView {
       <main class="photoshop-panel">
         <header class="photoshop-panel__header">
           <p class="photoshop-panel__brand">Debrute</p>
-          <p class="photoshop-panel__connection photoshop-panel__connection--${snapshot.connection.status}">
+          <p class="photoshop-panel__connection photoshop-panel__connection--${presentation.connectionPresentation}">
             <span aria-hidden="true"></span>${escapeHtml(presentation.connectionLabel)}
           </p>
         </header>

@@ -262,9 +262,10 @@ Global Settings, Integration discovery, live Photoshop state, and packaged Produ
 state are independent resources carried by the initial stream and subsequent
 ordered Global events. The settings snapshot never synchronously probes
 integrations or Photoshop. Settings activation explicitly starts Integration
-discovery. Photoshop sessions publish complete live state through the initial
-stream and ordered Global events, with no settings-owned refresh or second
-frontend truth. Mutating and action commands return
+discovery. Runtime applies the persisted Photoshop Integration enable choice at
+composition, then Photoshop sessions publish complete live state through the
+initial stream and ordered Global events. There is no settings-owned refresh or
+second frontend truth. Mutating and action commands return
 only their closed command outcome and any action-specific diagnostic; they do not return
 another complete state for the initiating Workbench to apply. Command progress
 is local interaction state and ends with the command response, while displayed
@@ -363,13 +364,14 @@ decisions are indexed under the
 ## Global And Project State
 
 Runtime's global store is the sole persistence boundary for Workbench
-preferences, Canvas-global settings, recent Project roots, model overrides and
-API keys. Photoshop state is live-only and is not a Global Settings field.
-Canvas Text Appearance persists as one complete `canvas.textAppearance` value
-rather than field patches: managed font ID, font size, line-height ratio,
-requested integer weight, letter spacing, and ligatures.
-`canvas.hierarchyEdgesVisible` is one boolean that defaults to `true`. Recent
-Projects persist only an ordered list of canonical roots.
+preferences, Canvas-global settings, recent Project roots, model overrides,
+Plugin Integration enablement, and API keys. The Photoshop enable choice is a
+Global Settings field; its gateway health, retry, sessions, Documents,
+credentials, commands, and transfer state remain live-only. Canvas Text
+Appearance persists as one complete `canvas.textAppearance` value: managed font
+ID, font size, line-height ratio, requested integer weight, letter spacing, and
+ligatures. `canvas.hierarchyEdgesVisible` is one boolean that defaults to
+`true`. Recent Projects persist only an ordered list of canonical roots.
 Non-secret settings and secrets use separate atomic files;
 public projections expose only whether a key is set and a non-secret preview.
 Runtime stores no default frontend. Every frontend-opening command or menu item

@@ -50,13 +50,44 @@ describe('Workbench context menu', () => {
     }))).toEqual(['create-file', 'create-directory', 'paste', 'open-terminal']);
   });
 
-  it('shows Photoshop only for exactly one eligible selected file', () => {
-    const items = buildWorkbenchContextMenuItems({
+  it('shows Photoshop only for one eligible file with at least one open live Document', () => {
+    const target = canvasTarget('cover.png', [{ projectRelativePath: 'cover.png', kind: 'file', sizeBytes: 1024 }]);
+    const withoutSession = buildWorkbenchContextMenuItems({
+      target,
+      projection: projection([node('cover.png')]),
+      photoshop: { status: 'waiting', transferActive: false, sessions: [] }
+    });
+    const withoutDocument = buildWorkbenchContextMenuItems({
+      target,
+      projection: projection([node('cover.png')]),
+      photoshop: {
+        status: 'connected',
+        transferActive: false,
+        sessions: [{
+          pluginSessionId: 'session-1',
+          hostVersion: '27.0',
+          placementMimeTypes: ['image/png'],
+          documents: []
+        }]
+      }
+    });
+    const withDocument = buildWorkbenchContextMenuItems({
       target: canvasTarget('cover.png', [{ projectRelativePath: 'cover.png', kind: 'file', sizeBytes: 1024 }]),
       projection: projection([node('cover.png')]),
-      photoshop: { sessions: [] }
+      photoshop: {
+        status: 'connected',
+        transferActive: false,
+        sessions: [{
+          pluginSessionId: 'session-1',
+          hostVersion: '27.0',
+          placementMimeTypes: ['image/png'],
+          documents: [{ documentId: 7, title: 'Poster.psd' }]
+        }]
+      }
     });
-    expect(items.some((item) => item.kind === 'photoshop-submenu')).toBe(true);
+    expect(withoutSession.some((item) => item.kind === 'photoshop-submenu')).toBe(false);
+    expect(withoutDocument.some((item) => item.kind === 'photoshop-submenu')).toBe(false);
+    expect(withDocument.some((item) => item.kind === 'photoshop-submenu')).toBe(true);
   });
 
   it('preserves Photoshop format, size, and AVIF host compatibility boundaries', () => {
@@ -74,6 +105,8 @@ describe('Workbench context menu', () => {
       target: canvasTarget('cover.avif', [{ projectRelativePath: 'cover.avif', kind: 'file', sizeBytes: 10 }]),
       projection: projection([node('cover.avif')]),
       photoshop: {
+        status: 'connected',
+        transferActive: false,
         sessions: [{
           pluginSessionId: 'legacy',
           hostVersion: '26.7.0',

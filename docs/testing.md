@@ -132,9 +132,14 @@ syntax is the parser's input.
 ## Workbench UI Acceptance
 
 DOM tests exercise rendered state and the action a user can perform. Settings
-coverage verifies the navigation groups and default page, and Product update
-behavior through both direct Install buttons: General Settings and the title
-bar. Workbench coverage also requires the global blocking surface for
+coverage verifies the navigation groups and default page; Plugins coverage
+waits for both authoritative resources, renders all four Photoshop states and
+their exact diagnostics, keeps the switch projection-controlled, and disables
+only that switch during a transfer. Context-menu coverage proves that the whole
+Photoshop submenu requires an open live Document while retaining disabled
+format-incompatible Documents once any target exists. Product update coverage
+exercises both direct Install buttons: General Settings and the title bar.
+Workbench coverage also requires the global blocking surface for
 `preparing` and `committing`; the Desktop probe tests the closed native failure
 record used when Runtime never becomes Ready. Absence assertions are used when
 absence is part of the rendered contract, such as hiding ready content while a

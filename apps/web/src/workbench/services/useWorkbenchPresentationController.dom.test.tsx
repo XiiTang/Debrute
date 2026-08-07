@@ -98,6 +98,7 @@ function settingsFixture(
       }
     },
     chrome: { recentProjectRoots: [] },
+    plugins: { photoshop: { enabled: false } },
     models: { image: [], video: [], audio: [] }
   };
 }

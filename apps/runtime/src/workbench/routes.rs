@@ -647,9 +647,9 @@ async fn global_settings_patch(
         Ok(body) => body,
         Err(response) => return response,
     };
-    match services.global().settings_save(&body) {
+    match services.settings_save(&body) {
         Ok(_) => Json(json!({"ok": true})).into_response(),
-        Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
+        Err(error) => service_error_response(error),
     }
 }
 

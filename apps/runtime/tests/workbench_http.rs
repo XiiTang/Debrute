@@ -19,6 +19,7 @@ use debrute_runtime::control::{
 use debrute_runtime::{
     cli::RuntimeCliService,
     control::RuntimeControlState,
+    photoshop::{PhotoshopIntegrationStatus, PhotoshopMimeType, PluginPhotoshopMessage},
     workbench::{
         RuntimeCliHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
         WorkbenchHttpServer, WorkbenchRuntimeServices,
@@ -269,6 +270,152 @@ fn model_api_key_reveal_is_authenticated_non_cacheable_and_not_published() {
         json!({ "apiKey": exact_api_key })
     );
     assert_eq!(runtime.services().global().revision(), revision);
+}
+
+#[test]
+fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("photoshop-enablement");
+    let client = test_client();
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    let initial = events.next_of_type("photoshop.state.changed");
+    assert_eq!(initial["state"]["status"], "off");
+    assert_eq!(initial["state"]["transferActive"], false);
+    assert_eq!(initial["state"]["sessions"], json!([]));
+    open_project(&client, &runtime, &project, &cookie, &credential);
+
+    let enable = client
+        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "plugins": { "photoshop": { "enabled": true } } }))
+        .send()
+        .expect("Photoshop enable should complete");
+    assert_eq!(enable.status().as_u16(), 200);
+    assert_eq!(
+        events.next_of_type("globalSettings.changed")["settings"]["plugins"]["photoshop"]["enabled"],
+        true
+    );
+    runtime
+        .services()
+        .photoshop()
+        .set_gateway_available_for_tests(true);
+    assert_eq!(
+        runtime.services().photoshop().state().status,
+        PhotoshopIntegrationStatus::Waiting
+    );
+
+    let (outbound, _messages) = tokio::sync::mpsc::channel(8);
+    let admission = runtime
+        .services()
+        .photoshop()
+        .connect(
+            "27.0".to_owned(),
+            vec![PhotoshopMimeType::Png],
+            Vec::new(),
+            outbound,
+        )
+        .expect("enabled Photoshop Integration should admit a session");
+    runtime
+        .services()
+        .photoshop()
+        .handle_message(
+            &admission.plugin_session_id,
+            PluginPhotoshopMessage::ExportStart {
+                command_id: "busy-export".to_owned(),
+                canonical_root: project.canonical_root.clone(),
+                project_revision: runtime
+                    .services()
+                    .projects()
+                    .get(Path::new(&project.canonical_root))
+                    .unwrap()
+                    .summary()
+                    .unwrap()
+                    .project_revision,
+                directory: String::new(),
+                items: vec![debrute_runtime::photoshop::PhotoshopExportItem {
+                    item_id: "item-1".to_owned(),
+                    source_name: "Layer 1".to_owned(),
+                }],
+            },
+        )
+        .expect("Photoshop export should reserve the session");
+    assert!(runtime.services().photoshop().state().transfer_active);
+
+    let unrelated = client
+        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "workbench": { "themePreference": "dark" } }))
+        .send()
+        .expect("unrelated setting should remain mutable during a Photoshop transfer");
+    assert_eq!(unrelated.status().as_u16(), 200);
+
+    let rejected = client
+        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({
+            "workbench": { "locale": "zh-CN" },
+            "plugins": { "photoshop": { "enabled": false } }
+        }))
+        .send()
+        .expect("busy Photoshop disable should complete");
+    assert_eq!(rejected.status().as_u16(), 409);
+    assert_eq!(
+        rejected.json::<Value>().unwrap()["error"],
+        json!({
+            "code": "photoshop_transfer_in_progress",
+            "message": "Transfer in progress.",
+            "details": null
+        })
+    );
+    assert!(
+        runtime
+            .services()
+            .global()
+            .settings_get()
+            .unwrap()
+            .plugins
+            .photoshop
+            .enabled
+    );
+    let retained_settings = runtime.services().global().settings_get().unwrap();
+    assert_eq!(retained_settings.workbench.locale, "en");
+    assert_eq!(retained_settings.workbench.theme_preference, "dark");
+
+    runtime
+        .services()
+        .photoshop()
+        .disconnect(&admission.plugin_session_id);
+    let disable = client
+        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "plugins": { "photoshop": { "enabled": false } } }))
+        .send()
+        .expect("idle Photoshop disable should complete");
+    assert_eq!(disable.status().as_u16(), 200);
+    assert!(!runtime.services().photoshop().state().transfer_active);
+    assert_eq!(
+        runtime.services().photoshop().state().status,
+        PhotoshopIntegrationStatus::Off
+    );
+    assert!(runtime.services().photoshop().state().sessions.is_empty());
+    assert!(
+        !runtime
+            .services()
+            .global()
+            .settings_get()
+            .unwrap()
+            .plugins
+            .photoshop
+            .enabled
+    );
 }
 
 #[test]

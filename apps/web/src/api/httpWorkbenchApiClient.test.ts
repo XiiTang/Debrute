@@ -500,7 +500,7 @@ function createHarness(globalRevision = 1) {
           controller.enqueue(sse(encoder, {
             type: 'photoshop.state.changed',
             revision: 1,
-            state: { sessions: [] }
+            state: { status: 'off', transferActive: false, sessions: [] }
           }));
           controller.enqueue(sse(encoder, { type: 'product.changed', revision: 1, product: null }));
           controller.enqueue(sse(encoder, {

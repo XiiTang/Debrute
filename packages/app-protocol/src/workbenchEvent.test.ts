@@ -169,6 +169,8 @@ describe('Workbench event decoding', () => {
       type: 'photoshop.state.changed',
       revision: 7,
       state: {
+        status: 'connected',
+        transferActive: false,
         sessions: [{
           pluginSessionId: 'photoshop-session-1',
           hostVersion: '27.9.0',
@@ -215,6 +217,15 @@ describe('Workbench event decoding', () => {
         sessions: [{ ...event.state.sessions[0], extra: true }]
       }
     })).toBeUndefined();
+    for (const state of [
+      { status: 'off', transferActive: false, sessions: event.state.sessions },
+      { status: 'waiting', transferActive: true, sessions: [] },
+      { status: 'connected', transferActive: false, sessions: [] },
+      { status: 'unavailable', transferActive: false, sessions: event.state.sessions },
+      { status: 'connecting', transferActive: false, sessions: [] }
+    ]) {
+      expect(decodeWorkbenchEvent({ ...event, state })).toBeUndefined();
+    }
   });
 
   it('recognizes but rejects incomplete authoritative Project payloads', () => {

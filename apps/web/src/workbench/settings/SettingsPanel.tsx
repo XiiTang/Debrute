@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { AudioLines, Eye, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
+import { AudioLines, Cable, Eye, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
 import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
-  IntegrationSettingsView
+  IntegrationSettingsView,
+  PhotoshopStateView
 } from '@debrute/app-protocol';
 import type { EventProjection, SettingsResource } from '../../types.js';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
 import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage.js';
+import { PluginsSettingsPage } from './plugins/PluginsSettingsPage.js';
 import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage.js';
 import { SettingsResourcePanel } from './SettingsResourcePanel.js';
 import { useI18n } from '../i18n/index.js';
@@ -35,6 +37,11 @@ const SETTINGS_NAV_GROUPS = [
     ]
   },
   {
+    id: 'plugins',
+    labelKey: 'settings.nav.pluginsGroup',
+    items: [{ id: 'plugins', labelKey: 'settings.nav.plugins', icon: Cable }]
+  },
+  {
     id: 'integrations',
     labelKey: 'settings.nav.integrationsGroup',
     items: [{ id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench }]
@@ -46,6 +53,7 @@ type SettingsPageId = typeof SETTINGS_NAV_GROUPS[number]['items'][number]['id'];
 export interface SettingsPanelState {
   globalSettings: EventProjection<DebruteGlobalSettingsView>;
   integrations: SettingsResource<IntegrationSettingsView>;
+  photoshop: EventProjection<PhotoshopStateView>;
   product: EventProjection<DebruteProductState | null>;
   resolvedTheme: WorkbenchResolvedTheme;
 }
@@ -142,6 +150,19 @@ export function SettingsPanel({
           >
             {(settings) => <AudioModelSettings settings={settings} actions={actions} kind="sound-effect" />}
           </SettingsResourcePanel>
+        ) : activePage === 'plugins' ? (
+          <SettingsResourcePanel
+            title={i18n.t('settings.plugins.title')}
+            resource={pluginsResource(state.globalSettings, state.photoshop)}
+          >
+            {(resource) => (
+              <PluginsSettingsPage
+                settings={resource.settings.plugins}
+                photoshop={resource.photoshop}
+                onSettingsChange={actions.saveGlobalSettings}
+              />
+            )}
+          </SettingsResourcePanel>
         ) : activePage === 'integrations' ? (
           <SettingsResourcePanel
             title={i18n.t('settings.integrations.title')}
@@ -154,6 +175,16 @@ export function SettingsPanel({
       </div>
     </div>
   );
+}
+
+function pluginsResource(
+  settings: EventProjection<DebruteGlobalSettingsView>,
+  photoshop: EventProjection<PhotoshopStateView>
+): EventProjection<{ settings: DebruteGlobalSettingsView; photoshop: PhotoshopStateView }> {
+  if (settings.status === 'loading' || photoshop.status === 'loading') {
+    return { status: 'loading' };
+  }
+  return { status: 'ready', value: { settings: settings.value, photoshop: photoshop.value } };
 }
 
 function derivedSettingsResource<T>(

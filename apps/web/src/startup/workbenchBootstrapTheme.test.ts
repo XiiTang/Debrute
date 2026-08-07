@@ -42,6 +42,7 @@ function settingsFixture(themePreference: 'light' | 'dark'): DebruteGlobalSettin
       }
     },
     chrome: { recentProjectRoots: [] },
+    plugins: { photoshop: { enabled: false } },
     models: { image: [], video: [], audio: [] }
   };
 }

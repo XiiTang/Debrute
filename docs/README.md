@@ -44,6 +44,7 @@ when prose and implementation differ.
 - [Model Artifacts and provenance](./model-artifacts.md)
 - [Local integrations](./integrations.md)
 - [Photoshop file transfer](./photoshop.md)
+- [Plugin Integration runtime controls plan](./plugin-integration-controls-plan.md)
 
 ## Engineering
 

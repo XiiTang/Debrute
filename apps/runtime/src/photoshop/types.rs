@@ -38,9 +38,21 @@ pub struct PhotoshopSessionView {
     pub documents: Vec<PhotoshopDocumentView>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhotoshopIntegrationStatus {
+    #[default]
+    Off,
+    Waiting,
+    Connected,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhotoshopStateView {
+    pub status: PhotoshopIntegrationStatus,
+    pub transfer_active: bool,
     pub sessions: Vec<PhotoshopSessionView>,
 }
 

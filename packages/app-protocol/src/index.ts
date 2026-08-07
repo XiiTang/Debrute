@@ -294,10 +294,17 @@ interface DebruteGlobalChromeSettings {
   recentProjectRoots: string[];
 }
 
+interface DebruteGlobalPluginSettings {
+  photoshop: {
+    enabled: boolean;
+  };
+}
+
 export interface DebruteGlobalSettingsView {
   workbench: DebruteGlobalWorkbenchSettings;
   canvas: DebruteGlobalCanvasSettings;
   chrome: DebruteGlobalChromeSettings;
+  plugins: DebruteGlobalPluginSettings;
   models: {
     image: ImageModelSettingRecord[];
     video: VideoModelSettingRecord[];
@@ -308,6 +315,7 @@ export interface DebruteGlobalSettingsView {
 export interface SaveDebruteGlobalSettingsInput {
   workbench?: Partial<DebruteGlobalWorkbenchSettings>;
   canvas?: Partial<DebruteGlobalCanvasSettings>;
+  plugins?: { photoshop: { enabled: boolean } };
   modelSetting?: { modelId: string; setting: SaveModelSettingInput };
 }
 
@@ -872,6 +880,8 @@ export interface PhotoshopSessionView {
 }
 
 export interface PhotoshopStateView {
+  status: 'off' | 'waiting' | 'connected' | 'unavailable';
+  transferActive: boolean;
   sessions: PhotoshopSessionView[];
 }
 
@@ -1668,10 +1678,16 @@ function hasExactKeys(
 }
 
 function isPhotoshopStateView(value: unknown): value is PhotoshopStateView {
-  return isProtocolObject(value)
-    && Object.keys(value).length === 1
-    && Array.isArray(value.sessions)
-    && value.sessions.every((session) => isProtocolObject(session)
+  if (!isProtocolObject(value)
+    || Object.keys(value).length !== 3
+    || typeof value.status !== 'string'
+    || !['off', 'waiting', 'connected', 'unavailable'].includes(value.status)
+    || typeof value.transferActive !== 'boolean'
+  ) {
+    return false;
+  }
+  if (!Array.isArray(value.sessions)
+    || !value.sessions.every((session) => isProtocolObject(session)
       && Object.keys(session).length === 4
       && typeof session.pluginSessionId === 'string'
       && typeof session.hostVersion === 'string'
@@ -1683,7 +1699,14 @@ function isPhotoshopStateView(value: unknown): value is PhotoshopStateView {
       && session.documents.every((document) => isProtocolObject(document)
         && Object.keys(document).length === 2
         && isNonNegativeInteger(document.documentId)
-        && typeof document.title === 'string'));
+        && typeof document.title === 'string'))
+  ) {
+    return false;
+  }
+  if (value.status === 'connected') {
+    return value.sessions.length > 0;
+  }
+  return value.sessions.length === 0 && !value.transferActive;
 }
 
 function isFiniteNumber(value: unknown): value is number {

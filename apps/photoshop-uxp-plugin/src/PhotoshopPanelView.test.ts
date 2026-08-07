@@ -9,6 +9,7 @@ describe('PhotoshopPanelView presentation', () => {
   it('enables one direct send action only for a connected valid idle destination', () => {
     expect(panelPresentation(snapshotFixture())).toEqual({
       connectionLabel: 'Connected',
+      connectionPresentation: 'connected',
       sourceLabel: 'Poster.psd · 1 selected',
       sourceProblem: null,
       destinationLabel: 'Poster / exports',
@@ -164,7 +165,7 @@ describe('PhotoshopPanelView presentation', () => {
     });
   });
 
-  it('keeps a disconnected candidate visible as pending while the live tree is absent', () => {
+  it('presents both disconnected and connecting discovery as Waiting', () => {
     const snapshot = {
       ...snapshotFixture(),
       connection: { status: 'disconnected' as const },
@@ -173,12 +174,20 @@ describe('PhotoshopPanelView presentation', () => {
     };
 
     expect(panelPresentation(snapshot)).toMatchObject({
-      connectionLabel: 'Disconnected',
+      connectionLabel: 'Waiting',
+      connectionPresentation: 'waiting',
       destinationLabel: 'Poster / exports',
       destinationStatus: 'pending',
       sendDisabled: true
     });
     expect(destinationTreePresentation(snapshot).roots).toEqual([]);
+    expect(panelPresentation({
+      ...snapshot,
+      connection: { status: 'connecting' }
+    })).toMatchObject({
+      connectionLabel: 'Waiting',
+      connectionPresentation: 'waiting'
+    });
   });
 
   it('disables send when there is no exact destination or the selection exceeds 50 items', () => {
@@ -193,7 +202,8 @@ describe('PhotoshopPanelView presentation', () => {
       selection: { documentId: 4, documentTitle: 'Poster.psd', items },
       destination: null
     })).toMatchObject({
-      connectionLabel: 'Disconnected',
+      connectionLabel: 'Waiting',
+      connectionPresentation: 'waiting',
       sourceLabel: 'Poster.psd · 51 selected',
       sourceProblem: 'Select no more than 50 layers or groups.',
       destinationLabel: 'No destination selected',

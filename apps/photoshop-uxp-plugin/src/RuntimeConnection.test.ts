@@ -45,6 +45,32 @@ describe('RuntimeConnection', () => {
     );
   });
 
+  it('starts a fresh discovery round after stopping during an active probe', () => {
+    const sockets: FakeSocket[] = [];
+    const connection = new RuntimeConnection({
+      hostVersion: () => '27.9.0',
+      placementMimeTypes: () => [...placementMimeTypes()],
+      documents: () => [],
+      createSocket: (url, protocol) => {
+        const socket = new FakeSocket(url, protocol);
+        sockets.push(socket);
+        return socket;
+      },
+      schedule: vi.fn(() => 1),
+      cancelSchedule: vi.fn(),
+      onState: vi.fn(),
+      onMessage: vi.fn()
+    });
+
+    connection.start();
+    connection.stop();
+    connection.start();
+
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0]?.closed).toBe(true);
+    expect(sockets[1]?.url).toBe('ws://127.0.0.1:32124/photoshop/session');
+  });
+
   it('probes the closed pool, starts one session, and retries only after loss', () => {
     const sockets: FakeSocket[] = [];
     const scheduled: Array<{ delay: number; callback: () => void }> = [];
@@ -156,6 +182,46 @@ describe('RuntimeConnection', () => {
     firstCandidateDeadline?.callback();
     expect(sockets).toHaveLength(2);
     expect(states.at(-1)).toMatchObject({ status: 'ready', pluginSessionId: 'session-1' });
+  });
+
+  it('finishes the ordered fixed-port pool before one non-overlapping five-second retry', () => {
+    const sockets: FakeSocket[] = [];
+    const scheduled: Array<{ delay: number; callback: () => void }> = [];
+    const states: RuntimeConnectionState[] = [];
+    const connection = new RuntimeConnection({
+      hostVersion: () => '27.9.0',
+      placementMimeTypes: () => [...placementMimeTypes()],
+      documents: () => [],
+      createSocket: (url, protocol) => {
+        const socket = new FakeSocket(url, protocol);
+        sockets.push(socket);
+        return socket;
+      },
+      schedule: (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      },
+      cancelSchedule: vi.fn(),
+      onState: (state) => states.push(state),
+      onMessage: vi.fn()
+    });
+
+    connection.start();
+    for (let index = 0; index < 8; index += 1) {
+      expect(sockets[index]?.url).toBe(
+        `ws://127.0.0.1:${32124 + index}/photoshop/session`
+      );
+      sockets[index]?.fail();
+    }
+
+    expect(sockets).toHaveLength(8);
+    expect(states.at(-1)).toEqual({ status: 'disconnected' });
+    const retry = scheduled.at(-1);
+    expect(retry?.delay).toBe(5_000);
+    expect(sockets).toHaveLength(8);
+    retry?.callback();
+    expect(sockets).toHaveLength(9);
+    expect(sockets[8]?.url).toBe('ws://127.0.0.1:32124/photoshop/session');
   });
 
   it('keeps the byte deadline active until the response body is consumed', async () => {

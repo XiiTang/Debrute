@@ -24,8 +24,8 @@ use crate::{
     control::RuntimeControlState,
     executable_path::resolve_executable,
     global::{
-        GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent, GlobalRuntimeService,
-        ModelCatalog,
+        DebruteGlobalSettingsView, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent,
+        GlobalRuntimeService, ModelCatalog,
     },
     integrations::{IntegrationOperation, Platform},
     model_operation::{
@@ -33,7 +33,7 @@ use crate::{
         OperationState,
     },
     model_request::{ModelArtifactProvenanceStore, ModelRequestExecutor},
-    photoshop::PhotoshopIntegration,
+    photoshop::{PhotoshopEnableMutationError, PhotoshopGatewayLifecycle, PhotoshopIntegration},
     project::{
         CanvasFeedbackArtifacts, MediaToolPaths, NativeProjectNodeAdapter, OpenProjectSession,
         ProjectNativeShellService, ProjectPathStateReconciler, ProjectSession,
@@ -161,6 +161,7 @@ pub struct WorkbenchRuntimeServices {
     provenance: Arc<ModelArtifactProvenanceStore>,
     model_operations: Arc<ModelOperationService<ModelRequestExecutor>>,
     photoshop: Arc<PhotoshopIntegration>,
+    photoshop_lifecycle: PhotoshopGatewayLifecycle,
     connections: Arc<WorkbenchConnectionRegistry>,
     connection_closer: WorkbenchConnectionCloser,
     global_events: broadcast::Sender<GlobalRuntimeEvent>,
@@ -314,6 +315,12 @@ impl WorkbenchRuntimeServices {
             ));
         }
         let callback_global = Arc::clone(&global);
+        let photoshop_enabled = global
+            .settings_get()
+            .map_err(RuntimeHttpServiceError::from_global)?
+            .plugins
+            .photoshop
+            .enabled;
         let photoshop = Arc::new(PhotoshopIntegration::new(
             runtime_state.instance_id(),
             Arc::clone(&runtime_state),
@@ -322,6 +329,17 @@ impl WorkbenchRuntimeServices {
                 callback_global.publish_external(GlobalRuntimeChange::PhotoshopChanged(state));
             }),
         ));
+        photoshop.initialize_enabled(photoshop_enabled);
+        let photoshop_lifecycle =
+            PhotoshopGatewayLifecycle::start(Arc::clone(&photoshop), photoshop_enabled).map_err(
+                |error| {
+                    RuntimeHttpServiceError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "photoshop_lifecycle_unavailable",
+                        error.to_string(),
+                    )
+                },
+            )?;
         *photoshop_holder
             .lock()
             .expect("Photoshop integration holder lock poisoned") = Arc::downgrade(&photoshop);
@@ -363,6 +381,7 @@ impl WorkbenchRuntimeServices {
             provenance,
             model_operations,
             photoshop,
+            photoshop_lifecycle,
             connections,
             connection_closer,
             global_events,
@@ -386,6 +405,43 @@ impl WorkbenchRuntimeServices {
     #[must_use]
     pub fn global(&self) -> &Arc<GlobalRuntimeService> {
         &self.global
+    }
+
+    pub fn settings_save(
+        &self,
+        input: &Value,
+    ) -> Result<DebruteGlobalSettingsView, RuntimeHttpServiceError> {
+        let requested_photoshop_enabled = input
+            .get("plugins")
+            .and_then(Value::as_object)
+            .and_then(|plugins| plugins.get("photoshop"))
+            .and_then(Value::as_object)
+            .and_then(|photoshop| photoshop.get("enabled"))
+            .and_then(Value::as_bool);
+        let Some(enabled) = requested_photoshop_enabled else {
+            return self
+                .global
+                .settings_save(input)
+                .map_err(RuntimeHttpServiceError::from_global);
+        };
+        let (view, _) = self
+            .photoshop
+            .mutate_enabled(
+                enabled,
+                || self.global.settings_save(input),
+                || self.photoshop_lifecycle.set_enabled(enabled),
+            )
+            .map_err(|error| match error {
+                PhotoshopEnableMutationError::TransferActive => RuntimeHttpServiceError::new(
+                    StatusCode::CONFLICT,
+                    "photoshop_transfer_in_progress",
+                    "Transfer in progress.",
+                ),
+                PhotoshopEnableMutationError::Persist(error) => {
+                    RuntimeHttpServiceError::from_global(error)
+                }
+            })?;
+        Ok(view)
     }
 
     #[must_use]

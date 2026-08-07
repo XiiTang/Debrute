@@ -76,8 +76,8 @@ p { margin: 0; }
   background: currentColor;
 }
 
-.photoshop-panel__connection--ready { color: var(--panel-success); }
-.photoshop-panel__connection--connecting { color: var(--panel-accent); }
+.photoshop-panel__connection--connected { color: var(--panel-success); }
+.photoshop-panel__connection--waiting { color: var(--panel-muted); }
 
 .photoshop-panel__source {
   flex: 0 0 auto;

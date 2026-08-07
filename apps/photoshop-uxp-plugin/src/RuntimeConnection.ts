@@ -84,6 +84,7 @@ export class RuntimeConnection {
 
   stop(): void {
     this.stopped = true;
+    this.roundActive = false;
     this.clearRoundDeadline();
     this.clearCandidateDeadline();
     this.clearRetrySchedule();

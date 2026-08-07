@@ -42,6 +42,13 @@ requests are accepted only when Origin is absent, as observed in Photoshop
 bearer. Photoshop routes do not inherit Workbench or CLI authority. See
 [`photoshop.md`](./photoshop.md).
 
+The Runtime-owned Photoshop Integration setting controls whether that complete
+authority surface exists. Off binds no fixed-pool listener and retains no
+Photoshop route, session, credential, or command authority. Idle disable closes
+all sessions and invalidates their bearers before returning. Workbench can
+request the closed setting mutation but cannot keep a listener or session alive
+independently of Runtime.
+
 ## Project Filesystem Boundary
 
 A Project operation accepts a normalized Project-relative path. Absolute paths,

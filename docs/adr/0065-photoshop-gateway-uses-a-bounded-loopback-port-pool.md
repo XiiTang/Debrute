@@ -16,9 +16,13 @@ command-item PNG POST. Both use the socket session's bearer in the
 `Authorization` header, and neither selects a destination independently of its
 already admitted Photoshop command.
 
-An occupied port advances Runtime to the next pool entry. Exhausting the pool
-makes Photoshop connectivity unavailable without preventing Runtime or
-Workbench operation. The plugin does not scan arbitrary ports, read a Runtime
-locator file, request broad host-filesystem access, or use a fixed port for the
-entire Workbench server. The Workbench keeps its dynamic origin and
-role-partitioned authorization.
+The Runtime-owned Photoshop enable setting controls the complete gateway
+lifecycle. Off binds no pool port and retains no Photoshop route or session
+authority. On attempts the complete pool immediately. An occupied port advances
+Runtime to the next entry; exhausting the pool publishes `unavailable` without
+turning the setting off or preventing Runtime and Workbench operation. Runtime
+retries the complete pool after each five-second interval with no overlapping
+rounds. The plugin does not scan arbitrary ports, read a Runtime locator file,
+request broad host-filesystem access, or use a fixed port for the entire
+Workbench server. The Workbench keeps its dynamic origin and role-partitioned
+authorization.

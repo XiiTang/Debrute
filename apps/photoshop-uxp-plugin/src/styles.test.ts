@@ -71,5 +71,10 @@ describe('Photoshop UXP panel styles', () => {
     expect(css).not.toContain('.photoshop-panel__tree-disclosure');
     expect(css).toMatch(/\.photoshop-panel__send:focus\s*\{/);
     expect(css).toMatch(/\.photoshop-panel__send:disabled\s*\{/);
+    expect(css).toContain('.photoshop-panel__connection--connected');
+    expect(css).toContain('.photoshop-panel__connection--waiting');
+    expect(css).not.toContain('.photoshop-panel__connection--ready');
+    expect(css).not.toContain('.photoshop-panel__connection--connecting');
+    expect(css).not.toContain('.photoshop-panel__connection--disconnected');
   });
 });

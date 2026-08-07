@@ -4,6 +4,7 @@ import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
   IntegrationSettingsView,
+  PhotoshopStateView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
   SaveDebruteGlobalSettingsInput,
@@ -28,6 +29,7 @@ export interface WorkbenchSettingsActions {
 export interface WorkbenchSettingsController {
   globalSettings: EventProjection<DebruteGlobalSettingsView>;
   integrations: SettingsResource<IntegrationSettingsView>;
+  photoshop: EventProjection<PhotoshopStateView>;
   product: EventProjection<DebruteProductState | null>;
   canvasTextAppearance: CanvasTextAppearance;
   actions: WorkbenchSettingsActions;
@@ -105,10 +107,11 @@ export function useWorkbenchSettingsController(
   return useMemo(() => ({
     globalSettings,
     integrations,
+    photoshop: projection.photoshop,
     product: projection.product,
     canvasTextAppearance,
     actions
-  }), [actions, canvasTextAppearance, globalSettings, integrations, projection.product]);
+  }), [actions, canvasTextAppearance, globalSettings, integrations, projection.photoshop, projection.product]);
 }
 
 type InitializedWorkbenchGlobalProjection = Exclude<WorkbenchGlobalProjectionState, { status: 'uninitialized' }>;

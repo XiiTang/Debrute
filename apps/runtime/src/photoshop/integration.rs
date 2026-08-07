@@ -24,9 +24,9 @@ use crate::{
 use super::{
     PHOTOSHOP_MAX_BATCH_BYTES, PHOTOSHOP_MAX_BATCH_ITEMS, PHOTOSHOP_MAX_FILE_BYTES,
     PhotoshopDocumentView, PhotoshopError, PhotoshopErrorCode, PhotoshopExportItem,
-    PhotoshopExportResult, PhotoshopMimeType, PhotoshopProjectView, PhotoshopSendResult,
-    PhotoshopSessionView, PhotoshopStateView, PhotoshopUploadResult, PluginPhotoshopMessage,
-    RuntimePhotoshopMessage,
+    PhotoshopExportResult, PhotoshopIntegrationStatus, PhotoshopMimeType, PhotoshopProjectView,
+    PhotoshopSendResult, PhotoshopSessionView, PhotoshopStateView, PhotoshopUploadResult,
+    PluginPhotoshopMessage, RuntimePhotoshopMessage,
 };
 
 type PhotoshopStateObserver = Arc<dyn Fn(PhotoshopStateView) + Send + Sync>;
@@ -68,11 +68,27 @@ struct ExportCommand {
     _product_work: RuntimeWorkPermit,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum GatewayAvailability {
+    #[default]
+    Unchecked,
+    Unavailable,
+    Available,
+}
+
 #[derive(Default)]
 struct State {
+    enabled: bool,
+    gateway_availability: GatewayAvailability,
     sessions: HashMap<String, Session>,
     bearer_sessions: HashMap<String, String>,
     commands: HashMap<String, Command>,
+}
+
+#[derive(Debug)]
+pub(crate) enum PhotoshopEnableMutationError<E> {
+    TransferActive,
+    Persist(E),
 }
 
 pub struct PhotoshopSessionAdmission {
@@ -90,6 +106,11 @@ pub struct PhotoshopIntegration {
     runtime_instance_id: String,
     runtime_state: Arc<RuntimeControlState>,
     projects: ProjectSessionRegistry,
+    // Orders the complete persistence-through-gateway settlement transition.
+    lifecycle_mutation: Mutex<()>,
+    // Linearizes enablement with session and transfer admission, then releases
+    // before the gateway worker is joined.
+    admission: Mutex<()>,
     state: Mutex<State>,
     observer: PhotoshopStateObserver,
 }
@@ -106,8 +127,94 @@ impl PhotoshopIntegration {
             runtime_instance_id,
             runtime_state,
             projects,
+            lifecycle_mutation: Mutex::new(()),
+            admission: Mutex::new(()),
             state: Mutex::new(State::default()),
             observer,
+        }
+    }
+
+    pub(crate) fn mutate_enabled<T, E>(
+        &self,
+        enabled: bool,
+        persist: impl FnOnce() -> Result<T, E>,
+        settle_lifecycle: impl FnOnce(),
+    ) -> Result<(T, bool), PhotoshopEnableMutationError<E>> {
+        let _lifecycle_mutation = self.lock_lifecycle_mutation();
+        let admission = self.lock_admission();
+        let current = {
+            let state = self.lock();
+            if state.enabled && !enabled && transfer_active(&state) {
+                return Err(PhotoshopEnableMutationError::TransferActive);
+            }
+            state.enabled
+        };
+        let value = persist().map_err(PhotoshopEnableMutationError::Persist)?;
+        let changed = current != enabled;
+        if changed {
+            self.apply_enabled(enabled);
+            drop(admission);
+            settle_lifecycle();
+            if !enabled {
+                self.publish();
+            }
+        } else {
+            drop(admission);
+        }
+        Ok((value, changed))
+    }
+
+    pub(crate) fn initialize_enabled(&self, enabled: bool) {
+        if !enabled {
+            return;
+        }
+        let _admission = self.lock_admission();
+        self.apply_enabled(true);
+    }
+
+    pub(crate) fn set_gateway_available(&self, available: bool) {
+        let availability = if available {
+            GatewayAvailability::Available
+        } else {
+            GatewayAvailability::Unavailable
+        };
+        let changed = {
+            let mut state = self.lock();
+            if !state.enabled || state.gateway_availability == availability {
+                false
+            } else {
+                state.gateway_availability = availability;
+                true
+            }
+        };
+        if changed {
+            self.publish();
+        }
+    }
+
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn set_gateway_available_for_tests(&self, available: bool) {
+        self.set_gateway_available(available);
+    }
+
+    fn apply_enabled(&self, enabled: bool) {
+        {
+            let mut state = self.lock();
+            state.enabled = enabled;
+            state.gateway_availability = GatewayAvailability::Unchecked;
+            if !enabled {
+                assert!(
+                    !transfer_active(&state),
+                    "Photoshop Integration cannot disable with an active transfer"
+                );
+                state.sessions.clear();
+                state.bearer_sessions.clear();
+                assert!(
+                    state.commands.is_empty(),
+                    "Photoshop command registry must be empty when disable is admitted"
+                );
+            }
         }
     }
 
@@ -127,6 +234,7 @@ impl PhotoshopIntegration {
         documents: Vec<PhotoshopDocumentView>,
         sender: mpsc::Sender<RuntimePhotoshopMessage>,
     ) -> Result<PhotoshopSessionAdmission, PhotoshopError> {
+        let _admission = self.lock_admission();
         validate_host_snapshot(&host_version, &placement_mime_types, &documents)?;
         let plugin_session_id = Uuid::new_v4().to_string();
         let bearer = random_credential();
@@ -140,6 +248,7 @@ impl PhotoshopIntegration {
         };
         {
             let mut state = self.lock();
+            require_available(&state)?;
             assert!(
                 state
                     .bearer_sessions
@@ -411,6 +520,7 @@ impl PhotoshopIntegration {
 
     #[must_use]
     pub fn state(&self) -> PhotoshopStateView {
+        let _lifecycle_mutation = self.lock_lifecycle_mutation();
         state_view(&self.lock())
     }
 
@@ -550,7 +660,9 @@ impl PhotoshopIntegration {
         document_id: u64,
         mime_type: PhotoshopMimeType,
     ) -> Result<String, PhotoshopError> {
+        let admission = self.lock_admission();
         let mut state = self.lock();
+        require_available(&state)?;
         let session = session_mut(&mut state, session_id)?;
         if session.active_command.is_some() {
             return Err(PhotoshopError::new(
@@ -576,6 +688,9 @@ impl PhotoshopIntegration {
             ));
         }
         session.active_command = Some(command_id.to_owned());
+        drop(state);
+        drop(admission);
+        self.publish();
         Ok(document_title)
     }
 
@@ -721,7 +836,9 @@ impl PhotoshopIntegration {
         session_id: &str,
         command_id: &str,
     ) -> Result<(), PhotoshopError> {
+        let admission = self.lock_admission();
         let mut state = self.lock();
+        require_available(&state)?;
         if state.commands.contains_key(command_id) {
             return Err(invalid_command());
         }
@@ -733,6 +850,9 @@ impl PhotoshopIntegration {
             ));
         }
         session.active_command = Some(command_id.to_owned());
+        drop(state);
+        drop(admission);
+        self.publish();
         Ok(())
     }
 
@@ -923,24 +1043,46 @@ impl PhotoshopIntegration {
     }
 
     fn clear_active(&self, session_id: &str, command_id: &str) {
-        if let Some(session) = self.lock().sessions.get_mut(session_id) {
-            assert_eq!(
-                session.active_command.as_deref(),
-                Some(command_id),
-                "Photoshop session active command must match settlement"
-            );
-            session.active_command = None;
+        let changed = {
+            let mut state = self.lock();
+            if let Some(session) = state.sessions.get_mut(session_id) {
+                assert_eq!(
+                    session.active_command.as_deref(),
+                    Some(command_id),
+                    "Photoshop session active command must match settlement"
+                );
+                session.active_command = None;
+                true
+            } else {
+                false
+            }
+        };
+        if changed {
+            self.publish();
         }
     }
 
     fn publish(&self) {
-        (self.observer)(self.state());
+        let state = state_view(&self.lock());
+        (self.observer)(state);
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state
             .lock()
             .expect("Photoshop integration lock poisoned")
+    }
+
+    fn lock_admission(&self) -> MutexGuard<'_, ()> {
+        self.admission
+            .lock()
+            .expect("Photoshop admission lock poisoned")
+    }
+
+    fn lock_lifecycle_mutation(&self) -> MutexGuard<'_, ()> {
+        self.lifecycle_mutation
+            .lock()
+            .expect("Photoshop lifecycle mutation lock poisoned")
     }
 }
 
@@ -1025,7 +1167,38 @@ fn state_view(state: &State) -> PhotoshopStateView {
         })
         .collect::<Vec<_>>();
     sessions.sort_by(|left, right| left.plugin_session_id.cmp(&right.plugin_session_id));
-    PhotoshopStateView { sessions }
+    let transfer_active = transfer_active(state);
+    let status = if !state.enabled {
+        PhotoshopIntegrationStatus::Off
+    } else if state.gateway_availability != GatewayAvailability::Available {
+        PhotoshopIntegrationStatus::Unavailable
+    } else if sessions.is_empty() {
+        PhotoshopIntegrationStatus::Waiting
+    } else {
+        PhotoshopIntegrationStatus::Connected
+    };
+    PhotoshopStateView {
+        status,
+        transfer_active,
+        sessions,
+    }
+}
+
+fn transfer_active(state: &State) -> bool {
+    state
+        .sessions
+        .values()
+        .any(|session| session.active_command.is_some())
+}
+
+fn require_available(state: &State) -> Result<(), PhotoshopError> {
+    if state.enabled && state.gateway_availability == GatewayAvailability::Available {
+        return Ok(());
+    }
+    Err(PhotoshopError::new(
+        PhotoshopErrorCode::Unavailable,
+        "Photoshop Integration is not available.",
+    ))
 }
 
 fn project_views(projects: Vec<ProjectSessionSummary>) -> Vec<PhotoshopProjectView> {
@@ -1219,7 +1392,9 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
+        sync::atomic::{AtomicBool, Ordering},
         sync::{Arc, mpsc as std_mpsc},
+        thread,
         time::Duration,
     };
 
@@ -1272,6 +1447,21 @@ mod tests {
         let state = Arc::new(RuntimeControlState::new("runtime-1"));
         assert!(state.finish_startup());
         state
+    }
+
+    fn enabled_integration(
+        runtime_state: Arc<RuntimeControlState>,
+        projects: ProjectSessionRegistry,
+    ) -> PhotoshopIntegration {
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            runtime_state,
+            projects,
+            Arc::new(|_| {}),
+        );
+        integration.initialize_enabled(true);
+        integration.set_gateway_available(true);
+        integration
     }
 
     fn connect(
@@ -1327,6 +1517,239 @@ mod tests {
     }
 
     #[test]
+    fn enablement_and_gateway_availability_define_the_live_state() {
+        let home = TemporaryDirectory::new("enablement-state-home");
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            registry(home.as_ref()),
+            Arc::new(|_| {}),
+        );
+
+        assert_eq!(integration.state(), PhotoshopStateView::default());
+        integration.initialize_enabled(true);
+        assert_eq!(
+            integration.state().status,
+            PhotoshopIntegrationStatus::Unavailable
+        );
+        integration.set_gateway_available(true);
+        assert_eq!(
+            integration.state().status,
+            PhotoshopIntegrationStatus::Waiting
+        );
+
+        let (admission, _outbound) = connect(&integration, Vec::new());
+        let session_bearer = bearer(&admission).to_owned();
+        assert_eq!(
+            integration.state().status,
+            PhotoshopIntegrationStatus::Connected
+        );
+
+        let result = integration.mutate_enabled(false, || Ok::<_, ()>(()), || {});
+        assert!(matches!(result, Ok(((), true))));
+        assert_eq!(integration.state(), PhotoshopStateView::default());
+        let Err(error) = integration.content(&session_bearer, "retired-command") else {
+            panic!("disabled Photoshop bearer must be invalid");
+        };
+        assert_eq!(error.code(), PhotoshopErrorCode::SessionInvalid);
+
+        integration.initialize_enabled(true);
+        assert_eq!(
+            integration.state().status,
+            PhotoshopIntegrationStatus::Unavailable
+        );
+        integration.set_gateway_available(true);
+        assert_eq!(
+            integration.state().status,
+            PhotoshopIntegrationStatus::Waiting
+        );
+        integration.set_gateway_available(false);
+        assert_eq!(
+            integration.state().status,
+            PhotoshopIntegrationStatus::Unavailable
+        );
+
+        let disabled_again = integration.mutate_enabled(false, || Ok::<_, ()>(()), || {});
+        assert!(matches!(disabled_again, Ok(((), true))));
+        assert_eq!(integration.state(), PhotoshopStateView::default());
+    }
+
+    #[test]
+    fn enablement_publishes_settled_gateway_state_and_off_after_lifecycle_stop() {
+        let home = TemporaryDirectory::new("enablement-publication-home");
+        let lifecycle_stopped = Arc::new(AtomicBool::new(false));
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let observer_stopped = Arc::clone(&lifecycle_stopped);
+        let observer_states = Arc::clone(&observed);
+        let integration = PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            registry(home.as_ref()),
+            Arc::new(move |state| {
+                observer_states
+                    .lock()
+                    .unwrap()
+                    .push((state.status, observer_stopped.load(Ordering::SeqCst)));
+            }),
+        );
+
+        integration
+            .mutate_enabled(
+                true,
+                || Ok::<_, ()>(()),
+                || integration.set_gateway_available(true),
+            )
+            .unwrap();
+        integration
+            .mutate_enabled(
+                false,
+                || Ok::<_, ()>(()),
+                || lifecycle_stopped.store(true, Ordering::SeqCst),
+            )
+            .unwrap();
+
+        assert_eq!(
+            *observed.lock().unwrap(),
+            [
+                (PhotoshopIntegrationStatus::Waiting, false),
+                (PhotoshopIntegrationStatus::Off, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn enablement_mutations_cannot_overtake_lifecycle_settlement() {
+        let home = TemporaryDirectory::new("enablement-order-home");
+        let integration = Arc::new(PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            registry(home.as_ref()),
+            Arc::new(|_| {}),
+        ));
+        let (settling, settlement_started) = std_mpsc::sync_channel(0);
+        let (release_settlement, release) = std_mpsc::sync_channel(0);
+        let first_integration = Arc::clone(&integration);
+        let first = thread::spawn(move || {
+            first_integration
+                .mutate_enabled(
+                    true,
+                    || Ok::<_, ()>(()),
+                    || {
+                        settling.send(()).unwrap();
+                        release.recv().unwrap();
+                        first_integration.set_gateway_available(true);
+                    },
+                )
+                .unwrap();
+        });
+        settlement_started.recv().unwrap();
+
+        let (second_started, second_entered) = std_mpsc::sync_channel(0);
+        let (persisted, persistence_observed) = std_mpsc::sync_channel(0);
+        let second_integration = Arc::clone(&integration);
+        let second = thread::spawn(move || {
+            second_started.send(()).unwrap();
+            second_integration
+                .mutate_enabled(
+                    false,
+                    || {
+                        persisted.send(()).unwrap();
+                        Ok::<_, ()>(())
+                    },
+                    || {},
+                )
+                .unwrap();
+        });
+        second_entered.recv().unwrap();
+        assert!(matches!(
+            persistence_observed.recv_timeout(Duration::from_millis(50)),
+            Err(std_mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        release_settlement.send(()).unwrap();
+        first.join().unwrap();
+        persistence_observed
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        second.join().unwrap();
+        assert_eq!(integration.state(), PhotoshopStateView::default());
+    }
+
+    #[test]
+    fn active_transfer_rejects_disable_before_persistence() {
+        let project = TemporaryDirectory::new("disable-busy-project");
+        let home = TemporaryDirectory::new("disable-busy-home");
+        fs::write(project.as_ref().join("source.png"), b"accepted bytes").unwrap();
+        let projects = registry(home.as_ref());
+        let opened = projects
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
+            .unwrap();
+        let canonical_root = opened.session.summary().unwrap().canonical_root;
+        let integration = enabled_integration(ready_runtime_state(), projects);
+        let (admission, _outbound) = connect(
+            &integration,
+            vec![PhotoshopDocumentView {
+                document_id: 10,
+                title: "A.psd".to_owned(),
+            }],
+        );
+        let (completion, command) = integration
+            .prepare_place(
+                &canonical_root,
+                "source.png",
+                &admission.plugin_session_id,
+                10,
+            )
+            .unwrap();
+        assert!(integration.state().transfer_active);
+
+        let persisted = AtomicBool::new(false);
+        let rejected = integration.mutate_enabled(
+            false,
+            || {
+                persisted.store(true, Ordering::SeqCst);
+                Ok::<_, ()>(())
+            },
+            || {},
+        );
+        assert!(matches!(
+            rejected,
+            Err(PhotoshopEnableMutationError::TransferActive)
+        ));
+        assert!(!persisted.load(Ordering::SeqCst));
+        assert_eq!(
+            integration.state().status,
+            PhotoshopIntegrationStatus::Connected
+        );
+
+        integration
+            .handle_message(
+                &admission.plugin_session_id,
+                PluginPhotoshopMessage::PlaceResult {
+                    command_id: command.command_id,
+                    ok: true,
+                    error_code: None,
+                    message: None,
+                },
+            )
+            .unwrap();
+        completion.blocking_recv().unwrap().unwrap();
+        let lifecycle_settled = AtomicBool::new(false);
+        let admitted = integration.mutate_enabled(
+            false,
+            || {
+                persisted.store(true, Ordering::SeqCst);
+                Ok::<_, ()>(())
+            },
+            || lifecycle_settled.store(true, Ordering::SeqCst),
+        );
+        assert!(matches!(admitted, Ok(((), true))));
+        assert!(persisted.load(Ordering::SeqCst));
+        assert!(lifecycle_settled.load(Ordering::SeqCst));
+        assert_eq!(integration.state(), PhotoshopStateView::default());
+    }
+
+    #[test]
     fn incoming_transfer_freezes_bytes_and_binds_the_exact_document() {
         let project = TemporaryDirectory::new("incoming-project");
         let home = TemporaryDirectory::new("incoming-home");
@@ -1337,12 +1760,7 @@ mod tests {
             .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let canonical_root = opened.session.summary().unwrap().canonical_root;
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects.clone(),
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects.clone());
         let (admission, mut outbound) = connect(
             &integration,
             vec![
@@ -1455,12 +1873,7 @@ mod tests {
             .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let canonical_root = opened.session.summary().unwrap().canonical_root;
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects,
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects);
         let documents = vec![PhotoshopDocumentView {
             document_id: 10,
             title: "A.psd".to_owned(),
@@ -1539,12 +1952,7 @@ mod tests {
     fn session_start_rejects_empty_or_duplicate_placement_capabilities() {
         let home = TemporaryDirectory::new("invalid-capability-home");
         let projects = registry(home.as_ref());
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects,
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects);
 
         for placement_mime_types in [
             Vec::new(),
@@ -1572,12 +1980,7 @@ mod tests {
             .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let canonical_root = opened.session.summary().unwrap().canonical_root;
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects,
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects);
         let (admission, mut outbound) = connect(
             &integration,
             vec![PhotoshopDocumentView {
@@ -1642,12 +2045,7 @@ mod tests {
     fn failed_project_broadcast_retires_the_stale_photoshop_session() {
         let home = TemporaryDirectory::new("stale-broadcast-home");
         let projects = registry(home.as_ref());
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects,
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects);
         let (admission, outbound) = connect(&integration, Vec::new());
         drop(outbound);
 
@@ -1667,12 +2065,7 @@ mod tests {
     fn closed_project_registry_broadcasts_an_empty_projection() {
         let home = TemporaryDirectory::new("closed-broadcast-home");
         let projects = registry(home.as_ref());
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects.clone(),
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects.clone());
         let (_admission, mut outbound) = connect(&integration, Vec::new());
 
         projects.close().unwrap();
@@ -1705,12 +2098,7 @@ mod tests {
             .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects,
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects);
         let (admission, mut outbound) = connect(&integration, Vec::new());
 
         integration
@@ -1792,12 +2180,7 @@ mod tests {
             .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            projects.clone(),
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), projects.clone());
         let (admission, mut outbound) = connect(
             &integration,
             vec![PhotoshopDocumentView {
@@ -1895,12 +2278,7 @@ mod tests {
             .unwrap();
         let summary = opened.session.summary().unwrap();
         let runtime_state = ready_runtime_state();
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            Arc::clone(&runtime_state),
-            projects,
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(Arc::clone(&runtime_state), projects);
         let (admitted, mut admitted_outbound) = connect(&integration, Vec::new());
         let (rejected, _rejected_outbound) = connect(&integration, Vec::new());
         integration
@@ -1966,12 +2344,7 @@ mod tests {
     #[test]
     fn document_snapshots_replace_atomically_and_reconnects_are_fresh() {
         let home = TemporaryDirectory::new("sessions-home");
-        let integration = PhotoshopIntegration::new(
-            "runtime-1".to_owned(),
-            ready_runtime_state(),
-            registry(home.as_ref()),
-            Arc::new(|_| {}),
-        );
+        let integration = enabled_integration(ready_runtime_state(), registry(home.as_ref()));
         let (first, _first_outbound) = connect(
             &integration,
             vec![PhotoshopDocumentView {
