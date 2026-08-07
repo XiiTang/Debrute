@@ -367,14 +367,13 @@ Recent Projects store those roots directly. Browser tabs and Electron windows ha
 one live Workbench connection and at most one bound Project. Interactive users
 open Projects with the Workbench `Open Project` action. Desktop Workbenches ask
 Electron to present the native directory picker owned by their current window;
-browser Workbenches ask Runtime to present the host picker. Agents and automation
-open an explicit absolute path with
-`debrute workbench start <project> --frontend browser`; the command sends a native
-Control activation and never prints an authentication URL. Runtime acquisition,
+browser Workbenches ask Runtime to present the host picker. Runtime acquisition,
 optional launch, handshake, and Ready polling share
 one absolute fifteen-second deadline in development and packaged clients; a
 wrapper does not add or restart another Ready timer. The root Workbench route
-does not reopen the last Project.
+does not reopen the last Project. A Project route carries an absolute requested
+path into the ordinary Workbench admission flow; constructing that route does
+not itself open or canonicalize a Project.
 
 `pnpm preview` serves the production Web build for smoke testing after `pnpm build`. Desktop assembly consumes that complete `apps/web/dist` output directly and packages it only under the Product seed's `web` directory; it does not maintain a second Desktop Web output directory. `pnpm clean` removes that current Web output together with generated Desktop, package, release, and TypeScript build artifacts. A target that does not exist is already clean; any other traversal or removal error fails the command instead of reporting a partial cleanup as successful.
 

@@ -13,10 +13,13 @@ input paths independently of Project identity and Project Sessions.
 ## Admission and routing
 
 Input surfaces may accept relative paths when their working directory is
-defined. Runtime canonicalizes the existing directory before admitting work and
-uses only the canonical absolute value afterward. Desktop forwards the raw
-requested root to one selected Workbench; that Workbench binding performs the
-Project path admission and full Project Session load.
+defined. A frontend activation or URL-resolution surface may construct a
+navigation request from the resulting absolute path without inspecting the
+filesystem. That request is not Project identity or admission. The selected
+Workbench asks Runtime to canonicalize the existing directory while admitting
+the Project and uses only the canonical absolute value afterward. A successful
+admission replaces the page route with that Canonical Root; a failure remains
+in the selected Workbench.
 
 The only stable Project page route is:
 

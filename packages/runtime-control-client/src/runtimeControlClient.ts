@@ -62,6 +62,7 @@ export interface RuntimeControlClient {
   waitUntilReady(): Promise<void>;
   inspect(): Promise<ControlResponse>;
   activate(intent: ActivationIntent, preferredDesktopWindowKey?: string): Promise<ControlResponse>;
+  resolveWorkbenchRootUrl(): Promise<ControlResponse>;
   createCliAuthorization(): Promise<ControlResponse>;
   registerDevWorkbenchOrigin(origin: string): Promise<ControlResponse>;
   createDesktopLaunchTicket(windowKey: string): Promise<ControlResponse>;
@@ -247,6 +248,10 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
         ? { preferred_desktop_window_key: preferredDesktopWindowKey }
         : {})
     }, true);
+  }
+
+  async resolveWorkbenchRootUrl(): Promise<ControlResponse> {
+    return await this.request({ command: 'resolve_workbench_root_url' }, true);
   }
 
   async createCliAuthorization(): Promise<ControlResponse> {

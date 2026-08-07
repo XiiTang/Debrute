@@ -401,6 +401,7 @@ fn result_field_order(command: &str) -> &'static [&'static str] {
             &["project_root", "project_name", "errors", "warnings"]
         }
         "workbench.start" => &["frontend", "target", "outcome"],
+        "workbench.url" => &["url"],
         _ => &[],
     }
 }

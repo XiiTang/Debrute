@@ -44,16 +44,9 @@ AI 生成无法替代专业编辑工具的精度、控制力和专业经验。�
 
 ## 与 Agent 配合
 
-Debrute 不限制 agent。它最推荐搭配具备内置浏览器的 agent GUI 项目使用，因为 agent 可以打开 Debrute Workbench、查看 Canvas 状态、理解视觉反馈，然后在同一个循环里更新项目文件。
-
-建议优先评估这些例子：
-
-- [Codex](https://developers.openai.com/codex/app/browser)
-- [Qoder](https://docs.qoder.com/user-guide/chat/browser-agent)
-- [Cursor](https://cursor.com/docs/agent/tools/browser)
-- [Google Antigravity](https://www.antigravity.google/docs/browser)
-
-所有 CLI agent 也都可以使用 Debrute。Debrute 提供命令接口和官方 Skills，让外部 agent 可以启动 Workbench、校验项目、请求生成、查询生成资产元数据。
+Debrute 不限制 agent。外部 agent 通过命令接口和官方 Skills 使用本地
+Project、查看视觉状态、提交模型请求和查询模型资产来源。Debrute 不依赖
+某一款特定的 agent harness。
 
 ## 与设计师配合
 
@@ -77,7 +70,7 @@ Debrute 应该位于专业编辑软件之前和旁边，而不是位于它们之
 
 Debrute 提供面向外部 agent 的标准 Skills：
 
-- `debrute-core`：项目语义、Workbench 启动、生成资产和基于模型的生成。
+- `debrute-core`：项目语义、Workbench 访问、生成资产和基于模型的生成。
 - `debrute-image-director`：通过 `debrute` 命令进行图片生成和编辑。
 - `debrute-video-director`：通过 `debrute` 命令进行视频生成和编辑。
 - `debrute-audio-director`：通过 `debrute` 命令进行 TTS、音乐生成和音效生成。

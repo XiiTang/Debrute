@@ -8,6 +8,14 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "macos")]
+use std::{io::Write as _, os::unix::net::UnixStream};
+
+#[cfg(target_os = "macos")]
+use debrute_runtime::control::{
+    ClientMessage, ClientRole, ControlRequest, ControlResponse, ServerMessage, WorkbenchRoute,
+    encode_frame, read_server_frame, request_handshake, serve_control_connection,
+};
 use debrute_runtime::{
     cli::RuntimeCliService,
     control::RuntimeControlState,
@@ -49,6 +57,79 @@ fn stable_assets_have_no_launch_credential_in_the_url() {
             .and_then(|value| value.to_str().ok()),
         Some("no-cache")
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn control_resolves_the_current_source_workbench_root_url() {
+    let runtime = TestRuntime::start();
+    assert_eq!(
+        runtime
+            .state()
+            .workbench_url(&WorkbenchRoute::Root)
+            .unwrap(),
+        format!("{}/", runtime.origin())
+    );
+
+    let (mut launcher, launcher_server_stream) =
+        UnixStream::pair().expect("launcher stream pair should open");
+    launcher
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("launcher read should be bounded");
+    let launcher_state = Arc::clone(runtime.state());
+    let launcher_server = std::thread::spawn(move || {
+        serve_control_connection(launcher_server_stream, &launcher_state, 8)
+            .expect("launcher connection should close cleanly");
+    });
+    request_handshake(&mut launcher, ClientRole::Launcher)
+        .expect("launcher handshake should succeed");
+    write_control_request(
+        &mut launcher,
+        "register-source",
+        ControlRequest::RegisterDevWorkbenchOrigin {
+            origin: "http://127.0.0.1:5173".to_owned(),
+        },
+    );
+    assert_eq!(
+        read_server_frame(&mut launcher).expect("registration response should arrive"),
+        ServerMessage::response(
+            "register-source",
+            ControlResponse::DevWorkbenchOriginRegistered {
+                runtime_origin: runtime.origin().to_owned(),
+            },
+        )
+    );
+
+    let (mut cli, cli_server_stream) = UnixStream::pair().expect("CLI stream pair should open");
+    cli.set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("CLI read should be bounded");
+    let cli_state = Arc::clone(runtime.state());
+    let cli_server = std::thread::spawn(move || {
+        serve_control_connection(cli_server_stream, &cli_state, 8)
+            .expect("CLI connection should close cleanly");
+    });
+    request_handshake(&mut cli, ClientRole::Cli).expect("CLI handshake should succeed");
+    write_control_request(
+        &mut cli,
+        "resolve-url",
+        ControlRequest::ResolveWorkbenchRootUrl,
+    );
+    assert_eq!(
+        read_server_frame(&mut cli).expect("Workbench URL response should arrive"),
+        ServerMessage::response(
+            "resolve-url",
+            ControlResponse::WorkbenchRootUrl {
+                url: "http://127.0.0.1:5173/".to_owned(),
+            },
+        )
+    );
+
+    drop(cli);
+    cli_server.join().expect("CLI server should finish");
+    drop(launcher);
+    launcher_server
+        .join()
+        .expect("launcher server should finish");
 }
 
 #[test]
@@ -1410,6 +1491,7 @@ impl SseEvents {
 
 struct TestRuntime {
     root: PathBuf,
+    state: Arc<RuntimeControlState>,
     server: WorkbenchHttpServer,
     services: Option<Arc<WorkbenchRuntimeServices>>,
 }
@@ -1449,6 +1531,7 @@ impl TestRuntime {
         assert!(state.finish_startup());
         Self {
             root,
+            state,
             server,
             services: Some(services),
         }
@@ -1456,6 +1539,10 @@ impl TestRuntime {
 
     fn origin(&self) -> &str {
         self.server.origin()
+    }
+
+    fn state(&self) -> &Arc<RuntimeControlState> {
+        &self.state
     }
 
     fn services(&self) -> &WorkbenchRuntimeServices {
@@ -1477,6 +1564,16 @@ impl TestRuntime {
             binding_id: Mutex::new(None),
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn write_control_request(stream: &mut UnixStream, request_id: &str, request: ControlRequest) {
+    stream
+        .write_all(
+            &encode_frame(&ClientMessage::request(request_id, request))
+                .expect("Control request should encode"),
+        )
+        .expect("Control request should write");
 }
 
 impl Drop for TestRuntime {

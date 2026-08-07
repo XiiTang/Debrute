@@ -1,6 +1,6 @@
 ---
 name: debrute-core
-description: Use when an external Agent needs Debrute project semantics through the debrute command, including project status, visual Workbench activation, Model Artifacts, and Model Requests.
+description: Use when an external Agent needs Debrute project semantics through the debrute command, including project status, visual Workbench access, Model Artifacts, and Model Requests.
 metadata:
   debrute.managed: "true"
   debrute.package: "debrute"
@@ -15,7 +15,8 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 
 - Read Debrute CLI stdout as unversioned `debrute` Agent Records.
 - Treat Project Path values as project-relative. Root arguments may be absolute
-  or relative to the CLI working directory; Runtime canonicalizes them before
+  or relative to the CLI working directory. The CLI resolves relative roots
+  against that directory; Runtime canonicalizes them only during Project
   admission.
 - Use the external Agent's filesystem tools for generic file reads, directory listings, writes, and deletes.
 - Do not edit files under `~/.agents/skills` directly.
@@ -29,7 +30,8 @@ debrute runtime status
 debrute runtime doctor
 debrute project status /path/to/project
 debrute project validate /path/to/project
-debrute workbench start --frontend browser
+debrute workbench url ./
+debrute workbench start ./ --frontend desktop
 debrute model-artifact lookup --path generated/example.png
 debrute models image list
 debrute models image describe gpt-image-2
@@ -69,38 +71,25 @@ for detached work, use the returned Operation id with `operation wait`.
 
 ## Visual Workbench
 
-Use the Workbench when visual inspection helps: Canvas layout, image previews, Model Artifacts, or project file structure.
+Use the Workbench when visual inspection helps.
 
-Start the Runtime and activate one explicit Workbench frontend:
-
-```sh
-debrute workbench start --frontend browser
-debrute workbench start --frontend desktop
-```
-
-Open a Project directly in a specific frontend by passing an absolute path or a
-path relative to the CLI working directory:
+For browser use, obtain the exact current Workbench URL for the Project and open
+it in the browser requested by the user. If none is specified, prefer the
+current Agent harness's built-in browser. Reuse a confirmed current Debrute
+origin when available; otherwise run:
 
 ```sh
-debrute workbench start ./ --frontend browser
-debrute workbench start ./ --frontend desktop
+debrute workbench url [<project>]
 ```
 
-`--frontend browser` opens the root Workbench or Project in the system browser.
-`--frontend desktop` opens or focuses the Debrute Desktop window. The option is
-required; Debrute has no default frontend or implicit fallback. Interactive
-users can also open projects from the Workbench `Open Project` picker.
+For Desktop use:
 
-After browser activation, use the current agent environment's GUI/browser capability to inspect the opened Debrute tab. After Desktop activation, use its desktop-app capability.
-
-```text
-Qoder: use /browser to inspect the opened Debrute Workbench tab
-Antigravity: use /browser to inspect the opened Debrute Workbench tab
-Cline: use the browser to inspect the opened Debrute Workbench tab
-Codex app: use Browser for Web or Computer Use for Desktop
+```sh
+debrute workbench start [<project>] --frontend desktop
 ```
 
-If the agent cannot control the selected frontend, report that limitation instead of claiming the activation was visually verified.
+`--frontend browser` remains available when direct activation of the system
+default browser is requested.
 
 ## Canvas and Project files
 

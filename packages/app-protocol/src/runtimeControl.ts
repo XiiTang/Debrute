@@ -10,6 +10,5 @@ export type { ClientRole } from './generated/runtime-control/ClientRole.js';
 export type { ControlEvent } from './generated/runtime-control/ControlEvent.js';
 export type { ControlRequest } from './generated/runtime-control/ControlRequest.js';
 export type { ControlResponse } from './generated/runtime-control/ControlResponse.js';
-export type { ProjectOpenFailure } from './generated/runtime-control/ProjectOpenFailure.js';
 export type { RuntimeStatus } from './generated/runtime-control/RuntimeStatus.js';
 export type { ServerMessage } from './generated/runtime-control/ServerMessage.js';

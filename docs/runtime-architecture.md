@@ -88,6 +88,12 @@ registered browser; failure to spawn still rejects the activation. Runtime does
 not try another browser command or reinterpret a successful Windows handoff as
 an activation failure.
 
+The CLI-only Root Workbench URL request is also Ready-gated. Runtime returns the
+current packaged or registered source-development Root URL without activating a
+frontend. No Project path crosses Control; the CLI may append one absolute
+requested root with the shared pure route builder. URL resolution does not open
+a Workbench connection, admit a Project, or change Recent Projects.
+
 The Start at Login check item reflects the exact operating-system login
 registration last confirmed by Runtime. A user change performs one registration
 write using the selected check state. A successful write confirms that state;
@@ -441,13 +447,15 @@ Workbench, Terminal, Transfer, Photoshop, or request-specific cleanup results.
 There is no idle retention, grace period, reservation worker, or fixed session
 cap.
 
-Desktop Project activation only forwards the raw root and optional source key
-to the Desktop host. Electron selects the live source, the sole live window for
-a source-free request, or one new ordinary Root Workbench when there is no
-unique target. Existing targets perform the normal bound-connection open or
-replacement; a new target submits the initial root with its first connection.
-Root activation always opens a new Root window. Project validation failure
-stays in the selected Workbench and does not select another target.
+Browser and Desktop Project activation do not preflight the target path.
+Browser activation builds a route from the absolute requested root. Desktop
+activation forwards the raw root and optional source key to the Desktop host.
+Electron selects the live source, the sole live window for a source-free
+request, or one new ordinary Root Workbench when there is no unique target.
+Existing targets perform the normal bound-connection open or replacement; a
+new target submits the initial root with its first connection. Root activation
+always opens a new Root window. Project validation failure stays in the
+selected Workbench and does not select another target.
 
 Opening from an unbound Workbench and browser replacement from a bound
 Workbench are the binding operations. Target validation finishes before an

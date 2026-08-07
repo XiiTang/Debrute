@@ -21,11 +21,29 @@ Runtime has no default frontend, implicit frontend selection, or fallback from
 one frontend to another. It also has no pre-ready activation queue, intent id,
 deduplication cache, or cross-instance replay.
 
-Browser Project activation validates the Project before opening its routed URL
-and returns `project_open_failed` when validation fails. Desktop Project
-activation does not preflight or bind a Project. If no Desktop host exists,
-Runtime launches Desktop with the raw requested root. If a host exists, Runtime
-forwards the raw root and optional source window key to that host once.
+Agent-directed browser navigation may resolve a Workbench URL without
+activating a frontend. `debrute workbench url [<project>]` ensures that Runtime
+is Ready and obtains the current credential-free Root Workbench URL from
+Runtime without opening or focusing a browser or Desktop window. Runtime owns
+selection of the current packaged or source-development origin. For a Project
+argument, CLI follows its ordinary working-directory path rules to obtain an
+absolute path, then uses the same pure route builder as Runtime to derive the
+Project URL locally. The Project path does not cross Control.
+
+URL construction does not check whether that path exists, require a directory,
+or canonicalize it. Project admission and canonicalization occur only when a
+Workbench navigates to the URL, so every Project-open failure remains a
+navigation-time outcome. URL resolution creates no Workbench connection,
+Project binding, or Recent Project entry. The Agent chooses how to navigate the
+returned URL; Runtime does not model the Agent harness or its browser
+capabilities.
+
+Browser and Desktop Project activation do not preflight or bind a Project.
+Browser activation opens the routed URL built from the absolute requested root.
+If no Desktop host exists, Runtime launches Desktop with the raw requested
+root. If a host exists, Runtime forwards the raw root and optional source window
+key to that host once. In either frontend, the selected Workbench owns Project
+admission, canonicalization, and any resulting error presentation.
 
 Electron selects one target before Project opening begins: the live source, the
 only live window for a source-free request, or a new ordinary Workbench when no

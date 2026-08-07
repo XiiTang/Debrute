@@ -3,6 +3,7 @@ pub enum CliCommandPolicy {
     Local,
     Observe,
     Activate,
+    Resolve,
     Stop,
     Run,
     Submit,
@@ -122,10 +123,7 @@ const OBSERVE_ERRORS: &[&str] = &[
     "runtime_lost",
     "product_update_failed",
 ];
-const ACTIVATE_ERRORS: &[&str] = &[
-    "project_not_found",
-    "project_invalid",
-    "project_root_invalid",
+const RUNTIME_ACQUISITION_ERRORS: &[&str] = &[
     "runtime_launch_failed",
     "runtime_ready_timeout",
     "runtime_health_failed",
@@ -442,6 +440,22 @@ const SPECS: &[CliCommandSpec] = &[
         &[],
     ),
     spec(
+        "workbench.url",
+        &["workbench", "url"],
+        CliCommandPolicy::Resolve,
+        "runtime",
+        "read",
+        "none",
+        "none",
+        "[<project>]",
+        "Workbench URL record",
+        0,
+        1,
+        Some(0),
+        NO_OPTIONS,
+        &[],
+    ),
+    spec(
         "model-artifact.lookup",
         &["model-artifact", "lookup"],
         CliCommandPolicy::Run,
@@ -669,7 +683,7 @@ const fn policy_errors(policy: CliCommandPolicy) -> &'static [&'static str] {
     match policy {
         CliCommandPolicy::Local => &[],
         CliCommandPolicy::Observe => OBSERVE_ERRORS,
-        CliCommandPolicy::Activate => ACTIVATE_ERRORS,
+        CliCommandPolicy::Activate | CliCommandPolicy::Resolve => RUNTIME_ACQUISITION_ERRORS,
         CliCommandPolicy::Stop => STOP_ERRORS,
         CliCommandPolicy::Run | CliCommandPolicy::Submit | CliCommandPolicy::Stream => {
             RUNTIME_COMMAND_ERRORS

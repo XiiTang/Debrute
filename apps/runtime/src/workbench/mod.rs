@@ -12,7 +12,10 @@ pub(crate) mod websocket;
 mod working_copy;
 
 pub(crate) use authority::{DesktopLaunchBinding, SourceWorkbenchRegistrationError};
-pub use authority::{WORKBENCH_SESSION_COOKIE, WorkbenchLaunchError, WorkbenchLaunchService};
+pub use authority::{
+    WORKBENCH_SESSION_COOKIE, WorkbenchLaunchError, WorkbenchLaunchService,
+    build_project_workbench_url,
+};
 pub use connections::WORKBENCH_CONNECTION_HEADER;
 pub use connections::WorkbenchConnectionRegistry;
 pub(crate) use connections::{

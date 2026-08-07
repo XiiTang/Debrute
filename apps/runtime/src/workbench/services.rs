@@ -949,34 +949,6 @@ impl WorkbenchRuntimeServices {
         self.activity_events.subscribe()
     }
 
-    pub fn preflight_project_root(
-        &self,
-        project_root: &str,
-    ) -> Result<String, RuntimeHttpServiceError> {
-        let requested = Path::new(project_root);
-        let canonical = requested.canonicalize().map_err(|error| {
-            RuntimeHttpServiceError::from_project(if error.kind() == std::io::ErrorKind::NotFound {
-                crate::project::ProjectError::ProjectNotFound(project_root.to_owned())
-            } else {
-                crate::project::ProjectError::from(error)
-            })
-        })?;
-        if !canonical.is_dir() {
-            return Err(RuntimeHttpServiceError::new(
-                StatusCode::BAD_REQUEST,
-                "project_invalid",
-                "Project root must be a directory.",
-            ));
-        }
-        canonical.to_str().map(str::to_owned).ok_or_else(|| {
-            RuntimeHttpServiceError::new(
-                StatusCode::BAD_REQUEST,
-                "project_root_invalid",
-                "Project root is not valid UTF-8.",
-            )
-        })
-    }
-
     pub fn integration_operation(
         &self,
         integration_id: &str,

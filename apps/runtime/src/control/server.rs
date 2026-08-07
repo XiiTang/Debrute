@@ -24,8 +24,7 @@ use crate::workbench::{
 use super::{
     ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
     ControlRequest, ControlResponse, DesktopOpenError, FrameDecodeError, HandshakeRejection,
-    ProjectOpenFailure, RuntimeStatus, ServerHandshakeError, ServerMessage, WorkbenchRoute,
-    authorize_request,
+    RuntimeStatus, ServerHandshakeError, ServerMessage, WorkbenchRoute, authorize_request,
     desktop::{DesktopHostRegistrationError, DesktopWindowTopology},
     frame::is_connection_closed,
     handshake::read_handshake_request,
@@ -75,25 +74,12 @@ pub trait RuntimeActivationService: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns a typed Control or Project-open failure when the requested target
-    /// cannot be opened.
+    /// Returns a typed Control rejection when the frontend cannot be activated.
     fn activate(
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ActivationFailure>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActivationFailure {
-    Control(ControlErrorCode),
-    ProjectOpen(ProjectOpenFailure),
-}
-
-impl From<ControlErrorCode> for ActivationFailure {
-    fn from(code: ControlErrorCode) -> Self {
-        Self::Control(code)
-    }
+    ) -> Result<ActivationOutcome, ControlErrorCode>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,21 +452,20 @@ impl RuntimeControlState {
     ///
     /// # Errors
     ///
-    /// Returns a typed Control or Project-open failure when activation cannot
-    /// be completed.
+    /// Returns a typed Control rejection when activation cannot be completed.
     pub fn activate_intent(
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ActivationFailure> {
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         let _transition = self.read_product_transition();
         match &*self.lock_lifecycle() {
             RuntimeLifecycle::Starting => {
-                return Err(ControlErrorCode::RuntimeStarting.into());
+                return Err(ControlErrorCode::RuntimeStarting);
             }
-            RuntimeLifecycle::Exiting => return Err(ControlErrorCode::RuntimeExiting.into()),
+            RuntimeLifecycle::Exiting => return Err(ControlErrorCode::RuntimeExiting),
             RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
-                return Err(ControlErrorCode::UpdateCommitInProgress.into());
+                return Err(ControlErrorCode::UpdateCommitInProgress);
             }
             RuntimeLifecycle::Ready => {}
         }
@@ -488,7 +473,7 @@ impl RuntimeControlState {
             return Ok(ActivationOutcome::Ensured);
         }
         let service = self.lock_activation_service().clone();
-        service.map_or(Err(ControlErrorCode::InvalidActivation.into()), |service| {
+        service.map_or(Err(ControlErrorCode::InvalidActivation), |service| {
             service.activate(intent, preferred_desktop_window_key)
         })
     }
@@ -612,6 +597,20 @@ impl RuntimeControlState {
                 intent,
                 preferred_desktop_window_key.as_deref(),
             ),
+            ControlRequest::ResolveWorkbenchRootUrl => {
+                match self.workbench_url(&WorkbenchRoute::Root) {
+                    Ok(url) => ControlResponse::WorkbenchRootUrl { url },
+                    Err(
+                        RuntimeActionError::RuntimeNotReady { .. }
+                        | RuntimeActionError::WorkbenchUnavailable,
+                    ) => ControlResponse::Rejected {
+                        code: ControlErrorCode::RuntimeStarting,
+                    },
+                    Err(RuntimeActionError::WorkbenchLaunch(_)) => ControlResponse::Rejected {
+                        code: ControlErrorCode::InvalidRoute,
+                    },
+                }
+            }
             ControlRequest::CreateCliAuthorization => {
                 let mut inner = self.lock_inner();
                 let Some(workbench) = inner.workbench.as_ref() else {
@@ -898,11 +897,8 @@ impl RuntimeControlState {
     }
 }
 
-fn activation_failure_response(failure: ActivationFailure) -> ControlResponse {
-    match failure {
-        ActivationFailure::Control(code) => ControlResponse::Rejected { code },
-        ActivationFailure::ProjectOpen(failure) => ControlResponse::ProjectOpenFailed { failure },
-    }
+const fn activation_failure_response(code: ControlErrorCode) -> ControlResponse {
+    ControlResponse::Rejected { code }
 }
 
 impl Drop for RuntimeWorkPermit {

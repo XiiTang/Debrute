@@ -40,6 +40,7 @@ fn registry_exactly_matches_the_final_cli_matrix() {
             "project.status",
             "project.validate",
             "workbench.start",
+            "workbench.url",
             "model-artifact.lookup",
             "request.single",
             "request.batch",
@@ -68,7 +69,7 @@ fn command_inventory_includes_policy_transport_and_lifecycle_errors() {
                 "runtime_lost",
                 "product_update_failed",
             ][..],
-            CliCommandPolicy::Activate => &[
+            CliCommandPolicy::Activate | CliCommandPolicy::Resolve => &[
                 "runtime_launch_failed",
                 "runtime_ready_timeout",
                 "runtime_health_failed",
@@ -96,9 +97,14 @@ fn command_inventory_includes_policy_transport_and_lifecycle_errors() {
         }
     }
 
-    let workbench = command_errors("workbench.start");
-    assert!(!workbench.contains("invalid_activation"));
-    assert!(!workbench.contains("desktop_unavailable"));
+    for command in ["workbench.start", "workbench.url"] {
+        let errors = command_errors(command);
+        assert!(!errors.contains("invalid_activation"));
+        assert!(!errors.contains("desktop_unavailable"));
+        assert!(!errors.contains("project_not_found"));
+        assert!(!errors.contains("project_invalid"));
+        assert!(!errors.contains("project_root_invalid"));
+    }
 }
 
 #[test]
@@ -237,6 +243,52 @@ fn parser_enforces_registered_syntax_shapes() {
 }
 
 #[test]
+fn parser_accepts_an_optional_unchecked_workbench_url_root() {
+    let rootless = parse_cli_args(&["workbench".into(), "url".into()])
+        .expect("Root Workbench URL form should parse");
+    assert_eq!(rootless.policy, CliCommandPolicy::Resolve);
+    assert!(rootless.root.is_none());
+
+    let project = parse_cli_args(&[
+        "workbench".into(),
+        "url".into(),
+        "does-not-need-to-exist".into(),
+    ])
+    .expect("Project Workbench URL form should parse without filesystem admission");
+    assert_eq!(
+        project.root,
+        Some(project.cwd.join("does-not-need-to-exist"))
+    );
+
+    let extra = parse_cli_args(&["workbench".into(), "url".into(), "one".into(), "two".into()])
+        .expect_err("workbench.url accepts at most one Project root");
+    assert_eq!(extra.code(), "invalid_argument");
+
+    let option = parse_cli_args(&[
+        "workbench".into(),
+        "url".into(),
+        "--frontend".into(),
+        "browser".into(),
+    ])
+    .expect_err("workbench.url has no frontend option");
+    assert_eq!(option.code(), "invalid_argument");
+}
+
+#[test]
+fn workbench_url_command_is_read_only_url_resolution() {
+    let spec = command_specs()
+        .iter()
+        .find(|spec| spec.command == "workbench.url")
+        .expect("workbench.url should be registered");
+    assert_eq!(spec.policy, CliCommandPolicy::Resolve);
+    assert_eq!(spec.scope, "runtime");
+    assert_eq!(spec.risk, "read");
+    assert_eq!(spec.writes, "none");
+    assert_eq!(spec.output, "Workbench URL record");
+    assert!(spec.options.is_empty());
+}
+
+#[test]
 fn agent_records_match_the_unversioned_golden_encoding() {
     let rendered = agent_record(&serde_json::from_value::<CliResult>(json!({
         "status": "ok",
@@ -272,6 +324,27 @@ fn agent_records_match_the_unversioned_golden_encoding() {
             "debrute progress cmd=request.batch event=batch_item.settled\n",
             "batch_item item_index=0 model=gpt-image-2 status=succeeded\n",
             "artifact artifact_index=0 output_path=/project/generated/cover.jpg mime_type=image/jpeg"
+        )
+    );
+}
+
+#[test]
+fn workbench_url_agent_record_contains_only_the_url_field() {
+    let rendered = agent_record(
+        &serde_json::from_value::<CliResult>(json!({
+            "status": "ok",
+            "command": "workbench.url",
+            "fields": {
+                "url": "http://127.0.0.1:17321/open?path=%2FReference+Projects"
+            }
+        }))
+        .expect("closed result"),
+    );
+    assert_eq!(
+        rendered,
+        concat!(
+            "debrute ok cmd=workbench.url\n",
+            "url=\"http://127.0.0.1:17321/open?path=%2FReference+Projects\""
         )
     );
 }

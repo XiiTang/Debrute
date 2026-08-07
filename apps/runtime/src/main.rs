@@ -27,10 +27,9 @@ use debrute_runtime::control::endpoint::{WindowsControlEndpoint, WindowsControlO
 use debrute_runtime::{
     cli::RuntimeCliService,
     control::{
-        ActivationFailure, ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY,
-        ClientRole, ControlErrorCode, ControlRequest, DesktopOpenError, NativeControlClient,
-        ProjectFrontend, ProjectOpenFailure, RuntimeActionError, RuntimeActivationService,
-        RuntimeControlState, WorkbenchRoute,
+        ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY, ClientRole,
+        ControlErrorCode, ControlRequest, DesktopOpenError, NativeControlClient, ProjectFrontend,
+        RuntimeActionError, RuntimeActivationService, RuntimeControlState, WorkbenchRoute,
         endpoint::{
             ControlEndpointAdapter, ControlEndpointOwnerAdapter, EndpointClaim, EndpointError,
         },
@@ -47,7 +46,7 @@ use debrute_runtime::{
     project::initialize_raster_preview_engine,
     workbench::{
         RuntimeCliHttpService, RuntimeProductHttpService, WorkbenchHttpServer,
-        WorkbenchRuntimeServices,
+        WorkbenchRuntimeServices, build_project_workbench_url,
     },
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -778,7 +777,6 @@ fn run_runtime_services(
         state.install_workbench(workbench.launch_service())?;
         let activation: Arc<dyn RuntimeActivationService> = Arc::new(PlatformRuntimeActivation {
             state: Arc::clone(state),
-            services: Arc::clone(&runtime_services),
             desktop_launch: Mutex::new(()),
         });
         if !state.install_activation_service(activation) {
@@ -959,7 +957,6 @@ fn resume_product_surface(
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 struct PlatformRuntimeActivation {
     state: Arc<RuntimeControlState>,
-    services: Arc<WorkbenchRuntimeServices>,
     desktop_launch: Mutex<()>,
 }
 
@@ -969,13 +966,11 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ActivationFailure> {
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         match intent {
             ActivationIntent::EnsureRuntime => Ok(ActivationOutcome::Ensured),
-            ActivationIntent::OpenDesktop => self.open_desktop().map_err(ActivationFailure::from),
-            ActivationIntent::OpenBrowser => self
-                .open_browser(&WorkbenchRoute::Root)
-                .map_err(ActivationFailure::from),
+            ActivationIntent::OpenDesktop => self.open_desktop(),
+            ActivationIntent::OpenBrowser => self.open_browser(&WorkbenchRoute::Root),
             ActivationIntent::OpenProject {
                 project_root,
                 frontend,
@@ -983,14 +978,7 @@ impl RuntimeActivationService for PlatformRuntimeActivation {
                 ProjectFrontend::Desktop => {
                     self.open_desktop_project(project_root, preferred_desktop_window_key)
                 }
-                ProjectFrontend::Browser => {
-                    let canonical_root = self
-                        .services
-                        .preflight_project_root(project_root)
-                        .map_err(|error| project_open_failure(project_root, error))?;
-                    self.open_browser(&WorkbenchRoute::OpenProject { canonical_root })
-                        .map_err(ActivationFailure::from)
-                }
+                ProjectFrontend::Browser => self.open_browser_project(project_root),
             },
         }
     }
@@ -1002,19 +990,19 @@ impl PlatformRuntimeActivation {
         &self,
         project_root: &str,
         preferred_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ActivationFailure> {
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         let _launch = self
             .desktop_launch
             .lock()
             .expect("Desktop launch lock poisoned");
         if !self.state.has_desktop_host() {
-            Self::launch_desktop_host(Some(project_root)).map_err(ActivationFailure::from)?;
+            Self::launch_desktop_host(Some(project_root))?;
             return Ok(ActivationOutcome::Opened);
         }
         self.state
             .request_desktop_project_open(project_root, preferred_window_key)
             .map(|()| ActivationOutcome::Opened)
-            .map_err(|_| ControlErrorCode::DesktopUnavailable.into())
+            .map_err(|_| ControlErrorCode::DesktopUnavailable)
     }
 
     fn open_desktop(&self) -> Result<ActivationOutcome, ControlErrorCode> {
@@ -1059,30 +1047,35 @@ impl PlatformRuntimeActivation {
     }
 
     fn open_browser(&self, target: &WorkbenchRoute) -> Result<ActivationOutcome, ControlErrorCode> {
-        let url = self
-            .state
-            .workbench_url(target)
+        let url = self.workbench_url(target)?;
+        Self::open_browser_url(&url)
+    }
+
+    fn open_browser_project(
+        &self,
+        requested_project_root: &str,
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
+        let root_url = self.workbench_url(&WorkbenchRoute::Root)?;
+        let url = build_project_workbench_url(&root_url, requested_project_root)
+            .map_err(|_| ControlErrorCode::InvalidActivation)?;
+        Self::open_browser_url(&url)
+    }
+
+    fn open_browser_url(url: &str) -> Result<ActivationOutcome, ControlErrorCode> {
+        open_url(url)
+            .map(|()| ActivationOutcome::Opened)
+            .map_err(|_| ControlErrorCode::InvalidActivation)
+    }
+
+    fn workbench_url(&self, route: &WorkbenchRoute) -> Result<String, ControlErrorCode> {
+        self.state
+            .workbench_url(route)
             .map_err(|error| match error {
                 RuntimeActionError::RuntimeNotReady { .. } => ControlErrorCode::RuntimeStarting,
                 RuntimeActionError::WorkbenchUnavailable
                 | RuntimeActionError::WorkbenchLaunch(_) => ControlErrorCode::InvalidActivation,
-            })?;
-        open_url(&url)
-            .map(|()| ActivationOutcome::Opened)
-            .map_err(|_| ControlErrorCode::InvalidActivation)
+            })
     }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn project_open_failure(
-    project_root: &str,
-    error: debrute_runtime::workbench::RuntimeHttpServiceError,
-) -> ActivationFailure {
-    ActivationFailure::ProjectOpen(ProjectOpenFailure {
-        canonical_root: project_root.to_owned(),
-        code: error.code.to_owned(),
-        message: error.message,
-    })
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

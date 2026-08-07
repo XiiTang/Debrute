@@ -7,10 +7,10 @@ use std::{
 };
 
 use debrute_runtime::control::{
-    ActivationFailure, ActivationIntent, ActivationOutcome, ClientMessage, ClientRole,
-    ControlErrorCode, ControlEvent, ControlRequest, ControlResponse, DesktopOpenError,
-    ProjectFrontend, RuntimeActivationService, RuntimeControlState, ServerMessage, WorkbenchRoute,
-    encode_frame, read_server_frame, request_handshake, serve_control_connection,
+    ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
+    ControlRequest, ControlResponse, DesktopOpenError, ProjectFrontend, RuntimeActivationService,
+    RuntimeControlState, ServerMessage, WorkbenchRoute, encode_frame, read_server_frame,
+    request_handshake, serve_control_connection,
 };
 
 struct DesktopActivation {
@@ -22,7 +22,7 @@ impl RuntimeActivationService for DesktopActivation {
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ActivationFailure> {
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         let state = self
             .state
             .upgrade()
@@ -31,7 +31,7 @@ impl RuntimeActivationService for DesktopActivation {
             ActivationIntent::OpenDesktop => match state.open_desktop_window() {
                 Ok(()) => Ok(ActivationOutcome::Opened),
                 Err(DesktopOpenError::HostUnavailable | DesktopOpenError::Outbound(_)) => {
-                    Err(ControlErrorCode::DesktopUnavailable.into())
+                    Err(ControlErrorCode::DesktopUnavailable)
                 }
             },
             ActivationIntent::OpenProject {
@@ -40,8 +40,8 @@ impl RuntimeActivationService for DesktopActivation {
             } => state
                 .request_desktop_project_open(project_root, preferred_desktop_window_key)
                 .map(|()| ActivationOutcome::Opened)
-                .map_err(|_| ControlErrorCode::DesktopUnavailable.into()),
-            _ => Err(ControlErrorCode::InvalidActivation.into()),
+                .map_err(|_| ControlErrorCode::DesktopUnavailable),
+            _ => Err(ControlErrorCode::InvalidActivation),
         }
     }
 }

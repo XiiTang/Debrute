@@ -8,10 +8,9 @@ use std::{
 };
 
 use debrute_runtime::control::{
-    ActivationFailure, ActivationIntent, ActivationOutcome, ClientMessage, ClientRole,
-    ControlErrorCode, ControlEvent, ControlRequest, ControlResponse, RuntimeActivationService,
-    RuntimeControlState, RuntimeStatus, ServerMessage, encode_frame, read_server_frame,
-    request_handshake, serve_control_connection,
+    ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
+    ControlRequest, ControlResponse, RuntimeActivationService, RuntimeControlState, RuntimeStatus,
+    ServerMessage, encode_frame, read_server_frame, request_handshake, serve_control_connection,
 };
 
 struct BrowserActivation;
@@ -21,7 +20,7 @@ impl RuntimeActivationService for BrowserActivation {
         &self,
         intent: &ActivationIntent,
         preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ActivationFailure> {
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         assert_eq!(intent, &ActivationIntent::OpenBrowser);
         assert_eq!(preferred_desktop_window_key, None);
         Ok(ActivationOutcome::Opened)
@@ -83,6 +82,33 @@ fn server_rejects_a_request_outside_the_wire_role() {
             "cli-auth",
             ControlResponse::Rejected {
                 code: ControlErrorCode::RoleDenied,
+            },
+        )
+    );
+    drop(client);
+    server.join().expect("server should finish");
+}
+
+#[test]
+fn server_ready_gates_root_workbench_url_resolution() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    let (mut client, server_stream) = UnixStream::pair().expect("stream pair should open");
+    client
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read should be bounded");
+    let server = serve_in_thread(server_stream, Arc::clone(&state));
+    request_handshake(&mut client, ClientRole::Cli).expect("handshake should succeed");
+    send_request(
+        &mut client,
+        "resolve-url",
+        ControlRequest::ResolveWorkbenchRootUrl,
+    );
+    assert_eq!(
+        read_server_frame(&mut client).expect("response should arrive"),
+        ServerMessage::response(
+            "resolve-url",
+            ControlResponse::Rejected {
+                code: ControlErrorCode::RuntimeStarting,
             },
         )
     );

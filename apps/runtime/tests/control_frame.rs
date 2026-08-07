@@ -1,9 +1,9 @@
 use debrute_runtime::control::{
     ActivationIntent, ActivationOutcome, CONTROL_PROTOCOL, CONTROL_PROTOCOL_VERSION, ClientMessage,
     ClientRole, ControlEvent, ControlRequest, ControlResponse, FrameDecodeError, FrameEncodeError,
-    HandshakeRejection, MAX_CONTROL_FRAME_BYTES, PRODUCT_VERSION, ProjectFrontend,
-    ProjectOpenFailure, RuntimeStatus, ServerMessage, authorize_request, encode_frame,
-    encode_server_frame, read_frame, read_server_frame, validate_handshake,
+    HandshakeRejection, MAX_CONTROL_FRAME_BYTES, PRODUCT_VERSION, ProjectFrontend, RuntimeStatus,
+    ServerMessage, authorize_request, encode_frame, encode_server_frame, read_frame,
+    read_server_frame, validate_handshake,
 };
 use std::io::Cursor;
 
@@ -17,7 +17,7 @@ fn handshake_encodes_as_one_big_endian_length_prefixed_json_frame() {
     };
 
     let frame = encode_frame(&message).expect("handshake frame should encode");
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":6,"product_version":"0.0.4","role":"launcher"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":7,"product_version":"0.0.4","role":"launcher"}"#;
     let mut expected = u32::try_from(payload.len())
         .expect("test payload length fits in u32")
         .to_be_bytes()
@@ -171,7 +171,7 @@ fn handshake_requires_exact_protocol_and_product_versions() {
 fn runtime_encodes_and_decodes_closed_handshake_responses() {
     let accepted = ServerMessage::handshake_accepted("runtime-instance", RuntimeStatus::Ready);
     let accepted_frame = encode_server_frame(&accepted).expect("accepted handshake should encode");
-    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":6,"product_version":"0.0.4","status":"ready"}"#;
+    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":7,"product_version":"0.0.4","status":"ready"}"#;
     assert_eq!(accepted_frame, frame(accepted_payload));
     assert_eq!(
         read_server_frame(&mut Cursor::new(accepted_frame))
@@ -254,6 +254,16 @@ fn control_requests_are_closed_and_role_authorized() {
         authorize_request(ClientRole::Cli, &ControlRequest::CreateCliAuthorization),
         Ok(())
     );
+    let resolve_url = ControlRequest::ResolveWorkbenchRootUrl;
+    assert_eq!(authorize_request(ClientRole::Cli, &resolve_url), Ok(()));
+    assert!(authorize_request(ClientRole::Launcher, &resolve_url).is_err());
+    assert_eq!(
+        encode_frame(&ClientMessage::request("resolve-url", resolve_url))
+            .expect("Workbench URL request should encode"),
+        frame(
+            br#"{"type":"request","request_id":"resolve-url","request":{"command":"resolve_workbench_root_url"}}"#
+        )
+    );
     let launch = ControlRequest::CreateDesktopLaunchTicket {
         window_key: "window-1".to_owned(),
     };
@@ -290,28 +300,24 @@ fn control_responses_and_lifecycle_events_have_closed_frames() {
         response
     );
 
-    let project_failure = ServerMessage::response(
-        "request-project",
-        ControlResponse::ProjectOpenFailed {
-            failure: ProjectOpenFailure {
-                canonical_root: "/projects/damaged".to_owned(),
-                code: "project_not_found".to_owned(),
-                message: "Project root does not exist.".to_owned(),
-            },
+    let workbench_url = ServerMessage::response(
+        "resolve-url",
+        ControlResponse::WorkbenchRootUrl {
+            url: "http://127.0.0.1:5173/".to_owned(),
         },
     );
-    let project_failure_frame =
-        encode_server_frame(&project_failure).expect("Project failure should encode");
+    let workbench_url_frame =
+        encode_server_frame(&workbench_url).expect("Workbench URL should encode");
     assert_eq!(
-        project_failure_frame,
+        workbench_url_frame,
         frame(
-            br#"{"type":"response","request_id":"request-project","response":{"result":"project_open_failed","failure":{"canonical_root":"/projects/damaged","code":"project_not_found","message":"Project root does not exist."}}}"#
+            br#"{"type":"response","request_id":"resolve-url","response":{"result":"workbench_root_url","url":"http://127.0.0.1:5173/"}}"#
         )
     );
     assert_eq!(
-        read_server_frame(&mut Cursor::new(project_failure_frame))
-            .expect("Project failure should decode"),
-        project_failure
+        read_server_frame(&mut Cursor::new(workbench_url_frame))
+            .expect("Workbench URL should decode"),
+        workbench_url
     );
 
     let event = ServerMessage::event(ControlEvent::ProductExiting);

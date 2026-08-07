@@ -161,11 +161,51 @@ pub enum WorkbenchLaunchError {
 
 impl fmt::Display for WorkbenchLaunchError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("Workbench Project path is not a valid canonical root")
+        formatter.write_str("Workbench Project path is not a valid absolute path")
     }
 }
 
 impl Error for WorkbenchLaunchError {}
+
+/// Builds a Project route from the current Root Workbench URL without opening
+/// or admitting the requested Project path.
+///
+/// # Errors
+///
+/// Returns an error when the requested Project root is not an absolute path.
+pub fn build_project_workbench_url(
+    root_url: &str,
+    requested_project_root: &str,
+) -> Result<String, WorkbenchLaunchError> {
+    if !is_absolute_project_root(requested_project_root) {
+        return Err(WorkbenchLaunchError::InvalidProjectPath);
+    }
+    Ok(format!(
+        "{}{}",
+        root_url.trim_end_matches('/'),
+        project_route_path(requested_project_root)
+    ))
+}
+
+fn is_absolute_project_root(project_root: &str) -> bool {
+    let bytes = project_root.as_bytes();
+    bytes.first() == Some(&b'/')
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\'))
+        || is_unc_project_root(project_root)
+}
+
+fn is_unc_project_root(project_root: &str) -> bool {
+    let Some(remainder) = project_root.strip_prefix(r"\\") else {
+        return false;
+    };
+    let mut components = remainder
+        .split(['\\', '/'])
+        .filter(|component| !component.is_empty());
+    components.next().is_some() && components.next().is_some()
+}
 
 fn validate_route(route: &WorkbenchRoute) -> Result<(), WorkbenchLaunchError> {
     match route {
@@ -182,11 +222,15 @@ fn validate_route(route: &WorkbenchRoute) -> Result<(), WorkbenchLaunchError> {
 fn route_path(route: &WorkbenchRoute) -> String {
     match route {
         WorkbenchRoute::Root => "/".to_owned(),
-        WorkbenchRoute::OpenProject { canonical_root } => format!(
-            "/open?path={}",
-            url::form_urlencoded::byte_serialize(canonical_root.as_bytes()).collect::<String>()
-        ),
+        WorkbenchRoute::OpenProject { canonical_root } => project_route_path(canonical_root),
     }
+}
+
+fn project_route_path(project_root: &str) -> String {
+    format!(
+        "/open?path={}",
+        url::form_urlencoded::byte_serialize(project_root.as_bytes()).collect::<String>()
+    )
 }
 
 pub(super) fn is_opaque_value(value: &str) -> bool {
@@ -224,6 +268,63 @@ fn normalize_source_workbench_origin(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_workbench_url_encodes_an_unadmitted_absolute_root() {
+        assert_eq!(
+            build_project_workbench_url(
+                "http://127.0.0.1:17321/",
+                "/definitely/not/present/Reference #? 中文",
+            )
+            .unwrap(),
+            "http://127.0.0.1:17321/open?path=%2Fdefinitely%2Fnot%2Fpresent%2FReference+%23%3F+%E4%B8%AD%E6%96%87"
+        );
+    }
+
+    #[test]
+    fn project_workbench_url_accepts_a_windows_drive_root_on_any_host() {
+        assert_eq!(
+            build_project_workbench_url(
+                "http://127.0.0.1:17321/",
+                r"C:\Reference Projects\A#?.debrute",
+            )
+            .unwrap(),
+            "http://127.0.0.1:17321/open?path=C%3A%5CReference+Projects%5CA%23%3F.debrute"
+        );
+    }
+
+    #[test]
+    fn project_workbench_url_accepts_a_unc_root_on_any_host() {
+        assert_eq!(
+            build_project_workbench_url("http://127.0.0.1:17321/", r"\\server\share\Reference 文",)
+                .unwrap(),
+            "http://127.0.0.1:17321/open?path=%5C%5Cserver%5Cshare%5CReference+%E6%96%87"
+        );
+    }
+
+    #[test]
+    fn project_workbench_url_rejects_a_relative_root() {
+        assert_eq!(
+            build_project_workbench_url("http://127.0.0.1:17321/", "Reference Projects"),
+            Err(WorkbenchLaunchError::InvalidProjectPath)
+        );
+    }
+
+    #[test]
+    fn root_workbench_url_follows_the_current_source_registration() {
+        let service = WorkbenchLaunchService::new("http://127.0.0.1:17321".to_owned());
+        assert_eq!(
+            service.url_for_route(&WorkbenchRoute::Root).unwrap(),
+            "http://127.0.0.1:17321/"
+        );
+        service
+            .register_source_workbench("launcher-1", "http://127.0.0.1:5173")
+            .unwrap();
+        assert_eq!(
+            service.url_for_route(&WorkbenchRoute::Root).unwrap(),
+            "http://127.0.0.1:5173/"
+        );
+    }
 
     #[test]
     fn desktop_ticket_is_memory_only_and_one_use() {

@@ -17,8 +17,9 @@ use debrute_runtime::{
     control::{
         ActivationIntent, ActivationOutcome, ClientRole, ControlErrorCode, ControlRequest,
         ControlResponse, NativeControlClient, NativeControlClientError, ProjectFrontend,
-        ProjectOpenFailure, RuntimeStatus, endpoint::ControlEndpointAdapter,
+        RuntimeStatus, endpoint::ControlEndpointAdapter,
     },
+    workbench::build_project_workbench_url,
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -84,10 +85,47 @@ async fn run(parsed: ParsedCliCommand) -> Result<CliResult, CliRunError> {
         CliCommandPolicy::Local => Ok(run_local(&parsed)),
         CliCommandPolicy::Observe => run_observe(&parsed).await,
         CliCommandPolicy::Activate => run_activate(&parsed),
+        CliCommandPolicy::Resolve => run_resolve(&parsed),
         CliCommandPolicy::Stop => run_stop(&parsed),
         CliCommandPolicy::Run => run_http(&parsed, false).await,
         CliCommandPolicy::Submit => run_submit(&parsed).await,
         CliCommandPolicy::Stream => run_http(&parsed, true).await,
+    }
+}
+
+fn run_resolve(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
+    let deadline = Instant::now() + RUNTIME_STARTUP_TIMEOUT;
+    let mut client = ensure_runtime(deadline)?;
+    let response = client
+        .wait_ready_and_request_until(
+            deadline,
+            Uuid::new_v4().to_string(),
+            ControlRequest::ResolveWorkbenchRootUrl,
+        )
+        .map_err(|error| control_failure(parsed.command, &error))?;
+    match response {
+        ControlResponse::WorkbenchRootUrl { url: root_url } => {
+            let url = match &parsed.root {
+                None => root_url,
+                Some(project_root) => {
+                    build_project_workbench_url(&root_url, project_root.to_string_lossy().as_ref())
+                        .map_err(|error| {
+                            CliRunError::new(parsed.command, "invalid_input", error.to_string())
+                        })?
+                }
+            };
+            Ok(closed_result(json!({
+                "status": "ok",
+                "command": parsed.command,
+                "fields": { "url": url }
+            })))
+        }
+        ControlResponse::Rejected { code } => Err(rejected_failure(parsed.command, code)),
+        _ => Err(CliRunError::new(
+            parsed.command,
+            "runtime_health_failed",
+            "Runtime returned an unexpected Workbench URL response.",
+        )),
     }
 }
 
@@ -171,9 +209,6 @@ fn run_activate(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
                 "outcome": activation_outcome(outcome)
             }
         }))),
-        ControlResponse::ProjectOpenFailed { failure } => {
-            Err(project_open_cli_failure(parsed.command, failure))
-        }
         ControlResponse::Rejected { code } => Err(rejected_failure(parsed.command, code)),
         _ => Err(CliRunError::new(
             parsed.command,
@@ -776,12 +811,6 @@ fn rejected_failure(command: &str, code: ControlErrorCode) -> CliRunError {
     CliRunError::new(command, error_code, message)
 }
 
-fn project_open_cli_failure(command: &str, failure: ProjectOpenFailure) -> CliRunError {
-    let mut error = CliRunError::new(command, failure.code, failure.message);
-    error.fields.insert("path", failure.canonical_root.into());
-    error
-}
-
 fn control_failure(command: &str, error: &NativeControlClientError) -> CliRunError {
     let code = if matches!(error, NativeControlClientError::RuntimeReadyTimeout) {
         "runtime_ready_timeout"
@@ -910,8 +939,8 @@ mod tests {
     use debrute_runtime::control::{ClientRole, NativeControlClient};
 
     use super::{
-        CliFields, ProjectOpenFailure, control_failure, exit_code_for_result, failure,
-        normalize_http_error, project_open_cli_failure, readiness_control_failure,
+        CliFields, control_failure, exit_code_for_result, failure, normalize_http_error,
+        readiness_control_failure,
     };
 
     #[test]
@@ -924,24 +953,6 @@ mod tests {
         assert_eq!(
             readiness_control_failure("runtime", &error).code,
             "runtime_ready_timeout"
-        );
-    }
-
-    #[test]
-    fn project_open_failure_preserves_runtime_code_message_and_root() {
-        let failure = project_open_cli_failure(
-            "workbench.start",
-            ProjectOpenFailure {
-                canonical_root: "/missing/project".to_owned(),
-                code: "project_not_found".to_owned(),
-                message: "Project root does not exist.".to_owned(),
-            },
-        );
-        assert_eq!(failure.code, "project_not_found");
-        assert_eq!(failure.message, "Project root does not exist.");
-        assert_eq!(
-            failure.fields.get("path").and_then(|value| value.as_str()),
-            Some("/missing/project")
         );
     }
 

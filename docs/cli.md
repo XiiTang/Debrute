@@ -68,6 +68,38 @@ its managed Product identity through diagnostics, but it cannot discover,
 install, continue, or retry a Product update. Product installation is a GUI
 action; Runtime owns discovery and the durable update transaction.
 
+## Workbench URLs
+
+`workbench url` returns the exact current credential-free Workbench URL without
+activating a frontend:
+
+```sh
+debrute workbench url [<project>]
+```
+
+The command ensures Runtime is Ready, then sends the CLI-only
+`resolve_workbench_root_url` Control request. Runtime returns only the current
+Root Workbench URL, selecting the packaged origin or the currently registered
+source-development origin. No Project path crosses Control.
+
+With a Project argument, the CLI resolves a relative value against its
+canonical invocation working directory and appends the Project route locally.
+It does not inspect, canonicalize, or require the target path to exist. The
+selected Workbench performs Project admission later. URL resolution does not
+open or focus a browser or Desktop window, create a Workbench connection or
+Project binding, or change Recent Projects.
+
+Success is one standard Agent Record with no fields other than `url`:
+
+```text
+debrute ok cmd=workbench.url
+url="http://127.0.0.1:<port>/open?path=..."
+```
+
+`workbench start [<project>] --frontend desktop|browser` remains the explicit
+frontend-activation command. Its `outcome=opened` reports that the selected
+frontend was activated; it does not assert that a Project was admitted.
+
 ## Model Requests
 
 Single accepts either one strict UTF-8 JSONL record or one request written
@@ -172,13 +204,15 @@ debrute runtime stop
 debrute skills status
 debrute project status /path/to/project
 debrute project validate /path/to/project
+debrute workbench url /path/to/project
 debrute workbench start /path/to/project --frontend desktop
 debrute model-artifact lookup --path generated/example.png
 debrute commands
 ```
 
 Project roots and Model Artifact lookup paths may be absolute or relative to the
-CLI working directory. Runtime uses their admitted canonical absolute paths.
-Generic filesystem reads and writes remain the external Agent's responsibility.
+CLI working directory. The CLI makes root arguments absolute; commands that
+admit a Project then use its canonical absolute path. Generic filesystem reads
+and writes remain the external Agent's responsibility.
 See [Model Requests](./model-requests.md), [Model Artifacts](./model-artifacts.md),
 and [Product model](./product-model.md) for the underlying contracts.

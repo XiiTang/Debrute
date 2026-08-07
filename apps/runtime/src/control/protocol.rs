@@ -3,7 +3,7 @@ use std::{error::Error, fmt};
 use ts_rs::TS;
 
 pub const CONTROL_PROTOCOL: &str = "debrute-control";
-pub const CONTROL_PROTOCOL_VERSION: u32 = 6;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 7;
 pub const CONTROL_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 pub const PRODUCT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -72,6 +72,7 @@ pub enum ControlRequest {
         preferred_desktop_window_key: Option<String>,
     },
     Inspect,
+    ResolveWorkbenchRootUrl,
     CreateCliAuthorization,
     RegisterDevWorkbenchOrigin {
         origin: String,
@@ -118,15 +119,6 @@ pub enum ActivationOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-#[ts(export, export_to = "runtime-control/")]
-pub struct ProjectOpenFailure {
-    pub canonical_root: String,
-    pub code: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[ts(export, export_to = "runtime-control/")]
 pub enum WorkbenchRoute {
@@ -159,13 +151,13 @@ pub enum ControlResponse {
     Activation {
         outcome: ActivationOutcome,
     },
-    ProjectOpenFailed {
-        failure: ProjectOpenFailure,
-    },
     Inspection {
         instance_id: String,
         status: RuntimeStatus,
         executable_identity: Option<String>,
+    },
+    WorkbenchRootUrl {
+        url: String,
     },
     CliAuthorization {
         origin: String,
@@ -325,6 +317,7 @@ pub fn authorize_request(role: ClientRole, request: &ControlRequest) -> Result<(
             request,
             ControlRequest::Activate { .. }
                 | ControlRequest::Inspect
+                | ControlRequest::ResolveWorkbenchRootUrl
                 | ControlRequest::CreateCliAuthorization
                 | ControlRequest::QuitProduct
         ),
@@ -344,6 +337,7 @@ impl ControlRequest {
         match self {
             Self::Activate { .. } => "activate",
             Self::Inspect => "inspect",
+            Self::ResolveWorkbenchRootUrl => "resolve_workbench_root_url",
             Self::CreateCliAuthorization => "create_cli_authorization",
             Self::RegisterDevWorkbenchOrigin { .. } => "register_dev_workbench_origin",
             Self::CreateDesktopLaunchTicket { .. } => "create_desktop_launch_ticket",
@@ -364,6 +358,32 @@ impl fmt::Display for RoleViolation {
 }
 
 impl Error for RoleViolation {}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{CONTROL_PROTOCOL_VERSION, ControlRequest, ControlResponse};
+
+    #[test]
+    fn protocol_v7_serializes_root_workbench_url_resolution() {
+        assert_eq!(CONTROL_PROTOCOL_VERSION, 7);
+        assert_eq!(
+            serde_json::to_value(ControlRequest::ResolveWorkbenchRootUrl).unwrap(),
+            json!({ "command": "resolve_workbench_root_url" })
+        );
+        assert_eq!(
+            serde_json::to_value(ControlResponse::WorkbenchRootUrl {
+                url: "http://127.0.0.1:17321/".to_owned(),
+            })
+            .unwrap(),
+            json!({
+                "result": "workbench_root_url",
+                "url": "http://127.0.0.1:17321/",
+            })
+        );
+    }
+}
 
 #[cfg(test)]
 mod bindings {

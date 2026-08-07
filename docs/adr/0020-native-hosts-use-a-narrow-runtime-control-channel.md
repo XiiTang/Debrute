@@ -15,6 +15,9 @@ negotiation, compatibility mode, request replay, or event history.
 Control requests are limited to:
 
 - activate a closed Runtime/Desktop/browser/Project intent;
+- resolve the current credential-free Root Workbench URL for an Agent-facing
+  CLI request without activating a frontend; Project paths do not cross this
+  boundary;
 - inspect Runtime identity and status;
 - issue CLI authorization;
 - register the one source-development Vite origin;

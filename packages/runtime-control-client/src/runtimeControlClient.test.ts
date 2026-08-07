@@ -37,7 +37,7 @@ describe('Runtime Control client', () => {
     })).toThrowError(/invalid current-user SID/);
   });
 
-  it('uses protocol v3 and sends one activation request after a ready handshake', async () => {
+  it('uses protocol v7 and sends one activation request after a ready handshake', async () => {
     let requestCount = 0;
     await withControlServer((socket) => {
       readFrames(socket, (message) => {
@@ -69,6 +69,30 @@ describe('Runtime Control client', () => {
         outcome: 'opened'
       });
       expect(requestCount).toBe(1);
+      client.close();
+    });
+  });
+
+  it('resolves the current Root Workbench URL through a ready CLI request', async () => {
+    await withControlServer((socket) => {
+      readFrames(socket, (message) => {
+        if (message.type === 'handshake') {
+          expect(message.role).toBe('cli');
+          acceptHandshake(socket, 'ready');
+          return;
+        }
+        expect(message.request).toEqual({ command: 'resolve_workbench_root_url' });
+        respond(socket, message.request_id, {
+          result: 'workbench_root_url',
+          url: 'http://127.0.0.1:5173/'
+        });
+      });
+    }, async (socketPath) => {
+      const client = await connectClient(socketPath, 'cli');
+      await expect(client.resolveWorkbenchRootUrl()).resolves.toEqual({
+        result: 'workbench_root_url',
+        url: 'http://127.0.0.1:5173/'
+      });
       client.close();
     });
   });

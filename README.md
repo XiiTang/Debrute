@@ -44,16 +44,10 @@ AI generation does not replace the precision, control, and expertise of professi
 
 ## Working With Agents
 
-Debrute is agent-agnostic. It works best with agent GUI projects that have a built-in browser, because the agent can open the Debrute Workbench, inspect Canvas state, understand visual feedback, and then update project files in the same loop.
-
-Good examples to evaluate first:
-
-- [Codex](https://developers.openai.com/codex/app/browser)
-- [Qoder](https://docs.qoder.com/user-guide/chat/browser-agent)
-- [Cursor](https://cursor.com/docs/agent/tools/browser)
-- [Google Antigravity](https://www.antigravity.google/docs/browser)
-
-All CLI agents can use Debrute too. Debrute provides a command surface and official Skills so external agents can start the Workbench, validate a project, submit Model Requests, and inspect Model Artifact provenance.
+Debrute is agent-agnostic. External agents use its command surface and official
+Skills to work with local Projects, inspect visual state, submit Model Requests,
+and inspect Model Artifact provenance. Debrute does not depend on a specific
+agent harness.
 
 ## Working With Designers
 
@@ -75,7 +69,7 @@ The Canvas presents the Project tree. Users disclose or collapse folders, then a
 
 Debrute ships standard Skills for external agents:
 
-- `debrute-core` for Project semantics, Workbench activation, Model Artifacts, and Model Requests.
+- `debrute-core` for Project semantics, Workbench access, Model Artifacts, and Model Requests.
 - `debrute-image-director` for image generation and editing through the `debrute` command.
 - `debrute-video-director` for video generation and editing through the `debrute` command.
 - `debrute-audio-director` for TTS, music generation, and sound effect generation through the `debrute` command.

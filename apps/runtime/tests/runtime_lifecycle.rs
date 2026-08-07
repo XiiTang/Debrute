@@ -10,8 +10,8 @@ use std::{
 };
 
 use debrute_runtime::control::{
-    ActivationFailure, ActivationIntent, ActivationOutcome, ControlErrorCode,
-    ProductUpdateTransitionFailure, RuntimeActivationService, RuntimeControlState, RuntimeStatus,
+    ActivationIntent, ActivationOutcome, ControlErrorCode, ProductUpdateTransitionFailure,
+    RuntimeActivationService, RuntimeControlState, RuntimeStatus,
 };
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ impl RuntimeActivationService for CountingActivation {
         &self,
         _intent: &ActivationIntent,
         _preferred_desktop_window_key: Option<&str>,
-    ) -> Result<ActivationOutcome, ActivationFailure> {
+    ) -> Result<ActivationOutcome, ControlErrorCode> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(ActivationOutcome::Opened)
     }
@@ -62,7 +62,7 @@ fn queued_activation_is_rejected_after_product_quit_before_reaching_the_platform
 
     assert_eq!(
         state.activate_intent(&ActivationIntent::OpenDesktop, None),
-        Err(ControlErrorCode::RuntimeExiting.into())
+        Err(ControlErrorCode::RuntimeExiting)
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -103,7 +103,7 @@ fn update_crosses_one_commit_boundary_and_requests_replacement() {
     );
     assert_eq!(
         state.activate_intent(&ActivationIntent::OpenDesktop, None),
-        Err(ControlErrorCode::UpdateCommitInProgress.into())
+        Err(ControlErrorCode::UpdateCommitInProgress)
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
