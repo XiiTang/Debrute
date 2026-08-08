@@ -72,13 +72,35 @@ function windowsJumpList(execPath: string, recentProjectRoots: string[]): JumpLi
         title: projectDisplayName(projectRoot),
         description: projectRoot,
         program: execPath,
-        args: `--debrute-project-root="${projectRoot.replace(/"/g, '\\"')}"`,
+        args: quoteWindowsCommandLineArgument(`--debrute-project-root=${projectRoot}`),
         iconPath: 'explorer.exe',
         iconIndex: 0
       }))
     });
   }
   return categories;
+}
+
+function quoteWindowsCommandLineArgument(value: string): string {
+  let quoted = '"';
+  let backslashes = 0;
+  for (const character of value) {
+    if (character === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (character === '"') {
+      quoted += '\\'.repeat(backslashes * 2 + 1);
+      quoted += '"';
+      backslashes = 0;
+      continue;
+    }
+    quoted += '\\'.repeat(backslashes);
+    quoted += character;
+    backslashes = 0;
+  }
+  quoted += '\\'.repeat(backslashes * 2);
+  return `${quoted}"`;
 }
 
 function projectDisplayName(projectRoot: string): string {

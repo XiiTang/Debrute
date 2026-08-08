@@ -394,6 +394,18 @@ typed Project Uses. Workbench APIs receive a temporary opaque `bindingId`; it
 is capability authority rather than durable identity. The use kinds are
 Workbench, request, running terminal, and transfer.
 
+Project admission canonicalizes and validates an existing directory exactly
+once, producing Runtime's `CanonicalProjectRoot` identity value. Registry,
+Session, Workbench ownership, Terminal lifetime, and Photoshop transfer state
+retain that value; UTF-8 strings are projections used only by wire and persisted
+document formats. Project-relative input is parsed at its request seam into a
+non-empty `ProjectRelativePath`, or into `ProjectDirectoryPath` when the empty
+value is allowed to name the root. Filesystem Interfaces accept those admitted
+values instead of reparsing arbitrary strings. On Windows, identity and
+containment continue to use the canonical path, while the Terminal process
+Adapter alone removes a supported verbatim prefix when constructing an
+external-process working directory.
+
 Project opening publishes root-scoped Canvas state, Project-local Feedback, and the
 ordered view of one session-local `ProjectTree` module containing the real root
 entry and its direct children. That module alone owns the flat path index, directory
@@ -501,7 +513,15 @@ snapshot, expected output hash, or commit marker. Native Trash validates the
 complete top-level batch before any effect, revalidates each original Project
 path immediately before asking the operating system to trash it, and stops at
 the first failure without retry or rollback. Earlier successful items remain in
-the system Trash and later items are not attempted.
+the system Trash and later items are not attempted. Each item is handed to a
+fresh private Runtime worker through an argument-array command containing the
+canonical Project root, one admitted Project-relative path, expected filesystem
+identity, and expected kind. The worker runs before normal Runtime or Terminal
+bootstrap, accepts only that closed command shape, reopens the canonical root,
+repeats no-symbolic-link containment plus identity and kind checks, and calls
+the native Trash Adapter directly. It never builds a shell command. The parent
+supervises the worker with one bounded timeout and treats a non-zero exit,
+signal, or timeout as the item failure.
 
 ## Working Copies And Terminal Lifetime
 

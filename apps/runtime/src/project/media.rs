@@ -99,7 +99,7 @@ pub fn open_revisioned_project_file(
     };
     Ok(RevisionedFileResponse::File(RevisionedFilePlan {
         file,
-        project_relative_path: relative.clone(),
+        project_relative_path: relative.to_string(),
         revision: expected_revision.to_owned(),
         content_type: project_content_type(&relative).to_owned(),
         file_size,

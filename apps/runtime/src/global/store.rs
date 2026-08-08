@@ -800,14 +800,8 @@ fn write_json_atomic<T: Serialize>(
     write_result
 }
 
-#[cfg(target_os = "windows")]
 fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    debrute_windows_product_fs::replace_file_atomic(source, destination)
-}
-
-#[cfg(not(target_os = "windows"))]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    fs::rename(source, destination)
+    debrute_native_fs::replace_file_atomic(source, destination)
 }
 
 #[cfg(unix)]

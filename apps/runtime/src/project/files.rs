@@ -11,12 +11,11 @@ use regex::Regex;
 use uuid::Uuid;
 
 use super::{
-    ProjectError, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
-    ProjectPathOperationStatus, ProjectTextFile, assert_project_tree_visible_mutation_path,
-    assert_project_tree_visible_path, join_project_path, normalize_project_directory_path,
-    normalize_project_path_basename, parent_project_path, project_content_hash, rename_no_replace,
-    replace_file, resolve_no_symlink_existing_project_path, resolve_project_path,
-    resolve_project_path_for_write,
+    ProjectDirectoryPath, ProjectError, ProjectPathBatchItemResult, ProjectPathEntry,
+    ProjectPathKind, ProjectPathOperationStatus, ProjectRelativePath, ProjectTextFile,
+    assert_project_tree_visible_mutation_path, assert_project_tree_visible_path,
+    normalize_project_path_basename, project_content_hash, rename_no_replace, replace_file,
+    resolve_no_symlink_existing_project_path, resolve_project_path, resolve_project_path_for_write,
 };
 
 fn project_io_error(operation: &str, path: &Path, error: &io::Error) -> ProjectError {
@@ -40,16 +39,37 @@ fn project_rename_error(source: &Path, target: &Path, error: &io::Error) -> Proj
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectUploadEntry {
     Directory {
-        project_relative_path: String,
+        project_relative_path: ProjectRelativePath,
     },
     File {
-        project_relative_path: String,
+        project_relative_path: ProjectRelativePath,
         content: Vec<u8>,
     },
     TemporaryFile {
-        project_relative_path: String,
+        project_relative_path: ProjectRelativePath,
         temporary_path: PathBuf,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
+pub struct AdmittedProjectPathEntry {
+    pub(crate) project_relative_path: ProjectRelativePath,
+    pub(crate) kind: ProjectPathKind,
+}
+
+pub(crate) fn admit_project_path_entries(
+    entries: Vec<ProjectPathEntry>,
+) -> Result<Vec<AdmittedProjectPathEntry>, ProjectError> {
+    entries
+        .into_iter()
+        .map(|entry| {
+            Ok(AdmittedProjectPathEntry {
+                project_relative_path: ProjectRelativePath::parse(&entry.project_relative_path)?,
+                kind: entry.kind,
+            })
+        })
+        .collect()
 }
 
 pub(crate) struct CommittedProjectTextFile {
@@ -66,7 +86,7 @@ pub fn read_project_text_file(
     relative: &str,
 ) -> Result<ProjectTextFile, ProjectError> {
     let relative = assert_project_tree_visible_path(relative)?;
-    let absolute = resolve_no_symlink_existing_project_path(root, &relative)?;
+    let absolute = resolve_no_symlink_existing_project_path(root, relative.as_directory_path())?;
     let metadata = fs::metadata(&absolute)?;
     if !metadata.is_file() {
         return Err(ProjectError::Validation(format!(
@@ -85,7 +105,7 @@ pub fn read_project_text_file(
     let content = String::from_utf8(bytes).map_err(|_| {
         ProjectError::Validation(format!("Project file is not valid UTF-8 text: {relative}"))
     })?;
-    project_text_file(relative, &absolute, content, &read_metadata)
+    project_text_file(relative.into_string(), &absolute, content, &read_metadata)
 }
 
 /// Replaces a visible text file using a required content-revision comparison.
@@ -94,12 +114,16 @@ pub fn read_project_text_file(
 /// Returns an error for invalid paths, stale revisions, or atomic-write failure.
 pub(crate) fn write_project_text_file(
     root: &Path,
-    relative: &str,
+    relative: &ProjectRelativePath,
     content: &str,
     expected_revision: &str,
 ) -> Result<CommittedProjectTextFile, ProjectError> {
-    let relative = assert_project_tree_visible_path(relative)?;
-    let absolute = resolve_no_symlink_existing_project_path(root, &relative)?;
+    if !super::is_project_visible_path(relative) {
+        return Err(ProjectError::Validation(format!(
+            "Project path is not visible in the Project Tree: {relative}"
+        )));
+    }
+    let absolute = resolve_no_symlink_existing_project_path(root, relative.as_directory_path())?;
     let metadata = fs::metadata(&absolute)?;
     if !metadata.is_file() {
         return Err(ProjectError::Validation(format!(
@@ -112,7 +136,7 @@ pub(crate) fn write_project_text_file(
             "project_file_revision_conflict",
             format!("Project text file revision is stale: {relative}"),
             [
-                ("file_path".to_owned(), relative),
+                ("file_path".to_owned(), relative.to_string()),
                 ("expected_revision".to_owned(), expected_revision.to_owned()),
                 ("actual_revision".to_owned(), actual_revision),
             ],
@@ -131,7 +155,7 @@ pub(crate) fn write_project_text_file(
             project_io_error("read committed text staging identity", &temporary, &error)
         })?;
         let saved = project_text_file(
-            relative.clone(),
+            relative.to_string(),
             &absolute,
             content.to_owned(),
             &fs::metadata(&temporary)?,
@@ -179,13 +203,13 @@ fn project_text_file(
 /// Returns an error for invalid/protected paths, collisions, or I/O failure.
 pub(crate) fn create_project_path(
     root: &Path,
-    parent: &str,
+    parent: &ProjectDirectoryPath,
     name: &str,
     kind: ProjectPathKind,
 ) -> Result<ProjectPathEntry, ProjectError> {
-    let relative = join_project_path(parent, name)?;
+    let relative = parent.join_name(name)?;
     assert_project_tree_visible_mutation_path(&relative)?;
-    assert_directory(root, &normalize_project_directory_path(parent)?)?;
+    assert_directory(root, parent)?;
     let absolute = resolve_project_path_for_write(root, &relative)?;
     if absolute.exists() {
         return Err(ProjectError::Validation(format!(
@@ -202,7 +226,7 @@ pub(crate) fn create_project_path(
         ProjectPathKind::Directory => fs::create_dir(absolute)?,
     }
     Ok(ProjectPathEntry {
-        project_relative_path: relative,
+        project_relative_path: relative.into_string(),
         kind,
         size_bytes: (kind == ProjectPathKind::File).then_some(0),
     })
@@ -214,15 +238,19 @@ pub(crate) fn create_project_path(
 /// Returns an error for invalid/protected paths, collisions, or I/O failure.
 pub(crate) fn rename_project_path(
     root: &Path,
-    relative: &str,
+    relative: &ProjectRelativePath,
     name: &str,
 ) -> Result<ProjectPathEntry, ProjectError> {
-    let source = normalize_project_directory_path(relative)?;
-    assert_project_tree_visible_mutation_path(&source)?;
-    let kind = project_path_kind(root, &source)?;
-    let target = join_project_path(&parent_project_path(&source)?, name)?;
+    let source = relative.as_directory_path();
+    if !super::is_project_visible_path(relative) {
+        return Err(ProjectError::Validation(format!(
+            "Project path is not visible in the Project Tree: {relative}"
+        )));
+    }
+    let kind = project_path_kind(root, source)?;
+    let target = relative.with_name(name)?;
     assert_project_tree_visible_mutation_path(&target)?;
-    let source_absolute = resolve_project_path(root, &source)?;
+    let source_absolute = resolve_project_path(root, source)?;
     let target_absolute = resolve_project_path_for_write(root, &target)?;
     if target_absolute.exists()
         && debrute_native_fs::path_identity(&source_absolute)?
@@ -237,7 +265,7 @@ pub(crate) fn rename_project_path(
         .then(|| fs::metadata(&target_absolute).map(|metadata| metadata.len()))
         .transpose()?;
     Ok(ProjectPathEntry {
-        project_relative_path: target,
+        project_relative_path: target.into_string(),
         kind,
         size_bytes,
     })
@@ -249,21 +277,23 @@ pub(crate) fn rename_project_path(
 /// Returns an error for invalid batches, recursive copies, symbolic links, or I/O failure.
 pub(crate) fn copy_project_paths(
     root: &Path,
-    entries: &[ProjectPathEntry],
-    target_directory: &str,
+    entries: &[AdmittedProjectPathEntry],
+    target_directory: &ProjectDirectoryPath,
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
-    let target_directory = normalize_project_directory_path(target_directory)?;
-    assert_directory(root, &target_directory)?;
+    assert_directory(root, target_directory)?;
     let entries = normalized_top_level_entries(root, entries)?;
     for entry in &entries {
         if entry.kind == ProjectPathKind::Directory
-            && is_same_or_child(&target_directory, &entry.project_relative_path)
+            && is_same_or_child(target_directory, &entry.project_relative_path)
         {
             return Err(ProjectError::Validation(
                 "Cannot copy a directory into itself or one of its descendants.".to_owned(),
             ));
         }
-        validate_copy_tree(&resolve_project_path(root, &entry.project_relative_path)?)?;
+        validate_copy_tree(&resolve_project_path(
+            root,
+            entry.project_relative_path.as_directory_path(),
+        )?)?;
     }
     let mut planned = Vec::new();
     let mut reserved = BTreeSet::new();
@@ -273,7 +303,7 @@ pub(crate) fn copy_project_paths(
             .rsplit('/')
             .next()
             .ok_or_else(|| ProjectError::Validation("Project path has no basename.".to_owned()))?;
-        let target = unique_paste_target(root, &target_directory, basename, &reserved)?;
+        let target = unique_paste_target(root, target_directory, basename, &reserved)?;
         reserved.insert(target.clone());
         planned.push((entry, target));
     }
@@ -281,7 +311,10 @@ pub(crate) fn copy_project_paths(
         .iter()
         .map(|(entry, target)| {
             Ok((
-                resolve_no_symlink_existing_project_path(root, &entry.project_relative_path)?,
+                resolve_no_symlink_existing_project_path(
+                    root,
+                    entry.project_relative_path.as_directory_path(),
+                )?,
                 resolve_project_path_for_write(root, target)?,
             ))
         })
@@ -290,8 +323,8 @@ pub(crate) fn copy_project_paths(
     Ok(planned
         .into_iter()
         .map(|(entry, target)| ProjectPathBatchItemResult {
-            source_project_relative_path: entry.project_relative_path,
-            project_relative_path: target,
+            source_project_relative_path: entry.project_relative_path.into_string(),
+            project_relative_path: target.into_string(),
             kind: entry.kind,
             status: ProjectPathOperationStatus::Ok,
         })
@@ -304,12 +337,11 @@ pub(crate) fn copy_project_paths(
 /// Returns an error for invalid batches, recursive moves, collisions, or I/O failure.
 pub(crate) fn move_project_paths(
     root: &Path,
-    entries: &[ProjectPathEntry],
-    target_directory: &str,
+    entries: &[AdmittedProjectPathEntry],
+    target_directory: &ProjectDirectoryPath,
     overwrite: bool,
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
-    let target_directory = normalize_project_directory_path(target_directory)?;
-    assert_directory(root, &target_directory)?;
+    assert_directory(root, target_directory)?;
     let entries = normalized_top_level_entries(root, entries)?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
@@ -319,7 +351,7 @@ pub(crate) fn move_project_paths(
             .rsplit('/')
             .next()
             .unwrap_or_default();
-        let target = join_project_path(&target_directory, basename)?;
+        let target = target_directory.join_name(basename)?;
         if !targets.insert(target.clone()) {
             return Err(ProjectError::Validation(format!(
                 "Duplicate project path target in batch: {target}"
@@ -327,13 +359,13 @@ pub(crate) fn move_project_paths(
         }
         assert_project_tree_visible_mutation_path(&target)?;
         if entry.kind == ProjectPathKind::Directory
-            && is_same_or_child(&target_directory, &entry.project_relative_path)
+            && is_same_or_child(target_directory, &entry.project_relative_path)
         {
             return Err(ProjectError::Validation(
                 "Cannot move a directory into itself or one of its descendants.".to_owned(),
             ));
         }
-        let skipped = parent_project_path(&entry.project_relative_path)? == target_directory;
+        let skipped = entry.project_relative_path.parent() == *target_directory;
         if !skipped && resolve_project_path_for_write(root, &target)?.exists() && !overwrite {
             return Err(ProjectError::Validation(format!(
                 "Project path already exists: {target}"
@@ -346,7 +378,10 @@ pub(crate) fn move_project_paths(
         .filter(|(_, _, skipped)| !skipped)
         .map(|(entry, target, _)| {
             Ok((
-                resolve_no_symlink_existing_project_path(root, &entry.project_relative_path)?,
+                resolve_no_symlink_existing_project_path(
+                    root,
+                    entry.project_relative_path.as_directory_path(),
+                )?,
                 resolve_project_path_for_write(root, target)?,
             ))
         })
@@ -355,11 +390,11 @@ pub(crate) fn move_project_paths(
     Ok(planned
         .into_iter()
         .map(|(entry, target, skipped)| ProjectPathBatchItemResult {
-            source_project_relative_path: entry.project_relative_path.clone(),
+            source_project_relative_path: entry.project_relative_path.to_string(),
             project_relative_path: if skipped {
-                entry.project_relative_path
+                entry.project_relative_path.into_string()
             } else {
-                target
+                target.into_string()
             },
             kind: entry.kind,
             status: if skipped {
@@ -377,22 +412,30 @@ pub(crate) fn move_project_paths(
 /// Returns an error if validation fails before deletion or any deletion fails.
 pub(crate) fn delete_project_paths(
     root: &Path,
-    entries: &[ProjectPathEntry],
+    entries: &[AdmittedProjectPathEntry],
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
     let entries = normalized_top_level_entries(root, entries)?;
     for entry in &entries {
-        resolve_no_symlink_existing_project_path(root, &entry.project_relative_path)?;
+        resolve_no_symlink_existing_project_path(
+            root,
+            entry.project_relative_path.as_directory_path(),
+        )?;
     }
     let targets = entries
         .iter()
-        .map(|entry| resolve_no_symlink_existing_project_path(root, &entry.project_relative_path))
+        .map(|entry| {
+            resolve_no_symlink_existing_project_path(
+                root,
+                entry.project_relative_path.as_directory_path(),
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     commit_deleted_paths(&targets)?;
     Ok(entries
         .into_iter()
         .map(|entry| ProjectPathBatchItemResult {
-            source_project_relative_path: entry.project_relative_path.clone(),
-            project_relative_path: entry.project_relative_path,
+            source_project_relative_path: entry.project_relative_path.to_string(),
+            project_relative_path: entry.project_relative_path.into_string(),
             kind: entry.kind,
             status: ProjectPathOperationStatus::Ok,
         })
@@ -406,11 +449,10 @@ pub(crate) fn delete_project_paths(
 pub(crate) fn import_local_project_paths(
     root: &Path,
     sources: &[PathBuf],
-    target_directory: &str,
+    target_directory: &ProjectDirectoryPath,
     overwrite: bool,
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
-    let target_directory = normalize_project_directory_path(target_directory)?;
-    assert_directory(root, &target_directory)?;
+    assert_directory(root, target_directory)?;
     let root_real = root.canonicalize()?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
@@ -445,7 +487,7 @@ pub(crate) fn import_local_project_paths(
             .ok_or_else(|| {
                 ProjectError::Validation("External source name is invalid.".to_owned())
             })?;
-        let target = join_project_path(&target_directory, name)?;
+        let target = target_directory.join_name(name)?;
         assert_project_tree_visible_mutation_path(&target)?;
         if !targets.insert(target.clone()) {
             return Err(ProjectError::Validation(format!(
@@ -499,7 +541,7 @@ pub(crate) fn import_local_project_paths(
         .into_iter()
         .map(|(source, target, kind)| ProjectPathBatchItemResult {
             source_project_relative_path: source.to_string_lossy().into_owned(),
-            project_relative_path: target,
+            project_relative_path: target.into_string(),
             kind,
             status: ProjectPathOperationStatus::Ok,
         })
@@ -513,11 +555,10 @@ pub(crate) fn import_local_project_paths(
 pub(crate) fn import_upload_project_entries(
     root: &Path,
     entries: &[ProjectUploadEntry],
-    target_directory: &str,
+    target_directory: &ProjectDirectoryPath,
     overwrite: bool,
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
-    let target_directory = normalize_project_directory_path(target_directory)?;
-    assert_directory(root, &target_directory)?;
+    assert_directory(root, target_directory)?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
     for entry in entries {
@@ -534,9 +575,8 @@ pub(crate) fn import_upload_project_entries(
                 ..
             } => (project_relative_path, ProjectPathKind::File),
         };
-        let relative = normalize_project_directory_path(relative)?;
-        assert_project_tree_visible_mutation_path(&relative)?;
-        if !is_strict_child(&relative, &target_directory) {
+        assert_project_tree_visible_mutation_path(relative)?;
+        if !is_strict_child(relative, target_directory) {
             return Err(ProjectError::Validation(format!(
                 "Uploaded project path must be inside import target directory: {relative}"
             )));
@@ -546,7 +586,7 @@ pub(crate) fn import_upload_project_entries(
                 "Duplicate project path target in batch: {relative}"
             )));
         }
-        planned.push((entry, relative, kind));
+        planned.push((entry, relative.clone(), kind));
     }
     for (_, file_path, kind) in &planned {
         if *kind == ProjectPathKind::File
@@ -559,9 +599,9 @@ pub(crate) fn import_upload_project_entries(
             )));
         }
     }
-    let top_level: BTreeSet<String> = planned
+    let top_level: BTreeSet<ProjectRelativePath> = planned
         .iter()
-        .map(|(_, path, _)| upload_top_level(&target_directory, path))
+        .map(|(_, path, _)| upload_top_level(target_directory, path))
         .collect::<Result<_, _>>()?;
     for target in &top_level {
         if resolve_project_path_for_write(root, target)?.exists() && !overwrite {
@@ -570,24 +610,27 @@ pub(crate) fn import_upload_project_entries(
             )));
         }
     }
-    let staged = stage_upload_entries(root, &target_directory, &planned, &top_level)?;
+    let staged = stage_upload_entries(root, target_directory, &planned, &top_level)?;
     commit_staged_paths(&staged, overwrite)?;
     Ok(planned
         .into_iter()
-        .map(|(_, path, kind)| ProjectPathBatchItemResult {
-            source_project_relative_path: path.clone(),
-            project_relative_path: path,
-            kind,
-            status: ProjectPathOperationStatus::Ok,
+        .map(|(_, path, kind)| {
+            let path = path.into_string();
+            ProjectPathBatchItemResult {
+                source_project_relative_path: path.clone(),
+                project_relative_path: path,
+                kind,
+                status: ProjectPathOperationStatus::Ok,
+            }
         })
         .collect())
 }
 
 fn stage_upload_entries(
     root: &Path,
-    target_directory: &str,
-    planned: &[(&ProjectUploadEntry, String, ProjectPathKind)],
-    top_level: &BTreeSet<String>,
+    target_directory: &ProjectDirectoryPath,
+    planned: &[(&ProjectUploadEntry, ProjectRelativePath, ProjectPathKind)],
+    top_level: &BTreeSet<ProjectRelativePath>,
 ) -> Result<Vec<(PathBuf, PathBuf)>, ProjectError> {
     let mut roots = BTreeMap::new();
     let result = (|| {
@@ -612,9 +655,9 @@ fn stage_upload_entries(
 }
 
 fn materialize_upload_stages(
-    target_directory: &str,
-    planned: &[(&ProjectUploadEntry, String, ProjectPathKind)],
-    roots: &BTreeMap<String, (PathBuf, PathBuf)>,
+    target_directory: &ProjectDirectoryPath,
+    planned: &[(&ProjectUploadEntry, ProjectRelativePath, ProjectPathKind)],
+    roots: &BTreeMap<ProjectRelativePath, (PathBuf, PathBuf)>,
 ) -> Result<(), ProjectError> {
     let mut directories = planned
         .iter()
@@ -676,9 +719,9 @@ fn materialize_upload_stages(
 }
 
 fn upload_stage_path(
-    target_directory: &str,
-    path: &str,
-    roots: &BTreeMap<String, (PathBuf, PathBuf)>,
+    target_directory: &ProjectDirectoryPath,
+    path: &ProjectRelativePath,
+    roots: &BTreeMap<ProjectRelativePath, (PathBuf, PathBuf)>,
 ) -> Result<PathBuf, ProjectError> {
     let top = upload_top_level(target_directory, path)?;
     let stage = &roots
@@ -686,7 +729,8 @@ fn upload_stage_path(
         .expect("upload stage must exist for every accepted top-level path")
         .0;
     let suffix = path
-        .strip_prefix(&top)
+        .as_str()
+        .strip_prefix(top.as_str())
         .expect("upload path must start with its derived top-level path")
         .trim_start_matches('/');
     Ok(if suffix.is_empty() {
@@ -990,29 +1034,32 @@ fn cleanup_paths<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) {
 
 fn normalized_top_level_entries(
     root: &Path,
-    entries: &[ProjectPathEntry],
-) -> Result<Vec<ProjectPathEntry>, ProjectError> {
+    entries: &[AdmittedProjectPathEntry],
+) -> Result<Vec<AdmittedProjectPathEntry>, ProjectError> {
     let mut normalized = Vec::new();
     let mut seen = HashSet::new();
     for entry in entries {
-        let path = normalize_project_directory_path(&entry.project_relative_path)?;
+        let path = &entry.project_relative_path;
         if !seen.insert(path.clone()) {
             continue;
         }
-        assert_project_tree_visible_mutation_path(&path)?;
-        let kind = project_path_kind(root, &path)?;
+        if !super::is_project_visible_path(path) {
+            return Err(ProjectError::Validation(format!(
+                "Project path is not visible in the Project Tree: {path}"
+            )));
+        }
+        let kind = project_path_kind(root, path.as_directory_path())?;
         if kind != entry.kind {
             return Err(ProjectError::Validation(format!(
                 "Project path kind mismatch: {path}"
             )));
         }
-        normalized.push(ProjectPathEntry {
-            project_relative_path: path,
+        normalized.push(AdmittedProjectPathEntry {
+            project_relative_path: path.clone(),
             kind,
-            size_bytes: None,
         });
     }
-    let mut top_level = Vec::<ProjectPathEntry>::new();
+    let mut top_level = Vec::<AdmittedProjectPathEntry>::new();
     for entry in normalized {
         if top_level.iter().any(|candidate| {
             is_same_or_child(
@@ -1033,7 +1080,10 @@ fn normalized_top_level_entries(
     Ok(top_level)
 }
 
-fn project_path_kind(root: &Path, relative: &str) -> Result<ProjectPathKind, ProjectError> {
+fn project_path_kind(
+    root: &Path,
+    relative: &ProjectDirectoryPath,
+) -> Result<ProjectPathKind, ProjectError> {
     let metadata = fs::metadata(resolve_no_symlink_existing_project_path(root, relative)?)?;
     if metadata.is_dir() {
         Ok(ProjectPathKind::Directory)
@@ -1046,7 +1096,7 @@ fn project_path_kind(root: &Path, relative: &str) -> Result<ProjectPathKind, Pro
     }
 }
 
-fn assert_directory(root: &Path, relative: &str) -> Result<(), ProjectError> {
+fn assert_directory(root: &Path, relative: &ProjectDirectoryPath) -> Result<(), ProjectError> {
     if fs::metadata(resolve_no_symlink_existing_project_path(root, relative)?)?.is_dir() {
         Ok(())
     } else {
@@ -1058,10 +1108,10 @@ fn assert_directory(root: &Path, relative: &str) -> Result<(), ProjectError> {
 
 fn unique_paste_target(
     root: &Path,
-    directory: &str,
+    directory: &ProjectDirectoryPath,
     source_name: &str,
-    reserved: &BTreeSet<String>,
-) -> Result<String, ProjectError> {
+    reserved: &BTreeSet<ProjectRelativePath>,
+) -> Result<ProjectRelativePath, ProjectError> {
     let name = normalize_project_path_basename(source_name)?;
     let extension = Path::new(&name)
         .extension()
@@ -1076,7 +1126,7 @@ fn unique_paste_target(
             1 => format!("{stem} copy{extension}"),
             _ => format!("{stem} copy {index}{extension}"),
         };
-        let candidate = join_project_path(directory, &candidate_name)?;
+        let candidate = directory.join_name(&candidate_name)?;
         if !reserved.contains(&candidate)
             && !resolve_project_path_for_write(root, &candidate)?.exists()
         {
@@ -1150,17 +1200,22 @@ fn is_strict_child(candidate: &str, parent: &str) -> bool {
     }
 }
 
-fn upload_top_level(target: &str, path: &str) -> Result<String, ProjectError> {
+fn upload_top_level(
+    target: &ProjectDirectoryPath,
+    path: &ProjectRelativePath,
+) -> Result<ProjectRelativePath, ProjectError> {
     let relative = if target.is_empty() {
-        path
+        path.as_str()
     } else {
-        path.strip_prefix(&format!("{target}/")).ok_or_else(|| {
-            ProjectError::Validation(format!(
-                "Uploaded project path must be inside import target directory: {path}"
-            ))
-        })?
+        path.as_str()
+            .strip_prefix(&format!("{target}/"))
+            .ok_or_else(|| {
+                ProjectError::Validation(format!(
+                    "Uploaded project path must be inside import target directory: {path}"
+                ))
+            })?
     };
-    join_project_path(target, relative.split('/').next().unwrap_or_default())
+    target.join_name(relative.split('/').next().unwrap_or_default())
 }
 
 fn project_upload_kind(entry: &ProjectUploadEntry) -> ProjectPathKind {

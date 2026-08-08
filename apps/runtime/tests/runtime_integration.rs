@@ -14,6 +14,8 @@ mod desktop_window_topology;
 mod global_runtime_state;
 #[path = "integration_state.rs"]
 mod integration_state;
+#[path = "native_trash_worker.rs"]
+mod native_trash_worker;
 #[path = "runtime_lifecycle.rs"]
 mod runtime_lifecycle;
 #[path = "start_at_login.rs"]

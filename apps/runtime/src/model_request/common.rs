@@ -1152,12 +1152,24 @@ pub(crate) fn commit_execution(
 struct PendingArtifactPublish {
     temporary: PathBuf,
     target: PathBuf,
-    backup: Option<PathBuf>,
     replace: bool,
-    published: bool,
+    state: PendingArtifactPublishState,
+}
+
+enum PendingArtifactPublishState {
+    Staged,
+    Created,
+    Replaced { backup: PathBuf },
 }
 
 fn commit_model_artifacts(files: Vec<ModelArtifactWrite>) -> Result<usize, ModelRequestError> {
+    commit_model_artifacts_with_before_publish(files, || {})
+}
+
+fn commit_model_artifacts_with_before_publish(
+    files: Vec<ModelArtifactWrite>,
+    before_publish: impl FnOnce(),
+) -> Result<usize, ModelRequestError> {
     let mut publishes = Vec::with_capacity(files.len());
     let mut created_directories = Vec::new();
     let result = (|| {
@@ -1200,15 +1212,15 @@ fn commit_model_artifacts(files: Vec<ModelArtifactWrite>) -> Result<usize, Model
             publishes.push(PendingArtifactPublish {
                 temporary,
                 target: file.target,
-                backup: None,
                 replace: file.replace,
-                published: false,
+                state: PendingArtifactPublishState::Staged,
             });
             handle
                 .write_all(&file.content)
                 .and_then(|()| handle.sync_all())
                 .map_err(|error| artifact_commit_error(error.to_string()))?;
         }
+        before_publish();
         for publish in &mut publishes {
             match fs::symlink_metadata(&publish.target) {
                 Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
@@ -1227,11 +1239,15 @@ fn commit_model_artifacts(files: Vec<ModelArtifactWrite>) -> Result<usize, Model
                             .to_string_lossy(),
                         Uuid::new_v4()
                     ));
-                    fs::rename(&publish.target, &backup)
-                        .map_err(|error| artifact_commit_error(error.to_string()))?;
-                    publish.backup = Some(backup);
-                    fs::rename(&publish.temporary, &publish.target)
-                        .map_err(|error| artifact_commit_error(error.to_string()))?;
+                    debrute_native_fs::replace_file_atomic_with_backup(
+                        &publish.temporary,
+                        &publish.target,
+                        &backup,
+                    )
+                    .map_err(|error| {
+                        model_artifact_replacement_error(error, &publish.target, &backup)
+                    })?;
+                    publish.state = PendingArtifactPublishState::Replaced { backup };
                 }
                 Ok(_) => {
                     return Err(artifact_commit_error(format!(
@@ -1240,24 +1256,31 @@ fn commit_model_artifacts(files: Vec<ModelArtifactWrite>) -> Result<usize, Model
                     )));
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    fs::hard_link(&publish.temporary, &publish.target)
+                    debrute_native_fs::rename_no_replace(&publish.temporary, &publish.target)
                         .map_err(|error| artifact_commit_error(error.to_string()))?;
+                    publish.state = PendingArtifactPublishState::Created;
                 }
                 Err(error) => return Err(artifact_commit_error(error.to_string())),
             }
-            publish.published = true;
         }
         Ok(())
     })();
     if let Err(error) = result {
-        rollback_model_artifacts(&mut publishes);
+        if let Err(rollback_error) = rollback_model_artifacts(&mut publishes) {
+            return Err(ModelRequestError::new(
+                "model_artifact_rollback_failed",
+                format!(
+                    "Model Artifact commit failed ({error}); Runtime could not restore the complete prior state: {rollback_error}"
+                ),
+            ));
+        }
         cleanup_created_directories(&created_directories);
         return Err(error);
     }
     let mut cleanup_failures = 0_usize;
     for publish in publishes {
         cleanup_failures += remove_published_temporary(&publish.temporary);
-        if let Some(backup) = publish.backup {
+        if let PendingArtifactPublishState::Replaced { backup } = publish.state {
             cleanup_failures += remove_published_temporary(&backup);
         }
     }
@@ -1269,6 +1292,29 @@ fn remove_published_temporary(path: &Path) -> usize {
         Ok(()) => 0,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
         Err(_) => 1,
+    }
+}
+
+fn model_artifact_replacement_error(
+    error: debrute_native_fs::ReplaceFileWithBackupError,
+    target: &Path,
+    backup: &Path,
+) -> ModelRequestError {
+    match error {
+        debrute_native_fs::ReplaceFileWithBackupError::DestinationRestore {
+            replacement,
+            restore,
+        } => ModelRequestError::new(
+            "model_artifact_rollback_failed",
+            format!(
+                "Model Artifact replacement failed ({replacement}) and the prior file could not be restored to {}: {restore}; recovery data remains at {}",
+                target.display(),
+                backup.display()
+            ),
+        ),
+        debrute_native_fs::ReplaceFileWithBackupError::Operation(error) => {
+            artifact_commit_error(error.to_string())
+        }
     }
 }
 
@@ -1307,15 +1353,46 @@ fn ensure_output_directory(
     Ok(())
 }
 
-fn rollback_model_artifacts(publishes: &mut [PendingArtifactPublish]) {
+fn rollback_model_artifacts(
+    publishes: &mut [PendingArtifactPublish],
+) -> Result<(), ModelRequestError> {
+    let mut failures = Vec::new();
     for publish in publishes.iter_mut().rev() {
-        if publish.published {
-            let _ = fs::remove_file(&publish.target);
+        let state = std::mem::replace(&mut publish.state, PendingArtifactPublishState::Staged);
+        let preserved_on_failure = match &state {
+            PendingArtifactPublishState::Replaced { backup } => Some(backup.clone()),
+            PendingArtifactPublishState::Created => Some(publish.target.clone()),
+            PendingArtifactPublishState::Staged => None,
+        };
+        let rollback_result = match state {
+            PendingArtifactPublishState::Staged => Ok(()),
+            PendingArtifactPublishState::Created => fs::remove_file(&publish.target),
+            PendingArtifactPublishState::Replaced { backup } => {
+                debrute_native_fs::replace_file_atomic(&backup, &publish.target)
+            }
+        };
+        if let Err(error) = rollback_result {
+            failures.push(if let Some(path) = preserved_on_failure {
+                format!(
+                    "{}: {error}; recovery data remains at {}",
+                    publish.target.display(),
+                    path.display()
+                )
+            } else {
+                format!("{}: {error}", publish.target.display())
+            });
+            continue;
         }
-        if let Some(backup) = publish.backup.take() {
-            let _ = fs::rename(backup, &publish.target);
+        if let Err(error) = fs::remove_file(&publish.temporary)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            failures.push(format!("{}: {error}", publish.temporary.display()));
         }
-        let _ = fs::remove_file(&publish.temporary);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(artifact_commit_error(failures.join("; ")))
     }
 }
 
@@ -1588,32 +1665,61 @@ mod tests {
     }
 
     #[test]
-    fn failed_multi_artifact_publish_removes_earlier_targets_and_staging_files() {
+    fn failed_multi_artifact_publish_restores_replaced_targets_and_staging_files() {
         let root = std::env::temp_dir().join(format!("debrute-model-request-{}", Uuid::new_v4()));
         let generated = root.join("generated");
         std::fs::create_dir_all(&generated).unwrap();
-        std::fs::write(generated.join("second.mp3"), b"existing").unwrap();
+        let root = root.canonicalize().unwrap();
+        let generated = root.join("generated");
+        std::fs::write(generated.join("first.mp3"), b"existing").unwrap();
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
 
-        let error = commit_model_artifacts(vec![
-            ModelArtifactWrite {
-                target: generated.join("first.mp3"),
-                content: b"first".to_vec(),
-                replace: false,
-            },
-            ModelArtifactWrite {
-                target: generated.join("second.mp3"),
-                content: b"second".to_vec(),
-                replace: false,
-            },
-        ])
+            std::fs::set_permissions(
+                generated.join("first.mp3"),
+                std::fs::Permissions::from_mode(0o640),
+            )
+            .unwrap();
+        }
+        let blocked_target = generated.join("second.mp3");
+
+        let error = commit_model_artifacts_with_before_publish(
+            vec![
+                ModelArtifactWrite {
+                    target: generated.join("first.mp3"),
+                    content: b"first".to_vec(),
+                    replace: true,
+                },
+                ModelArtifactWrite {
+                    target: blocked_target.clone(),
+                    content: b"second".to_vec(),
+                    replace: false,
+                },
+            ],
+            || std::fs::create_dir(&blocked_target).unwrap(),
+        )
         .unwrap_err();
 
         assert_eq!(error.code(), "model_artifact_commit_failed");
-        assert!(!generated.join("first.mp3").exists());
         assert_eq!(
-            std::fs::read(generated.join("second.mp3")).unwrap(),
+            std::fs::read(generated.join("first.mp3")).unwrap(),
             b"existing"
         );
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            assert_eq!(
+                std::fs::metadata(generated.join("first.mp3"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o640
+            );
+        }
+        assert!(blocked_target.is_dir());
         assert_eq!(
             std::fs::read_dir(&generated)
                 .unwrap()
@@ -1623,6 +1729,27 @@ mod tests {
             0
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_model_artifact_destination_restore_has_a_rollback_error() {
+        let target = Path::new("generated/output.bin");
+        let backup = Path::new("generated/.output.rollback");
+        let error = model_artifact_replacement_error(
+            debrute_native_fs::ReplaceFileWithBackupError::DestinationRestore {
+                replacement: std::io::Error::from_raw_os_error(1177),
+                restore: std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "destination changed",
+                ),
+            },
+            target,
+            backup,
+        );
+
+        assert_eq!(error.code(), "model_artifact_rollback_failed");
+        assert!(error.message().contains(&target.display().to_string()));
+        assert!(error.message().contains(&backup.display().to_string()));
     }
 
     #[test]

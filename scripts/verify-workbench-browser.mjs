@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, toNamespacedPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import sharp from 'sharp';
@@ -62,6 +62,7 @@ async function main() {
     await verifyViewport(context, page, { projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
   } catch (error) {
     verificationError = error;
+    console.error(error instanceof Error ? error.stack ?? error.message : String(error));
     if (page) {
       console.error(`Browser verification failed at ${page.url()}`);
       console.error((await page.locator('body').innerText().catch(() => '')).slice(0, 4000));
@@ -116,9 +117,13 @@ async function writeFixtureProject() {
   }).png().toFile(join(fixtureRoot, fixtureImagePath));
   await writeFile(join(fixtureRoot, fixtureVideoPath), Buffer.from(fixtureVideoBase64, 'base64'));
   await writeFile(join(fixtureRoot, fixtureAudioPath), createAudioFixture());
-  const rootKey = createHash('sha256').update(fixtureRoot, 'utf8').digest('hex');
+  const realFixtureRoot = await realpath(fixtureRoot);
+  const canonicalFixtureRoot = process.platform === 'win32'
+    ? toNamespacedPath(realFixtureRoot)
+    : realFixtureRoot;
+  const rootKey = createHash('sha256').update(canonicalFixtureRoot, 'utf8').digest('hex');
   await writeJson(join(fixtureHome, '.debrute', 'state', 'roots', rootKey, 'canvas.json'), {
-    canonicalRoot: fixtureRoot,
+    canonicalRoot: canonicalFixtureRoot,
     expandedDirectories: ['images', 'media', 'notes'],
     nodeStates: {
       [fixtureTextPath]: {
@@ -237,7 +242,8 @@ function startWorkbenchRuntime() {
         }
         if (process.platform === 'win32') {
           await terminateWindowsProcessTree(child, {
-            label: 'browser-verification Workbench process'
+            label: 'browser-verification Workbench process',
+            gracePeriodMs: 2_000
           });
           await exited;
           return;

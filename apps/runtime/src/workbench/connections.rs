@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::project::ProjectUse;
+use crate::project::{CanonicalProjectRoot, ProjectUse};
 
 use super::DesktopLaunchBinding;
 
@@ -48,7 +48,7 @@ pub struct WorkbenchConnectionRegistry {
 struct ConnectionRegistryInner {
     records: HashMap<String, ConnectionRecord>,
     credentials_by_browser_session: HashMap<String, HashSet<String>>,
-    owner_by_root: HashMap<String, String>,
+    owner_by_root: HashMap<CanonicalProjectRoot, String>,
     admission_closed: bool,
 }
 
@@ -66,7 +66,7 @@ struct ConnectionRecord {
 
 struct ConnectionProjectBinding {
     binding_id: String,
-    canonical_root: String,
+    canonical_root: CanonicalProjectRoot,
     _project_use: ProjectUse,
 }
 
@@ -302,7 +302,7 @@ impl WorkbenchConnectionRegistry {
             canonical_root: record
                 .binding
                 .as_ref()
-                .map(|binding| binding.canonical_root.clone()),
+                .map(|binding| binding.canonical_root.as_wire().to_owned()),
             binding_generation: record.binding_generation,
             desktop: record.desktop.clone(),
         })
@@ -322,7 +322,7 @@ impl WorkbenchConnectionRegistry {
             canonical_root: record
                 .binding
                 .as_ref()
-                .map(|binding| binding.canonical_root.clone()),
+                .map(|binding| binding.canonical_root.as_wire().to_owned()),
             binding_generation: record.binding_generation,
             desktop: record.desktop.clone(),
         })
@@ -363,7 +363,7 @@ impl WorkbenchConnectionRegistry {
             credential: credential.clone(),
             browser_session: record.browser_session.clone(),
             binding_id: Some(binding.binding_id.clone()),
-            canonical_root: Some(binding.canonical_root.clone()),
+            canonical_root: Some(binding.canonical_root.as_wire().to_owned()),
             binding_generation: record.binding_generation,
             desktop: record.desktop.clone(),
         })
@@ -407,7 +407,7 @@ impl WorkbenchConnectionRegistry {
         let credential = self
             .lock_inner()
             .owner_by_root
-            .get(canonical_root)
+            .get(std::path::Path::new(canonical_root))
             .cloned()?;
         self.context(&credential)
     }
@@ -480,10 +480,11 @@ impl WorkbenchConnectionRegistry {
             bound_event,
         } = commit;
         assert_eq!(
-            project_use.canonical_root().to_string_lossy(),
+            project_use.canonical_root().as_wire(),
             canonical_root,
             "Workbench Project Use must own the bound Project"
         );
+        let project_root = project_use.canonical_root().clone();
         let binding_transaction = self.lock_binding_transaction();
         let (gates, bound_permit) = {
             let inner = self.lock_inner();
@@ -497,7 +498,7 @@ impl WorkbenchConnectionRegistry {
             if record
                 .binding
                 .as_ref()
-                .is_some_and(|binding| binding.canonical_root == canonical_root)
+                .is_some_and(|binding| binding.canonical_root == project_root)
             {
                 return Ok(ProjectBindOutcome::AlreadyBound);
             }
@@ -510,7 +511,7 @@ impl WorkbenchConnectionRegistry {
                     &inner,
                     [
                         Some(credential),
-                        inner.owner_by_root.get(&canonical_root).map(String::as_str),
+                        inner.owner_by_root.get(&project_root).map(String::as_str),
                     ],
                 ),
                 bound_permit,
@@ -536,13 +537,13 @@ impl WorkbenchConnectionRegistry {
 
         let mut released_bindings = Vec::new();
         let (preempted, close_preempted, released_binding) =
-            preempt_project_owner(&mut inner, credential, &canonical_root);
+            preempt_project_owner(&mut inner, credential, &project_root);
         if let Some(binding) = released_binding {
             released_bindings.push(binding);
         }
         inner
             .owner_by_root
-            .insert(canonical_root.clone(), credential.to_owned());
+            .insert(project_root.clone(), credential.to_owned());
         let record = inner
             .records
             .get_mut(credential)
@@ -552,7 +553,7 @@ impl WorkbenchConnectionRegistry {
         record.binding_generation = generation;
         record.binding = Some(ConnectionProjectBinding {
             binding_id,
-            canonical_root,
+            canonical_root: project_root,
             _project_use: project_use,
         });
         drop(inner);
@@ -582,10 +583,11 @@ impl WorkbenchConnectionRegistry {
             bound_event,
         } = commit;
         assert_eq!(
-            project_use.canonical_root().to_string_lossy(),
+            project_use.canonical_root().as_wire(),
             target_root,
             "Workbench Project Use must own the replacement Project"
         );
+        let target_project_root = project_use.canonical_root().clone();
         let binding_transaction = self.lock_binding_transaction();
         let (gates, bound_permit) = {
             let inner = self.lock_inner();
@@ -599,7 +601,7 @@ impl WorkbenchConnectionRegistry {
             if record
                 .binding
                 .as_ref()
-                .is_some_and(|binding| binding.canonical_root == target_root)
+                .is_some_and(|binding| binding.canonical_root == target_project_root)
             {
                 return Ok(ProjectBindOutcome::AlreadyBound);
             }
@@ -609,7 +611,10 @@ impl WorkbenchConnectionRegistry {
                     &inner,
                     [
                         Some(credential),
-                        inner.owner_by_root.get(&target_root).map(String::as_str),
+                        inner
+                            .owner_by_root
+                            .get(&target_project_root)
+                            .map(String::as_str),
                     ],
                 ),
                 bound_permit,
@@ -638,13 +643,13 @@ impl WorkbenchConnectionRegistry {
         remove_source_owner(&mut inner, credential, &source_root);
         let mut released_bindings = Vec::new();
         let (preempted, close_preempted, released_binding) =
-            preempt_project_owner(&mut inner, credential, &target_root);
+            preempt_project_owner(&mut inner, credential, &target_project_root);
         if let Some(binding) = released_binding {
             released_bindings.push(binding);
         }
         inner
             .owner_by_root
-            .insert(target_root.clone(), credential.to_owned());
+            .insert(target_project_root.clone(), credential.to_owned());
         let record = inner
             .records
             .get_mut(credential)
@@ -654,7 +659,7 @@ impl WorkbenchConnectionRegistry {
             .binding
             .replace(ConnectionProjectBinding {
                 binding_id: target_binding_id,
-                canonical_root: target_root,
+                canonical_root: target_project_root,
                 _project_use: project_use,
             })
             .expect("replacement source Project binding must exist");
@@ -757,7 +762,7 @@ impl WorkbenchConnectionRegistry {
             credential: credential.to_owned(),
             browser_session: record.browser_session,
             binding_id,
-            canonical_root,
+            canonical_root: canonical_root.map(|root| root.as_wire().to_owned()),
             binding_generation: record.binding_generation,
             desktop: record.desktop,
         };
@@ -973,7 +978,7 @@ fn begin_transitions(gates: &[Arc<ConnectionCommandGate>]) -> Vec<ConnectionTran
 fn preempt_project_owner(
     inner: &mut ConnectionRegistryInner,
     new_owner: &str,
-    canonical_root: &str,
+    canonical_root: &CanonicalProjectRoot,
 ) -> (
     Option<PreemptedConnection>,
     bool,
@@ -995,7 +1000,8 @@ fn preempt_project_owner(
         .take()
         .expect("Workbench Project owner must have a binding");
     assert_eq!(
-        binding.canonical_root, canonical_root,
+        binding.canonical_root.as_path(),
+        canonical_root.as_path(),
         "Workbench Project owner binding must match its owner index"
     );
     record.binding_generation = next_binding_generation(record.binding_generation);
@@ -1019,7 +1025,7 @@ fn preempt_project_owner(
 fn remove_source_owner(
     inner: &mut ConnectionRegistryInner,
     credential: &str,
-    canonical_root: &str,
+    canonical_root: &CanonicalProjectRoot,
 ) {
     assert_eq!(
         inner.owner_by_root.get(canonical_root).map(String::as_str),

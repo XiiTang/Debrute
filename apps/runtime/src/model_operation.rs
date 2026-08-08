@@ -2309,6 +2309,7 @@ mod tests {
         let observed_states = Arc::clone(&states);
         let (running_entered_sender, running_entered_receiver) = mpsc::channel();
         let (release_running_sender, release_running_receiver) = mpsc::channel();
+        let (terminal_observed_sender, terminal_observed_receiver) = mpsc::channel();
         let release_running_receiver = Mutex::new(release_running_receiver);
         assert!(fixture.service.install_observer(Arc::new(move |snapshot| {
             if snapshot.state == OperationState::Running {
@@ -2316,6 +2317,9 @@ mod tests {
                 release_running_receiver.lock().unwrap().recv().unwrap();
             }
             observed_states.lock().unwrap().push(snapshot.state);
+            if snapshot.state == OperationState::Cancelled {
+                terminal_observed_sender.send(()).unwrap();
+            }
         })));
 
         let accepted = fixture
@@ -2354,6 +2358,9 @@ mod tests {
             .unwrap()
             .expect("cancelled operation must remain observable");
         assert_eq!(terminal.state, OperationState::Cancelled);
+        terminal_observed_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("terminal observer snapshot must be delivered");
 
         let states = states.lock().unwrap();
         assert_eq!(

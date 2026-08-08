@@ -125,6 +125,10 @@ export function createHttpWorkbenchApiClient(options: {
   let globalSettingsBootstrap: WorkbenchGlobalSettingsBootstrap | undefined;
   let globalSettingsBootstrapError: Error | undefined;
   let desktopInitialProjectRoot: string | undefined;
+  let currentProjectRequestAlias: {
+    requestedProjectRoot: string;
+    bindingId: string;
+  } | undefined;
   let projectRootSelection: Promise<string | undefined> | undefined;
   const globalSettingsBootstrapWaiters: Array<{
     resolve(value: WorkbenchGlobalSettingsBootstrap): void;
@@ -391,6 +395,9 @@ export function createHttpWorkbenchApiClient(options: {
     }
   };
   const markProjectDetached = (bindingId: string): void => {
+    if (currentProjectRequestAlias?.bindingId === bindingId) {
+      currentProjectRequestAlias = undefined;
+    }
     projectProjection.detachProject(bindingId);
     for (const controller of projectRequestControllers) {
       controller.abort();
@@ -445,7 +452,14 @@ export function createHttpWorkbenchApiClient(options: {
     if (opened.outcome === 'focused_existing_desktop') {
       return opened;
     }
-    return waitForBoundProject(opened.bindingId);
+    const project = await waitForBoundProject(opened.bindingId);
+    if (currentProjectBinding()?.bindingId === project.bindingId) {
+      currentProjectRequestAlias = {
+        requestedProjectRoot: target.projectRoot,
+        bindingId: project.bindingId
+      };
+    }
+    return project;
   };
   const ensureConnection = (): Promise<void> => {
     if (connectionReady) {
@@ -535,9 +549,14 @@ export function createHttpWorkbenchApiClient(options: {
                 ...projectConnectionFrame.project,
                 workingCopies: projectConnectionFrame.workingCopies
               };
+              currentProjectRequestAlias = undefined;
               commitCurrentProject(project);
               acceptBoundProject(project);
-              if (project.canonicalRoot === requestedProjectRoot) {
+              if (!projectSynchronized && requestedProjectRoot !== undefined) {
+                currentProjectRequestAlias = {
+                  requestedProjectRoot,
+                  bindingId: project.bindingId
+                };
                 projectSynchronized = true;
                 settleReady();
               }
@@ -643,7 +662,9 @@ export function createHttpWorkbenchApiClient(options: {
       if (!current) {
         return requestProjectBinding('/api/projects/open', target);
       }
-      if (current.canonicalRoot === target.projectRoot) {
+      if (current.canonicalRoot === target.projectRoot
+        || (currentProjectRequestAlias?.bindingId === current.bindingId
+          && currentProjectRequestAlias.requestedProjectRoot === target.projectRoot)) {
         return waitForBoundProject(current.bindingId);
       }
       return requestProjectBinding('/api/projects/replace', target);

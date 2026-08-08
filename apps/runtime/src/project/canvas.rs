@@ -4,8 +4,8 @@ use serde::{Deserialize, Deserializer};
 
 use super::{
     CanvasManualLayout, CanvasMediaKind, CanvasNodeState, CanvasState, CanvasTextViewportState,
-    CanvasVideoPlaybackState, ProjectError, ProjectTreeEntry, assert_project_tree_visible_path,
-    normalize_project_directory_path, project_content_type, project_media_kind_from_content_type,
+    CanvasVideoPlaybackState, ProjectDirectoryPath, ProjectError, ProjectTreeEntry,
+    assert_project_tree_visible_path, project_content_type, project_media_kind_from_content_type,
     project_text_file_type_for_path, rewrite_project_path,
 };
 
@@ -256,7 +256,7 @@ fn validate_canvas_path(path: &str) -> Result<(), ProjectError> {
     if path.is_empty() {
         return Ok(());
     }
-    let normalized = normalize_project_directory_path(path)?;
+    let normalized = ProjectDirectoryPath::parse(path)?;
     if normalized != path {
         return Err(ProjectError::Validation(format!(
             "Canvas path is not normalized: {path}"

@@ -9,6 +9,7 @@ export async function terminateWindowsProcessTree(
   child,
   {
     label = 'child process',
+    gracePeriodMs = 0,
     timeoutMs = DEFAULT_TIMEOUT_MS
   } = {},
   services = defaultServices()
@@ -25,6 +26,9 @@ export async function terminateWindowsProcessTree(
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error(`Cannot terminate ${label}: timeoutMs must be a positive integer.`);
   }
+  if (!Number.isInteger(gracePeriodMs) || gracePeriodMs < 0) {
+    throw new Error(`Cannot terminate ${label}: gracePeriodMs must be a non-negative integer.`);
+  }
 
   const windowsDirectory = services.windowsDirectory;
   if (!windowsDirectory) {
@@ -36,6 +40,12 @@ export async function terminateWindowsProcessTree(
   const taskkill = win32.join(windowsDirectory, 'System32', 'taskkill.exe');
   const exit = observeChildExit(child);
   try {
+    if (hasExited(child)) {
+      return;
+    }
+    if (gracePeriodMs > 0 && await settlesWithin(exit.promise, gracePeriodMs)) {
+      return;
+    }
     if (hasExited(child)) {
       return;
     }
@@ -51,6 +61,20 @@ export async function terminateWindowsProcessTree(
     );
   } finally {
     exit.dispose();
+  }
+}
+
+async function settlesWithin(promise, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

@@ -12,12 +12,11 @@ use uuid::Uuid;
 use crate::{
     control::{RuntimeControlState, RuntimeWorkPermit},
     project::{
-        ProjectCommand, ProjectCommandResult, ProjectError, ProjectPathKind,
-        ProjectSessionRegistry, ProjectSessionSummary, ProjectUploadEntry, ProjectUse,
-        ProjectUseKind, assert_project_tree_visible_mutation_path,
-        assert_project_tree_visible_path, list_project_directory, normalize_project_directory_path,
-        open_no_symlink_existing_project_file, resolve_no_symlink_existing_project_path,
-        resolve_project_path,
+        CanonicalProjectRoot, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath,
+        ProjectError, ProjectPathKind, ProjectSessionRegistry, ProjectSessionSummary,
+        ProjectUploadEntry, ProjectUse, ProjectUseKind, assert_project_tree_visible_path,
+        is_project_visible_path, list_project_directory, open_no_symlink_existing_project_file,
+        resolve_no_symlink_existing_project_path, resolve_project_path,
     },
 };
 
@@ -56,7 +55,7 @@ struct PlaceCommand {
 
 struct ExportCommand {
     session_id: String,
-    canonical_root: String,
+    canonical_root: CanonicalProjectRoot,
     project_revision: u64,
     directory: String,
     items: HashMap<String, String>,
@@ -350,7 +349,7 @@ impl PhotoshopIntegration {
             } => self.begin_export(
                 session_id,
                 &command_id,
-                canonical_root,
+                &canonical_root,
                 project_revision,
                 &directory,
                 items,
@@ -489,8 +488,13 @@ impl PhotoshopIntegration {
                 source_name,
             )
         };
-        let result =
-            self.commit_export_item(&canonical_root, revision, &directory, &source_name, bytes);
+        let result = self.commit_export_item(
+            canonical_root.as_wire(),
+            revision,
+            &directory,
+            &source_name,
+            bytes,
+        );
         let mut state = self.lock();
         let command = match state.commands.get_mut(command_id) {
             Some(Command::Export(command)) => command,
@@ -724,7 +728,7 @@ impl PhotoshopIntegration {
         &self,
         session_id: &str,
         command_id: &str,
-        canonical_root: String,
+        canonical_root: &str,
         project_revision: u64,
         directory: &str,
         items: Vec<PhotoshopExportItem>,
@@ -748,18 +752,16 @@ impl PhotoshopIntegration {
         }
         self.reserve_export_session(session_id, command_id)?;
         let prepared = (|| {
-            let project = self.projects.get(Path::new(&canonical_root))?;
+            let project = self.projects.get(Path::new(canonical_root))?;
             if project.summary()?.project_revision != project_revision {
                 return Err(revision_changed());
             }
-            let directory = normalize_project_directory_path(directory)?;
-            if !directory.is_empty() {
-                assert_project_tree_visible_mutation_path(&directory).map_err(|_| {
-                    PhotoshopError::new(
-                        PhotoshopErrorCode::TargetDirectoryNotVisible,
-                        "Photoshop target directory is not visible.",
-                    )
-                })?;
+            let directory = ProjectDirectoryPath::parse(directory)?;
+            if !directory.is_empty() && !is_project_visible_path(&directory) {
+                return Err(PhotoshopError::new(
+                    PhotoshopErrorCode::TargetDirectoryNotVisible,
+                    "Photoshop target directory is not visible.",
+                ));
             }
             let directory_path =
                 resolve_no_symlink_existing_project_path(project.root(), &directory).map_err(
@@ -778,7 +780,7 @@ impl PhotoshopIntegration {
             }
             let project_use = self
                 .projects
-                .acquire_use(Path::new(&canonical_root), ProjectUseKind::Transfer)?;
+                .acquire_use(Path::new(canonical_root), ProjectUseKind::Transfer)?;
             Ok::<_, PhotoshopError>((directory, project_use))
         })();
         let (directory, project_use) =
@@ -798,9 +800,9 @@ impl PhotoshopIntegration {
                         command_id.to_owned(),
                         Command::Export(ExportCommand {
                             session_id: session_id.to_owned(),
-                            canonical_root,
+                            canonical_root: project_use.canonical_root().clone(),
                             project_revision,
-                            directory,
+                            directory: directory.into_string(),
                             items: item_map,
                             consumed_items: HashSet::new(),
                             successful_items: HashMap::new(),
@@ -964,6 +966,7 @@ impl PhotoshopIntegration {
             return Err(revision_changed());
         }
         let stem = sanitized_stem(source_name);
+        let directory = crate::project::ProjectDirectoryPath::parse(directory)?;
         let temporary = temporary_path("export");
         fs::write(&temporary, bytes)?;
         let result = (|| {
@@ -973,8 +976,8 @@ impl PhotoshopIntegration {
                 } else {
                     format!("{stem} {index}.png")
                 };
-                let relative = crate::project::join_project_path(directory, &file_name)?;
-                if resolve_project_path(session.root(), &relative)?.exists() {
+                let relative = directory.join_name(&file_name)?;
+                if resolve_project_path(session.root(), relative.as_directory_path())?.exists() {
                     continue;
                 }
                 let result = session
@@ -985,7 +988,7 @@ impl PhotoshopIntegration {
                                 project_relative_path: relative,
                                 temporary_path: temporary.clone(),
                             }],
-                            target_directory: directory.to_owned(),
+                            target_directory: directory.clone(),
                             overwrite: false,
                         },
                     )
@@ -1090,9 +1093,10 @@ fn list_photoshop_target_directories(root: &Path) -> Result<Vec<String>, Project
     let mut directories = Vec::new();
     let mut pending = vec![String::new()];
     while let Some(parent) = pending.pop() {
-        for entry in list_project_directory(root, &parent)? {
+        let parent_path = crate::project::ProjectDirectoryPath::parse(&parent)?;
+        for entry in list_project_directory(root, &parent_path)? {
             if entry.kind != ProjectPathKind::Directory
-                || assert_project_tree_visible_mutation_path(&entry.project_relative_path).is_err()
+                || !is_project_visible_path(&entry.project_relative_path)
             {
                 continue;
             }

@@ -13,48 +13,11 @@ use uuid::Uuid;
 
 use super::{ProjectDirectoryState, ProjectError, ProjectPathKind, ProjectTreeEntry};
 
-/// Normalizes a non-root Project-relative path.
-///
-/// # Errors
-/// Returns an error for absolute, empty, traversal, or NUL-containing input.
-pub fn normalize_project_relative_path(path: &str) -> Result<String, ProjectError> {
-    normalize_project_path(path, false)
-}
+mod relative;
+mod root;
 
-/// Normalizes a Project-relative directory path, including the empty root path.
-///
-/// # Errors
-/// Returns an error for absolute, traversal, or NUL-containing input.
-pub fn normalize_project_directory_path(path: &str) -> Result<String, ProjectError> {
-    normalize_project_path(path, true)
-}
-
-fn normalize_project_path(path: &str, allow_empty: bool) -> Result<String, ProjectError> {
-    if path.starts_with('/') || is_windows_absolute(path) {
-        return Err(ProjectError::Validation(format!(
-            "Project path must be relative: {path}"
-        )));
-    }
-    if path.contains('\\') {
-        return Err(ProjectError::Validation(format!(
-            "Project path must not contain backslashes: {path}"
-        )));
-    }
-    if path.is_empty() {
-        return allow_empty
-            .then(String::new)
-            .ok_or_else(|| ProjectError::Validation("Project path must be non-empty.".to_owned()));
-    }
-    for segment in path.split('/') {
-        if segment.is_empty() || matches!(segment, "." | "..") {
-            return Err(ProjectError::Validation(format!(
-                "Project path must not contain empty, \".\", or \"..\" segments: {path}"
-            )));
-        }
-        validate_portable_path_segment(segment)?;
-    }
-    Ok(path.to_owned())
-}
+pub use relative::{ProjectDirectoryPath, ProjectRelativePath};
+pub use root::CanonicalProjectRoot;
 
 /// Validates a single Project path basename.
 ///
@@ -72,64 +35,8 @@ pub fn normalize_project_path_basename(name: &str) -> Result<String, ProjectErro
             "Project path name must be a basename.".to_owned(),
         ));
     }
-    validate_portable_path_segment(trimmed)?;
+    relative::validate_portable_path_segment(trimmed)?;
     Ok(trimmed.to_owned())
-}
-
-fn validate_portable_path_segment(segment: &str) -> Result<(), ProjectError> {
-    if segment.chars().any(|character| {
-        character == '\0'
-            || character.is_control()
-            || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*')
-    }) || segment.ends_with(['.', ' '])
-    {
-        return Err(ProjectError::Validation(format!(
-            "Project path segment is not portable across macOS and Windows: {segment:?}"
-        )));
-    }
-    let stem = segment
-        .split_once('.')
-        .map_or(segment, |(stem, _)| stem)
-        .to_ascii_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || stem
-            .strip_prefix("COM")
-            .or_else(|| stem.strip_prefix("LPT"))
-            .is_some_and(|number| {
-                (number.len() == 1 && matches!(number.as_bytes()[0], b'1'..=b'9'))
-                    || matches!(number, "¹" | "²" | "³")
-            });
-    if reserved {
-        return Err(ProjectError::Validation(format!(
-            "Project path segment is a reserved Windows device name: {segment}"
-        )));
-    }
-    Ok(())
-}
-
-/// Returns the normalized parent of a Project-relative path.
-///
-/// # Errors
-/// Returns an error when the input path is invalid.
-pub fn parent_project_path(path: &str) -> Result<String, ProjectError> {
-    let normalized = normalize_project_directory_path(path)?;
-    Ok(normalized
-        .rsplit_once('/')
-        .map_or_else(String::new, |(parent, _)| parent.to_owned()))
-}
-
-/// Joins a normalized directory and basename into a Project-relative path.
-///
-/// # Errors
-/// Returns an error when either component is invalid.
-pub fn join_project_path(parent: &str, name: &str) -> Result<String, ProjectError> {
-    let parent = normalize_project_directory_path(parent)?;
-    let name = normalize_project_path_basename(name)?;
-    Ok(if parent.is_empty() {
-        name
-    } else {
-        format!("{parent}/{name}")
-    })
 }
 
 #[must_use]
@@ -158,10 +65,12 @@ pub fn rewrite_project_path(path: &str, source: &str, target: &str) -> String {
 ///
 /// # Errors
 /// Returns an error when the root or relative path is invalid.
-pub fn resolve_project_path(root: &Path, relative: &str) -> Result<PathBuf, ProjectError> {
-    let normalized = normalize_project_directory_path(relative)?;
+pub fn resolve_project_path(
+    root: &Path,
+    relative: &ProjectDirectoryPath,
+) -> Result<PathBuf, ProjectError> {
     let mut result = root.to_path_buf();
-    for component in Path::new(&normalized).components() {
+    for component in Path::new(relative).components() {
         match component {
             Component::Normal(segment) => result.push(segment),
             _ => {
@@ -178,7 +87,10 @@ pub fn resolve_project_path(root: &Path, relative: &str) -> Result<PathBuf, Proj
 ///
 /// # Errors
 /// Returns an error for missing paths, root escape, or I/O failure.
-pub fn resolve_existing_project_path(root: &Path, relative: &str) -> Result<PathBuf, ProjectError> {
+pub fn resolve_existing_project_path(
+    root: &Path,
+    relative: &ProjectDirectoryPath,
+) -> Result<PathBuf, ProjectError> {
     let lexical = resolve_project_path(root, relative)?;
     let root_real = root.canonicalize()?;
     let target_real = lexical.canonicalize()?;
@@ -192,7 +104,7 @@ pub fn resolve_existing_project_path(root: &Path, relative: &str) -> Result<Path
 /// Returns an error for missing paths, symbolic links, root escape, or I/O failure.
 pub fn resolve_no_symlink_existing_project_path(
     root: &Path,
-    relative: &str,
+    relative: &ProjectDirectoryPath,
 ) -> Result<PathBuf, ProjectError> {
     let lexical = resolve_project_path(root, relative)?;
     assert_no_symlink_components(root, relative)?;
@@ -213,9 +125,9 @@ pub fn resolve_no_symlink_existing_project_path(
 /// identity race, or I/O failure.
 pub fn open_no_symlink_existing_project_file(
     root: &Path,
-    relative: &str,
+    relative: &ProjectRelativePath,
 ) -> Result<fs::File, ProjectError> {
-    let absolute = resolve_no_symlink_existing_project_path(root, relative)?;
+    let absolute = resolve_no_symlink_existing_project_path(root, relative.as_directory_path())?;
     let file = fs::File::open(&absolute)?;
     if !file.metadata()?.is_file() {
         return Err(ProjectError::Validation(format!(
@@ -223,7 +135,7 @@ pub fn open_no_symlink_existing_project_file(
         )));
     }
     let handle_identity = debrute_native_fs::file_identity(&file)?;
-    let current = resolve_no_symlink_existing_project_path(root, relative)?;
+    let current = resolve_no_symlink_existing_project_path(root, relative.as_directory_path())?;
     let path_identity = debrute_native_fs::path_identity(&current)?;
     if handle_identity != path_identity {
         return Err(ProjectError::service(
@@ -240,7 +152,7 @@ pub fn open_no_symlink_existing_project_file(
 /// Returns an error for invalid paths, root escape, or invalid existing parents.
 pub fn resolve_project_path_for_write(
     root: &Path,
-    relative: &str,
+    relative: &ProjectRelativePath,
 ) -> Result<PathBuf, ProjectError> {
     resolve_project_path_for_write_inner(root, relative)
 }
@@ -251,7 +163,7 @@ pub fn resolve_project_path_for_write(
 /// Returns an error for invalid paths, symbolic links, or root escape.
 pub fn resolve_no_symlink_project_path_for_write(
     root: &Path,
-    relative: &str,
+    relative: &ProjectRelativePath,
 ) -> Result<PathBuf, ProjectError> {
     resolve_project_path_for_write_inner(root, relative)
 }
@@ -312,27 +224,34 @@ impl ProjectCapabilityFs {
         roots.retain(|_, root| root.strong_count() > 0);
     }
 
-    pub(crate) fn open_directory(&self, relative: &str) -> Result<Dir, ProjectError> {
-        let relative = normalize_project_directory_path(relative)?;
-        if relative.is_empty() {
+    pub(crate) fn open_directory(
+        &self,
+        relative: &ProjectDirectoryPath,
+    ) -> Result<Dir, ProjectError> {
+        if relative.is_root() {
             return Ok(self.root.try_clone()?);
         }
         Ok(self.root.open_dir(relative)?)
     }
 
-    pub(crate) fn ensure_directory(&self, relative: &str) -> Result<Dir, ProjectError> {
-        let relative = normalize_project_directory_path(relative)?;
-        if relative.is_empty() {
+    pub(crate) fn ensure_directory(
+        &self,
+        relative: &ProjectDirectoryPath,
+    ) -> Result<Dir, ProjectError> {
+        if relative.is_root() {
             return Ok(self.root.try_clone()?);
         }
-        self.root.create_dir_all(&relative)?;
+        self.root.create_dir_all(relative)?;
         Ok(self.root.open_dir(relative)?)
     }
 
-    pub(crate) fn atomic_write(&self, relative: &str, bytes: &[u8]) -> Result<(), ProjectError> {
-        let relative = normalize_project_relative_path(relative)?;
-        let (parent, name) = split_parent_name(&relative)?;
-        let directory = self.ensure_directory(parent)?;
+    pub(crate) fn atomic_write(
+        &self,
+        relative: &ProjectRelativePath,
+        bytes: &[u8],
+    ) -> Result<(), ProjectError> {
+        let (parent, name) = split_parent_name(relative);
+        let directory = self.ensure_directory(&parent)?;
         let temporary = format!(".{name}.{}.tmp", Uuid::new_v4());
         let result = (|| {
             let mut options = cap_std::fs::OpenOptions::new();
@@ -348,7 +267,7 @@ impl ProjectCapabilityFs {
 
     pub(crate) fn atomic_write_checked<E, F>(
         &self,
-        relative: &str,
+        relative: &ProjectRelativePath,
         bytes: &[u8],
         mut check: F,
     ) -> Result<(), E>
@@ -356,9 +275,8 @@ impl ProjectCapabilityFs {
         E: From<ProjectError> + std::fmt::Display,
         F: FnMut() -> Result<(), E>,
     {
-        let relative = normalize_project_relative_path(relative)?;
-        let (parent, name) = split_parent_name(&relative)?;
-        let directory = self.ensure_directory(parent)?;
+        let (parent, name) = split_parent_name(relative);
+        let directory = self.ensure_directory(&parent)?;
         let temporary = format!(".{name}.{}.tmp", Uuid::new_v4());
         let result = (|| {
             check()?;
@@ -384,7 +302,7 @@ impl ProjectCapabilityFs {
 
     pub(crate) fn atomic_write_stream_checked<E, R, F>(
         &self,
-        relative: &str,
+        relative: &ProjectRelativePath,
         render: R,
         mut check: F,
     ) -> Result<(), E>
@@ -393,9 +311,8 @@ impl ProjectCapabilityFs {
         R: FnOnce(&mut std::fs::File) -> Result<(), E>,
         F: FnMut() -> Result<(), E>,
     {
-        let relative = normalize_project_relative_path(relative)?;
-        let (parent, name) = split_parent_name(&relative)?;
-        let directory = self.ensure_directory(parent)?;
+        let (parent, name) = split_parent_name(relative);
+        let directory = self.ensure_directory(&parent)?;
         let temporary = format!(".{name}.{}.tmp", Uuid::new_v4());
         let result = (|| {
             check()?;
@@ -420,10 +337,9 @@ impl ProjectCapabilityFs {
 
     pub(crate) fn read_limited(
         &self,
-        relative: &str,
+        relative: &ProjectRelativePath,
         max_bytes: usize,
     ) -> Result<Vec<u8>, ProjectError> {
-        let relative = normalize_project_relative_path(relative)?;
         let mut file = self.root.open(relative)?;
         let limit = max_bytes as u64;
         if file.metadata()?.len() > limit {
@@ -445,19 +361,17 @@ impl ProjectCapabilityFs {
         Ok(bytes)
     }
 
-    pub(crate) fn remove_file(&self, relative: &str) -> Result<(), ProjectError> {
-        let relative = normalize_project_relative_path(relative)?;
+    pub(crate) fn remove_file(&self, relative: &ProjectRelativePath) -> Result<(), ProjectError> {
         self.root.remove_file(relative)?;
         Ok(())
     }
 
     pub(crate) fn hard_link_to(
         &self,
-        source: &str,
+        source: &ProjectRelativePath,
         destination: &Dir,
         destination_name: &str,
     ) -> Result<(), ProjectError> {
-        let source = normalize_project_relative_path(source)?;
         normalize_project_path_basename(destination_name)?;
         self.root.hard_link(source, destination, destination_name)?;
         Ok(())
@@ -481,23 +395,25 @@ where
     }
 }
 
-fn split_parent_name(relative: &str) -> Result<(&str, &str), ProjectError> {
-    relative.rsplit_once('/').map_or_else(
-        || Ok(("", relative)),
+fn split_parent_name(relative: &ProjectRelativePath) -> (ProjectDirectoryPath, &str) {
+    relative.as_str().rsplit_once('/').map_or_else(
+        || (ProjectDirectoryPath::root(), relative.as_str()),
         |(parent, name)| {
-            normalize_project_directory_path(parent)?;
-            normalize_project_path_basename(name)?;
-            Ok((parent, name))
+            (
+                ProjectDirectoryPath::parse(parent)
+                    .expect("validated Project path parent must remain valid"),
+                name,
+            )
         },
     )
 }
 
 fn resolve_project_path_for_write_inner(
     root: &Path,
-    relative: &str,
+    relative: &ProjectRelativePath,
 ) -> Result<PathBuf, ProjectError> {
-    let lexical = resolve_project_path(root, relative)?;
-    assert_no_symlink_components(root, relative)?;
+    let lexical = resolve_project_path(root, relative.as_directory_path())?;
+    assert_no_symlink_components(root, relative.as_directory_path())?;
     let root_real = root.canonicalize()?;
     match fs::symlink_metadata(&lexical) {
         Ok(metadata) => {
@@ -531,10 +447,12 @@ fn resolve_project_path_for_write_inner(
     }
 }
 
-fn assert_no_symlink_components(root: &Path, relative: &str) -> Result<(), ProjectError> {
-    let normalized = normalize_project_directory_path(relative)?;
+fn assert_no_symlink_components(
+    root: &Path,
+    relative: &ProjectDirectoryPath,
+) -> Result<(), ProjectError> {
     let mut current = root.to_path_buf();
-    for component in Path::new(&normalized).components() {
+    for component in Path::new(relative).components() {
         let Component::Normal(segment) = component else {
             return Err(ProjectError::Validation(format!(
                 "Project path escapes project root: {relative}"
@@ -568,8 +486,8 @@ fn assert_path_inside(root: &Path, target: &Path, relative: &str) -> Result<(), 
 ///
 /// # Errors
 /// Returns an error when the path is invalid or excluded by Project policy.
-pub fn assert_project_tree_visible_path(path: &str) -> Result<String, ProjectError> {
-    let normalized = normalize_project_relative_path(path)?;
+pub fn assert_project_tree_visible_path(path: &str) -> Result<ProjectRelativePath, ProjectError> {
+    let normalized = ProjectRelativePath::parse(path)?;
     if !is_project_visible_path(&normalized) {
         return Err(ProjectError::Validation(format!(
             "Project path is not visible in the Project Tree: {path}"
@@ -582,8 +500,16 @@ pub fn assert_project_tree_visible_path(path: &str) -> Result<String, ProjectErr
 ///
 /// # Errors
 /// Returns an error when the path is invalid or excluded.
-pub fn assert_project_tree_visible_mutation_path(path: &str) -> Result<String, ProjectError> {
-    assert_project_tree_visible_path(path)
+pub fn assert_project_tree_visible_mutation_path(
+    path: &ProjectRelativePath,
+) -> Result<(), ProjectError> {
+    if is_project_visible_path(path) {
+        Ok(())
+    } else {
+        Err(ProjectError::Validation(format!(
+            "Project path is not visible in the Project Tree: {path}"
+        )))
+    }
 }
 
 #[must_use]
@@ -632,16 +558,16 @@ fn is_windows_absolute(path: &str) -> bool {
 /// Returns an error when the directory path is invalid or cannot be read safely.
 pub fn list_project_directory(
     root: &Path,
-    project_relative_directory: &str,
+    project_relative_directory: &ProjectDirectoryPath,
 ) -> Result<Vec<ProjectTreeEntry>, ProjectError> {
-    let directory = normalize_project_directory_path(project_relative_directory)?;
-    if !directory.is_empty() && !is_project_visible_path(&directory) {
+    let directory = project_relative_directory;
+    if !directory.is_empty() && !is_project_visible_path(directory) {
         return Err(ProjectError::Validation(format!(
             "Project directory is not visible: {directory}"
         )));
     }
     let project = ProjectCapabilityFs::open(root)?;
-    let current = project.open_directory(&directory)?;
+    let current = project.open_directory(directory)?;
     let mut result = Vec::new();
     for entry in current.entries()? {
         let entry = entry?;
@@ -771,7 +697,7 @@ mod tests {
             "media/bad\0name",
             "media/bad\u{1f}name",
         ] {
-            assert!(normalize_project_relative_path(path).is_err(), "{path:?}");
+            assert!(ProjectRelativePath::parse(path).is_err(), "{path:?}");
         }
     }
 
@@ -806,10 +732,11 @@ mod tests {
         fs::create_dir_all(root.join("artifacts")).unwrap();
         fs::create_dir_all(&external).unwrap();
         symlink(&external, root.join("artifacts/output")).unwrap();
+        let output = ProjectRelativePath::parse("artifacts/output/preview.bin").unwrap();
         assert!(
             ProjectCapabilityFs::open(&root)
                 .unwrap()
-                .atomic_write("artifacts/output/preview.bin", b"preview")
+                .atomic_write(&output, b"preview")
                 .is_err()
         );
         assert!(!external.join("preview.bin").exists());
@@ -833,7 +760,8 @@ mod tests {
         fs::rename(&root, &moved).unwrap();
         symlink(&external, &root).unwrap();
 
-        capability.atomic_write("output/value", b"owned").unwrap();
+        let output = ProjectRelativePath::parse("output/value").unwrap();
+        capability.atomic_write(&output, b"owned").unwrap();
 
         assert_eq!(fs::read(moved.join("output/value")).unwrap(), b"owned");
         assert!(!external.join("output/value").exists());
@@ -853,12 +781,17 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let new = ProjectCapabilityFs::bind_session_root(&root).unwrap();
 
-        old.atomic_write("output/old", b"old").unwrap();
-        new.atomic_write("output/new", b"new").unwrap();
+        old.atomic_write(&ProjectRelativePath::parse("output/old").unwrap(), b"old")
+            .unwrap();
+        new.atomic_write(&ProjectRelativePath::parse("output/new").unwrap(), b"new")
+            .unwrap();
         old.unbind_session_root(&root);
         ProjectCapabilityFs::open(&root)
             .unwrap()
-            .atomic_write("output/current", b"current")
+            .atomic_write(
+                &ProjectRelativePath::parse("output/current").unwrap(),
+                b"current",
+            )
             .unwrap();
 
         assert!(moved.join("output/old").is_file());
@@ -875,10 +808,11 @@ mod tests {
         let root = std::env::temp_dir().join(format!("debrute-stream-root-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let checks = Cell::new(0_u8);
+        let output = ProjectRelativePath::parse("derived/preview.png").unwrap();
         let result = ProjectCapabilityFs::open(&root)
             .unwrap()
             .atomic_write_stream_checked(
-                "derived/preview.png",
+                &output,
                 |file| {
                     file.write_all(b"rendered")?;
                     Ok::<(), ProjectError>(())

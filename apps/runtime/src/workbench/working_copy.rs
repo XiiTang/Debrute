@@ -14,8 +14,8 @@ use crate::global::root_state_directory;
 use crate::project::{
     CanvasFeedbackGeometry, CanvasFeedbackItemKind, CanvasFeedbackScope, ProjectCommand,
     ProjectCommandResult, ProjectError, ProjectPathOperationStatus, ProjectPathStateReconciler,
-    normalize_project_relative_path, normalized_geometry, project_path_is_same_or_descendant,
-    replace_file, rewrite_project_path, validate_spatial_geometry,
+    ProjectRelativePath, normalized_geometry, project_path_is_same_or_descendant, replace_file,
+    rewrite_project_path, validate_spatial_geometry,
 };
 
 use super::RuntimeHttpServiceError;
@@ -91,8 +91,9 @@ impl WorkingCopyStore {
         mut working_copy: TextWorkingCopy,
     ) -> Result<TextWorkingCopy, RuntimeHttpServiceError> {
         working_copy.project_relative_path =
-            normalize_project_relative_path(&working_copy.project_relative_path)
-                .map_err(RuntimeHttpServiceError::from_project)?;
+            ProjectRelativePath::parse(&working_copy.project_relative_path)
+                .map_err(RuntimeHttpServiceError::from_project)?
+                .into_string();
         if working_copy.language.is_empty() || working_copy.base_revision.is_empty() {
             return Err(invalid(
                 "Text Working Copy requires language and baseRevision.",
@@ -113,11 +114,11 @@ impl WorkingCopyStore {
         canonical_root: &str,
         project_relative_path: &str,
     ) -> Result<(), RuntimeHttpServiceError> {
-        let project_relative_path = normalize_project_relative_path(project_relative_path)
+        let project_relative_path = ProjectRelativePath::parse(project_relative_path)
             .map_err(RuntimeHttpServiceError::from_project)?;
         let _io = self.lock();
         let mut project = self.read(canonical_root)?;
-        project.text.remove(&project_relative_path);
+        project.text.remove(project_relative_path.as_str());
         self.write_or_remove(canonical_root, &project)
     }
 
@@ -127,8 +128,9 @@ impl WorkingCopyStore {
         mut working_copy: FeedbackWorkingCopy,
     ) -> Result<FeedbackWorkingCopy, RuntimeHttpServiceError> {
         working_copy.project_relative_path =
-            normalize_project_relative_path(&working_copy.project_relative_path)
-                .map_err(RuntimeHttpServiceError::from_project)?;
+            ProjectRelativePath::parse(&working_copy.project_relative_path)
+                .map_err(RuntimeHttpServiceError::from_project)?
+                .into_string();
         if working_copy.item_id.is_empty()
             || working_copy.item_id != working_copy.item_id.trim()
             || working_copy.item_id.len() > MAX_FEEDBACK_WORKING_COPY_ITEM_ID_BYTES
@@ -332,7 +334,7 @@ fn working_copy_path_changes(
         ) => (
             vec![result.project_relative_path.clone()],
             vec![(
-                project_relative_path.clone(),
+                project_relative_path.to_string(),
                 result.project_relative_path.clone(),
             )],
         ),
@@ -363,7 +365,7 @@ fn working_copy_path_changes(
         (ProjectCommand::DeletePaths { entries }, _) => (
             entries
                 .iter()
-                .map(|entry| entry.project_relative_path.clone())
+                .map(|entry| entry.project_relative_path.to_string())
                 .collect(),
             Vec::new(),
         ),

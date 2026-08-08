@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { JumpListCategory } from 'electron';
 import { parseDesktopOpenIntent, syncNativeRecentProjects } from './nativeRecentProjects';
 
 describe('native recent projects', () => {
@@ -44,9 +45,31 @@ describe('native recent projects', () => {
         items: [expect.objectContaining({
           title: 'Alpha Project',
           description: 'C:\\Projects\\Alpha Project',
-          args: '--debrute-project-root="C:\\Projects\\Alpha Project"'
+          args: '"--debrute-project-root=C:\\Projects\\Alpha Project"'
         })]
       }
+    ]);
+  });
+
+  it('doubles trailing backslashes in Windows Jump List arguments', () => {
+    const setJumpList = vi.fn((_categories: JumpListCategory[]) => 'ok' as const);
+
+    syncNativeRecentProjects(
+      { setJumpList, addRecentDocument: vi.fn(), clearRecentDocuments: vi.fn() },
+      'win32',
+      'C:\\Program Files\\Debrute\\Debrute.exe',
+      ['\\\\?\\C:\\', '\\\\server\\share\\']
+    );
+
+    const categories = setJumpList.mock.calls[0]?.[0];
+    const recent = categories?.[1];
+    expect(recent?.type).toBe('custom');
+    if (recent?.type !== 'custom') {
+      throw new Error('Expected Recent Projects Jump List category.');
+    }
+    expect((recent.items ?? []).map((item) => item.args)).toEqual([
+      '"--debrute-project-root=\\\\?\\C:\\\\"',
+      '"--debrute-project-root=\\\\server\\share\\\\"'
     ]);
   });
 

@@ -19,8 +19,7 @@ mod windows {
         Foundation::{GENERIC_WRITE, HANDLE},
         Storage::FileSystem::{
             BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FlushFileBuffers, GetFileInformationByHandle, MOVEFILE_REPLACE_EXISTING,
-            MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            FlushFileBuffers, GetFileInformationByHandle,
         },
         System::{
             IO::DeviceIoControl, Ioctl::FSCTL_SET_REPARSE_POINT,
@@ -167,32 +166,6 @@ mod windows {
         flush_file(&file)
     }
 
-    /// Atomically replaces `destination` with `source` and requests write-through.
-    ///
-    /// # Errors
-    ///
-    /// Returns an operating-system error when Windows cannot perform the
-    /// same-volume replacement and durability operation.
-    pub fn replace_file_atomic(source: &Path, destination: &Path) -> io::Result<()> {
-        let source = wide_path(source);
-        let destination = wide_path(destination);
-        // SAFETY: both vectors are live, NUL-terminated UTF-16 path buffers for
-        // the duration of the call. Flags request same-volume replacement and
-        // write-through; Windows reports all validation failures via GetLastError.
-        let success = unsafe {
-            MoveFileExW(
-                source.as_ptr(),
-                destination.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        };
-        if success == 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
-    }
-
     fn flush_reparse_point(path: &Path) -> io::Result<()> {
         let file = open_directory(path, true)?;
         flush_file(&file)
@@ -210,10 +183,6 @@ mod windows {
             .share_mode(SHARE_READ_WRITE_DELETE)
             .custom_flags(flags)
             .open(path)
-    }
-
-    fn wide_path(path: &Path) -> Vec<u16> {
-        path.as_os_str().encode_wide().chain([0]).collect()
     }
 
     fn flush_file(file: &File) -> io::Result<()> {
@@ -238,8 +207,8 @@ mod windows {
 
 #[cfg(target_os = "windows")]
 pub use windows::{
-    FileIdentity, create_junction, junction_identity, junction_target, replace_file_atomic,
-    retarget_junction, sync_directory,
+    FileIdentity, create_junction, junction_identity, junction_target, retarget_junction,
+    sync_directory,
 };
 
 #[cfg(all(test, target_os = "windows"))]
@@ -285,22 +254,6 @@ mod tests {
             fs::canonicalize(&second).unwrap()
         );
         fs::remove_dir(&current).unwrap();
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn file_replacement_is_atomic_and_consumes_the_source() {
-        let root = temporary_root("replace");
-        fs::create_dir_all(&root).unwrap();
-        let source = root.join("source.json");
-        let destination = root.join("destination.json");
-        fs::write(&source, b"new").unwrap();
-        fs::write(&destination, b"old").unwrap();
-
-        super::replace_file_atomic(&source, &destination).unwrap();
-
-        assert_eq!(fs::read(&destination).unwrap(), b"new");
-        assert!(!source.exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

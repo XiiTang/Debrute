@@ -14,6 +14,7 @@ mod fal_flux_dev;
 mod fal_flux_dev_image_to_image;
 mod gemini_3_1_flash_image;
 mod gemini_3_pro_image;
+mod gemini_interactions_image;
 mod gpt_image_1;
 mod gpt_image_2;
 mod minimax_image_01;

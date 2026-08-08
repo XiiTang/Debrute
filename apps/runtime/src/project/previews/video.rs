@@ -24,7 +24,7 @@ use super::{
     },
 };
 use crate::project::{
-    CANVAS_VIDEO_TIME_MAX_MS, ProjectCapabilityFs, ProjectError, normalize_project_relative_path,
+    CANVAS_VIDEO_TIME_MAX_MS, ProjectCapabilityFs, ProjectError, ProjectRelativePath,
     open_no_symlink_existing_project_file, project_media_revision,
     resolve_no_symlink_existing_project_path,
 };
@@ -284,7 +284,8 @@ impl CanvasVideoPreviewService {
                     ],
                 )
             })?;
-        let file = open_no_symlink_existing_project_file(&cache_root, &source_project_path)?;
+        let source_relative = ProjectRelativePath::parse(&source_project_path)?;
+        let file = open_no_symlink_existing_project_file(&cache_root, &source_relative)?;
         self.raster_variants.resolve(
             &cache_root,
             RasterPreviewVariantRequest {
@@ -327,7 +328,8 @@ impl CanvasVideoPreviewService {
                 canonical_source_identity,
             });
         };
-        let mut file = open_no_symlink_existing_project_file(&cache_root, &source_project_path)?;
+        let source_relative = ProjectRelativePath::parse(&source_project_path)?;
+        let mut file = open_no_symlink_existing_project_file(&cache_root, &source_relative)?;
         let metadata = self
             .raster_variants
             .metadata_file(&source, &mut file, cancellation)?;
@@ -362,8 +364,9 @@ impl CanvasVideoPreviewService {
             canonical_source_identity,
         )?;
         let source_project_path = format!("{directory}/source.jpg");
+        let source_relative = ProjectRelativePath::parse(&source_project_path)?;
         let cache_root = self.cache_root(project_root)?;
-        let source = if let Some(source) = existing_file(&cache_root, &source_project_path)? {
+        let source = if let Some(source) = existing_file(&cache_root, &source_relative)? {
             source
         } else {
             let video = StableVideoInput::open(
@@ -398,8 +401,9 @@ impl CanvasVideoPreviewService {
                     "canvas_video_preview_frame_too_large",
                     "Extracted Canvas video preview frame",
                 )?;
+                let source_relative = ProjectRelativePath::parse(&source_project_path)?;
                 ProjectCapabilityFs::open(&cache_root)?.atomic_write_checked(
-                    &source_project_path,
+                    &source_relative,
                     &bytes,
                     || {
                         cancellation.check()?;
@@ -409,9 +413,14 @@ impl CanvasVideoPreviewService {
                 )
             })();
             publication?;
-            resolve_no_symlink_existing_project_path(&cache_root, &source_project_path)?
+            let source_relative = ProjectRelativePath::parse(&source_project_path)?;
+            resolve_no_symlink_existing_project_path(
+                &cache_root,
+                source_relative.as_directory_path(),
+            )?
         };
-        let mut file = open_no_symlink_existing_project_file(&cache_root, &source_project_path)?;
+        let source_relative = ProjectRelativePath::parse(&source_project_path)?;
+        let mut file = open_no_symlink_existing_project_file(&cache_root, &source_relative)?;
         let metadata = self
             .raster_variants
             .metadata_file(&source, &mut file, cancellation)?;
@@ -422,8 +431,7 @@ impl CanvasVideoPreviewService {
     }
 
     fn cache_root(&self, project_root: &Path) -> Result<PathBuf, ProjectError> {
-        let canonical_root = project_root.canonicalize()?;
-        let canonical_root = canonical_root.to_str().ok_or_else(|| {
+        let canonical_root = project_root.to_str().ok_or_else(|| {
             ProjectError::Validation("Project root must be valid UTF-8.".to_owned())
         })?;
         let root =
@@ -676,7 +684,7 @@ impl StableVideoInput {
         copy_admission: &Semaphore,
         cancellation: &PreviewCancellation,
     ) -> Result<Self, ProjectError> {
-        let relative = normalize_project_relative_path(project_relative_path)?;
+        let relative = ProjectRelativePath::parse(project_relative_path)?;
         cancellation.check()?;
         let mut source = open_no_symlink_existing_project_file(project_root, &relative)?;
         let source_identity = debrute_native_fs::file_identity(&source)?;
@@ -842,7 +850,7 @@ fn assert_source_revision(
     project_root: &Path,
     target: &CanvasVideoPreviewTarget,
 ) -> Result<(), ProjectError> {
-    let relative = normalize_project_relative_path(&target.project_relative_path)?;
+    let relative = ProjectRelativePath::parse(&target.project_relative_path)?;
     let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
     let actual = project_media_revision(&mut file)?;
     if actual == target.source_revision {
@@ -852,7 +860,7 @@ fn assert_source_revision(
             "canvas_video_preview_source_revision_mismatch",
             format!("Canvas video preview revision does not match source: {relative}"),
             [
-                ("project_relative_path".to_owned(), relative),
+                ("project_relative_path".to_owned(), relative.to_string()),
                 ("source_revision".to_owned(), target.source_revision.clone()),
                 ("actual_revision".to_owned(), actual),
             ],
@@ -881,7 +889,8 @@ fn source_file(
     directory: &str,
 ) -> Result<Option<(String, PathBuf)>, ProjectError> {
     let project_path = format!("{directory}/source.jpg");
-    existing_file(project_root, &project_path)
+    let relative = ProjectRelativePath::parse(&project_path)?;
+    existing_file(project_root, &relative)
         .map(|source| source.map(|absolute| (project_path, absolute)))
 }
 

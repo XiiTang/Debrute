@@ -1638,6 +1638,7 @@ impl SseEvents {
 
 struct TestRuntime {
     root: PathBuf,
+    #[cfg(target_os = "macos")]
     state: Arc<RuntimeControlState>,
     server: WorkbenchHttpServer,
     services: Option<Arc<WorkbenchRuntimeServices>>,
@@ -1678,6 +1679,7 @@ impl TestRuntime {
         assert!(state.finish_startup());
         Self {
             root,
+            #[cfg(target_os = "macos")]
             state,
             server,
             services: Some(services),
@@ -1688,6 +1690,7 @@ impl TestRuntime {
         self.server.origin()
     }
 
+    #[cfg(target_os = "macos")]
     fn state(&self) -> &Arc<RuntimeControlState> {
         &self.state
     }

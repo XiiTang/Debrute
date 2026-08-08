@@ -246,6 +246,18 @@ through `navigator.clipboard`, and Electron does not expose direct
 file-operation or clipboard IPC for these commands, so browser and Desktop
 Workbenches share the same behavior.
 
+On Windows, reveal calls the Shell PIDL API directly; it does not start Explorer
+as a child process. Recoverable deletion does not invoke PowerShell, AppleScript,
+Finder, or another command interpreter. Runtime validates the whole requested
+Project batch, then starts one private copy of its current executable for each
+top-level item. The worker accepts only the canonical Project root, one admitted
+Project-relative path, and the expected filesystem identity and
+file-or-directory kind. It reopens the canonical root, repeats the complete
+no-symbolic-link containment and identity validation, and only then calls the
+operating system Trash or Recycle Bin Adapter. Runtime supervises each worker
+for 30 seconds, stops at the first failure, and performs no retry, rollback,
+compatibility fallback, or recovery journal.
+
 ## Executable Authorities
 
 - Desktop composition and native command execution: `apps/desktop/src/electron/main.ts`.

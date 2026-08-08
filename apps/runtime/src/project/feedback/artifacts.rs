@@ -18,8 +18,8 @@ use super::{
 };
 use crate::project::{
     CanvasMediaKind, PreviewCancellation, ProjectCapabilityFs, ProjectDiagnostic,
-    ProjectDiagnosticSeverity, ProjectError, ProjectPreviewService, ProjectSession,
-    canvas_media_kind_from_path,
+    ProjectDiagnosticSeverity, ProjectDirectoryPath, ProjectError, ProjectPreviewService,
+    ProjectRelativePath, ProjectSession, canvas_media_kind_from_path,
     previews::raster::{composite_svg_overlay, encode_png},
 };
 #[cfg(test)]
@@ -1005,9 +1005,11 @@ fn complete_epoch(
     let latest = render.epoch == epoch && !active.cancellation_is_cancelled();
     if latest {
         match result {
-            Ok(bytes) => match ProjectCapabilityFs::open(&render.project_root).and_then(|project| {
-                project.atomic_write(&render.descriptor.artifact_project_path, &bytes)
-            }) {
+            Ok(bytes) => match ProjectRelativePath::parse(&render.descriptor.artifact_project_path)
+                .and_then(|artifact_path| {
+                    ProjectCapabilityFs::open(&render.project_root)
+                        .and_then(|project| project.atomic_write(&artifact_path, &bytes))
+                }) {
                 Ok(()) => publish_render_success(on_diagnostic, render),
                 Err(error) => publish_render_failure(on_diagnostic, render, &error.to_string()),
             },
@@ -1061,8 +1063,11 @@ fn remove_obsolete_states(
         if let Some(active) = &render.active {
             active.cancellation.cancel();
         }
-        let removal = ProjectCapabilityFs::open(&render.project_root)
-            .and_then(|project| project.remove_file(&render.descriptor.artifact_project_path));
+        let removal = ProjectRelativePath::parse(&render.descriptor.artifact_project_path)
+            .and_then(|artifact_path| {
+                ProjectCapabilityFs::open(&render.project_root)
+                    .and_then(|project| project.remove_file(&artifact_path))
+            });
         match removal {
             Ok(()) => publish_render_success(on_diagnostic, render),
             Err(ProjectError::Io(ref error)) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1130,8 +1135,11 @@ fn publish_render_failure(
     render: &RenderState,
     message: &str,
 ) {
-    let cleanup_error = ProjectCapabilityFs::open(&render.project_root)
-        .and_then(|project| project.remove_file(&render.descriptor.artifact_project_path))
+    let cleanup_error = ProjectRelativePath::parse(&render.descriptor.artifact_project_path)
+        .and_then(|artifact_path| {
+            ProjectCapabilityFs::open(&render.project_root)
+                .and_then(|project| project.remove_file(&artifact_path))
+        })
         .err()
         .filter(|error| {
             !matches!(error, ProjectError::Io(error) if error.kind() == std::io::ErrorKind::NotFound)
@@ -1334,7 +1342,9 @@ fn remove_unexpected_artifacts(
 ) -> Result<(), ProjectError> {
     const ROOT: &str = ".debrute/feedback/artifacts";
     let project = ProjectCapabilityFs::open(project_root)?;
-    let root = match project.open_directory(ROOT) {
+    let root_path =
+        ProjectDirectoryPath::parse(ROOT).expect("Canvas feedback artifact root must remain valid");
+    let root = match project.open_directory(&root_path) {
         Ok(root) => root,
         Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(());

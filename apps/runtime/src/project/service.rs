@@ -4,24 +4,26 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     io::{Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
     time::SystemTime,
 };
 
 use super::{
-    CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasImageDimensions, CanvasMediaKind,
-    CanvasNodeAvailability, CanvasResource, CanvasResourceView, CanvasState, CanvasStatePatch,
-    CanvasVideoPresentation, CanvasWorkspaceDocument, CanvasWorkspaceSnapshot,
-    CanvasWorkspaceStore, CanvasWorkspaceUnavailable, ProjectCapabilityFs, ProjectDiagnostic,
-    ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectError, ProjectHealthSummary,
-    ProjectPathKind, ProjectSnapshot, ProjectTree, ProjectTreeChange, ProjectTreeEntry,
-    UpdateCanvasFeedbackInput, apply_canvas_state_patch, canvas_media_kind_from_path,
-    normalize_feedback_path, open_no_symlink_existing_project_file, project_content_hash,
-    project_content_type, project_media_kind_from_content_type, project_media_revision,
-    project_text_file_type_for_path, prune_canvas_state_path, read_canvas_feedback_state,
-    resolve_no_symlink_existing_project_path, rewrite_canvas_state_path,
-    update_canvas_feedback_document, visible_canvas_entries, write_canvas_feedback_document,
+    CanonicalProjectRoot, CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument,
+    CanvasImageDimensions, CanvasMediaKind, CanvasNodeAvailability, CanvasResource,
+    CanvasResourceView, CanvasState, CanvasStatePatch, CanvasVideoPresentation,
+    CanvasWorkspaceDocument, CanvasWorkspaceSnapshot, CanvasWorkspaceStore,
+    CanvasWorkspaceUnavailable, ProjectCapabilityFs, ProjectDiagnostic, ProjectDiagnosticCounts,
+    ProjectDiagnosticSeverity, ProjectDirectoryPath, ProjectError, ProjectHealthSummary,
+    ProjectPathKind, ProjectRelativePath, ProjectSnapshot, ProjectTree, ProjectTreeChange,
+    ProjectTreeEntry, UpdateCanvasFeedbackInput, apply_canvas_state_patch,
+    canvas_media_kind_from_path, normalize_feedback_path, open_no_symlink_existing_project_file,
+    project_content_hash, project_content_type, project_media_kind_from_content_type,
+    project_media_revision, project_text_file_type_for_path, prune_canvas_state_path,
+    read_canvas_feedback_state, resolve_no_symlink_existing_project_path,
+    rewrite_canvas_state_path, update_canvas_feedback_document, visible_canvas_entries,
+    write_canvas_feedback_document,
 };
 
 type CanvasNodeAdapterData = (
@@ -95,8 +97,7 @@ pub(crate) struct WatchedProjectRefresh {
 impl ProjectNodeAdapter for DefaultProjectNodeAdapter {}
 
 pub struct ProjectService {
-    root: PathBuf,
-    canonical_root: String,
+    root: CanonicalProjectRoot,
     capability: ProjectCapabilityFs,
     node_adapter: Arc<dyn ProjectNodeAdapter>,
     canvas_store: CanvasWorkspaceStore,
@@ -117,44 +118,22 @@ impl ProjectService {
         debrute_home: impl AsRef<Path>,
         node_adapter: Arc<dyn ProjectNodeAdapter>,
     ) -> Result<Self, ProjectError> {
-        let mut service = Self::prepare_unloaded(project_root, debrute_home, node_adapter)?;
+        let root = CanonicalProjectRoot::open_existing(project_root.as_ref())?;
+        let mut service = Self::prepare_unloaded(root, debrute_home, node_adapter)?;
         service.refresh_loaded_snapshot()?;
         Ok(service)
     }
 
     pub(crate) fn prepare_unloaded(
-        project_root: impl AsRef<Path>,
+        root: CanonicalProjectRoot,
         debrute_home: impl AsRef<Path>,
         node_adapter: Arc<dyn ProjectNodeAdapter>,
     ) -> Result<Self, ProjectError> {
-        let requested = project_root.as_ref();
-        let root = requested.canonicalize().map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                ProjectError::ProjectNotFound(requested.to_string_lossy().into_owned())
-            } else {
-                ProjectError::from(error)
-            }
-        })?;
-        if !root.is_dir() {
-            return Err(ProjectError::service(
-                "path_not_directory",
-                format!("Project root is not a directory: {}", root.display()),
-            ));
-        }
-        let canonical_root = root
-            .to_str()
-            .ok_or_else(|| {
-                ProjectError::service(
-                    "project_path_not_utf8",
-                    "Project root must be representable as UTF-8.",
-                )
-            })?
-            .to_owned();
-        let capability = ProjectCapabilityFs::bind_session_root(&root)?;
-        let canvas_store = CanvasWorkspaceStore::new(debrute_home.as_ref(), &canonical_root);
+        let capability = ProjectCapabilityFs::bind_session_root(root.as_path())?;
+        let canvas_store = CanvasWorkspaceStore::new(debrute_home.as_ref(), root.as_wire());
         let canvas_workspace = canvas_store.load_or_create();
         let feedback_document = CanvasFeedbackDocument::empty(crate::now_rfc3339())?;
-        let project_tree = ProjectTree::new(root.clone());
+        let project_tree = ProjectTree::new(root.as_path().to_path_buf());
         let canvas_workspace_snapshot = match &canvas_workspace {
             Ok(workspace) => CanvasWorkspaceSnapshot::Available {
                 workspace: workspace.clone(),
@@ -168,12 +147,12 @@ impl ProjectService {
             },
         };
         let snapshot = ProjectSnapshot {
-            canonical_root: canonical_root.clone(),
+            canonical_root: root.as_wire().to_owned(),
             project_tree: Vec::new(),
             canvas_workspace: canvas_workspace_snapshot,
             diagnostics: Vec::new(),
             health: ProjectHealthSummary {
-                project_name: project_name(&root),
+                project_name: project_name(root.as_path()),
                 diagnostic_counts: ProjectDiagnosticCounts {
                     errors: 0,
                     warnings: 0,
@@ -183,7 +162,6 @@ impl ProjectService {
         };
         Ok(Self {
             root,
-            canonical_root,
             capability,
             node_adapter,
             canvas_store,
@@ -200,6 +178,11 @@ impl ProjectService {
 
     #[must_use]
     pub fn root(&self) -> &Path {
+        self.root.as_path()
+    }
+
+    #[must_use]
+    pub(crate) fn project_root(&self) -> &CanonicalProjectRoot {
         &self.root
     }
 
@@ -418,7 +401,8 @@ impl ProjectService {
     ) -> Result<CanvasFeedbackUpdate, ProjectError> {
         for path in input.target_project_relative_paths() {
             let normalized = normalize_feedback_path(path)?;
-            let target = resolve_no_symlink_existing_project_path(&self.root, &normalized)
+            let normalized_path = ProjectDirectoryPath::parse(&normalized)?;
+            let target = resolve_no_symlink_existing_project_path(&self.root, &normalized_path)
                 .map_err(|_| {
                     ProjectError::Validation(format!(
                         "Canvas feedback target is not a current Project Path: {normalized}"
@@ -627,7 +611,7 @@ impl ProjectService {
     }
 
     pub fn reset_canvas(&mut self) -> Result<ProjectSnapshot, ProjectError> {
-        let document = super::default_canvas_workspace(&self.canonical_root);
+        let document = super::default_canvas_workspace(self.root.as_wire());
         self.canvas_store
             .save(&document)
             .map_err(|unavailable| unavailable.to_error())?;
@@ -770,7 +754,7 @@ impl ProjectService {
         diagnostics.sort_by(|left, right| left.id.cmp(&right.id));
         diagnostics.dedup_by(|left, right| left.id == right.id);
         self.snapshot = ProjectSnapshot {
-            canonical_root: self.canonical_root.clone(),
+            canonical_root: self.root.as_wire().to_owned(),
             project_tree,
             canvas_workspace,
             diagnostics,
@@ -794,25 +778,27 @@ impl ProjectService {
             };
         }
         let media_kind = canvas_media_kind_from_path(&entry.project_relative_path);
-        let mut file =
-            match open_no_symlink_existing_project_file(&self.root, &entry.project_relative_path) {
-                Ok(file) => file,
-                Err(error) => {
-                    let availability = if matches!(
-                        &error,
-                        ProjectError::Io(error) if error.kind() == std::io::ErrorKind::NotFound
-                    ) {
-                        CanvasNodeAvailability::Missing {
-                            message: error.to_string(),
-                        }
-                    } else {
-                        CanvasNodeAvailability::Unreadable {
-                            message: error.to_string(),
-                        }
-                    };
-                    return unavailable_canvas_file_resource(entry, media_kind, availability);
-                }
-            };
+        let relative = ProjectRelativePath::parse(&entry.project_relative_path);
+        let mut file = match relative
+            .and_then(|relative| open_no_symlink_existing_project_file(&self.root, &relative))
+        {
+            Ok(file) => file,
+            Err(error) => {
+                let availability = if matches!(
+                    &error,
+                    ProjectError::Io(error) if error.kind() == std::io::ErrorKind::NotFound
+                ) {
+                    CanvasNodeAvailability::Missing {
+                        message: error.to_string(),
+                    }
+                } else {
+                    CanvasNodeAvailability::Unreadable {
+                        message: error.to_string(),
+                    }
+                };
+                return unavailable_canvas_file_resource(entry, media_kind, availability);
+            }
+        };
         let metadata = match file.metadata() {
             Ok(metadata) => metadata,
             Err(error) => {
@@ -1070,7 +1056,7 @@ impl ProjectService {
         let normalized = if path.is_empty() {
             String::new()
         } else {
-            super::normalize_project_relative_path(path)?
+            super::ProjectRelativePath::parse(path)?.into_string()
         };
         match project_tree.entry(&normalized) {
             Some(entry) if entry.kind == ProjectPathKind::Directory => Ok(()),

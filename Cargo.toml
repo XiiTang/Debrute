@@ -13,6 +13,7 @@ axum = "0.8.9"
 base64 = "0.22.1"
 cap-std = "4.0.2"
 ed25519-dalek = { version = "2.2.0", features = ["pkcs8"] }
+dunce = "1.0.5"
 fs2 = "0.4.3"
 flate2 = "1.1.9"
 futures-core = "0.3.31"
@@ -36,6 +37,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.10.9"
 time = { version = "0.3.45", features = ["formatting", "parsing"] }
+trash = { version = "=5.2.6", default-features = false, features = ["coinit_apartmentthreaded"] }
 tao = "=0.35.3"
 tray-icon = "=0.24.1"
 tokio = { version = "1.52.3", features = ["fs", "io-util", "net", "rt", "sync", "time"] }
@@ -43,7 +45,7 @@ ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
 uuid = { version = "1", features = ["v4"] }
 url = "2.5.8"
 vt100 = "0.16.2"
-windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemServices", "Win32_System_Threading"] }
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
 winreg = "0.55.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 

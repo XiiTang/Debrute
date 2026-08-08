@@ -37,10 +37,11 @@ use crate::{
         CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasStatePatch,
         CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
         CanvasVideoPreviewEnsureStatus, CanvasVideoPreviewProbeStatus, CanvasVideoPreviewTarget,
-        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectError,
-        ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind, ProjectRevisionResult,
-        ProjectSession, ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse,
-        UpdateCanvasFeedbackInput, open_revisioned_project_file, read_project_text_file,
+        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath,
+        ProjectError, ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind,
+        ProjectRelativePath, ProjectRevisionResult, ProjectSession, ProjectUploadEntry,
+        RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
+        admit_project_path_entries, open_revisioned_project_file, read_project_text_file,
         resolve_existing_project_path,
     },
     terminal::{
@@ -96,6 +97,10 @@ pub(super) async fn text_file(
     let input: Input = match json_body_with_limit(request, usize::MAX).await {
         Ok(input) => input,
         Err(response) => return response,
+    };
+    let path = match ProjectRelativePath::parse(&path) {
+        Ok(path) => path,
+        Err(error) => return project_error(error),
     };
     execute_command(
         &session,
@@ -159,11 +164,15 @@ pub(super) async fn create_path(
         Ok(input) => input,
         Err(response) => return response,
     };
+    let parent = match ProjectDirectoryPath::parse(&input.parent_project_relative_path) {
+        Ok(parent) => parent,
+        Err(error) => return project_error(error),
+    };
     command_for_scope(
         &state,
         &scope,
         ProjectCommand::CreatePath {
-            parent_project_relative_path: input.parent_project_relative_path,
+            parent_project_relative_path: parent,
             name: input.name,
             kind: input.kind,
         },
@@ -184,11 +193,15 @@ pub(super) async fn load_directory(
         Ok(input) => input,
         Err(response) => return response,
     };
+    let directory = match ProjectDirectoryPath::parse(&input.project_relative_directory) {
+        Ok(directory) => directory,
+        Err(error) => return project_error(error),
+    };
     command_for_scope(
         &state,
         &scope,
         ProjectCommand::LoadDirectory {
-            project_relative_directory: input.project_relative_directory,
+            project_relative_directory: directory,
         },
     )
 }
@@ -210,12 +223,17 @@ pub(super) async fn import_local(
         Ok(input) => input,
         Err(response) => return response,
     };
+    let target_directory =
+        match ProjectDirectoryPath::parse(&input.target_directory_project_relative_path) {
+            Ok(target) => target,
+            Err(error) => return project_error(error),
+        };
     command_for_scope(
         &state,
         &scope,
         ProjectCommand::ImportLocalPaths {
             source_paths: input.sources.into_iter().map(Into::into).collect(),
-            target_directory: input.target_directory_project_relative_path,
+            target_directory,
             overwrite: input.overwrite,
         },
     )
@@ -265,9 +283,16 @@ pub(super) async fn import_uploads(
         match entry {
             PlanEntry::Directory {
                 project_relative_path,
-            } => entries.push(ProjectUploadEntry::Directory {
-                project_relative_path,
-            }),
+            } => {
+                let project_relative_path = match ProjectRelativePath::parse(&project_relative_path)
+                {
+                    Ok(path) => path,
+                    Err(error) => return project_error(error),
+                };
+                entries.push(ProjectUploadEntry::Directory {
+                    project_relative_path,
+                });
+            }
             PlanEntry::File {
                 project_relative_path,
                 file_field,
@@ -278,6 +303,11 @@ pub(super) async fn import_uploads(
                 if !referenced_files.insert(file_field.clone()) {
                     return invalid_input(format!("Upload file field is reused: {file_field}"));
                 }
+                let project_relative_path = match ProjectRelativePath::parse(&project_relative_path)
+                {
+                    Ok(path) => path,
+                    Err(error) => return project_error(error),
+                };
                 entries.push(ProjectUploadEntry::TemporaryFile {
                     project_relative_path,
                     temporary_path: file.temporary_path.clone(),
@@ -288,12 +318,17 @@ pub(super) async fn import_uploads(
     if referenced_files.len() != parts.files.len() {
         return invalid_input("Upload request contains an undeclared file field.");
     }
+    let target_directory =
+        match ProjectDirectoryPath::parse(&plan.target_directory_project_relative_path) {
+            Ok(target) => target,
+            Err(error) => return project_error(error),
+        };
     command_for_scope(
         &state,
         &scope,
         ProjectCommand::ImportUploadEntries {
             entries,
-            target_directory: plan.target_directory_project_relative_path,
+            target_directory,
             overwrite: plan.overwrite,
         },
     )
@@ -308,12 +343,21 @@ pub(super) async fn batch_copy(
         Ok(input) => input,
         Err(response) => return response,
     };
+    let target_directory =
+        match ProjectDirectoryPath::parse(&input.target_directory_project_relative_path) {
+            Ok(target) => target,
+            Err(error) => return project_error(error),
+        };
+    let entries = match admit_project_path_entries(input.entries) {
+        Ok(entries) => entries,
+        Err(error) => return project_error(error),
+    };
     command_for_scope(
         &state,
         &scope,
         ProjectCommand::CopyPaths {
-            entries: input.entries,
-            target_directory: input.target_directory_project_relative_path,
+            entries,
+            target_directory,
         },
     )
 }
@@ -327,12 +371,21 @@ pub(super) async fn batch_move(
         Ok(input) => input,
         Err(response) => return response,
     };
+    let target_directory =
+        match ProjectDirectoryPath::parse(&input.target_directory_project_relative_path) {
+            Ok(target) => target,
+            Err(error) => return project_error(error),
+        };
+    let entries = match admit_project_path_entries(input.entries) {
+        Ok(entries) => entries,
+        Err(error) => return project_error(error),
+    };
     command_for_scope(
         &state,
         &scope,
         ProjectCommand::MovePaths {
-            entries: input.entries,
-            target_directory: input.target_directory_project_relative_path,
+            entries,
+            target_directory,
             overwrite: input.overwrite,
         },
     )
@@ -347,13 +400,11 @@ pub(super) async fn batch_delete(
         Ok(input) => input,
         Err(response) => return response,
     };
-    command_for_scope(
-        &state,
-        &scope,
-        ProjectCommand::DeletePaths {
-            entries: input.entries,
-        },
-    )
+    let entries = match admit_project_path_entries(input.entries) {
+        Ok(entries) => entries,
+        Err(error) => return project_error(error),
+    };
+    command_for_scope(&state, &scope, ProjectCommand::DeletePaths { entries })
 }
 
 pub(super) async fn copy_paths_to_system_clipboard(
@@ -439,6 +490,10 @@ pub(super) async fn project_path(
     if input.operation != "rename" {
         return invalid_input("Project path operation must be rename.");
     }
+    let path = match ProjectRelativePath::parse(&path) {
+        Ok(path) => path,
+        Err(error) => return project_error(error),
+    };
     command_for_scope(
         &state,
         &scope,
@@ -502,7 +557,11 @@ pub(super) async fn model_artifact_lookup(
         Ok(session) => session,
         Err(response) => return response,
     };
-    let path = match resolve_existing_project_path(session.root(), &input.project_relative_path) {
+    let relative = match ProjectDirectoryPath::parse(&input.project_relative_path) {
+        Ok(relative) => relative,
+        Err(error) => return project_error(error),
+    };
+    let path = match resolve_existing_project_path(session.root(), &relative) {
         Ok(path) => path,
         Err(error) => return project_error(error),
     };

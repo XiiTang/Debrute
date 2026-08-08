@@ -96,6 +96,52 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('accepts the Runtime-canonical Windows root for the initial Project without replacing it', async () => {
+    const requestedProjectRoot = 'E:\\Projects\\reference';
+    const canonicalProjectRoot = '\\\\?\\E:\\Projects\\reference';
+    const harness = createHarness(1, canonicalProjectRoot);
+    vi.stubGlobal('location', {
+      origin: 'http://127.0.0.1:41001',
+      pathname: '/open',
+      search: `?path=${encodeURIComponent(requestedProjectRoot)}`
+    });
+    const client = createHttpWorkbenchApiClient();
+
+    await expect(client.openProject({ projectRoot: requestedProjectRoot })).resolves.toMatchObject({
+      canonicalRoot: canonicalProjectRoot
+    });
+    expect(harness.calls.map((call) => call.path)).toEqual(['/api/workbench/connection']);
+    client.dispose();
+  });
+
+  it('replaces the current Project when reopening the initial Windows path after another Project', async () => {
+    const requestedProjectRoot = 'E:\\Projects\\reference';
+    const canonicalProjectRoot = '\\\\?\\E:\\Projects\\reference';
+    const harness = createHarness(1, canonicalProjectRoot);
+    vi.stubGlobal('location', {
+      origin: 'http://127.0.0.1:41001',
+      pathname: '/open',
+      search: `?path=${encodeURIComponent(requestedProjectRoot)}`
+    });
+    const client = createHttpWorkbenchApiClient();
+
+    await client.openProject({ projectRoot: requestedProjectRoot });
+    await client.openProject({ projectRoot: 'E:\\Projects\\second' });
+    await expect(client.openProject({ projectRoot: requestedProjectRoot })).resolves.toMatchObject({
+      canonicalRoot: requestedProjectRoot
+    });
+    await expect(client.openProject({ projectRoot: requestedProjectRoot })).resolves.toMatchObject({
+      canonicalRoot: requestedProjectRoot
+    });
+
+    expect(harness.calls.map((call) => call.path)).toEqual([
+      '/api/workbench/connection',
+      '/api/projects/replace',
+      '/api/projects/replace'
+    ]);
+    client.dispose();
+  });
+
   it('uses the one-use Desktop launch context for the initial Project', async () => {
     const harness = createHarness();
     vi.stubGlobal('window', {
@@ -466,7 +512,7 @@ describe('Runtime Workbench connection', () => {
   });
 });
 
-function createHarness(globalRevision = 1) {
+function createHarness(globalRevision = 1, initialCanonicalRoot?: string) {
   const calls: Array<{ path: string; init: RequestInit | undefined }> = [];
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   const encoder = new TextEncoder();
@@ -511,14 +557,14 @@ function createHarness(globalRevision = 1) {
           if (requestedProjectRoot) {
             projectNumber += 1;
             const bindingId = `project-${projectNumber}`;
-            currentCanonicalRoot = requestedProjectRoot;
+            currentCanonicalRoot = initialCanonicalRoot ?? requestedProjectRoot;
             controller.enqueue(sse(encoder, {
               type: 'project.bound',
               project: {
                 bindingId,
-                canonicalRoot: requestedProjectRoot,
+                canonicalRoot: currentCanonicalRoot,
                 projectRevision: 1,
-                snapshot: snapshotFixture(requestedProjectRoot, bindingId)
+                snapshot: snapshotFixture(currentCanonicalRoot, bindingId)
               },
               workingCopies: { text: {}, feedback: {} }
             }));

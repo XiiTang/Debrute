@@ -28,8 +28,8 @@ use crate::{process::ProcessCancellation, workers::RuntimeWorkerServices};
 use super::{
     CanvasImageDimensions, CanvasImagePreviewInfo, CanvasVideoPresentation,
     CanvasVideoPresentationKind, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
-    ProjectCapabilityFs, ProjectError, ProjectNodeAdapter, ProjectPathKind, ProjectTreeEntry,
-    assert_project_tree_visible_path, normalize_project_relative_path,
+    ProjectCapabilityFs, ProjectDirectoryPath, ProjectError, ProjectNodeAdapter, ProjectPathKind,
+    ProjectRelativePath, ProjectTreeEntry, assert_project_tree_visible_path,
     open_no_symlink_existing_project_file, project_media_revision,
     resolve_no_symlink_existing_project_path,
 };
@@ -221,7 +221,8 @@ impl ProjectPreviewService {
                 source_height: None,
             });
         };
-        let source = resolve_no_symlink_existing_project_path(project_root, &relative)?;
+        let source =
+            resolve_no_symlink_existing_project_path(project_root, relative.as_directory_path())?;
         let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
         let metadata = self.raster_variants.metadata_file(
             &source,
@@ -257,7 +258,10 @@ impl ProjectPreviewService {
             else {
                 continue;
             };
-            let path = resolve_no_symlink_existing_project_path(project_root, &relative)?;
+            let path = resolve_no_symlink_existing_project_path(
+                project_root,
+                relative.as_directory_path(),
+            )?;
             if self
                 .raster_variants
                 .metadata_file(&path, &mut file, &PreviewCancellation::default())
@@ -274,7 +278,8 @@ impl ProjectPreviewService {
 
         let cache_root = self.cache_root(project_root)?;
         let cache_fs = ProjectCapabilityFs::open(&cache_root)?;
-        let cache = match cache_fs.open_directory("canvas-image-previews") {
+        let cache_directory = ProjectDirectoryPath::parse("canvas-image-previews")?;
+        let cache = match cache_fs.open_directory(&cache_directory) {
             Ok(cache) => cache,
             Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(());
@@ -314,7 +319,8 @@ impl ProjectPreviewService {
         cancellation: &PreviewCancellation,
     ) -> Result<image::DynamicImage, ProjectError> {
         let relative = previewable_image_path(project_relative_path)?;
-        let source = resolve_no_symlink_existing_project_path(project_root, &relative)?;
+        let source =
+            resolve_no_symlink_existing_project_path(project_root, relative.as_directory_path())?;
         let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
         RasterPreviewEngine::load_bounded_admitted(
             &source,
@@ -487,8 +493,7 @@ impl ProjectPreviewService {
     }
 
     fn cache_root(&self, project_root: &Path) -> Result<PathBuf, ProjectError> {
-        let canonical_root = project_root.canonicalize()?;
-        let canonical_root = canonical_root.to_str().ok_or_else(|| {
+        let canonical_root = project_root.to_str().ok_or_else(|| {
             ProjectError::Validation("Project root must be valid UTF-8.".to_owned())
         })?;
         let root =
@@ -542,15 +547,17 @@ fn open_revisioned_source(
             "Canvas preview revision is required.",
         ));
     }
-    let path = resolve_no_symlink_existing_project_path(project_root, relative)?;
-    let mut file = open_no_symlink_existing_project_file(project_root, relative)?;
+    let relative = ProjectRelativePath::parse(relative)?;
+    let path =
+        resolve_no_symlink_existing_project_path(project_root, relative.as_directory_path())?;
+    let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
     let actual = project_media_revision(&mut file)?;
     if actual != expected_revision {
         return Err(ProjectError::service_with_fields(
             "canvas_preview_revision_mismatch",
             format!("Canvas preview revision does not match source: {relative}"),
             [
-                ("project_relative_path".to_owned(), relative.to_owned()),
+                ("project_relative_path".to_owned(), relative.to_string()),
                 ("expected_revision".to_owned(), expected_revision.to_owned()),
                 ("actual_revision".to_owned(), actual),
             ],
@@ -559,7 +566,7 @@ fn open_revisioned_source(
     let identity = debrute_native_fs::file_identity(&file)?;
     Ok(RevisionedSource {
         project_root: project_root.to_path_buf(),
-        relative: relative.to_owned(),
+        relative: relative.into_string(),
         path,
         file,
         identity,
@@ -572,7 +579,8 @@ fn verify_source_snapshot(
     identity: &debrute_native_fs::PathIdentity,
     expected_revision: &str,
 ) -> Result<(), ProjectError> {
-    let mut current = open_no_symlink_existing_project_file(project_root, relative)?;
+    let relative = ProjectRelativePath::parse(relative)?;
+    let mut current = open_no_symlink_existing_project_file(project_root, &relative)?;
     let current_revision = project_media_revision(&mut current)?;
     let current_identity = debrute_native_fs::file_identity(&current)?;
     if current_revision == expected_revision && &current_identity == identity {
@@ -590,7 +598,8 @@ fn verify_text_preview_source(
     source_path: &str,
     source_identity: &debrute_native_fs::PathIdentity,
 ) -> Result<(), ProjectError> {
-    let current = open_no_symlink_existing_project_file(project_root, source_path)?;
+    let source_path = ProjectRelativePath::parse(source_path)?;
+    let current = open_no_symlink_existing_project_file(project_root, &source_path)?;
     if &debrute_native_fs::file_identity(&current)? == source_identity {
         Ok(())
     } else {
@@ -601,7 +610,7 @@ fn verify_text_preview_source(
     }
 }
 
-fn previewable_image_path(path: &str) -> Result<String, ProjectError> {
+fn previewable_image_path(path: &str) -> Result<ProjectRelativePath, ProjectError> {
     let relative = assert_project_tree_visible_path(path)?;
     let extension = Path::new(&relative)
         .extension()
@@ -638,8 +647,8 @@ fn direct_image_content_type(path: &str) -> Option<&'static str> {
 
 fn text_source_project_path(
     target: &CanvasTextPreviewSourceTarget,
-) -> Result<String, ProjectError> {
-    Ok(format!(
+) -> Result<ProjectRelativePath, ProjectError> {
+    ProjectRelativePath::parse(&format!(
         "{}/source.png",
         text_preview_base_project_path(target)?
     ))
@@ -648,7 +657,7 @@ fn text_source_project_path(
 fn text_preview_base_project_path(
     target: &CanvasTextPreviewSourceTarget,
 ) -> Result<String, ProjectError> {
-    let relative = normalize_project_relative_path(&target.project_relative_path)?;
+    let relative = ProjectRelativePath::parse(&target.project_relative_path)?;
     Ok(format!(
         "canvas-text-previews/{}/{}",
         project_relative_path_cache_key(&relative)?,
@@ -663,16 +672,23 @@ fn existing_open_file(
     project_root: &Path,
     relative: &str,
 ) -> Result<Option<(PathBuf, File)>, ProjectError> {
-    let Some(path) = existing_file(project_root, relative)? else {
+    let relative = ProjectRelativePath::parse(relative)?;
+    let Some(path) = existing_file(project_root, &relative)? else {
         return Ok(None);
     };
-    let file = open_no_symlink_existing_project_file(project_root, relative)?;
+    let file = open_no_symlink_existing_project_file(project_root, &relative)?;
     Ok(Some((path, file)))
 }
 
-fn existing_file(project_root: &Path, relative: &str) -> Result<Option<PathBuf>, ProjectError> {
+fn existing_file(
+    project_root: &Path,
+    relative: &ProjectRelativePath,
+) -> Result<Option<PathBuf>, ProjectError> {
     match open_no_symlink_existing_project_file(project_root, relative) {
-        Ok(_) => resolve_no_symlink_existing_project_path(project_root, relative).map(Some),
+        Ok(_) => {
+            resolve_no_symlink_existing_project_path(project_root, relative.as_directory_path())
+                .map(Some)
+        }
         Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
@@ -682,12 +698,14 @@ fn video_text_tracks(
     project_root: &Path,
     video_path: &str,
 ) -> Result<Vec<CanvasVideoTextTrack>, ProjectError> {
-    let video = normalize_project_relative_path(video_path)?;
-    let (directory_relative, name) = video
+    let video = ProjectRelativePath::parse(video_path)?;
+    let directory_relative = video.parent();
+    let name = video
+        .as_str()
         .rsplit_once('/')
-        .map_or(("", video.as_str()), |value| value);
+        .map_or(video.as_str(), |(_, name)| name);
     let base = name.rsplit_once('.').map_or(name, |(base, _)| base);
-    let directory = ProjectCapabilityFs::open(project_root)?.open_directory(directory_relative)?;
+    let directory = ProjectCapabilityFs::open(project_root)?.open_directory(&directory_relative)?;
     let mut tracks = directory
         .entries()?
         .collect::<Result<Vec<_>, _>>()?
@@ -708,7 +726,8 @@ fn video_text_tracks(
             parse_video_track(&video, &relative).map(|track| (relative, track))
         })
         .map(|(relative, parsed)| {
-            let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
+            let admitted = ProjectRelativePath::parse(&relative)?;
+            let mut file = open_no_symlink_existing_project_file(project_root, &admitted)?;
             let revision = project_media_revision(&mut file)?;
             Ok(VideoTrack {
                 project_relative_path: relative,
@@ -849,7 +868,7 @@ mod tests {
         fs::create_dir_all(root.join("assets")).unwrap();
         let image = ImageBuffer::from_pixel(8, 4, Rgba([255_u8, 0, 0, 128]));
         image.save(root.join("assets/source.png")).unwrap();
-        root
+        root.canonicalize().unwrap()
     }
 
     #[test]

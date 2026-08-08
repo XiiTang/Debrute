@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::{
-    ProjectCapabilityFs, ProjectError, normalize_project_directory_path, project_content_hash,
+    ProjectCapabilityFs, ProjectDirectoryPath, ProjectError, ProjectRelativePath,
+    project_content_hash,
 };
 
 mod artifacts;
@@ -292,10 +293,9 @@ pub(crate) fn read_canvas_feedback_state(
     missing_timestamp: String,
 ) -> Result<CanvasFeedbackState, ProjectError> {
     let project = ProjectCapabilityFs::open(project_root)?;
-    let content = match project.read_limited(
-        CANVAS_FEEDBACK_PROJECT_PATH,
-        MAX_CANVAS_FEEDBACK_DOCUMENT_BYTES,
-    ) {
+    let document_path = ProjectRelativePath::parse(CANVAS_FEEDBACK_PROJECT_PATH)
+        .expect("Canvas feedback document path must remain valid");
+    let content = match project.read_limited(&document_path, MAX_CANVAS_FEEDBACK_DOCUMENT_BYTES) {
         Ok(content) => content,
         Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(CanvasFeedbackState {
@@ -309,7 +309,7 @@ pub(crate) fn read_canvas_feedback_state(
         ProjectError::Validation(format!("Canvas feedback document is not UTF-8: {error}"))
     })?;
     let document: CanvasFeedbackDocument = serde_json::from_str(&content)?;
-    let document = normalize_canvas_feedback_document(document)?;
+    validate_canvas_feedback_document(&document)?;
     Ok(CanvasFeedbackState {
         document,
         content_hash: Some(project_content_hash(content)),
@@ -323,14 +323,14 @@ pub(crate) fn write_canvas_feedback_document(
 ) -> Result<(), ProjectError> {
     validate_canvas_feedback_document(document)?;
     let project = ProjectCapabilityFs::open(project_root)?;
-    let current_hash = match project.read_limited(
-        CANVAS_FEEDBACK_PROJECT_PATH,
-        MAX_CANVAS_FEEDBACK_DOCUMENT_BYTES,
-    ) {
-        Ok(content) => Some(project_content_hash(content)),
-        Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error),
-    };
+    let document_path = ProjectRelativePath::parse(CANVAS_FEEDBACK_PROJECT_PATH)
+        .expect("Canvas feedback document path must remain valid");
+    let current_hash =
+        match project.read_limited(&document_path, MAX_CANVAS_FEEDBACK_DOCUMENT_BYTES) {
+            Ok(content) => Some(project_content_hash(content)),
+            Err(ProjectError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
     if current_hash.as_deref() != expected_hash {
         return Err(ProjectError::service(
             "document_transaction_conflict",
@@ -345,7 +345,7 @@ pub(crate) fn write_canvas_feedback_document(
             format!("Canvas feedback document exceeds {MAX_CANVAS_FEEDBACK_DOCUMENT_BYTES} bytes."),
         ));
     }
-    project.atomic_write(CANVAS_FEEDBACK_PROJECT_PATH, content.as_bytes())
+    project.atomic_write(&document_path, content.as_bytes())
 }
 
 // The closed operation interpreter stays together so every variant shares one validation tail.
@@ -627,48 +627,6 @@ pub fn validate_canvas_feedback_document(
     Ok(())
 }
 
-fn normalize_canvas_feedback_document(
-    mut document: CanvasFeedbackDocument,
-) -> Result<CanvasFeedbackDocument, ProjectError> {
-    validate_iso_timestamp(&document.updated_at)?;
-    let mut entries = BTreeMap::new();
-    for (key, mut entry) in document.entries {
-        let key = normalize_feedback_path(&key)?;
-        entry.project_relative_path = normalize_feedback_path(&entry.project_relative_path)?;
-        if key != entry.project_relative_path {
-            return Err(ProjectError::Validation(format!(
-                "Canvas feedback entry key must match projectRelativePath: {key}"
-            )));
-        }
-        entry.marks = normalized_marks(&entry.marks);
-        for item in &mut entry.items {
-            item.id = item.id.trim().to_owned();
-            item.comment = normalized_comment(&item.comment)?;
-            if let Some(geometry) = &item.geometry {
-                item.geometry = Some(normalized_geometry(geometry)?);
-            }
-            if let Some(moment) = &mut item.moment {
-                let label = moment_label_number(&moment.label)?;
-                moment.label = format!("M{label}");
-                moment.current_time_seconds =
-                    normalized_playback_time(moment.current_time_seconds)?;
-            }
-        }
-        entry.items.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        validate_entry(&entry)?;
-        if !entry.marks.is_empty() || !entry.items.is_empty() {
-            entries.insert(key, entry);
-        }
-    }
-    document.entries = entries;
-    validate_canvas_feedback_document(&document)?;
-    Ok(document)
-}
-
 fn validate_entry(entry: &CanvasFeedbackEntry) -> Result<(), ProjectError> {
     validate_iso_timestamp(&entry.updated_at)?;
     if entry.next_moment_label == 0 || entry.next_spatial_label == 0 {
@@ -841,9 +799,7 @@ pub(crate) fn validate_spatial_geometry(
 }
 
 pub(crate) fn normalize_feedback_path(path: &str) -> Result<String, ProjectError> {
-    let normalized = path.replace('\\', "/");
-    let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
-    let normalized = normalize_project_directory_path(normalized)?;
+    let normalized = ProjectDirectoryPath::parse(path)?;
     if normalized.len() > MAX_CANVAS_FEEDBACK_PATH_BYTES {
         return Err(ProjectError::Validation(format!(
             "Canvas feedback path exceeds {MAX_CANVAS_FEEDBACK_PATH_BYTES} bytes."
@@ -854,7 +810,7 @@ pub(crate) fn normalize_feedback_path(path: &str) -> Result<String, ProjectError
             "Canvas feedback cannot target the .debrute namespace.".to_owned(),
         ));
     }
-    Ok(normalized)
+    Ok(normalized.into_string())
 }
 
 fn deserialize_optional_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -1282,7 +1238,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_document_normalization_matches_the_canonical_feedback_shape() {
+    fn persisted_document_rejects_noncanonical_paths_and_repairable_values() {
         let input = serde_json::json!({
             "updatedAt": T0,
             "entries": {
@@ -1306,13 +1262,7 @@ mod tests {
         });
         let parsed: CanvasFeedbackDocument =
             serde_json::from_value(input).expect("shape should decode");
-        let normalized =
-            normalize_canvas_feedback_document(parsed).expect("document should normalize");
-        assert_eq!(normalized.entries.len(), 1);
-        assert_eq!(
-            normalized.entries["images/a.png"].marks,
-            vec![CanvasFeedbackMark::Like, CanvasFeedbackMark::Important]
-        );
+        assert!(validate_canvas_feedback_document(&parsed).is_err());
 
         let null_field = serde_json::json!({
             "id": "one",

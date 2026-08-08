@@ -42,7 +42,9 @@ use debrute_runtime::{
         ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform, ResumeIntent,
         RuntimeProductService, launch_product_update_failure, read_desktop_host_registration,
     },
-    project::initialize_raster_preview_engine,
+    project::{
+        NATIVE_TRASH_WORKER_COMMAND, initialize_raster_preview_engine, run_native_trash_worker,
+    },
     workbench::{
         RuntimeCliHttpService, RuntimeProductHttpService, WorkbenchHttpServer,
         WorkbenchRuntimeServices, build_project_workbench_url,
@@ -80,6 +82,17 @@ type PlatformControlOwner = WindowsControlOwner;
 
 fn main() -> ExitCode {
     install_runtime_panic_abort_hook();
+    let command = std::env::args_os().nth(1);
+    if command.as_deref() == Some(std::ffi::OsStr::new(NATIVE_TRASH_WORKER_COMMAND)) {
+        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
+        return match run_native_trash_worker(&arguments) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("Debrute Runtime failed: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     #[cfg(target_os = "windows")]
     if let Some(result) = debrute_runtime::terminal::run_windows_terminal_bootstrap() {
         match result {
@@ -90,7 +103,6 @@ fn main() -> ExitCode {
             }
         }
     }
-    let command = std::env::args_os().nth(1);
     let result = if command.as_deref() == Some(std::ffi::OsStr::new("bootstrap")) {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
         run_bootstrap(&arguments)

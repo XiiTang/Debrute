@@ -5,6 +5,10 @@ use uuid::Uuid;
 use super::*;
 use crate::workers::RuntimeWorkerServices;
 
+fn relative(path: &str) -> ProjectRelativePath {
+    ProjectRelativePath::parse(path).expect("test Project path must be valid")
+}
+
 fn fixture() -> (
     std::path::PathBuf,
     std::path::PathBuf,
@@ -116,6 +120,7 @@ fn canvas_resource_media_facts_use_exact_shared_classification() {
         );
     }
 
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -296,6 +301,7 @@ fn reset_canvas_persistence_failure_preserves_available_state() {
 
     assert_eq!(error.code(), "canvas_workspace_persistence_failed");
     assert_eq!(service.snapshot(), &before);
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -324,6 +330,7 @@ fn canvas_patch_persistence_failure_discards_the_staged_project_tree() {
     assert_eq!(error.code(), "canvas_workspace_persistence_failed");
     assert_eq!(service.snapshot(), &before);
     assert!(!service.is_loaded_watch_path("assets/child.txt"));
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -373,6 +380,7 @@ fn canvas_patch_commits_when_confirmed_path_feedback_cannot_be_pruned() {
             .unwrap(),
         *workspace
     );
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -412,6 +420,7 @@ fn invalid_canvas_patch_leaves_all_project_state_unchanged() {
     assert_eq!(service.snapshot(), &before_snapshot);
     assert_eq!(service.canvas_feedback(), &before_feedback);
     assert!(!service.is_loaded_watch_path("assets/new.txt"));
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -501,6 +510,7 @@ fn confirmed_external_replacement_prunes_sparse_canvas_state() {
     );
     let persisted = store.load_or_create().unwrap();
     assert_eq!(&persisted, document);
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -545,6 +555,7 @@ fn watcher_echo_does_not_erase_state_carried_by_a_runtime_rename() {
 
     let document = available_canvas_workspace(&snapshot);
     assert!(document.state.node_states.contains_key("after.txt"));
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -579,7 +590,8 @@ fn runtime_text_save_preserves_state_only_for_its_committed_identity() {
         ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
     let current = read_project_text_file(&root, "note.txt").unwrap();
 
-    let committed = write_project_text_file(&root, "note.txt", "after", &current.revision).unwrap();
+    let committed =
+        write_project_text_file(&root, &relative("note.txt"), "after", &current.revision).unwrap();
     let snapshot = service.reconcile_committed_content_change("note.txt", committed.identity);
 
     let document = available_canvas_workspace(&snapshot);
@@ -595,7 +607,8 @@ fn runtime_text_save_preserves_state_only_for_its_committed_identity() {
 
     let current = read_project_text_file(&root, "note.txt").unwrap();
     let committed =
-        write_project_text_file(&root, "note.txt", "runtime", &current.revision).unwrap();
+        write_project_text_file(&root, &relative("note.txt"), "runtime", &current.revision)
+            .unwrap();
     fs::remove_file(root.join("note.txt")).unwrap();
     fs::write(root.join("note.txt"), "external").unwrap();
     let snapshot = service.reconcile_committed_content_change("note.txt", committed.identity);
@@ -605,6 +618,7 @@ fn runtime_text_save_preserves_state_only_for_its_committed_identity() {
             .node_states
             .contains_key("note.txt")
     );
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -620,7 +634,8 @@ fn committed_text_save_reports_following_project_refresh_failure() {
         ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
     let current = read_project_text_file(&root, "note.txt").unwrap();
 
-    let committed = write_project_text_file(&root, "note.txt", "after", &current.revision).unwrap();
+    let committed =
+        write_project_text_file(&root, &relative("note.txt"), "after", &current.revision).unwrap();
     fs::write(root.join(CANVAS_FEEDBACK_PROJECT_PATH), "{not json").unwrap();
     let snapshot = service.reconcile_committed_content_change("note.txt", committed.identity);
 
@@ -631,7 +646,8 @@ fn committed_text_save_reports_following_project_refresh_failure() {
     }));
     let current = read_project_text_file(&root, "second.txt").unwrap();
     let committed =
-        write_project_text_file(&root, "second.txt", "after", &current.revision).unwrap();
+        write_project_text_file(&root, &relative("second.txt"), "after", &current.revision)
+            .unwrap();
     let snapshot = service.reconcile_committed_content_change("second.txt", committed.identity);
     assert_eq!(
         snapshot
@@ -641,6 +657,7 @@ fn committed_text_save_reports_following_project_refresh_failure() {
             .count(),
         1
     );
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -655,7 +672,8 @@ fn text_files_larger_than_two_mib_are_read_and_written_in_full() {
 
     let current = read_project_text_file(&root, "large.txt").unwrap();
     assert_eq!(current.content, before);
-    let saved = write_project_text_file(&root, "large.txt", &after, &current.revision).unwrap();
+    let saved =
+        write_project_text_file(&root, &relative("large.txt"), &after, &current.revision).unwrap();
 
     assert_eq!(saved.file.content, after);
     assert_eq!(fs::read_to_string(root.join("large.txt")).unwrap(), after);
@@ -725,7 +743,7 @@ fn rename_rewrites_accepted_feedback_and_both_working_copy_kinds() {
     opened
         .session
         .execute(ProjectCommand::RenamePath {
-            project_relative_path: "visible.txt".to_owned(),
+            project_relative_path: relative("visible.txt"),
             name: "renamed.txt".to_owned(),
         })
         .unwrap();
@@ -798,6 +816,7 @@ fn runtime_path_reconciliation_prunes_a_concurrently_missing_sibling() {
             .entries
             .contains_key("sibling.txt")
     );
+    drop(service);
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -1092,7 +1111,7 @@ fn committed_path_operation_survives_working_copy_reconcile_failure() {
         .unwrap();
 
     let result = opened.session.execute(ProjectCommand::RenamePath {
-        project_relative_path: "visible.txt".to_owned(),
+        project_relative_path: relative("visible.txt"),
         name: "renamed.txt".to_owned(),
     });
 
@@ -1118,7 +1137,7 @@ fn committed_path_operation_survives_working_copy_reconcile_failure() {
     opened
         .session
         .execute(ProjectCommand::CreatePath {
-            parent_project_relative_path: String::new(),
+            parent_project_relative_path: ProjectDirectoryPath::root(),
             name: "next.txt".to_owned(),
             kind: ProjectPathKind::File,
         })

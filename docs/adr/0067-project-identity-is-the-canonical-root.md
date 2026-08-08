@@ -10,6 +10,12 @@ Working Copies, and Canvas state. A Model Request instead captures the CLI's
 canonical working directory and resolves its own output and declared local
 input paths independently of Project identity and Project Sessions.
 
+Inside Runtime, successful admission produces one `CanonicalProjectRoot` value
+which retains the native canonical path and its UTF-8 wire projection. Project
+Registry maps, Session ownership, Workbench binding ownership, Terminal
+lifetime, and Photoshop transfer state carry that value. They do not use
+independently canonicalized strings as parallel identities.
+
 ## Admission and routing
 
 Input surfaces may accept relative paths when their working directory is

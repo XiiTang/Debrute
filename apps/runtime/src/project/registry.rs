@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    CanvasFeedbackArtifacts, CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument,
-    CanvasStatePatch, ProjectChange, ProjectError, ProjectEvent, ProjectNativeShellService,
+    AdmittedProjectPathEntry, CanonicalProjectRoot, CanvasFeedbackArtifacts,
+    CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasStatePatch, ProjectChange,
+    ProjectDirectoryPath, ProjectError, ProjectEvent, ProjectNativeShellService,
     ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
-    ProjectPathOperationStatus, ProjectService, ProjectSnapshot, ProjectSyncSnapshot,
-    ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput, copy_project_paths,
-    create_project_path, delete_project_paths, import_local_project_paths,
+    ProjectPathOperationStatus, ProjectRelativePath, ProjectService, ProjectSnapshot,
+    ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput,
+    copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
     import_upload_project_entries, move_project_paths, rename_project_path,
     watcher::{
         ProjectFileWatcher, ProjectWatchBackendFactory, ProjectWatchPath, ProjectWatchSignal,
@@ -115,7 +116,7 @@ pub enum ProjectCommand {
     Refresh,
     Validate,
     LoadDirectory {
-        project_relative_directory: String,
+        project_relative_directory: ProjectDirectoryPath,
     },
     ResetCanvas,
     PatchCanvasState {
@@ -125,39 +126,39 @@ pub enum ProjectCommand {
         input: UpdateCanvasFeedbackInput,
     },
     WriteTextFile {
-        project_relative_path: String,
+        project_relative_path: ProjectRelativePath,
         content: String,
         expected_revision: String,
     },
     CreatePath {
-        parent_project_relative_path: String,
+        parent_project_relative_path: ProjectDirectoryPath,
         name: String,
         kind: ProjectPathKind,
     },
     RenamePath {
-        project_relative_path: String,
+        project_relative_path: ProjectRelativePath,
         name: String,
     },
     CopyPaths {
-        entries: Vec<ProjectPathEntry>,
-        target_directory: String,
+        entries: Vec<AdmittedProjectPathEntry>,
+        target_directory: ProjectDirectoryPath,
     },
     MovePaths {
-        entries: Vec<ProjectPathEntry>,
-        target_directory: String,
+        entries: Vec<AdmittedProjectPathEntry>,
+        target_directory: ProjectDirectoryPath,
         overwrite: bool,
     },
     DeletePaths {
-        entries: Vec<ProjectPathEntry>,
+        entries: Vec<AdmittedProjectPathEntry>,
     },
     ImportLocalPaths {
         source_paths: Vec<PathBuf>,
-        target_directory: String,
+        target_directory: ProjectDirectoryPath,
         overwrite: bool,
     },
     ImportUploadEntries {
         entries: Vec<ProjectUploadEntry>,
-        target_directory: String,
+        target_directory: ProjectDirectoryPath,
         overwrite: bool,
     },
 }
@@ -249,9 +250,9 @@ struct ProjectSessionRegistryInner {
 struct ProjectSessionRegistryState {
     closed: bool,
     close_transition: Option<Arc<RootTransition>>,
-    sessions_by_root: HashMap<PathBuf, Arc<ProjectSession>>,
-    uses_by_root: HashMap<PathBuf, HashMap<Uuid, ProjectUseKind>>,
-    transitions_by_root: HashMap<PathBuf, Arc<RootTransition>>,
+    sessions_by_root: HashMap<CanonicalProjectRoot, Arc<ProjectSession>>,
+    uses_by_root: HashMap<CanonicalProjectRoot, HashMap<Uuid, ProjectUseKind>>,
+    transitions_by_root: HashMap<CanonicalProjectRoot, Arc<RootTransition>>,
 }
 
 struct RootTransition {
@@ -445,14 +446,7 @@ impl ProjectSessionRegistry {
         project_root: impl AsRef<Path>,
         use_kind: ProjectUseKind,
     ) -> Result<OpenProjectSession, ProjectError> {
-        let requested_root = project_root.as_ref();
-        let canonical_root = requested_root.canonicalize().map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                ProjectError::ProjectNotFound(requested_root.to_string_lossy().into_owned())
-            } else {
-                ProjectError::from(error)
-            }
-        })?;
+        let canonical_root = CanonicalProjectRoot::open_existing(project_root.as_ref())?;
         loop {
             let transition = {
                 let mut state = lock(&self.inner.state);
@@ -489,11 +483,11 @@ impl ProjectSessionRegistry {
 
     fn open_new_project(
         &self,
-        canonical_root: &Path,
+        canonical_root: &CanonicalProjectRoot,
         use_kind: ProjectUseKind,
     ) -> Result<OpenProjectSession, ProjectError> {
         let opened = ProjectService::prepare_unloaded(
-            canonical_root,
+            canonical_root.clone(),
             &self.inner.debrute_home,
             Arc::clone(&self.inner.node_adapter),
         )
@@ -516,8 +510,9 @@ impl ProjectSessionRegistry {
             Ok(session) if !state.closed => {
                 state
                     .sessions_by_root
-                    .insert(canonical_root.to_path_buf(), Arc::clone(&session));
-                let project_use = add_use(&self.inner, &mut state, canonical_root, use_kind)?;
+                    .insert(canonical_root.clone(), Arc::clone(&session));
+                let project_use =
+                    add_use(&self.inner, &mut state, canonical_root.as_path(), use_kind)?;
                 session.publish();
                 self.inner.feedback_artifacts.attach(&session);
                 drop(state);
@@ -677,14 +672,14 @@ impl Clone for ProjectSessionRegistry {
 
 pub struct ProjectUse {
     registry: Weak<ProjectSessionRegistryInner>,
-    canonical_root: PathBuf,
+    canonical_root: CanonicalProjectRoot,
     use_id: Uuid,
     kind: ProjectUseKind,
 }
 
 impl ProjectUse {
     #[must_use]
-    pub fn canonical_root(&self) -> &Path {
+    pub fn canonical_root(&self) -> &CanonicalProjectRoot {
         &self.canonical_root
     }
 
@@ -697,7 +692,7 @@ impl ProjectUse {
     pub(crate) fn detached_for_test(canonical_root: &Path) -> Self {
         Self {
             registry: Weak::new(),
-            canonical_root: canonical_root.to_path_buf(),
+            canonical_root: CanonicalProjectRoot::detached_for_test(canonical_root),
             use_id: Uuid::new_v4(),
             kind: ProjectUseKind::Workbench,
         }
@@ -713,7 +708,7 @@ impl Drop for ProjectUse {
 }
 
 pub struct ProjectSession {
-    root: PathBuf,
+    root: CanonicalProjectRoot,
     feedback_artifacts: Arc<CanvasFeedbackArtifacts>,
     path_state_reconciler: Arc<dyn ProjectPathStateReconciler>,
     on_change: Arc<dyn Fn() + Send + Sync>,
@@ -739,7 +734,7 @@ impl ProjectSession {
         on_change: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
         Self {
-            root: service.root().to_path_buf(),
+            root: service.project_root().clone(),
             feedback_artifacts,
             path_state_reconciler,
             on_change,
@@ -757,17 +752,17 @@ impl ProjectSession {
     }
 
     #[must_use]
-    /// # Panics
-    ///
-    /// Panics only if an admitted canonical root is not valid UTF-8.
     pub fn canonical_root(&self) -> &str {
-        self.root
-            .to_str()
-            .expect("Project roots are validated as UTF-8 at admission")
+        self.root.as_wire()
     }
 
     #[must_use]
     pub fn root(&self) -> &Path {
+        self.root.as_path()
+    }
+
+    #[must_use]
+    pub(crate) fn project_root(&self) -> &CanonicalProjectRoot {
         &self.root
     }
 
@@ -997,7 +992,7 @@ impl ProjectSession {
         entries: &[ProjectPathEntry],
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
         let command = ProjectCommand::DeletePaths {
-            entries: entries.to_vec(),
+            entries: super::admit_project_path_entries(entries.to_vec())?,
         };
         self.commit_mutation_with(
             |service| {
@@ -1523,7 +1518,7 @@ fn execute_single_file_command(
                     snapshot: snapshot.clone(),
                 },
                 ProjectChange::ProjectFileChanged {
-                    project_relative_path: project_relative_path.clone(),
+                    project_relative_path: project_relative_path.to_string(),
                     snapshot,
                 },
             ))
@@ -1554,7 +1549,7 @@ fn execute_single_file_command(
             let target = result.project_relative_path.clone();
             let snapshot = service.reconcile_committed_path_mutation(
                 std::slice::from_ref(&target),
-                &[(project_relative_path, target.clone())],
+                &[(project_relative_path.into_string(), target.clone())],
             );
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::PathChanged {
@@ -1656,10 +1651,10 @@ fn project_snapshot_mutation(snapshot: ProjectSnapshot) -> ProjectMutation<Proje
     )
 }
 
-fn entries_project_paths(entries: &[ProjectPathEntry]) -> Vec<String> {
+fn entries_project_paths(entries: &[AdmittedProjectPathEntry]) -> Vec<String> {
     entries
         .iter()
-        .map(|entry| entry.project_relative_path.clone())
+        .map(|entry| entry.project_relative_path.to_string())
         .collect()
 }
 
@@ -1697,26 +1692,32 @@ fn add_use(
     canonical_root: &Path,
     kind: ProjectUseKind,
 ) -> Result<ProjectUse, ProjectError> {
-    if !state.sessions_by_root.contains_key(canonical_root) {
-        return Err(ProjectError::ProjectNotOpen(
-            canonical_root.to_string_lossy().into_owned(),
-        ));
-    }
+    let canonical_root = state
+        .sessions_by_root
+        .get_key_value(canonical_root)
+        .map(|(canonical_root, _)| canonical_root.clone())
+        .ok_or_else(|| {
+            ProjectError::ProjectNotOpen(canonical_root.to_string_lossy().into_owned())
+        })?;
     let use_id = Uuid::new_v4();
     state
         .uses_by_root
-        .entry(canonical_root.to_path_buf())
+        .entry(canonical_root.clone())
         .or_default()
         .insert(use_id, kind);
     Ok(ProjectUse {
         registry: Arc::downgrade(registry),
-        canonical_root: canonical_root.to_path_buf(),
+        canonical_root,
         use_id,
         kind,
     })
 }
 
-fn release_use(registry: &Arc<ProjectSessionRegistryInner>, canonical_root: &Path, use_id: Uuid) {
+fn release_use(
+    registry: &Arc<ProjectSessionRegistryInner>,
+    canonical_root: &CanonicalProjectRoot,
+    use_id: Uuid,
+) {
     let closing = {
         let mut state = registry
             .state
@@ -1735,7 +1736,7 @@ fn release_use(registry: &Arc<ProjectSessionRegistryInner>, canonical_root: &Pat
         let transition = Arc::new(RootTransition::new());
         state
             .transitions_by_root
-            .insert(session.root().to_path_buf(), Arc::clone(&transition));
+            .insert(session.project_root().clone(), Arc::clone(&transition));
         Some((session, transition))
     };
     if let Some((session, transition)) = closing {
@@ -1750,7 +1751,7 @@ fn release_use(registry: &Arc<ProjectSessionRegistryInner>, canonical_root: &Pat
                 .lock()
                 .expect("Project registry lock poisoned")
                 .transitions_by_root
-                .remove(session.root());
+                .remove(session.project_root());
         }
         transition.finish(failure.clone(), failure);
     }

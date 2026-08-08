@@ -6,9 +6,8 @@ use std::{
 };
 
 use super::{
-    ProjectDirectoryState, ProjectError, ProjectPathKind, ProjectTreeEntry,
-    compare_project_tree_entries, list_project_directory, normalize_project_directory_path,
-    watcher::ProjectWatchPath,
+    ProjectDirectoryPath, ProjectDirectoryState, ProjectError, ProjectPathKind, ProjectTreeEntry,
+    compare_project_tree_entries, list_project_directory, watcher::ProjectWatchPath,
 };
 
 #[derive(Clone)]
@@ -101,7 +100,8 @@ impl ProjectTree {
             if change.invalidates(&directory) {
                 continue;
             }
-            match list_project_directory(&self.root, &directory) {
+            let admitted = ProjectDirectoryPath::parse(&directory)?;
+            match list_project_directory(&self.root, &admitted) {
                 Ok(children) => {
                     change.extend(self.replace_directory_entries(&directory, children)?);
                 }
@@ -126,7 +126,7 @@ impl ProjectTree {
     ) -> Result<ProjectTreeChange, ProjectError> {
         let mut directories = directories
             .iter()
-            .map(|directory| normalize_project_directory_path(directory))
+            .map(|directory| ProjectDirectoryPath::parse(directory))
             .collect::<Result<Vec<_>, _>>()?;
         directories.sort_by_key(|path| path.matches('/').count());
         directories.dedup();
@@ -154,13 +154,13 @@ impl ProjectTree {
                         && !directory.is_empty() =>
                 {
                     self.remove_path(&directory);
-                    change.confirmed_missing_paths.push(directory.clone());
-                    blocked_roots.push(directory);
+                    change.confirmed_missing_paths.push(directory.to_string());
+                    blocked_roots.push(directory.into_string());
                 }
                 Err(error) if directory.is_empty() => return Err(error),
                 Err(error) => {
                     self.set_directory_error(&directory, &error.to_string());
-                    blocked_roots.push(directory);
+                    blocked_roots.push(directory.into_string());
                 }
             }
         }
@@ -227,7 +227,8 @@ impl ProjectTree {
             if change.invalidates(&directory) {
                 continue;
             }
-            match list_project_directory(&self.root, &directory) {
+            let admitted = ProjectDirectoryPath::parse(&directory)?;
+            match list_project_directory(&self.root, &admitted) {
                 Ok(children) => {
                     change.extend(self.replace_directory_entries(&directory, children)?);
                 }
@@ -283,7 +284,8 @@ impl ProjectTree {
             if change.invalidates(&directory) {
                 continue;
             }
-            match list_project_directory(&self.root, &directory) {
+            let admitted = ProjectDirectoryPath::parse(&directory)?;
+            match list_project_directory(&self.root, &admitted) {
                 Ok(children) => {
                     change.extend(self.replace_directory_entries(&directory, children)?);
                 }

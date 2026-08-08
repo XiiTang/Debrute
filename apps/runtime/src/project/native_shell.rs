@@ -1,6 +1,7 @@
 //! Closed macOS/Windows Project file-manager actions.
 
 use std::{
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -16,11 +17,13 @@ use crate::{
 };
 
 use super::{
-    ProjectError, ProjectPathEntry, ProjectPathKind, assert_project_tree_visible_path,
+    CanonicalProjectRoot, ProjectDirectoryPath, ProjectError, ProjectPathEntry, ProjectPathKind,
+    ProjectRelativePath, assert_project_tree_visible_path,
     resolve_no_symlink_existing_project_path,
 };
 
 const NATIVE_SHELL_TIMEOUT: Duration = Duration::from_secs(30);
+pub const NATIVE_TRASH_WORKER_COMMAND: &str = "__native-trash";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectPathClipboardFormat {
@@ -102,8 +105,31 @@ impl ProjectNativeShellService {
         entry: &ProjectPathEntry,
     ) -> Result<(), ProjectError> {
         let resolved = validate_entry(project_root, entry)?;
+        #[cfg(target_os = "windows")]
+        {
+            resolved.revalidate()?;
+            let result = match entry.kind {
+                ProjectPathKind::File => {
+                    debrute_native_fs::reveal_file_in_shell(&resolved.absolute)
+                }
+                ProjectPathKind::Directory => {
+                    debrute_native_fs::open_directory_in_shell(&resolved.absolute)
+                }
+            };
+            return result.map_err(|error| {
+                ProjectError::service(
+                    "native_shell_failed",
+                    format!("Native Project reveal failed: {error}"),
+                )
+            });
+        }
+        #[cfg(target_os = "macos")]
         let action = reveal_action(&resolved.absolute, entry.kind);
-        self.run(action, Some(&resolved))
+        #[cfg(target_os = "macos")]
+        {
+            resolved.revalidate()?;
+            self.run(action)
+        }
     }
 
     /// Moves every top-level selected Project path to the system trash.
@@ -119,22 +145,19 @@ impl ProjectNativeShellService {
     ) -> Result<Vec<ProjectPathEntry>, ProjectError> {
         let resolved = top_level_resolved_entries(validate_entries(project_root, entries)?)?;
         for entry in &resolved {
-            self.run(trash_action(&entry.absolute), Some(entry))?;
+            self.run(trash_action(entry)?)?;
         }
         Ok(resolved
             .into_iter()
             .map(|entry| ProjectPathEntry {
-                project_relative_path: entry.relative,
+                project_relative_path: entry.relative.into_string(),
                 kind: entry.kind,
                 size_bytes: None,
             })
             .collect())
     }
 
-    fn run(&self, action: NativeAction, entry: Option<&ResolvedEntry>) -> Result<(), ProjectError> {
-        if let Some(entry) = entry {
-            entry.revalidate()?;
-        }
+    fn run(&self, action: NativeAction) -> Result<(), ProjectError> {
         let output = self.supervisor.run(
             ProcessRequest::new(
                 WorkerKind::NativeShell,
@@ -212,7 +235,7 @@ fn decode_directory_picker_output(output: &str) -> Result<Option<PathBuf>, Proje
 
 struct ResolvedEntry {
     project_root: PathBuf,
-    relative: String,
+    relative: ProjectDirectoryPath,
     absolute: PathBuf,
     identity: debrute_native_fs::PathIdentity,
     kind: ProjectPathKind,
@@ -240,6 +263,142 @@ struct NativeAction {
     args: Vec<String>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct NativeTrashWorkerRequest {
+    project_root: CanonicalProjectRoot,
+    relative: ProjectRelativePath,
+    expected_identity: debrute_native_fs::PathIdentity,
+    expected_kind: ProjectPathKind,
+}
+
+impl NativeTrashWorkerRequest {
+    fn parse(arguments: &[OsString]) -> Result<Self, ProjectError> {
+        let [
+            root_flag,
+            root,
+            relative_flag,
+            relative,
+            volume_flag,
+            volume,
+            file_flag,
+            file,
+            kind_flag,
+            kind,
+        ] = arguments
+        else {
+            return Err(invalid_native_trash_arguments());
+        };
+        if root_flag != OsStr::new("--project-root")
+            || relative_flag != OsStr::new("--project-relative-path")
+            || volume_flag != OsStr::new("--expected-volume")
+            || file_flag != OsStr::new("--expected-file")
+            || kind_flag != OsStr::new("--expected-kind")
+        {
+            return Err(invalid_native_trash_arguments());
+        }
+        let requested_root = PathBuf::from(root);
+        if !requested_root.is_absolute() {
+            return Err(ProjectError::service(
+                "native_trash_worker_invalid_project_root",
+                "Native trash worker Project root must be an absolute canonical path.",
+            ));
+        }
+        let project_root = CanonicalProjectRoot::open_existing(&requested_root)?;
+        if project_root.as_path() != requested_root {
+            return Err(ProjectError::service(
+                "project_path_changed",
+                "Native trash worker Project root changed before execution.",
+            ));
+        }
+        let relative = relative
+            .to_str()
+            .ok_or_else(invalid_native_trash_arguments)
+            .and_then(ProjectRelativePath::parse)?;
+        let parse_identity_part = |value: &OsString| {
+            value
+                .to_str()
+                .and_then(|value| value.parse::<u64>().ok())
+                .ok_or_else(invalid_native_trash_arguments)
+        };
+        let expected_kind = match kind.to_str() {
+            Some("file") => ProjectPathKind::File,
+            Some("directory") => ProjectPathKind::Directory,
+            _ => return Err(invalid_native_trash_arguments()),
+        };
+        Ok(Self {
+            project_root,
+            relative,
+            expected_identity: debrute_native_fs::PathIdentity {
+                volume: parse_identity_part(volume)?,
+                file: parse_identity_part(file)?,
+            },
+            expected_kind,
+        })
+    }
+
+    fn resolve(&self) -> Result<PathBuf, ProjectError> {
+        let requested_root = self.project_root.as_path();
+        let current_root = CanonicalProjectRoot::open_existing(requested_root)?;
+        if current_root != self.project_root {
+            return Err(ProjectError::service(
+                "project_path_changed",
+                "Native trash worker Project root changed before execution.",
+            ));
+        }
+        let path = resolve_no_symlink_existing_project_path(
+            requested_root,
+            self.relative.as_directory_path(),
+        )?;
+        let metadata = fs::symlink_metadata(&path)?;
+        let kind_matches = match self.expected_kind {
+            ProjectPathKind::File => metadata.is_file(),
+            ProjectPathKind::Directory => metadata.is_dir(),
+        };
+        let identity = validate_entry_identity(
+            requested_root,
+            self.relative.as_directory_path(),
+            self.expected_kind,
+        )?;
+        if !kind_matches || identity != self.expected_identity {
+            return Err(ProjectError::service(
+                "project_path_changed",
+                format!(
+                    "Native trash path changed before execution: {}",
+                    self.relative
+                ),
+            ));
+        }
+        Ok(path)
+    }
+}
+
+fn invalid_native_trash_arguments() -> ProjectError {
+    ProjectError::service(
+        "native_trash_worker_invalid_arguments",
+        "Native trash worker arguments do not match the closed internal contract.",
+    )
+}
+
+/// Executes the private native-trash worker command without starting Runtime
+/// product state, HTTP, Control, or Project sessions.
+///
+/// # Errors
+/// Returns a closed worker-contract, identity, or operating-system trash error.
+#[doc(hidden)]
+pub fn run_native_trash_worker(arguments: &[OsString]) -> Result<(), ProjectError> {
+    let request = NativeTrashWorkerRequest::parse(arguments)?;
+    let path = request.resolve()?;
+    debrute_native_fs::trash_path(&path).map_err(|error| {
+        ProjectError::service(
+            "native_trash_failed",
+            format!(
+                "Operating system trash failed for {}: {error}",
+                request.relative
+            ),
+        )
+    })
+}
+
 fn validate_entries(
     project_root: &Path,
     entries: &[ProjectPathEntry],
@@ -258,7 +417,7 @@ fn validate_clipboard_entries(
         .iter()
         .map(|entry| {
             let relative = clipboard_entry_relative_path(entry)?;
-            validate_resolved_entry(project_root, entry, relative)
+            validate_resolved_entry(project_root, entry, ProjectDirectoryPath::parse(&relative)?)
         })
         .collect()
 }
@@ -324,7 +483,7 @@ fn validate_entry(
     entry: &ProjectPathEntry,
 ) -> Result<ResolvedEntry, ProjectError> {
     let relative = assert_project_tree_visible_path(&entry.project_relative_path)?;
-    validate_resolved_entry(project_root, entry, relative)
+    validate_resolved_entry(project_root, entry, relative.as_directory_path().clone())
 }
 
 fn clipboard_entry_relative_path(entry: &ProjectPathEntry) -> Result<String, ProjectError> {
@@ -338,12 +497,13 @@ fn clipboard_entry_relative_path(entry: &ProjectPathEntry) -> Result<String, Pro
         };
     }
     assert_project_tree_visible_path(&entry.project_relative_path)
+        .map(super::ProjectRelativePath::into_string)
 }
 
 fn validate_resolved_entry(
     project_root: &Path,
     entry: &ProjectPathEntry,
-    relative: String,
+    relative: ProjectDirectoryPath,
 ) -> Result<ResolvedEntry, ProjectError> {
     let absolute = resolve_no_symlink_existing_project_path(project_root, &relative)?;
     let metadata = fs::symlink_metadata(&absolute)?;
@@ -369,12 +529,13 @@ fn validate_resolved_entry(
 
 fn validate_entry_identity(
     project_root: &Path,
-    relative: &str,
+    relative: &ProjectDirectoryPath,
     kind: ProjectPathKind,
 ) -> Result<debrute_native_fs::PathIdentity, ProjectError> {
     let absolute = resolve_no_symlink_existing_project_path(project_root, relative)?;
     let identity = if kind == ProjectPathKind::File {
-        let file = super::open_no_symlink_existing_project_file(project_root, relative)?;
+        let relative_file = ProjectRelativePath::parse(relative.as_str())?;
+        let file = super::open_no_symlink_existing_project_file(project_root, &relative_file)?;
         debrute_native_fs::file_identity(&file)?
     } else {
         debrute_native_fs::path_identity(&absolute)?
@@ -448,49 +609,34 @@ fn reveal_action(path: &Path, kind: ProjectPathKind) -> NativeAction {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn reveal_action(path: &Path, kind: ProjectPathKind) -> NativeAction {
-    let path = path.to_string_lossy().into_owned();
-    NativeAction {
-        executable: PathBuf::from("explorer.exe"),
-        args: if kind == ProjectPathKind::File {
-            vec![format!("/select,{path}")]
-        } else {
-            vec![path]
-        },
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn trash_action(path: &Path) -> NativeAction {
-    NativeAction {
-        executable: PathBuf::from("/usr/bin/osascript"),
+fn trash_action(entry: &ResolvedEntry) -> Result<NativeAction, ProjectError> {
+    let project_root = entry.project_root.to_str().ok_or_else(|| {
+        ProjectError::service(
+            "project_path_not_utf8",
+            "Native trash Project root must be representable as UTF-8.",
+        )
+    })?;
+    let executable = std::env::current_exe().map_err(ProjectError::from)?;
+    Ok(NativeAction {
+        executable,
         args: vec![
-            "-e".to_owned(),
-            "on run argv".to_owned(),
-            "-e".to_owned(),
-            "tell application \"Finder\" to delete POSIX file (item 1 of argv)".to_owned(),
-            "-e".to_owned(),
-            "end run".to_owned(),
-            "--".to_owned(),
-            path.to_string_lossy().into_owned(),
+            NATIVE_TRASH_WORKER_COMMAND.to_owned(),
+            "--project-root".to_owned(),
+            project_root.to_owned(),
+            "--project-relative-path".to_owned(),
+            entry.relative.to_string(),
+            "--expected-volume".to_owned(),
+            entry.identity.volume.to_string(),
+            "--expected-file".to_owned(),
+            entry.identity.file.to_string(),
+            "--expected-kind".to_owned(),
+            match entry.kind {
+                ProjectPathKind::File => "file",
+                ProjectPathKind::Directory => "directory",
+            }
+            .to_owned(),
         ],
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn trash_action(path: &Path) -> NativeAction {
-    const SCRIPT: &str = "Add-Type -AssemblyName Microsoft.VisualBasic; $path = $args[0]; if ([System.IO.Directory]::Exists($path)) { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($path, 'OnlyErrorDialogs', 'SendToRecycleBin') } else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($path, 'OnlyErrorDialogs', 'SendToRecycleBin') }";
-    NativeAction {
-        executable: PathBuf::from("powershell.exe"),
-        args: vec![
-            "-NoProfile".to_owned(),
-            "-NonInteractive".to_owned(),
-            "-Command".to_owned(),
-            SCRIPT.to_owned(),
-            path.to_string_lossy().into_owned(),
-        ],
-    }
+    })
 }
 
 #[cfg(test)]
@@ -572,7 +718,7 @@ mod tests {
             format!(
                 "{}\n{}",
                 root.join("b.txt").to_string_lossy(),
-                root.join("folder/a.txt").to_string_lossy()
+                root.join("folder").join("a.txt").to_string_lossy()
             )
         );
 
@@ -747,6 +893,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("debrute-native-shell-{}", Uuid::new_v4()));
         fs::create_dir_all(root.join("folder")).unwrap();
         fs::write(root.join("folder/file.txt"), "fixture").unwrap();
+        let root = root.canonicalize().unwrap();
         let entry = validate_entry(
             &root,
             &ProjectPathEntry {
@@ -756,11 +903,18 @@ mod tests {
             },
         )
         .unwrap();
-        let action = trash_action(&entry.absolute);
-        assert_eq!(
-            action.args.last().unwrap(),
-            &root.join("folder/file.txt").to_string_lossy()
-        );
+        let action = trash_action(&entry).unwrap();
+        assert_eq!(action.args[0], NATIVE_TRASH_WORKER_COMMAND);
+        assert_eq!(action.args[1], "--project-root");
+        assert_eq!(action.args[2], root.to_str().unwrap());
+        assert_eq!(action.args[3], "--project-relative-path");
+        assert_eq!(action.args[4], "folder/file.txt");
+        assert_eq!(action.args[5], "--expected-volume");
+        assert_eq!(action.args[6], entry.identity.volume.to_string());
+        assert_eq!(action.args[7], "--expected-file");
+        assert_eq!(action.args[8], entry.identity.file.to_string());
+        assert_eq!(action.args[9], "--expected-kind");
+        assert_eq!(action.args[10], "file");
 
         fs::rename(
             root.join("folder/file.txt"),
@@ -775,12 +929,80 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn mac_trash_passes_the_path_as_an_argument_not_script_source() {
-        let action = trash_action(Path::new("/tmp/brief \"draft\".md"));
-        assert_eq!(action.executable, Path::new("/usr/bin/osascript"));
-        assert_eq!(action.args.last().unwrap(), "/tmp/brief \"draft\".md");
-        assert!(!action.args[3].contains("draft"));
+    fn native_trash_worker_rejects_open_or_malformed_arguments() {
+        assert_eq!(
+            NativeTrashWorkerRequest::parse(&[]).unwrap_err().code(),
+            "native_trash_worker_invalid_arguments"
+        );
+        let arguments = [
+            OsString::from("--project-root"),
+            OsString::from("relative-root"),
+            OsString::from("--project-relative-path"),
+            OsString::from("fixture.txt"),
+            OsString::from("--expected-volume"),
+            OsString::from("1"),
+            OsString::from("--expected-file"),
+            OsString::from("2"),
+            OsString::from("--expected-kind"),
+            OsString::from("file"),
+        ];
+        assert_eq!(
+            NativeTrashWorkerRequest::parse(&arguments)
+                .unwrap_err()
+                .code(),
+            "native_trash_worker_invalid_project_root"
+        );
+    }
+
+    #[test]
+    fn native_trash_worker_rejects_a_changed_identity_without_an_effect() {
+        let root = std::env::temp_dir().join(format!("debrute-trash-worker-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("fixture.txt");
+        fs::write(&path, "fixture").unwrap();
+        let request = NativeTrashWorkerRequest {
+            project_root: CanonicalProjectRoot::open_existing(&root).unwrap(),
+            relative: ProjectRelativePath::parse("fixture.txt").unwrap(),
+            expected_identity: debrute_native_fs::PathIdentity { volume: 0, file: 0 },
+            expected_kind: ProjectPathKind::File,
+        };
+
+        assert_eq!(
+            request.resolve().unwrap_err().code(),
+            "project_path_changed"
+        );
+        assert!(path.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_trash_worker_rejects_a_project_root_replaced_by_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("debrute-trash-root-{}", Uuid::new_v4()));
+        let root = base.join("project");
+        let moved = base.join("moved");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("fixture.txt");
+        fs::write(&path, "fixture").unwrap();
+        let request = NativeTrashWorkerRequest {
+            project_root: CanonicalProjectRoot::open_existing(&root).unwrap(),
+            relative: ProjectRelativePath::parse("fixture.txt").unwrap(),
+            expected_identity: debrute_native_fs::path_identity(&path).unwrap(),
+            expected_kind: ProjectPathKind::File,
+        };
+
+        fs::rename(&root, &moved).unwrap();
+        symlink(&moved, &root).unwrap();
+
+        assert_eq!(
+            request.resolve().unwrap_err().code(),
+            "project_path_changed"
+        );
+        assert!(moved.join("fixture.txt").exists());
+        fs::remove_file(root).unwrap();
+        fs::remove_dir_all(base).unwrap();
     }
 }

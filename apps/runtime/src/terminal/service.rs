@@ -19,8 +19,8 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use uuid::Uuid;
 
 use crate::project::{
-    ProjectSessionRegistry, ProjectUse, ProjectUseKind, normalize_project_directory_path,
-    parent_project_path, resolve_no_symlink_existing_project_path,
+    CanonicalProjectRoot, ProjectDirectoryPath, ProjectSessionRegistry, ProjectUse, ProjectUseKind,
+    resolve_no_symlink_existing_project_path,
 };
 
 use super::{
@@ -183,7 +183,7 @@ pub struct TerminalTopologySubscription {
     pub snapshot: TerminalTopologySnapshot,
     receiver: mpsc::Receiver<TerminalTopologySnapshot>,
     service: Weak<TerminalServiceInner>,
-    canonical_root: String,
+    canonical_root: CanonicalProjectRoot,
     observer_id: Uuid,
 }
 
@@ -238,7 +238,7 @@ pub struct TerminalService {
 
 struct TerminalServiceInner {
     registry: ProjectSessionRegistry,
-    projects: Mutex<HashMap<String, ProjectTerminals>>,
+    projects: Mutex<HashMap<CanonicalProjectRoot, ProjectTerminals>>,
 }
 
 impl Drop for TerminalServiceInner {
@@ -277,7 +277,7 @@ struct TerminalHandle {
 
 struct TerminalReservation {
     service: Weak<TerminalServiceInner>,
-    canonical_root: String,
+    canonical_root: CanonicalProjectRoot,
     active: bool,
 }
 
@@ -307,13 +307,14 @@ impl TerminalService {
             .get(Path::new(canonical_root))
             .map_err(project_terminal_error)?;
         let cwd = resolve_terminal_cwd(session.root(), cwd_project_relative_path)?;
+        let project_root = session.project_root().clone();
         let cols = DEFAULT_COLS;
         let rows = DEFAULT_ROWS;
-        let mut reservation = self.reserve_terminal(canonical_root)?;
+        let mut reservation = self.reserve_project_terminal(&project_root)?;
         let project_use = self
             .inner
             .registry
-            .acquire_use(Path::new(canonical_root), ProjectUseKind::RunningTerminal)
+            .acquire_use(project_root.as_path(), ProjectUseKind::RunningTerminal)
             .map_err(project_terminal_error)?;
         let id = Uuid::new_v4().to_string();
         let now = crate::now_rfc3339();
@@ -337,7 +338,7 @@ impl TerminalService {
         let terminal = spawn_terminal(view, cwd, project_use)?;
         let result = terminal.view();
         let mut projects = lock(&self.inner.projects, "Terminal project registry");
-        let project = projects.entry(canonical_root.to_owned()).or_default();
+        let project = projects.entry(project_root).or_default();
         reservation.commit(project);
         project.sessions.insert(id, terminal);
         if let Err(error) = publish_topology(project) {
@@ -351,7 +352,20 @@ impl TerminalService {
         Ok(result)
     }
 
+    #[cfg(all(test, target_os = "macos"))]
     fn reserve_terminal(&self, canonical_root: &str) -> Result<TerminalReservation, TerminalError> {
+        let session = self
+            .inner
+            .registry
+            .get(Path::new(canonical_root))
+            .map_err(project_terminal_error)?;
+        self.reserve_project_terminal(session.project_root())
+    }
+
+    fn reserve_project_terminal(
+        &self,
+        canonical_root: &CanonicalProjectRoot,
+    ) -> Result<TerminalReservation, TerminalError> {
         let mut projects = self
             .inner
             .projects
@@ -359,7 +373,7 @@ impl TerminalService {
             .expect("Terminal project registry lock poisoned");
         let mut retired = Vec::new();
         loop {
-            let project = projects.entry(canonical_root.to_owned()).or_default();
+            let project = projects.entry(canonical_root.clone()).or_default();
             if project.sessions.len() + project.reservations < MAX_TERMINALS_PER_PROJECT {
                 break;
             }
@@ -399,14 +413,14 @@ impl TerminalService {
                 publish_topology(project)?;
             }
         }
-        let project = projects.entry(canonical_root.to_owned()).or_default();
+        let project = projects.entry(canonical_root.clone()).or_default();
         project.reservations = project
             .reservations
             .checked_add(1)
             .expect("Terminal reservation count overflow");
         let reservation = TerminalReservation {
             service: Arc::downgrade(&self.inner),
-            canonical_root: canonical_root.to_owned(),
+            canonical_root: canonical_root.clone(),
             active: true,
         };
         drop(projects);
@@ -580,7 +594,7 @@ impl TerminalService {
     ) -> Result<(), TerminalError> {
         validate_observer_id(observer_id)?;
         let terminals = lock(&self.inner.projects, "Terminal project registry")
-            .get(canonical_root)
+            .get(Path::new(canonical_root))
             .map(|project| project.sessions.values().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         for terminal in terminals {
@@ -610,7 +624,7 @@ impl TerminalService {
         let terminal = self.terminal(canonical_root, terminal_id)?;
         terminal.close()?;
         let mut projects = lock(&self.inner.projects, "Terminal project registry");
-        if let Some(project) = projects.get_mut(canonical_root) {
+        if let Some(project) = projects.get_mut(Path::new(canonical_root)) {
             project.sessions.remove(terminal_id);
             publish_topology(project)?;
         }
@@ -625,12 +639,14 @@ impl TerminalService {
         &self,
         canonical_root: &str,
     ) -> Result<TerminalTopologySubscription, TerminalError> {
-        self.inner
+        let session = self
+            .inner
             .registry
             .get(Path::new(canonical_root))
             .map_err(project_terminal_error)?;
+        let project_root = session.project_root().clone();
         let mut projects = lock(&self.inner.projects, "Terminal project registry");
-        let project = projects.entry(canonical_root.to_owned()).or_default();
+        let project = projects.entry(project_root.clone()).or_default();
         if project.observers.len() >= MAX_TERMINAL_TOPOLOGY_OBSERVERS {
             return Err(TerminalError::new(
                 "terminal_topology_observer_limit_reached",
@@ -645,7 +661,7 @@ impl TerminalService {
             snapshot,
             receiver,
             service: Arc::downgrade(&self.inner),
-            canonical_root: canonical_root.to_owned(),
+            canonical_root: project_root,
             observer_id,
         })
     }
@@ -700,7 +716,7 @@ impl TerminalService {
             .lock()
             .expect("Terminal project registry lock poisoned");
         projects
-            .get(canonical_root)
+            .get(Path::new(canonical_root))
             .and_then(|project| project.sessions.get(terminal_id))
             .cloned()
             .ok_or_else(|| {
@@ -750,8 +766,8 @@ fn oldest_retired_terminal_id(project: &ProjectTerminals) -> Option<String> {
 }
 
 fn oldest_runtime_retired_terminal(
-    projects: &HashMap<String, ProjectTerminals>,
-) -> Option<(String, String)> {
+    projects: &HashMap<CanonicalProjectRoot, ProjectTerminals>,
+) -> Option<(CanonicalProjectRoot, String)> {
     let mut retired = Vec::new();
     for (canonical_root, project) in projects {
         for terminal in project.sessions.values() {
@@ -1162,7 +1178,7 @@ fn start_terminal_actor(
     let (mut command, spawn_barrier) = windows_terminal_command()?;
     #[cfg(not(target_os = "windows"))]
     let mut command = CommandBuilder::new(default_shell());
-    let process_cwd = terminal_process_cwd(&cwd);
+    let process_cwd = debrute_native_fs::external_process_path(&cwd);
     command.cwd(&process_cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
@@ -1896,7 +1912,7 @@ fn wait_for_pty_child(
 }
 
 fn resolve_terminal_cwd(project_root: &Path, requested: &str) -> Result<PathBuf, TerminalError> {
-    let requested = normalize_project_directory_path(requested).map_err(project_terminal_error)?;
+    let requested = ProjectDirectoryPath::parse(requested).map_err(project_terminal_error)?;
     let requested_path = resolve_no_symlink_existing_project_path(project_root, &requested)
         .map_err(project_terminal_error)?;
     let metadata = requested_path
@@ -1905,7 +1921,7 @@ fn resolve_terminal_cwd(project_root: &Path, requested: &str) -> Result<PathBuf,
     let directory = if metadata.is_dir() {
         requested
     } else {
-        parent_project_path(&requested).map_err(project_terminal_error)?
+        requested.parent()
     };
     let path = resolve_no_symlink_existing_project_path(project_root, &directory)
         .map_err(project_terminal_error)?;
@@ -1962,48 +1978,6 @@ fn default_shell() -> PathBuf {
     {
         std::env::var_os("SHELL").map_or_else(|| PathBuf::from("/bin/sh"), PathBuf::from)
     }
-}
-
-#[cfg(target_os = "windows")]
-fn terminal_process_cwd(path: &Path) -> PathBuf {
-    use std::{
-        ffi::OsString,
-        os::windows::ffi::{OsStrExt as _, OsStringExt as _},
-    };
-
-    let encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    let is_verbatim = encoded.starts_with(&[
-        u16::from(b'\\'),
-        u16::from(b'\\'),
-        u16::from(b'?'),
-        u16::from(b'\\'),
-    ]);
-    if !is_verbatim {
-        return path.to_path_buf();
-    }
-    let is_verbatim_unc = encoded.get(4..8).is_some_and(|prefix| {
-        prefix.len() == 4
-            && matches!(prefix[0], value if value == u16::from(b'U') || value == u16::from(b'u'))
-            && matches!(prefix[1], value if value == u16::from(b'N') || value == u16::from(b'n'))
-            && matches!(prefix[2], value if value == u16::from(b'C') || value == u16::from(b'c'))
-            && prefix[3] == u16::from(b'\\')
-    });
-    let simplified = if is_verbatim_unc {
-        [u16::from(b'\\'), u16::from(b'\\')]
-            .into_iter()
-            .chain(encoded[8..].iter().copied())
-            .collect::<Vec<_>>()
-    } else if encoded.get(5) == Some(&u16::from(b':')) {
-        encoded[4..].to_vec()
-    } else {
-        return path.to_path_buf();
-    };
-    PathBuf::from(OsString::from_wide(&simplified))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn terminal_process_cwd(path: &Path) -> PathBuf {
-    path.to_path_buf()
 }
 
 #[cfg(target_os = "windows")]
@@ -2406,27 +2380,6 @@ mod writer_tests {
     }
 }
 
-#[cfg(all(test, target_os = "windows"))]
-mod windows_tests {
-    use super::*;
-
-    #[test]
-    fn terminal_process_cwd_uses_drive_syntax_for_verbatim_disk_paths() {
-        assert_eq!(
-            terminal_process_cwd(Path::new(r"\\?\E:\onedrive\城启设计")),
-            PathBuf::from(r"E:\onedrive\城启设计")
-        );
-    }
-
-    #[test]
-    fn terminal_process_cwd_preserves_unc_semantics_without_the_verbatim_marker() {
-        assert_eq!(
-            terminal_process_cwd(Path::new(r"\\?\UNC\server\share\project")),
-            PathBuf::from(r"\\server\share\project")
-        );
-    }
-}
-
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use std::{fs, time::Duration};
@@ -2616,7 +2569,7 @@ mod tests {
         let mut project = ProjectTerminals::default();
         let mut reservation = TerminalReservation {
             service: Weak::new(),
-            canonical_root: "project-1".to_owned(),
+            canonical_root: CanonicalProjectRoot::detached_for_test(Path::new("/project-1")),
             active: true,
         };
 

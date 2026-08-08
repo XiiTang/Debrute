@@ -103,6 +103,27 @@ describe('terminateWindowsProcessTree', () => {
     expect(launched).toBe(false);
   });
 
+  it('allows an owned child a bounded graceful exit before launching taskkill', async () => {
+    const child = fakeChild(4242);
+    let launched = false;
+
+    const termination = terminateWindowsProcessTree(child, {
+      gracePeriodMs: 1_000
+    }, {
+      platform: 'win32',
+      windowsDirectory: 'C:\\Windows',
+      runTaskkill: async () => {
+        launched = true;
+      }
+    });
+    await Promise.resolve();
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    await termination;
+
+    expect(launched).toBe(false);
+  });
+
   it('terminates a real Windows parent and grandchild process', async () => {
     if (process.platform !== 'win32') {
       return;

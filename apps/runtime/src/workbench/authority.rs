@@ -267,7 +267,22 @@ fn normalize_source_workbench_origin(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
+
+    fn canonical_test_project(label: &str) -> (std::path::PathBuf, String) {
+        let base =
+            std::env::temp_dir().join(format!("debrute-authority-{label}-{}", Uuid::new_v4()));
+        let project = base.join("Reference Projects");
+        fs::create_dir_all(&project).unwrap();
+        let canonical = project
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        (base, canonical)
+    }
 
     #[test]
     fn project_workbench_url_encodes_an_unadmitted_absolute_root() {
@@ -329,9 +344,8 @@ mod tests {
     #[test]
     fn desktop_ticket_is_memory_only_and_one_use() {
         let service = WorkbenchLaunchService::new("http://127.0.0.1:17321".to_owned());
-        let route = WorkbenchRoute::OpenProject {
-            canonical_root: "/project-1".to_owned(),
-        };
+        let (base, canonical_root) = canonical_test_project("desktop-ticket");
+        let route = WorkbenchRoute::OpenProject { canonical_root };
         let ticket = service
             .create_desktop_ticket(
                 route.clone(),
@@ -348,25 +362,46 @@ mod tests {
             route
         );
         assert!(service.consume_desktop_ticket(&ticket).is_none());
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn source_workbench_registration_owns_the_origin_without_changing_the_route() {
         let service = WorkbenchLaunchService::new("http://127.0.0.1:17321".to_owned());
+        let (base, canonical_root) = canonical_test_project("source-workbench");
         let route = WorkbenchRoute::OpenProject {
-            canonical_root: "/Users/me/Reference Projects".to_owned(),
+            canonical_root: canonical_root.clone(),
         };
         service
             .register_source_workbench("launcher-1", "http://127.0.0.1:5173")
             .unwrap();
+        let source_url = Url::parse(&service.url_for_route(&route).unwrap()).unwrap();
         assert_eq!(
-            service.url_for_route(&route).unwrap(),
-            "http://127.0.0.1:5173/open?path=%2FUsers%2Fme%2FReference+Projects"
+            source_url.origin().ascii_serialization(),
+            "http://127.0.0.1:5173"
+        );
+        assert_eq!(
+            source_url
+                .query_pairs()
+                .find(|(key, _)| key == "path")
+                .unwrap()
+                .1,
+            canonical_root
         );
         service.unregister_source_workbench("launcher-1");
+        let bundled_url = Url::parse(&service.url_for_route(&route).unwrap()).unwrap();
         assert_eq!(
-            service.url_for_route(&route).unwrap(),
-            "http://127.0.0.1:17321/open?path=%2FUsers%2Fme%2FReference+Projects"
+            bundled_url.origin().ascii_serialization(),
+            "http://127.0.0.1:17321"
         );
+        assert_eq!(
+            bundled_url
+                .query_pairs()
+                .find(|(key, _)| key == "path")
+                .unwrap()
+                .1,
+            canonical_root
+        );
+        fs::remove_dir_all(base).unwrap();
     }
 }

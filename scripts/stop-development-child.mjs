@@ -1,11 +1,16 @@
 import { terminateWindowsProcessTree } from './terminate-windows-process-tree.mjs';
 
+const WINDOWS_DEVELOPMENT_GRACE_PERIOD_MS = 2_000;
+
 export async function stopDevelopmentChild(child, { label = 'development child process' } = {}) {
   if (!child || hasExited(child)) {
     return;
   }
   if (process.platform === 'win32') {
-    await terminateWindowsProcessTree(child, { label });
+    await terminateWindowsProcessTree(child, {
+      label,
+      gracePeriodMs: WINDOWS_DEVELOPMENT_GRACE_PERIOD_MS
+    });
     return;
   }
   await new Promise((resolve, reject) => {

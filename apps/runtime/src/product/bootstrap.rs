@@ -380,14 +380,8 @@ fn write_file_atomic(destination: &Path, bytes: &[u8]) -> Result<(), ProductBoot
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
 fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    debrute_windows_product_fs::replace_file_atomic(source, destination)
-}
-
-#[cfg(target_os = "macos")]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    fs::rename(source, destination)
+    debrute_native_fs::replace_file_atomic(source, destination)
 }
 
 #[cfg(target_os = "windows")]

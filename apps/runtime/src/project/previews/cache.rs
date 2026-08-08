@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use super::super::{ProjectCapabilityFs, ProjectError, normalize_project_relative_path};
+use super::super::{ProjectCapabilityFs, ProjectError, ProjectRelativePath};
 use super::PreviewCancellation;
 
 const READABLE_CACHE_KEY_PREFIX_MAX_LENGTH: usize = 96;
@@ -225,7 +225,7 @@ impl Drop for KeyedLock<'_> {
 }
 
 pub(super) fn project_relative_path_cache_key(path: &str) -> Result<String, ProjectError> {
-    let normalized = normalize_project_relative_path(path)?;
+    let normalized = ProjectRelativePath::parse(path)?;
     let encoded = encode_uri_component(&normalized);
     let mut readable = if encoded.len() <= READABLE_CACHE_KEY_PREFIX_MAX_LENGTH {
         encoded.clone()
@@ -290,7 +290,8 @@ pub(super) fn atomic_write(
     project_relative_path: &str,
     bytes: &[u8],
 ) -> Result<(), ProjectError> {
-    ProjectCapabilityFs::open(project_root)?.atomic_write(project_relative_path, bytes)
+    let relative = ProjectRelativePath::parse(project_relative_path)?;
+    ProjectCapabilityFs::open(project_root)?.atomic_write(&relative, bytes)
 }
 
 fn encode_uri_component(value: &str) -> String {

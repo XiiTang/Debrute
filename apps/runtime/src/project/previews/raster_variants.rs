@@ -6,7 +6,7 @@ use std::{
 };
 
 use super::{
-    CanvasPreviewFile, PreviewCancellation, ProjectCapabilityFs, ProjectError,
+    CanvasPreviewFile, PreviewCancellation, ProjectCapabilityFs, ProjectError, ProjectRelativePath,
     RASTER_PREVIEW_ENGINE_VERSION,
     cache::{KeyedLocks, Semaphore},
     existing_open_file, open_no_symlink_existing_project_file,
@@ -104,8 +104,9 @@ impl RasterPreviewVariantService {
             });
         }
 
+        let variant_relative = ProjectRelativePath::parse(&variant_path)?;
         ProjectCapabilityFs::open(cache_root)?.atomic_write_stream_checked(
-            &variant_path,
+            &variant_relative,
             |output_file| {
                 self.raster.render_variant_to_file(
                     &request.source_path,
@@ -118,9 +119,12 @@ impl RasterPreviewVariantService {
             },
             verify_source,
         )?;
-        let file = open_no_symlink_existing_project_file(cache_root, &variant_path)?;
+        let file = open_no_symlink_existing_project_file(cache_root, &variant_relative)?;
         Ok(CanvasPreviewFile {
-            absolute_path: resolve_no_symlink_existing_project_path(cache_root, &variant_path)?,
+            absolute_path: resolve_no_symlink_existing_project_path(
+                cache_root,
+                variant_relative.as_directory_path(),
+            )?,
             file,
             content_type: output.content_type,
         })
