@@ -586,15 +586,11 @@ describe('CanvasEditorRuntime', () => {
   });
 
   it('publishes one coherent scene when Projection replacement invalidates active state', () => {
-    const runtime = createRuntime();
-    runtime.setSelection({
-      kind: 'nodes',
-      projectRelativePaths: ['flow/a.png', 'flow/b.png']
-    });
-    runtime.setContentInteraction('flow/a.png');
+    const runtime = createContentRuntime();
+    runtime.activateContent('flow/a.md');
     runtime.input.beginNodeMove({
       pointerId: 41,
-      projectRelativePath: 'flow/a.png',
+      projectRelativePath: 'flow/a.md',
       screenPoint: { x: 0, y: 0 }
     });
     runtime.input.updatePointerInteraction({ pointerId: 41, screenPoint: { x: 20, y: 0 } });
@@ -603,16 +599,16 @@ describe('CanvasEditorRuntime', () => {
     runtime.scene.subscribeRenderSnapshot(() => renderChanges.push(runtime.scene.getRenderSnapshot()));
     runtime.scene.subscribePresentation((update) => presentationChanges.push(update));
 
-    runtime.acceptProjection(canvasProjection('flow/b.png', 30));
+    runtime.acceptProjection(contentProjection('flow/b.md', 30));
 
     expect(renderChanges).toHaveLength(1);
     expect(presentationChanges).toEqual([]);
     expect(runtime.getSnapshot()).toMatchObject({
       pointerInteraction: undefined,
       contentInteractionProjectRelativePath: undefined,
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/b.png'] }
+      selection: undefined
     });
-    expect([...runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['flow/b.png']);
+    expect([...runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['flow/b.md']);
   });
 
   it('keeps node pointer interaction in the runtime snapshot', async () => {
@@ -746,7 +742,48 @@ describe('CanvasEditorRuntime', () => {
     expect(runtime.scene.getPresentedNodes().get('flow/b.png')).toMatchObject({ x: 40, y: 55 });
   });
 
-  it('does not notify broad snapshot subscribers for pointer move drag previews', () => {
+  it('rebuilds the move batch from modifiers applied before the movement threshold', () => {
+    const base = [
+      { ...canvasProjection('flow/a.png', 10).nodes[0]!, y: 20 },
+      { ...canvasProjection('flow/b.png', 30).nodes[0]!, y: 40 }
+    ];
+    const runtime = createCanvasEditorRuntime({
+      initialProjection: { nodes: base, edges: [] },
+      submitManualLayout: async () => undefined,
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+    });
+
+    runtime.input.beginNodeMove({
+      pointerId: 15,
+      projectRelativePath: 'flow/b.png',
+      screenPoint: { x: 0, y: 0 },
+      modifiers: noModifiers()
+    });
+    runtime.input.updatePointerInteraction({
+      pointerId: 15,
+      screenPoint: { x: 10, y: 15 },
+      modifiers: { ...noModifiers(), metaKey: true }
+    });
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      selection: {
+        kind: 'nodes',
+        projectRelativePaths: ['flow/a.png', 'flow/b.png']
+      },
+      pointerInteraction: {
+        kind: 'move-node',
+        phase: 'active',
+        origins: [
+          { projectRelativePath: 'flow/a.png', x: 10, y: 20 },
+          { projectRelativePath: 'flow/b.png', x: 30, y: 40 }
+        ]
+      }
+    });
+    expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({ x: 20, y: 35 });
+    expect(runtime.scene.getPresentedNodes().get('flow/b.png')).toMatchObject({ x: 40, y: 55 });
+  });
+
+  it('publishes the threshold state transition once, then keeps drag previews off broad subscribers', () => {
     const runtime = createRuntime();
     const snapshots: unknown[] = [];
     runtime.subscribe((snapshot) => snapshots.push(snapshot));
@@ -763,6 +800,17 @@ describe('CanvasEditorRuntime', () => {
     });
 
     expect(updated).toBe(true);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] },
+      contentInteractionProjectRelativePath: undefined,
+      pointerInteraction: { kind: 'move-node', phase: 'active' }
+    });
+    snapshots.length = 0;
+    runtime.input.updatePointerInteraction({
+      pointerId: 7,
+      screenPoint: { x: 25, y: 35 }
+    });
     expect(snapshots).toEqual([]);
   });
 
@@ -912,29 +960,136 @@ describe('CanvasEditorRuntime', () => {
     expect(runtime.scene.getPresentedNodes().get('flow/a.png')?.x).toBe(0);
   });
 
-  it('owns content interaction independently from node selection', () => {
-    const runtime = createRuntime();
+  it('atomically enforces sole Selection for Content Activation', () => {
+    const runtime = createContentRuntime();
     const changes: Array<string | undefined> = [];
+    const snapshots: unknown[] = [];
     runtime.subscribeContentInteraction((path) => changes.push(path));
+    runtime.subscribe((snapshot) => snapshots.push(snapshot));
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.activateContent('flow/a.md');
+    expect(runtime.getSnapshot()).toMatchObject({
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      contentInteractionProjectRelativePath: 'flow/a.md'
+    });
+    expect(snapshots).toHaveLength(1);
+    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.md'] });
+
     expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
-
-    runtime.setContentInteraction('flow/a.png');
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.png'] });
-
-    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe('flow/a.png');
-    expect(changes).toEqual(['flow/a.png']);
+    expect(changes).toEqual(['flow/a.md', undefined]);
   });
 
-  it('rejects missing content interaction paths and clears an active path removed by Projection', () => {
-    const runtime = createRuntime();
+  it('publishes resize start with Selection and Content Activation already coherent', () => {
+    const runtime = createContentRuntime();
+    runtime.activateContent('flow/a.md');
+    const contentChanges: unknown[] = [];
+    const snapshots: unknown[] = [];
+    runtime.subscribeContentInteraction((path) => contentChanges.push({
+      path,
+      pointerInteraction: runtime.getSnapshot().pointerInteraction
+    }));
+    runtime.subscribe((snapshot) => snapshots.push(snapshot));
 
-    runtime.setContentInteraction('missing.png');
-    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
+    runtime.input.beginNodeResize({
+      pointerId: 80,
+      handle: 'se',
+      projectRelativePath: 'flow/a.md',
+      screenPoint: { x: 0, y: 0 },
+      modifiers: noModifiers()
+    });
 
-    runtime.setContentInteraction('flow/a.png');
-    runtime.acceptProjection(canvasProjection('flow/b.png', 0));
+    expect(contentChanges).toEqual([{
+      path: undefined,
+      pointerInteraction: expect.objectContaining({ kind: 'resize-node', phase: 'active' })
+    }]);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      contentInteractionProjectRelativePath: undefined,
+      pointerInteraction: { kind: 'resize-node', phase: 'active' }
+    });
+  });
+
+  it('publishes one coherent cancellation snapshot while restoring Selection and Content Activation', () => {
+    const runtime = createContentRuntime();
+    runtime.activateContent('flow/a.md');
+    runtime.input.beginNodeMove({
+      pointerId: 81,
+      projectRelativePath: 'flow/b.md',
+      screenPoint: { x: 0, y: 0 }
+    });
+    runtime.input.updatePointerInteraction({
+      pointerId: 81,
+      screenPoint: { x: 20, y: 0 }
+    });
+    const snapshots: unknown[] = [];
+    const selectionChanges: unknown[] = [];
+    const contentChanges: unknown[] = [];
+    runtime.subscribe((snapshot) => snapshots.push(snapshot));
+    runtime.subscribeSelection((selection) => selectionChanges.push({
+      selection,
+      pointerInteraction: runtime.getSnapshot().pointerInteraction
+    }));
+    runtime.subscribeContentInteraction((path) => contentChanges.push({
+      path,
+      pointerInteraction: runtime.getSnapshot().pointerInteraction
+    }));
+
+    runtime.input.cancelPointerInteraction(81);
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      contentInteractionProjectRelativePath: 'flow/a.md',
+      pointerInteraction: undefined
+    });
+    expect(selectionChanges).toEqual([{
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      pointerInteraction: undefined
+    }]);
+    expect(contentChanges).toEqual([{
+      path: 'flow/a.md',
+      pointerInteraction: undefined
+    }]);
+  });
+
+  it('ends Content Activation at a blank marquee threshold and restores it if the gesture is cancelled', () => {
+    const runtime = createContentRuntime();
+    runtime.activateContent('flow/a.md');
+    runtime.input.beginSelectionMarquee({
+      pointerId: 82,
+      screenPoint: { x: 500, y: 500 },
+      modifiers: noModifiers()
+    });
+
+    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe('flow/a.md');
+    runtime.input.updatePointerInteraction({
+      pointerId: 82,
+      screenPoint: { x: 520, y: 500 },
+      modifiers: noModifiers()
+    });
+    expect(runtime.getSnapshot()).toMatchObject({
+      contentInteractionProjectRelativePath: undefined,
+      pointerInteraction: { kind: 'selection-marquee', phase: 'active' }
+    });
+
+    runtime.input.cancelPointerInteraction(82);
+    expect(runtime.getSnapshot()).toMatchObject({
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      contentInteractionProjectRelativePath: 'flow/a.md',
+      pointerInteraction: undefined
+    });
+  });
+
+  it('rejects missing or non-content activation and clears an active path removed by Projection', () => {
+    const runtime = createContentRuntime();
+
+    expect(() => runtime.activateContent('missing.md')).toThrow('requires a sole selected');
+    const imageRuntime = createRuntime();
+    expect(() => imageRuntime.activateContent('flow/a.png')).toThrow('requires a sole selected');
+
+    runtime.activateContent('flow/a.md');
+    runtime.acceptProjection(contentProjection('flow/b.md', 0));
 
     expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
   });
@@ -961,6 +1116,23 @@ function canvasProjection(projectRelativePath: string, x: number) {
       }
     }],
     edges: [],
+  };
+}
+
+function contentProjection(projectRelativePath: string, x: number) {
+  return {
+    nodes: [{
+      ...canvasProjection(projectRelativePath, x).nodes[0]!,
+      mediaKind: 'text' as const,
+      availability: {
+        state: 'available' as const,
+        size: 100,
+        mimeType: 'text/markdown',
+        fileUrl: `/files/${projectRelativePath}`,
+        revision: 'rev'
+      }
+    }],
+    edges: []
   };
 }
 
@@ -994,6 +1166,19 @@ function createRuntime(input?: {
     },
     submitManualLayout: async () => undefined,
     ...input
+  });
+}
+
+function createContentRuntime() {
+  return createCanvasEditorRuntime({
+    initialProjection: {
+      nodes: [
+        { ...contentProjection('flow/a.md', 10).nodes[0]!, y: 20 },
+        { ...contentProjection('flow/b.md', 30).nodes[0]!, y: 40 }
+      ],
+      edges: []
+    },
+    submitManualLayout: async () => undefined
   });
 }
 

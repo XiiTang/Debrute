@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCanvasInteractionRuntime } from './CanvasInteractionRuntime.js';
 
 describe('CanvasInteractionRuntime', () => {
-  it('owns one semantic node hover across passive content and interaction islands', () => {
+  it('owns one semantic node hover across Content and content-island targets', () => {
     const runtime = createCanvasInteractionRuntime();
 
     runtime.updatePointer({
       screenPoint: { x: 20, y: 30 },
-      target: { kind: 'node', projectRelativePath: 'notes/readme.md', mediaKind: 'text', zone: 'passive' }
+      target: { kind: 'node', projectRelativePath: 'notes/readme.md', mediaKind: 'text', zone: 'content', directManipulation: false, contentControl: false }
     });
     expect(runtime.getSnapshot()).toMatchObject({
       hoveredNodePath: 'notes/readme.md',
@@ -16,7 +16,7 @@ describe('CanvasInteractionRuntime', () => {
 
     runtime.updatePointer({
       screenPoint: { x: 24, y: 34 },
-      target: { kind: 'node', projectRelativePath: 'notes/readme.md', mediaKind: 'text', zone: 'interaction-island' }
+      target: { kind: 'node', projectRelativePath: 'notes/readme.md', mediaKind: 'text', zone: 'content-island', directManipulation: false, contentControl: false }
     });
     expect(runtime.getSnapshot().hoveredNodePath).toBe('notes/readme.md');
   });
@@ -27,13 +27,13 @@ describe('CanvasInteractionRuntime', () => {
     runtime.subscribe(listener);
     runtime.updatePointer({
       screenPoint: { x: 50, y: 60 },
-      target: { kind: 'node', projectRelativePath: 'flow/a.png', mediaKind: 'image', zone: 'move' }
+      target: { kind: 'node', projectRelativePath: 'flow/a.png', mediaKind: 'image', zone: 'manipulation', directManipulation: false, contentControl: false }
     });
 
     runtime.setCameraState('moving');
     runtime.updatePointer({
       screenPoint: { x: 50, y: 60 },
-      target: { kind: 'node', projectRelativePath: 'flow/b.png', mediaKind: 'image', zone: 'move' }
+      target: { kind: 'node', projectRelativePath: 'flow/b.png', mediaKind: 'image', zone: 'manipulation', directManipulation: false, contentControl: false }
     });
 
     expect(runtime.getSnapshot()).toMatchObject({
@@ -63,7 +63,9 @@ describe('CanvasInteractionRuntime', () => {
       kind: 'node',
       projectRelativePath: 'flow/b.png',
       mediaKind: 'image',
-      zone: 'move'
+      zone: 'manipulation',
+      directManipulation: false,
+      contentControl: false
     });
     expect(runtime.getSnapshot()).toMatchObject({
       hoveredNodePath: 'flow/b.png',
@@ -78,7 +80,7 @@ describe('CanvasInteractionRuntime', () => {
 
     runtime.updatePointer({
       screenPoint: { x: 50, y: 60 },
-      target: { kind: 'node', projectRelativePath: 'flow/a.png', zone: 'move' }
+      target: { kind: 'node', projectRelativePath: 'flow/a.png', zone: 'manipulation', directManipulation: false, contentControl: false }
     });
     runtime.setCameraState('moving');
     runtime.setCameraState('idle');
@@ -117,7 +119,7 @@ describe('CanvasInteractionRuntime', () => {
     runtime.subscribe(listener);
     runtime.updatePointer({
       screenPoint: { x: 10, y: 10 },
-      target: { kind: 'node', projectRelativePath: 'flow/a.png', zone: 'move' }
+      target: { kind: 'node', projectRelativePath: 'flow/a.png', zone: 'manipulation', directManipulation: false, contentControl: false }
     });
     listener.mockClear();
 
@@ -144,7 +146,7 @@ describe('CanvasInteractionRuntime', () => {
     const runtime = createCanvasInteractionRuntime();
     runtime.updatePointer({
       screenPoint: { x: 1, y: 2 },
-      target: { kind: 'node', projectRelativePath: 'flow/a.png', zone: 'resize' }
+      target: { kind: 'node', projectRelativePath: 'flow/a.png', zone: 'resize', directManipulation: false, contentControl: false }
     });
     runtime.setPointerInteractionActive(true);
     expect(runtime.getSnapshot()).toMatchObject({ hoveredNodePath: undefined, gated: true });

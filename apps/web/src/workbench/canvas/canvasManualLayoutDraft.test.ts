@@ -155,6 +155,7 @@ function moveState(
     start,
     current: start,
     initialSelection: undefined,
+    initialContentInteractionProjectRelativePath: undefined,
     pressedProjectRelativePath: origins[0]?.projectRelativePath ?? '',
     additive: false,
     origins
@@ -177,6 +178,7 @@ function resizeState(input: {
     handle: input.handle,
     start: input.start,
     initialSelection: undefined,
+    initialContentInteractionProjectRelativePath: undefined,
     node: { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image' },
     origin: input.origin,
     preserveAspect: input.preserveAspect,

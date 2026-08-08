@@ -7,24 +7,23 @@ import type {
   CanvasVideoPlaybackState,
   ProjectTextLanguageId
 } from '@debrute/app-protocol';
+import {
+  canvasGenericNodeSceneSizes,
+  type CanvasGenericIdentityRowMeasurer,
+  type CanvasGenericNodeSceneSize
+} from './CanvasGenericNodeGeometry.js';
 
 type CanvasResource = CanvasResourceView['resources'][number];
 type CanvasFileResource = Extract<CanvasResource, { nodeKind: 'file' }>;
 
-const INTERNAL_SCALE = 10;
-const GENERIC_HEIGHT = 48 * INTERNAL_SCALE;
-const GENERIC_HORIZONTAL_CHROME = 54;
-const GENERIC_MIN_WIDTH = 120;
-const GENERIC_MAX_WIDTH = 360;
 const TEXT_WIDTH = 4_200;
 const TEXT_HEIGHT = 2_800;
 const AUDIO_WIDTH = 3_200;
 const AUDIO_HEIGHT = 960;
+const UNAVAILABLE_VIDEO_WIDTH = 3_200;
+const UNAVAILABLE_VIDEO_HEIGHT = 1_800;
 const DEPTH_GAP = 100;
 const SIBLING_GAP = 80;
-const LABEL_FONT = '700 13px "Noto Sans SC"';
-
-type LabelWidthMeasurer = (label: string) => number;
 
 export interface CanvasProjectedRect {
   projectRelativePath: string;
@@ -84,20 +83,28 @@ interface LayoutRect extends LayoutSize {
   y: number;
 }
 
-let labelContext: CanvasRenderingContext2D | undefined;
-const labelWidthCache = new Map<string, number>();
-
 export function projectCanvasScene(input: {
   canonicalRoot: string;
   resources: CanvasResourceView;
   state: CanvasState;
-  measureLabelWidth?: LabelWidthMeasurer;
+  measureGenericIdentityRows?: CanvasGenericIdentityRowMeasurer;
 }): CanvasSceneProjectionResult {
-  const measureLabelWidth = input.measureLabelWidth ?? measureCanvasLabelWidth;
   const trees = buildLayoutTrees(input.resources.resources);
+  const labels = new Map(input.resources.resources.map((resource) => [
+    resource.projectRelativePath,
+    resourceLabel(resource, input.canonicalRoot)
+  ]));
+  const genericSizes = canvasGenericNodeSceneSizes(
+    input.resources.resources.flatMap((resource) => (
+      resourceUsesGenericGeometry(resource)
+        ? [labels.get(resource.projectRelativePath)!]
+        : []
+    )),
+    input.measureGenericIdentityRows
+  );
   const sizes = new Map(input.resources.resources.map((resource) => [
     resource.projectRelativePath,
-    resourceSize(resource, resourceLabel(resource, input.canonicalRoot), measureLabelWidth)
+    resourceSize(resource, labels.get(resource.projectRelativePath)!, genericSizes)
   ]));
   const columnWidths: number[] = [];
   for (const tree of trees) {
@@ -167,25 +174,6 @@ export function projectCanvasScene(input: {
   };
 }
 
-function measureCanvasLabelWidth(label: string): number {
-  const cached = labelWidthCache.get(label);
-  if (cached !== undefined) {
-    return cached;
-  }
-  if (!labelContext) {
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    if (!context) {
-      throw new Error('Canvas label measurement is unavailable.');
-    }
-    context.font = LABEL_FONT;
-    labelContext = context;
-  }
-  const width = labelContext.measureText(label).width;
-  labelWidthCache.set(label, width);
-  return width;
-}
-
 function resourceLabel(resource: CanvasResource, canonicalRoot: string): string {
   if (resource.projectRelativePath) {
     return resource.projectRelativePath.split('/').at(-1)!;
@@ -197,7 +185,7 @@ function resourceLabel(resource: CanvasResource, canonicalRoot: string): string 
 function resourceSize(
   resource: CanvasResource,
   label: string,
-  measureLabelWidth: LabelWidthMeasurer
+  genericSizes: ReadonlyMap<string, CanvasGenericNodeSceneSize>
 ): LayoutSize {
   if (resource.nodeKind === 'file') {
     if (resource.mediaKind === 'text') {
@@ -209,18 +197,39 @@ function resourceSize(
     if (resource.mediaKind === 'image' && resource.imageDimensions) {
       return resource.imageDimensions;
     }
-    if (resource.mediaKind === 'video' && resource.videoPresentation) {
-      return {
-        width: resource.videoPresentation.width,
-        height: resource.videoPresentation.height
-      };
+    if (resource.mediaKind === 'video') {
+      return resource.videoPresentation
+        ? {
+            width: resource.videoPresentation.width,
+            height: resource.videoPresentation.height
+          }
+        : {
+            width: UNAVAILABLE_VIDEO_WIDTH,
+            height: UNAVAILABLE_VIDEO_HEIGHT
+          };
     }
   }
-  const cssWidth = Math.min(
-    GENERIC_MAX_WIDTH,
-    Math.max(GENERIC_MIN_WIDTH, measureLabelWidth(label) + GENERIC_HORIZONTAL_CHROME)
-  );
-  return { width: cssWidth * INTERNAL_SCALE, height: GENERIC_HEIGHT };
+  const genericSize = genericSizes.get(label);
+  if (!genericSize) {
+    throw new Error(`Canvas generic geometry is missing for ${JSON.stringify(label)}.`);
+  }
+  return genericSize;
+}
+
+function resourceUsesGenericGeometry(resource: CanvasResource): boolean {
+  if (resource.nodeKind !== 'file') {
+    return true;
+  }
+  if (resource.mediaKind === 'text' || resource.mediaKind === 'audio') {
+    return false;
+  }
+  if (resource.mediaKind === 'image' && resource.imageDimensions) {
+    return false;
+  }
+  if (resource.mediaKind === 'video') {
+    return false;
+  }
+  return true;
 }
 
 function buildLayoutTrees(resources: readonly CanvasResource[]): LayoutTreeNode[] {

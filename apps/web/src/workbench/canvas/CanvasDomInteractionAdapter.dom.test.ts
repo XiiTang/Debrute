@@ -15,7 +15,7 @@ describe('resolveCanvasDomInteractionTarget', () => {
     expect(resolveCanvasDomInteractionTarget(surface, outside)).toEqual({ kind: 'outside' });
   });
 
-  it('returns one semantic node target for passive presentation and every interaction zone', () => {
+  it('returns one semantic node target for every stable interaction region', () => {
     const surface = document.createElement('div');
     const node = document.createElement('div');
     node.dataset.canvasEntity = 'node';
@@ -25,7 +25,7 @@ describe('resolveCanvasDomInteractionTarget', () => {
     surface.append(node);
 
     const targets = new Set<string>();
-    for (const zone of ['passive', 'move', 'activate', 'action', 'interaction-island', 'resize', 'feedback'] as const) {
+    for (const zone of ['content', 'manipulation', 'action', 'content-island', 'resize', 'feedback'] as const) {
       const wrapper = document.createElement('div');
       const child = document.createElement('span');
       wrapper.dataset.canvasNodeZone = zone;
@@ -36,30 +36,41 @@ describe('resolveCanvasDomInteractionTarget', () => {
         kind: 'node',
         projectRelativePath: 'media/clip.mp4',
         mediaKind: 'video',
-        zone
+        zone,
+        directManipulation: false,
+        contentControl: false
       });
       targets.add(zone);
     }
-    expect(targets).toHaveLength(7);
+    expect(targets).toHaveLength(6);
   });
 
-  it('keeps a real button as a node action and an active editor as a node interaction island', () => {
+  it('keeps content controls in content, title-bar buttons as actions, and editor islands stable', () => {
     const surface = document.createElement('div');
     const node = document.createElement('div');
     node.dataset.canvasEntity = 'node';
     node.dataset.canvasNodePath = 'notes/readme.md';
     const activationZone = document.createElement('div');
-    activationZone.dataset.canvasNodeZone = 'activate';
+    activationZone.dataset.canvasNodeZone = 'content';
     const button = document.createElement('button');
     activationZone.append(button);
+    const actionZone = document.createElement('div');
+    actionZone.dataset.canvasNodeZone = 'action';
+    const actionButton = document.createElement('button');
+    actionZone.append(actionButton);
     const resizeHandle = document.createElement('button');
     resizeHandle.dataset.canvasNodeZone = 'resize';
     const editor = document.createElement('div');
-    editor.dataset.canvasInteractionIsland = 'true';
-    node.append(activationZone, resizeHandle, editor);
+    editor.dataset.canvasNodeZone = 'content-island';
+    node.append(activationZone, actionZone, resizeHandle, editor);
     surface.append(node);
 
     expect(resolveCanvasDomInteractionTarget(surface, button)).toMatchObject({
+      kind: 'node',
+      projectRelativePath: 'notes/readme.md',
+      zone: 'content'
+    });
+    expect(resolveCanvasDomInteractionTarget(surface, actionButton)).toMatchObject({
       kind: 'node',
       projectRelativePath: 'notes/readme.md',
       zone: 'action'
@@ -67,12 +78,64 @@ describe('resolveCanvasDomInteractionTarget', () => {
     expect(resolveCanvasDomInteractionTarget(surface, editor)).toMatchObject({
       kind: 'node',
       projectRelativePath: 'notes/readme.md',
-      zone: 'interaction-island'
+      zone: 'content-island'
     });
     expect(resolveCanvasDomInteractionTarget(surface, resizeHandle)).toMatchObject({
       kind: 'node',
       projectRelativePath: 'notes/readme.md',
       zone: 'resize'
+    });
+  });
+
+  it('keeps nested media controls in content and identifies range direct manipulation', () => {
+    const surface = document.createElement('div');
+    const node = document.createElement('div');
+    node.dataset.canvasEntity = 'node';
+    node.dataset.canvasNodePath = 'media/clip.mp4';
+    node.dataset.canvasMediaKind = 'video';
+    const content = document.createElement('div');
+    content.dataset.canvasNodeZone = 'content';
+    const button = document.createElement('media-play-button');
+    const range = document.createElement('media-time-range');
+    range.dataset.canvasDirectManipulation = 'true';
+    content.append(button, range);
+    node.append(content);
+    surface.append(node);
+
+    expect(resolveCanvasDomInteractionTarget(surface, button)).toMatchObject({
+      zone: 'content',
+      contentControl: true,
+      directManipulation: false
+    });
+    expect(resolveCanvasDomInteractionTarget(surface, range)).toMatchObject({
+      zone: 'content',
+      contentControl: false,
+      directManipulation: true
+    });
+  });
+
+  it('lets an already mounted video own its playback click without a second Canvas handoff', () => {
+    const surface = document.createElement('div');
+    const node = document.createElement('div');
+    node.dataset.canvasEntity = 'node';
+    node.dataset.canvasNodePath = 'media/clip.mp4';
+    node.dataset.canvasMediaKind = 'video';
+    const content = document.createElement('div');
+    content.dataset.canvasNodeZone = 'content';
+    const controller = document.createElement('media-controller');
+    const video = document.createElement('video');
+    controller.append(video);
+    content.append(controller);
+    node.append(content);
+    surface.append(node);
+
+    expect(resolveCanvasDomInteractionTarget(surface, controller)).toMatchObject({
+      zone: 'content',
+      contentControl: true
+    });
+    expect(resolveCanvasDomInteractionTarget(surface, video)).toMatchObject({
+      zone: 'content',
+      contentControl: true
     });
   });
 

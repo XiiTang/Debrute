@@ -35,6 +35,44 @@ this one selection, not separate selection states. It contains only Canvas
 Nodes and is not Canvas State.
 _Avoid_: Mixed selection, selected assets
 
+**Canvas Content Activation**:
+The transient, optional identity of the one text, video, or audio Canvas Node whose
+Content Region currently accepts direct content-specific interaction. It is
+distinct from Canvas Node Selection but may exist only when that node is the
+sole selected node; Selection alone never activates content. It is not Canvas
+State. Generic and image nodes have no Content Region.
+_Avoid_: Canvas Node Selection, active node, persisted focus
+
+**Canvas Content Region**:
+The text body, video player, or audio player area reserved for content-specific
+pointer and keyboard behavior. It never initiates Canvas Node movement.
+_Avoid_: Canvas Node, Node Manipulation Region, preview node
+
+**Content Interaction Island**:
+A popup or portal owned by the currently active Content Region. A completed
+click inside it preserves Canvas Content Activation even when its DOM is
+outside the Canvas Node or CanvasSurface.
+_Avoid_: Workbench overlay, Node Manipulation Region, global focus scope
+
+**Content Activation Click**:
+One successful unmodified click in an inactive Content Region that atomically
+sole-selects its node, establishes Canvas Content Activation, and applies the
+click's content action exactly once. Text places the editor caret at the
+original click position; video toggles playback; and an audio button applies
+its targeted control action. An audio time- or volume-range press is an
+immediate direct-manipulation activation rather than a Content Activation
+Click. It is one gesture, not an activation click followed by a simulated
+second click.
+_Avoid_: Double click, click replay, select then activate, preview click
+
+**Node Manipulation Region**:
+The non-action background of a text, video, or audio Canvas Node title bar. A
+completed click there selects the node and ends Canvas Content Activation; a
+drag gesture beginning there may move the node. Title-bar actions and resize
+handles remain separate action and resize targets; the visual node frame is not
+a manipulation target.
+_Avoid_: Interaction area, Canvas Content Region, whole-node drag target, visual frame
+
 **Selection Marquee**:
 A transient pointer interaction and displayed rectangle that updates the Canvas
 Node Selection from every Canvas Node whose current displayed rectangle
@@ -69,9 +107,26 @@ Deterministic hierarchy placement recalculated from currently visible Project
 Tree nodes. Manual rectangles override only their own nodes.
 _Avoid_: Saved layout, fallback layout
 
+**Automatic Generic Node Width**:
+The content-responsive displayed width that Automatic Layout assigns to a
+Canvas Node rendered with the generic node presentation, including Project
+roots, directories, unknown resources, and images without intrinsic
+dimensions. It grows continuously with the intrinsic width of the stable node
+identity row between one Canvas-owned minimum and maximum; those bounds are not
+size tiers and have one owner in camera-independent presentation pixels. The
+initial bounds are 120 and 360 presentation pixels. The measured width is
+rounded upward before clamping; only the maximum may cause an
+Automatic Layout label to be ellipsized. Transient error or availability copy
+does not change this geometry. Camera changes never alter this width or its
+label overflow, and the bounds never constrain or rewrite Manual Layout.
+Resource presentations with an explicit media sizing policy retain that policy.
+_Avoid_: Folder node length, folder-only width, size preset, resource-name length limit, Manual Layout limit
+
 **Manual Layout**:
-A persisted node rectangle created by direct move or resize and preserved while
-the Project Path exists.
+A complete persisted node rectangle created by direct move or resize and
+preserved while the Project Path exists. Automatic width bounds never rewrite
+its position or size; Reset Layout deletes it and returns the node to current
+Automatic Layout.
 _Avoid_: Locked node, drag preview
 
 **Manual Layout Draft**:

@@ -14,18 +14,18 @@ describe('workbench focus command router', () => {
     expect(workbenchFocusCommandFromKeyboardEvent(key('c'), 'darwin')).toBeUndefined();
   });
 
-  it('uses Escape priority: pointer interaction, Cut, then node selection', () => {
+  it('uses Escape priority: pointer interaction, Content Activation, Cut, then node selection', () => {
     const projection = {
-      nodes: [node('a.png'), node('b.png')],
+      nodes: [textNode('a.md'), node('b.png')],
       edges: []
     };
     const runtime = createCanvasEditorRuntime({
       initialProjection: projection,
       submitManualLayout: async () => undefined,
-      selection: { kind: 'nodes', projectRelativePaths: ['a.png'] }
+      selection: { kind: 'nodes', projectRelativePaths: ['a.md'] }
     });
     const clearCut = vi.fn();
-    const explorer = { fileClipboard: { operation: 'cut' as const, entries: [{ projectRelativePath: 'a.png', kind: 'file' as const }] }, clearCut };
+    const explorer = { fileClipboard: { operation: 'cut' as const, entries: [{ projectRelativePath: 'a.md', kind: 'file' as const }] }, clearCut };
     const router = createWorkbenchFocusCommandRouter({
       getRuntime: () => runtime,
       getProjection: () => projection,
@@ -34,6 +34,7 @@ describe('workbench focus command router', () => {
       getExplorerController: () => explorer
     });
 
+    runtime.activateContent('a.md');
     runtime.input.beginSelectionMarquee({
       pointerId: 1,
       screenPoint: { x: 0, y: 0 },
@@ -41,6 +42,14 @@ describe('workbench focus command router', () => {
     });
     expect(router.dispatch('escape', 'other')).toBe(true);
     expect(runtime.getSnapshot().pointerInteraction).toBeUndefined();
+    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe('a.md');
+    expect(clearCut).not.toHaveBeenCalled();
+    expect(router.dispatch('escape', 'other')).toBe(true);
+    expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
+    expect(runtime.getSnapshot().selection).toEqual({
+      kind: 'nodes',
+      projectRelativePaths: ['a.md']
+    });
     expect(clearCut).not.toHaveBeenCalled();
     router.dispatch('escape', 'canvas');
     expect(clearCut).toHaveBeenCalledOnce();
@@ -147,6 +156,20 @@ function node(path: string) {
       state: 'available' as const,
       size: 10,
       mimeType: 'image/png',
+      fileUrl: `/files/${path}`,
+      revision: 'rev'
+    }
+  };
+}
+
+function textNode(path: string) {
+  return {
+    ...node(path),
+    mediaKind: 'text' as const,
+    availability: {
+      state: 'available' as const,
+      size: 10,
+      mimeType: 'text/markdown',
       fileUrl: `/files/${path}`,
       revision: 'rev'
     }

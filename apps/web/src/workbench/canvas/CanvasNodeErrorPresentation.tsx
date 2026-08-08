@@ -32,3 +32,18 @@ export function CanvasNodeErrorPresentation({
     </div>
   );
 }
+
+export function CanvasContentErrorPresentation({
+  message
+}: {
+  message: string;
+}): React.ReactElement {
+  const i18n = useI18n();
+  return (
+    <div className="canvas-content-error" role="alert">
+      <AlertTriangle size={18} />
+      <span>{message}</span>
+      <strong>{i18n.t('canvas.node.clickToRetry')}</strong>
+    </div>
+  );
+}

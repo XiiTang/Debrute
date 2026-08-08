@@ -157,7 +157,7 @@ authoritative cross-window projection; a rejected write restores the latest
 Runtime-confirmed appearance. There is no apply action, restore-default action,
 custom font input, font import, or temporary preview editor.
 
-For an inline Canvas text node, explicit Content Interaction owns the live
+For an inline Canvas text node, explicit Content Activation owns the live
 editor. Canvas Node Selection alone does not. DOM focus is an input detail
 rather than the ownership source. Pressing an inactive preview does not select
 or activate it. Pointer release within the same preview commits the node
@@ -319,7 +319,7 @@ movement or node dragging. Readiness, DOM snapshot slices, image decode, draw,
 and PNG encoding run only for that current job; inactive nodes remain `<img>`
 presentations rather than retaining CodeMirror DOM or loading an editor buffer.
 The title chrome and mounted preview are valid without a `TextFileBuffer`; only
-Content Interaction requests the live editor body. The lane incrementally
+Content Activation requests the live editor body. The lane incrementally
 rebuilds the current CodeMirror DOM from shallow element clones and text nodes,
 copying an explicit allowlist of pixel-affecting computed styles over eligible
 animation frames with a source-defined slice target. It removes cursor,

@@ -48,6 +48,7 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
+    const onContentError = vi.fn();
     const decodeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'decode');
     Object.defineProperty(HTMLImageElement.prototype, 'decode', {
       configurable: true,
@@ -68,6 +69,7 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
                 actions={actionsFixture()}
                 textBuffer={textBuffer()}
                 textPreviewRequest={textPreviewRequest()}
+                onContentError={onContentError}
                 onVideoPlayerMounted={() => undefined}
                 onVideoPlayingChange={() => undefined}
                 onRegisterVideoTarget={() => undefined}
@@ -88,14 +90,17 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
       await act(async () => undefined);
       await renderNode(true);
 
-      await waitFor(() => container.querySelector('.canvas-text-message--overlay') !== null);
-      const overlay = container.querySelector('.canvas-text-message--overlay');
+      await waitFor(() => container.querySelector('.canvas-content-error') !== null);
+      const overlay = container.querySelector('.canvas-content-error');
       expect(overlay?.textContent).toContain('Text Error');
+      expect(overlay?.textContent).toContain('Click to retry');
+      expect(overlay?.querySelector('button')).toBeNull();
       expect(overlay?.querySelector('span')?.textContent).not.toBe('');
       expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
         'data-canvas-raster-preview-hidden'
       )).toBe('false');
       expect(container.querySelector('[data-canvas-text-editor="true"]')).toBeNull();
+      expect(onContentError).toHaveBeenCalledWith('flow/readme.md');
     } finally {
       await act(async () => root.unmount());
       container.remove();

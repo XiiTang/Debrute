@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, Music2, RefreshCw, Save } from '../ui/index.js';
+import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, RefreshCw, Save } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
+import { CanvasAudioNodeContent } from './CanvasAudioNodeContent.js';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
-import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
 import type { CanvasSceneActions } from './CanvasSceneActions.js';
 import { canvasImageRasterPreviewRequestForNode } from './canvasImagePreviewTarget';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
@@ -16,7 +17,10 @@ import {
   type CanvasRasterPreviewRequest
 } from './CanvasRasterPreviewPresentation';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
-import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
+import {
+  CanvasContentErrorPresentation,
+  CanvasNodeErrorPresentation
+} from './CanvasNodeErrorPresentation';
 import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui/index.js';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
@@ -27,7 +31,7 @@ import {
 import {
   CANVAS_NODE_PRESENTATION_SCALE,
   canvasTextPresentationGeometry
-} from './CanvasTextPresentationGeometry.js';
+} from './CanvasNodePresentationGeometry.js';
 
 const GENERIC_NODE_WRAP_VISUAL_HEIGHT = 88;
 const CanvasTextEditor = React.lazy(async () => {
@@ -66,7 +70,7 @@ export interface CanvasNodeContentProps {
   videoPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
-  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
+  contentHandoffRequest?: CanvasContentHandoffRequest | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
@@ -79,6 +83,8 @@ export interface CanvasNodeContentProps {
   onFeedbackItemActivate?: ((projectRelativePath: string, itemId: string) => void) | undefined;
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
+  onContentError: (projectRelativePath: string) => void;
+  onContentHandoffConsumed?: ((requestId: number) => void) | undefined;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
@@ -94,7 +100,7 @@ export function CanvasNodeContent({
   videoPreviewRequest,
   videoPreviewError,
   forceVideoPlayerMounted = false,
-  previewActivationRequest,
+  contentHandoffRequest,
   feedbackEntry,
   activeFeedbackItemId,
   localFeedbackMode,
@@ -104,13 +110,13 @@ export function CanvasNodeContent({
   onFeedbackItemActivate,
   onVideoPlayerMounted,
   onVideoPlayingChange,
+  onContentError,
+  onContentHandoffConsumed,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
   onUpdateTextViewport
 }: CanvasNodeContentProps): React.ReactElement {
   const i18n = useI18n();
-  const [mediaError, setMediaError] = useState<string>();
-  const [mediaRetryNonce, setMediaRetryNonce] = useState(0);
   const requestedTextBufferKeyRef = useRef<string | undefined>(undefined);
   const ensureTextFileBufferRef = useRef(actions.ensureTextFileBuffer);
   const textBufferEnsureKey = canvasTextBufferEnsureKey(
@@ -118,18 +124,7 @@ export function CanvasNodeContent({
     textBuffer,
     contentInteractionActive
   );
-  const mediaSrc = node.mediaKind === 'image'
-    ? undefined
-    : node.availability.state === 'available'
-      ? node.availability.fileUrl
-      : undefined;
-
   ensureTextFileBufferRef.current = actions.ensureTextFileBuffer;
-
-  useEffect(() => {
-    setMediaError(undefined);
-    setMediaRetryNonce(0);
-  }, [mediaSrc, node.mediaKind]);
 
   useEffect(() => {
     if (!textBufferEnsureKey) {
@@ -149,12 +144,7 @@ export function CanvasNodeContent({
   const availabilityProblem = node.availability.state === 'available' || node.availability.state === 'directory'
     ? undefined
     : { title: nodeAvailabilityTitle(node.availability.state, i18n), message: node.availability.message };
-  const mediaProblem = node.mediaKind === 'image' || !mediaError ? undefined : { title: i18n.t('canvas.node.loadError'), message: mediaError };
-  const problem = mediaProblem ?? availabilityProblem;
-  const retryMediaLoad = () => {
-    setMediaError(undefined);
-    setMediaRetryNonce((current) => current + 1);
-  };
+  const problem = availabilityProblem;
 
   if (node.nodeKind === 'directory' || node.mediaKind === 'unknown' || !node.mediaKind) {
     return <CanvasGenericNodeContent node={node} problem={problem} />;
@@ -170,7 +160,9 @@ export function CanvasNodeContent({
         actions={actions}
         textPreviewRequest={textPreviewRequest}
         textPreviewError={textPreviewError}
-        previewActivationRequest={previewActivationRequest}
+        contentHandoffRequest={contentHandoffRequest}
+        onContentError={onContentError}
+        onContentHandoffConsumed={onContentHandoffConsumed}
         onUpdateTextViewport={onUpdateTextViewport}
         i18n={i18n}
       />
@@ -185,9 +177,11 @@ export function CanvasNodeContent({
         videoPreviewRequest={videoPreviewRequest}
         videoPreviewError={videoPreviewError}
         forcePlayerMounted={forceVideoPlayerMounted}
-        previewActivationRequest={previewActivationRequest}
+        contentHandoffRequest={contentHandoffRequest}
         onPlayerMounted={onVideoPlayerMounted}
         onPlayingChange={onVideoPlayingChange}
+        onContentError={onContentError}
+        onContentHandoffConsumed={onContentHandoffConsumed}
         onRegisterVideoTarget={onRegisterVideoTarget}
         onUpdatePlaybackTime={onUpdateVideoPlaybackTime}
         feedbackEntry={feedbackEntry}
@@ -201,68 +195,47 @@ export function CanvasNodeContent({
     );
   }
 
+  if (node.mediaKind === 'audio') {
+    return (
+      <CanvasAudioNodeContent
+        node={node}
+        contentInteractionActive={contentInteractionActive}
+        onContentError={onContentError}
+      />
+    );
+  }
+
   const canRenderMediaPreview = node.availability.state === 'available'
-    && (node.mediaKind === 'image' || mediaSrc !== undefined)
-    && (!problem || node.mediaKind === 'image');
+    && node.mediaKind === 'image';
 
   return (
     <>
       {canRenderMediaPreview ? (
         <div
           className="canvas-node-preview"
-          data-canvas-node-zone={node.mediaKind === 'audio' ? contentInteractionActive ? 'passive' : 'activate' : undefined}
         >
-          {node.mediaKind === 'image' ? (
-            <>
-              <CanvasImageNodeContent node={node} />
-              <CanvasMediaFeedbackLayer
-                items={imageSpatialFeedbackItems(feedbackEntry)}
-                mode={localFeedbackMode}
-                draftRegions={localFeedbackRegions}
-                activeItemId={activeFeedbackItemId}
-                onItemActivate={(itemId) => onFeedbackItemActivate?.(node.projectRelativePath, itemId)}
-                onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
-                  projectRelativePath: node.projectRelativePath,
-                  geometry
-                })}
-              />
-            </>
-          ) : (
-            <audio
-              key={`${mediaSrc}:${mediaRetryNonce}`}
-              controls
-              preload="none"
-              src={mediaSrc}
-              inert={!contentInteractionActive}
-              data-canvas-interaction-island={contentInteractionActive ? 'true' : undefined}
-              onError={() => setMediaError(i18n.t('canvas.node.unableToLoad', { path: node.projectRelativePath }))}
-            />
-          )}
+          <CanvasImageNodeContent node={node} />
+          <CanvasMediaFeedbackLayer
+            items={imageSpatialFeedbackItems(feedbackEntry)}
+            mode={localFeedbackMode}
+            draftRegions={localFeedbackRegions}
+            activeItemId={activeFeedbackItemId}
+            onItemActivate={(itemId) => onFeedbackItemActivate?.(node.projectRelativePath, itemId)}
+            onRegionDraft={(geometry) => onLocalFeedbackDraft?.({
+              projectRelativePath: node.projectRelativePath,
+              geometry
+            })}
+          />
         </div>
       ) : (
         <div className="canvas-node-preview">
           <div className={problem ? 'db-canvas-node-placeholder db-canvas-node-placeholder--problem' : 'db-canvas-node-placeholder'}>
-            {problem ? <AlertTriangle size={22} /> : node.mediaKind === 'audio' ? <Music2 size={22} /> : <ImageIcon size={22} />}
+            {problem ? <AlertTriangle size={22} /> : <ImageIcon size={22} />}
             <strong>{problem?.title ?? mediaKindLabel(node.mediaKind, i18n)}</strong>
             <span>{problem?.message ?? nodeDisplayName(node)}</span>
-            {mediaProblem ? (
-              <Button
-                className="db-canvas-node-retry"
-                size="xs"
-                iconStart={<RefreshCw size={12} />}
-                onClick={retryMediaLoad}
-              >
-                {i18n.t('canvas.node.retry')}
-              </Button>
-            ) : null}
           </div>
         </div>
       )}
-      {node.mediaKind === 'audio' ? (
-        <div className="db-canvas-node-caption" data-canvas-node-zone="move">
-          <span>{nodeDisplayName(node)}</span>
-        </div>
-      ) : null}
     </>
   );
 }
@@ -283,7 +256,10 @@ export function canvasTextBufferEnsureKey(
     || node.availability.state !== 'available') {
     return undefined;
   }
-  if (textBuffer?.projectRelativePath === node.projectRelativePath) {
+  if (
+    textBuffer?.projectRelativePath === node.projectRelativePath
+    && textBuffer.error === undefined
+  ) {
     return undefined;
   }
   return node.projectRelativePath;
@@ -390,7 +366,9 @@ function CanvasTextNodeContent({
   actions,
   textPreviewRequest,
   textPreviewError,
-  previewActivationRequest,
+  contentHandoffRequest,
+  onContentError,
+  onContentHandoffConsumed,
   onUpdateTextViewport,
   i18n
 }: {
@@ -401,7 +379,9 @@ function CanvasTextNodeContent({
   actions: CanvasSceneActions;
   textPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   textPreviewError?: string | undefined;
-  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
+  contentHandoffRequest?: CanvasContentHandoffRequest | undefined;
+  onContentError: (projectRelativePath: string) => void;
+  onContentHandoffConsumed?: ((requestId: number) => void) | undefined;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
   i18n: WorkbenchI18n;
 }): React.ReactElement {
@@ -446,8 +426,7 @@ function CanvasTextNodeContent({
     : undefined;
   const textPreviewBlockingProblem = textRasterPreview.hasVisible ? undefined : textPreviewProblem;
   const textPreviewOverlayProblem = textRasterPreview.hasVisible ? textPreviewProblem : undefined;
-  const editorActivationProblem = active
-    && (buffer?.error !== undefined || editorActivationError !== undefined)
+  const editorActivationProblem = buffer?.error !== undefined || editorActivationError !== undefined
     ? {
         title: i18n.t('canvas.node.textError'),
         message: buffer?.error ?? editorActivationError?.message ?? i18n.t('canvas.node.textError')
@@ -459,30 +438,36 @@ function CanvasTextNodeContent({
     ?? editorActivationBlockingProblem
     ?? (visibleTextLayer === 'preview' ? textPreviewBlockingProblem : undefined);
   const overlayProblem = editorActivationOverlayProblem ?? textPreviewOverlayProblem;
-  const status = textBufferStatus(buffer, problem ?? editorActivationProblem ?? textPreviewProblem, active, i18n);
+  const status = problem || editorActivationProblem || textPreviewProblem
+    ? undefined
+    : textBufferStatus(buffer, active, i18n);
   useEffect(() => {
     if (
-      previewActivationRequest?.mediaKind !== 'text'
-      || previewActivationRequest.projectRelativePath !== node.projectRelativePath
+      contentHandoffRequest?.kind !== 'text-caret'
+      || contentHandoffRequest.projectRelativePath !== node.projectRelativePath
       || !active
-      || bodyProblem
-      || buffer?.error
-      || lastActivationRequestIdRef.current === previewActivationRequest.requestId
+      || lastActivationRequestIdRef.current === contentHandoffRequest.requestId
     ) {
       return;
     }
-    lastActivationRequestIdRef.current = previewActivationRequest.requestId;
+    lastActivationRequestIdRef.current = contentHandoffRequest.requestId;
+    setEditorActivationError(undefined);
+    if (currentTextPreviewError) {
+      retryCurrentTextPreview();
+    }
     setFocusRequest({
-      requestId: previewActivationRequest.requestId,
-      clientX: previewActivationRequest.clientX,
-      clientY: previewActivationRequest.clientY
+      requestId: contentHandoffRequest.requestId,
+      clientX: contentHandoffRequest.clientX,
+      clientY: contentHandoffRequest.clientY
     });
+    onContentHandoffConsumed?.(contentHandoffRequest.requestId);
   }, [
     active,
-    bodyProblem,
-    buffer?.error,
+    retryCurrentTextPreview,
+    currentTextPreviewError,
     node.projectRelativePath,
-    previewActivationRequest
+    contentHandoffRequest,
+    onContentHandoffConsumed
   ]);
   const geometry = canvasTextPresentationGeometry(node);
   const bodyRef = useCallback((element: HTMLDivElement | null) => {
@@ -517,13 +502,13 @@ function CanvasTextNodeContent({
   const failEditorActivation = useCallback((error: Error) => {
     setVisibleTextLayer('preview');
     setEditorActivationError(error);
-  }, []);
+    onContentError(node.projectRelativePath);
+  }, [node.projectRelativePath, onContentError]);
 
   useEffect(() => {
     if (active) {
       setHandoffViewport(undefined);
     } else {
-      setEditorActivationError(undefined);
       setFocusRequest(undefined);
     }
   }, [active]);
@@ -531,8 +516,16 @@ function CanvasTextNodeContent({
   useEffect(() => {
     if (active && buffer?.error !== undefined) {
       setVisibleTextLayer('preview');
+      onContentError(node.projectRelativePath);
     }
-  }, [active, buffer?.error]);
+  }, [active, buffer?.error, node.projectRelativePath, onContentError]);
+
+  const hasAvailabilityProblem = problem !== undefined;
+  useEffect(() => {
+    if (active && hasAvailabilityProblem) {
+      onContentError(node.projectRelativePath);
+    }
+  }, [active, hasAvailabilityProblem, node.projectRelativePath, onContentError]);
 
   useEffect(() => {
     if (!active
@@ -588,24 +581,10 @@ function CanvasTextNodeContent({
         ref={bodyRef}
         className={bodyProblem ? 'canvas-text-body problem' : 'canvas-text-body'}
         data-canvas-local-wheel="focus"
-        data-canvas-node-zone={active ? 'passive' : 'activate'}
+        data-canvas-node-zone="content"
       >
         {bodyProblem ? (
-          <div className="canvas-text-message">
-            <AlertTriangle size={18} />
-            <strong>{bodyProblem.title}</strong>
-            <span>{bodyProblem.message}</span>
-            {textPreviewBlockingProblem !== undefined && bodyProblem === textPreviewBlockingProblem ? (
-              <Button
-                className="db-canvas-node-retry"
-                size="xs"
-                iconStart={<RefreshCw size={12} />}
-                onClick={retryCurrentTextPreview}
-              >
-                {i18n.t('canvas.node.retry')}
-              </Button>
-            ) : null}
-          </div>
+          <CanvasContentErrorPresentation message={`${bodyProblem.title}: ${bodyProblem.message}`} />
         ) : (
           <>
             {showTextEditor ? (
@@ -649,21 +628,7 @@ function CanvasTextNodeContent({
             ) : null}
             {textRasterPreview.layers}
             {!showTextEditor && overlayProblem ? (
-              <div className="canvas-text-message canvas-text-message--overlay">
-                <AlertTriangle size={18} />
-                <strong>{overlayProblem.title}</strong>
-                <span>{overlayProblem.message}</span>
-                {overlayProblem === textPreviewOverlayProblem ? (
-                  <Button
-                    className="db-canvas-node-retry"
-                    size="xs"
-                    iconStart={<RefreshCw size={12} />}
-                    onClick={retryCurrentTextPreview}
-                  >
-                    {i18n.t('canvas.node.retry')}
-                  </Button>
-                ) : null}
-              </div>
+              <CanvasContentErrorPresentation message={`${overlayProblem.title}: ${overlayProblem.message}`} />
             ) : null}
           </>
         )}
@@ -674,13 +639,9 @@ function CanvasTextNodeContent({
 
 function textBufferStatus(
   buffer: TextFileBuffer | undefined,
-  problem: { title: string; message: string } | undefined,
   contentRequested: boolean,
   i18n: WorkbenchI18n
 ): { label: string; tone: 'danger' | 'info' | 'loading' } | undefined {
-  if (problem || buffer?.error) {
-    return { label: i18n.t('canvas.node.error'), tone: 'danger' };
-  }
   if (!buffer) {
     return contentRequested
       ? { label: i18n.t('canvas.node.loading'), tone: 'loading' }

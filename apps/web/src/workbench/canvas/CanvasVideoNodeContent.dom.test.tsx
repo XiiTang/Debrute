@@ -8,7 +8,11 @@ import {
 } from '@debrute/canvas-core';
 import type { CanvasFeedbackEntry } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from './CanvasScene.js';
-import { CanvasVideoNodeContent, canvasVideoFrameContentBox } from './CanvasVideoNodeContent';
+import {
+  CanvasVideoNodeContent as CanvasVideoNodeContentImplementation,
+  canvasVideoFrameContentBox,
+  type CanvasVideoNodeContentProps
+} from './CanvasVideoNodeContent';
 import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation';
 import { I18nProvider } from '../i18n';
 
@@ -66,7 +70,8 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onPlayingChange,
       onPlaybackBoundary,
       onReadyForDisplay,
-      playRequest,
+      playbackToggleRequest,
+      contentInteractionActive,
       formatPlayError
     }: {
       node: ProjectedCanvasNode;
@@ -75,26 +80,24 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       onPlayingChange: (playing: boolean) => void;
       onPlaybackBoundary: (currentTimeMs: number) => void;
       onReadyForDisplay: () => void;
-      playRequest?: { requestId: number } | undefined;
+      playbackToggleRequest?: { requestId: number } | undefined;
+      contentInteractionActive?: boolean | undefined;
       formatPlayError: (projectRelativePath: string) => string;
     },
     ref: React.ForwardedRef<unknown>
   ) {
     React.useImperativeHandle(ref, () => ({
-      togglePlayback: vi.fn(),
-      seekBy: vi.fn(),
-      toggleMuted: vi.fn(),
-      adjustPlaybackRate: vi.fn(),
-      toggleCaptions: vi.fn(),
-      enterFullscreen: vi.fn(),
-      togglePictureInPicture: vi.fn()
+      readCurrentTimeSeconds: vi.fn(),
+      pauseAt: vi.fn(),
+      restorePersistedTime: vi.fn()
     }), []);
     return (
       <div
         data-testid="video-player-adapter"
         data-path={node.projectRelativePath}
         data-initial-time={initialTimeMs}
-        data-play-request-id={playRequest?.requestId}
+        data-playback-toggle-request-id={playbackToggleRequest?.requestId}
+        data-content-active={contentInteractionActive ? 'true' : 'false'}
       >
         <video src={node.availability.state === 'available' ? node.availability.fileUrl : undefined} />
         <button type="button" data-testid="mock-video-error" onClick={() => onError(formatPlayError(node.projectRelativePath))}>
@@ -135,6 +138,19 @@ afterEach(() => {
   vi.restoreAllMocks();
   runtimeMocks.retryPreview.mockReset();
 });
+
+function CanvasVideoNodeContent(
+  props: Omit<CanvasVideoNodeContentProps, 'onContentError'> & {
+    onContentError?: CanvasVideoNodeContentProps['onContentError'] | undefined;
+  }
+): React.ReactElement {
+  return (
+    <CanvasVideoNodeContentImplementation
+      {...props}
+      onContentError={props.onContentError ?? (() => undefined)}
+    />
+  );
+}
 
 describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
   it('computes the video frame content box inside horizontal or vertical letterboxing', () => {
@@ -243,16 +259,17 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     );
 
     expect(html).toContain('preview frame is unavailable');
-    expect(html).toContain('db-canvas-node-error-overlay');
-    expect(html).toContain('canvas-node-error-presentation');
-    expect(html).toContain('Retry');
+    expect(html).toContain('canvas-content-error');
+    expect(html).toContain('Click to retry');
+    expect(html).not.toContain('<button');
     expect(html).not.toContain('data-testid="video-player-adapter"');
   });
 
-  it('passes one play request when pointerup activation selects the inactive preview', async () => {
+  it('passes one playback-toggle request when pointerup activates the inactive Content Region', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
+    const onContentHandoffConsumed = vi.fn();
     try {
       await act(async () => {
         root.render(
@@ -269,7 +286,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       });
 
       expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
-      expect(container.querySelector('.canvas-video-player-shell')?.getAttribute('data-canvas-node-zone')).toBe('activate');
+      expect(container.querySelector('.canvas-video-player-shell')?.getAttribute('data-canvas-node-zone')).toBe('content');
 
       await act(async () => {
         root.render(
@@ -278,12 +295,62 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
               node={videoNode()}
               contentInteractionActive
               videoPreviewRequest={previewSource()}
-              previewActivationRequest={{
+              contentHandoffRequest={{
                 requestId: 17,
                 projectRelativePath: 'media/clip.mp4',
-                mediaKind: 'video',
-                clientX: 120,
-                clientY: 80
+                kind: 'video-toggle'
+              }}
+              onContentHandoffConsumed={onContentHandoffConsumed}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute('data-playback-toggle-request-id')).toBe('17');
+      expect(container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute('data-content-active')).toBe('true');
+      expect(container.querySelector('.canvas-video-player-shell')?.getAttribute('data-canvas-node-zone')).toBe('content');
+      expect(onContentHandoffConsumed).toHaveBeenCalledOnce();
+      expect(onContentHandoffConsumed).toHaveBeenCalledWith(17);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('retries a failed preview while mounting one playback-toggle request from the new click', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive={false}
+              videoPreviewError="preview frame is unavailable"
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive
+              videoPreviewError="preview frame is unavailable"
+              contentHandoffRequest={{
+                kind: 'video-toggle',
+                requestId: 18,
+                projectRelativePath: 'media/clip.mp4'
               }}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
@@ -292,12 +359,13 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
         );
       });
 
-      expect(container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute('data-play-request-id')).toBe('17');
-      expect(container.querySelector('[data-canvas-video-layer="player"]')?.getAttribute('data-canvas-interaction-island')).toBe('true');
+      expect(runtimeMocks.retryPreview).toHaveBeenCalledOnce();
+      expect(runtimeMocks.retryPreview).toHaveBeenCalledWith('media/clip.mp4');
+      expect(container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute(
+        'data-playback-toggle-request-id'
+      )).toBe('18');
     } finally {
-      await act(async () => {
-        root.unmount();
-      });
+      await act(async () => root.unmount());
       container.remove();
     }
   });
@@ -424,10 +492,11 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('keeps the preview visible when the pending player reports an error', async () => {
+  it('discards the failed player and replaces the whole Content Region with the retry surface', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
+    const onContentError = vi.fn();
 
     try {
       await act(async () => {
@@ -437,6 +506,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
               node={videoNode()}
               contentInteractionActive={false}
               videoPreviewRequest={previewSource()}
+              onContentError={onContentError}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -456,6 +526,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
               node={videoNode()}
               contentInteractionActive
               videoPreviewRequest={previewSource()}
+              onContentError={onContentError}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={() => undefined}
             />
@@ -466,8 +537,12 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
         button(container, 'mock-video-error').click();
       });
 
-      expect(videoPreviewIsVisible(container)).toBe(true);
+      expect(videoPreviewIsVisible(container)).toBe(false);
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
+      expect(container.querySelector('.canvas-content-error')).not.toBeNull();
       expect(container.textContent).toContain('Unable to play media/clip.mp4.');
+      expect(container.textContent).toContain('Click to retry');
+      expect(onContentError).toHaveBeenCalledWith('media/clip.mp4');
     } finally {
       await act(async () => {
         root.unmount();
@@ -561,7 +636,9 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       </I18nProvider>
     );
 
-    expect(html).toContain('db-canvas-node-placeholder');
+    expect(html).toContain('canvas-content-error');
+    expect(html).toContain('Click to retry');
+    expect(html).not.toContain('<button');
     expect(html).toContain('db-canvas-node-titlebar');
     expect(html).toContain('clip.mp4');
   });
@@ -641,6 +718,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
             <CanvasVideoNodeContent
               node={videoNode()}
               contentInteractionActive
+              videoPreviewRequest={previewSource()}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={onUpdatePlaybackTime}
             />
@@ -656,6 +734,22 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
         button(container, 'mock-video-paused').click();
       });
       expect(onUpdatePlaybackTime).toHaveBeenLastCalledWith('media/clip.mp4', 4_250);
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive={false}
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+
       expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
 
       await act(async () => {
@@ -718,7 +812,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('keeps a playing video mounted after losing selection', async () => {
+  it('keeps a playing video mounted and locally operable after Content Activation ends', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -757,9 +851,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
       expect(videoPreviewIsVisible(container)).toBe(false);
       const playerLayer = container.querySelector('[data-canvas-video-layer="player"]');
-      expect(playerLayer?.hasAttribute('data-canvas-interaction-island')).toBe(false);
-      expect(playerLayer?.hasAttribute('inert')).toBe(true);
-      expect(container.querySelector('.canvas-video-player-shell')?.getAttribute('data-canvas-node-zone')).toBe('activate');
+      expect(playerLayer?.hasAttribute('inert')).toBe(false);
+      expect(container.querySelector('.canvas-video-player-shell')?.getAttribute('data-canvas-node-zone')).toBe('content');
     } finally {
       await act(async () => {
         root.unmount();
@@ -850,6 +943,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       container.remove();
     }
   });
+
 });
 
 function videoNode(options: {

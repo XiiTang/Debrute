@@ -196,6 +196,7 @@ function moveState(path: string, originX: number, currentX: number): Extract<Can
     start: { x: 0, y: 0 },
     current: { x: currentX - originX, y: 0 },
     initialSelection: undefined,
+    initialContentInteractionProjectRelativePath: undefined,
     pressedProjectRelativePath: path,
     additive: false,
     origins: [{ projectRelativePath: path, x: originX, y: 0, width: 200, height: 120 }]

@@ -10,7 +10,11 @@ import type {
 import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import type { CanvasPoint, ResizeHandle } from '../services/canvasInteraction.js';
+import {
+  isAdditiveCanvasSelectionModifier,
+  type CanvasPoint,
+  type ResizeHandle
+} from '../services/canvasInteraction.js';
 import { projectPathCommandEntryForCanvasNode } from '../services/projectPathCommandTarget.js';
 import {
   type CanvasFeedbackNodeBarTarget
@@ -20,14 +24,18 @@ import {
   CanvasRasterPreviewEnvironmentProvider,
   type CanvasRasterPreviewEnvironment
 } from './CanvasRasterPreviewPresentation';
-import { createCanvasVideoHotkeyController } from './CanvasVideoHotkeyController';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import {
   resolveCanvasDomInteractionTarget,
   type CanvasDomInteractionTarget,
-  type CanvasPreviewActivationRequest
+  type CanvasContentHandoffRequest
 } from './CanvasDomInteractionAdapter.js';
+import {
+  CANVAS_POINTER_ACTIVATION_DISTANCE,
+  decideCanvasInteraction,
+  type CanvasInteractionStateCommand
+} from './CanvasInteractionPolicy.js';
 import { CanvasMovingCameraHitTestBlocker } from './CanvasMovingCameraHitTestBlocker.js';
 import { CanvasNodeShell } from './CanvasNodeShell';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
@@ -93,10 +101,10 @@ import {
 
 const EMPTY_FEEDBACK_ITEM_IDS: ReadonlySet<string> = new Set();
 
-interface CanvasPreviewActivationCandidate {
+interface CanvasCompletedClickCandidate {
   pointerId: number;
-  projectRelativePath: string;
-  mediaKind: 'text' | 'video' | 'audio';
+  startScreen: CanvasPoint;
+  target: Extract<CanvasDomInteractionTarget, { kind: 'node' }>;
 }
 
 interface CanvasSurfaceProps {
@@ -213,9 +221,9 @@ function CanvasSurfaceRuntime({
   const canvasPerfPointerInteractionSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const reactCommitCountRef = useRef(0);
   const feedbackHoverSuspendedRef = useRef(false);
-  const previewActivationCandidateRef = useRef<CanvasPreviewActivationCandidate | undefined>(undefined);
-  const nextPreviewActivationRequestIdRef = useRef(0);
-  const [previewActivationRequest, setPreviewActivationRequest] = useState<CanvasPreviewActivationRequest>();
+  const completedClickCandidateRef = useRef<CanvasCompletedClickCandidate | undefined>(undefined);
+  const nextContentHandoffRequestIdRef = useRef(0);
+  const [contentHandoffRequest, setContentHandoffRequest] = useState<CanvasContentHandoffRequest>();
   const [playingVideoPaths, setPlayingVideoPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [requestedVideoPlayerPath, setRequestedVideoPlayerPath] = useState<string>();
   const [videoTargetRevision, setVideoTargetRevision] = useState(0);
@@ -278,14 +286,10 @@ function CanvasSurfaceRuntime({
   const projectedNodes = projection.nodes;
   const projectedNodesRef = useRef(projectedNodes);
   projectedNodesRef.current = projectedNodes;
-  const videoHotkeyController = useMemo(() => createCanvasVideoHotkeyController({
-    requestTargetMount: setRequestedVideoPlayerPath
-  }), []);
   const videoTargetsRef = useRef(new Map<string, CanvasVideoPlayerHandle>());
   const pendingFeedbackSeekRef = useRef(new Map<string, number>());
   const videoPlaybackUpdateVersionsRef = useRef(new Map<string, number>());
   const registerVideoTarget = useCallback((projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => {
-    videoHotkeyController.register(projectRelativePath, target);
     if (target) {
       videoTargetsRef.current.set(projectRelativePath, target);
       const pendingFeedbackSeek = pendingFeedbackSeekRef.current.get(projectRelativePath);
@@ -297,7 +301,7 @@ function CanvasSurfaceRuntime({
       videoTargetsRef.current.delete(projectRelativePath);
     }
     setVideoTargetRevision((current) => current + 1);
-  }, [videoHotkeyController]);
+  }, []);
   const devicePixelRatio = devicePixelRatioValue();
   const instrumentationMonitor = perfMonitor;
   const stageRuntime = useMemo(() => createCanvasStageRuntime({ perfMonitor: instrumentationMonitor }), [instrumentationMonitor]);
@@ -387,37 +391,6 @@ function CanvasSurfaceRuntime({
     renderLifecycle,
     surfaceElement: surfaceRef.current
   };
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (interactionBlocked) {
-        return;
-      }
-      const contentInteractionPath = runtime.getSnapshot().contentInteractionProjectRelativePath;
-      const contentInteractionNode = contentInteractionPath
-        ? projectedNodes.find((node) => node.projectRelativePath === contentInteractionPath)
-        : undefined;
-      const contentActiveVideoPath = contentInteractionNode?.mediaKind === 'video'
-        ? contentInteractionNode.projectRelativePath
-        : undefined;
-      const activeElement = document.activeElement;
-      const focusedCanvasNodePath = activeElement
-        ?.closest('[data-canvas-node-path]')
-        ?.getAttribute('data-canvas-node-path');
-      if (!contentActiveVideoPath || focusedCanvasNodePath !== contentActiveVideoPath) {
-        return;
-      }
-      videoHotkeyController.handleKeyDown({
-        key: event.key,
-        shiftKey: event.shiftKey,
-        preventDefault: () => event.preventDefault(),
-        contentActiveVideoPath,
-        activeElement
-      });
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [interactionBlocked, projectedNodes, runtime, videoHotkeyController]);
 
   const perfDebugBridge = useMemo(() => (
     __DEBRUTE_CANVAS_PERF__ && perfMonitor
@@ -702,6 +675,41 @@ function CanvasSurfaceRuntime({
     );
   }, []);
 
+  const applyInteractionState = useCallback((command: CanvasInteractionStateCommand) => {
+    switch (command.kind) {
+      case 'preserve':
+        return;
+      case 'end-content-activation':
+        runtime.endContentActivation();
+        return;
+      case 'set-selection-and-end-content-activation':
+        runtime.setSelectionAndEndContentActivation(command.selection);
+        return;
+      case 'activate-content':
+        runtime.activateContent(command.projectRelativePath);
+        return;
+    }
+  }, [runtime]);
+
+  const handleSurfaceClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (
+      event.button !== 0
+      || !isAdditiveCanvasSelectionModifier(pointerEventModifiers(event, productPlatform))
+    ) {
+      return;
+    }
+    const target = resolveCanvasDomInteractionTarget(event.currentTarget, event.target);
+    if (
+      target.kind !== 'node'
+      || target.zone !== 'content'
+      || runtime.getSnapshot().contentInteractionProjectRelativePath === target.projectRelativePath
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  }, [productPlatform, runtime]);
+
   const handleSurfacePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const target = resolvePointerTarget(event);
     interactionRuntime.updatePointer({
@@ -718,7 +726,7 @@ function CanvasSurfaceRuntime({
     if (target.kind !== 'node') {
       return;
     }
-    if (target.zone === 'move') {
+    if (target.zone === 'manipulation') {
       const node = projectedNodesRef.current.find((candidate) => (
         candidate.projectRelativePath === target.projectRelativePath
       ));
@@ -727,19 +735,36 @@ function CanvasSurfaceRuntime({
       }
       return;
     }
+    if (target.zone === 'content' && target.directManipulation) {
+      const decision = decideCanvasInteraction({
+        event: 'content-direct-manipulation-start',
+        target,
+        selection: runtime.getSnapshot().selection,
+        contentActivationProjectRelativePath: runtime.getSnapshot().contentInteractionProjectRelativePath,
+        additive: false
+      });
+      applyInteractionState(decision.state);
+      return;
+    }
     if (
-      target.zone === 'activate'
-      && (target.mediaKind === 'text' || target.mediaKind === 'video' || target.mediaKind === 'audio')
+      target.zone === 'content'
+      && runtime.getSnapshot().contentInteractionProjectRelativePath === target.projectRelativePath
     ) {
-      event.currentTarget.focus({ preventScroll: true });
-      event.currentTarget.setPointerCapture(event.pointerId);
-      previewActivationCandidateRef.current = {
+      return;
+    }
+    if (target.zone === 'content' || target.zone === 'content-island' || target.zone === 'action') {
+      completedClickCandidateRef.current = {
         pointerId: event.pointerId,
-        projectRelativePath: target.projectRelativePath,
-        mediaKind: target.mediaKind
+        startScreen: pointerScreenPoint(event),
+        target
       };
+      if (target.zone === 'content' && !target.contentControl) {
+        event.currentTarget.focus({ preventScroll: true });
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
     }
   }, [
+    applyInteractionState,
     beginNodeMove,
     beginSelectionMarquee,
     interactionBlocked,
@@ -750,6 +775,18 @@ function CanvasSurfaceRuntime({
   ]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<Element>) => {
+    const clickCandidate = completedClickCandidateRef.current;
+    if (
+      clickCandidate?.pointerId === event.pointerId
+      && clickCandidate.target.zone === 'content'
+      && !clickCandidate.target.contentControl
+      && Math.hypot(
+        event.clientX - clickCandidate.startScreen.x,
+        event.clientY - clickCandidate.startScreen.y
+      ) > CANVAS_POINTER_ACTIVATION_DISTANCE
+    ) {
+      completedClickCandidateRef.current = undefined;
+    }
     runtime.input.updatePointerInteraction({
       pointerId: event.pointerId,
       screenPoint: pointerScreenPoint(event),
@@ -772,12 +809,12 @@ function CanvasSurfaceRuntime({
   }, [interactionRuntime, pointerScreenPoint, resolvePointerTarget]);
 
   const handlePointerUp = useCallback(async (event: React.PointerEvent<Element>) => {
-    const currentActivationCandidate = previewActivationCandidateRef.current;
-    const activationCandidate = currentActivationCandidate?.pointerId === event.pointerId
-      ? currentActivationCandidate
+    const currentClickCandidate = completedClickCandidateRef.current;
+    const clickCandidate = currentClickCandidate?.pointerId === event.pointerId
+      ? currentClickCandidate
       : undefined;
-    if (activationCandidate) {
-      previewActivationCandidateRef.current = undefined;
+    if (clickCandidate) {
+      completedClickCandidateRef.current = undefined;
     }
     const pointerInteraction = runtime.getSnapshot().pointerInteraction;
     const interactionWasActive = pointerInteraction?.phase === 'active';
@@ -813,23 +850,31 @@ function CanvasSurfaceRuntime({
         expanded: !canvasState.expandedDirectories.includes(directoryTogglePath)
       });
     }
-    if (
-      activationCandidate?.pointerId === event.pointerId
+    if (clickCandidate
       && releaseTarget?.kind === 'node'
-      && releaseTarget.zone === 'activate'
-      && releaseTarget.projectRelativePath === activationCandidate.projectRelativePath
-      && releaseTarget.mediaKind === activationCandidate.mediaKind
-    ) {
-      nextPreviewActivationRequestIdRef.current += 1;
-      runtime.setSelection(canvasNodeSelection([activationCandidate.projectRelativePath]));
-      runtime.setContentInteraction(activationCandidate.projectRelativePath);
-      if (activationCandidate.mediaKind !== 'audio') {
-        setPreviewActivationRequest({
-          requestId: nextPreviewActivationRequestIdRef.current,
-          projectRelativePath: activationCandidate.projectRelativePath,
-          mediaKind: activationCandidate.mediaKind,
+      && releaseTarget.projectRelativePath === clickCandidate.target.projectRelativePath
+      && releaseTarget.zone === clickCandidate.target.zone) {
+      const snapshot = runtime.getSnapshot();
+      const decision = decideCanvasInteraction({
+        event: 'completed-click',
+        target: releaseTarget,
+        selection: snapshot.selection,
+        contentActivationProjectRelativePath: snapshot.contentInteractionProjectRelativePath,
+        additive: Boolean(event.shiftKey || event.metaKey || event.ctrlKey)
+      });
+      applyInteractionState(decision.state);
+      if (decision.handoff !== 'none') {
+        nextContentHandoffRequestIdRef.current += 1;
+        setContentHandoffRequest(decision.handoff === 'text-caret' ? {
+          kind: 'text-caret',
+          requestId: nextContentHandoffRequestIdRef.current,
+          projectRelativePath: releaseTarget.projectRelativePath,
           clientX: event.clientX,
           clientY: event.clientY
+        } : {
+          kind: 'video-toggle',
+          requestId: nextContentHandoffRequestIdRef.current,
+          projectRelativePath: releaseTarget.projectRelativePath
         });
       }
     }
@@ -847,15 +892,15 @@ function CanvasSurfaceRuntime({
         // Pointer capture may already have ended in the browser.
       }
     }
-  }, [actions, canvasState.expandedDirectories, interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
+  }, [actions, applyInteractionState, canvasState.expandedDirectories, interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
 
   const handlePointerUpEvent = useCallback((event: React.PointerEvent<Element>) => {
     void handlePointerUp(event).catch(() => undefined);
   }, [handlePointerUp]);
 
   const cancelPointerEvent = useCallback((event: React.PointerEvent<Element>) => {
-    if (previewActivationCandidateRef.current?.pointerId === event.pointerId) {
-      previewActivationCandidateRef.current = undefined;
+    if (completedClickCandidateRef.current?.pointerId === event.pointerId) {
+      completedClickCandidateRef.current = undefined;
     }
     runtime.input.cancelPointerInteraction(event.pointerId);
   }, [runtime]);
@@ -899,7 +944,7 @@ function CanvasSurfaceRuntime({
     if (
       target.kind !== 'node'
       || target.zone === 'action'
-      || target.zone === 'interaction-island'
+      || target.zone === 'content-island'
       || target.zone === 'feedback'
     ) {
       return;
@@ -938,16 +983,16 @@ function CanvasSurfaceRuntime({
     [activeContentInteractionNode]
   );
   useEffect(() => {
-    if (!previewActivationRequest) {
+    if (!contentHandoffRequest) {
       return;
     }
     if (
-      contentInteractionPath === previewActivationRequest.projectRelativePath
+      contentInteractionPath === contentHandoffRequest.projectRelativePath
     ) {
       return;
     }
-    setPreviewActivationRequest(undefined);
-  }, [contentInteractionPath, previewActivationRequest]);
+    setContentHandoffRequest(undefined);
+  }, [contentHandoffRequest, contentInteractionPath]);
   const activeVideoPaths = useMemo(() => canvasActiveVideoPaths({
     nodes: projectedNodes,
     contentActiveProjectRelativePaths: contentActiveVideoPaths,
@@ -977,6 +1022,14 @@ function CanvasSurfaceRuntime({
       return next;
     });
   }, []);
+  const handleContentError = useCallback((projectRelativePath: string) => {
+    if (runtime.getSnapshot().contentInteractionProjectRelativePath === projectRelativePath) {
+      runtime.endContentActivation();
+    }
+  }, [runtime]);
+  const handleContentHandoffConsumed = useCallback((requestId: number) => {
+    setContentHandoffRequest((current) => current?.requestId === requestId ? undefined : current);
+  }, []);
   const handleUpdateVideoPlaybackTime = useCallback((projectRelativePath: string, currentTimeMs: number) => {
     const node = projectedNodesRef.current.find((candidate) => (
       candidate.projectRelativePath === projectRelativePath
@@ -987,13 +1040,13 @@ function CanvasSurfaceRuntime({
     const updateKey = projectRelativePath;
     const version = (videoPlaybackUpdateVersionsRef.current.get(updateKey) ?? 0) + 1;
     videoPlaybackUpdateVersionsRef.current.set(updateKey, version);
-    void actions.updateCanvasVideoPlaybackState({
+    return actions.updateCanvasVideoPlaybackState({
       updates: [{ projectRelativePath, currentTimeMs }]
     }).then(() => {
       if (videoPlaybackUpdateVersionsRef.current.get(updateKey) === version) {
         videoPlaybackUpdateVersionsRef.current.delete(updateKey);
       }
-    }, () => {
+    }, (error) => {
       if (videoPlaybackUpdateVersionsRef.current.get(updateKey) !== version) {
         return;
       }
@@ -1007,6 +1060,7 @@ function CanvasSurfaceRuntime({
       videoTargetsRef.current
         .get(projectRelativePath)
         ?.restorePersistedTime(durableNode.videoPlayback?.currentTimeMs ?? 0);
+      throw error;
     });
   }, [actions]);
   const handleUpdateTextViewport = useCallback((projectRelativePath: string, viewport: CanvasTextViewportState) => {
@@ -1328,6 +1382,7 @@ function CanvasSurfaceRuntime({
       data-canvas-cursor="default"
       tabIndex={0}
       onPointerDown={handleSurfacePointerDown}
+      onClickCapture={handleSurfaceClickCapture}
       onPointerMove={handlePointerMove}
       onPointerOver={handlePointerOver}
       onPointerLeave={handlePointerLeave}
@@ -1335,11 +1390,7 @@ function CanvasSurfaceRuntime({
       onPointerCancel={cancelPointerEvent}
       onLostPointerCapture={cancelPointerEvent}
       onContextMenu={handleSurfaceContextMenu}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          runtime.setSelection(undefined);
-        }
-      }}
+      data-canvas-surface="true"
     >
       <div
         ref={stageRef}
@@ -1378,8 +1429,8 @@ function CanvasSurfaceRuntime({
                   actions={actions}
                   textBuffer={textFileBuffers[node.projectRelativePath]}
                   forceVideoPlayerMounted={requestedVideoPlayerPath === node.projectRelativePath}
-                  previewActivationRequest={previewActivationRequest?.projectRelativePath === node.projectRelativePath
-                    ? previewActivationRequest
+                  contentHandoffRequest={contentHandoffRequest?.projectRelativePath === node.projectRelativePath
+                    ? contentHandoffRequest
                     : undefined}
                   feedbackEntry={canvasFeedbackEntries?.[node.projectRelativePath]}
                   activeFeedbackItemId={feedbackInteraction?.focusedCapsuleId}
@@ -1401,6 +1452,8 @@ function CanvasSurfaceRuntime({
                   onResizePointerDown={beginNodeResize}
                   onVideoPlayerMounted={handleVideoPlayerMounted}
                   onVideoPlayingChange={handleVideoPlayingChange}
+                  onContentError={handleContentError}
+                  onContentHandoffConsumed={handleContentHandoffConsumed}
                   onRegisterVideoTarget={registerVideoTarget}
                   onUpdateVideoPlaybackTime={handleUpdateVideoPlaybackTime}
                   onUpdateTextViewport={handleUpdateTextViewport}
@@ -1497,7 +1550,7 @@ interface CanvasSurfaceNodeShellProps {
   actions: CanvasSceneActions;
   textBuffer: TextFileBuffer | undefined;
   forceVideoPlayerMounted: boolean;
-  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
+  contentHandoffRequest?: CanvasContentHandoffRequest | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
@@ -1511,6 +1564,8 @@ interface CanvasSurfaceNodeShellProps {
   onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
+  onContentError: (projectRelativePath: string) => void;
+  onContentHandoffConsumed: (requestId: number) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
@@ -1570,7 +1625,7 @@ function CanvasSurfaceNodeShellBase({
   actions,
   textBuffer,
   forceVideoPlayerMounted,
-  previewActivationRequest,
+  contentHandoffRequest,
   feedbackEntry,
   activeFeedbackItemId,
   localFeedbackMode,
@@ -1581,6 +1636,8 @@ function CanvasSurfaceNodeShellBase({
   onResizePointerDown,
   onVideoPlayerMounted,
   onVideoPlayingChange,
+  onContentError,
+  onContentHandoffConsumed,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
   onUpdateTextViewport,
@@ -1609,7 +1666,7 @@ function CanvasSurfaceNodeShellBase({
       videoPreviewRequest={videoPreviewRequest}
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
-      previewActivationRequest={previewActivationRequest}
+      contentHandoffRequest={contentHandoffRequest}
       feedbackEntry={feedbackEntry}
       activeFeedbackItemId={activeFeedbackItemId}
       localFeedbackMode={localFeedbackMode}
@@ -1620,6 +1677,8 @@ function CanvasSurfaceNodeShellBase({
       onResizePointerDown={onResizePointerDown}
       onVideoPlayerMounted={onVideoPlayerMounted}
       onVideoPlayingChange={onVideoPlayingChange}
+      onContentError={onContentError}
+      onContentHandoffConsumed={onContentHandoffConsumed}
       onRegisterVideoTarget={onRegisterVideoTarget}
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}

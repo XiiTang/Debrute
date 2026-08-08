@@ -11,7 +11,7 @@ import type { CanvasFeedbackBarTarget } from '../shell/floatingBars.js';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
-import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import { areCanvasNodeShellPropsEqual, type CanvasNodeShellProps } from './CanvasNodeShell';
@@ -70,13 +70,11 @@ const emptyCanvasState: CanvasState = {
 };
 
 const {
-  videoTogglePlaybackSpy,
   videoPauseAtSpy,
   videoRestorePersistedTimeSpy,
   videoReadCurrentTimeSecondsSpy,
   videoMockState
 } = vi.hoisted(() => ({
-  videoTogglePlaybackSpy: vi.fn(),
   videoPauseAtSpy: vi.fn(),
   videoRestorePersistedTimeSpy: vi.fn(),
   videoReadCurrentTimeSecondsSpy: vi.fn(() => 4.25),
@@ -94,21 +92,14 @@ vi.mock('./CanvasVideoNodeContent', async () => {
     CanvasVideoNodeContent: ({
       node,
       contentInteractionActive,
-      previewActivationRequest,
+      contentHandoffRequest,
       onRegisterVideoTarget,
       onUpdatePlaybackTime
     }: {
       node: CanvasProjection['nodes'][number];
       contentInteractionActive: boolean;
-      previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
+      contentHandoffRequest?: CanvasContentHandoffRequest | undefined;
       onRegisterVideoTarget: (projectRelativePath: string, target: {
-        togglePlayback: () => void;
-        seekBy: (seconds: number) => void;
-        toggleMuted: () => void;
-        adjustPlaybackRate: (delta: number) => void;
-        toggleCaptions: () => void;
-        enterFullscreen: () => void;
-        togglePictureInPicture: () => void;
         readCurrentTimeSeconds: () => number | undefined;
         pauseAt: (seconds: number) => void;
         restorePersistedTime: (seconds: number) => void;
@@ -117,13 +108,6 @@ vi.mock('./CanvasVideoNodeContent', async () => {
     }) => {
       ReactModule.useEffect(() => {
         const target = {
-          togglePlayback: videoTogglePlaybackSpy,
-          seekBy: vi.fn(),
-          toggleMuted: vi.fn(),
-          adjustPlaybackRate: vi.fn(),
-          toggleCaptions: vi.fn(),
-          enterFullscreen: vi.fn(),
-          togglePictureInPicture: vi.fn(),
           readCurrentTimeSeconds: videoReadCurrentTimeSecondsSpy,
           pauseAt: videoPauseAtSpy,
           restorePersistedTime: videoRestorePersistedTimeSpy
@@ -139,12 +123,15 @@ vi.mock('./CanvasVideoNodeContent', async () => {
       return (
         <div
           data-testid="mock-video-node"
-          data-canvas-node-zone={contentInteractionActive ? 'passive' : 'activate'}
-          data-canvas-interaction-island={contentInteractionActive ? 'true' : undefined}
-          data-play-request-id={previewActivationRequest?.requestId}
+          data-canvas-node-zone="content"
+          data-content-active={contentInteractionActive ? 'true' : 'false'}
+          data-playback-toggle-request-id={contentHandoffRequest?.kind === 'video-toggle'
+            ? contentHandoffRequest.requestId
+            : undefined}
           tabIndex={0}
         >
           {node.projectRelativePath}
+          <button type="button" data-testid="mock-video-control">Play</button>
         </div>
       );
     }
@@ -816,7 +803,6 @@ describe('CanvasSurface', () => {
 
       await act(async () => {
         runtime.setSelection(undefined);
-        runtime.setContentInteraction(undefined);
       });
       const restoredTextPreview = container.querySelector<HTMLElement>('.canvas-text-body')!;
       await act(async () => {
@@ -842,7 +828,7 @@ describe('CanvasSurface', () => {
     }
   });
 
-  it('commits one video play activation only when pointerup remains inside the inactive preview', async () => {
+  it('commits one video playback-toggle activation only when pointerup remains inside the inactive Content Region', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -884,7 +870,116 @@ describe('CanvasSurface', () => {
         kind: 'nodes',
         projectRelativePaths: [node.projectRelativePath]
       });
-      expect(container.querySelector('[data-testid="mock-video-node"]')?.getAttribute('data-play-request-id')).toBe('1');
+      expect(container.querySelector('[data-testid="mock-video-node"]')?.getAttribute('data-playback-toggle-request-id')).toBe('1');
+    } finally {
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('keeps a successful mounted content-control click after pointer travel', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const node = videoProjectionNode('media/control.mp4', 0, 0);
+    const projection: CanvasProjection = { nodes: [node], edges: [] };
+    const runtime = canvasRuntimeFixture(projection);
+
+    try {
+      await act(async () => {
+        root.render(surface(projection, { runtime }));
+      });
+      const control = container.querySelector<HTMLElement>('[data-testid="mock-video-control"]')!;
+
+      await act(async () => {
+        control.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 24,
+          button: 0,
+          clientX: 10,
+          clientY: 10
+        }));
+        control.dispatchEvent(pointerEvent('pointermove', {
+          pointerId: 24,
+          button: 0,
+          clientX: 20,
+          clientY: 10
+        }));
+        control.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 24,
+          button: 0,
+          clientX: 20,
+          clientY: 10
+        }));
+      });
+
+      expect(runtime.getSnapshot()).toMatchObject({
+        selection: {
+          kind: 'nodes',
+          projectRelativePaths: [node.projectRelativePath]
+        },
+        contentInteractionProjectRelativePath: node.projectRelativePath
+      });
+      expect(container.querySelector('[data-testid="mock-video-node"]')?.hasAttribute('data-playback-toggle-request-id')).toBe(false);
+    } finally {
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('suppresses the local action for an additive click on inactive content', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const activeNode = videoProjectionNode('media/active.mp4', 0, 0);
+    const targetNode = videoProjectionNode('media/additive.mp4', 240, 0);
+    const projection: CanvasProjection = { nodes: [activeNode, targetNode], edges: [] };
+    const runtime = canvasRuntimeFixture(projection);
+    runtime.activateContent(activeNode.projectRelativePath);
+
+    try {
+      await act(async () => {
+        root.render(surface(projection, { runtime }));
+      });
+      const targetControl = container.querySelectorAll<HTMLElement>('[data-testid="mock-video-control"]')[1]!;
+      const localAction = vi.fn();
+      targetControl.addEventListener('click', localAction);
+
+      await act(async () => {
+        targetControl.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 25,
+          button: 0,
+          clientX: 10,
+          clientY: 10,
+          shiftKey: true
+        }));
+        targetControl.dispatchEvent(pointerEvent('pointerup', {
+          pointerId: 25,
+          button: 0,
+          clientX: 10,
+          clientY: 10,
+          shiftKey: true
+        }));
+      });
+      const click = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        shiftKey: true
+      });
+      await act(async () => {
+        expect(targetControl.dispatchEvent(click)).toBe(false);
+      });
+
+      expect(runtime.getSnapshot()).toMatchObject({
+        selection: {
+          kind: 'nodes',
+          projectRelativePaths: [activeNode.projectRelativePath, targetNode.projectRelativePath]
+        },
+        contentInteractionProjectRelativePath: undefined
+      });
+      expect(localAction).not.toHaveBeenCalled();
     } finally {
       runtime.dispose();
       await act(async () => root.unmount());
@@ -1141,12 +1236,16 @@ describe('CanvasSurface', () => {
     }
   });
 
-  it('uses the fixed Canvas presentation for unavailable image text without scaling available image pixels', () => {
+  it('scales generic and unavailable image presentations without scaling intrinsic image pixels', () => {
     const projection: CanvasProjection = {
       nodes: [
-        nodeFixture('flow/available.png', 0, 0),
         {
-          ...nodeFixture('flow/unavailable.jpg', 240, 0),
+          ...nodeFixture('flow/a-intrinsic.png', 0, 0),
+          imageDimensions: { width: 200, height: 120 }
+        },
+        nodeFixture('flow/b-generic.png', 240, 0),
+        {
+          ...nodeFixture('flow/c-unavailable.jpg', 480, 0),
           availability: {
             state: 'unreadable',
             message: 'Unable to read image metadata.'
@@ -1157,14 +1256,19 @@ describe('CanvasSurface', () => {
     };
 
     const html = renderToStaticMarkup(surface(projection));
-    const availableMarkup = html.slice(
-      html.indexOf('data-canvas-node-path="flow/available.png"'),
-      html.indexOf('data-canvas-node-path="flow/unavailable.jpg"')
+    const intrinsicMarkup = html.slice(
+      html.indexOf('data-canvas-node-path="flow/a-intrinsic.png"'),
+      html.indexOf('data-canvas-node-path="flow/b-generic.png"')
     );
-    const unavailableMarkup = html.slice(html.indexOf('data-canvas-node-path="flow/unavailable.jpg"'));
+    const genericMarkup = html.slice(
+      html.indexOf('data-canvas-node-path="flow/b-generic.png"'),
+      html.indexOf('data-canvas-node-path="flow/c-unavailable.jpg"')
+    );
+    const unavailableMarkup = html.slice(html.indexOf('data-canvas-node-path="flow/c-unavailable.jpg"'));
 
-    expect(availableMarkup).not.toContain('fixed-presentation');
-    expect(availableMarkup).not.toContain('canvas-node-presentation');
+    expect(intrinsicMarkup).not.toContain('fixed-presentation');
+    expect(genericMarkup).toContain('fixed-presentation');
+    expect(genericMarkup).toContain('canvas-node-presentation');
     expect(unavailableMarkup).toContain('fixed-presentation');
     expect(unavailableMarkup).toContain('canvas-node-presentation');
     expect(unavailableMarkup).toContain('Unable to read image metadata.');
@@ -1347,7 +1451,7 @@ describe('CanvasSurface', () => {
     expect(html.match(/canvas-raster-preview-layers/g) ?? []).toHaveLength(2);
   });
 
-  it('keeps multi-selected video and audio previews interaction-inactive', () => {
+  it('keeps stable video and audio Content Regions while multi-selection prevents activation', () => {
     const projection: CanvasProjection = {
       nodes: [
         videoProjectionNode('media/clip.mp4', 0, 0),
@@ -1363,184 +1467,7 @@ describe('CanvasSurface', () => {
       }
     }));
 
-    expect(html.match(/data-canvas-node-zone="activate"/g) ?? []).toHaveLength(2);
-    expect(html).not.toContain('data-canvas-interaction-island="true"');
-  });
-
-  it('does not route video shortcuts to a selected-only video node', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
-    const projection: CanvasProjection = {
-      nodes: [videoNode],
-      edges: [],
-    };
-    const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath ] }
-    });
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <CanvasSurface
-              productPlatform="darwin"
-              canvasState={emptyCanvasState}
-              projection={projection}
-              runtime={runtime}
-              actions={actions}
-              textFileBuffers={{}}
-              canvasFeedback={undefined}
-              textPreviewStyleDependencyKey="dark"
-            />
-          </I18nProvider>
-        );
-      });
-
-      container.querySelector<HTMLElement>('[data-testid="mock-video-node"]')?.focus();
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
-
-      expect(videoTogglePlaybackSpy).not.toHaveBeenCalled();
-    } finally {
-      await act(async () => {
-        root.unmount();
-      });
-      container.remove();
-      videoTogglePlaybackSpy.mockClear();
-    }
-  });
-
-  it('routes video shortcuts only to the content-active video after Selection changes', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
-    const projection: CanvasProjection = {
-      nodes: [videoNode],
-      edges: [],
-    };
-    const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath] }
-    });
-    runtime.setContentInteraction(videoNode.projectRelativePath);
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <CanvasSurface
-              productPlatform="darwin"
-              canvasState={emptyCanvasState}
-              projection={projection}
-              runtime={runtime}
-              actions={actions}
-              textFileBuffers={{}}
-              canvasFeedback={undefined}
-              textPreviewStyleDependencyKey="dark"
-            />
-          </I18nProvider>
-        );
-      });
-
-      await act(async () => {
-        runtime.setSelection(undefined);
-      });
-      container.querySelector<HTMLElement>('[data-testid="mock-video-node"]')?.focus();
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
-
-      expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe(videoNode.projectRelativePath);
-      expect(videoTogglePlaybackSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      await act(async () => {
-        root.unmount();
-      });
-      runtime.dispose();
-      container.remove();
-      videoTogglePlaybackSpy.mockClear();
-    }
-  });
-
-  it('does not route video shortcuts while Canvas interaction is blocked', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const videoNode = videoProjectionNode('media/clip.mp4', 0, 0);
-    const projection: CanvasProjection = {
-      nodes: [videoNode],
-      edges: [],
-    };
-    const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: [videoNode.projectRelativePath ] }
-    });
-    runtime.setContentInteraction(videoNode.projectRelativePath);
-
-    try {
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <CanvasSurface
-              productPlatform="darwin"
-              canvasState={emptyCanvasState}
-              projection={projection}
-              runtime={runtime}
-              actions={actions}
-              textFileBuffers={{}}
-              canvasFeedback={undefined}
-              textPreviewStyleDependencyKey="dark"
-            />
-          </I18nProvider>
-        );
-      });
-
-      await act(async () => {
-        runtime.input.beginNodeMove({
-          pointerId: 7,
-          projectRelativePath: videoNode.projectRelativePath,
-          screenPoint: { x: 0, y: 0 }
-        });
-      });
-      expect(runtime.getSnapshot().pointerInteraction).toBeDefined();
-
-      await act(async () => {
-        root.render(
-          <I18nProvider locale="en">
-            <CanvasSurface
-              productPlatform="darwin"
-              canvasState={emptyCanvasState}
-              projection={projection}
-              runtime={runtime}
-              actions={actions}
-              textFileBuffers={{}}
-              canvasFeedback={undefined}
-              interactionBlocked
-              textPreviewStyleDependencyKey="dark"
-            />
-          </I18nProvider>
-        );
-      });
-
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
-
-      expect(videoTogglePlaybackSpy).not.toHaveBeenCalled();
-      expect(runtime.getSnapshot().pointerInteraction).toBeUndefined();
-
-      const cameraBeforeWheel = runtime.camera.getCamera();
-      container.querySelector('[data-testid="canvas-surface"]')?.dispatchEvent(new WheelEvent('wheel', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 40,
-        clientY: 40,
-        deltaY: -100
-      }));
-      expect(runtime.camera.getCamera()).toEqual(cameraBeforeWheel);
-    } finally {
-      await act(async () => {
-        root.unmount();
-      });
-      container.remove();
-      videoTogglePlaybackSpy.mockClear();
-    }
+    expect(html.match(/data-canvas-node-zone="content"/g) ?? []).toHaveLength(2);
   });
 
   it('restores the durable video position when Runtime rejects persistence', async () => {
@@ -1578,8 +1505,8 @@ describe('CanvasSurface', () => {
       });
 
       await act(async () => {
-        videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8_250);
-        await Promise.resolve();
+        const update = videoMockState.lastUpdatePlaybackTime?.(videoNode.projectRelativePath, 8_250);
+        await expect(Promise.resolve(update)).rejects.toThrow('persistence failed');
       });
 
       expect(updateCanvasVideoPlaybackState).toHaveBeenCalledWith({
@@ -1720,13 +1647,6 @@ describe('CanvasSurface', () => {
 
       await act(async () => {
         videoMockState.lastRegister?.(videoNode.projectRelativePath, {
-          togglePlayback: videoTogglePlaybackSpy,
-          seekBy: vi.fn(),
-          toggleMuted: vi.fn(),
-          adjustPlaybackRate: vi.fn(),
-          toggleCaptions: vi.fn(),
-          enterFullscreen: vi.fn(),
-          togglePictureInPicture: vi.fn(),
           readCurrentTimeSeconds: videoReadCurrentTimeSecondsSpy,
           pauseAt: videoPauseAtSpy,
           restorePersistedTime: videoRestorePersistedTimeSpy
@@ -1894,8 +1814,6 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('canvas-media-feedback-layer');
     expect(html).toContain('data-canvas-feedback-label="1"');
-    expect(html).toContain('data-canvas-feedback-frame="true"');
-    expect(html).toContain('data-canvas-feedback-frame-kinds="regions"');
     expect(html).not.toContain('region note hidden');
     expect(html).not.toContain('class="canvas-feedback-bar"');
   });
@@ -1932,10 +1850,9 @@ describe('CanvasSurface', () => {
     }));
 
     expect(html).not.toContain('data-canvas-feedback-label="1"');
-    expect(html).not.toContain('data-canvas-feedback-frame="true"');
   });
 
-  it('renders persistent feedback frames for node-level marks and comments without comment text', () => {
+  it('does not project node-level marks or comments into node chrome', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/cover.png', 120, 80)],
       edges: [],
@@ -1968,38 +1885,12 @@ describe('CanvasSurface', () => {
       })
     }));
 
-    expect(html).toContain('canvas-node-has-feedback');
-    expect(html).toContain('data-canvas-feedback-frame="true"');
-    expect(html).toContain('data-canvas-feedback-frame-kinds="like important comments"');
     expect(html).not.toContain('overall direction');
     expect(html).not.toContain('second pass');
     expect(html).not.toContain('class="canvas-feedback-bar"');
   });
 
-  it('does not render persistent feedback frames for empty feedback entries', () => {
-    const projection: CanvasProjection = {
-      nodes: [nodeFixture('flow/cover.png', 120, 80)],
-      edges: [],
-    };
-
-    const html = renderToStaticMarkup(surface(projection, {
-      canvasFeedback: feedbackDocument({
-        'flow/cover.png': {
-          projectRelativePath: 'flow/cover.png',
-          marks: [],
-          nextMomentLabel: 1,
-          nextSpatialLabel: 1,
-          items: [],
-          updatedAt: '2026-05-26T12:00:00.000Z'
-        }
-      })
-    }));
-
-    expect(html).not.toContain('canvas-node-has-feedback');
-    expect(html).not.toContain('data-canvas-feedback-frame="true"');
-  });
-
-  it('renders persistent feedback frames for text and video nodes', () => {
+  it('keeps node-level feedback out of text and video node chrome', () => {
     const projection: CanvasProjection = {
       nodes: [
         textProjectionNode('flow/readme.md', 120, 80, 'rev-a'),
@@ -2038,14 +1929,11 @@ describe('CanvasSurface', () => {
 
     expect(html).toContain('data-canvas-node-path="flow/readme.md"');
     expect(html).toContain('data-canvas-node-path="flow/clip.mp4"');
-    expect(html.match(/data-canvas-feedback-frame="true"/g) ?? []).toHaveLength(2);
-    expect(html).toContain('data-canvas-feedback-frame-kinds="check comments"');
-    expect(html).toContain('data-canvas-feedback-frame-kinds="needs_revision"');
     expect(html).not.toContain('tighten intro');
     expect(html).not.toContain('class="canvas-feedback-bar"');
   });
 
-  it('renders persistent feedback frames for audio, directory, and unknown-file nodes', () => {
+  it('keeps node-level feedback out of audio, directory, and unknown node chrome', () => {
     const audioNode: CanvasProjection['nodes'][number] = {
       ...nodeFixture('flow/sound.wav', 120, 80),
       mediaKind: 'audio',
@@ -2116,10 +2004,6 @@ describe('CanvasSurface', () => {
     expect(html).toContain('data-canvas-node-path="flow/sound.wav"');
     expect(html).toContain('data-canvas-node-path="flow/archive.bin"');
     expect(html).toContain('data-canvas-node-path="flow/assets"');
-    expect(html.match(/data-canvas-feedback-frame="true"/g) ?? []).toHaveLength(3);
-    expect(html).toContain('data-canvas-feedback-frame-kinds="pending"');
-    expect(html).toContain('data-canvas-feedback-frame-kinds="cross"');
-    expect(html).toContain('data-canvas-feedback-frame-kinds="comments"');
     expect(html).not.toContain('folder note hidden');
   });
 
@@ -2565,13 +2449,16 @@ describe('CanvasSurface', () => {
 
     expect(areCanvasNodeShellPropsEqual(props, {
       ...props,
-      previewActivationRequest: {
+      contentHandoffRequest: {
         requestId: 1,
         projectRelativePath: props.node.projectRelativePath,
-        mediaKind: 'video',
-        clientX: 10,
-        clientY: 20
+        kind: 'video-toggle'
       }
+    })).toBe(false);
+
+    expect(areCanvasNodeShellPropsEqual(props, {
+      ...props,
+      onContentHandoffConsumed: () => undefined
     })).toBe(false);
 
   });
@@ -2633,6 +2520,7 @@ describe('CanvasSurface', () => {
         start: { x: 0, y: 0 },
         current: { x: 0, y: 0 },
         initialSelection: undefined,
+        initialContentInteractionProjectRelativePath: undefined,
         pressedProjectRelativePath: 'cover.png',
         additive: false,
         origins: []
@@ -2774,6 +2662,7 @@ describe('CanvasSurface', () => {
         start: { x: 0, y: 0 },
         current: { x: 12, y: 8 },
         initialSelection: undefined,
+        initialContentInteractionProjectRelativePath: undefined,
         pressedProjectRelativePath: activeNode.projectRelativePath,
         additive: false,
         origins: [activeNode]
@@ -2832,6 +2721,7 @@ describe('CanvasSurface', () => {
       currentScreen: { x: 0, y: 0 },
       start: { x: 0, y: 0 },
       initialSelection: undefined,
+      initialContentInteractionProjectRelativePath: undefined,
       pressedProjectRelativePath: 'flow/a.png',
       additive: false,
       origins: [nodeFixture('flow/a.png', 0, 0)]
@@ -2908,7 +2798,7 @@ function surface(
 ): React.ReactElement {
   const runtime = input.runtime ?? canvasRuntimeFixture(projection, input);
   if (input.contentInteractionProjectRelativePath !== undefined) {
-    runtime.setContentInteraction(input.contentInteractionProjectRelativePath);
+    runtime.activateContent(input.contentInteractionProjectRelativePath);
   }
   return (
     <I18nProvider locale="en">
@@ -3199,6 +3089,8 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     onResizePointerDown: () => undefined,
     onVideoPlayerMounted: () => undefined,
     onVideoPlayingChange: () => undefined,
+    onContentError: () => undefined,
+    onContentHandoffConsumed: () => undefined,
     onRegisterVideoTarget: () => undefined,
     onUpdateTextViewport: () => undefined,
     onUpdateVideoPlaybackTime: () => undefined

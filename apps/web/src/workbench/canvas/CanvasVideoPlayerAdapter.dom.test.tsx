@@ -16,7 +16,6 @@ vi.mock('media-chrome/react', async () => {
     MediaCaptionsButton: mediaComponent('media-captions-button'),
     MediaControlBar: mediaComponent('media-control-bar'),
     MediaController: mediaComponent('media-controller'),
-    MediaErrorDialog: mediaComponent('media-error-dialog'),
     MediaFullscreenButton: mediaComponent('media-fullscreen-button'),
     MediaLoadingIndicator: mediaComponent('media-loading-indicator'),
     MediaMuteButton: mediaComponent('media-mute-button'),
@@ -36,8 +35,10 @@ import {
 
 type TestCanvasVideoPlayerAdapterProps = Omit<
   React.ComponentPropsWithoutRef<typeof CanvasVideoPlayerAdapter>,
-  'formatPlayError' | 'formatSeekError'
->;
+  'formatPlayError' | 'formatSeekError' | 'contentInteractionActive'
+> & {
+  contentInteractionActive?: boolean | undefined;
+};
 
 const TestCanvasVideoPlayerAdapter = React.forwardRef<CanvasVideoPlayerHandle, TestCanvasVideoPlayerAdapterProps>(
   function TestCanvasVideoPlayerAdapter(props, ref) {
@@ -45,6 +46,7 @@ const TestCanvasVideoPlayerAdapter = React.forwardRef<CanvasVideoPlayerHandle, T
       <CanvasVideoPlayerAdapter
         {...props}
         ref={ref}
+        contentInteractionActive={props.contentInteractionActive ?? false}
         formatPlayError={(projectRelativePath) => `Unable to play ${projectRelativePath}.`}
         formatSeekError={(projectRelativePath, seconds) => `Unable to seek ${projectRelativePath} to ${seconds} seconds.`}
       />
@@ -57,17 +59,11 @@ afterEach(() => {
 });
 
 describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
-  it('toggles only one caption or subtitle track at a time', async () => {
+  it('keeps only Feedback and playback-restoration operations on the Canvas handle', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
     const ref = React.createRef<CanvasVideoPlayerHandle>();
-    const tracks = [
-      textTrack('subtitles'),
-      textTrack('captions'),
-      textTrack('chapters')
-    ];
-
     try {
       await act(async () => {
         root.render(
@@ -81,24 +77,11 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
           />
         );
       });
-      const video = container.querySelector('video');
-      expect(video).not.toBeNull();
-      Object.defineProperty(video, 'textTracks', {
-        value: tracks,
-        configurable: true
-      });
-
-      act(() => {
-        ref.current?.toggleCaptions();
-      });
-
-      expect(tracks.map((track) => track.mode)).toEqual(['showing', 'disabled', 'disabled']);
-
-      act(() => {
-        ref.current?.toggleCaptions();
-      });
-
-      expect(tracks.map((track) => track.mode)).toEqual(['disabled', 'disabled', 'disabled']);
+      expect(Object.keys(ref.current ?? {}).sort()).toEqual([
+        'pauseAt',
+        'readCurrentTimeSeconds',
+        'restorePersistedTime'
+      ]);
     } finally {
       await act(async () => {
         root.unmount();
@@ -107,7 +90,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('keeps media-chrome hotkeys disabled and player picture gestures enabled', async () => {
+  it('enables Media Chrome hotkeys only while Content Activation is active', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -129,6 +112,20 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
       expect(controller).not.toBeNull();
       expect(controller?.hasAttribute('nohotkeys')).toBe(true);
       expect(controller?.hasAttribute('gesturesdisabled')).toBe(false);
+
+      await act(async () => {
+        root.render(
+          <TestCanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeMs={0}
+            contentInteractionActive
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onPlaybackBoundary={() => undefined}
+          />
+        );
+      });
+      expect(container.querySelector('media-controller')?.hasAttribute('nohotkeys')).toBe(false);
     } finally {
       await act(async () => {
         root.unmount();
@@ -137,7 +134,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('plays once for each new one-shot play request', async () => {
+  it('applies each new one-shot playback toggle request once', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -170,7 +167,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeMs={0}
-            playRequest={{ requestId: 1 }}
+            playbackToggleRequest={{ requestId: 1 }}
             onError={() => undefined}
             onPlayingChange={() => undefined}
             onPlaybackBoundary={() => undefined}
@@ -184,7 +181,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeMs={0}
-            playRequest={{ requestId: 1 }}
+            playbackToggleRequest={{ requestId: 1 }}
             onError={() => undefined}
             onPlayingChange={() => undefined}
             onPlaybackBoundary={() => undefined}
@@ -198,7 +195,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeMs={0}
-            playRequest={{ requestId: 2 }}
+            playbackToggleRequest={{ requestId: 2 }}
             onError={() => undefined}
             onPlayingChange={() => undefined}
             onPlaybackBoundary={() => undefined}
@@ -214,7 +211,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('reports a playback error when the one-shot play request is rejected', async () => {
+  it('reports a playback error when the one-shot toggle play is rejected', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -249,7 +246,7 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
           <TestCanvasVideoPlayerAdapter
             node={videoNode()}
             initialTimeMs={0}
-            playRequest={{ requestId: 1 }}
+            playbackToggleRequest={{ requestId: 1 }}
             onError={onError}
             onPlayingChange={() => undefined}
             onPlaybackBoundary={() => undefined}
@@ -613,13 +610,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 });
-
-function textTrack(kind: TextTrack['kind']): { kind: TextTrack['kind']; mode: TextTrack['mode'] } {
-  return {
-    kind,
-    mode: 'disabled'
-  };
-}
 
 function requiredVideo(container: HTMLElement): HTMLVideoElement {
   const video = container.querySelector('video');

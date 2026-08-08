@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { canvasTextPresentationGeometry } from './CanvasTextPresentationGeometry.js';
+import { canvasTextPresentationGeometry } from './CanvasNodePresentationGeometry.js';
 
-describe('CanvasTextPresentationGeometry', { tags: ['canvas-text'] }, () => {
+describe('CanvasNodePresentationGeometry', { tags: ['canvas-text'] }, () => {
   it('derives one camera-independent editor and capture geometry from the node', () => {
     expect(canvasTextPresentationGeometry({ width: 4200, height: 2800 })).toEqual({
       presentationScale: 10,

@@ -4,6 +4,12 @@ status: accepted
 
 # Project Tree Defines Canvas Membership
 
+ADR 0010 supersedes this ADR's original generic-node width rules. ADR 0011
+supersedes its original transient Selection, focus, pointer-routing, and node
+interaction rules. The corresponding original passages remain below only as
+decision history; current contracts are stated in the newer ADRs and public
+Canvas documentation.
+
 Canvas is a visual file manager for the complete Project Tree. Every regular
 Project file and directory belongs to the Canvas. Folder Disclosure decides
 which descendants are visible; Canvas state stores only
@@ -71,12 +77,17 @@ values.
 
 Scene coordinates use a scale of 10 relative to CSS pixels:
 
+The generic-node width and label-measurement rules in the first two bullets,
+plus the unavailable-video part of the media-sizing rule, are superseded by ADR
+0010; the original generic sizing text remains here as decision history.
+
 - root, directory, unknown, and unavailable nodes are 48 CSS pixels high and
   `clamp(120, measured label width + 54, 360)` CSS pixels wide;
 - labels use `700 13px Noto Sans SC` for measurement;
 - text nodes are `4200 × 2800` scene units;
 - audio nodes are `3200 × 960` scene units;
-- image and video nodes use intrinsic source dimensions.
+- image nodes and available video nodes use intrinsic source dimensions;
+  unavailable video uses the fallback defined by ADR 0010.
 
 Automatic Layout walks Project order depth-first. Each depth owns one column,
 with 100 scene units between columns. Within one directory, visible direct-child

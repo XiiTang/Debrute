@@ -106,6 +106,7 @@ describe('canvas interaction', () => {
 
     expect(shouldCanvasHandleWheelTarget(unfocusedEditor as unknown as EventTarget)).toBe(true);
     expect(shouldCanvasHandleWheelTarget(focusedEditor as unknown as EventTarget)).toBe(false);
+    expect(shouldCanvasHandleWheelTarget(focusedEditor as unknown as EventTarget, true)).toBe(true);
   });
 
   it('lets focused text editor wheel gestures scroll locally', () => {
@@ -135,6 +136,11 @@ describe('canvas interaction', () => {
     expect(shouldCanvasHandleGlobalWheelTarget(localWheelInput as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
     expect(shouldCanvasHandleGlobalWheelTarget(unfocusedFocusLocalInput as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
     expect(shouldCanvasHandleGlobalWheelTarget(focusedFocusLocalInput as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
+    expect(shouldCanvasHandleGlobalWheelTarget(
+      focusedFocusLocalInput as unknown as EventTarget,
+      surface as unknown as EventTarget,
+      true
+    )).toBe(true);
     expect(shouldCanvasHandleGlobalWheelTarget(panelButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
     expect(shouldCanvasHandleGlobalWheelTarget(otherFloatingActionButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
   });

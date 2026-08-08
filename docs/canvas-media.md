@@ -10,8 +10,9 @@ is documented in [`canvas-feedback.md`](./canvas-feedback.md).
 
 Canvas classifies visible Project files as image, video, audio, text, or
 unknown from their current Project path. Available nodes carry a revisioned raw
-file URL and MIME type. Images and videos require intrinsic dimensions for
-automatic layout; audio uses a fixed Canvas size.
+file URL and MIME type. Available images and videos use intrinsic dimensions for
+automatic layout; audio uses a fixed Canvas size, and an unavailable video uses
+a fixed `3200 × 1800` scene-unit fallback so its Content Region remains usable.
 
 Every available file node derives its media revision by streaming the exact
 current file bytes through SHA-256. Size and modification time remain projection
@@ -21,10 +22,23 @@ directory nodes retain their separate metadata revision because they have no
 file bytes.
 
 Image nodes use the derived raster-preview lifecycle in
-[`canvas-rendering.md`](./canvas-rendering.md). Audio nodes use a native audio
-element with controls, no preloading, a fixed presentation size, a file caption,
-and an explicit retry surface for media-load errors. Audio playback state is not
-stored in Canvas state.
+[`canvas-rendering.md`](./canvas-rendering.md). Audio nodes use a project-styled
+Media Chrome control composition over a native audio playback element, with no
+native browser controls or browser-owned pill presentation. Their upper title
+bar is the Node Manipulation Region and their lower player is the Content
+Region. The native playback element uses no preloading, the node retains a fixed
+presentation size, and Audio playback state is not stored in Canvas state.
+Audio uses the same mounted Media Chrome composition while content-inactive and
+content-active. Ending Content Activation neither pauses nor unloads it; the
+active state changes interaction ownership and Content Region presentation, not
+the playback engine's residency.
+
+Content-inactive audio controls remain readable and continue to show live
+playback progress rather than appearing disabled. Selection is the node's
+orange outer outline and Content Activation is the player's teal inner ring;
+neither is encoded by dimming the controls. The control region is rectangular,
+uses Debrute design tokens, and does not retain the native browser audio pill or
+semicircular ends.
 
 An available video projection must include intrinsic width and height, optional
 duration, and discovered WebVTT text tracks. Static preview data is deliberately
@@ -43,24 +57,37 @@ Workbench writes Playback Position at playback boundaries such as pause, ended
 playback, player unload, Canvas switch, and Project close. It does not persist
 continuous `timeupdate` events. Volume, mute, playback rate, captions,
 fullscreen, picture-in-picture, loading state, errors, player mounting, and
-one-shot play requests remain transient browser or Workbench state.
+one-shot playback-toggle requests remain transient browser or Workbench state.
 
 ## Inactive Preview And Active Player
 
-An inactive available video settles to one derived preview image and no player.
-A content-active, explicitly requested, or playing video settles to one real
-player. A shortcut aimed at the content-active inactive video first requests
-that player's mount. A playing video remains mounted if Canvas Node Selection
-changes; a paused content-inactive video returns to its preview.
+A content-inactive, non-playing available video settles to one derived preview
+image and no player.
+A content-active or playing video settles to one real player. A playing video
+remains mounted if Canvas Node Selection changes; a paused content-inactive
+video returns to its preview.
 
-Pressing an inactive preview does not select or play it. Pointer release within
-that same preview selects the node, mounts the player, and issues one play
-request; release outside it does nothing. Inside the mounted player,
-media-chrome owns pointer gestures and controls while Debrute keeps keyboard
-ownership at the content-active Canvas Node boundary. The centralized shortcuts cover
-play/pause, small or large seek, mute, captions, playback-rate adjustment,
-fullscreen, and picture-in-picture.
-Focused text inputs and media controls keep their native keyboard behavior.
+Content Activation identifies at most one video, while any number of videos may
+be playing. Starting another video does not pause or unload existing playback.
+Only the conjunction of content-inactive and not playing makes a video player
+eligible for preview handoff and unload; an offscreen playing video likewise
+remains mounted.
+
+A completed unmodified primary click on an inactive preview atomically
+sole-selects and activates the node, mounts the player, and issues exactly one
+playback toggle from that click. Pointer-down alone, release outside the target,
+or cancellation does none of those. Inside the mounted player, Media Chrome
+owns its pointer controls and local shortcuts. Canvas only enables those local
+shortcuts for the content-active controller and does not retain a window-level
+video hotkey controller, target registry, delayed key replay, or keyboard
+shortcut dialog. Audio uses the same local shortcut ownership with unsupported
+video-only commands omitted. Focused CodeMirror, Media Chrome, and native
+controls retain their library behavior without a second Canvas keyboard model.
+When a live video player remains mounted while content-inactive, its buttons and
+ranges use the same trusted-event activation handoff as audio controls. Clicking
+the video media surface or its non-control background activates and toggles
+playback once; clicking empty audio-player background activates without
+autoplay.
 
 The preview-to-player handoff keeps the current preview visible until the
 player has displayable data and any persisted initial seek has completed. The
@@ -71,6 +98,14 @@ preview DOM remains mounted and is hidden while the player is visible, so a
 later switch can reuse it without another load. Source path, raw URL, revision,
 or availability changes replace the Preview Continuity Key, making every stale
 layer ineligible immediately.
+
+The player remains mounted until the preview has actually committed. If the
+video is reactivated first, reactivation invalidates only the pending retirement
+and reuses that same player. A late preview may remain cached but cannot replace
+reactivated content. Viewport culling never stops playback. Leaving the Canvas
+projection through ancestor collapse, deletion, Project change, or Canvas close
+does stop and unmount media; there is no player registry outside projected
+nodes.
 
 ## Video Preview Sources
 
@@ -154,11 +189,16 @@ revisioned URL.
 Missing or unreadable source media is node availability. Probe and Ensure are
 Video producer errors; variant load and decode failures are shared raster
 presentation errors.
-Browser loading, play, and initial-seek failures are player errors. During a
-handoff, failure leaves the current visible layer intact and places the target
-layer's error above it. Preview Retry restarts that node at Probe, while Player
-Retry reloads only the current player source. Source selection has no alternate
-path.
+Browser loading, play, and initial-seek failures are player errors. A terminal
+content, load, decode, or playback failure preserves Node Selection, ends
+Content Activation, marks the medium as not playing, and replaces the Content
+Region with an inactive error surface saying it may be clicked to retry.
+Buffering and temporary stalls do not enter this state. The title bar and Node
+Manipulation Region show no error or retry control, and there is no separate
+Retry button. Preview Retry restarts that node at Probe. Player Retry discards
+the failed media element and constructs a fresh player; successful video retry
+applies its click's one playback action, while audio retry restores controls
+without autoplay. Source selection has no alternate path.
 
 Node-availability and media-load error titles and messages use the same
 Canvas-scaled semantic presentation as other Canvas text. They remain attached

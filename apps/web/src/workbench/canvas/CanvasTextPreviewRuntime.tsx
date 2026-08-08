@@ -72,7 +72,7 @@ import {
   type CanvasTextPreviewTask
 } from './CanvasTextPreviewTaskRegistry.js';
 import { orderCanvasPreviewItemsByNode } from './CanvasPreviewScheduling.js';
-import { canvasTextPresentationGeometry } from './CanvasTextPresentationGeometry.js';
+import { canvasTextPresentationGeometry } from './CanvasNodePresentationGeometry.js';
 import { useCanvasPreviewInteractionGate } from './useCanvasPreviewInteractionGate.js';
 import type { CanvasRect } from './runtime/canvasGeometry.js';
 

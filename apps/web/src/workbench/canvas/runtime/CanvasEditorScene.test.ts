@@ -19,7 +19,7 @@ describe('CanvasEditorRuntime scene', () => {
       .toEqual([]);
   });
 
-  it('publishes immediate Selection Raise before one-node geometry and routing deltas', () => {
+  it('publishes Selection Raise with the first geometry and routing delta at the move threshold', () => {
     const runtime = createRuntime(projection([
       directoryNode('source', 0, 0, 1),
       directoryNode('target', 300, 0, 2),
@@ -46,36 +46,26 @@ describe('CanvasEditorRuntime scene', () => {
     runtime.input.updatePointerInteraction({ pointerId: 1, screenPoint: { x: 120, y: 50 } });
 
     expect(runtime.scene.getRenderSnapshot()).toBe(renderSnapshot);
-    expect(updates).toHaveLength(2);
+    expect(updates).toHaveLength(1);
     expect(updates[0]).toMatchObject({
       nodeLayouts: [{
         projectRelativePath: 'source',
-        x: 0,
-        y: 0,
+        x: 120,
+        y: 50,
         width: 100,
         height: 100,
         z: 5
       }],
-      edgeGroups: [],
-      geometryChanged: false
+      geometryChanged: true
     });
-    expect(updates[1]?.nodeLayouts).toEqual([{
-      projectRelativePath: 'source',
-      x: 120,
-      y: 50,
-      width: 100,
-      height: 100,
-      z: 5
-    }]);
-    expect(updates[1]?.edgeGroups.map((group) => group.id)).toEqual(['source']);
-    expect(updates[1]?.edgeGroups[0]?.path)
+    expect(updates[0]?.edgeGroups.map((group) => group.id)).toEqual(['source']);
+    expect(updates[0]?.edgeGroups[0]?.path)
       .toBe('M 220 100 L 260 100 M 260 50 L 260 100 M 260 50 L 300 50');
     expect(runtime.scene.queryNodePaths({ x: 100, y: 40, width: 140, height: 120 }))
       .toContain('source');
     expect(runtime.scene.queryEdgeGroupIds({ x: 250, y: 40, width: 20, height: 70 }))
       .toEqual(['source']);
     expect(pointerStatesAtPresentation).toEqual([
-      expect.objectContaining({ kind: 'move-node', phase: 'pending' }),
       expect.objectContaining({ kind: 'move-node', phase: 'active' })
     ]);
   });

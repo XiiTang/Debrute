@@ -45,6 +45,10 @@ export function createWorkbenchFocusCommandRouter(input: {
         runtime?.input.cancelPointerInteraction(pointerInteraction.pointerId);
         return true;
       }
+      if (command === 'escape' && runtime?.getSnapshot().contentInteractionProjectRelativePath) {
+        runtime.endContentActivation();
+        return true;
+      }
       if (owner !== 'canvas' || !runtime) {
         return false;
       }

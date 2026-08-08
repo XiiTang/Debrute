@@ -34,12 +34,10 @@ import {
 import type { CanvasSelection } from './canvasSelection.js';
 import {
   canvasNodeSelection,
-  isCanvasNodeSelected,
   normalizeCanvasSelection,
   pruneCanvasSelection,
   sameCanvasSelection,
   selectedNodeProjectRelativePaths,
-  toggleCanvasNodeSelection,
   unionCanvasNodeSelection
 } from './canvasSelection.js';
 import {
@@ -50,6 +48,11 @@ import {
   createCanvasScenePresentation,
   type CanvasRuntimeScene
 } from '../CanvasScenePresentation.js';
+import {
+  CANVAS_POINTER_ACTIVATION_DISTANCE,
+  decideCanvasInteraction,
+  type CanvasInteractionStateCommand
+} from '../CanvasInteractionPolicy.js';
 
 export interface CanvasSurfaceElements {
   surface: HTMLElement;
@@ -133,7 +136,9 @@ export interface CanvasEditorRuntime {
   bindSurface(elements: CanvasSurfaceElements): () => void;
   acceptProjection(projection: CanvasProjection): void;
   setSelection(selection: CanvasSelection | undefined): void;
-  setContentInteraction(projectRelativePath: string | undefined): void;
+  setSelectionAndEndContentActivation(selection: CanvasSelection | undefined): void;
+  activateContent(projectRelativePath: string): void;
+  endContentActivation(): void;
   dispose(): void;
 }
 
@@ -156,6 +161,7 @@ export type CanvasRuntimePointerInteraction =
       current: CanvasPoint;
       rect?: CanvasRect;
       initialSelection: CanvasSelection | undefined;
+      initialContentInteractionProjectRelativePath: string | undefined;
       additive: boolean;
       topEdgeInset: number;
     }
@@ -168,6 +174,7 @@ export type CanvasRuntimePointerInteraction =
       start: CanvasPoint;
       current?: CanvasPoint;
       initialSelection: CanvasSelection | undefined;
+      initialContentInteractionProjectRelativePath: string | undefined;
       pressedProjectRelativePath: string;
       additive: boolean;
       origins: CanvasRuntimeMoveOrigin[];
@@ -182,6 +189,7 @@ export type CanvasRuntimePointerInteraction =
       start: CanvasPoint;
       current?: CanvasPoint;
       initialSelection: CanvasSelection | undefined;
+      initialContentInteractionProjectRelativePath: string | undefined;
       node: CanvasRuntimeResizeNode;
       origin: CanvasRect;
       preserveAspect: boolean;
@@ -441,7 +449,11 @@ export function createCanvasEditorRuntime(initial: {
   };
   const setPointerInteraction = (
     pointerInteraction: CanvasRuntimePointerInteraction | undefined,
-    options: { notifySnapshot: boolean }
+    options: {
+      notifySnapshot: boolean;
+      applyPresentation?: boolean;
+      flushPointerListeners?: boolean;
+    }
   ) => {
     state.pointerInteraction = pointerInteraction;
     manualLayoutLifecycle.setActiveInteraction(
@@ -450,9 +462,13 @@ export function createCanvasEditorRuntime(initial: {
         : undefined
     );
     invalidateSnapshot();
-    applyCanvasPresentation();
-    flushPointerInteractionListeners(pointerInteraction);
-    syncMarqueeEdgeScroll(pointerInteraction);
+    if (options.applyPresentation !== false) {
+      applyCanvasPresentation();
+    }
+    if (options.flushPointerListeners !== false) {
+      flushPointerInteractionListeners(pointerInteraction);
+      syncMarqueeEdgeScroll(pointerInteraction);
+    }
     if (options.notifySnapshot) {
       notify();
     }
@@ -471,30 +487,152 @@ export function createCanvasEditorRuntime(initial: {
     return node;
   };
 
-  const commitSelection = (selection: CanvasSelection | undefined) => {
-    selectionIntentRevision += 1;
-    const normalized = normalizeCanvasSelection(selection);
-    if (sameCanvasSelection(state.selection, normalized)) {
-      return;
+  const commitSelectionAndContentActivation = (input: {
+    selection: CanvasSelection | undefined;
+    contentInteractionProjectRelativePath: string | undefined;
+    selectionIntent?: boolean;
+    strictActivation?: boolean;
+    applyPresentation?: boolean;
+    notifySnapshot?: boolean;
+  }): { selectionChanged: boolean; contentInteractionChanged: boolean } => {
+    if (input.selectionIntent) {
+      selectionIntentRevision += 1;
     }
-    state.selection = normalized;
-    applyCanvasPresentation();
+    const selection = normalizeCanvasSelection(input.selection);
+    const selectedPaths = selectedNodeProjectRelativePaths(selection);
+    const requestedContentPath = input.contentInteractionProjectRelativePath;
+    const contentNode = requestedContentPath
+      ? scenePresentation.getPresentedNodes().get(requestedContentPath)
+      : undefined;
+    const activationValid = requestedContentPath !== undefined
+      && selectedPaths.length === 1
+      && selectedPaths[0] === requestedContentPath
+      && isContentCapableNode(contentNode);
+    if (requestedContentPath !== undefined && !activationValid && input.strictActivation) {
+      throw new Error(`Canvas Content Activation requires a sole selected text, video, or audio node: ${requestedContentPath}`);
+    }
+    const contentInteractionProjectRelativePath = activationValid
+      ? requestedContentPath
+      : undefined;
+    const selectionChanged = !sameCanvasSelection(state.selection, selection);
+    const contentInteractionChanged = state.contentInteractionProjectRelativePath
+      !== contentInteractionProjectRelativePath;
+    if (!selectionChanged && !contentInteractionChanged) {
+      return { selectionChanged: false, contentInteractionChanged: false };
+    }
+    state.selection = selection;
+    state.contentInteractionProjectRelativePath = contentInteractionProjectRelativePath;
+    if (input.applyPresentation !== false) {
+      applyCanvasPresentation();
+    }
     invalidateSnapshot();
-    flushSelectionListeners(normalized);
-    notify();
+    if (selectionChanged) {
+      flushSelectionListeners(selection);
+    }
+    if (contentInteractionChanged) {
+      flushContentInteractionListeners(contentInteractionProjectRelativePath);
+    }
+    if (input.notifySnapshot !== false) {
+      notify();
+    }
+    return { selectionChanged, contentInteractionChanged };
   };
 
-  const commitContentInteraction = (projectRelativePath: string | undefined) => {
-    const nextPath = projectRelativePath && scenePresentation.getPresentedNodes().has(projectRelativePath)
-      ? projectRelativePath
-      : undefined;
-    if (state.contentInteractionProjectRelativePath === nextPath) {
-      return;
+  const commitSelectionPreservingValidActivation = (
+    selection: CanvasSelection | undefined,
+    selectionIntent = true,
+    notifySnapshot = true
+  ) => {
+    const selectedPaths = selectedNodeProjectRelativePaths(selection);
+    const currentContentPath = state.contentInteractionProjectRelativePath;
+    commitSelectionAndContentActivation({
+      selection,
+      contentInteractionProjectRelativePath: currentContentPath
+        && selectedPaths.length === 1
+        && selectedPaths[0] === currentContentPath
+        ? currentContentPath
+        : undefined,
+      selectionIntent,
+      notifySnapshot
+    });
+  };
+
+  const commitSelectionAndEndContentActivation = (
+    selection: CanvasSelection | undefined,
+    selectionIntent = true,
+    notifySnapshot = true
+  ) => commitSelectionAndContentActivation({
+    selection,
+    contentInteractionProjectRelativePath: undefined,
+    selectionIntent,
+    notifySnapshot
+  });
+
+  const activateContent = (projectRelativePath: string) => commitSelectionAndContentActivation({
+    selection: canvasNodeSelection([projectRelativePath]),
+    contentInteractionProjectRelativePath: projectRelativePath,
+    selectionIntent: true,
+    strictActivation: true
+  });
+
+  const endContentActivation = () => commitSelectionAndContentActivation({
+    selection: state.selection,
+    contentInteractionProjectRelativePath: undefined
+  });
+
+  const commitInteractionStateCommand = (
+    command: CanvasInteractionStateCommand,
+    options: {
+      applyPresentation?: boolean;
+      notifySnapshot?: boolean;
+    } = {}
+  ) => {
+    switch (command.kind) {
+      case 'preserve':
+        return;
+      case 'end-content-activation':
+        commitSelectionAndContentActivation({
+          selection: state.selection,
+          contentInteractionProjectRelativePath: undefined,
+          ...options
+        });
+        return;
+      case 'set-selection-and-end-content-activation':
+        commitSelectionAndContentActivation({
+          selection: command.selection,
+          contentInteractionProjectRelativePath: undefined,
+          selectionIntent: true,
+          ...options
+        });
+        return;
+      case 'activate-content':
+        commitSelectionAndContentActivation({
+          selection: canvasNodeSelection([command.projectRelativePath]),
+          contentInteractionProjectRelativePath: command.projectRelativePath,
+          selectionIntent: true,
+          strictActivation: true,
+          ...options
+        });
     }
-    state.contentInteractionProjectRelativePath = nextPath;
-    invalidateSnapshot();
-    flushContentInteractionListeners(nextPath);
-    notify();
+  };
+
+  const commitPointerInteractionAndState = (
+    pointerInteraction: CanvasRuntimePointerInteraction | undefined,
+    commitState: () => void,
+    notifySnapshot = true
+  ) => {
+    setPointerInteraction(pointerInteraction, {
+      notifySnapshot: false,
+      applyPresentation: false,
+      flushPointerListeners: false
+    });
+    commitState();
+    applyCanvasPresentation();
+    flushPointerInteractionListeners(pointerInteraction);
+    syncMarqueeEdgeScroll(pointerInteraction);
+    if (notifySnapshot) {
+      notify();
+    }
   };
 
   const pointerInteractionWithPointer = (
@@ -505,7 +643,7 @@ export function createCanvasEditorRuntime(initial: {
     const nextScreen = screenPoint ?? active.currentScreen;
     const nextCanvas = screenToCanvas(nextScreen);
     if (active.kind === 'selection-marquee') {
-      const phase = active.phase === 'active' || screenDistance(active.startScreen, nextScreen) > POINTER_ACTIVATION_DISTANCE
+      const phase = active.phase === 'active' || screenDistance(active.startScreen, nextScreen) > CANVAS_POINTER_ACTIVATION_DISTANCE
         ? 'active'
         : 'pending';
       return {
@@ -518,7 +656,7 @@ export function createCanvasEditorRuntime(initial: {
       };
     }
     if (active.kind === 'move-node') {
-      const phase = active.phase === 'active' || screenDistance(active.startScreen, nextScreen) > POINTER_ACTIVATION_DISTANCE
+      const phase = active.phase === 'active' || screenDistance(active.startScreen, nextScreen) > CANVAS_POINTER_ACTIVATION_DISTANCE
         ? 'active'
         : 'pending';
       return {
@@ -607,8 +745,16 @@ export function createCanvasEditorRuntime(initial: {
         y: -edge.y * MARQUEE_EDGE_SCROLL_MAX_SPEED * ease * frameSeconds
       });
       const next = pointerInteractionWithPointer(active, active.currentScreen, undefined);
-      setPointerInteraction(next, { notifySnapshot: false });
-      commitSelection(marqueeSelection(next as Extract<CanvasRuntimePointerInteraction, { kind: 'selection-marquee' }>));
+      commitPointerInteractionAndState(next, () => {
+        commitSelectionAndContentActivation({
+          selection: marqueeSelection(next as Extract<CanvasRuntimePointerInteraction, { kind: 'selection-marquee' }>),
+          contentInteractionProjectRelativePath: undefined,
+          selectionIntent: false,
+          applyPresentation: false,
+          notifySnapshot: false
+        });
+      }, false);
+      return;
     }
     syncMarqueeEdgeScroll(state.pointerInteraction);
   };
@@ -631,7 +777,11 @@ export function createCanvasEditorRuntime(initial: {
   };
 
   const handleWheel = (event: WheelEvent) => {
-    if (!shouldCanvasHandleGlobalWheelTarget(event.target, boundElements?.surface ?? null)) {
+    if (!shouldCanvasHandleGlobalWheelTarget(
+      event.target,
+      boundElements?.surface ?? null,
+      event.ctrlKey || event.metaKey
+    )) {
       return;
     }
     event.preventDefault();
@@ -642,7 +792,7 @@ export function createCanvasEditorRuntime(initial: {
   };
 
   const handleGestureStart = (event: Event) => {
-    if (!shouldCanvasHandleGlobalWheelTarget(event.target, boundElements?.surface ?? null)) {
+    if (!shouldCanvasHandleGlobalWheelTarget(event.target, boundElements?.surface ?? null, true)) {
       return;
     }
     const gesture = event as CanvasGestureEvent;
@@ -659,7 +809,7 @@ export function createCanvasEditorRuntime(initial: {
   };
 
   const handleGestureChange = (event: Event) => {
-    if (!shouldCanvasHandleGlobalWheelTarget(event.target, boundElements?.surface ?? null)) {
+    if (!shouldCanvasHandleGlobalWheelTarget(event.target, boundElements?.surface ?? null, true)) {
       return;
     }
     const gesture = event as CanvasGestureEvent;
@@ -736,10 +886,6 @@ export function createCanvasEditorRuntime(initial: {
         initialSelection: pruneCanvasSelection(previousPointerInteraction.initialSelection, currentPaths)
       }, previousPointerInteraction.currentScreen, undefined);
     }
-    const nextContentInteraction = previousContentInteraction && currentPaths.has(previousContentInteraction)
-      ? previousContentInteraction
-      : undefined;
-
     manualLayoutLifecycle.setActiveInteraction(
       nextPointerInteraction?.kind !== 'selection-marquee' && nextPointerInteraction?.phase === 'active'
         ? nextPointerInteraction
@@ -750,15 +896,21 @@ export function createCanvasEditorRuntime(initial: {
     scenePresentation.setProjection(projection, canvasPresentation(nextSelection));
     if (nextPointerInteraction?.kind === 'selection-marquee') {
       nextSelection = marqueeSelection(nextPointerInteraction);
+      scenePresentation.applyPresentation(canvasPresentation(nextSelection));
     }
 
     state.pointerInteraction = nextPointerInteraction;
-    state.selection = nextSelection;
-    state.contentInteractionProjectRelativePath = nextContentInteraction;
     const pointerChanged = previousPointerInteraction !== nextPointerInteraction;
-    const selectionChanged = !sameCanvasSelection(previousSelection, nextSelection);
-    const contentInteractionChanged = previousContentInteraction !== nextContentInteraction;
-    if (pointerChanged || selectionChanged || contentInteractionChanged) {
+    const restorationContentPath = pointerChanged && nextPointerInteraction === undefined
+      ? previousPointerInteraction?.initialContentInteractionProjectRelativePath
+      : previousContentInteraction;
+    const stateChanges = commitSelectionAndContentActivation({
+      selection: nextSelection,
+      contentInteractionProjectRelativePath: restorationContentPath,
+      applyPresentation: false,
+      notifySnapshot: false
+    });
+    if (pointerChanged || stateChanges.selectionChanged || stateChanges.contentInteractionChanged) {
       invalidateSnapshot();
     }
     scenePresentation.publishRenderSnapshot();
@@ -766,13 +918,7 @@ export function createCanvasEditorRuntime(initial: {
       flushPointerInteractionListeners(nextPointerInteraction);
       syncMarqueeEdgeScroll(nextPointerInteraction);
     }
-    if (selectionChanged) {
-      flushSelectionListeners(nextSelection);
-    }
-    if (contentInteractionChanged) {
-      flushContentInteractionListeners(nextContentInteraction);
-    }
-    if (pointerChanged || selectionChanged || contentInteractionChanged) {
+    if (pointerChanged || stateChanges.selectionChanged || stateChanges.contentInteractionChanged) {
       notify();
     }
   };
@@ -793,6 +939,7 @@ export function createCanvasEditorRuntime(initial: {
           start: screenToCanvas(input.screenPoint),
           current: screenToCanvas(input.screenPoint),
           initialSelection: state.selection,
+          initialContentInteractionProjectRelativePath: state.contentInteractionProjectRelativePath,
           additive: additiveSelectionModifier(input.modifiers),
           topEdgeInset: input.topEdgeInset ?? 0
         }, { notifySnapshot: false });
@@ -800,16 +947,25 @@ export function createCanvasEditorRuntime(initial: {
       beginNodeMove: (input) => {
         const initialSelection = state.selection;
         const additive = additiveSelectionModifier(input.modifiers);
-        const alreadySelected = isCanvasNodeSelected(initialSelection, input.projectRelativePath);
-        const moveSelection = additive
-          ? alreadySelected
-            ? initialSelection
-            : unionCanvasNodeSelection(initialSelection, [input.projectRelativePath])
-          : alreadySelected
-            ? initialSelection
-            : canvasNodeSelection([input.projectRelativePath]);
-        presentedNode(input.projectRelativePath);
-        const selectedPaths = new Set(selectedNodeProjectRelativePaths(moveSelection));
+        const node = presentedNode(input.projectRelativePath);
+        const thresholdDecision = decideCanvasInteraction({
+          event: 'manipulation-threshold',
+          target: {
+            kind: 'node',
+            projectRelativePath: node.projectRelativePath,
+            ...(node.mediaKind === undefined ? {} : { mediaKind: node.mediaKind }),
+            zone: 'manipulation'
+          },
+          selection: initialSelection,
+          contentActivationProjectRelativePath: state.contentInteractionProjectRelativePath,
+          additive
+        });
+        if (thresholdDecision.gesture !== 'move'
+          || thresholdDecision.state.kind !== 'set-selection-and-end-content-activation') {
+          throw new Error(`Canvas manipulation policy did not produce a move selection for ${input.projectRelativePath}.`);
+        }
+        const proposedSelection = thresholdDecision.state.selection;
+        const selectedPaths = new Set(selectedNodeProjectRelativePaths(proposedSelection));
         const start = screenToCanvas(input.screenPoint);
         setPointerInteraction({
           kind: 'move-node',
@@ -819,17 +975,33 @@ export function createCanvasEditorRuntime(initial: {
           currentScreen: input.screenPoint,
           start,
           initialSelection,
+          initialContentInteractionProjectRelativePath: state.contentInteractionProjectRelativePath,
           pressedProjectRelativePath: input.projectRelativePath,
           additive,
           origins: [...selectedPaths].flatMap((path) => scenePresentation.getPresentedNodes().get(path) ?? [])
         }, { notifySnapshot: false });
-        commitSelection(moveSelection);
       },
       beginNodeResize: (input) => {
         const node = presentedNode(input.projectRelativePath);
         const initialSelection = state.selection;
+        const initialContentInteractionProjectRelativePath = state.contentInteractionProjectRelativePath;
+        const decision = decideCanvasInteraction({
+          event: 'resize-start',
+          target: {
+            kind: 'node',
+            projectRelativePath: node.projectRelativePath,
+            ...(node.mediaKind === undefined ? {} : { mediaKind: node.mediaKind }),
+            zone: 'resize'
+          },
+          selection: initialSelection,
+          contentActivationProjectRelativePath: initialContentInteractionProjectRelativePath,
+          additive: additiveSelectionModifier(input.modifiers)
+        });
+        if (decision.gesture !== 'resize') {
+          throw new Error(`Canvas interaction policy did not produce resize for ${input.projectRelativePath}.`);
+        }
         const start = screenToCanvas(input.screenPoint);
-        setPointerInteraction({
+        const interaction: Extract<CanvasRuntimePointerInteraction, { kind: 'resize-node' }> = {
           kind: 'resize-node',
           pointerId: input.pointerId,
           phase: 'active',
@@ -838,6 +1010,7 @@ export function createCanvasEditorRuntime(initial: {
           handle: input.handle,
           start,
           initialSelection,
+          initialContentInteractionProjectRelativePath,
           node: {
             projectRelativePath: node.projectRelativePath,
             nodeKind: node.nodeKind,
@@ -853,8 +1026,13 @@ export function createCanvasEditorRuntime(initial: {
             handle: input.handle,
             node
           }, input.modifiers)
-        }, { notifySnapshot: false });
-        commitSelection(canvasNodeSelection([input.projectRelativePath]));
+        };
+        commitPointerInteractionAndState(interaction, () => {
+          commitInteractionStateCommand(decision.state, {
+            applyPresentation: false,
+            notifySnapshot: false
+          });
+        });
       },
       updatePointerInteraction: (input) => {
         const active = state.pointerInteraction;
@@ -862,9 +1040,85 @@ export function createCanvasEditorRuntime(initial: {
           return false;
         }
         const next = pointerInteractionWithPointer(active, input.screenPoint, input.modifiers);
-        setPointerInteraction(next, { notifySnapshot: false });
+        const moveBecameActive = (
+          active.kind === 'move-node'
+          && active.phase === 'pending'
+          && next.kind === 'move-node'
+          && next.phase === 'active'
+        );
+        const marqueeBecameActive = (
+          active.kind === 'selection-marquee'
+          && active.phase === 'pending'
+          && next.kind === 'selection-marquee'
+          && next.phase === 'active'
+        );
+        if (moveBecameActive && next.kind === 'move-node') {
+          const pressedNode = presentedNode(active.pressedProjectRelativePath);
+          const decision = decideCanvasInteraction({
+            event: 'manipulation-threshold',
+            target: {
+              kind: 'node',
+              projectRelativePath: pressedNode.projectRelativePath,
+              ...(pressedNode.mediaKind === undefined ? {} : { mediaKind: pressedNode.mediaKind }),
+              zone: 'manipulation'
+            },
+            selection: active.initialSelection,
+            contentActivationProjectRelativePath: active.initialContentInteractionProjectRelativePath,
+            additive: next.additive
+          });
+          if (decision.gesture !== 'move'
+            || decision.state.kind !== 'set-selection-and-end-content-activation') {
+            throw new Error(`Canvas interaction policy did not produce move for ${active.pressedProjectRelativePath}.`);
+          }
+          const activatedSelectionPaths = selectedNodeProjectRelativePaths(decision.state.selection);
+          const activatedMove = {
+            ...next,
+            origins: activatedSelectionPaths.flatMap((path) => (
+              scenePresentation.getPresentedNodes().get(path) ?? []
+            ))
+          };
+          commitPointerInteractionAndState(activatedMove, () => {
+            commitInteractionStateCommand(decision.state, {
+              applyPresentation: false,
+              notifySnapshot: false
+            });
+          });
+          return true;
+        } else if (marqueeBecameActive && next.kind === 'selection-marquee') {
+          const decision = decideCanvasInteraction({
+            event: 'manipulation-threshold',
+            target: { kind: 'blank' },
+            selection: active.initialSelection,
+            contentActivationProjectRelativePath: active.initialContentInteractionProjectRelativePath,
+            additive: next.additive
+          });
+          if (decision.gesture !== 'marquee'
+            || decision.state.kind !== 'end-content-activation') {
+            throw new Error('Canvas interaction policy did not produce a blank-area marquee.');
+          }
+          commitPointerInteractionAndState(next, () => {
+            commitSelectionAndContentActivation({
+              selection: marqueeSelection(next),
+              contentInteractionProjectRelativePath: undefined,
+              selectionIntent: true,
+              applyPresentation: false,
+              notifySnapshot: false
+            });
+          });
+          return true;
+        }
         if (next.kind === 'selection-marquee') {
-          commitSelection(marqueeSelection(next));
+          commitPointerInteractionAndState(next, () => {
+            commitSelectionAndContentActivation({
+              selection: marqueeSelection(next),
+              contentInteractionProjectRelativePath: undefined,
+              selectionIntent: true,
+              applyPresentation: false,
+              notifySnapshot: false
+            });
+          }, false);
+        } else {
+          setPointerInteraction(next, { notifySnapshot: false });
         }
         return true;
       },
@@ -875,17 +1129,53 @@ export function createCanvasEditorRuntime(initial: {
         }
         const finished = pointerInteractionWithPointer(active, input.screenPoint, input.modifiers);
         if (finished.kind === 'selection-marquee') {
-          commitSelection(finished.phase === 'pending'
-            ? finished.additive ? finished.initialSelection : undefined
-            : marqueeSelection(finished));
-          setPointerInteraction(undefined, { notifySnapshot: true });
+          if (finished.phase === 'pending') {
+            const decision = decideCanvasInteraction({
+              event: 'completed-click',
+              target: { kind: 'blank' },
+              selection: finished.initialSelection,
+              contentActivationProjectRelativePath: finished.initialContentInteractionProjectRelativePath,
+              additive: finished.additive
+            });
+            commitPointerInteractionAndState(undefined, () => {
+              commitInteractionStateCommand(decision.state, {
+                applyPresentation: false,
+                notifySnapshot: false
+              });
+            });
+          } else {
+            commitPointerInteractionAndState(undefined, () => {
+              commitSelectionAndContentActivation({
+                selection: marqueeSelection(finished),
+                contentInteractionProjectRelativePath: undefined,
+                selectionIntent: true,
+                applyPresentation: false,
+                notifySnapshot: false
+              });
+            });
+          }
           return finished;
         }
         if (finished.kind === 'move-node' && finished.phase === 'pending') {
-          commitSelection(finished.additive
-            ? toggleCanvasNodeSelection(finished.initialSelection, finished.pressedProjectRelativePath)
-            : canvasNodeSelection([finished.pressedProjectRelativePath]));
-          setPointerInteraction(undefined, { notifySnapshot: true });
+          const pressedNode = presentedNode(finished.pressedProjectRelativePath);
+          const decision = decideCanvasInteraction({
+            event: 'completed-click',
+            target: {
+              kind: 'node',
+              projectRelativePath: pressedNode.projectRelativePath,
+              ...(pressedNode.mediaKind === undefined ? {} : { mediaKind: pressedNode.mediaKind }),
+              zone: 'manipulation'
+            },
+            selection: finished.initialSelection,
+            contentActivationProjectRelativePath: finished.initialContentInteractionProjectRelativePath,
+            additive: finished.additive
+          });
+          commitPointerInteractionAndState(undefined, () => {
+            commitInteractionStateCommand(decision.state, {
+              applyPresentation: false,
+              notifySnapshot: false
+            });
+          });
           return finished;
         }
         const submission = manualLayoutLifecycle.submitFinishedInteraction(finished);
@@ -901,8 +1191,14 @@ export function createCanvasEditorRuntime(initial: {
       cancelPointerInteraction: (pointerId) => {
         const active = state.pointerInteraction;
         if (active?.pointerId === pointerId) {
-          setPointerInteraction(undefined, { notifySnapshot: true });
-          commitSelection(active.initialSelection);
+          commitPointerInteractionAndState(undefined, () => {
+            commitSelectionAndContentActivation({
+              selection: active.initialSelection,
+              contentInteractionProjectRelativePath: active.initialContentInteractionProjectRelativePath,
+              applyPresentation: false,
+              notifySnapshot: false
+            });
+          });
         }
       }
     },
@@ -992,8 +1288,10 @@ export function createCanvasEditorRuntime(initial: {
       };
     },
     acceptProjection,
-    setSelection: commitSelection,
-    setContentInteraction: commitContentInteraction,
+    setSelection: commitSelectionPreservingValidActivation,
+    setSelectionAndEndContentActivation: commitSelectionAndEndContentActivation,
+    activateContent,
+    endContentActivation,
     dispose: () => {
       disposed = true;
       manualLayoutLifecycle.dispose();
@@ -1022,7 +1320,12 @@ function positiveFiniteScale(value: number): number | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-const POINTER_ACTIVATION_DISTANCE = 4;
+function isContentCapableNode(node: ProjectedCanvasNode | undefined): boolean {
+  return node?.mediaKind === 'text'
+    || node?.mediaKind === 'video'
+    || node?.mediaKind === 'audio';
+}
+
 const MARQUEE_EDGE_SCROLL_ZONE = 8;
 const MARQUEE_EDGE_SCROLL_DELAY_MS = 200;
 const MARQUEE_EDGE_SCROLL_EASE_MS = 200;

@@ -142,10 +142,31 @@ import {
   CanvasTextRenderProfileGate,
   CanvasTextRenderProfileProvider
 } from './canvas/CanvasTextRenderProfileContext.js';
+import { decideCanvasInteraction } from './canvas/CanvasInteractionPolicy.js';
 import { CanvasTextProjectFontEnvironmentProvider } from './canvas/font-subset/CanvasTextProjectFontEnvironment.js';
 import { workbenchStartupTimeline } from '../startup/workbenchStartupTimeline.js';
 
 const productPlatform: DebruteProductPlatform = __DEBRUTE_PLATFORM__;
+
+export function shouldWorkbenchClickEndCanvasContentActivation(
+  button: number,
+  target: EventTarget | null,
+  activeProjectRelativePath?: string | undefined
+): boolean {
+  const contentIslandOwnerPath = target instanceof Element
+    ? canvasContentIslandOwnerPath(target)
+    : undefined;
+  return button === 0
+    && target instanceof Element
+    && !target.closest('[data-canvas-surface="true"]')
+    && (contentIslandOwnerPath === undefined || contentIslandOwnerPath !== activeProjectRelativePath);
+}
+
+function canvasContentIslandOwnerPath(target: Element): string | undefined {
+  const island = target.closest<HTMLElement>('[data-canvas-node-zone="content-island"]');
+  return island?.closest<HTMLElement>('[data-canvas-node-path]')?.dataset.canvasNodePath;
+}
+
 const TerminalPanel = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('terminal');
   const module = await import('./terminal/TerminalPanel.js');
@@ -572,6 +593,29 @@ function WorkbenchBoundProjectApp({
     : undefined;
   const canvasState = availableCanvasWorkspace?.workspace;
   const canvasRuntime = mountedCanvasRuntime;
+  const handleWorkbenchCompletedClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!canvasRuntime) {
+      return;
+    }
+    const snapshot = canvasRuntime.getSnapshot();
+    if (!shouldWorkbenchClickEndCanvasContentActivation(
+      event.button,
+      event.target,
+      snapshot.contentInteractionProjectRelativePath
+    )) {
+      return;
+    }
+    const decision = decideCanvasInteraction({
+      event: 'completed-click',
+      target: { kind: 'workbench' },
+      selection: snapshot.selection,
+      contentActivationProjectRelativePath: snapshot.contentInteractionProjectRelativePath,
+      additive: false
+    });
+    if (decision.state.kind === 'end-content-activation') {
+      canvasRuntime.endContentActivation();
+    }
+  }, [canvasRuntime]);
   const canvasScene = useMemo(() => (
     canvasState
     && availableCanvasWorkspace
@@ -1604,7 +1648,12 @@ function WorkbenchBoundProjectApp({
       ) : null}
       <I18nProvider locale={presentationController.locale}>
       <WorkbenchIconProvider>
-        <div className="workbench-shell" data-theme={presentationController.resolvedTheme} data-testid="workbench-shell">
+        <div
+          className="workbench-shell"
+          data-theme={presentationController.resolvedTheme}
+          data-testid="workbench-shell"
+          onClickCapture={handleWorkbenchCompletedClick}
+        >
           <WorkbenchTitleBar
             {...titleBarActivityProps}
             state={effectiveTitleBarState}

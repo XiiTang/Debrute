@@ -10,7 +10,7 @@ import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { EditorView } from '@codemirror/view';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import {
-  CanvasNodeContent,
+  CanvasNodeContent as CanvasNodeContentImplementation,
   canvasTextBufferEnsureKey,
   type CanvasNodeContentProps
 } from './CanvasNodeContent';
@@ -68,6 +68,19 @@ const previewOrder: CanvasPreviewOrderSource = {
   getPreviewOrderSnapshot: () => previewOrderSnapshot,
   subscribePreviewOrder: () => () => undefined
 };
+
+function CanvasNodeContent(
+  props: Omit<CanvasNodeContentProps, 'onContentError'> & {
+    onContentError?: CanvasNodeContentProps['onContentError'] | undefined;
+  }
+): React.ReactElement {
+  return (
+    <CanvasNodeContentImplementation
+      {...props}
+      onContentError={props.onContentError ?? (() => undefined)}
+    />
+  );
+}
 
 function TestProviders({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
@@ -244,7 +257,7 @@ describe('CanvasNodeContent', () => {
   });
 
   describe('Canvas video title chrome', { tags: ['canvas-video'] }, () => {
-    it('marks the video title bar as the central Canvas move zone', async () => {
+    it('marks the video title bar as the stable Node Manipulation Region', async () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
@@ -269,7 +282,7 @@ describe('CanvasNodeContent', () => {
 
         const titleBar = container.querySelector<HTMLElement>('.db-canvas-node-titlebar');
         expect(titleBar).not.toBeNull();
-        expect(titleBar?.getAttribute('data-canvas-node-zone')).toBe('move');
+        expect(titleBar?.getAttribute('data-canvas-node-zone')).toBe('manipulation');
       } finally {
         await act(async () => {
           root.unmount();
@@ -315,7 +328,8 @@ describe('CanvasNodeContent', () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
-      const renderNode = async (contentInteractionActive: boolean, activationRequest?: CanvasNodeContentProps['previewActivationRequest']) => {
+      const onContentHandoffConsumed = vi.fn();
+      const renderNode = async (contentInteractionActive: boolean, handoffRequest?: CanvasNodeContentProps['contentHandoffRequest']) => {
         await act(async () => {
           root.render(
             <TestProviders>
@@ -325,9 +339,10 @@ describe('CanvasNodeContent', () => {
                 actions={actionsFixture()}
                 textBuffer={textBuffer('flow/readme.md', 'rev-a')}
                 textPreviewRequest={textPreviewRequest()}
-                previewActivationRequest={activationRequest}
+                contentHandoffRequest={handoffRequest}
                 onVideoPlayerMounted={() => undefined}
                 onVideoPlayingChange={() => undefined}
+                onContentHandoffConsumed={onContentHandoffConsumed}
                 onRegisterVideoTarget={() => undefined}
                 onUpdateVideoPlaybackTime={() => undefined}
                 onUpdateTextViewport={() => undefined}
@@ -340,13 +355,13 @@ describe('CanvasNodeContent', () => {
       try {
         await renderNode(false);
 
-        expect(container.querySelector('.canvas-text-body')?.getAttribute('data-canvas-node-zone')).toBe('activate');
+        expect(container.querySelector('.canvas-text-body')?.getAttribute('data-canvas-node-zone')).toBe('content');
         expect(posAtCoords).not.toHaveBeenCalled();
 
         await renderNode(true, {
           requestId: 11,
           projectRelativePath: 'flow/readme.md',
-          mediaKind: 'text',
+          kind: 'text-caret',
           clientX: 144,
           clientY: 96
         });
@@ -357,6 +372,16 @@ describe('CanvasNodeContent', () => {
         });
 
         expect(posAtCoords).toHaveBeenCalledWith({ x: 144, y: 96 });
+        expect(onContentHandoffConsumed).toHaveBeenCalledOnce();
+        expect(onContentHandoffConsumed).toHaveBeenCalledWith(11);
+        await renderNode(true, {
+          requestId: 11,
+          projectRelativePath: 'flow/readme.md',
+          kind: 'text-caret',
+          clientX: 144,
+          clientY: 96
+        });
+        expect(onContentHandoffConsumed).toHaveBeenCalledOnce();
       } finally {
         await act(async () => {
           root.unmount();
@@ -387,15 +412,15 @@ describe('CanvasNodeContent', () => {
       const preview = textPreviewRequest();
       const renderNode = (
         contentInteractionActive: boolean,
-        previewActivationRequest?: CanvasNodeContentProps['previewActivationRequest']
-      ) => renderTextPreviewNode(root, preview, { contentInteractionActive, previewActivationRequest });
+        contentHandoffRequest?: CanvasNodeContentProps['contentHandoffRequest']
+      ) => renderTextPreviewNode(root, preview, { contentInteractionActive, contentHandoffRequest });
 
       try {
         await renderNode(false);
         await renderNode(true, {
           requestId: 12,
           projectRelativePath: 'flow/readme.md',
-          mediaKind: 'text',
+          kind: 'text-caret',
           clientX: 144,
           clientY: 96
         });
@@ -844,7 +869,7 @@ describe('CanvasNodeContent', () => {
     });
   });
 
-  it('makes audio controls an interaction island only after content activation', () => {
+  it('keeps the Audio Content and Manipulation Regions structurally stable across activation', () => {
     const audioNode = {
       ...imageNode('audio/theme.mp3', 'rev-a'),
       mediaKind: 'audio' as const,
@@ -883,13 +908,12 @@ describe('CanvasNodeContent', () => {
       />
     );
 
-    expect(inactiveHtml).toContain('data-canvas-node-zone="activate"');
-    expect(inactiveHtml).not.toContain('data-canvas-interaction-island="true"');
-    expect(inactiveHtml).toContain('inert=""');
-    expect(activeHtml).toContain('data-canvas-node-zone="passive"');
-    expect(activeHtml).toContain('data-canvas-interaction-island="true"');
+    expect(inactiveHtml).toContain('data-canvas-node-zone="content"');
+    expect(inactiveHtml).toContain('data-canvas-node-zone="manipulation"');
+    expect(inactiveHtml).not.toContain('inert=""');
+    expect(activeHtml).toContain('data-canvas-node-zone="content"');
+    expect(activeHtml).toContain('data-canvas-node-zone="manipulation"');
     expect(activeHtml).not.toContain('inert=""');
-    expect(activeHtml).toContain('class="db-canvas-node-caption" data-canvas-node-zone="move"');
   });
 
   describe('Canvas text status', { tags: ['canvas-text'] }, () => {
@@ -1055,8 +1079,9 @@ async function renderTextPreviewNode(
   options?: {
     contentInteractionActive?: boolean | undefined;
     textPreviewError?: string | undefined;
-    previewActivationRequest?: CanvasNodeContentProps['previewActivationRequest'] | undefined;
+    contentHandoffRequest?: CanvasNodeContentProps['contentHandoffRequest'] | undefined;
     node?: ProjectedCanvasNode | undefined;
+    onContentError?: CanvasNodeContentProps['onContentError'] | undefined;
     onUpdateTextViewport?: CanvasNodeContentProps['onUpdateTextViewport'] | undefined;
   }
 ): Promise<void> {
@@ -1070,7 +1095,8 @@ async function renderTextPreviewNode(
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreviewRequest={textPreviewRequest}
           textPreviewError={options?.textPreviewError}
-          previewActivationRequest={options?.previewActivationRequest}
+          contentHandoffRequest={options?.contentHandoffRequest}
+          onContentError={options?.onContentError}
           onVideoPlayerMounted={() => undefined}
           onVideoPlayingChange={() => undefined}
           onRegisterVideoTarget={() => undefined}
@@ -1097,9 +1123,11 @@ async function expectEditorActivationFailure(
 ): Promise<void> {
   await renderTextPreviewNode(root, preview, { contentInteractionActive: false });
   await renderTextPreviewNode(root, preview, { contentInteractionActive: true });
-  const overlay = await waitForElement<HTMLElement>(container, '.canvas-text-message--overlay');
+  const overlay = await waitForElement<HTMLElement>(container, '.canvas-content-error');
 
   expect(overlay.textContent).toContain(message);
+  expect(overlay.textContent).toContain('Click to retry');
+  expect(overlay.querySelector('button')).toBeNull();
   expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
     'data-canvas-raster-preview-hidden'
   )).toBe('false');

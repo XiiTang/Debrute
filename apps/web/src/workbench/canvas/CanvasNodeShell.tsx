@@ -4,13 +4,15 @@ import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
-import { CanvasFeedbackFrame, canvasFeedbackEntryHasFeedback } from './CanvasFeedbackFrame';
 import { CanvasNodeContent } from './CanvasNodeContent';
 import type { CanvasMediaFeedbackDraftRegion, CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
-import { canvasTextPresentationGeometry } from './CanvasTextPresentationGeometry.js';
-import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
+import {
+  CANVAS_NODE_PRESENTATION_SCALE,
+  canvasTextPresentationGeometry
+} from './CanvasNodePresentationGeometry.js';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
 import type { CanvasSceneActions } from './CanvasSceneActions.js';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
@@ -29,7 +31,7 @@ export interface CanvasNodeShellProps {
   videoPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   videoPreviewError?: string | undefined;
   forceVideoPlayerMounted?: boolean | undefined;
-  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
+  contentHandoffRequest?: CanvasContentHandoffRequest | undefined;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
   activeFeedbackItemId?: string | undefined;
   localFeedbackMode?: CanvasMediaFeedbackMode | undefined;
@@ -43,6 +45,8 @@ export interface CanvasNodeShellProps {
   onResizePointerDown: (node: ProjectedCanvasNode, handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
   onVideoPlayerMounted: (projectRelativePath: string) => void;
   onVideoPlayingChange: (projectRelativePath: string, playing: boolean) => void;
+  onContentError: (projectRelativePath: string) => void;
+  onContentHandoffConsumed: (requestId: number) => void;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdateVideoPlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   onUpdateTextViewport: (projectRelativePath: string, viewport: CanvasTextViewportState) => void | Promise<void>;
@@ -62,7 +66,7 @@ function CanvasNodeShellComponent({
   videoPreviewRequest,
   videoPreviewError,
   forceVideoPlayerMounted,
-  previewActivationRequest,
+  contentHandoffRequest,
   feedbackEntry,
   activeFeedbackItemId,
   localFeedbackMode,
@@ -73,6 +77,8 @@ function CanvasNodeShellComponent({
   onResizePointerDown,
   onVideoPlayerMounted,
   onVideoPlayingChange,
+  onContentError,
+  onContentHandoffConsumed,
   onRegisterVideoTarget,
   onUpdateVideoPlaybackTime,
   onUpdateTextViewport,
@@ -97,7 +103,6 @@ function CanvasNodeShellComponent({
     });
   }, [stageRuntime, node.height, node.projectRelativePath, node.width, node.x, node.y, zIndex]);
 
-  const hasFeedback = canvasFeedbackEntryHasFeedback(feedbackEntry);
   const textPresentationGeometry = node.mediaKind === 'text'
     ? canvasTextPresentationGeometry(node)
     : undefined;
@@ -107,7 +112,6 @@ function CanvasNodeShellComponent({
     'db-canvas-node-frame',
     node.mediaKind,
     cut ? 'canvas-cut-source' : '',
-    hasFeedback ? 'canvas-node-has-feedback' : '',
     node.nodeKind,
     usesFixedNodePresentation(node) ? 'fixed-presentation' : ''
   ].filter(Boolean).join(' ');
@@ -122,7 +126,7 @@ function CanvasNodeShellComponent({
       videoPreviewRequest={videoPreviewRequest}
       videoPreviewError={videoPreviewError}
       forceVideoPlayerMounted={forceVideoPlayerMounted}
-      previewActivationRequest={previewActivationRequest}
+      contentHandoffRequest={contentHandoffRequest}
       feedbackEntry={feedbackEntry}
       activeFeedbackItemId={activeFeedbackItemId}
       localFeedbackMode={localFeedbackMode}
@@ -132,6 +136,8 @@ function CanvasNodeShellComponent({
       onFeedbackItemActivate={onFeedbackItemActivate}
       onVideoPlayerMounted={onVideoPlayerMounted}
       onVideoPlayingChange={onVideoPlayingChange}
+      onContentError={onContentError}
+      onContentHandoffConsumed={onContentHandoffConsumed}
       onRegisterVideoTarget={onRegisterVideoTarget}
       onUpdateVideoPlaybackTime={onUpdateVideoPlaybackTime}
       onUpdateTextViewport={onUpdateTextViewport}
@@ -145,12 +151,15 @@ function CanvasNodeShellComponent({
       data-canvas-node-path={node.projectRelativePath}
       data-canvas-node-kind={node.nodeKind}
       data-canvas-media-kind={node.mediaKind}
-      data-canvas-node-default-zone={node.mediaKind === 'text' || node.mediaKind === 'video' || node.mediaKind === 'audio'
-        ? 'passive'
-        : 'move'}
+      data-canvas-content-active={contentInteractionActive ? 'true' : undefined}
       data-project-relative-path={node.projectRelativePath}
       className={className}
-      style={{ left: 0, top: 0 } as React.CSSProperties}
+      style={{
+        left: 0,
+        top: 0,
+        '--canvas-node-presentation-scale': CANVAS_NODE_PRESENTATION_SCALE,
+        '--canvas-node-presentation-scale-inverse': 1 / CANVAS_NODE_PRESENTATION_SCALE
+      } as React.CSSProperties}
     >
       {usesFixedNodePresentation(node)
         ? (
@@ -165,7 +174,6 @@ function CanvasNodeShellComponent({
             </div>
           )
         : content}
-      <CanvasFeedbackFrame entry={feedbackEntry} />
       {showResizeHandles ? RESIZE_HANDLES.map((handle) => (
         <button
           key={handle}
@@ -200,7 +208,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.videoPreviewRequest === next.videoPreviewRequest
     && previous.videoPreviewError === next.videoPreviewError
     && previous.forceVideoPlayerMounted === next.forceVideoPlayerMounted
-    && previous.previewActivationRequest === next.previewActivationRequest
+    && previous.contentHandoffRequest === next.contentHandoffRequest
     && previous.feedbackEntry === next.feedbackEntry
     && previous.activeFeedbackItemId === next.activeFeedbackItemId
     && previous.localFeedbackMode === next.localFeedbackMode
@@ -211,6 +219,8 @@ export function areCanvasNodeShellPropsEqual(
     && previous.onResizePointerDown === next.onResizePointerDown
     && previous.onVideoPlayerMounted === next.onVideoPlayerMounted
     && previous.onVideoPlayingChange === next.onVideoPlayingChange
+    && previous.onContentError === next.onContentError
+    && previous.onContentHandoffConsumed === next.onContentHandoffConsumed
     && previous.onRegisterVideoTarget === next.onRegisterVideoTarget
     && previous.onUpdateVideoPlaybackTime === next.onUpdateVideoPlaybackTime
     && previous.onUpdateTextViewport === next.onUpdateTextViewport;
@@ -222,5 +232,7 @@ function usesFixedNodePresentation(node: ProjectedCanvasNode): boolean {
     || node.mediaKind === 'text'
     || node.mediaKind === 'audio'
     || node.mediaKind === 'unknown'
-    || !node.mediaKind;
+    || !node.mediaKind
+    || (node.mediaKind === 'image' && !node.imageDimensions)
+    || (node.mediaKind === 'video' && !node.videoPresentation);
 }

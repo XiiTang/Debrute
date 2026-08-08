@@ -34,6 +34,7 @@ when prose and implementation differ.
 - [Canvas rendering and preview resources](./canvas-rendering.md)
 - [Canvas media presentation](./canvas-media.md)
 - [Canvas feedback](./canvas-feedback.md)
+- [Canvas generic-node geometry and content interaction implementation record](./canvas-generic-node-geometry-and-content-interaction-implementation.md)
 - [Text files, editing, and Canvas previews](./text-files.md)
 
 ## Capabilities And Integrations

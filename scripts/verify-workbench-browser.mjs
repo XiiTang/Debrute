@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -19,13 +20,20 @@ const browserScreenshotDirectory = process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR?.t
   : undefined;
 const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
 const fixtureHome = join(fixtureRoot, '.home');
-const fixtureTemporaryDirectory = join(fixtureRoot, '.tmp');
+const fixtureTemporaryDirectory = join(tmpdir(), `debrute-browser-${process.pid}`);
 const fixtureTextPath = 'notes/browser-verification.md';
 const fixtureImagePath = 'images/browser-verification.png';
-const fixtureVideoPath = 'media/browser-verification.mp4';
+const fixtureVideoPath = 'media/browser-verification.webm';
+const fixtureAudioPath = 'media/browser-verification.wav';
+const fixtureGenericDirectoryPaths = [
+  'taobao-product-detail-image-test',
+  'taobao-product-detail-images',
+  'taobao-womens-ranking',
+  'womens-clothing'
+];
 const fixtureImageWidth = 4096;
 const fixtureImageHeight = 3072;
-const fixtureVideoBase64 = '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';
+const fixtureVideoBase64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAA8UEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEnTbuMU6uEHFO7a1Osgg7+7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjIuMTIuMTAyV0GNTGF2ZjYyLjEyLjEwMkSJiECncAAAAAAAFlSua8quAQAAAAAAAEHXgQFzxYitQy2elugJxJyBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhAvrwgDgkrCCBQC6ggLQmoECVbCEVbmBARJUw2f8c3OgY8CAZ8iaRaOHRU5DT0RFUkSHjUxhdmY2Mi4xMi4xMDJzc9ZjwItjxYitQy2elugJxGfIoUWjh0VOQ09ERVJEh5RMYXZjNjIuMjguMTAyIGxpYnZweGfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDMuMDAwMDAwMDAwAB9DtnVNUOeBAKNGQYEAAIDQwwCdASoABdACAEcIhYWIhYSIAgICdaoD+AP6Aga2ph17c2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD2TnD16Am//pb3WTof/0uD/93EPzeVP/3Z8Ao++BAMgA8QwABhDEABgAGFgv9Bf6BgYL/QMACIAEAACAABAAAhttGNftotrttBtbtnNrNsxtZtlNqtshtRtjtptsZtKNhtoxr9tFtdtoNrds5tZtmNrNsptVtkNqNsdtNtjNpRsNtGNftotrttBtAACj6IEBkAARDAAGEMQAGAAYWC/0AAiABAAAgAAQAAIbbRjX7aLa7bQbW7ZzazbMbWbZTarbIbUbY7abbGbSjYbaMa/bRbXbaDa3bObWbZjazbKbVbZDajbHbTbYzaUbDbRjX7aLa7bQbQAAo+iBAlgAEQwABhDEABgAGFgv9AAIgAQAAIAAEAACG20Y1+2i2u20G1u2c2s2zG1m2U2q2yG1G2O2m2xm0o2G2jGv20W122g2t2zm1m2Y2s2ym1W2Q2o2x2022M2lGw20Y1+2i2u20G0AAKPogQMgABEMAAYQxAAYABhYL/QACIAEAACAABAAAhttGNftotrttBtbtnNrNsxtZtlNqtshtRtjtptsZtKNhtoxr9tFtdtoNrds5tZtmNrNsptVtkNqNsdtNtjNpRsNtGNftotrttBtAACj6IED6AARDAAGEMQAGAAYWC/0AAiABAAAgAAQAAIbbRjX7aLa7bQbW7ZzazbMbWbZTarbIbUbY7abbGbSjYbaMa/bRbXbaDa3bObWbZjazbKbVbZDajbHbTbYzaUbDbRjX7aLa7bQbQAAo+iBBLAAEQwABhDEABgAGFgv9AAIgAQAAIAAEAACG20Y1+2i2u20G1u2c2s2zG1m2U2q2yG1G2O2m2xm0o2G2jGv20W122g2t2zm1m2Y2s2ym1W2Q2o2x2022M2lGw20Y1+2i2u20G0AAKNBnYEFeACxMgAGEBAUYABhrr/QCQ511U2HXfGw6742HXfGw6742HXfGw6742HXfGw6742HXe90BAQEBAQEBAQEBAQEBAQGBymNh13xsOu+Nh13xsOu+Nh13xsOu+Nh13xsOu+Nh13xsGwQEBAQEBAQEBAQEBAQEBCBrXfGw6742HXfGw6742HXfGw6742HXfGw6742HXfGw674vOAgICAgICAgICAgICAgIDlLXfGw6742HXfGw6742HXfGw6742HXfGw6742HXfGw674vOAgICAgICAgICAgICAgIDlLXfGw6742HXfGw6742HXfGw6742HXfGw6742HXfGw674vOAgICAgICAgICAgICAgIDlLXfGw6742HXfGw6742HXfGw6742HXfGw6742HXfGw674vOAgICAgICAgICAgICAgIDlLXfGw6742HXfGw6742HXfGw6742HXfGw6742HXfGw674vOAgICAgICAgICAgICAgIDlLXfGw6742HXfGw6742HXfGw6742HXfGw6742HXfGw674vOAgICAgIAgAAo+iBBkAAEQwABhDEABgAGFgv9AAIgAQAAIAAEAACG20Y1+2i2u20G1u2c2s2zG1m2U2q2yG1G2O2m2xm0o2G2jGv20W122g2t2zm1m2Y2s2ym1W2Q2o2x2022M2lGw20Y1+2i2u20G0AAKPogQcIABEMAAYQxAAYABhYL/QACIAEAACAABAAAhttGNftotrttBtbtnNrNsxtZtlNqtshtRtjtptsZtKNhtoxr9tFtdtoNrds5tZtmNrNsptVtkNqNsdtNtjNpRsNtGNftotrttBtAACj6IEH0AARDAAGEMQAGAAYWC/0AAiABAAAgAAQAAIbbRjX7aLa7bQbW7ZzazbMbWbZTarbIbUbY7abbGbSjYbaMa/bRbXbaDa3bObWbZjazbKbVbZDajbHbTbYzaUbDbRjX7aLa7bQbQAAo+iBCJgAEQwABhDEABgAGFgv9AAIgAQAAIAAEAACG20Y1+2i2u20G1u2c2s2zG1m2U2q2yG1G2O2m2xm0o2G2jGv20W122g2t2zm1m2Y2s2ym1W2Q2o2x2022M2lGw20Y1+2i2u20G0AAKPogQlgABEMAAYQxAAYABhYL/QACIAEAACAABAAAhttGNftotrttBtbtnNrNsxtZtlNqtshtRtjtptsZtKNhtoxr9tFtdtoNrds5tZtmNrNsptVtkNqNsdtNtjNpRsNtGNftotrttBtAACj6IEKKAARDAAGEMQAGAAYWC/0AAiABAAAgAAQAAIbbRjX7aLa7bQbW7ZzazbMbWbZTarbIbUbY7abbGbSjYbaMa/bRbXbaDa3bObWbZjazbKbVbZDajbHbTbYzaUbDbRjX7aLa7bQbQAAo+iBCvAAEQwABhDEABgAGFgv9AAIgAQAAIAAEAACG20Y1+2i2u20G1u2c2s2zG1m2U2q2yG1G2O2m2xm0o2G2jGv20W122g2t2zm1m2Y2s2ym1W2Q2o2x2022M2lGw20Y1+2i2u20G0AABxTu2uRu4+zgQC3iveBAfGCAajwgQM=';
 const productVersion = JSON.parse(await readFile(join(workspaceRoot, 'package.json'), 'utf8')).version;
 
 async function main() {
@@ -63,6 +71,7 @@ async function main() {
         : error;
     } finally {
       await rm(fixtureRoot, { recursive: true, force: true });
+      await rm(fixtureTemporaryDirectory, { recursive: true, force: true });
     }
   }
   if (verificationError) {
@@ -72,9 +81,13 @@ async function main() {
 
 async function writeFixtureProject() {
   await rm(fixtureRoot, { recursive: true, force: true });
+  await rm(fixtureTemporaryDirectory, { recursive: true, force: true });
   await mkdir(join(fixtureRoot, 'notes'), { recursive: true });
   await mkdir(join(fixtureRoot, 'images'), { recursive: true });
   await mkdir(join(fixtureRoot, 'media'), { recursive: true });
+  for (const path of fixtureGenericDirectoryPaths) {
+    await mkdir(join(fixtureRoot, path), { recursive: true });
+  }
   await mkdir(fixtureHome, { recursive: true });
   await mkdir(fixtureTemporaryDirectory, { recursive: true });
   await mkdir(join(fixtureRoot, '.debrute', 'feedback'), { recursive: true });
@@ -93,19 +106,23 @@ async function writeFixtureProject() {
     }
   }).png().toFile(join(fixtureRoot, fixtureImagePath));
   await writeFile(join(fixtureRoot, fixtureVideoPath), Buffer.from(fixtureVideoBase64, 'base64'));
+  await writeFile(join(fixtureRoot, fixtureAudioPath), createAudioFixture());
   const rootKey = createHash('sha256').update(fixtureRoot, 'utf8').digest('hex');
   await writeJson(join(fixtureHome, '.debrute', 'state', 'roots', rootKey, 'canvas.json'), {
     canonicalRoot: fixtureRoot,
     expandedDirectories: ['images', 'media', 'notes'],
     nodeStates: {
       [fixtureTextPath]: {
-        manualLayout: { x: 120, y: 80, width: 420, height: 260 }
+        manualLayout: { x: 200, y: 200, width: 4_200, height: 2_800 }
       },
       [fixtureImagePath]: {
-        manualLayout: { x: 600, y: 80, width: 512, height: 384 }
+        manualLayout: { x: 4_600, y: 200, width: 4_096, height: 3_072 }
       },
       [fixtureVideoPath]: {
-        manualLayout: { x: 600, y: 500, width: 480, height: 270 }
+        manualLayout: { x: 4_600, y: 3_600, width: 3_200, height: 1_800 }
+      },
+      [fixtureAudioPath]: {
+        manualLayout: { x: 200, y: 3_400, width: 3_200, height: 960 }
       }
     },
     occlusionOrder: []
@@ -114,6 +131,33 @@ async function writeFixtureProject() {
     updatedAt: '2026-07-07T00:00:00.000Z',
     entries: {}
   });
+}
+
+function createAudioFixture() {
+  const sampleRate = 8_000;
+  const sampleCount = sampleRate * 2;
+  const bytesPerSample = 2;
+  const dataSize = sampleCount * bytesPerSample;
+  const wav = Buffer.alloc(44 + dataSize);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + dataSize, 4);
+  wav.write('WAVE', 8);
+  wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * bytesPerSample, 28);
+  wav.writeUInt16LE(bytesPerSample, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(dataSize, 40);
+  for (let index = 0; index < sampleCount; index += 1) {
+    const envelope = Math.min(1, index / 200, (sampleCount - index) / 200);
+    const sample = Math.round(Math.sin((index / sampleRate) * Math.PI * 2 * 440) * 4_000 * envelope);
+    wav.writeInt16LE(sample, 44 + index * bytesPerSample);
+  }
+  return wav;
 }
 
 async function writeJson(path, value) {
@@ -258,7 +302,7 @@ async function ensureChildProcessGroupStopped(processGroupId) {
   try {
     process.kill(-processGroupId, 'SIGKILL');
   } catch (error) {
-    if (error?.code !== 'ESRCH') {
+    if (error?.code !== 'ESRCH' && error?.code !== 'EPERM') {
       throw error;
     }
   }
@@ -269,7 +313,7 @@ function processGroupExists(processGroupId) {
     process.kill(-processGroupId, 0);
     return true;
   } catch (error) {
-    if (error?.code === 'ESRCH') {
+    if (error?.code === 'ESRCH' || error?.code === 'EPERM') {
       return false;
     }
     throw error;
@@ -348,6 +392,9 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
     await assertCanvasImageWorkflow(page, label);
     await assertCanvasVideoWorkflow(page, label);
     if (fullCanvasWorkflow) {
+      await assertCanvasGenericNodeGeometry(page, label);
+      await assertCanvasVideoInteractionWorkflow(page, label);
+      await assertCanvasAudioWorkflow(page, label);
       await assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog);
       await assertCanvasHoverSurface(page, label, requestLog, canvasFeedbackLoad);
       await assertCanvasPreviewResolutionWorkflow(page, label);
@@ -435,7 +482,7 @@ function isExpectedUnavailableCapabilityConsole(message) {
 function isWorkbenchVerificationRequest(url) {
   return url.includes('/api/global/events')
     || url.includes('/api/projects/open')
-    || url.includes('/text-viewport')
+    || url.includes('/canvas/state')
     || url.includes('/canvas-feedback')
     || url.includes('/canvas-image-preview')
     || url.includes('/canvas-text-preview')
@@ -458,11 +505,7 @@ async function assertCanvasImageWorkflow(page, label) {
   );
   await imageNode.waitFor({ state: 'visible', timeout: 60000 });
   const preview = imageNode.locator('img');
-  await preview.waitFor({ state: 'visible', timeout: 60000 });
-  const loaded = await preview.evaluate((image) => image.complete && image.naturalWidth > 0);
-  if (!loaded) {
-    throw new Error(`[${label}] Canvas image preview did not decode.`);
-  }
+  await waitForDecodedImage(preview, `${label} Canvas image preview`);
   if (await imageNode.getByRole('button', { name: 'Retry' }).count() > 0) {
     throw new Error(`[${label}] Canvas image preview exposed a retry error.`);
   }
@@ -474,23 +517,404 @@ async function assertCanvasVideoWorkflow(page, label) {
     `[data-canvas-node-kind="file"][data-canvas-media-kind="video"][data-project-relative-path="${fixtureVideoPath}"]`
   );
   await videoNode.waitFor({ state: 'visible', timeout: 60000 });
-  const preview = videoNode.locator('img[data-canvas-video-layer="preview"]');
-  await preview.waitFor({ state: 'visible', timeout: 60000 });
-  const loaded = await preview.evaluate((image) => image.complete && image.naturalWidth > 0);
-  if (!loaded) {
-    throw new Error(`[${label}] Canvas video preview did not decode.`);
-  }
+  const preview = videoNode.locator(
+    'img[data-canvas-raster-preview-kind="video"][data-canvas-raster-preview-layer="visible"]'
+  );
+  await waitForDecodedImage(preview, `${label} Canvas video preview`);
   if (await videoNode.getByText('Canvas video preview', { exact: false }).count() > 0) {
     throw new Error(`[${label}] Canvas video preview exposed an error state.`);
   }
   console.log(`[${label}] Canvas video frame loaded through the Runtime preview contract.`);
 }
 
+async function waitForDecodedImage(locator, description) {
+  await locator.waitFor({ state: 'visible', timeout: 60000 });
+  const image = await locator.elementHandle();
+  if (!image) {
+    throw new Error(`${description} element was unavailable.`);
+  }
+  await locator.page().waitForFunction(
+    (element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0,
+    image,
+    { timeout: 60000 }
+  );
+}
+
+async function assertCanvasGenericNodeGeometry(page, label) {
+  for (const path of fixtureGenericDirectoryPaths) {
+    await page.locator(`[data-project-relative-path="${path}"]`).waitFor({
+      state: 'attached',
+      timeout: 60000
+    });
+  }
+
+  const readGeometry = async () => page.evaluate((paths) => {
+    const measurementContainer = document.createElement('div');
+    Object.assign(measurementContainer.style, {
+      position: 'fixed',
+      left: '-100000px',
+      top: '0',
+      width: 'max-content',
+      height: '0',
+      overflow: 'visible',
+      visibility: 'hidden',
+      pointerEvents: 'none'
+    });
+    document.body.append(measurementContainer);
+    try {
+      return paths.map((path) => {
+        const node = document.querySelector(`[data-project-relative-path="${CSS.escape(path)}"]`);
+        const presentation = node?.querySelector(':scope > .canvas-node-presentation');
+        const labelElement = presentation?.querySelector('.db-canvas-node-generic__label');
+        if (!(node instanceof HTMLElement)
+          || !(presentation instanceof HTMLElement)
+          || !(labelElement instanceof HTMLElement)) {
+          throw new Error(`Canvas generic node ${path} was not mounted with its presentation row.`);
+        }
+
+        const row = document.createElement('div');
+        row.className = 'db-canvas-node-generic canvas-generic-node-measurement-row';
+        row.style.width = 'max-content';
+        row.style.height = '48px';
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('aria-hidden', 'true');
+        const identity = document.createElement('strong');
+        identity.className = 'db-canvas-node-generic__label';
+        identity.textContent = path;
+        row.append(icon, identity);
+        measurementContainer.append(row);
+        const intrinsicWidth = row.getBoundingClientRect().width;
+        row.remove();
+        const expectedWidth = Math.min(360, Math.max(120, Math.ceil(intrinsicWidth)));
+        return {
+          path,
+          intrinsicWidth,
+          expectedWidth,
+          actualWidth: presentation.offsetWidth,
+          labelClientWidth: labelElement.clientWidth,
+          labelScrollWidth: labelElement.scrollWidth
+        };
+      });
+    } finally {
+      measurementContainer.remove();
+    }
+  }, fixtureGenericDirectoryPaths);
+
+  const initial = await readGeometry();
+  assertGenericNodeGeometryValues(label, 'initial zoom', initial);
+  for (let step = 0; step < 6; step += 1) {
+    await dispatchCanvasZoom(page, 12);
+  }
+  const zoomedOut = await readGeometry();
+  assertGenericNodeGeometryValues(label, 'zoomed out', zoomedOut);
+  for (let step = 0; step < 6; step += 1) {
+    await dispatchCanvasZoom(page, -12);
+  }
+  await page.locator('.canvas-hit-test-blocker').waitFor({ state: 'hidden', timeout: 5000 });
+  console.log(`[${label}] Automatic generic node widths match one continuous intrinsic measurement with 120–360 CSS px bounds at normal and extreme zoom.`);
+}
+
+function assertGenericNodeGeometryValues(label, stage, values) {
+  for (const value of values) {
+    if (value.actualWidth !== value.expectedWidth) {
+      throw new Error(
+        `[${label}] ${value.path} at ${stage} expected ${value.expectedWidth}px from ${value.intrinsicWidth}px intrinsic width, received ${value.actualWidth}px.`
+      );
+    }
+    if (value.intrinsicWidth <= 360 && value.labelScrollWidth > value.labelClientWidth + 1) {
+      throw new Error(
+        `[${label}] ${value.path} ellipsized below the automatic maximum at ${stage}: ${JSON.stringify(value)}.`
+      );
+    }
+  }
+  if (new Set(values.map((value) => value.actualWidth)).size < 2) {
+    throw new Error(`[${label}] generic node measurement collapsed the sample names into one width at ${stage}.`);
+  }
+}
+
+async function assertCanvasVideoInteractionWorkflow(page, label) {
+  const videoNode = page.locator(
+    `[data-canvas-node-kind="file"][data-canvas-media-kind="video"][data-project-relative-path="${fixtureVideoPath}"]`
+  );
+  const preview = videoNode.locator(
+    'img[data-canvas-raster-preview-kind="video"][data-canvas-raster-preview-layer="visible"]'
+  );
+  await page.evaluate(() => {
+    window.__debruteBrowserVideoCalls = { play: 0, pause: 0 };
+    const mediaPrototype = HTMLMediaElement.prototype;
+    if (!window.__debruteBrowserOriginalVideoPlay) {
+      window.__debruteBrowserOriginalVideoPlay = mediaPrototype.play;
+      window.__debruteBrowserOriginalVideoPause = mediaPrototype.pause;
+      mediaPrototype.play = function play() {
+        if (this instanceof HTMLVideoElement) {
+          window.__debruteBrowserVideoCalls.play += 1;
+        }
+        return window.__debruteBrowserOriginalVideoPlay.call(this);
+      };
+      mediaPrototype.pause = function pause() {
+        if (this instanceof HTMLVideoElement) {
+          window.__debruteBrowserVideoCalls.pause += 1;
+        }
+        return window.__debruteBrowserOriginalVideoPause.call(this);
+      };
+    }
+    const prepareVideo = (candidate) => {
+      if (candidate instanceof HTMLVideoElement) {
+        candidate.loop = true;
+        candidate.playbackRate = 0.25;
+      }
+    };
+    document.querySelectorAll('video').forEach(prepareVideo);
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const addedNode of record.addedNodes) {
+          prepareVideo(addedNode);
+          if (addedNode instanceof Element) {
+            addedNode.querySelectorAll('video').forEach(prepareVideo);
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.__debruteBrowserVideoObserver = observer;
+  });
+
+  await clickVisibleElementPoint(page, preview, label, 'inactive Canvas video preview');
+  const video = videoNode.locator('video').first();
+  await video.waitFor({ state: 'attached', timeout: 10000 });
+  await page.waitForFunction(() => window.__debruteBrowserVideoCalls.play === 1, undefined, { timeout: 10000 });
+  const playerReadyError = await videoNode.locator(
+    '[data-canvas-video-layer="player"]:not(.canvas-video-layer--hidden)'
+  ).waitFor({ state: 'visible', timeout: 30000 }).then(
+    () => undefined,
+    (error) => error
+  );
+  if (playerReadyError) {
+    const readiness = await videoNode.evaluate((node) => {
+      const media = node.querySelector('video');
+      const layer = node.querySelector('[data-canvas-video-layer="player"]');
+      return media instanceof HTMLVideoElement ? {
+        readyState: media.readyState,
+        networkState: media.networkState,
+        error: media.error ? { code: media.error.code, message: media.error.message } : undefined,
+        currentSrc: media.currentSrc,
+        paused: media.paused,
+        duration: media.duration,
+        layerClassName: layer?.className,
+        calls: window.__debruteBrowserVideoCalls
+      } : { missing: true };
+    });
+    throw new Error(`[${label}] mounted video did not become display-ready: ${JSON.stringify(readiness)}.`);
+  }
+  const firstClickState = await videoNode.evaluate((node) => {
+    const media = node.querySelector('video');
+    return {
+      selected: node.getAttribute('data-canvas-selected') === 'true',
+      active: node.getAttribute('data-canvas-content-active') === 'true',
+      paused: media instanceof HTMLVideoElement ? media.paused : undefined,
+      calls: window.__debruteBrowserVideoCalls
+    };
+  });
+  if (!firstClickState.selected || !firstClickState.active || firstClickState.paused || firstClickState.calls.play !== 1) {
+    throw new Error(`[${label}] inactive video preview did not select, activate, and toggle playback exactly once: ${JSON.stringify(firstClickState)}.`);
+  }
+
+  const dockButton = page.getByTestId('floating-dock').locator('button').nth(1);
+  await dockButton.click();
+  await page.waitForFunction((node) => (
+    node.getAttribute('data-canvas-content-active') !== 'true'
+    && node.getAttribute('data-canvas-selected') === 'true'
+    && node.querySelector('video') instanceof HTMLVideoElement
+    && !node.querySelector('video').paused
+  ), await videoNode.elementHandle(), { timeout: 5000 });
+
+  await clickVisibleElementPoint(page, video, label, 'mounted inactive Canvas video');
+  await page.waitForFunction((node) => {
+    const media = node.querySelector('video');
+    return node.getAttribute('data-canvas-content-active') === 'true'
+      && media instanceof HTMLVideoElement
+      && media.paused;
+  }, await videoNode.elementHandle(), { timeout: 5000 });
+  const mountedClickCalls = await page.evaluate(() => window.__debruteBrowserVideoCalls);
+  if (mountedClickCalls.play !== 1 || mountedClickCalls.pause !== 1) {
+    throw new Error(`[${label}] mounted inactive video click did not perform exactly one local pause: ${JSON.stringify(mountedClickCalls)}.`);
+  }
+
+  await dockButton.click();
+  await page.waitForFunction((node) => node.querySelector('video') === null, await videoNode.elementHandle(), {
+    timeout: 10000
+  });
+  await preview.waitFor({ state: 'visible', timeout: 10000 });
+  await page.evaluate(() => {
+    window.__debruteBrowserVideoObserver?.disconnect();
+  });
+  console.log(`[${label}] Video first-click handoff, Workbench click-away, concurrent-playing residency, local mounted click, and paused inactive retirement passed.`);
+}
+
+async function assertCanvasAudioWorkflow(page, label) {
+  const audioNode = page.locator(
+    `[data-canvas-node-kind="file"][data-canvas-media-kind="audio"][data-project-relative-path="${fixtureAudioPath}"]`
+  );
+  await audioNode.waitFor({ state: 'visible', timeout: 60000 });
+  const audio = audioNode.locator('audio').first();
+  await audio.waitFor({ state: 'attached', timeout: 10000 });
+  const structure = await audioNode.evaluate((node) => {
+    const title = node.querySelector('.db-canvas-node-titlebar');
+    const content = node.querySelector('.canvas-audio-content');
+    const media = node.querySelector('audio');
+    const requiredControls = [
+      'media-play-button',
+      'media-time-range',
+      'media-time-display',
+      'media-mute-button',
+      'media-volume-range'
+    ];
+    return {
+      titleBeforeContent: Boolean(title && content && (title.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      titleZone: title?.getAttribute('data-canvas-node-zone'),
+      contentZone: content?.getAttribute('data-canvas-node-zone'),
+      nativeControls: media instanceof HTMLAudioElement ? media.controls : undefined,
+      preload: media instanceof HTMLAudioElement ? media.preload : undefined,
+      audioController: node.querySelector('media-controller')?.hasAttribute('audio'),
+      requiredControls: Object.fromEntries(requiredControls.map((selector) => [selector, node.querySelectorAll(selector).length])),
+      extraControls: node.querySelectorAll(
+        'media-captions-button, media-pip-button, media-fullscreen-button, media-playback-rate-button'
+      ).length,
+      radii: requiredControls.map((selector) => getComputedStyle(node.querySelector(selector)).borderRadius)
+    };
+  });
+  if (!structure.titleBeforeContent
+    || structure.titleZone !== 'manipulation'
+    || structure.contentZone !== 'content'
+    || structure.nativeControls !== false
+    || structure.preload !== 'none'
+    || structure.audioController !== true
+    || Object.values(structure.requiredControls).some((count) => count !== 1)
+    || structure.extraControls !== 0
+    || structure.radii.some((radius) => radius !== '0px')) {
+    throw new Error(`[${label}] Canvas audio structure or control set diverged from the contract: ${JSON.stringify(structure)}.`);
+  }
+
+  await audio.evaluate((element) => {
+    element.dataset.browserPlayerInstance = 'stable';
+    window.__debruteBrowserAudioCalls = { play: 0, pause: 0 };
+    element.addEventListener('play', () => {
+      window.__debruteBrowserAudioCalls.play += 1;
+    });
+    element.addEventListener('pause', () => {
+      window.__debruteBrowserAudioCalls.pause += 1;
+    });
+  });
+  const content = audioNode.locator('.canvas-audio-content');
+  const backgroundPoint = await content.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const passiveTargets = [
+      '.canvas-audio-content',
+      '.canvas-audio-player',
+      'media-controller',
+      'media-control-bar'
+    ].join(', ');
+    const actionTargets = [
+      'media-play-button',
+      'media-time-range',
+      'media-time-display',
+      'media-mute-button',
+      'media-volume-range'
+    ].join(', ');
+    for (let y = rect.bottom - 2; y >= rect.top + 2; y -= 2) {
+      for (let x = rect.left + 2; x <= rect.right - 2; x += 2) {
+        const target = document.elementFromPoint(x, y);
+        if (target?.matches(passiveTargets) && !target.closest(actionTargets)) {
+          return { x, y, target: target.localName };
+        }
+      }
+    }
+    return undefined;
+  });
+  if (!backgroundPoint) {
+    throw new Error(`[${label}] Canvas audio Content Region exposed no non-action point.`);
+  }
+  await page.mouse.click(backgroundPoint.x, backgroundPoint.y);
+  await page.waitForFunction((node) => {
+    const media = node.querySelector('audio');
+    return node.getAttribute('data-canvas-selected') === 'true'
+      && node.getAttribute('data-canvas-content-active') === 'true'
+      && media instanceof HTMLAudioElement
+      && media.paused;
+  }, await audioNode.elementHandle(), { timeout: 10000 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const backgroundCalls = await page.evaluate(() => window.__debruteBrowserAudioCalls);
+  if (backgroundCalls.play !== 0 || backgroundCalls.pause !== 0) {
+    throw new Error(`[${label}] inactive audio background changed playback: ${JSON.stringify(backgroundCalls)}.`);
+  }
+  const dockButton = page.getByTestId('floating-dock').locator('button').nth(1);
+  await dockButton.click();
+
+  const playButton = audioNode.locator('media-play-button').first();
+  await clickVisibleElementPoint(page, playButton, label, 'inactive Canvas audio play control');
+  await page.waitForFunction((node) => {
+    const media = node.querySelector('audio');
+    return node.getAttribute('data-canvas-selected') === 'true'
+      && node.getAttribute('data-canvas-content-active') === 'true'
+      && media instanceof HTMLAudioElement
+      && !media.paused;
+  }, await audioNode.elementHandle(), { timeout: 10000 });
+  await page.waitForFunction(() => window.__debruteBrowserAudioCalls?.play >= 1, undefined, { timeout: 10000 });
+  const startedCalls = await page.evaluate(() => window.__debruteBrowserAudioCalls);
+  if (startedCalls.play !== 1 || startedCalls.pause !== 0) {
+    throw new Error(`[${label}] inactive audio control did not activate and play exactly once: ${JSON.stringify(startedCalls)}.`);
+  }
+  await assertCanvasContentActivationRing(page, audioNode, '.canvas-audio-content', label, 'initial audio zoom');
+  await dispatchCanvasZoom(page, 12);
+  await page.locator('.canvas-hit-test-blocker').waitFor({ state: 'hidden', timeout: 5000 });
+  await assertCanvasContentActivationRing(page, audioNode, '.canvas-audio-content', label, 'zoomed audio');
+  await dispatchCanvasZoom(page, -12);
+  await page.locator('.canvas-hit-test-blocker').waitFor({ state: 'hidden', timeout: 5000 });
+
+  await clickVisibleElementPoint(page, playButton, label, 'active Canvas audio pause control');
+  await page.waitForFunction((node) => node.querySelector('audio')?.paused === true, await audioNode.elementHandle(), {
+    timeout: 5000
+  });
+  await dockButton.click();
+  const inactive = await audioNode.evaluate((node) => ({
+    selected: node.getAttribute('data-canvas-selected') === 'true',
+    active: node.getAttribute('data-canvas-content-active') === 'true',
+    playerInstance: node.querySelector('audio')?.dataset.browserPlayerInstance,
+    paused: node.querySelector('audio')?.paused
+  }));
+  if (!inactive.selected || inactive.active || inactive.playerInstance !== 'stable' || inactive.paused !== true) {
+    throw new Error(`[${label}] audio Workbench click-away changed Selection or unloaded playback state: ${JSON.stringify(inactive)}.`);
+  }
+  console.log(`[${label}] Audio title/content regions, rectangular Media Chrome controls, first-click activation, and stable deactivation passed.`);
+}
+
+async function assertCanvasContentActivationRing(page, node, selector, label, stage) {
+  const measurement = await node.evaluate((element, contentSelector) => {
+    const content = element.querySelector(contentSelector);
+    if (!(content instanceof HTMLElement) || content.offsetWidth <= 0) {
+      return undefined;
+    }
+    const boxShadow = getComputedStyle(content, '::after').boxShadow;
+    const lengths = [...boxShadow.matchAll(/(-?[\d.]+)px/g)].map((match) => Number(match[1]));
+    return {
+      boxShadow,
+      localSpread: lengths[3],
+      transformedScale: content.getBoundingClientRect().width / content.offsetWidth
+    };
+  }, selector);
+  const screenSpread = measurement?.localSpread === undefined
+    ? undefined
+    : measurement.localSpread * measurement.transformedScale;
+  if (screenSpread === undefined || Math.abs(screenSpread - 2) > 0.25) {
+    throw new Error(`[${label}] ${stage} Content Activation ring was not 2 screen px: ${JSON.stringify({ measurement, screenSpread })}.`);
+  }
+}
+
 async function assertCanvasPreviewResolutionWorkflow(page, label) {
   const selectors = {
-    image: `[data-project-relative-path="${fixtureImagePath}"] img[data-canvas-image-layer="visible"]`,
-    text: `[data-project-relative-path="${fixtureTextPath}"] img[data-canvas-text-preview-layer="visible"]`,
-    video: `[data-project-relative-path="${fixtureVideoPath}"] img[data-canvas-video-layer="preview"]`
+    image: `[data-project-relative-path="${fixtureImagePath}"] img[data-canvas-raster-preview-kind="image"][data-canvas-raster-preview-layer="visible"]`,
+    text: `[data-project-relative-path="${fixtureTextPath}"] img[data-canvas-raster-preview-kind="text"][data-canvas-raster-preview-layer="visible"]`,
+    video: `[data-project-relative-path="${fixtureVideoPath}"] img[data-canvas-raster-preview-kind="video"][data-canvas-raster-preview-layer="visible"]`
   };
   await waitForCanvasPreviewImages(page, selectors);
   const initial = await readCanvasPreviewResolutions(page, selectors);
@@ -499,20 +923,12 @@ async function assertCanvasPreviewResolutionWorkflow(page, label) {
     Object.keys(selectors).every((kind) => current[kind].previewWidth < initial[kind].previewWidth)
   ));
   assertCanvasPreviewResolutionRequests(label, 'initial-low', initialLow);
-  const high = await zoomCanvasAndWait(page, selectors, 'high', initial, -10, 9, (current) => (
+  const high = await zoomCanvasAndWait(page, selectors, 'high', initial, -10, 10, (current) => (
     Object.keys(selectors).every((kind) => current[kind].previewWidth > initial[kind].previewWidth)
   ));
   assertCanvasPreviewResolutionRequests(label, 'high', high);
-  const low = await zoomCanvasAndWait(page, selectors, 'low', high, 10, 4, (current) => (
-    Object.keys(selectors).every((kind) => current[kind].previewWidth < high[kind].previewWidth)
-  ));
-  assertCanvasPreviewResolutionRequests(label, 'low', low);
-  const restored = await zoomCanvasAndWait(page, selectors, 'restored', low, -10, 8, (current) => (
-    Object.keys(selectors).every((kind) => current[kind].previewWidth > low[kind].previewWidth)
-  ));
-  assertCanvasPreviewResolutionRequests(label, 'restored', restored);
 
-  console.log(`[${label}] Canvas image/text/video resolution tiers switched initial -> low -> high -> low -> high: ${JSON.stringify({ initial, initialLow, high, low, restored })}.`);
+  console.log(`[${label}] Canvas image/text/video resolution tiers switched initial -> low -> high: ${JSON.stringify({ initial, initialLow, high })}.`);
 }
 
 function assertCanvasPreviewResolutionRequests(label, stage, resolutions) {
@@ -625,7 +1041,6 @@ async function assertWorkbenchChrome(page, label) {
   await page.getByTestId('floating-dock').waitFor({ state: 'visible', timeout: 60000 });
   await page.getByTestId('canvas-layer').waitFor({ state: 'visible', timeout: 60000 });
   await page.getByTestId('canvas-minimap-bar').waitFor({ state: 'visible', timeout: 60000 });
-  await page.locator('.canvas-card-bar').waitFor({ state: 'visible', timeout: 60000 });
 
   const dockButtons = page.getByTestId('floating-dock').locator('button');
   const dockButtonCount = await dockButtons.count();
@@ -638,7 +1053,7 @@ async function assertWorkbenchChrome(page, label) {
   await page.getByTestId('floating-panel-settings').waitFor({ state: 'visible', timeout: 10000 });
   await dockButtons.nth(2).click();
   await dockButtons.nth(1).click();
-  console.log(`[${label}] Workbench launch, title bar, FloatingDock, Settings, Inspector, minimap, and Canvas card bar rendered.`);
+  console.log(`[${label}] Workbench launch, title bar, FloatingDock, Settings, Inspector, and minimap rendered.`);
 }
 
 async function assertIconButtonsHaveNames(page, label) {
@@ -657,7 +1072,28 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
   const textNode = page.locator(`[data-canvas-node-kind="file"][data-canvas-media-kind="text"][data-project-relative-path="${fixtureTextPath}"]`).first();
   await textNode.waitFor({ state: 'visible', timeout: 60000 });
   const textBody = textNode.locator('.canvas-text-body');
-  await clickVisibleElementPoint(page, textBody, label, 'Canvas text body');
+  const activationPoint = await clickVisibleElementPoint(page, textBody, label, 'Canvas text body');
+  const cursor = textNode.locator('.cm-cursor').first();
+  await cursor.waitFor({ state: 'visible', timeout: 10000 });
+  const activation = await textNode.evaluate((node, clickedPoint) => {
+    const cursorElement = node.querySelector('.cm-cursor');
+    if (!(cursorElement instanceof HTMLElement)) {
+      throw new Error('Canvas text cursor did not mount.');
+    }
+    const cursorRect = cursorElement.getBoundingClientRect();
+    return {
+      selected: node.getAttribute('data-canvas-selected') === 'true',
+      active: node.getAttribute('data-canvas-content-active') === 'true',
+      cursorDistanceX: Math.abs(cursorRect.left - clickedPoint.x),
+      cursorDistanceY: Math.abs((cursorRect.top + cursorRect.height / 2) - clickedPoint.y)
+    };
+  }, activationPoint);
+  if (!activation.selected
+    || !activation.active
+    || activation.cursorDistanceX > 140
+    || activation.cursorDistanceY > 45) {
+    throw new Error(`[${label}] first inactive text click did not select, activate, and place the caret at the clicked position: ${JSON.stringify(activation)}.`);
+  }
   await assertCanvasImageWorkflow(page, `${label}: text active`);
   const scroller = textNode.locator('.cm-scroller').first();
   await scroller.waitFor({ state: 'visible', timeout: 60000 });
@@ -670,10 +1106,43 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
     scrollerHandle,
     { timeout: 10000 }
   );
+  const nodeScreenWidthBeforeOrdinaryWheel = await textNode.evaluate((node) => node.getBoundingClientRect().width);
   const committedScrollTop = await scrollCanvasTextEditor(page, scroller, targetScrollTop, label);
+  const nodeScreenWidthAfterOrdinaryWheel = await textNode.evaluate((node) => node.getBoundingClientRect().width);
+  if (Math.abs(nodeScreenWidthAfterOrdinaryWheel - nodeScreenWidthBeforeOrdinaryWheel) > 0.5) {
+    throw new Error(`[${label}] ordinary wheel over focused text changed Canvas zoom.`);
+  }
+  await scroller.hover();
+  await page.keyboard.down('Control');
+  try {
+    await page.mouse.wheel(0, -120);
+  } finally {
+    await page.keyboard.up('Control');
+  }
+  const zoomDeadline = Date.now() + 5000;
+  let nodeScreenWidthAfterModifiedWheel = nodeScreenWidthAfterOrdinaryWheel;
+  while (Date.now() < zoomDeadline) {
+    nodeScreenWidthAfterModifiedWheel = await textNode.evaluate((node) => node.getBoundingClientRect().width);
+    if (Math.abs(nodeScreenWidthAfterModifiedWheel - nodeScreenWidthAfterOrdinaryWheel) > 0.5) {
+      break;
+    }
+    await page.waitForTimeout(50);
+  }
+  if (Math.abs(nodeScreenWidthAfterModifiedWheel - nodeScreenWidthAfterOrdinaryWheel) <= 0.5) {
+    const stageTransform = await page.locator('.canvas-world-stage').evaluate((stage) => ({
+      inline: stage.style.transform,
+      computed: getComputedStyle(stage).transform
+    }));
+    throw new Error(`[${label}] modified wheel over focused text did not change Canvas zoom: ${JSON.stringify({
+      nodeScreenWidthAfterOrdinaryWheel,
+      nodeScreenWidthAfterModifiedWheel,
+      stageTransform
+    })}.`);
+  }
+  await page.locator('.canvas-hit-test-blocker').waitFor({ state: 'hidden', timeout: 5000 });
   const viewportCommit = observeCanvasTextResponse(page, (response) => (
     response.request().method() === 'PATCH'
-    && response.url().includes('/text-viewport')
+    && response.url().includes('/canvas/state')
     && response.ok()
   ), { timeout: 10000 });
   const previewSourceSave = observeCanvasTextResponse(page, (response) => (
@@ -682,9 +1151,11 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
     && response.ok()
   ), { timeout: 60000 });
   await clickCanvasSurfaceEmptyPoint(page, textNode, label);
-  await waitForCanvasTextResponse(viewportCommit, page, textNode, label, requestLog, 'text viewport PATCH');
+  await waitForCanvasTextResponse(viewportCommit, page, textNode, label, requestLog, 'Canvas state viewport PATCH');
   await waitForCanvasTextResponse(previewSourceSave, page, textNode, label, requestLog, 'text preview source save');
-  await textNode.locator('.canvas-text-preview-image').waitFor({ state: 'visible', timeout: 60000 });
+  await textNode.locator(
+    'img[data-canvas-raster-preview-kind="text"][data-canvas-raster-preview-layer="visible"]'
+  ).waitFor({ state: 'visible', timeout: 60000 });
   await assertCanvasTextPreviewRaster(page, textNode, label);
   await saveBrowserScreenshot(page, `${label}-canvas-text-preview.png`);
 
@@ -703,11 +1174,13 @@ async function assertCanvasTextWorkflow(page, label, targetScrollTop, requestLog
   if (afterArrowScrollTop < arrowFloor) {
     throw new Error(`[${label}] Cursor movement reset Canvas text scroll. Expected >= ${arrowFloor}, received ${afterArrowScrollTop}.`);
   }
-  console.log(`[${label}] Canvas text scroll restore, preview handoff, and cursor movement passed.`);
+  console.log(`[${label}] Canvas text first-click caret, local wheel, modified Canvas zoom, scroll restore, preview handoff, and cursor movement passed.`);
 }
 
 async function assertCanvasTextPreviewRaster(page, textNode, label) {
-  const preview = textNode.locator('img[data-canvas-text-preview-layer="visible"]').first();
+  const preview = textNode.locator(
+    'img[data-canvas-raster-preview-kind="text"][data-canvas-raster-preview-layer="visible"]'
+  ).first();
   await preview.waitFor({ state: 'visible', timeout: 60000 });
   const statistics = await preview.evaluate((image) => {
     if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0) {
@@ -869,6 +1342,7 @@ async function clickVisibleElementPoint(page, locator, label, description) {
     throw new Error(`[${label}] ${description} had no visible click point.\n${diagnostics}`);
   }
   await page.mouse.click(point.x, point.y);
+  return point;
 }
 
 async function moveToVisibleElementPoint(page, locator, label, description) {
@@ -967,11 +1441,13 @@ async function canvasTextDiagnostics(page, textNode) {
     const activeElement = document.activeElement;
     return JSON.stringify({
       nodeClassName: node.className,
-      selected: node.classList.contains('selected'),
+      selected: node.getAttribute('data-canvas-selected') === 'true',
       editorCount: node.querySelectorAll('.canvas-text-editor').length,
       scrollerScrollTop: scroller instanceof HTMLElement ? scroller.scrollTop : undefined,
       scrollerScrollLeft: scroller instanceof HTMLElement ? scroller.scrollLeft : undefined,
-      previewImageCount: node.querySelectorAll('.canvas-text-preview-image').length,
+      previewImageCount: node.querySelectorAll(
+        'img[data-canvas-raster-preview-kind="text"][data-canvas-raster-preview-layer="visible"]'
+      ).length,
       previewEmptyCount: node.querySelectorAll('.canvas-text-preview-empty').length,
       captureTargetCount: document.querySelectorAll('.canvas-text-preview-capture-target').length,
       activeElementClassName: activeElement instanceof HTMLElement ? activeElement.className : undefined,
@@ -1018,7 +1494,11 @@ async function clickCanvasSurfaceEmptyPoint(page, node, label) {
   }
 
   await page.mouse.click(point.x, point.y);
-  await page.waitForFunction((element) => !element.classList.contains('selected'), nodeElement, { timeout: 5000 });
+  await page.waitForFunction(
+    (element) => element.getAttribute('data-canvas-selected') !== 'true',
+    nodeElement,
+    { timeout: 5000 }
+  );
 }
 
 async function assertCanvasHoverSurface(page, label, requestLog, canvasFeedbackLoad) {
@@ -1054,8 +1534,8 @@ async function hoverDiagnostics(page, textNode) {
     const hit = document.elementFromPoint(rect.left + 40, rect.top + 40);
     return JSON.stringify({
       nodeClassName: node.className,
-      selected: node.classList.contains('selected'),
-      hovered: node.classList.contains('hovered'),
+      selected: node.getAttribute('data-canvas-selected') === 'true',
+      hovered: node.getAttribute('data-canvas-hovered') === 'true',
       feedbackBarCount: document.querySelectorAll('.canvas-feedback-bar').length,
       canvasFeedbackBarDataCount: document.querySelectorAll('[data-canvas-feedback-bar="true"]').length,
       hitClassName: hit instanceof HTMLElement ? hit.className : undefined,
@@ -1065,6 +1545,13 @@ async function hoverDiagnostics(page, textNode) {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(formatVerificationError(error));
   process.exitCode = 1;
 });
+
+function formatVerificationError(error) {
+  if (error instanceof AggregateError) {
+    return [error.message, ...error.errors.map(formatVerificationError)].join('\n');
+  }
+  return error instanceof Error ? error.stack ?? error.message : String(error);
+}

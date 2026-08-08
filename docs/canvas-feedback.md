@@ -240,12 +240,10 @@ drag, resize, or geometry
 edit mode. Repositioning requires deleting the Item and creating a new spatial
 comment.
 
-Every node with any accepted feedback renders one pointer-transparent,
-theme-aware Feedback Frame. The frame is a single feedback-presence border; it
-does not encode feedback kinds with segmented colors and does not show icons,
-counts, comments, labels, timestamps, or controls. Ordered kind metadata is kept
-only for deterministic tests and diagnostics. Image and video spatial items
-remain high-contrast numbered overlays over their media content.
+Canvas renders no node-wide Feedback Frame or other persistent
+feedback-presence border. Feedback remains visible through its Feedback Bar,
+saved Capsules, marks, and the high-contrast numbered pin or rectangle overlays
+owned by image and video spatial items.
 
 ## Video Moment Interaction
 

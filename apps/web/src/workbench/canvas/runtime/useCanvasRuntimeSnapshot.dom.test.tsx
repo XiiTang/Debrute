@@ -75,6 +75,7 @@ function selectionMarquee(): CanvasRuntimePointerInteraction {
     start: { x: 10, y: 20 },
     current: { x: 10, y: 20 },
     initialSelection: undefined,
+    initialContentInteractionProjectRelativePath: undefined,
     additive: false,
     topEdgeInset: 0
   };

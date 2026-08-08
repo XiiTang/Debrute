@@ -407,7 +407,7 @@ export function CanvasTextEditor({
     <div
       ref={hostRef}
       data-canvas-text-editor="true"
-      data-canvas-interaction-island={!readOnly && published ? 'true' : undefined}
+      data-canvas-node-zone="content-island"
       data-editor-engine="codemirror"
       data-editor-mode={readOnly ? 'handoff' : 'edit'}
       data-editor-published={published ? 'true' : 'false'}

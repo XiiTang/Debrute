@@ -7,7 +7,11 @@ Canvas state; Workbench owns scene geometry and interaction.
 The complete contracts are
 [Project Tree membership](../packages/canvas-core/docs/adr/0008-project-tree-defines-canvas-membership.md)
 and
-[single root-scoped Canvas state](../packages/canvas-core/docs/adr/0009-canvas-workspace-contains-one-canvas-state.md).
+[single root-scoped Canvas state](../packages/canvas-core/docs/adr/0009-canvas-workspace-contains-one-canvas-state.md),
+with presentation geometry refined by
+[camera-independent content and chrome](../packages/canvas-core/docs/adr/0010-canvas-presentation-separates-content-from-screen-space-chrome.md)
+and interaction refined by
+[distinct Selection, Content Activation, and manipulation](../packages/canvas-core/docs/adr/0011-canvas-node-selection-content-activation-and-manipulation-are-distinct.md).
 
 ## Runtime Authority
 
@@ -41,13 +45,24 @@ derives:
 - overlap-only `occlusionOrder` reconciliation and z values;
 - Canvas Selection, camera, drag drafts, and pointer interaction.
 
-Generic root, folder, unknown, and unavailable nodes are 48 CSS pixels high and
-`clamp(120, measured label width + 54, 360)` CSS pixels wide. Text nodes use
-`4200 × 2800` scene units, audio uses `3200 × 960`, and image and video nodes
-use intrinsic dimensions. Scene coordinates use the existing scale of 10.
+Generic root, folder, unknown, and image-without-dimensions nodes are 48 presentation pixels
+high. Automatic Layout derives their width from one rendering-matched DOM
+measurement of the stable icon-and-label identity row, rounds upward, and
+clamps continuously between one Canvas-owned minimum and maximum. Those bounds
+are initially 120 and 360 pixels and are not size tiers. They are expressed in camera-independent presentation
+pixels and converted once through the scene scale of 10. Camera zoom and
+transient error copy never change node geometry or label overflow; only an
+identity row wider than the automatic maximum is ellipsized. Manual Layout does
+not use these bounds. Text nodes use `4200 × 2800` scene units, audio uses
+`3200 × 960`, available image and video nodes use intrinsic dimensions, and an
+unavailable video uses a `3200 × 1800` fallback so its title bar and Content
+Region remain usable.
 
-A Manual Layout overrides only its own node. Automatic nodes do not route around
-manual rectangles. Reset removes only the selected `manualLayout` values.
+A Manual Layout overrides only its own node. Its complete persisted rectangle,
+including width, is never rewritten by the automatic bounds. Automatic nodes do
+not route around manual rectangles. Reset removes only the selected
+`manualLayout` values and thereby opts those nodes back into current Automatic
+Layout geometry. No Canvas-state migration or width-source field is required.
 
 Within each directory, direct-child directory subtrees remain vertical blocks
 in Project order, followed by one horizontal row containing all direct-child
@@ -61,16 +76,25 @@ layout mechanism.
 visible node. Selecting nodes raises the complete resulting selection above
 overlapping unselected nodes while preserving the selected nodes' internal
 order. Newly disclosed overlapping nodes start above existing nodes. Selection
-is transient and clears when Canvas interaction loses focus.
+is transient. Workbench focus changes do not clear it or control Content
+Activation.
 
 ## Interaction
 
+Canvas Node Selection and Canvas Content Activation are separate. Only text,
+video, and audio have a Content Region; their title-bar background is the only
+Node Manipulation Region. A successful unmodified click in inactive content
+atomically sole-selects and activates it, then applies the one content action.
+Clicking elsewhere ends Content Activation after the click succeeds, without
+making browser focus a state authority. Generic and image nodes retain their
+whole non-action surface as the move handle.
+
 Canvas directory click selects and toggles disclosure on pointer up when the
 pointer stays within the drag threshold. Crossing the threshold performs a
-Manual Layout drag. Explorer single-click changes Explorer Selection;
-double-clicking a file or invoking Reveal in Canvas discloses and loads its
-ancestors, centers the Canvas, focuses it, selects the target, and applies the
-ordinary raise rule.
+Manual Layout drag. Text, video, and audio move only from their title bars.
+Explorer single-click changes Explorer Selection; double-clicking a file or
+invoking Reveal in Canvas discloses and loads its ancestors, centers the Canvas,
+focuses it, selects the target, and applies the ordinary raise rule.
 
 Explorer filesystem drag and Canvas layout drag are independent. Canvas never
 changes Project hierarchy, and Explorer never changes Canvas membership.

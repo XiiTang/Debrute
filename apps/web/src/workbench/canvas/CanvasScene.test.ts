@@ -14,7 +14,7 @@ describe('CanvasScene', () => {
         resources: [{ projectRelativePath: '', nodeKind: 'directory' }],
       },
       state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
-      measureLabelWidth: () => 100
+      measureGenericIdentityRows: measuredWidths(() => 100)
     });
 
     expect(result.projection.nodes).toEqual([
@@ -22,7 +22,7 @@ describe('CanvasScene', () => {
         projectRelativePath: '',
         displayName: 'ecommerce',
         nodeKind: 'directory',
-        width: 1_540,
+        width: 1_200,
         height: 480
       })
     ]);
@@ -52,7 +52,7 @@ describe('CanvasScene', () => {
         ],
       },
       state: { expandedDirectories: ['assets'], nodeStates: {}, occlusionOrder: [] },
-      measureLabelWidth: (label) => label === 'ecommerce' ? 100 : 50
+      measureGenericIdentityRows: measuredWidths((label) => label === 'ecommerce' ? 154 : 50)
     });
 
     expect(result.projection.nodes.map((node) => [
@@ -71,7 +71,32 @@ describe('CanvasScene', () => {
     ]);
   });
 
+  it('reserves a usable Content Region for unavailable video', () => {
+    const result = projectCanvasScene({
+      canonicalRoot: '/project',
+      resources: {
+        resources: [
+          { projectRelativePath: '', nodeKind: 'directory' },
+          {
+            projectRelativePath: 'missing.mp4',
+            nodeKind: 'file',
+            mediaKind: 'video',
+            availability: { state: 'missing', message: 'missing' }
+          }
+        ]
+      },
+      state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
+      measureGenericIdentityRows: measuredWidths(() => 20)
+    });
+
+    expect(result.projection.nodes.find((node) => node.projectRelativePath === 'missing.mp4')).toMatchObject({
+      width: 3_200,
+      height: 1_800
+    });
+  });
+
   it('overlays manual state and derives overlap-only stacking order', () => {
+    const measuredLabels: string[][] = [];
     const result = projectCanvasScene({
       canonicalRoot: '/project',
       resources: {
@@ -89,12 +114,76 @@ describe('CanvasScene', () => {
         },
         occlusionOrder: ['a']
       },
-      measureLabelWidth: () => 20
+      measureGenericIdentityRows: (labels) => {
+        measuredLabels.push([...labels]);
+        return new Map(labels.map((label) => [label, 20]));
+      }
     });
 
+    expect(measuredLabels).toEqual([['project', 'a', 'b']]);
+    expect(result.projection.nodes.find((node) => node.projectRelativePath === 'a')).toMatchObject({
+      x: 0,
+      y: 0,
+      width: 1_200,
+      height: 480,
+      layoutMode: 'manual'
+    });
+    expect(result.projection.nodes.find((node) => node.projectRelativePath === 'b')).toMatchObject({
+      x: 100,
+      y: 100,
+      width: 1_200,
+      height: 480,
+      layoutMode: 'manual'
+    });
     expect(result.occlusionOrder).toEqual(['a', '', 'b']);
     expect(result.projection.nodes.find((node) => node.projectRelativePath === 'b')!.z)
       .toBeGreaterThan(result.projection.nodes.find((node) => node.projectRelativePath === 'a')!.z);
+  });
+
+  it('keeps Automatic Layout independent of a node manual rectangle', () => {
+    const resources = {
+      resources: [
+        { projectRelativePath: '', nodeKind: 'directory' as const },
+        { projectRelativePath: 'a', nodeKind: 'directory' as const },
+        { projectRelativePath: 'b', nodeKind: 'directory' as const }
+      ]
+    };
+    const measureGenericIdentityRows = measuredWidths(() => 20);
+    const automatic = projectCanvasScene({
+      canonicalRoot: '/project',
+      resources,
+      state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
+      measureGenericIdentityRows
+    });
+    const manual = projectCanvasScene({
+      canonicalRoot: '/project',
+      resources,
+      state: {
+        expandedDirectories: [],
+        nodeStates: {
+          a: { manualLayout: { x: 9_000, y: 8_000, width: 7_000, height: 6_000 } }
+        },
+        occlusionOrder: []
+      },
+      measureGenericIdentityRows
+    });
+
+    for (const path of ['', 'b']) {
+      const automaticNode = automatic.projection.nodes.find((node) => node.projectRelativePath === path)!;
+      expect(manual.projection.nodes.find((node) => node.projectRelativePath === path)).toMatchObject({
+        x: automaticNode.x,
+        y: automaticNode.y,
+        width: automaticNode.width,
+        height: automaticNode.height
+      });
+    }
+    expect(manual.projection.nodes.find((node) => node.projectRelativePath === 'a')).toMatchObject({
+      x: 9_000,
+      y: 8_000,
+      width: 7_000,
+      height: 6_000,
+      layoutMode: 'manual'
+    });
   });
 
   it('retains order only for overlapping nodes and raises a selection as one stable group', () => {
@@ -145,7 +234,7 @@ describe('CanvasScene', () => {
         ],
       },
       state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
-      measureLabelWidth: () => 20
+      measureGenericIdentityRows: measuredWidths(() => 20)
     });
 
     expect(result.projection.nodes.map((node) => [
@@ -162,3 +251,9 @@ describe('CanvasScene', () => {
     ]);
   });
 });
+
+function measuredWidths(
+  widthForLabel: (label: string) => number
+): (labels: readonly string[]) => ReadonlyMap<string, number> {
+  return (labels) => new Map(labels.map((label) => [label, widthForLabel(label)]));
+}

@@ -67,7 +67,13 @@ const CANVAS_FOCUS_LOCAL_WHEEL_SELECTOR = '[data-canvas-local-wheel="focus"]';
 const CANVAS_FLOATING_BAR_LAYER_SELECTOR = '.floating-bar-layer';
 const CANVAS_WORKBENCH_SHELL_SELECTOR = '.workbench-shell';
 
-export function shouldCanvasHandleWheelTarget(target: EventTarget | null): boolean {
+export function shouldCanvasHandleWheelTarget(
+  target: EventTarget | null,
+  forceCanvasZoom = false
+): boolean {
+  if (forceCanvasZoom) {
+    return true;
+  }
   if (closestElement(target, CANVAS_LOCAL_WHEEL_SELECTOR) !== null) {
     return false;
   }
@@ -77,9 +83,10 @@ export function shouldCanvasHandleWheelTarget(target: EventTarget | null): boole
 
 export function shouldCanvasHandleGlobalWheelTarget(
   target: EventTarget | null,
-  surfaceElement: EventTarget | null
+  surfaceElement: EventTarget | null,
+  forceCanvasZoom = false
 ): boolean {
-  if (!shouldCanvasHandleWheelTarget(target)) {
+  if (!shouldCanvasHandleWheelTarget(target, forceCanvasZoom)) {
     return false;
   }
   if (containsTarget(surfaceElement, target)) {

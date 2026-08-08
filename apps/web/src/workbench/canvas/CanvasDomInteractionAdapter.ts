@@ -1,11 +1,6 @@
-export type CanvasDomNodeInteractionZone =
-  | 'passive'
-  | 'move'
-  | 'activate'
-  | 'action'
-  | 'interaction-island'
-  | 'resize'
-  | 'feedback';
+import type { CanvasInteractionPolicyNodeZone } from './CanvasInteractionPolicy.js';
+
+export type CanvasDomNodeInteractionZone = CanvasInteractionPolicyNodeZone;
 
 export type CanvasDomInteractionTarget =
   | { kind: 'outside' }
@@ -17,22 +12,29 @@ export type CanvasDomInteractionTarget =
       projectRelativePath: string;
       mediaKind?: string | undefined;
       zone: CanvasDomNodeInteractionZone;
+      directManipulation: boolean;
+      contentControl: boolean;
     };
 
-export interface CanvasPreviewActivationRequest {
-  requestId: number;
-  projectRelativePath: string;
-  mediaKind: 'text' | 'video';
-  clientX: number;
-  clientY: number;
-}
+export type CanvasContentHandoffRequest =
+  | {
+      kind: 'text-caret';
+      requestId: number;
+      projectRelativePath: string;
+      clientX: number;
+      clientY: number;
+    }
+  | {
+      kind: 'video-toggle';
+      requestId: number;
+      projectRelativePath: string;
+    };
 
 const CANVAS_NODE_ZONES = new Set<CanvasDomNodeInteractionZone>([
-  'passive',
-  'move',
-  'activate',
+  'content',
+  'manipulation',
   'action',
-  'interaction-island',
+  'content-island',
   'resize',
   'feedback'
 ]);
@@ -42,9 +44,17 @@ const NATIVE_ACTION_SELECTOR = [
   'input',
   'select',
   'textarea',
+  'video',
   'a[href]',
   'summary',
-  '[role="button"]'
+  '[role="button"]',
+  'media-controller',
+  'media-play-button',
+  'media-mute-button',
+  'media-captions-button',
+  'media-pip-button',
+  'media-fullscreen-button',
+  'media-playback-rate-button'
 ].join(',');
 
 export function resolveCanvasDomInteractionTarget(
@@ -70,11 +80,15 @@ export function resolveCanvasDomInteractionTarget(
     return { kind: 'canvas-ui' };
   }
 
+  const zone = canvasNodeInteractionZone(target, node);
   return {
     kind: 'node',
     projectRelativePath,
     ...(node.dataset.canvasMediaKind === undefined ? {} : { mediaKind: node.dataset.canvasMediaKind }),
-    zone: canvasNodeInteractionZone(target, node)
+    zone,
+    directManipulation: node.contains(target.closest('[data-canvas-direct-manipulation="true"]')),
+    contentControl: zone === 'content'
+      && node.contains(target.closest(NATIVE_ACTION_SELECTOR))
   };
 }
 
@@ -89,9 +103,14 @@ function canvasNodeInteractionZone(target: Element, node: HTMLElement): CanvasDo
     return explicitZone;
   }
 
-  const interactionIsland = target.closest('[data-canvas-interaction-island="true"]');
-  if (interactionIsland && node.contains(interactionIsland)) {
-    return 'interaction-island';
+  const contentIsland = target.closest('[data-canvas-node-zone="content-island"]');
+  if (contentIsland && node.contains(contentIsland)) {
+    return 'content-island';
+  }
+
+  const content = target.closest('[data-canvas-node-zone="content"]');
+  if (content && node.contains(content)) {
+    return 'content';
   }
 
   const nativeAction = target.closest(NATIVE_ACTION_SELECTOR);
@@ -105,6 +124,5 @@ function canvasNodeInteractionZone(target: Element, node: HTMLElement): CanvasDo
     }
   }
 
-  const defaultZone = node.dataset.canvasNodeDefaultZone as CanvasDomNodeInteractionZone | undefined;
-  return defaultZone && CANVAS_NODE_ZONES.has(defaultZone) ? defaultZone : 'passive';
+  return 'manipulation';
 }

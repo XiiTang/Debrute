@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AlertTriangle, Video } from '../ui/index.js';
+import { Video } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { useI18n } from '../i18n';
-import type { CanvasVideoPlayRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter.js';
+import type { CanvasVideoPlaybackToggleRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter.js';
 import {
   useCanvasRasterPreviewPresentation,
   type CanvasRasterPreviewRequest
@@ -11,8 +11,8 @@ import {
 import { useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime.js';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
-import { CanvasNodeErrorPresentation } from './CanvasNodeErrorPresentation';
-import type { CanvasPreviewActivationRequest } from './CanvasDomInteractionAdapter.js';
+import { CanvasContentErrorPresentation } from './CanvasNodeErrorPresentation';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
 
 const CanvasVideoPlayerAdapter = React.lazy(async () => {
   const module = await import('./CanvasVideoPlayerAdapter.js');
@@ -27,9 +27,11 @@ export interface CanvasVideoNodeContentProps {
   videoPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   videoPreviewError?: string | undefined;
   forcePlayerMounted?: boolean | undefined;
-  previewActivationRequest?: CanvasPreviewActivationRequest | undefined;
+  contentHandoffRequest?: CanvasContentHandoffRequest | undefined;
   onPlayerMounted?: ((projectRelativePath: string) => void) | undefined;
   onPlayingChange?: ((projectRelativePath: string, playing: boolean) => void) | undefined;
+  onContentError: (projectRelativePath: string) => void;
+  onContentHandoffConsumed?: ((requestId: number) => void) | undefined;
   onRegisterVideoTarget: (projectRelativePath: string, target: CanvasVideoPlayerHandle | undefined) => void;
   onUpdatePlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
   feedbackEntry?: CanvasFeedbackEntry | undefined;
@@ -50,9 +52,11 @@ export function CanvasVideoNodeContent({
   videoPreviewRequest,
   videoPreviewError,
   forcePlayerMounted = false,
-  previewActivationRequest,
+  contentHandoffRequest,
   onPlayerMounted,
   onPlayingChange,
+  onContentError,
+  onContentHandoffConsumed,
   onRegisterVideoTarget,
   onUpdatePlaybackTime,
   feedbackEntry,
@@ -71,6 +75,7 @@ export function CanvasVideoNodeContent({
   const playerSourceIdentity = node.availability.state === 'available'
     ? `${node.projectRelativePath}\u001f${node.availability.fileUrl}\u001f${node.availability.revision}`
     : `${node.projectRelativePath}\u001f${node.availability.state}`;
+  const projectedPlaybackTimeMs = node.videoPlayback?.currentTimeMs ?? 0;
   const initialVisibleLayer: CanvasVideoVisibleLayer = contentInteractionActive || forcePlayerMounted ? 'player' : 'preview';
   const [visibleLayer, setVisibleLayer] = useState<CanvasVideoVisibleLayer>(initialVisibleLayer);
   const [playerMounted, setPlayerMounted] = useState(() => initialVisibleLayer === 'player');
@@ -80,7 +85,9 @@ export function CanvasVideoNodeContent({
   const targetLayerRef = useRef(targetLayer);
   const sourceResetLayerRef = useRef<CanvasVideoVisibleLayer>(initialVisibleLayer);
   const lastActivationRequestIdRef = useRef<number | undefined>(undefined);
-  const [playRequest, setPlayRequest] = useState<CanvasVideoPlayRequest>();
+  const [playbackToggleRequest, setPlaybackToggleRequest] = useState<CanvasVideoPlaybackToggleRequest>();
+  const [previewRetirementTimeMs, setPreviewRetirementTimeMs] = useState(projectedPlaybackTimeMs);
+  const playbackBoundaryVersionRef = useRef(0);
   const playingRef = useRef(false);
   const previousPlayerSourceIdentityRef = useRef(playerSourceIdentity);
 
@@ -105,18 +112,22 @@ export function CanvasVideoNodeContent({
     setError(undefined);
     setRetryKey(0);
     setPlaying(false);
-    setPlayRequest(undefined);
+    setPlaybackToggleRequest(undefined);
+    playbackBoundaryVersionRef.current += 1;
+    setPreviewRetirementTimeMs(projectedPlaybackTimeMs);
     const resetLayer = sourceResetLayerRef.current;
     setVisibleLayer(resetLayer);
     setPlayerMounted(resetLayer === 'player');
     if (wasPlaying) {
       onPlayingChange?.(node.projectRelativePath, false);
     }
-  }, [playerSourceIdentity, node.projectRelativePath, onPlayingChange]);
+  }, [playerSourceIdentity, node.projectRelativePath, onPlayingChange, projectedPlaybackTimeMs]);
 
-  useEffect(() => () => {
-    onRegisterVideoTarget(node.projectRelativePath, undefined);
-  }, [node.projectRelativePath, onRegisterVideoTarget]);
+  useEffect(() => {
+    if (contentInteractionActive && node.availability.state !== 'available') {
+      onContentError(node.projectRelativePath);
+    }
+  }, [contentInteractionActive, node.availability.state, node.projectRelativePath, onContentError]);
 
   useLayoutEffect(() => {
     const element = playerShellRef.current;
@@ -135,19 +146,6 @@ export function CanvasVideoNodeContent({
     return () => resizeObserver.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (
-      previewActivationRequest?.mediaKind !== 'video'
-      || previewActivationRequest.projectRelativePath !== node.projectRelativePath
-      || !contentInteractionActive
-      || lastActivationRequestIdRef.current === previewActivationRequest.requestId
-    ) {
-      return;
-    }
-    lastActivationRequestIdRef.current = previewActivationRequest.requestId;
-    setPlayRequest({ requestId: previewActivationRequest.requestId });
-    setPlayerMounted(true);
-  }, [contentInteractionActive, node.projectRelativePath, previewActivationRequest]);
   const handlePlayingChange = useCallback((nextPlaying: boolean) => {
     playingRef.current = nextPlaying;
     setPlaying(nextPlaying);
@@ -157,14 +155,33 @@ export function CanvasVideoNodeContent({
     }
   }, [node.projectRelativePath, onPlayingChange]);
   const handlePlaybackBoundary = useCallback((currentTimeMs: number) => {
-    void onUpdatePlaybackTime(node.projectRelativePath, currentTimeMs);
+    playbackBoundaryVersionRef.current += 1;
+    const boundaryVersion = playbackBoundaryVersionRef.current;
+    setPreviewRetirementTimeMs(currentTimeMs);
+    void Promise.resolve(onUpdatePlaybackTime(node.projectRelativePath, currentTimeMs)).catch(() => {
+      if (playbackBoundaryVersionRef.current === boundaryVersion) {
+        setPreviewRetirementTimeMs(projectedPlaybackTimeMs);
+      }
+    });
     if (currentTimeMs === 0) {
       playingRef.current = false;
       setPlaying(false);
       onPlayingChange?.(node.projectRelativePath, false);
       return;
     }
-  }, [node.projectRelativePath, onPlayingChange, onUpdatePlaybackTime]);
+  }, [node.projectRelativePath, onPlayingChange, onUpdatePlaybackTime, projectedPlaybackTimeMs]);
+  const handleTerminalError = useCallback((message: string) => {
+    const wasPlaying = playingRef.current;
+    playingRef.current = false;
+    setPlaying(false);
+    setPlaybackToggleRequest(undefined);
+    setPlayerMounted(false);
+    setError(message);
+    if (wasPlaying) {
+      onPlayingChange?.(node.projectRelativePath, false);
+    }
+    onContentError(node.projectRelativePath);
+  }, [node.projectRelativePath, onContentError, onPlayingChange]);
   const retryVideoPreviewSource = useCallback(() => {
     retryPreview(node.projectRelativePath);
   }, [node.projectRelativePath, retryPreview]);
@@ -181,6 +198,34 @@ export function CanvasVideoNodeContent({
     ?? (rasterPreview.failure
       ? i18n.t('canvas.node.videoPreviewVariantLoadError', { path: node.projectRelativePath })
       : undefined);
+  const retryRasterPreview = rasterPreview.retry;
+  useEffect(() => {
+    if (
+      contentHandoffRequest?.kind !== 'video-toggle'
+      || contentHandoffRequest.projectRelativePath !== node.projectRelativePath
+      || !contentInteractionActive
+      || lastActivationRequestIdRef.current === contentHandoffRequest.requestId
+    ) {
+      return;
+    }
+    lastActivationRequestIdRef.current = contentHandoffRequest.requestId;
+    if (previewProblem) {
+      retryRasterPreview();
+    }
+    setError(undefined);
+    setRetryKey((current) => error ? current + 1 : current);
+    setPlaybackToggleRequest({ requestId: contentHandoffRequest.requestId });
+    setPlayerMounted(true);
+    onContentHandoffConsumed?.(contentHandoffRequest.requestId);
+  }, [
+    contentHandoffRequest,
+    contentInteractionActive,
+    error,
+    node.projectRelativePath,
+    onContentHandoffConsumed,
+    previewProblem,
+    retryRasterPreview
+  ]);
   const formatVideoPlayError = useCallback((projectRelativePath: string) => (
     i18n.t('canvas.node.videoPlayError', { path: projectRelativePath })
   ), [i18n]);
@@ -188,22 +233,33 @@ export function CanvasVideoNodeContent({
     i18n.t('canvas.node.videoSeekError', { path: projectRelativePath, seconds })
   ), [i18n]);
   useEffect(() => {
-    if (targetLayer !== 'player') {
+    if (targetLayer !== 'player' || error) {
       return;
     }
     setPlayerMounted(true);
     if (!rasterPreview.hasVisible || rasterPreview.failure) {
       setVisibleLayer('player');
     }
-  }, [rasterPreview.failure, rasterPreview.hasVisible, targetLayer]);
+  }, [error, rasterPreview.failure, rasterPreview.hasVisible, targetLayer]);
 
   useEffect(() => {
-    if (targetLayer !== 'preview' || !rasterPreview.hasVisible || rasterPreview.failure) {
+    if (
+      targetLayer !== 'preview'
+      || projectedPlaybackTimeMs !== previewRetirementTimeMs
+      || !rasterPreview.hasVisible
+      || rasterPreview.failure
+    ) {
       return;
     }
     setVisibleLayer('preview');
     setPlayerMounted(false);
-  }, [rasterPreview.failure, rasterPreview.hasVisible, targetLayer]);
+  }, [
+    previewRetirementTimeMs,
+    projectedPlaybackTimeMs,
+    rasterPreview.failure,
+    rasterPreview.hasVisible,
+    targetLayer
+  ]);
   const handlePlayerReadyForDisplay = useCallback(() => {
     if (targetLayerRef.current === 'player') {
       setVisibleLayer('player');
@@ -221,15 +277,14 @@ export function CanvasVideoNodeContent({
     throw new Error(`Video content received a directory node: ${node.projectRelativePath}`);
   }
   if (node.availability.state !== 'available') {
+    const title = node.availability.state === 'missing'
+      ? i18n.t('canvas.node.missingFile')
+      : i18n.t('canvas.node.unreadableFile');
     return (
       <section className="canvas-video-node">
         {titleBar}
-        <div className="canvas-video-player-shell">
-          <div className="db-canvas-node-placeholder db-canvas-node-placeholder--problem">
-            <AlertTriangle size={22} />
-            <strong>{node.availability.state === 'missing' ? i18n.t('canvas.node.missingFile') : i18n.t('canvas.node.unreadableFile')}</strong>
-            <span>{node.availability.message}</span>
-          </div>
+        <div className="canvas-video-player-shell" data-canvas-node-zone="content">
+          <CanvasContentErrorPresentation message={`${title}: ${node.availability.message}`} />
         </div>
       </section>
     );
@@ -238,7 +293,7 @@ export function CanvasVideoNodeContent({
     throw new Error(`Projected video node is missing videoPresentation: ${node.projectRelativePath}`);
   }
   const presentation = node.videoPresentation;
-  const initialTimeMs = node.videoPlayback?.currentTimeMs ?? 0;
+  const initialTimeMs = projectedPlaybackTimeMs;
   const feedbackMomentTimeSeconds = playing && activeFeedbackMomentTimeSeconds === undefined
     ? undefined
     : activeFeedbackMomentTimeSeconds ?? initialTimeMs / 1000;
@@ -256,29 +311,21 @@ export function CanvasVideoNodeContent({
       <div
         ref={playerShellRef}
         className="canvas-video-player-shell"
-        data-canvas-node-zone={contentInteractionActive ? 'passive' : 'activate'}
+        data-canvas-node-zone="content"
       >
         {error ? (
-          <CanvasNodeErrorPresentation
-            message={error}
-            onRetry={() => {
-              setError(undefined);
-              setRetryKey((current) => current + 1);
-            }}
-          />
+          <CanvasContentErrorPresentation message={error} />
         ) : null}
         {previewProblem && targetLayer === 'preview' ? (
-          <CanvasNodeErrorPresentation message={previewProblem} onRetry={rasterPreview.retry} />
+          <CanvasContentErrorPresentation message={previewProblem} />
         ) : null}
-        {rasterPreview.layers}
-        {playerMounted ? (
+        {!error ? rasterPreview.layers : null}
+        {playerMounted && !error ? (
           <div
             className={visibleLayer === 'player'
               ? 'canvas-video-layer'
               : 'canvas-video-layer canvas-video-layer--hidden'}
             data-canvas-video-layer="player"
-            inert={!contentInteractionActive}
-            data-canvas-interaction-island={contentInteractionActive ? 'true' : undefined}
           >
             <React.Suspense fallback={<div className="db-canvas-node-placeholder" aria-busy="true" />}>
               <CanvasVideoPlayerAdapter
@@ -286,15 +333,16 @@ export function CanvasVideoNodeContent({
                 ref={register}
                 node={node}
                 initialTimeMs={initialTimeMs}
-                playRequest={playRequest}
+                playbackToggleRequest={playbackToggleRequest}
+                contentInteractionActive={contentInteractionActive}
                 formatPlayError={formatVideoPlayError}
                 formatSeekError={formatVideoSeekError}
-                onError={setError}
+                onError={handleTerminalError}
                 onPlayingChange={handlePlayingChange}
                 onPlaybackBoundary={handlePlaybackBoundary}
                 onReadyForDisplay={handlePlayerReadyForDisplay}
-                onPlayRequestConsumed={(requestId) => {
-                  setPlayRequest((current) => current?.requestId === requestId ? undefined : current);
+                onPlaybackToggleRequestConsumed={(requestId) => {
+                  setPlaybackToggleRequest((current) => current?.requestId === requestId ? undefined : current);
                 }}
               />
             </React.Suspense>

@@ -16,7 +16,7 @@ export function CanvasNodeTitleBar({
   return (
     <div
       className="db-canvas-node-titlebar"
-      data-canvas-node-zone="move"
+      data-canvas-node-zone="manipulation"
     >
       {icon}
       <strong>{title}</strong>

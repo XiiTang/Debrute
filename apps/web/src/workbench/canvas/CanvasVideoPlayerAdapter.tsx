@@ -3,7 +3,6 @@ import {
   MediaCaptionsButton,
   MediaControlBar,
   MediaController,
-  MediaErrorDialog,
   MediaFullscreenButton,
   MediaLoadingIndicator,
   MediaMuteButton,
@@ -21,47 +20,42 @@ export interface CanvasVideoPlayerHandle {
   readCurrentTimeSeconds(): number | undefined;
   pauseAt(seconds: number): void;
   restorePersistedTime(currentTimeMs: number): void;
-  togglePlayback(): void;
-  seekBy(seconds: number): void;
-  toggleMuted(): void;
-  adjustPlaybackRate(delta: number): void;
-  toggleCaptions(): void;
-  enterFullscreen(): void;
-  togglePictureInPicture(): void;
 }
 
-export interface CanvasVideoPlayRequest {
+export interface CanvasVideoPlaybackToggleRequest {
   requestId: number;
 }
 
 export interface CanvasVideoPlayerAdapterProps {
   node: ProjectedCanvasNode;
   initialTimeMs: number;
-  playRequest?: CanvasVideoPlayRequest | undefined;
+  playbackToggleRequest?: CanvasVideoPlaybackToggleRequest | undefined;
+  contentInteractionActive: boolean;
   formatPlayError: (projectRelativePath: string) => string;
   formatSeekError: (projectRelativePath: string, seconds: number) => string;
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
   onPlaybackBoundary: (currentTimeMs: number) => void;
   onReadyForDisplay?: (() => void) | undefined;
-  onPlayRequestConsumed?: ((requestId: number) => void) | undefined;
+  onPlaybackToggleRequestConsumed?: ((requestId: number) => void) | undefined;
 }
 
 export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, CanvasVideoPlayerAdapterProps>(function CanvasVideoPlayerAdapter({
   node,
   initialTimeMs,
-  playRequest,
+  playbackToggleRequest,
+  contentInteractionActive,
   formatPlayError,
   formatSeekError,
   onError,
   onPlayingChange,
   onPlaybackBoundary,
   onReadyForDisplay,
-  onPlayRequestConsumed
+  onPlaybackToggleRequestConsumed
 }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastPlaybackBoundaryRef = useRef<number | undefined>(undefined);
-  const consumedPlayRequestIdRef = useRef<number | undefined>(undefined);
+  const consumedPlaybackToggleRequestIdRef = useRef<number | undefined>(undefined);
   const readyForDisplayRef = useRef(false);
   const displayReadinessFailedRef = useRef(false);
   const pendingInitialSeekRef = useRef(false);
@@ -149,16 +143,26 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
 
   useEffect(() => {
     const video = videoRef.current;
-    const request = playRequest;
-    if (!video || !request || consumedPlayRequestIdRef.current === request.requestId) {
+    const request = playbackToggleRequest;
+    if (!video || !request || consumedPlaybackToggleRequestIdRef.current === request.requestId) {
       return;
     }
-    consumedPlayRequestIdRef.current = request.requestId;
-    onPlayRequestConsumed?.(request.requestId);
-    void video.play().catch(() => {
-      onError(formatPlayError(node.projectRelativePath));
-    });
-  }, [formatPlayError, node.projectRelativePath, onError, onPlayRequestConsumed, playRequest]);
+    consumedPlaybackToggleRequestIdRef.current = request.requestId;
+    onPlaybackToggleRequestConsumed?.(request.requestId);
+    if (video.paused) {
+      void video.play().catch(() => {
+        onError(formatPlayError(node.projectRelativePath));
+      });
+    } else {
+      video.pause();
+    }
+  }, [
+    formatPlayError,
+    node.projectRelativePath,
+    onError,
+    onPlaybackToggleRequestConsumed,
+    playbackToggleRequest
+  ]);
 
   useImperativeHandle(ref, () => ({
     readCurrentTimeSeconds: () => {
@@ -184,62 +188,12 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
       lastPlaybackBoundaryRef.current = normalizedTimeMs;
       video.currentTime = normalizedTimeMs / 1000;
       onPlayingChange(false);
-    },
-    togglePlayback: () => {
-      const video = videoRef.current;
-      if (!video) return;
-      if (video.paused) {
-        void video.play();
-      } else {
-        video.pause();
-      }
-    },
-    seekBy: (seconds) => {
-      const video = videoRef.current;
-      if (!video) return;
-      video.currentTime = Math.max(0, video.currentTime + seconds);
-    },
-    toggleMuted: () => {
-      const video = videoRef.current;
-      if (video) {
-        video.muted = !video.muted;
-      }
-    },
-    adjustPlaybackRate: (delta) => {
-      const video = videoRef.current;
-      if (!video) return;
-      video.playbackRate = Math.min(3, Math.max(0.25, Number((video.playbackRate + delta).toFixed(2))));
-    },
-    toggleCaptions: () => {
-      const video = videoRef.current;
-      if (!video) return;
-      const tracks = Array.from(video.textTracks).filter((track) => track.kind === 'subtitles' || track.kind === 'captions');
-      const showing = tracks.find((track) => track.mode === 'showing');
-      for (const track of tracks) {
-        track.mode = 'disabled';
-      }
-      if (!showing && tracks[0]) {
-        tracks[0].mode = 'showing';
-      }
-    },
-    enterFullscreen: () => {
-      const element = videoRef.current?.closest('media-controller') as HTMLElement | null;
-      void element?.requestFullscreen?.();
-    },
-    togglePictureInPicture: () => {
-      const video = videoRef.current;
-      if (!video || !document.pictureInPictureEnabled) return;
-      if (document.pictureInPictureElement === video) {
-        void document.exitPictureInPicture();
-      } else {
-        void video.requestPictureInPicture?.();
-      }
     }
   }), [onPlayingChange, publishPlaybackBoundary]);
 
   return (
     <div className="canvas-video-player">
-      <MediaController noHotkeys>
+      <MediaController noHotkeys={!contentInteractionActive}>
         <video
           ref={videoRef}
           slot="media"
@@ -274,13 +228,12 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
           ))}
         </video>
         <MediaLoadingIndicator />
-        <MediaErrorDialog role="dialog" slot="dialog" />
         <MediaControlBar>
           <MediaPlayButton />
-          <MediaTimeRange />
+          <MediaTimeRange data-canvas-direct-manipulation="true" />
           <MediaTimeDisplay showDuration />
           <MediaMuteButton />
-          <MediaVolumeRange />
+          <MediaVolumeRange data-canvas-direct-manipulation="true" />
           <MediaPlaybackRateButton rates={[0.5, 1, 1.5, 2]} />
           <MediaCaptionsButton />
           <MediaPipButton />
