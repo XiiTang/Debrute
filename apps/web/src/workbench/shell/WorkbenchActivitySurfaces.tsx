@@ -564,6 +564,7 @@ function workbenchMessage(i18n: WorkbenchI18n, operation: WorkbenchActivityOpera
     case 'window-state': return i18n.t('shell.activities.message.workbench.windowStateFailed');
     case 'window-command': return i18n.t('shell.activities.message.workbench.windowCommandFailed');
     case 'menu-command': return i18n.t('shell.activities.message.workbench.menuCommandFailed');
+    case 'save-canvas-settings': return i18n.t('shell.activities.message.workbench.saveCanvasSettingsFailed');
   }
 }
 

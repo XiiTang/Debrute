@@ -69,6 +69,60 @@ describe('CanvasEditorRuntime scene', () => {
       expect.objectContaining({ kind: 'move-node', phase: 'active' })
     ]);
   });
+
+  it('removes only edge routing state and restores it from the latest presented nodes', () => {
+    const nodes = [
+      directoryNode('source', 0, 0, 1),
+      directoryNode('target', 300, 0, 2)
+    ];
+    const edges = [edge('source-target', 'source', 'target')];
+    const runtime = createRuntime(projection(nodes, edges));
+    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['source'] });
+    const nodeSnapshot = runtime.scene.getRenderSnapshot().nodesByPath;
+    const updates: CanvasScenePresentationUpdate[] = [];
+    runtime.scene.subscribePresentation((update) => updates.push(update));
+
+    runtime.acceptProjection(projection(nodes));
+
+    expect(runtime.scene.getRenderSnapshot().nodesByPath).toBe(nodeSnapshot);
+    expect(runtime.scene.getRenderSnapshot().edgeGroups).toEqual([]);
+    expect(runtime.scene.queryEdgeGroupIds({ x: 0, y: 0, width: 500, height: 500 }))
+      .toEqual([]);
+    expect(runtime.getSnapshot().selection).toEqual({
+      kind: 'nodes',
+      projectRelativePaths: ['source']
+    });
+
+    runtime.input.beginNodeMove({
+      pointerId: 1,
+      projectRelativePath: 'source',
+      screenPoint: { x: 0, y: 0 }
+    });
+    runtime.input.updatePointerInteraction({
+      pointerId: 1,
+      screenPoint: { x: 100, y: 50 }
+    });
+
+    expect(updates.at(-1)).toMatchObject({
+      nodeLayouts: [{ projectRelativePath: 'source', x: 100, y: 50 }],
+      edgeGroups: [],
+      geometryChanged: true
+    });
+    expect(runtime.scene.queryEdgeGroupIds({ x: 0, y: 0, width: 500, height: 500 }))
+      .toEqual([]);
+
+    runtime.acceptProjection(projection(nodes, edges));
+
+    const restored = runtime.scene.getRenderSnapshot();
+    expect(restored.nodesByPath).toBe(nodeSnapshot);
+    expect(restored.edgeGroups.map((group) => group.edgeIds)).toEqual([['source-target']]);
+    expect(restored.edgeGroups[0]?.path).toContain('M 200 100');
+    expect(runtime.getSnapshot().selection).toEqual({
+      kind: 'nodes',
+      projectRelativePaths: ['source']
+    });
+    runtime.dispose();
+  });
 });
 
 function createRuntime(initialProjection: CanvasProjection) {

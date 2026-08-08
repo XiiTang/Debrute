@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  projectCanvasScene,
+  projectCanvasHierarchyEdges,
+  projectCanvasNodeScene,
   raiseCanvasSelection,
   reconcileCanvasOcclusionOrder,
   type CanvasProjectedRect
@@ -8,7 +9,7 @@ import {
 
 describe('CanvasScene', () => {
   it('projects the structural Project root', () => {
-    const result = projectCanvasScene({
+    const result = projectCanvasNodeScene({
       canonicalRoot: '/Users/example/ecommerce',
       resources: {
         resources: [{ projectRelativePath: '', nodeKind: 'directory' }],
@@ -17,7 +18,7 @@ describe('CanvasScene', () => {
       measureGenericIdentityRows: measuredWidths(() => 100)
     });
 
-    expect(result.projection.nodes).toEqual([
+    expect(result.nodes).toEqual([
       expect.objectContaining({
         projectRelativePath: '',
         displayName: 'ecommerce',
@@ -26,11 +27,11 @@ describe('CanvasScene', () => {
         height: 480
       })
     ]);
-    expect(result.projection.edges).toEqual([]);
+    expect(projectCanvasHierarchyEdges(result.nodes)).toEqual([]);
   });
 
   it('projects the root and visible descendants with measured directory widths', () => {
-    const result = projectCanvasScene({
+    const result = projectCanvasNodeScene({
       canonicalRoot: '/Users/example/ecommerce',
       resources: {
         resources: [
@@ -55,7 +56,7 @@ describe('CanvasScene', () => {
       measureGenericIdentityRows: measuredWidths((label) => label === 'ecommerce' ? 154 : 50)
     });
 
-    expect(result.projection.nodes.map((node) => [
+    expect(result.nodes.map((node) => [
       node.projectRelativePath,
       node.displayName,
       node.width,
@@ -65,14 +66,14 @@ describe('CanvasScene', () => {
       ['assets', 'assets', 1_200, 480],
       ['assets/cover.png', 'cover.png', 800, 600]
     ]);
-    expect(result.projection.edges).toEqual([
+    expect(projectCanvasHierarchyEdges(result.nodes)).toEqual([
       expect.objectContaining({ sourceProjectRelativePath: '', targetProjectRelativePath: 'assets' }),
       expect.objectContaining({ sourceProjectRelativePath: 'assets', targetProjectRelativePath: 'assets/cover.png' })
     ]);
   });
 
   it('reserves a usable Content Region for unavailable video', () => {
-    const result = projectCanvasScene({
+    const result = projectCanvasNodeScene({
       canonicalRoot: '/project',
       resources: {
         resources: [
@@ -89,7 +90,7 @@ describe('CanvasScene', () => {
       measureGenericIdentityRows: measuredWidths(() => 20)
     });
 
-    expect(result.projection.nodes.find((node) => node.projectRelativePath === 'missing.mp4')).toMatchObject({
+    expect(result.nodes.find((node) => node.projectRelativePath === 'missing.mp4')).toMatchObject({
       width: 3_200,
       height: 1_800
     });
@@ -97,7 +98,7 @@ describe('CanvasScene', () => {
 
   it('overlays manual state and derives overlap-only stacking order', () => {
     const measuredLabels: string[][] = [];
-    const result = projectCanvasScene({
+    const result = projectCanvasNodeScene({
       canonicalRoot: '/project',
       resources: {
         resources: [
@@ -121,14 +122,14 @@ describe('CanvasScene', () => {
     });
 
     expect(measuredLabels).toEqual([['project', 'a', 'b']]);
-    expect(result.projection.nodes.find((node) => node.projectRelativePath === 'a')).toMatchObject({
+    expect(result.nodes.find((node) => node.projectRelativePath === 'a')).toMatchObject({
       x: 0,
       y: 0,
       width: 1_200,
       height: 480,
       layoutMode: 'manual'
     });
-    expect(result.projection.nodes.find((node) => node.projectRelativePath === 'b')).toMatchObject({
+    expect(result.nodes.find((node) => node.projectRelativePath === 'b')).toMatchObject({
       x: 100,
       y: 100,
       width: 1_200,
@@ -136,8 +137,8 @@ describe('CanvasScene', () => {
       layoutMode: 'manual'
     });
     expect(result.occlusionOrder).toEqual(['a', '', 'b']);
-    expect(result.projection.nodes.find((node) => node.projectRelativePath === 'b')!.z)
-      .toBeGreaterThan(result.projection.nodes.find((node) => node.projectRelativePath === 'a')!.z);
+    expect(result.nodes.find((node) => node.projectRelativePath === 'b')!.z)
+      .toBeGreaterThan(result.nodes.find((node) => node.projectRelativePath === 'a')!.z);
   });
 
   it('keeps Automatic Layout independent of a node manual rectangle', () => {
@@ -149,13 +150,13 @@ describe('CanvasScene', () => {
       ]
     };
     const measureGenericIdentityRows = measuredWidths(() => 20);
-    const automatic = projectCanvasScene({
+    const automatic = projectCanvasNodeScene({
       canonicalRoot: '/project',
       resources,
       state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
       measureGenericIdentityRows
     });
-    const manual = projectCanvasScene({
+    const manual = projectCanvasNodeScene({
       canonicalRoot: '/project',
       resources,
       state: {
@@ -169,15 +170,15 @@ describe('CanvasScene', () => {
     });
 
     for (const path of ['', 'b']) {
-      const automaticNode = automatic.projection.nodes.find((node) => node.projectRelativePath === path)!;
-      expect(manual.projection.nodes.find((node) => node.projectRelativePath === path)).toMatchObject({
+      const automaticNode = automatic.nodes.find((node) => node.projectRelativePath === path)!;
+      expect(manual.nodes.find((node) => node.projectRelativePath === path)).toMatchObject({
         x: automaticNode.x,
         y: automaticNode.y,
         width: automaticNode.width,
         height: automaticNode.height
       });
     }
-    expect(manual.projection.nodes.find((node) => node.projectRelativePath === 'a')).toMatchObject({
+    expect(manual.nodes.find((node) => node.projectRelativePath === 'a')).toMatchObject({
       x: 9_000,
       y: 8_000,
       width: 7_000,
@@ -199,7 +200,7 @@ describe('CanvasScene', () => {
   });
 
   it('places direct-child directories vertically before one ordered horizontal file row', () => {
-    const result = projectCanvasScene({
+    const result = projectCanvasNodeScene({
       canonicalRoot: '/project',
       resources: {
         resources: [
@@ -237,7 +238,7 @@ describe('CanvasScene', () => {
       measureGenericIdentityRows: measuredWidths(() => 20)
     });
 
-    expect(result.projection.nodes.map((node) => [
+    expect(result.nodes.map((node) => [
       node.projectRelativePath,
       node.x,
       node.y,

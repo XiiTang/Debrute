@@ -14,6 +14,7 @@ import type {
   WorkbenchGlobalProjection,
   WorkbenchGlobalProjectionState
 } from '../services/WorkbenchGlobalProjection.js';
+import type { CanvasGlobalSettingsController } from '../services/useCanvasGlobalSettingsController.js';
 
 export interface WorkbenchSettingsActions {
   checkProductUpdate(): Promise<void>;
@@ -32,26 +33,10 @@ export interface WorkbenchSettingsController {
   actions: WorkbenchSettingsActions;
 }
 
-interface CanvasTextAppearanceSaveWaiter {
-  resolve(): void;
-  reject(error: unknown): void;
-}
-
-interface CanvasTextAppearanceSaveTask {
-  appearance: CanvasTextAppearance;
-  waiters: CanvasTextAppearanceSaveWaiter[];
-}
-
-interface CanvasTextAppearanceSaveQueue {
-  running: boolean;
-  inFlight?: CanvasTextAppearanceSaveTask & { confirmed: boolean };
-  queued?: CanvasTextAppearanceSaveTask;
-  awaitingEvent?: CanvasTextAppearance;
-}
-
 export interface WorkbenchSettingsControllerInput {
   api: WorkbenchApiClient;
   globalProjection: WorkbenchGlobalProjection;
+  canvasGlobalSettings: CanvasGlobalSettingsController;
 }
 
 export function useWorkbenchSettingsController(
@@ -63,82 +48,12 @@ export function useWorkbenchSettingsController(
     input.globalProjection.getState
   );
   const projection = initializedGlobalProjection(projectionState);
-  const [canvasTextAppearanceOverlay, setCanvasTextAppearanceOverlay] = useState<CanvasTextAppearance>();
   const [integrationsLoadError, setIntegrationsLoadError] = useState<string>();
-  const queueRef = useRef<CanvasTextAppearanceSaveQueue>({ running: false });
-  const acceptedCanvasTextAppearanceRef = useRef(projection.settings.canvas.textAppearance);
-  acceptedCanvasTextAppearanceRef.current = projection.settings.canvas.textAppearance;
   const optionalResourcesRequestedRef = useRef(false);
-
-  useEffect(() => {
-    const queue = queueRef.current;
-    if (
-      queue.awaitingEvent
-      && sameCanvasTextAppearance(queue.awaitingEvent, projection.settings.canvas.textAppearance)
-    ) {
-      delete queue.awaitingEvent;
-    }
-    if (queue.inFlight && sameCanvasTextAppearance(queue.inFlight.appearance, projection.settings.canvas.textAppearance)) {
-      queue.inFlight.confirmed = true;
-    }
-    setCanvasTextAppearanceOverlay(localCanvasTextAppearance(queue, projection.settings.canvas.textAppearance));
-  }, [projection.settings]);
 
   useEffect(() => {
     if (projection.integrations.status === 'ready') setIntegrationsLoadError(undefined);
   }, [projection.integrations]);
-
-  const saveCanvasTextAppearance = useCallback((appearance: CanvasTextAppearance): Promise<void> => {
-    const queue = queueRef.current;
-    if (
-      !queue.running
-      && !queue.inFlight
-      && !queue.queued
-      && !queue.awaitingEvent
-      && sameCanvasTextAppearance(appearance, acceptedCanvasTextAppearanceRef.current)
-    ) {
-      return Promise.resolve();
-    }
-    delete queue.awaitingEvent;
-    setCanvasTextAppearanceOverlay(appearance);
-    const pending = new Promise<void>((resolve, reject) => {
-      const waiter = { resolve, reject };
-      if (queue.queued) {
-        queue.queued.appearance = appearance;
-        queue.queued.waiters.push(waiter);
-      } else {
-        queue.queued = { appearance, waiters: [waiter] };
-      }
-    });
-    if (queue.running) return pending;
-    queue.running = true;
-    void (async () => {
-      while (queue.queued) {
-        const task = queue.queued;
-        delete queue.queued;
-        const inFlight = { ...task, confirmed: false };
-        queue.inFlight = inFlight;
-        try {
-          await input.api.globalSettingsSave({ canvas: { textAppearance: task.appearance } });
-        } catch (error) {
-          delete queue.inFlight;
-          const queued = takeQueuedCanvasAppearanceTask(queue);
-          delete queue.awaitingEvent;
-          queue.running = false;
-          task.waiters.forEach((waiter) => waiter.reject(error));
-          queued?.waiters.forEach((waiter) => waiter.reject(error));
-          setCanvasTextAppearanceOverlay(undefined);
-          return;
-        }
-        task.waiters.forEach((waiter) => waiter.resolve());
-        delete queue.inFlight;
-        if (!queue.queued && !inFlight.confirmed) queue.awaitingEvent = task.appearance;
-      }
-      queue.running = false;
-      if (!queue.awaitingEvent) setCanvasTextAppearanceOverlay(undefined);
-    })();
-    return pending;
-  }, [input.api.globalSettingsSave]);
 
   const rescanIntegrations = useCallback(async () => {
     setIntegrationsLoadError(undefined);
@@ -160,7 +75,7 @@ export function useWorkbenchSettingsController(
     applyProductUpdate: async () => { await input.api.applyProductUpdate(); },
     saveGlobalSettings: async (saveInput) => {
       if (saveInput.canvas && Object.keys(saveInput).length === 1) {
-        await saveCanvasTextAppearance(saveInput.canvas.textAppearance);
+        await input.canvasGlobalSettings.save(saveInput.canvas);
       } else {
         await input.api.globalSettingsSave(saveInput);
       }
@@ -172,18 +87,18 @@ export function useWorkbenchSettingsController(
     )
   }), [
     input.api,
-    rescanIntegrations,
-    saveCanvasTextAppearance
+    input.canvasGlobalSettings,
+    rescanIntegrations
   ]);
 
-  const canvasTextAppearance = canvasTextAppearanceOverlay
-    ?? projection.settings.canvas.textAppearance;
+  const canvasTextAppearance = input.canvasGlobalSettings.settings.textAppearance;
   const globalSettings = useMemo<EventProjection<DebruteGlobalSettingsView>>(() => ({
     status: 'ready',
-    value: canvasTextAppearanceOverlay
-      ? globalSettingsWithCanvasTextAppearance(projection.settings, canvasTextAppearance)
-      : projection.settings
-  }), [canvasTextAppearance, canvasTextAppearanceOverlay, projection.settings]);
+    value: {
+      ...projection.settings,
+      canvas: input.canvasGlobalSettings.settings
+    }
+  }), [input.canvasGlobalSettings.settings, projection.settings]);
   const integrations = integrationsLoadError
     ? { status: 'error' as const, message: integrationsLoadError }
     : projection.integrations;
@@ -196,48 +111,11 @@ export function useWorkbenchSettingsController(
   }), [actions, canvasTextAppearance, globalSettings, integrations, projection.product]);
 }
 
-function takeQueuedCanvasAppearanceTask(
-  queue: CanvasTextAppearanceSaveQueue
-): CanvasTextAppearanceSaveTask | undefined {
-  const task = queue.queued;
-  delete queue.queued;
-  return task;
-}
-
 type InitializedWorkbenchGlobalProjection = Exclude<WorkbenchGlobalProjectionState, { status: 'uninitialized' }>;
 
 function initializedGlobalProjection(state: WorkbenchGlobalProjectionState): InitializedWorkbenchGlobalProjection {
   if (state.status === 'uninitialized') throw new Error('Settings feature requires the initial Global snapshot.');
   return state;
-}
-
-function globalSettingsWithCanvasTextAppearance(
-  settings: DebruteGlobalSettingsView,
-  appearance: CanvasTextAppearance
-): DebruteGlobalSettingsView {
-  return { ...settings, canvas: { textAppearance: appearance } };
-}
-
-function localCanvasTextAppearance(
-  queue: CanvasTextAppearanceSaveQueue,
-  confirmed: CanvasTextAppearance
-): CanvasTextAppearance | undefined {
-  if (queue.queued) return queue.queued.appearance;
-  if (queue.inFlight) {
-    return queue.inFlight.confirmed && !sameCanvasTextAppearance(queue.inFlight.appearance, confirmed)
-      ? undefined
-      : queue.inFlight.appearance;
-  }
-  return queue.awaitingEvent;
-}
-
-function sameCanvasTextAppearance(left: CanvasTextAppearance, right: CanvasTextAppearance): boolean {
-  return left.fontId === right.fontId
-    && left.fontSizePx === right.fontSizePx
-    && left.lineHeightRatio === right.lineHeightRatio
-    && left.fontWeight === right.fontWeight
-    && left.letterSpacingPx === right.letterSpacingPx
-    && left.ligatures === right.ligatures;
 }
 
 function errorMessage(error: unknown): string {

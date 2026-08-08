@@ -1396,10 +1396,12 @@ function CanvasSurfaceRuntime({
         ref={stageRef}
         className="canvas-world-stage"
       >
-        <CanvasSurfaceEdgeLayer
-          groups={renderSnapshot.edgeGroups}
-          stageRuntime={stageRuntime}
-        />
+        {renderSnapshot.edgeGroups.length > 0 ? (
+          <CanvasSurfaceEdgeLayer
+            groups={renderSnapshot.edgeGroups}
+            stageRuntime={stageRuntime}
+          />
+        ) : null}
         <CanvasRasterPreviewEnvironmentProvider value={rasterPreviewEnvironment}>
           <CanvasVideoPreviewProvider
             nodes={projectedNodes}

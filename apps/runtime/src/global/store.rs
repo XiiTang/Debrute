@@ -65,10 +65,20 @@ impl Default for CanvasTextAppearance {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CanvasSettings {
     pub text_appearance: CanvasTextAppearance,
+    pub hierarchy_edges_visible: bool,
+}
+
+impl Default for CanvasSettings {
+    fn default() -> Self {
+        Self {
+            text_appearance: CanvasTextAppearance::default(),
+            hierarchy_edges_visible: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,20 +383,29 @@ fn apply_patch(
         validate_workbench(&snapshot.settings.workbench)?;
     }
     if let Some(value) = patch.get("canvas") {
-        let canvas = closed_patch_record(value, "Global settings canvas", &["textAppearance"])?;
-        let appearance = canvas.get("textAppearance").ok_or_else(|| {
-            GlobalSettingsError::Validation(
-                "Global settings canvas must contain textAppearance.".to_owned(),
-            )
-        })?;
-        let appearance: CanvasTextAppearance =
-            serde_json::from_value(appearance.clone()).map_err(|error| {
-                GlobalSettingsError::Validation(format!(
-                    "Canvas text appearance must be one complete value: {error}"
-                ))
-            })?;
-        validate_canvas_text_appearance(&appearance)?;
-        snapshot.settings.canvas.text_appearance = appearance;
+        let canvas = closed_patch_record(
+            value,
+            "Global settings canvas",
+            &["textAppearance", "hierarchyEdgesVisible"],
+        )?;
+        if let Some(appearance) = canvas.get("textAppearance") {
+            let appearance: CanvasTextAppearance = serde_json::from_value(appearance.clone())
+                .map_err(|error| {
+                    GlobalSettingsError::Validation(format!(
+                        "Canvas text appearance must be one complete value: {error}"
+                    ))
+                })?;
+            validate_canvas_text_appearance(&appearance)?;
+            snapshot.settings.canvas.text_appearance = appearance;
+        }
+        if let Some(visible) = canvas.get("hierarchyEdgesVisible") {
+            snapshot.settings.canvas.hierarchy_edges_visible =
+                visible.as_bool().ok_or_else(|| {
+                    GlobalSettingsError::Validation(
+                        "Canvas hierarchy edge visibility must be a boolean.".to_owned(),
+                    )
+                })?;
+        }
     }
     if let Some(value) = patch.get("modelSetting") {
         apply_model_patch(

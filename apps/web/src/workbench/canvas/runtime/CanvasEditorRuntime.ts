@@ -862,6 +862,12 @@ export function createCanvasEditorRuntime(initial: {
     if (projection === acceptedProjection) {
       return;
     }
+    if (projection.nodes === acceptedProjection.nodes) {
+      acceptedProjection = projection;
+      scenePresentation.setHierarchyEdges(projection.edges);
+      scenePresentation.publishRenderSnapshot();
+      return;
+    }
     const currentPaths = new Set(projection.nodes.map((node) => node.projectRelativePath));
     const previousPointerInteraction = state.pointerInteraction;
     const previousSelection = state.selection;

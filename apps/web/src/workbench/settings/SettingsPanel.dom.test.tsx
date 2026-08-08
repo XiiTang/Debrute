@@ -689,7 +689,10 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           product={{ status: 'ready', value: productState() }}
           settings={{
             workbench: { locale: 'zh-CN', themePreference: 'system' },
-            canvas: { textAppearance: globalSettingsFixture().canvas.textAppearance },
+            canvas: {
+              hierarchyEdgesVisible: true,
+              textAppearance: globalSettingsFixture().canvas.textAppearance
+            },
             chrome: { recentProjectRoots: [] },
             models: { image: [], video: [], audio: [] }
           }}
@@ -869,6 +872,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
   return {
     workbench: { locale: 'en', themePreference: 'system' },
     canvas: {
+      hierarchyEdgesVisible: true,
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',
         fontSizePx: 12,

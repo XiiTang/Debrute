@@ -7,6 +7,7 @@ import type {
   WorkbenchApiClient
 } from '@debrute/app-protocol';
 import { createWorkbenchGlobalProjection } from '../services/WorkbenchGlobalProjection.js';
+import { useCanvasGlobalSettingsController } from '../services/useCanvasGlobalSettingsController.js';
 import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
@@ -243,9 +244,14 @@ async function renderController(
   let current!: WorkbenchSettingsController;
 
   function Probe(): null {
-    current = useWorkbenchSettingsController({
+    const canvasGlobalSettings = useCanvasGlobalSettingsController({
       api,
       globalProjection: projection
+    });
+    current = useWorkbenchSettingsController({
+      api,
+      globalProjection: projection,
+      canvasGlobalSettings
     });
     return null;
   }
@@ -308,7 +314,7 @@ function settingsFixture(
 ): DebruteGlobalSettingsView {
   return {
     workbench: { locale: 'en', themePreference: 'dark' },
-    canvas: { textAppearance: appearance },
+    canvas: { hierarchyEdgesVisible: true, textAppearance: appearance },
     chrome: { recentProjectRoots: [] },
     models: { image: [], video: [], audio: [] }
   };

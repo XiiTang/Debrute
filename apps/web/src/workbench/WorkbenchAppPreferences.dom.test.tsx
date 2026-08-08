@@ -199,6 +199,120 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await unmount(root, container);
     });
+
+    it('keeps the hierarchy-edge switch available without a Project and restores its global value', async () => {
+      const save = deferred<{ ok: true }>();
+      const globalSettingsSave = vi.fn(() => save.promise);
+      const first = await renderWorkbenchApp('/', { globalSettingsSave });
+      const button = requireButton(first.container, 'Hide hierarchy edges');
+
+      expect(button.disabled).toBe(false);
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(first.container.querySelector('[data-testid="canvas-reset-layout-button"]')).toBeNull();
+
+      await act(async () => {
+        button.click();
+        await Promise.resolve();
+      });
+
+      expect(button.disabled).toBe(false);
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(globalSettingsSave).toHaveBeenCalledWith({
+        canvas: { hierarchyEdgesVisible: false }
+      });
+
+      await act(async () => {
+        emitWorkbenchEvent({
+          type: 'globalSettings.changed',
+          revision: 1,
+          settings: globalSettingsWithHierarchyEdgesVisible(false)
+        });
+        save.resolve({ ok: true });
+        await save.promise;
+        await Promise.resolve();
+      });
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+
+      await unmount(first.root, first.container);
+      const reopened = await renderWorkbenchApp('/');
+      expect(requireButton(reopened.container, 'Hide hierarchy edges').getAttribute('aria-pressed'))
+        .toBe('true');
+      await unmount(reopened.root, reopened.container);
+    });
+
+    it('rolls back a failed hierarchy-edge switch and reports one Workbench failure', async () => {
+      const failure = new Error('settings unavailable');
+      const reportActivityNotice = vi.fn(async () => ({ activityId: 'activity-1' }));
+      const globalSettingsSave = vi.fn(async () => {
+        throw failure;
+      });
+      const { container, root } = await renderWorkbenchApp('/', {
+        globalSettingsSave,
+        reportActivityNotice
+      });
+      const button = requireButton(container, 'Hide hierarchy edges');
+
+      await act(async () => {
+        button.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(reportActivityNotice).toHaveBeenCalledOnce();
+      expect(reportActivityNotice).toHaveBeenCalledWith({
+        kind: 'workbench-operation-failed',
+        operation: 'save-canvas-settings'
+      });
+      await unmount(root, container);
+    });
+
+    it('removes and restores hierarchy rendering without removing Canvas nodes', async () => {
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+        font: '',
+        measureText: () => ({ width: 50 })
+      } as unknown as CanvasRenderingContext2D);
+      const globalSettingsSave = vi.fn(async () => ({ ok: true as const }));
+      const snapshot = hierarchyCanvasSnapshotFixture();
+      const openProject = vi.fn(async () => ({
+        bindingId: 'project-hierarchy',
+        canonicalRoot: snapshot.canonicalRoot,
+        projectRevision: 1,
+        snapshot,
+        workingCopies: emptyWorkingCopies()
+      }));
+      const { container, root } = await renderWorkbenchApp(
+        '/open?path=%2Fprojects%2Fhierarchy',
+        { globalSettingsSave, openProject }
+      );
+
+      expect(container.querySelector('[data-canvas-node-path=""]')).not.toBeNull();
+      expect(container.querySelector('[data-canvas-node-path="folder"]')).not.toBeNull();
+      expect(container.querySelector('.canvas-edge-layer')).not.toBeNull();
+
+      await act(async () => {
+        requireButton(container, 'Hide hierarchy edges').click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[data-canvas-node-path=""]')).not.toBeNull();
+      expect(container.querySelector('[data-canvas-node-path="folder"]')).not.toBeNull();
+      expect(container.querySelector('.canvas-edge-layer')).toBeNull();
+
+      await act(async () => {
+        requireButton(container, 'Hide hierarchy edges').click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('.canvas-edge-layer')).not.toBeNull();
+      expect(globalSettingsSave.mock.calls).toEqual([
+        [{ canvas: { hierarchyEdgesVisible: false } }],
+        [{ canvas: { hierarchyEdgesVisible: true } }]
+      ]);
+      await unmount(root, container);
+    });
   });
 
   it('does not retain fields from a previous API fixture', async () => {
@@ -823,6 +937,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(container.querySelector('[data-testid="workbench-product-update-blocking"]')).not.toBeNull();
     expect(container.textContent).toContain('Preparing the complete Debrute update');
     expect(findButton(container, 'Update 0.3.0')).toBeUndefined();
+    expect(findButton(container, 'Hide hierarchy edges')).toBeUndefined();
     await unmount(root, container);
   });
 });
@@ -1045,6 +1160,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
   return {
     workbench: { locale: 'en', themePreference: 'dark' },
     canvas: {
+      hierarchyEdgesVisible: true,
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',
         fontSizePx: 12,
@@ -1061,6 +1177,16 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       audio: []
     },
     ...overrides
+  };
+}
+
+function globalSettingsWithHierarchyEdgesVisible(
+  hierarchyEdgesVisible: boolean
+): DebruteGlobalSettingsView {
+  const settings = globalSettingsFixture();
+  return {
+    ...settings,
+    canvas: { ...settings.canvas, hierarchyEdgesVisible }
   };
 }
 
@@ -1141,6 +1267,28 @@ function snapshotFixture(
       projectName,
       diagnosticCounts: { errors: 0, warnings: 0 },
       checkedAt: '2026-06-28T00:00:00.000Z'
+    }
+  };
+}
+
+function hierarchyCanvasSnapshotFixture(): WorkbenchProjectSessionSnapshot {
+  const snapshot = snapshotFixture('/projects/hierarchy', 'Hierarchy');
+  return {
+    ...snapshot,
+    canvasWorkspace: {
+      status: 'available',
+      workspace: {
+        canonicalRoot: snapshot.canonicalRoot,
+        expandedDirectories: [],
+        nodeStates: {},
+        occlusionOrder: []
+      },
+      canvasResources: {
+        resources: [
+          { projectRelativePath: '', nodeKind: 'directory' },
+          { projectRelativePath: 'folder', nodeKind: 'directory' }
+        ]
+      }
     }
   };
 }

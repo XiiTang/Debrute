@@ -1,10 +1,12 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   CANVAS_FEEDBACK_BAR_LAYOUT,
+  CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE,
   CANVAS_MINIMAP_BUTTON_SIZE,
   CANVAS_MINIMAP_PANEL_SIZE,
   canvasFeedbackBarSizeForTarget,
   canvasAnchorToViewportRect,
+  canvasHierarchyEdgeVisibilityButtonRect,
   canvasMinimapButtonRect,
   feedbackBarPlacementForCanvasTarget,
   canvasResetLayoutButtonRect,
@@ -259,8 +261,15 @@ describe('floating bar placement', () => {
     const viewportRect = { x: 0, y: 0, width: 1000, height: 700 };
     const minimapButton = canvasMinimapButtonRect(viewportRect);
     const resetButton = canvasResetLayoutButtonRect(viewportRect);
+    const hierarchyEdgeVisibilityButton = canvasHierarchyEdgeVisibilityButtonRect(viewportRect);
     expect(resetButton.y).toBe(minimapButton.y);
     expect(resetButton.x).toBeGreaterThan(minimapButton.x + minimapButton.width);
+    expect(hierarchyEdgeVisibilityButton).toEqual({
+      x: resetButton.x + resetButton.width + 4,
+      y: resetButton.y,
+      width: CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE.width,
+      height: CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE.height
+    });
   });
 
   it('places the minimap panel above the lower-left button', () => {

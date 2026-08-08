@@ -62,8 +62,8 @@ export interface CanvasProjection {
   edges: CanvasStructureEdgeProjection[];
 }
 
-interface CanvasSceneProjectionResult {
-  projection: CanvasProjection;
+export interface CanvasNodeSceneProjection {
+  nodes: ProjectedCanvasNode[];
   occlusionOrder: string[];
 }
 
@@ -83,12 +83,12 @@ interface LayoutRect extends LayoutSize {
   y: number;
 }
 
-export function projectCanvasScene(input: {
+export function projectCanvasNodeScene(input: {
   canonicalRoot: string;
   resources: CanvasResourceView;
   state: CanvasState;
   measureGenericIdentityRows?: CanvasGenericIdentityRowMeasurer;
-}): CanvasSceneProjectionResult {
+}): CanvasNodeSceneProjection {
   const trees = buildLayoutTrees(input.resources.resources);
   const labels = new Map(input.resources.resources.map((resource) => [
     resource.projectRelativePath,
@@ -154,8 +154,17 @@ export function projectCanvasScene(input: {
   for (const node of nodes) {
     node.z = zByPath.get(node.projectRelativePath) ?? node.z;
   }
+  return {
+    nodes,
+    occlusionOrder
+  };
+}
+
+export function projectCanvasHierarchyEdges(
+  nodes: readonly ProjectedCanvasNode[]
+): CanvasStructureEdgeProjection[] {
   const visiblePaths = new Set(nodes.map((node) => node.projectRelativePath));
-  const edges = nodes.flatMap((node) => {
+  return nodes.flatMap((node) => {
     const parent = canvasParentPath(node.projectRelativePath);
     return parent !== undefined && visiblePaths.has(parent)
       ? [{
@@ -165,13 +174,6 @@ export function projectCanvasScene(input: {
         }]
       : [];
   });
-  return {
-    projection: {
-      nodes,
-      edges
-    },
-    occlusionOrder
-  };
 }
 
 function resourceLabel(resource: CanvasResource, canonicalRoot: string): string {

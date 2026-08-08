@@ -1784,6 +1784,23 @@ describe('CanvasSurface', () => {
     expect(html.match(/<path/g) ?? []).toHaveLength(3);
   });
 
+  it('keeps Canvas nodes mounted while omitting the complete edge SVG layer', () => {
+    const projection: CanvasProjection = {
+      nodes: [
+        nodeFixture('flow/a.png', 0, 0),
+        nodeFixture('flow/b.png', 300, 0)
+      ],
+      edges: []
+    };
+
+    const html = renderToStaticMarkup(surface(projection));
+
+    expect(html).toContain('data-canvas-node-path="flow/a.png"');
+    expect(html).toContain('data-canvas-node-path="flow/b.png"');
+    expect(html).not.toContain('class="canvas-edge-layer"');
+    expect(html).not.toContain('data-canvas-edge-ids');
+  });
+
   it('passes image feedback entries to image node markup without rendering feedback bars inside nodes', () => {
     const projection: CanvasProjection = {
       nodes: [nodeFixture('flow/cover.png', 120, 80)],

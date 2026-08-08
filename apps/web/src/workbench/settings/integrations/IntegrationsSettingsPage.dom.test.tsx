@@ -381,6 +381,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
   return {
     workbench: { locale: 'en', themePreference: 'system' },
     canvas: {
+      hierarchyEdgesVisible: true,
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',
         fontSizePx: 12,

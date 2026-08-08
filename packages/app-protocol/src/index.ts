@@ -287,6 +287,7 @@ interface DebruteGlobalWorkbenchSettings {
 
 interface DebruteGlobalCanvasSettings {
   textAppearance: CanvasTextAppearance;
+  hierarchyEdgesVisible: boolean;
 }
 
 interface DebruteGlobalChromeSettings {
@@ -306,7 +307,7 @@ export interface DebruteGlobalSettingsView {
 
 export interface SaveDebruteGlobalSettingsInput {
   workbench?: Partial<DebruteGlobalWorkbenchSettings>;
-  canvas?: { textAppearance: CanvasTextAppearance };
+  canvas?: Partial<DebruteGlobalCanvasSettings>;
   modelSetting?: { modelId: string; setting: SaveModelSettingInput };
 }
 
@@ -924,7 +925,11 @@ export type ExplorerActivityOperation =
   | 'reveal'
   | 'delete'
   | 'paste';
-export type WorkbenchActivityOperation = 'window-state' | 'window-command' | 'menu-command';
+export type WorkbenchActivityOperation =
+  | 'window-state'
+  | 'window-command'
+  | 'menu-command'
+  | 'save-canvas-settings';
 export type IntegrationActivityOperation = 'install' | 'update' | 'uninstall';
 
 export type WorkbenchActivityNoticeInput =
@@ -989,7 +994,7 @@ const EXPLORER_ACTIVITY_OPERATIONS = new Set<ExplorerActivityOperation>([
   'load-directory', 'copy', 'move', 'import', 'copy-path', 'reveal', 'delete', 'paste'
 ]);
 const WORKBENCH_ACTIVITY_OPERATIONS = new Set<WorkbenchActivityOperation>([
-  'window-state', 'window-command', 'menu-command'
+  'window-state', 'window-command', 'menu-command', 'save-canvas-settings'
 ]);
 const INTEGRATION_ACTIVITY_OPERATIONS = new Set<IntegrationActivityOperation>([
   'install', 'update', 'uninstall'

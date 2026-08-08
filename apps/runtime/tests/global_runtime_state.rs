@@ -31,6 +31,7 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     assert_eq!(
         serde_json::to_value(&initial.canvas).expect("Canvas settings should serialize"),
         json!({
+            "hierarchyEdgesVisible": true,
             "textAppearance": {
                 "fontId": "noto-sans-mono-cjk-sc",
                 "fontSizePx": 12.0,
@@ -99,6 +100,7 @@ fn canvas_text_appearance_is_one_complete_validated_global_setting() {
     assert_eq!(
         serde_json::to_value(&result.view.canvas).expect("Canvas settings should serialize"),
         json!({
+            "hierarchyEdgesVisible": true,
             "textAppearance": {
                 "fontId": "jetbrains-mono",
                 "fontSizePx": 15.5,
@@ -119,6 +121,61 @@ fn canvas_text_appearance_is_one_complete_validated_global_setting() {
         canvas_text_appearance_patch_with("fontWeight", json!(901)),
         canvas_text_appearance_patch_with("letterSpacingPx", json!(0.15)),
         canvas_text_appearance_patch_with("unexpectedField", json!(true)),
+    ] {
+        assert!(matches!(
+            store.patch(&invalid, &catalog),
+            Err(GlobalSettingsError::Validation(_))
+        ));
+    }
+
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
+fn canvas_hierarchy_edge_visibility_is_one_global_boolean_setting() {
+    let home = temporary_home("canvas-hierarchy-edge-visibility");
+    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let store = GlobalConfigStore::new(&home);
+
+    let hidden = store
+        .patch(
+            &json!({ "canvas": { "hierarchyEdgesVisible": false } }),
+            &catalog,
+        )
+        .expect("Canvas hierarchy edges should hide");
+    assert!(hidden.changed);
+    assert!(!hidden.view.canvas.hierarchy_edges_visible);
+
+    let reopened_store = GlobalConfigStore::new(&home);
+    assert!(
+        !reopened_store
+            .read_view(&catalog)
+            .expect("persisted Canvas hierarchy edge visibility should reload")
+            .canvas
+            .hierarchy_edges_visible
+    );
+
+    let repeated = store
+        .patch(
+            &json!({ "canvas": { "hierarchyEdgesVisible": false } }),
+            &catalog,
+        )
+        .expect("repeating Canvas hierarchy edge visibility should be valid");
+    assert!(!repeated.changed);
+
+    let shown = store
+        .patch(
+            &json!({ "canvas": { "hierarchyEdgesVisible": true } }),
+            &catalog,
+        )
+        .expect("Canvas hierarchy edges should show");
+    assert!(shown.changed);
+    assert!(shown.view.canvas.hierarchy_edges_visible);
+
+    for invalid in [
+        json!({ "canvas": {} }),
+        json!({ "canvas": { "hierarchyEdgesVisible": "false" } }),
+        json!({ "canvas": { "hierarchyEdgesVisible": false, "unexpectedField": true } }),
     ] {
         assert!(matches!(
             store.patch(&invalid, &catalog),
@@ -342,6 +399,23 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
         serde_json::to_string_pretty(&settings).expect("settings should serialize"),
     )
     .expect("invalid settings fixture should write");
+    assert!(matches!(
+        store.read_view(&catalog),
+        Err(GlobalSettingsError::Json(_))
+    ));
+
+    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
+    settings["canvas"]
+        .as_object_mut()
+        .expect("Canvas settings should be an object")
+        .remove("hierarchyEdgesVisible");
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
+    )
+    .expect("obsolete Canvas settings fixture should write");
     assert!(matches!(
         store.read_view(&catalog),
         Err(GlobalSettingsError::Json(_))

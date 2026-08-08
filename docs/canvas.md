@@ -41,7 +41,7 @@ derives:
 - deterministic depth-first Automatic Layout with one horizontal row for the
   direct-child files of each directory;
 - Manual Layout overlay;
-- parent-child edges;
+- parent-child Hierarchy Edges;
 - overlap-only `occlusionOrder` reconciliation and z values;
 - Canvas Selection, camera, drag drafts, and pointer interaction.
 
@@ -63,6 +63,13 @@ including width, is never rewritten by the automatic bounds. Automatic nodes do
 not route around manual rectangles. Reset removes only the selected
 `manualLayout` values and thereby opts those nodes back into current Automatic
 Layout geometry. No Canvas-state migration or width-source field is required.
+
+The fixed lower-left Hierarchy Edge Visibility control is independent of
+Project and Canvas availability. Its Runtime-owned global value defaults to
+visible and applies across Projects, Workbench windows, and Debrute restarts.
+Hidden Hierarchy Edges are not derived or presented; Canvas Nodes, Project Tree,
+layout, selection, and interaction continue unchanged. This value governs only
+Hierarchy Edges, not other edge semantics.
 
 Within each directory, direct-child directory subtrees remain vertical blocks
 in Project order, followed by one horizontal row containing all direct-child

@@ -357,12 +357,13 @@ decisions are indexed under the
 ## Global And Project State
 
 Runtime's global store is the sole persistence boundary for Workbench
-preferences, Canvas Text Appearance, recent Project roots, model overrides and
+preferences, Canvas-global settings, recent Project roots, model overrides and
 API keys. Photoshop state is live-only and is not a Global Settings field.
-Canvas Text Appearance persists as one
-complete `canvas.textAppearance` value rather than field patches: managed font
-ID, font size, line-height ratio, requested integer weight, letter spacing, and
-ligatures. Recent Projects persist only an ordered list of canonical roots.
+Canvas Text Appearance persists as one complete `canvas.textAppearance` value
+rather than field patches: managed font ID, font size, line-height ratio,
+requested integer weight, letter spacing, and ligatures.
+`canvas.hierarchyEdgesVisible` is one boolean that defaults to `true`. Recent
+Projects persist only an ordered list of canonical roots.
 Non-secret settings and secrets use separate atomic files;
 public projections expose only whether a key is set and a non-secret preview.
 Runtime stores no default frontend. Every frontend-opening command or menu item

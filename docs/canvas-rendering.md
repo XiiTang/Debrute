@@ -25,6 +25,14 @@ group retains its member edge IDs and target paths. React reads the stable
 full-scene render snapshot directly from Runtime through an external-store
 subscription.
 
+Node projection and Hierarchy Edge derivation are separate. When global
+Hierarchy Edge Visibility is off, Workbench skips edge identity derivation and
+the Scene holds no routing groups or edge spatial-index entries; `CanvasSurface`
+does not mount the edge SVG. Toggling the value updates only edge presentation,
+preserving node membership, selection, Manual Layout Drafts, and node spatial
+state. Restoring visibility derives Hierarchy Edges from the latest nodes and
+routes them against the latest presented layouts.
+
 An accepted Scene Projection replaces React membership once. During a live Manual
 Layout Draft, Runtime derives the presentation once and the Scene updates only
 the changed node layouts, routing groups, and spatial-index entries. The

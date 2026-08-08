@@ -10,17 +10,21 @@ import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
 } from './useWorkbenchSettingsController.js';
+import type { CanvasGlobalSettingsController } from '../services/useCanvasGlobalSettingsController.js';
 
 export function WorkbenchSettingsFeatureHost({
   api,
+  canvasGlobalSettings,
   onController
 }: {
   api: HttpWorkbenchApiClient;
+  canvasGlobalSettings: CanvasGlobalSettingsController;
   onController(controller: WorkbenchSettingsController): void;
 }): null {
   const controller = useWorkbenchSettingsController({
     api,
-    globalProjection: api.globalProjection
+    globalProjection: api.globalProjection,
+    canvasGlobalSettings
   });
   useLayoutEffect(() => {
     onController(controller);

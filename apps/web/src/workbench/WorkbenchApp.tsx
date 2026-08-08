@@ -13,9 +13,11 @@ import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
+import { CanvasHierarchyEdgeVisibilityButton } from './canvas/CanvasHierarchyEdgeVisibilityButton.js';
 import {
   canvasPathAncestors,
-  projectCanvasScene,
+  projectCanvasHierarchyEdges,
+  projectCanvasNodeScene,
   raiseCanvasSelection as raiseProjectedCanvasSelection,
   type CanvasProjection
 } from './canvas/CanvasScene.js';
@@ -94,6 +96,7 @@ import {
 import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController.js';
 import {
   feedbackBarPlacementForCanvasTarget,
+  canvasHierarchyEdgeVisibilityButtonRect,
   canvasMinimapButtonRect,
   canvasResetLayoutButtonRect,
   placeCanvasMinimapPanel
@@ -137,6 +140,10 @@ import {
   useWorkbenchPresentationController,
   type WorkbenchPresentationController
 } from './services/useWorkbenchPresentationController.js';
+import {
+  useCanvasGlobalSettingsController,
+  type CanvasGlobalSettingsController
+} from './services/useCanvasGlobalSettingsController.js';
 import { canvasTextRenderProfileForAppearance } from './canvas/CanvasFontCatalog.js';
 import {
   CanvasTextRenderProfileGate,
@@ -167,6 +174,7 @@ function canvasContentIslandOwnerPath(target: Element): string | undefined {
   return island?.closest<HTMLElement>('[data-canvas-node-path]')?.dataset.canvasNodePath;
 }
 
+const EMPTY_CANVAS_HIERARCHY_EDGES: CanvasProjection['edges'] = [];
 const TerminalPanel = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('terminal');
   const module = await import('./terminal/TerminalPanel.js');
@@ -289,6 +297,23 @@ function WorkbenchRuntimeApp({
   const presentationController = useWorkbenchPresentationController({
     globalProjection: api.globalProjection
   });
+  const reportCanvasGlobalSettingsSaveError = useCallback((
+    _error: unknown,
+    patch: Parameters<CanvasGlobalSettingsController['save']>[0]
+  ) => {
+    if (patch.hierarchyEdgesVisible === undefined) {
+      return;
+    }
+    void api.reportActivityNotice({
+      kind: 'workbench-operation-failed',
+      operation: 'save-canvas-settings'
+    }).catch(() => undefined);
+  }, [api]);
+  const canvasGlobalSettingsController = useCanvasGlobalSettingsController({
+    api,
+    globalProjection: api.globalProjection,
+    onSaveError: reportCanvasGlobalSettingsSaveError
+  });
   useLayoutEffect(() => {
     workbenchStartupTimeline.mark('react-committed');
     onCommitted?.();
@@ -298,9 +323,7 @@ function WorkbenchRuntimeApp({
   const requestSettingsFeature = useCallback(() => {
     setSettingsFeatureRequested(true);
   }, []);
-  const canvasTextAppearance = settingsFeatureController
-    ? settingsFeatureController.canvasTextAppearance
-    : presentationController.settings.canvas.textAppearance;
+  const canvasTextAppearance = canvasGlobalSettingsController.settings.textAppearance;
   const canvasTextRenderProfile = useMemo(
     () => canvasTextRenderProfileForAppearance(canvasTextAppearance),
     [
@@ -393,6 +416,7 @@ function WorkbenchRuntimeApp({
     connectionEnded,
     announceProjectBinding,
     presentationController,
+    canvasGlobalSettingsController,
     settingsFeatureController,
     requestSettingsFeature,
     i18n,
@@ -422,6 +446,7 @@ function WorkbenchRuntimeApp({
         <React.Suspense fallback={null}>
           <WorkbenchSettingsFeatureHost
             api={api}
+            canvasGlobalSettings={canvasGlobalSettingsController}
             onController={setSettingsFeatureController}
           />
         </React.Suspense>
@@ -438,6 +463,7 @@ function WorkbenchBoundProjectApp({
   connectionEnded,
   announceProjectBinding,
   presentationController,
+  canvasGlobalSettingsController,
   settingsFeatureController,
   requestSettingsFeature,
   i18n,
@@ -454,6 +480,7 @@ function WorkbenchBoundProjectApp({
   connectionEnded: Error | undefined;
   announceProjectBinding(input: { bindingGeneration: number }): void;
   presentationController: WorkbenchPresentationController;
+  canvasGlobalSettingsController: CanvasGlobalSettingsController;
   settingsFeatureController: WorkbenchSettingsController | undefined;
   requestSettingsFeature(): void;
   i18n: WorkbenchI18n;
@@ -616,18 +643,28 @@ function WorkbenchBoundProjectApp({
       canvasRuntime.endContentActivation();
     }
   }, [canvasRuntime]);
-  const canvasScene = useMemo(() => (
+  const hierarchyEdgesVisible = canvasGlobalSettingsController.settings.hierarchyEdgesVisible;
+  const canvasNodeScene = useMemo(() => (
     canvasState
     && availableCanvasWorkspace
     && canonicalRoot
-      ? projectCanvasScene({
+      ? projectCanvasNodeScene({
           canonicalRoot,
           resources: availableCanvasWorkspace.canvasResources,
           state: canvasState
         })
       : undefined
   ), [availableCanvasWorkspace, canonicalRoot, canvasState]);
-  const canvasProjection = canvasScene?.projection;
+  const canvasProjection = useMemo<CanvasProjection | undefined>(() => (
+    canvasNodeScene
+      ? {
+          nodes: canvasNodeScene.nodes,
+          edges: hierarchyEdgesVisible
+            ? projectCanvasHierarchyEdges(canvasNodeScene.nodes)
+            : EMPTY_CANVAS_HIERARCHY_EDGES
+        }
+      : undefined
+  ), [canvasNodeScene, hierarchyEdgesVisible]);
   const canvas = useMemo(() => (
     canvasState && canvasProjection
       ? { state: canvasState, projection: canvasProjection }
@@ -635,12 +672,12 @@ function WorkbenchBoundProjectApp({
   ), [canvasProjection, canvasState]);
   const visibleCanvasPathsRef = useRef<Set<string> | undefined>(undefined);
   useEffect(() => {
-    if (!canvasState || !canvasScene) {
+    if (!canvasState || !canvasNodeScene) {
       visibleCanvasPathsRef.current = undefined;
       return;
     }
     const visiblePaths = new Set(
-      canvasScene.projection.nodes.map((node) => node.projectRelativePath)
+      canvasNodeScene.nodes.map((node) => node.projectRelativePath)
     );
     const previous = visibleCanvasPathsRef.current;
     visibleCanvasPathsRef.current = visiblePaths;
@@ -648,10 +685,10 @@ function WorkbenchBoundProjectApp({
       ? [...visiblePaths].filter((path) => !previous.has(path))
       : [];
     const currentOcclusionOrder = newlyVisible.length === 0
-      ? canvasScene.occlusionOrder
+      ? canvasNodeScene.occlusionOrder
       : raiseProjectedCanvasSelection(
-          canvasScene.occlusionOrder,
-          canvasScene.projection.nodes,
+          canvasNodeScene.occlusionOrder,
+          canvasNodeScene.nodes,
           newlyVisible
         );
     if (equalStringArrays(canvasState.occlusionOrder, currentOcclusionOrder)) {
@@ -659,20 +696,20 @@ function WorkbenchBoundProjectApp({
     }
     void enqueueCanvasOcclusionMutation(async (accepted) => {
       const context = canvasMutationContext(accepted);
-      const scene = projectCanvasScene({
+      const scene = projectCanvasNodeScene({
         canonicalRoot: accepted.canonicalRoot,
         resources: context.resources,
         state: context.state
       });
       const currentVisiblePaths = new Set(
-        scene.projection.nodes.map((node) => node.projectRelativePath)
+        scene.nodes.map((node) => node.projectRelativePath)
       );
       const currentlyNew = newlyVisible.filter((path) => currentVisiblePaths.has(path));
       const occlusionOrder = currentlyNew.length === 0
         ? scene.occlusionOrder
         : raiseProjectedCanvasSelection(
             scene.occlusionOrder,
-            scene.projection.nodes,
+            scene.nodes,
             currentlyNew
           );
       if (equalStringArrays(context.state.occlusionOrder, occlusionOrder)) {
@@ -683,12 +720,12 @@ function WorkbenchBoundProjectApp({
       kind: 'canvas-operation-failed',
       operation: 'raise-selection'
     }));
-  }, [api, canvasScene, canvasState, enqueueCanvasOcclusionMutation, projectActivities]);
+  }, [api, canvasNodeScene, canvasState, enqueueCanvasOcclusionMutation, projectActivities]);
   const centerCanvasProjectionNode = useCallback((
-    projection: CanvasProjection | undefined,
+    nodes: CanvasProjection['nodes'] | undefined,
     projectRelativePath: string
   ) => {
-    const node = projection?.nodes.find((item) => item.projectRelativePath === projectRelativePath);
+    const node = nodes?.find((item) => item.projectRelativePath === projectRelativePath);
     const runtimeSnapshot = canvasRuntime?.getSnapshot();
     if (!node || !canvasRuntime || !runtimeSnapshot?.surfaceSize) {
       return;
@@ -729,14 +766,14 @@ function WorkbenchBoundProjectApp({
       const latestWorkspace = latestSnapshot?.canvasWorkspace.status === 'available'
         ? latestSnapshot.canvasWorkspace
         : undefined;
-      const projection = latestWorkspace && canonicalRoot
-        ? projectCanvasScene({
+      const nodes = latestWorkspace && canonicalRoot
+        ? projectCanvasNodeScene({
             canonicalRoot,
             resources: latestWorkspace.canvasResources,
             state: latestWorkspace.workspace
-          }).projection
+          }).nodes
         : undefined;
-      centerCanvasProjectionNode(projection, projectRelativePath);
+      centerCanvasProjectionNode(nodes, projectRelativePath);
       document.querySelector<HTMLElement>('[data-testid="canvas-surface"]')?.focus({ preventScroll: true });
     } catch {
       if (scope.isCurrent()) {
@@ -963,15 +1000,15 @@ function WorkbenchBoundProjectApp({
             }
           };
         }
-        const projection = projectCanvasScene({
+        const scene = projectCanvasNodeScene({
           canonicalRoot: accepted.canonicalRoot,
           resources: context.resources,
           state: nextState
-        }).projection;
+        });
         await api.patchCanvasState({
           occlusionOrder: raiseProjectedCanvasSelection(
             context.state.occlusionOrder,
-            projection.nodes,
+            scene.nodes,
             input.selectedProjectRelativePaths
           ),
           nodeStateUpdates: input.nodeLayouts.map((layout) => ({
@@ -1018,7 +1055,7 @@ function WorkbenchBoundProjectApp({
           nextState.nodeStates[path] = remaining;
         }
       }
-      const scene = projectCanvasScene({
+      const scene = projectCanvasNodeScene({
         canonicalRoot: accepted.canonicalRoot,
         resources: context.resources,
         state: nextState
@@ -1077,7 +1114,7 @@ function WorkbenchBoundProjectApp({
     try {
       await enqueueCanvasOcclusionMutation(async (accepted) => {
         const context = canvasMutationContext(accepted);
-        const scene = projectCanvasScene({
+        const scene = projectCanvasNodeScene({
           canonicalRoot: accepted.canonicalRoot,
           resources: context.resources,
           state: context.state
@@ -1085,7 +1122,7 @@ function WorkbenchBoundProjectApp({
         await api.patchCanvasState({
           occlusionOrder: raiseProjectedCanvasSelection(
             context.state.occlusionOrder,
-            scene.projection.nodes,
+            scene.nodes,
             input.projectRelativePaths
           )
         });
@@ -1333,11 +1370,15 @@ function WorkbenchBoundProjectApp({
   const resetLayoutButtonRect = canvasState
     ? canvasResetLayoutButtonRect(workbenchViewportRect)
     : undefined;
+  const hierarchyEdgeVisibilityButtonRect = canvasHierarchyEdgeVisibilityButtonRect(
+    workbenchViewportRect
+  );
   const floatingBarReservedRects = [
     TITLE_BAR_RESERVED_RECT(workbenchViewportRect.width),
     ...FIXED_TOP_FLOATING_BAR_RECTS,
     minimapButtonRect,
     ...(resetLayoutButtonRect ? [resetLayoutButtonRect] : []),
+    hierarchyEdgeVisibilityButtonRect,
     ...(canvasMinimapOpen ? [minimapPanelPlacement] : [])
   ];
   useEffect(() => {
@@ -1376,6 +1417,11 @@ function WorkbenchBoundProjectApp({
       });
     });
   }, [actions, projectActivities]);
+  const setHierarchyEdgesVisible = useCallback((visible: boolean) => {
+    void canvasGlobalSettingsController.save({
+      hierarchyEdgesVisible: visible
+    }).catch(() => undefined);
+  }, [canvasGlobalSettingsController]);
   const readyPhotoshop = globalProjection.photoshop.status === 'ready'
     ? globalProjection.photoshop.value
     : undefined;
@@ -1782,6 +1828,10 @@ function WorkbenchBoundProjectApp({
                 />
               </>
             ) : null}
+            <CanvasHierarchyEdgeVisibilityButton
+              hierarchyEdgesVisible={hierarchyEdgesVisible}
+              onHierarchyEdgesVisibleChange={setHierarchyEdgesVisible}
+            />
             {Object.values(textEditorWindows).some((windowState) => windowState.open) ? (
               <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
                 {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (

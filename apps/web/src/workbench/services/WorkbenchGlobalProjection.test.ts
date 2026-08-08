@@ -102,6 +102,7 @@ function settingsFixture(locale: 'en' | 'zh-CN' = 'en'): DebruteGlobalSettingsVi
   return {
     workbench: { locale, themePreference: 'dark' },
     canvas: {
+      hierarchyEdgesVisible: true,
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',
         fontSizePx: 12,

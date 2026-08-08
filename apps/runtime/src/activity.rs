@@ -72,6 +72,7 @@ pub enum WorkbenchActivityOperation {
     WindowState,
     WindowCommand,
     MenuCommand,
+    SaveCanvasSettings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

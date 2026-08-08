@@ -87,6 +87,7 @@ function settingsFixture(
   return {
     workbench: { locale, themePreference },
     canvas: {
+      hierarchyEdgesVisible: true,
       textAppearance: {
         fontId: 'noto-sans-mono-cjk-sc',
         fontSizePx: 12,

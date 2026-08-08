@@ -97,6 +97,21 @@ Canvas State after fonts are ready. It contains Automatic Layout, Manual Layout
 overlay, overlap-only stacking, and hierarchy edges without persisting them.
 _Avoid_: Runtime projection, Canvas State
 
+**Hierarchy Edge**:
+A derived Canvas Scene Projection edge connecting each visible non-root Canvas
+Node to its visible parent in the Project Tree.
+_Avoid_: Stored edge, link
+
+**Hierarchy Edge Visibility**:
+The user's global choice to show or hide every Hierarchy Edge without changing
+the Project Tree, Canvas Nodes, or layout. Hiding omits Hierarchy Edge
+derivation and presentation while other Canvas behavior remains active. It
+defaults to visible and does not govern other present or future edge semantics.
+The choice takes effect immediately, is shared by all Workbench windows,
+persists across Projects and Debrute restarts, and returns to the latest
+Runtime-confirmed value when persistence fails.
+_Avoid_: Edge deletion, Canvas State
+
 **Canvas Workspace Document**:
 The one Runtime-global Canvas JSON document for a Project Canonical Root. It
 stores that root and the complete Canvas State. It is not Project content.

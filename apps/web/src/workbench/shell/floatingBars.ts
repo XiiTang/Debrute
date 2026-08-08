@@ -102,10 +102,19 @@ const CANVAS_LOWER_LEFT_CONTROL_INSET = {
   left: WORKBENCH_FLOATING_DOCK_EDGE_INSET.horizontal,
   bottom: 14
 } as const;
-const CANVAS_RESET_LAYOUT_GAP_PX = 4;
+const CANVAS_LOWER_LEFT_CONTROL_GAP_PX = 4;
 
 export const CANVAS_RESET_LAYOUT_BUTTON_SIZE = {
-  left: CANVAS_LOWER_LEFT_CONTROL_INSET.left + CANVAS_MINIMAP_BUTTON_SIZE.width + CANVAS_RESET_LAYOUT_GAP_PX,
+  left: CANVAS_LOWER_LEFT_CONTROL_INSET.left + CANVAS_MINIMAP_BUTTON_SIZE.width + CANVAS_LOWER_LEFT_CONTROL_GAP_PX,
+  bottom: CANVAS_LOWER_LEFT_CONTROL_INSET.bottom,
+  width: 28,
+  height: 28
+} as const;
+
+export const CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE = {
+  left: CANVAS_RESET_LAYOUT_BUTTON_SIZE.left
+    + CANVAS_RESET_LAYOUT_BUTTON_SIZE.width
+    + CANVAS_LOWER_LEFT_CONTROL_GAP_PX,
   bottom: CANVAS_LOWER_LEFT_CONTROL_INSET.bottom,
   width: 28,
   height: 28
@@ -252,6 +261,20 @@ export function canvasResetLayoutButtonRect(viewportRect: FloatingBarRect): Floa
     y: viewportRect.y + viewportRect.height - CANVAS_RESET_LAYOUT_BUTTON_SIZE.bottom - CANVAS_RESET_LAYOUT_BUTTON_SIZE.height,
     width: CANVAS_RESET_LAYOUT_BUTTON_SIZE.width,
     height: CANVAS_RESET_LAYOUT_BUTTON_SIZE.height
+  };
+}
+
+export function canvasHierarchyEdgeVisibilityButtonRect(
+  viewportRect: FloatingBarRect
+): FloatingBarRect {
+  return {
+    x: viewportRect.x + CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE.left,
+    y: viewportRect.y
+      + viewportRect.height
+      - CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE.bottom
+      - CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE.height,
+    width: CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE.width,
+    height: CANVAS_HIERARCHY_EDGE_VISIBILITY_BUTTON_SIZE.height
   };
 }
 

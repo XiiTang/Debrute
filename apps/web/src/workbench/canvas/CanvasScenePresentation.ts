@@ -40,6 +40,7 @@ export interface CanvasRuntimeScene {
 
 interface CanvasScenePresentation extends CanvasRuntimeScene {
   setProjection(projection: CanvasProjection, presentation: CanvasScenePresentationInput): CanvasSceneSnapshot;
+  setHierarchyEdges(edges: CanvasProjection['edges']): CanvasSceneSnapshot;
   publishRenderSnapshot(): void;
   applyPresentation(presentation: CanvasScenePresentationInput): CanvasScenePresentationUpdate;
   dispose(): void;
@@ -64,6 +65,19 @@ export function createCanvasScenePresentation(input: {
   const renderSnapshotListeners = new Set<() => void>();
   const presentationListeners = new Set<(update: CanvasScenePresentationUpdate) => void>();
   let snapshot: CanvasSceneSnapshot = { nodesByPath: new Map(), edgeGroups: [] };
+
+  const rebuildEdges = (edges: CanvasProjection['edges']): CanvasEdgeRoutingGroup[] => {
+    edgesBySource = edgesBySourceFor(edges);
+    sourceGroupsByNodePath = sourceGroupsByNodePathFor(edges);
+    edgeOrderById = new Map(edges.map((edge, order) => [edge.id, order]));
+    const edgeGroups = canvasEdgeRoutingGroupsForProjection({
+      nodes: [...presentedNodesByPath.values()],
+      edges
+    }).sort((left, right) => left.order - right.order);
+    edgeGroupsById = new Map(edgeGroups.map((group) => [group.id, group]));
+    edgeGroupSpatialIndex.rebuild(edgeGroups.map((group) => ({ id: group.id, bounds: group.bounds })));
+    return edgeGroups;
+  };
 
   const rebuild = (
     nextProjection: CanvasProjection,
@@ -95,15 +109,7 @@ export function createCanvasScenePresentation(input: {
       id: node.projectRelativePath,
       bounds: node
     })));
-    edgesBySource = edgesBySourceFor(projection.edges);
-    sourceGroupsByNodePath = sourceGroupsByNodePathFor(projection.edges);
-    edgeOrderById = new Map(projection.edges.map((edge, order) => [edge.id, order]));
-    const edgeGroups = canvasEdgeRoutingGroupsForProjection({
-      nodes: [...presentedNodesByPath.values()],
-      edges: projection.edges
-    }).sort((left, right) => left.order - right.order);
-    edgeGroupsById = new Map(edgeGroups.map((group) => [group.id, group]));
-    edgeGroupSpatialIndex.rebuild(edgeGroups.map((group) => ({ id: group.id, bounds: group.bounds })));
+    const edgeGroups = rebuildEdges(projection.edges);
     snapshot = {
       nodesByPath: new Map(
         [...presentedNodesByPath.values()]
@@ -136,6 +142,14 @@ export function createCanvasScenePresentation(input: {
       return () => presentationListeners.delete(listener);
     },
     setProjection: rebuild,
+    setHierarchyEdges(edges) {
+      projection = { ...projection, edges };
+      snapshot = {
+        nodesByPath: snapshot.nodesByPath,
+        edgeGroups: rebuildEdges(edges)
+      };
+      return snapshot;
+    },
     publishRenderSnapshot() {
       for (const listener of renderSnapshotListeners) {
         listener();

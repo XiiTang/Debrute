@@ -454,16 +454,18 @@ Settings feature instead of being added to the shared Workbench state and
 action bags.
 
 Canvas Text Appearance mutations always carry the complete font ID, font size,
-line-height ratio, requested weight, letter spacing, and ligature value. Valid
-control changes update the local Canvas immediately. Each Workbench window
-serializes its own submissions and replaces only an unsent appearance with the
-newest complete value. A successful mutation response is not confirmation: the
-local value remains presented until an ordered `globalSettings.changed` event
-contains the same complete Canvas Text Appearance. Earlier mismatching events
-do not clear it, and a newer local submission retires any older value still
-awaiting confirmation. After a match, later Runtime events win. Runtime event
-order remains authoritative across windows, and a rejected submission cancels
-its unsent coalesced work and restores the latest Runtime-confirmed value.
+line-height ratio, requested weight, letter spacing, and ligature value. The
+Canvas hierarchy-edge control sends the independent
+`canvas.hierarchyEdgesVisible` boolean and has no duplicate Settings page
+control. Both use one always-mounted Canvas-global settings controller. Valid
+changes update the local Canvas immediately; each Workbench window serializes
+its submissions and coalesces unsent fields to their newest values. A successful
+mutation response is not confirmation: the local values remain presented until
+ordered `globalSettings.changed` events confirm them. A newer local submission
+retires an older value for the same field that still awaits confirmation. After
+a match, later Runtime events win. Runtime event order remains authoritative
+across windows, and a rejected chain cancels its unsent coalesced work and
+restores the latest Runtime-confirmed values.
 
 The runtime persists `system`, `dark`, or `light` as the Workbench theme
 preference. `system` follows `prefers-color-scheme`; the resolved value is
