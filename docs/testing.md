@@ -203,6 +203,14 @@ value as both its `naturalWidth` and declared preview width. Project-specific
 regressions may additionally be checked against their real Project, but those
 user-local files are not presented as a committed fixture.
 
+`pnpm verify:browser:activity` reuses that isolated Runtime and Project but runs
+only the Activity surface acceptance path. It verifies the straight paper Card,
+three-card Floating Stack, transparent content-adaptive Center, remaining-height
+scroll cap, scroll-anchor preservation, non-modal focus semantics, terminal
+clear, empty hit area, and inert outside-pointer close at a wide light viewport
+and a narrow dark viewport. It is the focused live diagnostic when unrelated
+Canvas media acceptance is outside the requested change.
+
 The Runtime HTTP integration suite also opens two ordinary-browser Workbench
 connections under one cookie, binds them to different Projects, and proves that
 each connection can still issue commands and read its own passive media after
@@ -311,6 +319,7 @@ connection.
 | `pnpm test:stability` | three complete fixed-seed runs without retry |
 | `pnpm test:coverage` | merged local V8 coverage for contributing projects |
 | `pnpm test:canvas-text` | native `canvas-text` tag selection |
+| `pnpm verify:browser:activity` | focused light/dark real-browser Activity surface acceptance |
 | `pnpm verify` | timed daily repository gate with product-target Clippy |
 | `pnpm verify:all` | timed final repository gate with all-target Clippy |
 

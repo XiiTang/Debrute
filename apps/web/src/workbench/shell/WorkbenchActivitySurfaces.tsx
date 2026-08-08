@@ -20,6 +20,8 @@ import { useI18n, type WorkbenchI18n } from '../i18n/index.js';
 import {
   isActiveTask,
   isTerminalActivity,
+  WORKBENCH_ACTIVITY_FLOAT_MS,
+  type WorkbenchActivityFloatingCard,
   type WorkbenchActivities
 } from '../services/WorkbenchActivities.js';
 
@@ -34,6 +36,19 @@ interface ActivityAnchor {
   readonly top: number;
 }
 
+interface ActivityCardPresentation {
+  readonly key: string;
+  readonly record: ActivityRecord;
+  readonly exiting: boolean;
+}
+
+interface ActivityScrollAnchor {
+  readonly recordId: string | undefined;
+  readonly offset: number | undefined;
+  readonly scrollHeight: number;
+  readonly scrollTop: number;
+}
+
 export function WorkbenchActivitySurfaces({
   activities,
   activityBellRef,
@@ -46,8 +61,13 @@ export function WorkbenchActivitySurfaces({
     activities.getSnapshot
   );
   const centerRef = useRef<HTMLElement | null>(null);
+  const centerBodyRef = useRef<HTMLDivElement | null>(null);
+  const centerSnapshotRef = useRef<readonly ActivityCardPresentation[]>([]);
+  const scrollAnchorRef = useRef<ActivityScrollAnchor | undefined>(undefined);
   const [anchor, setAnchor] = useState<ActivityAnchor>();
   const [now, setNow] = useState(Date.now());
+  const centerOpen = snapshot.centerPresentation === 'open';
+  const centerExiting = snapshot.centerPresentation === 'exiting';
 
   useLayoutEffect(() => {
     activities.setPresentationBlocked(interactionBlocked);
@@ -80,17 +100,17 @@ export function WorkbenchActivitySurfaces({
   });
 
   useEffect(() => {
-    if (!snapshot.centerOpen && snapshot.floatingRecordIds.length === 0) return;
+    if (snapshot.centerPresentation === 'hidden' && snapshot.floatingCards.length === 0) return;
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
-  }, [snapshot.centerOpen, snapshot.floatingRecordIds.length]);
+  }, [snapshot.centerPresentation, snapshot.floatingCards.length]);
 
   useEffect(() => {
     if (interactionBlocked) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (activities.getSnapshot().centerOpen) activities.closeCenter();
+      if (activities.getSnapshot().centerPresentation === 'open') activities.closeCenter();
       else activities.hideFloating();
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -98,7 +118,7 @@ export function WorkbenchActivitySurfaces({
   }, [activities, interactionBlocked]);
 
   useEffect(() => {
-    if (interactionBlocked || !snapshot.centerOpen) return;
+    if (interactionBlocked || !centerOpen) return;
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (centerRef.current?.contains(target)) return;
@@ -107,27 +127,60 @@ export function WorkbenchActivitySurfaces({
     };
     window.addEventListener('pointerdown', handlePointerDown, { capture: true });
     return () => window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
-  }, [activities, interactionBlocked, snapshot.centerOpen]);
+  }, [activities, centerOpen, interactionBlocked]);
 
-  const floatingRecords = snapshot.floatingRecordIds
-    .map((id) => snapshot.records.find((record) => record.id === id))
-    .filter((record): record is ActivityRecord => record !== undefined);
-  const activeRecords = snapshot.records
-    .filter(isActiveTask)
-    .sort((left, right) => timestamp(right.createdAt) - timestamp(left.createdAt));
-  const recentRecords = snapshot.records
-    .filter(isTerminalActivity)
-    .sort((left, right) => activityTimestamp(right) - activityTimestamp(left));
+  const centerPresentations = [
+    ...snapshot.records.map((record): ActivityCardPresentation => ({
+      key: `record:${record.id}`,
+      record,
+      exiting: false
+    })),
+    ...snapshot.exitingCenterCards.map((card): ActivityCardPresentation => ({
+      key: `exit:${card.exitId}`,
+      record: card.record,
+      exiting: true
+    }))
+  ];
+  if (centerOpen) centerSnapshotRef.current = centerPresentations;
+  const renderedCenterPresentations = centerExiting
+    ? centerSnapshotRef.current
+    : centerPresentations;
+  const activePresentations = renderedCenterPresentations
+    .filter((presentation) => isActiveTask(presentation.record))
+    .sort((left, right) => (
+      timestamp(right.record.createdAt) - timestamp(left.record.createdAt)
+    ));
+  const recentPresentations = renderedCenterPresentations
+    .filter((presentation) => isTerminalActivity(presentation.record))
+    .sort((left, right) => (
+      activityTimestamp(right.record) - activityTimestamp(left.record)
+    ));
+  const hasTerminalRecords = snapshot.records.some(isTerminalActivity);
+  const centerContentSignature = renderedCenterPresentations
+    .map((presentation) => (
+      `${presentation.key}:${presentation.record.updatedAt}:${presentation.exiting ? 'exit' : 'live'}`
+    ))
+    .join('|');
+
+  useLayoutEffect(() => {
+    const body = centerBodyRef.current;
+    if (!body || !centerOpen) return;
+    restoreActivityScrollAnchor(body, scrollAnchorRef.current);
+    scrollAnchorRef.current = captureActivityScrollAnchor(body);
+  }, [centerContentSignature, centerOpen]);
+
   const positionStyle = {
     '--db-activity-anchor-right': `${anchor?.right ?? 8}px`,
     '--db-activity-anchor-top': `${anchor?.top ?? 36}px`
   } as React.CSSProperties;
 
-  if (!snapshot.centerOpen && floatingRecords.length === 0) return null;
+  if (snapshot.centerPresentation === 'hidden' && snapshot.floatingCards.length === 0) {
+    return null;
+  }
 
   return (
     <div className="db-activity-surfaces" style={positionStyle}>
-      {!snapshot.centerOpen && floatingRecords.length > 0 ? (
+      {!centerOpen && snapshot.floatingCards.length > 0 ? (
         <div
           className="db-activity-floating-stack"
           data-activity-container="floating"
@@ -135,61 +188,72 @@ export function WorkbenchActivitySurfaces({
           aria-label={i18n.t('shell.activities.centerTitle')}
           aria-live="polite"
         >
-          {floatingRecords.map((record) => (
-            <ActivityCard key={record.id} record={record} activities={activities} now={now} />
-          ))}
+          {snapshot.floatingCards.map((presentation) => {
+            const record = floatingRecord(presentation, snapshot.records);
+            return record ? (
+              <FloatingActivityCard
+                key={presentation.presentationId}
+                presentation={presentation}
+                record={record}
+                activities={activities}
+                now={now}
+              />
+            ) : null;
+          })}
         </div>
       ) : null}
-      {snapshot.centerOpen ? (
+      {snapshot.centerPresentation !== 'hidden' ? (
         <section
           id="workbench-activity-center"
           ref={centerRef}
-          className="db-activity-center"
+          className={`db-activity-center db-activity-center--${snapshot.centerPresentation}`}
           data-activity-container="center"
-          role="dialog"
+          data-activity-phase={snapshot.centerPresentation}
           aria-label={i18n.t('shell.activities.centerTitle')}
+          aria-hidden={centerExiting || undefined}
+          inert={centerExiting || undefined}
         >
           <header className="db-activity-center__header">
             <h2>{i18n.t('shell.activities.centerTitle')}</h2>
-            <div className="db-activity-center__actions">
-              <Button
-                size="xs"
-                className="db-activity-center__clear"
-                data-activity-clear-all
-                disabled={recentRecords.length === 0}
-                onClick={() => {
-                  void activities.clearTerminal().catch(() => undefined);
-                }}
-              >
-                {i18n.t('shell.activities.clearAll')}
-              </Button>
-              <IconButton
-                size="xs"
-                label={i18n.t('common.close')}
-                icon={<X />}
-                onClick={() => activities.closeCenter()}
-              />
-            </div>
+            <Button
+              size="xs"
+              className="db-activity-center__clear"
+              data-activity-clear-all
+              disabled={!hasTerminalRecords}
+              onClick={centerOpen ? () => {
+                void activities.clearTerminal().catch(() => undefined);
+              } : undefined}
+            >
+              {i18n.t('shell.activities.clearAll')}
+            </Button>
           </header>
-          <div className="db-activity-center__body">
-            {snapshot.records.length === 0 ? (
+          <div
+            ref={centerBodyRef}
+            className="db-activity-center__body"
+            onScroll={(event) => {
+              scrollAnchorRef.current = captureActivityScrollAnchor(event.currentTarget);
+            }}
+          >
+            {renderedCenterPresentations.length === 0 ? (
               <p className="db-activity-center__empty">{i18n.t('shell.activities.empty')}</p>
             ) : (
               <>
-                {activeRecords.length > 0 ? (
+                {activePresentations.length > 0 ? (
                   <ActivityGroup
                     title={i18n.t('shell.activities.activeGroup')}
-                    records={activeRecords}
+                    presentations={activePresentations}
                     activities={activities}
                     now={now}
+                    interactive={centerOpen}
                   />
                 ) : null}
-                {recentRecords.length > 0 ? (
+                {recentPresentations.length > 0 ? (
                   <ActivityGroup
                     title={i18n.t('shell.activities.recentGroup')}
-                    records={recentRecords}
+                    presentations={recentPresentations}
                     activities={activities}
                     now={now}
+                    interactive={centerOpen}
                   />
                 ) : null}
               </>
@@ -203,35 +267,92 @@ export function WorkbenchActivitySurfaces({
 
 function ActivityGroup({
   title,
-  records,
+  presentations,
   activities,
-  now
+  now,
+  interactive
 }: {
   title: string;
-  records: readonly ActivityRecord[];
+  presentations: readonly ActivityCardPresentation[];
   activities: WorkbenchActivities;
   now: number;
+  interactive: boolean;
 }): React.ReactElement {
   return (
     <section className="db-activity-group">
       <h3>{title}</h3>
       <div className="db-activity-group__cards">
-        {records.map((record) => (
-          <ActivityCard key={record.id} record={record} activities={activities} now={now} />
+        {presentations.map((presentation) => (
+          <div
+            key={presentation.key}
+            className={presentation.exiting
+              ? 'db-activity-card-presence db-activity-card-presence--exiting'
+              : 'db-activity-card-presence'}
+            data-activity-record-id={presentation.record.id}
+            aria-hidden={presentation.exiting || undefined}
+            inert={presentation.exiting || undefined}
+          >
+            <ActivityCard
+              record={presentation.record}
+              activities={activities}
+              now={now}
+              interactive={interactive && !presentation.exiting}
+            />
+          </div>
         ))}
       </div>
     </section>
   );
 }
 
-function ActivityCard({
+function FloatingActivityCard({
+  presentation,
   record,
   activities,
   now
 }: {
+  presentation: WorkbenchActivityFloatingCard;
   record: ActivityRecord;
   activities: WorkbenchActivities;
   now: number;
+}): React.ReactElement {
+  const [animationDelay] = useState(() => presentation.phase === 'present'
+    ? -Math.min(WORKBENCH_ACTIVITY_FLOAT_MS, Math.max(0, Date.now() - presentation.startedAt))
+    : 0);
+  const exiting = presentation.phase === 'exiting';
+  return (
+    <div
+      className={exiting
+        ? 'db-activity-floating-card db-activity-floating-card--exiting'
+        : 'db-activity-floating-card db-activity-floating-card--present'}
+      data-activity-record-id={record.id}
+      data-activity-presentation-id={presentation.presentationId}
+      aria-hidden={exiting || undefined}
+      inert={exiting || undefined}
+      style={exiting ? undefined : {
+        '--db-activity-float-animation-delay': `${animationDelay}ms`
+      } as React.CSSProperties}
+    >
+      <ActivityCard
+        record={record}
+        activities={activities}
+        now={now}
+        interactive={!exiting}
+      />
+    </div>
+  );
+}
+
+function ActivityCard({
+  record,
+  activities,
+  now,
+  interactive = true
+}: {
+  record: ActivityRecord;
+  activities: WorkbenchActivities;
+  now: number;
+  interactive?: boolean;
 }): React.ReactElement {
   const i18n = useI18n();
   const active = isActiveTask(record);
@@ -258,9 +379,10 @@ function ActivityCard({
               size="xs"
               label={i18n.t('shell.activities.dismiss')}
               icon={<X />}
-              onClick={() => {
+              tabIndex={interactive ? undefined : -1}
+              onClick={interactive ? () => {
                 void activities.dismiss(record.id).catch(() => undefined);
-              }}
+              } : undefined}
             />
           ) : null}
         </div>
@@ -311,6 +433,46 @@ function ActivityProgressView({
       <span />
     </div>
   );
+}
+
+function floatingRecord(
+  presentation: WorkbenchActivityFloatingCard,
+  records: readonly ActivityRecord[]
+): ActivityRecord | undefined {
+  return presentation.phase === 'exiting'
+    ? presentation.record
+    : records.find((record) => record.id === presentation.recordId);
+}
+
+function captureActivityScrollAnchor(element: HTMLDivElement): ActivityScrollAnchor {
+  const viewportTop = element.getBoundingClientRect().top;
+  const cards = Array.from(
+    element.querySelectorAll<HTMLElement>('[data-activity-record-id]')
+  );
+  const anchor = cards.find((card) => card.getBoundingClientRect().bottom > viewportTop);
+  return {
+    recordId: anchor?.dataset.activityRecordId,
+    offset: anchor ? anchor.getBoundingClientRect().top - viewportTop : undefined,
+    scrollHeight: element.scrollHeight,
+    scrollTop: element.scrollTop
+  };
+}
+
+function restoreActivityScrollAnchor(
+  element: HTMLDivElement,
+  previous: ActivityScrollAnchor | undefined
+): void {
+  if (!previous || previous.scrollTop <= 0) return;
+  const viewportTop = element.getBoundingClientRect().top;
+  const anchor = Array.from(
+    element.querySelectorAll<HTMLElement>('[data-activity-record-id]')
+  ).find((card) => card.dataset.activityRecordId === previous.recordId);
+  if (anchor && previous.offset !== undefined) {
+    const offset = anchor.getBoundingClientRect().top - viewportTop;
+    element.scrollTop += offset - previous.offset;
+    return;
+  }
+  element.scrollTop = previous.scrollTop + (element.scrollHeight - previous.scrollHeight);
 }
 
 function statusLabel(i18n: WorkbenchI18n, record: ActivityRecord): string {

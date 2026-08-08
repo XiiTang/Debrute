@@ -182,7 +182,9 @@ describe('Runtime Workbench connection', () => {
       }
     });
     await vi.waitFor(() => expect(client.activities.getSnapshot().records).toHaveLength(1));
-    expect(client.activities.getSnapshot().floatingRecordIds).toEqual(['activity-1']);
+    expect(client.activities.getSnapshot().floatingCards).toEqual([
+      expect.objectContaining({ phase: 'present', recordId: 'activity-1' })
+    ]);
 
     await client.reportActivityNotice({
       kind: 'canvas-operation-failed',

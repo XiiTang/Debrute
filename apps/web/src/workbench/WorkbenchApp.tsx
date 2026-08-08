@@ -472,14 +472,14 @@ function WorkbenchBoundProjectApp({
     api.activities.getSnapshot
   );
   const toggleActivityCenter = useCallback(() => {
-    if (api.activities.getSnapshot().centerOpen) {
+    if (api.activities.getSnapshot().centerPresentation === 'open') {
       api.activities.closeCenter();
     } else {
       api.activities.openCenter();
     }
   }, [api.activities]);
   const titleBarActivityProps = {
-    activityCenterOpen: activitySnapshot.centerOpen,
+    activityCenterOpen: activitySnapshot.centerPresentation === 'open',
     activityBellRef,
     onToggleActivityCenter: toggleActivityCenter,
     onCloseActivityCenter: api.activities.closeCenter

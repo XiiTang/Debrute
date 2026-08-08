@@ -175,7 +175,6 @@ export function WorkbenchTitleBar({
             label={i18n.t('shell.titleBar.activity')}
             icon={<Bell />}
             pressed={activityCenterOpen}
-            aria-haspopup="dialog"
             aria-expanded={activityCenterOpen}
             aria-controls="workbench-activity-center"
             onClick={() => {

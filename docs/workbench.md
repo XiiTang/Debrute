@@ -335,29 +335,70 @@ raw errors, logs, HTTP bodies, commands, and stdout/stderr cannot enter the
 stream; Workbench localizes each structured record using its current locale, so
 existing records retranslate when the locale changes.
 
-Every Activity Card uses one layout in both presentations. Its header shows
+Every Activity Card uses one layout and one Card primitive in both
+presentations. It is an opaque, zero-radius paper rectangle with the medium
+paper mask, restrained grain, and a 2px hard lower-right underlayer; it has no
+perimeter, soft shadow, hover lift, or whole-card interaction. Its header shows
 `<status> · <source> · <project>` where Project is applicable, with relative
-time and a terminal clear action on the right; the full wrapping message is
+time and a terminal clear action on the right; the complete wrapping message is
 below. An active task has no clear action. It shows `completed / total` and a
 determinate bar only when Runtime owns real totals, otherwise an indeterminate
 bar. Cancelling is indeterminate. Notices and terminal tasks show no progress.
 
-- The Floating Stack is anchored below the bell at the upper right and holds at
-  most three cards. A newly created notice or task floats in every currently
-  connected Workbench for one fixed eight-second interval. Ordinary task
-  progress updates do not re-float it; the active-to-terminal transition
-  re-floats that same record for a fresh eight seconds. Opening the Center,
-  pressing Escape, or expiry removes only floating presentation. A Workbench
-  joining later receives history in its Center but never replays old floats.
-- The Activity Center is a bounded-height, scrollable view over the complete
-  Runtime ledger. Active tasks appear first ordered by start time; terminal
-  notices and tasks follow by their creation or terminal time. Progress updates
-  do not reorder an active card. Its fixed header owns **Clear All** and close.
-  **Clear All** globally removes terminal Activity records only and stays
-  disabled while only active tasks remain. A terminal card's close action
-  globally removes that one record. Neither operation cancels work or removes
-  Model Operation history, generated files, logs, Project state, or another
-  owning feature's result.
+The Floating Stack is anchored `8px` below the Activity bell at the upper right,
+aligned to its right edge with an `8px` viewport inset, and uses
+`width: min(380px, calc(100vw - 16px))`. It holds at most three newest-first
+Cards. A newly created notice or task receives a local presentation identity in
+every currently connected Workbench. An active-to-terminal transition receives
+a new identity even though the record ID is unchanged; ordinary progress
+updates neither create a presentation nor renew its timer. Each presentation
+lasts exactly eight seconds: it enters from `translateX(8px)` and opacity zero
+over the first `120ms`, remains fully visible through `7,880ms`, fades during
+the final `120ms`, and is then removed without changing its Activity record.
+Opening the Center, a highest-layer blocker, and three-card displacement remove
+affected floating presentations immediately. Escape and explicit terminal
+removal use an inert `120ms` fade. Suppressed, consumed, expired, and displaced
+presentations never replay; a Workbench joining later receives history only in
+its Center.
+
+The Activity Center is a transient right overlay over the complete Runtime
+ledger, not a panel or a persistent workspace rail. It shares the Floating
+Stack's bell anchor, viewport inset, and width. Its height follows the toolbar
+and actual collection content up to the space remaining above an `8px` bottom
+inset; it has no fixed-height or `560px` cap and creates no transparent empty
+column that can intercept Canvas input. The Center outer element has no fill,
+perimeter, radius, mask, shadow, divider, or blur. Its fixed transparent toolbar
+contains only the localized Activity title and **Clear All**, with the existing
+title-bar contrast shadow and no close button. Only the collection beneath the
+toolbar scrolls; it contains no horizontal scroll, uses the global low-contrast
+thin scrollbar, and contains overscroll propagation.
+
+The collection places active tasks first, newest start first, then terminal
+notices and tasks by newest creation or terminal time. `Active` and `Recent`
+are lightweight non-sticky text headings that scroll with their Cards and have
+no section shell or divider. Progress updates do not reorder an active Card.
+Insertion and active-to-terminal movement preserve the user's current reading
+position instead of scrolling to the top. An empty Center stays open with its
+toolbar, disabled **Clear All**, and one left-aligned muted empty-state line.
+
+The Center is a named non-modal `section`, not a dialog. The bell exposes only
+its expanded state and `aria-controls` relationship; opening and closing do not
+programmatically move, restore, or trap focus. Ordinary Tab order reaches
+**Clear All** and terminal Card clear actions. The bell toggles the Center and
+remains mutually exclusive with title-bar application menus. Escape closes it.
+Pointer-down outside closes it without preventing or stopping that event, so the same
+gesture continues to the underlying target; pointer-down anywhere inside does
+not close it. Enter and exit each use the same `120ms` rightward/fade motion.
+Logical close and `aria-expanded=false` happen immediately; the visual exit copy
+is `inert`, hidden from accessibility, and pointer-transparent until removed.
+Reduced-motion preference makes these visual transitions effectively immediate.
+
+**Clear All** globally removes terminal Activity records only, requires no
+confirmation, and keeps the Center open. It is disabled when no terminal record
+exists. A terminal Card's clear action globally removes that one record and also
+keeps the Center open. Removed Cards retain only an inert `120ms` visual copy.
+Neither operation cancels work or removes Model Operation history, generated
+files, logs, Project state, or another owning feature's result.
 
 There is no severity, read/unread state, red dot, deduplication, separate Toast
 model, operating-system notification, or Project-change reset. Starting a

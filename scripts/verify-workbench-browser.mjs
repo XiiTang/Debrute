@@ -18,9 +18,13 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const browserScreenshotDirectory = process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR?.trim()
   ? resolve(process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR)
   : undefined;
+const activityOnly = process.argv.slice(2).includes('--activity-only');
 const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
 const fixtureHome = join(fixtureRoot, '.home');
-const fixtureTemporaryDirectory = join(tmpdir(), `debrute-browser-${process.pid}`);
+const fixtureTemporaryDirectory = join(
+  process.platform === 'win32' ? tmpdir() : '/tmp',
+  `dbv-${process.pid}`
+);
 const fixtureTextPath = 'notes/browser-verification.md';
 const fixtureImagePath = 'images/browser-verification.png';
 const fixtureVideoPath = 'media/browser-verification.webm';
@@ -49,10 +53,13 @@ async function main() {
     browser = await chromium.launch();
     context = await browser.newContext({ deviceScaleFactor: 2 });
     page = await context.newPage();
-    await runViewportVerification(context, page, { launchUrl, projectOpenUrl }, { width: 1440, height: 900 }, 'desktop', 420, true);
+    const verifyViewport = activityOnly
+      ? runActivityViewportVerification
+      : runViewportVerification;
+    await verifyViewport(context, page, { launchUrl, projectOpenUrl }, { width: 1440, height: 900 }, 'desktop', 420, true);
     await page.close();
     page = await context.newPage();
-    await runViewportVerification(context, page, { projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
+    await verifyViewport(context, page, { projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
   } catch (error) {
     verificationError = error;
     if (page) {
@@ -70,8 +77,10 @@ async function main() {
         ? new AggregateError([verificationError, error], 'Browser verification and Runtime cleanup failed.')
         : error;
     } finally {
-      await rm(fixtureRoot, { recursive: true, force: true });
-      await rm(fixtureTemporaryDirectory, { recursive: true, force: true });
+      await Promise.all([
+        rm(fixtureRoot, { recursive: true, force: true }),
+        rm(fixtureTemporaryDirectory, { recursive: true, force: true })
+      ]);
     }
   }
   if (verificationError) {
@@ -324,17 +333,37 @@ function projectOpenUrlForOrigin(launchUrl, projectRoot) {
   return new URL(`/open?path=${encodeURIComponent(projectRoot)}`, launchUrl).toString();
 }
 
+async function runActivityViewportVerification(context, page, urls, viewport, label) {
+  await page.setViewportSize(viewport);
+  if (label === 'narrow') {
+    await page.emulateMedia({ colorScheme: 'dark' });
+  }
+  let connectionCredential;
+  page.on('request', (request) => {
+    connectionCredential ??= request.headers()['x-debrute-workbench-connection'];
+  });
+  if (urls.launchUrl) {
+    await waitForWorkbenchOrigin(context, urls.launchUrl);
+  }
+  await page.goto(urls.projectOpenUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.getByTestId('workbench-shell').waitFor({ state: 'visible', timeout: 60000 });
+  await assertActivitySurfaces(page, label, () => connectionCredential);
+  console.log(`[${label}] Focused Activity browser verification passed.`);
+}
+
 async function runViewportVerification(context, page, urls, viewport, label, targetScrollTop, fullCanvasWorkflow) {
   await page.setViewportSize(viewport);
   const failures = [];
   const requestLog = [];
   const pendingPreviewRequests = new Set();
+  let connectionCredential;
   const canvasFeedbackLoad = observeCanvasTextResponse(page, (response) => (
     response.request().method() === 'GET'
     && response.url().includes('/canvas-feedback')
     && response.ok()
   ), { timeout: 60000 });
   page.on('request', (request) => {
+    connectionCredential ??= request.headers()['x-debrute-workbench-connection'];
     if (isCanvasPreviewRequest(request)) {
       pendingPreviewRequests.add(request);
     }
@@ -402,6 +431,7 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
     } else {
       await assertCanvasTextNodeVisible(page, label);
     }
+    await assertActivitySurfaces(page, label, () => connectionCredential);
     if (failures.length > 0) {
       throw new Error(failures.join('\n'));
     }
@@ -414,7 +444,7 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
       `Browser startup diagnostics:\n${JSON.stringify(diagnostics, null, 2)}`
     ].join('\n'));
   }
-  console.log(`[${label}] Workbench launch, chrome, Canvas nodes, icon accessibility${fullCanvasWorkflow ? ', preview handoff, and hover geometry' : ''} passed.`);
+  console.log(`[${label}] Workbench launch, chrome, Canvas nodes, icon accessibility${fullCanvasWorkflow ? ', preview handoff, and hover geometry' : ''}, and Activity surfaces passed.`);
 }
 
 async function waitForWorkbenchOrigin(context, launchUrl) {
@@ -1054,6 +1084,332 @@ async function assertWorkbenchChrome(page, label) {
   await dockButtons.nth(2).click();
   await dockButtons.nth(1).click();
   console.log(`[${label}] Workbench launch, title bar, FloatingDock, Settings, Inspector, and minimap rendered.`);
+}
+
+async function assertActivitySurfaces(page, label, readConnectionCredential) {
+  const connectionCredential = await waitForWorkbenchConnectionCredential(
+    page,
+    readConnectionCredential,
+    label
+  );
+  for (let index = 0; index < 12; index += 1) {
+    await reportBrowserActivityNotice(page, connectionCredential, label);
+  }
+
+  await page.waitForFunction(() => (
+    document.querySelectorAll('.db-activity-floating-card--present').length === 3
+  ), undefined, { timeout: 10000 });
+  const floating = await page.evaluate(() => {
+    const snapshotRect = (rect) => ({
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height
+    });
+    const bell = document.querySelector('[data-workbench-activity-bell]');
+    const stack = document.querySelector('.db-activity-floating-stack');
+    const card = document.querySelector('.db-activity-card');
+    const presentation = document.querySelector('.db-activity-floating-card--present');
+    if (!(bell instanceof HTMLElement)
+      || !(stack instanceof HTMLElement)
+      || !(card instanceof HTMLElement)
+      || !(presentation instanceof HTMLElement)) {
+      throw new Error('Expected the Activity bell and three floating Cards.');
+    }
+    const bellRect = bell.getBoundingClientRect();
+    const stackRect = stack.getBoundingClientRect();
+    const cardStyle = getComputedStyle(card);
+    const presentationStyle = getComputedStyle(presentation);
+    return {
+      bell: snapshotRect(bellRect),
+      stack: snapshotRect(stackRect),
+      card: {
+        backgroundColor: cardStyle.backgroundColor,
+        borderRadius: cardStyle.borderRadius,
+        borderTopWidth: cardStyle.borderTopWidth,
+        boxShadow: cardStyle.boxShadow,
+        maskImage: cardStyle.maskImage
+      },
+      presentation: {
+        animationDuration: presentationStyle.animationDuration,
+        animationName: presentationStyle.animationName
+      },
+      viewport: { width: window.innerWidth, height: window.innerHeight }
+    };
+  });
+  const expectedWidth = Math.min(380, floating.viewport.width - 16);
+  assertBrowserNear(label, 'Floating Stack width', floating.stack.width, expectedWidth);
+  assertBrowserNear(label, 'Floating Stack top anchor', floating.stack.top, floating.bell.bottom + 8);
+  assertBrowserNear(
+    label,
+    'Floating Stack right anchor',
+    floating.stack.right,
+    Math.min(floating.bell.right, floating.viewport.width - 8)
+  );
+  if (floating.card.borderRadius !== '0px'
+    || floating.card.borderTopWidth !== '0px'
+    || floating.card.backgroundColor === 'rgba(0, 0, 0, 0)'
+    || floating.card.boxShadow === 'none'
+    || floating.card.maskImage === 'none') {
+    throw new Error(`[${label}] Activity Card did not render as straight masked paper: ${JSON.stringify(floating.card)}.`);
+  }
+  if (floating.presentation.animationDuration !== '8s'
+    || floating.presentation.animationName !== 'db-activity-float-lifecycle') {
+    throw new Error(`[${label}] Floating Activity lifecycle was not exactly eight seconds: ${JSON.stringify(floating.presentation)}.`);
+  }
+
+  const bell = page.locator('[data-workbench-activity-bell]');
+  await bell.evaluate((element) => {
+    element.focus();
+    element.click();
+  });
+  await page.locator('.db-activity-center--open').waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForTimeout(160);
+  const center = await page.evaluate(() => {
+    const snapshotRect = (rect) => ({
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height
+    });
+    const bellElement = document.querySelector('[data-workbench-activity-bell]');
+    const centerElement = document.querySelector('.db-activity-center--open');
+    const header = centerElement?.querySelector('.db-activity-center__header');
+    const body = centerElement?.querySelector('.db-activity-center__body');
+    const heading = centerElement?.querySelector('.db-activity-group h3');
+    if (!(bellElement instanceof HTMLElement)
+      || !(centerElement instanceof HTMLElement)
+      || !(header instanceof HTMLElement)
+      || !(body instanceof HTMLElement)
+      || !(heading instanceof HTMLElement)) {
+      throw new Error('Expected an open Activity Center with a scrollable collection.');
+    }
+    const centerStyle = getComputedStyle(centerElement);
+    const headerStyle = getComputedStyle(header);
+    const bodyStyle = getComputedStyle(body);
+    const centerRect = centerElement.getBoundingClientRect();
+    return {
+      activeElementIsBell: document.activeElement === bellElement,
+      ariaExpanded: bellElement.getAttribute('aria-expanded'),
+      ariaHasPopup: bellElement.getAttribute('aria-haspopup'),
+      center: {
+        ...snapshotRect(centerRect),
+        tagName: centerElement.tagName,
+        role: centerElement.getAttribute('role'),
+        backgroundColor: centerStyle.backgroundColor,
+        borderTopWidth: centerStyle.borderTopWidth,
+        borderRadius: centerStyle.borderRadius,
+        boxShadow: centerStyle.boxShadow,
+        maskImage: centerStyle.maskImage,
+        animationDuration: centerStyle.animationDuration,
+        animationName: centerStyle.animationName
+      },
+      header: {
+        backgroundColor: headerStyle.backgroundColor,
+        borderTopWidth: headerStyle.borderTopWidth,
+        boxShadow: headerStyle.boxShadow,
+        buttonCount: header.querySelectorAll('button').length
+      },
+      body: {
+        clientHeight: body.clientHeight,
+        scrollHeight: body.scrollHeight,
+        overflowX: bodyStyle.overflowX,
+        overflowY: bodyStyle.overflowY,
+        overscrollBehavior: bodyStyle.overscrollBehavior,
+        scrollbarWidth: bodyStyle.scrollbarWidth
+      },
+      headingPosition: getComputedStyle(heading).position,
+      floatingCount: document.querySelectorAll('.db-activity-floating-card').length,
+      viewport: { width: window.innerWidth, height: window.innerHeight }
+    };
+  });
+  if (!center.activeElementIsBell
+    || center.ariaExpanded !== 'true'
+    || center.ariaHasPopup !== null
+    || center.center.tagName !== 'SECTION'
+    || center.center.role !== null) {
+    throw new Error(`[${label}] Activity Center focus or region semantics were incorrect: ${JSON.stringify(center)}.`);
+  }
+  assertBrowserNear(label, 'Activity Center width', center.center.width, expectedWidth);
+  if (center.center.bottom > center.viewport.height - 7
+    || center.center.backgroundColor !== 'rgba(0, 0, 0, 0)'
+    || center.center.borderTopWidth !== '0px'
+    || center.center.borderRadius !== '0px'
+    || center.center.boxShadow !== 'none'
+    || center.center.maskImage !== 'none'
+    || center.center.animationDuration !== '0.12s'
+    || center.center.animationName !== 'db-activity-enter') {
+    throw new Error(`[${label}] Activity Center geometry or transparent shell was incorrect: ${JSON.stringify(center.center)}.`);
+  }
+  if (center.header.backgroundColor !== 'rgba(0, 0, 0, 0)'
+    || center.header.borderTopWidth !== '0px'
+    || center.header.boxShadow !== 'none'
+    || center.header.buttonCount !== 1) {
+    throw new Error(`[${label}] Activity toolbar was not the transparent title and Clear All pair: ${JSON.stringify(center.header)}.`);
+  }
+  if (center.body.scrollHeight <= center.body.clientHeight
+    || center.body.overflowX !== 'hidden'
+    || center.body.overflowY !== 'auto'
+    || center.body.overscrollBehavior !== 'contain'
+    || center.body.scrollbarWidth !== 'thin'
+    || center.headingPosition === 'sticky'
+    || center.floatingCount !== 0) {
+    throw new Error(`[${label}] Activity collection did not own bounded thin scrolling: ${JSON.stringify(center)}.`);
+  }
+  await saveBrowserScreenshot(page, `${label}-activity-center.png`);
+
+  const scrollAnchor = await page.evaluate(() => {
+    const body = document.querySelector('.db-activity-center__body');
+    if (!(body instanceof HTMLElement)) throw new Error('Activity body is missing.');
+    body.scrollTop = Math.min(240, body.scrollHeight - body.clientHeight);
+    body.dispatchEvent(new Event('scroll', { bubbles: true }));
+    const bodyTop = body.getBoundingClientRect().top;
+    const card = Array.from(body.querySelectorAll('[data-activity-record-id]')).find((candidate) => (
+      candidate.getBoundingClientRect().bottom > bodyTop
+    ));
+    if (!(card instanceof HTMLElement) || body.scrollTop <= 0) {
+      throw new Error('Activity collection could not establish a visible scroll anchor.');
+    }
+    return {
+      recordId: card.dataset.activityRecordId,
+      offset: card.getBoundingClientRect().top - bodyTop
+    };
+  });
+  const insertedId = await reportBrowserActivityNotice(page, connectionCredential, label);
+  await page.locator(`[data-activity-record-id="${insertedId}"]`).waitFor({ state: 'attached', timeout: 10000 });
+  await page.waitForTimeout(50);
+  const restoredOffset = await page.evaluate((recordId) => {
+    const body = document.querySelector('.db-activity-center__body');
+    const card = document.querySelector(`[data-activity-record-id="${CSS.escape(recordId)}"]`);
+    if (!(body instanceof HTMLElement) || !(card instanceof HTMLElement)) {
+      throw new Error('Activity scroll anchor disappeared after insertion.');
+    }
+    return card.getBoundingClientRect().top - body.getBoundingClientRect().top;
+  }, scrollAnchor.recordId);
+  assertBrowserNear(label, 'Activity reading-position anchor', restoredOffset, scrollAnchor.offset, 1);
+  if (await page.locator('.db-activity-floating-card').count() !== 0) {
+    throw new Error(`[${label}] Activity created while Center was open also floated.`);
+  }
+
+  await page.locator('[data-activity-clear-all]').click();
+  await page.waitForFunction(() => {
+    const centerElement = document.querySelector('.db-activity-center--open');
+    return centerElement
+      && centerElement.querySelectorAll('.db-activity-card').length === 0
+      && centerElement.querySelector('[data-activity-clear-all]')?.matches(':disabled');
+  }, undefined, { timeout: 10000 });
+  const empty = await page.evaluate(() => {
+    const snapshotRect = (rect) => ({
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height
+    });
+    const centerElement = document.querySelector('.db-activity-center--open');
+    if (!(centerElement instanceof HTMLElement)) throw new Error('Activity Center closed after Clear All.');
+    const rect = centerElement.getBoundingClientRect();
+    const probeX = rect.left + 4;
+    const probeY = window.innerHeight - 4;
+    const hit = document.elementFromPoint(probeX, probeY);
+    return {
+      rect: snapshotRect(rect),
+      viewportHeight: window.innerHeight,
+      emptyColumnIntercepted: hit?.closest('.db-activity-surfaces') !== null,
+      ariaExpanded: document.querySelector('[data-workbench-activity-bell]')?.getAttribute('aria-expanded')
+    };
+  });
+  if (empty.rect.height >= center.center.height
+    || empty.rect.bottom >= empty.viewportHeight - 20
+    || empty.emptyColumnIntercepted
+    || empty.ariaExpanded !== 'true') {
+    throw new Error(`[${label}] Empty Activity Center retained a full-height hit column or closed: ${JSON.stringify(empty)}.`);
+  }
+
+  await page.evaluate(() => {
+    window.__debruteActivityOutsidePointerReached = false;
+    window.addEventListener('pointerdown', () => {
+      window.__debruteActivityOutsidePointerReached = true;
+    }, { once: true });
+  });
+  await page.mouse.move(
+    empty.rect.left + 4,
+    Math.min(empty.viewportHeight - 4, empty.rect.bottom + 20)
+  );
+  await page.mouse.down();
+  await page.waitForFunction(() => (
+    document.querySelector('.db-activity-center--exiting') !== null
+  ), undefined, { timeout: 10000 });
+  const exiting = await page.evaluate(() => {
+    const centerElement = document.querySelector('.db-activity-center--exiting');
+    return {
+      pointerReached: window.__debruteActivityOutsidePointerReached === true,
+      ariaExpanded: document.querySelector('[data-workbench-activity-bell]')?.getAttribute('aria-expanded'),
+      ariaHidden: centerElement?.getAttribute('aria-hidden'),
+      inert: centerElement instanceof HTMLElement && centerElement.inert,
+      pointerEvents: centerElement instanceof HTMLElement
+        ? getComputedStyle(centerElement).pointerEvents
+        : undefined
+    };
+  });
+  if (!exiting.pointerReached
+    || exiting.ariaExpanded !== 'false'
+    || exiting.ariaHidden !== 'true'
+    || !exiting.inert
+    || exiting.pointerEvents !== 'none') {
+    throw new Error(`[${label}] Outside pointer did not pass through an inert logical close: ${JSON.stringify(exiting)}.`);
+  }
+  await page.mouse.up();
+  await page.locator('.db-activity-center').waitFor({ state: 'detached', timeout: 10000 });
+  console.log(`[${label}] Activity Cards, transparent adaptive Center, scrolling, input, and presence passed in a real browser.`);
+}
+
+async function waitForWorkbenchConnectionCredential(page, readConnectionCredential, label) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const value = readConnectionCredential();
+    if (value) return value;
+    await page.waitForTimeout(20);
+  }
+  throw new Error(`[${label}] Workbench connection credential was not observed.`);
+}
+
+async function reportBrowserActivityNotice(page, connectionCredential, label) {
+  const result = await page.evaluate(async (credential) => {
+    const response = await fetch('/api/activities/notices', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-debrute-workbench-connection': credential
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ kind: 'update-install-failed' })
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      body: await response.text()
+    };
+  }, connectionCredential);
+  if (!result.ok) {
+    throw new Error(`[${label}] Activity notice report failed with ${result.status}: ${result.body}`);
+  }
+  const body = JSON.parse(result.body);
+  if (typeof body.activityId !== 'string') {
+    throw new Error(`[${label}] Activity notice response omitted activityId: ${result.body}`);
+  }
+  return body.activityId;
+}
+
+function assertBrowserNear(label, subject, actual, expected, tolerance = 0.5) {
+  if (Math.abs(actual - expected) > tolerance) {
+    throw new Error(`[${label}] ${subject} expected ${expected}, received ${actual}.`);
+  }
 }
 
 async function assertIconButtonsHaveNames(page, label) {

@@ -280,6 +280,9 @@ describe('WorkbenchTitleBar', () => {
       expect(fileButton.getAttribute('aria-expanded')).toBe('true');
 
       const bell = container.querySelector<HTMLButtonElement>('[data-workbench-activity-bell]');
+      expect(bell?.getAttribute('aria-haspopup')).toBeNull();
+      expect(bell?.getAttribute('aria-expanded')).toBe('true');
+      expect(bell?.getAttribute('aria-controls')).toBe('workbench-activity-center');
       await act(async () => bell?.click());
       expect(fileButton.getAttribute('aria-expanded')).toBe('false');
       expect(onToggleActivityCenter).toHaveBeenCalledOnce();

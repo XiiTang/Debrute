@@ -5,14 +5,37 @@ import type {
 } from '@debrute/app-protocol';
 
 export const WORKBENCH_ACTIVITY_FLOAT_MS = 8_000;
+export const WORKBENCH_ACTIVITY_MOTION_MS = 120;
 const MAX_FLOATING_ACTIVITIES = 3;
+
+export type WorkbenchActivityCenterPresentation = 'hidden' | 'open' | 'exiting';
+
+export type WorkbenchActivityFloatingCard =
+  | {
+      readonly phase: 'present';
+      readonly presentationId: number;
+      readonly recordId: string;
+      readonly startedAt: number;
+      readonly expiresAt: number;
+    }
+  | {
+      readonly phase: 'exiting';
+      readonly presentationId: number;
+      readonly record: ActivityRecord;
+    };
+
+export interface WorkbenchActivityExitingCenterCard {
+  readonly exitId: number;
+  readonly record: ActivityRecord;
+}
 
 export interface WorkbenchActivitiesSnapshot {
   readonly synchronized: boolean;
   readonly activityRevision: number;
-  readonly centerOpen: boolean;
+  readonly centerPresentation: WorkbenchActivityCenterPresentation;
   readonly records: readonly ActivityRecord[];
-  readonly floatingRecordIds: readonly string[];
+  readonly floatingCards: readonly WorkbenchActivityFloatingCard[];
+  readonly exitingCenterCards: readonly WorkbenchActivityExitingCenterCard[];
 }
 
 export interface WorkbenchActivities {
@@ -48,22 +71,42 @@ export function createWorkbenchActivities(actions: {
   clearTerminal(): Promise<unknown>;
 }): WorkbenchActivities {
   const listeners = new Set<() => void>();
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const floatingTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  const floatingExitTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  const centerCardExitTimers = new Map<number, ReturnType<typeof setTimeout>>();
   let disposed = false;
   let presentationBlocked = false;
+  let centerExitTimer: ReturnType<typeof setTimeout> | undefined;
+  let nextPresentationId = 1;
+  let nextCenterCardExitId = 1;
   let snapshot: WorkbenchActivitiesSnapshot = {
     synchronized: false,
     activityRevision: 0,
-    centerOpen: false,
+    centerPresentation: 'hidden',
     records: [],
-    floatingRecordIds: []
+    floatingCards: [],
+    exitingCenterCards: []
   };
 
-  const clearTimer = (id: string): void => {
-    const timer = timers.get(id);
+  const clearFloatingTimer = (presentationId: number): void => {
+    const timer = floatingTimers.get(presentationId);
     if (timer !== undefined) {
       clearTimeout(timer);
-      timers.delete(id);
+      floatingTimers.delete(presentationId);
+    }
+  };
+  const clearFloatingExitTimer = (presentationId: number): void => {
+    const timer = floatingExitTimers.get(presentationId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      floatingExitTimers.delete(presentationId);
+    }
+  };
+  const clearCenterCardExitTimer = (exitId: number): void => {
+    const timer = centerCardExitTimers.get(exitId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      centerCardExitTimers.delete(exitId);
     }
   };
   const emit = (next: WorkbenchActivitiesSnapshot): void => {
@@ -71,30 +114,104 @@ export function createWorkbenchActivities(actions: {
     snapshot = next;
     for (const listener of listeners) listener();
   };
-  const scheduleExpiry = (id: string): void => {
-    clearTimer(id);
-    timers.set(id, setTimeout(() => {
-      timers.delete(id);
-      if (!snapshot.floatingRecordIds.includes(id)) return;
+  const scheduleFloatingExpiry = (
+    presentation: Extract<WorkbenchActivityFloatingCard, { phase: 'present' }>
+  ): void => {
+    clearFloatingTimer(presentation.presentationId);
+    floatingTimers.set(presentation.presentationId, setTimeout(() => {
+      floatingTimers.delete(presentation.presentationId);
+      if (!snapshot.floatingCards.some((card) => (
+        card.phase === 'present' && card.presentationId === presentation.presentationId
+      ))) return;
       emit({
         ...snapshot,
-        floatingRecordIds: snapshot.floatingRecordIds.filter((recordId) => recordId !== id)
+        floatingCards: snapshot.floatingCards.filter((card) => (
+          card.presentationId !== presentation.presentationId
+        ))
       });
-    }, WORKBENCH_ACTIVITY_FLOAT_MS));
+    }, Math.max(0, presentation.expiresAt - Date.now())));
   };
-  const clearFloating = (): void => {
-    for (const id of snapshot.floatingRecordIds) clearTimer(id);
+  const scheduleFloatingExit = (presentationId: number): void => {
+    clearFloatingExitTimer(presentationId);
+    floatingExitTimers.set(presentationId, setTimeout(() => {
+      floatingExitTimers.delete(presentationId);
+      if (!snapshot.floatingCards.some((card) => (
+        card.phase === 'exiting' && card.presentationId === presentationId
+      ))) return;
+      emit({
+        ...snapshot,
+        floatingCards: snapshot.floatingCards.filter((card) => (
+          card.presentationId !== presentationId
+        ))
+      });
+    }, WORKBENCH_ACTIVITY_MOTION_MS));
+  };
+  const scheduleCenterCardExit = (exitId: number): void => {
+    clearCenterCardExitTimer(exitId);
+    centerCardExitTimers.set(exitId, setTimeout(() => {
+      centerCardExitTimers.delete(exitId);
+      if (!snapshot.exitingCenterCards.some((card) => card.exitId === exitId)) return;
+      emit({
+        ...snapshot,
+        exitingCenterCards: snapshot.exitingCenterCards.filter((card) => (
+          card.exitId !== exitId
+        ))
+      });
+    }, WORKBENCH_ACTIVITY_MOTION_MS));
+  };
+  const clearFloatingCardsImmediately = (): void => {
+    for (const card of snapshot.floatingCards) {
+      clearFloatingTimer(card.presentationId);
+      clearFloatingExitTimer(card.presentationId);
+    }
+  };
+  const clearCenterCardExitsImmediately = (): void => {
+    for (const card of snapshot.exitingCenterCards) {
+      clearCenterCardExitTimer(card.exitId);
+    }
+  };
+  const clearCenterExitTimer = (): void => {
+    if (centerExitTimer === undefined) return;
+    clearTimeout(centerExitTimer);
+    centerExitTimer = undefined;
+  };
+  const dropFloatingCards = (
+    cards: readonly WorkbenchActivityFloatingCard[],
+    retained: readonly WorkbenchActivityFloatingCard[]
+  ): void => {
+    const retainedIds = new Set(retained.map((card) => card.presentationId));
+    for (const card of cards) {
+      if (retainedIds.has(card.presentationId)) continue;
+      clearFloatingTimer(card.presentationId);
+      clearFloatingExitTimer(card.presentationId);
+    }
+  };
+  const floatingExitFor = (
+    card: Extract<WorkbenchActivityFloatingCard, { phase: 'present' }>,
+    records: readonly ActivityRecord[]
+  ): Extract<WorkbenchActivityFloatingCard, { phase: 'exiting' }> | undefined => {
+    const record = records.find((candidate) => candidate.id === card.recordId);
+    if (!record) return undefined;
+    clearFloatingTimer(card.presentationId);
+    return {
+      phase: 'exiting',
+      presentationId: card.presentationId,
+      record
+    };
   };
   const acceptSnapshot = (frame: Extract<WorkbenchActivityFrame, { type: 'activity.snapshot' }>): void => {
     if (snapshot.synchronized) {
       throw new Error('Runtime sent more than one Activity snapshot.');
     }
+    clearFloatingCardsImmediately();
+    clearCenterCardExitsImmediately();
     emit({
       synchronized: true,
       activityRevision: frame.activityRevision,
-      centerOpen: snapshot.centerOpen,
+      centerPresentation: snapshot.centerPresentation,
       records: frame.records,
-      floatingRecordIds: []
+      floatingCards: [],
+      exitingCenterCards: []
     });
   };
   const acceptEvent = (frame: Exclude<WorkbenchActivityFrame, { type: 'activity.snapshot' }>): void => {
@@ -103,13 +220,30 @@ export function createWorkbenchActivities(actions: {
     }
     if (frame.type === 'activity.remove') {
       const removed = new Set(frame.activityIds);
-      for (const id of removed) clearTimer(id);
+      const removedRecords = snapshot.records.filter((record) => removed.has(record.id));
+      const floatingExitIds: number[] = [];
+      const floatingCards = snapshot.floatingCards.flatMap((card) => {
+        if (card.phase === 'exiting' || !removed.has(card.recordId)) return [card];
+        const exiting = floatingExitFor(card, snapshot.records);
+        if (!exiting) return [];
+        floatingExitIds.push(exiting.presentationId);
+        return [exiting];
+      });
+      const centerExits = snapshot.centerPresentation === 'open'
+        ? removedRecords.map((record) => ({
+            exitId: nextCenterCardExitId++,
+            record
+          }))
+        : [];
       emit({
         ...snapshot,
         activityRevision: frame.activityRevision,
         records: snapshot.records.filter((record) => !removed.has(record.id)),
-        floatingRecordIds: snapshot.floatingRecordIds.filter((id) => !removed.has(id))
+        floatingCards,
+        exitingCenterCards: [...snapshot.exitingCenterCards, ...centerExits]
       });
+      for (const presentationId of floatingExitIds) scheduleFloatingExit(presentationId);
+      for (const card of centerExits) scheduleCenterCardExit(card.exitId);
       return;
     }
     const previous = snapshot.records.find((record) => record.id === frame.record.id);
@@ -119,22 +253,35 @@ export function createWorkbenchActivities(actions: {
     const terminalTransition = previous !== undefined
       && isActiveTask(previous)
       && isTerminalActivity(frame.record);
-    const shouldFloat = !snapshot.centerOpen
+    const shouldFloat = snapshot.centerPresentation !== 'open'
       && !presentationBlocked
       && (previous === undefined || terminalTransition);
-    const floatingRecordIds = shouldFloat
-      ? [frame.record.id, ...snapshot.floatingRecordIds.filter((id) => id !== frame.record.id)]
-        .slice(0, MAX_FLOATING_ACTIVITIES)
-      : snapshot.floatingRecordIds;
-    const dropped = snapshot.floatingRecordIds.filter((id) => !floatingRecordIds.includes(id));
-    for (const id of dropped) clearTimer(id);
+    let floatingCards = snapshot.floatingCards;
+    let presentation: Extract<WorkbenchActivityFloatingCard, { phase: 'present' }> | undefined;
+    if (shouldFloat) {
+      const startedAt = Date.now();
+      presentation = {
+        phase: 'present',
+        presentationId: nextPresentationId++,
+        recordId: frame.record.id,
+        startedAt,
+        expiresAt: startedAt + WORKBENCH_ACTIVITY_FLOAT_MS
+      };
+      floatingCards = [
+        presentation,
+        ...snapshot.floatingCards.filter((card) => (
+          (card.phase === 'present' ? card.recordId : card.record.id) !== frame.record.id
+        ))
+      ].slice(0, MAX_FLOATING_ACTIVITIES);
+      dropFloatingCards(snapshot.floatingCards, floatingCards);
+    }
     emit({
       ...snapshot,
       activityRevision: frame.activityRevision,
       records,
-      floatingRecordIds
+      floatingCards
     });
-    if (shouldFloat) scheduleExpiry(frame.record.id);
+    if (presentation) scheduleFloatingExpiry(presentation);
   };
 
   return {
@@ -150,25 +297,46 @@ export function createWorkbenchActivities(actions: {
       else acceptEvent(frame);
     },
     openCenter: () => {
-      if (snapshot.centerOpen) return;
-      clearFloating();
-      emit({ ...snapshot, centerOpen: true, floatingRecordIds: [] });
+      if (snapshot.centerPresentation === 'open') return;
+      clearCenterExitTimer();
+      clearFloatingCardsImmediately();
+      clearCenterCardExitsImmediately();
+      emit({
+        ...snapshot,
+        centerPresentation: 'open',
+        floatingCards: [],
+        exitingCenterCards: []
+      });
     },
     closeCenter: () => {
-      if (!snapshot.centerOpen) return;
-      emit({ ...snapshot, centerOpen: false });
+      if (snapshot.centerPresentation !== 'open') return;
+      clearCenterExitTimer();
+      emit({ ...snapshot, centerPresentation: 'exiting' });
+      centerExitTimer = setTimeout(() => {
+        centerExitTimer = undefined;
+        if (snapshot.centerPresentation !== 'exiting') return;
+        emit({ ...snapshot, centerPresentation: 'hidden' });
+      }, WORKBENCH_ACTIVITY_MOTION_MS);
     },
     hideFloating: () => {
-      if (snapshot.floatingRecordIds.length === 0) return;
-      clearFloating();
-      emit({ ...snapshot, floatingRecordIds: [] });
+      const exitingIds: number[] = [];
+      const floatingCards = snapshot.floatingCards.flatMap((card) => {
+        if (card.phase === 'exiting') return [card];
+        const exiting = floatingExitFor(card, snapshot.records);
+        if (!exiting) return [];
+        exitingIds.push(exiting.presentationId);
+        return [exiting];
+      });
+      if (exitingIds.length === 0) return;
+      emit({ ...snapshot, floatingCards });
+      for (const presentationId of exitingIds) scheduleFloatingExit(presentationId);
     },
     setPresentationBlocked: (blocked) => {
       if (presentationBlocked === blocked) return;
       presentationBlocked = blocked;
-      if (blocked && snapshot.floatingRecordIds.length > 0) {
-        clearFloating();
-        emit({ ...snapshot, floatingRecordIds: [] });
+      if (blocked && snapshot.floatingCards.length > 0) {
+        clearFloatingCardsImmediately();
+        emit({ ...snapshot, floatingCards: [] });
       }
     },
     dismiss: async (id) => {
@@ -180,8 +348,13 @@ export function createWorkbenchActivities(actions: {
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      for (const timer of timers.values()) clearTimeout(timer);
-      timers.clear();
+      clearCenterExitTimer();
+      for (const timer of floatingTimers.values()) clearTimeout(timer);
+      for (const timer of floatingExitTimers.values()) clearTimeout(timer);
+      for (const timer of centerCardExitTimers.values()) clearTimeout(timer);
+      floatingTimers.clear();
+      floatingExitTimers.clear();
+      centerCardExitTimers.clear();
       listeners.clear();
     }
   };
