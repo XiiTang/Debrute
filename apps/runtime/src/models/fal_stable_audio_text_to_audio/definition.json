@@ -1,0 +1,33 @@
+{
+  "id": "fal-stable-audio-text-to-audio",
+  "kind": "music",
+  "summary": "Text-to-music or sound-effect generation with explicit total seconds and one completed audio result; product kind is Music, but the remote model is not limited to music.",
+  "defaultBaseUrl": "https://queue.fal.run",
+  "defaultRequestModelId": "fal-ai/stable-audio-25/text-to-audio",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "prompt"
+    ],
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "seconds_total": {
+        "type": "number"
+      },
+      "num_inference_steps": {
+        "type": "integer"
+      },
+      "guidance_scale": {
+        "type": "number"
+      },
+      "seed": {
+        "type": "integer"
+      },
+      "sync_mode": {
+        "type": "boolean"
+      }
+    }
+  }
+}

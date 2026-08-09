@@ -6,7 +6,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::model_operation::{ModelCancellation, ModelKind};
+use crate::model_operation::ModelCancellation;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,7 +114,6 @@ impl ModelRequestDeadline {
 }
 
 pub(crate) struct ResolvedModelRequestModel {
-    pub kind: ModelKind,
     pub model_id: String,
     pub request_model_id: String,
     pub base_url: String,
@@ -126,6 +125,11 @@ pub(crate) struct ModelArtifactPayload {
     pub bytes: Vec<u8>,
     pub mime_type: String,
     pub model_output: serde_json::Value,
+}
+
+pub(crate) struct ModelExecutionDraft {
+    pub payloads: Vec<ModelArtifactPayload>,
+    pub safe_request: serde_json::Value,
 }
 
 #[derive(Debug, Clone)]

@@ -1,0 +1,51 @@
+{
+  "id": "qwen-image-2.0-pro-2026-06-22",
+  "kind": "image",
+  "summary": "Higher-quality image generation/editing with 0–3 input images and 1–6 PNG outputs; total output pixels from 512² to 2048²; synchronous Pro snapshot.",
+  "defaultBaseUrl": "https://dashscope.aliyuncs.com/api/v1",
+  "defaultRequestModelId": "qwen-image-2.0-pro-2026-06-22",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs.",
+        "maxItems": 3
+      },
+      "negative_prompt": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "size": {
+        "type": "string"
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      },
+      "prompt_extend": {
+        "type": "boolean"
+      },
+      "watermark": {
+        "type": "boolean",
+        "default": false
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

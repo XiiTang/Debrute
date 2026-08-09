@@ -491,8 +491,6 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
                   image: [{
                     debruteModelId: 'image/openai/gpt-image-1',
                     summary: 'OpenAI gpt-image-1 image generation and edits.',
-                    supportsEditing: true,
-                    supportsTextRendering: true,
                     defaultBaseUrl: 'https://api.openai.com/v1',
                     defaultRequestModelId: 'gpt-image-1',
                     baseUrlOverride: null,
@@ -928,8 +926,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       image: [{
         debruteModelId: 'image/openai/gpt-image-1',
         summary: 'OpenAI gpt-image-1 image generation and edits.',
-        supportsEditing: true,
-        supportsTextRendering: true,
         defaultBaseUrl: 'https://api.openai.com/v1',
         defaultRequestModelId: 'gpt-image-1',
         baseUrlOverride: null,
@@ -939,11 +935,6 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       video: [{
         debruteModelId: 'video/google/veo-3',
         summary: 'Google Veo 3 video generation.',
-        supportsTextToVideo: true,
-        supportsImageReferences: true,
-        supportsVideoReferences: false,
-        supportsAudioReferences: false,
-        supportsGeneratedAudio: true,
         defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         defaultRequestModelId: 'veo-3.0-generate-preview',
         baseUrlOverride: null,

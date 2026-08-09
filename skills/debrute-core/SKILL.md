@@ -27,7 +27,6 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 
 ```sh
 debrute runtime status
-debrute runtime doctor
 debrute project status /path/to/project
 debrute project validate /path/to/project
 debrute workbench url ./

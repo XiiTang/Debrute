@@ -7,7 +7,7 @@ import {
   type WorkbenchActivityNoticeInput,
   type DebruteGlobalSettingsView,
   type DebruteProductState,
-  type ImageModelSettingRecord,
+  type ModelSettingRecord,
   type WorkbenchApiClient,
   type WorkbenchEvent,
   type WorkbenchProjectSessionSnapshot
@@ -1223,12 +1223,10 @@ function globalSettingsWithHierarchyEdgesVisible(
   };
 }
 
-function imageSettingsFixture(): ImageModelSettingRecord[] {
+function imageSettingsFixture(): ModelSettingRecord[] {
   return [{
     debruteModelId: 'image/openai/gpt-image-1',
     summary: 'OpenAI image generation.',
-    supportsEditing: true,
-    supportsTextRendering: true,
     defaultBaseUrl: 'https://api.openai.com/v1',
     defaultRequestModelId: 'gpt-image-1',
     baseUrlOverride: null,

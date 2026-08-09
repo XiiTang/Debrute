@@ -1,0 +1,59 @@
+{
+  "id": "gemini-3-1-flash-tts-preview",
+  "kind": "tts",
+  "summary": "Preview TTS from text with one or two speakers, 30 voices, a 32k context, and raw 24 kHz mono PCM output; Debrute currently handles only completed, non-streaming responses.",
+  "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "defaultRequestModelId": "gemini-3.1-flash-tts-preview",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "speech_config"
+    ],
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "speech_config": {
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "voice": {
+                  "type": "string"
+                },
+                "language": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "voice"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "speaker": {
+                  "type": "string"
+                },
+                "voice": {
+                  "type": "string"
+                },
+                "language": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "speaker",
+                "voice"
+              ]
+            }
+          ]
+        },
+        "maxItems": 2
+      }
+    }
+  }
+}

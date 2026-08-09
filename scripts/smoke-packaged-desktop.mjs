@@ -103,7 +103,6 @@ async function waitForPackagedDesktop(port, exitPromise, cli) {
     const target = targets.find((candidate) => candidate.type === 'page');
     if (status.code === 0
       && status.output.includes('runtime_state=ready')
-      && status.output.includes('native_tray=active')
       && target) {
       const debuggerUrl = new URL(target.webSocketDebuggerUrl);
       if (debuggerUrl.hostname !== '127.0.0.1' || Number(debuggerUrl.port) !== port) {

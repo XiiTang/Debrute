@@ -10,6 +10,7 @@ pub mod integrations;
 pub mod login;
 pub mod model_operation;
 pub mod model_request;
+pub mod models;
 pub mod native_clipboard;
 pub mod photoshop;
 mod process;

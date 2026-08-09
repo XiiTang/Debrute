@@ -23,9 +23,9 @@ const manifestKeys = [
   'productVersion',
   'schemaVersion'
 ];
-const entrypointKeys = ['cli', 'modelDocs', 'nativeWorkers', 'runtime', 'skills', 'web'];
+const entrypointKeys = ['cli', 'nativeWorkers', 'runtime', 'skills', 'web'];
 const manifestFileKeys = ['path', 'sha256', 'sizeBytes'];
-const requiredProductComponents = ['runtime', 'web', 'skills', 'model-docs', 'native-workers'];
+const requiredProductComponents = ['runtime', 'web', 'skills', 'native-workers'];
 
 export async function assembleProductSeed(input) {
   if (!input || typeof input !== 'object') {
@@ -93,7 +93,6 @@ export async function assembleProductSeed(input) {
     dereference: true
   });
   await cp(join(root, 'skills'), join(destination, 'skills'), { recursive: true, dereference: true });
-  await copyModelDocs(root, destination);
   await mkdir(join(destination, 'native-workers'), { recursive: true });
   await writeFile(join(destination, 'native-workers/manifest.json'), `${JSON.stringify({
     schemaVersion: 1,
@@ -208,7 +207,6 @@ function productEntrypoints(platform) {
         web: 'web/index.html',
         cli: 'runtime/debrute.exe',
         skills: 'skills/debrute-core/SKILL.md',
-        modelDocs: 'model-docs/models.json',
         nativeWorkers: 'native-workers/manifest.json'
       }
     : {
@@ -216,7 +214,6 @@ function productEntrypoints(platform) {
         web: 'web/index.html',
         cli: 'runtime/debrute',
         skills: 'skills/debrute-core/SKILL.md',
-        modelDocs: 'model-docs/models.json',
         nativeWorkers: 'native-workers/manifest.json'
       };
 }
@@ -255,16 +252,6 @@ async function readControlProtocol(root) {
       'Control protocol version'
     ))
   };
-}
-
-async function copyModelDocs(root, destination) {
-  await mkdir(join(destination, 'model-docs'), { recursive: true });
-  await copyFile(join(root, 'assets/runtime-model-catalog.json'), join(destination, 'model-docs/models.json'));
-  await cp(
-    join(root, 'assets/model-docs/snapshots'),
-    join(destination, 'model-docs/snapshots'),
-    { recursive: true, dereference: true }
-  );
 }
 
 async function copyFile(source, destination) {

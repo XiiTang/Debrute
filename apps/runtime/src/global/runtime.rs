@@ -6,10 +6,11 @@ use serde_json::Value;
 use crate::integrations::{
     IntegrationOperation, IntegrationOperationResult, IntegrationService, IntegrationSettingsView,
 };
+use crate::models::ModelCatalog;
 use crate::photoshop::PhotoshopStateView;
 
 use super::{
-    models::{ModelCatalog, ModelSettingsView},
+    models::ModelSettingsView,
     store::{
         ChromeSettings, GlobalConfigStore, GlobalSettingsError, GlobalSettingsView, PluginSettings,
         WorkbenchSettings,

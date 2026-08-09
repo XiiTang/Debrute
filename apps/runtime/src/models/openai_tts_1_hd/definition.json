@@ -1,0 +1,60 @@
+{
+  "id": "openai-tts-1-hd",
+  "kind": "tts",
+  "summary": "Higher-quality TTS with up to 4,096 input characters, MP3/Opus/AAC/FLAC/WAV/PCM output, and speed 0.25–4; no style instructions or SSE output.",
+  "defaultBaseUrl": "https://api.openai.com/v1",
+  "defaultRequestModelId": "tts-1-hd",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "voice"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 4096
+      },
+      "voice": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        ]
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "mp3",
+          "opus",
+          "aac",
+          "flac",
+          "wav",
+          "pcm"
+        ]
+      },
+      "speed": {
+        "type": "number",
+        "minimum": 0.25,
+        "maximum": 4
+      },
+      "stream_format": {
+        "type": "string",
+        "enum": [
+          "audio"
+        ]
+      }
+    }
+  }
+}

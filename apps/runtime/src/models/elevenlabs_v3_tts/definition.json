@@ -1,0 +1,121 @@
+{
+  "id": "elevenlabs-v3-tts",
+  "kind": "tts",
+  "summary": "Expressive single-voice TTS in 70+ languages with up to 5,000 input characters and audio tags; this Debrute Model does not implement the separate multi-speaker Dialogue API.",
+  "defaultBaseUrl": "https://api.elevenlabs.io/v1",
+  "defaultRequestModelId": "eleven_v3",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "voice_id"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 5000
+      },
+      "voice_id": {
+        "type": "string"
+      },
+      "output_format": {
+        "type": "string"
+      },
+      "language_code": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "voice_settings": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "stability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "pronunciation_dictionary_locators": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "maxItems": 3,
+        "items": {
+          "type": "object",
+          "properties": {
+            "pronunciation_dictionary_id": {
+              "type": "string"
+            },
+            "version_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pronunciation_dictionary_id",
+            "version_id"
+          ]
+        }
+      },
+      "seed": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295
+      },
+      "previous_text": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "next_text": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "previous_request_ids": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "maxItems": 3,
+        "items": {
+          "type": "string"
+        }
+      },
+      "next_request_ids": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "maxItems": 3,
+        "items": {
+          "type": "string"
+        }
+      },
+      "apply_text_normalization": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "on",
+          "off"
+        ]
+      },
+      "apply_language_text_normalization": {
+        "type": "boolean"
+      },
+      "use_pvc_as_ivc": {
+        "type": "boolean"
+      }
+    }
+  }
+}

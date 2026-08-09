@@ -158,7 +158,6 @@ async fn run_observe(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError
         phase => Ok(closed_result(transitioning_observe_result(
             parsed.command,
             phase,
-            client.instance_id(),
         ))),
     }
 }
@@ -603,46 +602,18 @@ fn spec_record(spec: &debrute_runtime::cli::CliCommandSpec) -> Value {
 }
 
 fn stopped_observe_result(command: &str) -> Value {
-    if command == "runtime.doctor" {
-        json!({
-            "status": "ok", "command": command,
-            "records": [{"name": "diagnostic", "fields": {
-                "code": "runtime_stopped", "severity": "warning",
-                "message": "Debrute Runtime is not running."
-            }}],
-            "fields": {"runtime_state": "stopped", "native_tray": "unavailable", "diagnostics": 1}
-        })
-    } else {
-        json!({
-            "status": "ok", "command": command,
-            "fields": {"runtime_state": "stopped", "native_tray": "unavailable"}
-        })
-    }
+    json!({
+        "status": "ok", "command": command,
+        "fields": {"runtime_state": "stopped"}
+    })
 }
 
-fn transitioning_observe_result(command: &str, status: RuntimeStatus, instance_id: &str) -> Value {
+fn transitioning_observe_result(command: &str, status: RuntimeStatus) -> Value {
     let state = status_name(status);
-    if command == "runtime.doctor" {
-        json!({
-            "status": "ok", "command": command,
-            "records": [{"name": "diagnostic", "fields": {
-                "code": format!("runtime_{state}"), "severity": "warning",
-                "message": format!("Debrute Runtime is {state}.")
-            }}],
-            "fields": {
-                "runtime_state": state, "native_tray": "unavailable",
-                "runtime_instance": instance_id, "diagnostics": 1
-            }
-        })
-    } else {
-        json!({
-            "status": "ok", "command": command,
-            "fields": {
-                "runtime_state": state, "native_tray": "unavailable",
-                "runtime_instance": instance_id
-            }
-        })
-    }
+    json!({
+        "status": "ok", "command": command,
+        "fields": {"runtime_state": state}
+    })
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -933,12 +904,24 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use debrute_runtime::control::{ClientRole, NativeControlClient};
+    use debrute_runtime::control::{ClientRole, NativeControlClient, RuntimeStatus};
 
     use super::{
         CliFields, control_failure, exit_code_for_result, failure, normalize_http_error,
-        readiness_control_failure,
+        readiness_control_failure, stopped_observe_result, transitioning_observe_result,
     };
+
+    #[test]
+    fn runtime_status_observation_contains_only_lifecycle_state() {
+        assert_eq!(
+            stopped_observe_result("runtime.status")["fields"],
+            serde_json::json!({"runtime_state": "stopped"})
+        );
+        assert_eq!(
+            transitioning_observe_result("runtime.status", RuntimeStatus::Starting)["fields"],
+            serde_json::json!({"runtime_state": "starting"})
+        );
+    }
 
     #[test]
     fn stalled_handshake_is_ready_timeout_only_for_runtime_acquisition() {

@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    global::{AudioModelKind, GlobalRuntimeService, ModelCatalog},
+    global::GlobalRuntimeService,
     model_operation::{
         BatchItemOutcome, ExecutionShape, ModelKind, ModelOperationExecution,
         ModelOperationListQuery, ModelOperationService, ModelOperationSnapshot, OperationListState,
@@ -18,6 +18,7 @@ use crate::{
     model_request::{
         ModelArtifactProvenanceLookup, ModelArtifactProvenanceStore, ModelRequestExecutor,
     },
+    models::ModelCatalog,
     project::{
         ProjectCommand, ProjectCommandResult, ProjectDiagnostic, ProjectDiagnosticSeverity,
         ProjectError, ProjectSessionRegistry, ProjectSnapshot, ProjectUseKind,
@@ -96,20 +97,17 @@ impl RuntimeCliService {
     fn run_command(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         match request.command.as_str() {
             "runtime.status" => self.runtime_status(request),
-            "runtime.doctor" => self.runtime_doctor(request),
             "skills.status" => self.skills_status(request),
-            "models.image.list" => self.list_image_models(request),
-            "models.video.list" => self.list_video_models(request),
-            "models.tts.list" => self.list_audio_models(request, AudioModelKind::Tts),
-            "models.music.list" => self.list_audio_models(request, AudioModelKind::Music),
-            "models.sfx.list" => self.list_audio_models(request, AudioModelKind::SoundEffect),
-            "models.image.describe" => self.describe_image_model(request),
-            "models.video.describe" => self.describe_video_model(request),
-            "models.tts.describe" => self.describe_audio_model(request, AudioModelKind::Tts),
-            "models.music.describe" => self.describe_audio_model(request, AudioModelKind::Music),
-            "models.sfx.describe" => {
-                self.describe_audio_model(request, AudioModelKind::SoundEffect)
-            }
+            "models.image.list" => self.list_models(request, ModelKind::Image),
+            "models.video.list" => self.list_models(request, ModelKind::Video),
+            "models.tts.list" => self.list_models(request, ModelKind::Tts),
+            "models.music.list" => self.list_models(request, ModelKind::Music),
+            "models.sfx.list" => self.list_models(request, ModelKind::SoundEffect),
+            "models.image.describe" => self.describe_model(request, ModelKind::Image),
+            "models.video.describe" => self.describe_model(request, ModelKind::Video),
+            "models.tts.describe" => self.describe_model(request, ModelKind::Tts),
+            "models.music.describe" => self.describe_model(request, ModelKind::Music),
+            "models.sfx.describe" => self.describe_model(request, ModelKind::SoundEffect),
             "project.status" | "project.validate" => self.project_command(request),
             "model-artifact.lookup" => self.model_artifact_lookup(request),
             "operation.list" => self.operation_list(request),
@@ -128,91 +126,10 @@ impl RuntimeCliService {
 
     fn runtime_status(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
         require_no_arguments(request)?;
-        let settings = self
-            .global
-            .settings_get()
-            .map_err(|error| CliFailure::new("runtime_config_error", error.to_string()))?;
-        let models = &self.models;
-        let available_image = settings
-            .models
-            .image
-            .iter()
-            .filter(|model| model.api_key_set)
-            .count();
-        let available_video = settings
-            .models
-            .video
-            .iter()
-            .filter(|model| model.api_key_set)
-            .count();
-        let available_audio = settings
-            .models
-            .audio
-            .iter()
-            .filter(|model| model.api_key_set)
-            .count();
         Ok(ok(
             &request.command,
             json!({
-                "ok": true,
-                "runtime_state": "ready",
-                "native_tray": "active",
-                "image_models": models.images().len(),
-                "available_image_models": available_image,
-                "video_models": models.videos().len(),
-                "available_video_models": available_video,
-                "audio_models": models.audio().len(),
-                "available_audio_models": available_audio,
-                "diagnostics": 0
-            }),
-        ))
-    }
-
-    fn runtime_doctor(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        let status = self.runtime_status(request)?;
-        let fields = status.fields();
-        let mut records = Vec::new();
-        for (field, code, message) in [
-            (
-                "available_image_models",
-                "image_model_not_configured",
-                "No available image model is configured.",
-            ),
-            (
-                "available_video_models",
-                "video_model_not_configured",
-                "No available video model is configured.",
-            ),
-            (
-                "available_audio_models",
-                "audio_model_not_configured",
-                "No available audio model is configured.",
-            ),
-        ] {
-            if fields
-                .get(field)
-                .and_then(super::records::CliPrimitive::as_u64)
-                == Some(0)
-            {
-                records.push(json!({"name": "diagnostic", "fields": {
-                    "code": code, "severity": "warning", "message": message
-                }}));
-            }
-        }
-        if records.is_empty() {
-            records.push(json!({"name": "diagnostic", "fields": {
-                "code": "runtime_ok", "severity": "info",
-                "message": "Debrute runtime configuration is usable."
-            }}));
-        }
-        let count = records.len();
-        Ok(ok_records(
-            &request.command,
-            records,
-            json!({
-                "runtime_state": "ready",
-                "native_tray": "active",
-                "diagnostics": count
+                "runtime_state": "ready"
             }),
         ))
     }
@@ -244,22 +161,46 @@ impl RuntimeCliService {
         ))
     }
 
-    fn list_image_models(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
+    fn list_models(
+        &self,
+        request: &CliCommandRequest,
+        kind: ModelKind,
+    ) -> Result<CliResult, CliFailure> {
         require_no_arguments(request)?;
         let settings = self.settings()?;
-        let configured = settings
+        let configured = match kind {
+            ModelKind::Image => settings
+                .models
+                .image
+                .iter()
+                .filter(|model| model.api_key_set)
+                .map(|model| model.debrute_model_id.as_str())
+                .collect::<BTreeSet<_>>(),
+            ModelKind::Video => settings
+                .models
+                .video
+                .iter()
+                .filter(|model| model.api_key_set)
+                .map(|model| model.debrute_model_id.as_str())
+                .collect::<BTreeSet<_>>(),
+            ModelKind::Tts | ModelKind::Music | ModelKind::SoundEffect => settings
+                .models
+                .audio
+                .iter()
+                .filter(|model| model.setting.api_key_set && model.kind == kind)
+                .map(|model| model.setting.debrute_model_id.as_str())
+                .collect::<BTreeSet<_>>(),
+        };
+        let records = self
             .models
-            .image
-            .iter()
-            .filter(|model| model.api_key_set);
-        let records = configured
-            .filter_map(|setting| {
-                self.models.images().iter().find(|entry| entry.debrute_model_id == setting.debrute_model_id)
+            .by_kind(kind)
+            .filter(|definition| configured.contains(definition.id()))
+            .map(|definition| {
+                json!({"name": "model", "fields": {
+                    "id": definition.id(),
+                    "summary": definition.summary()
+                }})
             })
-            .map(|entry| json!({"name": "model", "fields": {
-                "id": entry.debrute_model_id,
-                "parameters": serde_json::to_string(&entry.list_parameters).expect("model parameters serialize")
-            }}))
             .collect::<Vec<_>>();
         Ok(ok_records(
             &request.command,
@@ -268,118 +209,22 @@ impl RuntimeCliService {
         ))
     }
 
-    fn list_video_models(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        require_no_arguments(request)?;
-        let settings = self.settings()?;
-        let records = settings.models.video.iter()
-            .filter(|model| model.api_key_set)
-            .filter_map(|setting| self.models.videos().iter().find(|entry| entry.debrute_model_id == setting.debrute_model_id))
-            .map(|entry| json!({"name": "model", "fields": {
-                "id": entry.debrute_model_id,
-                "parameters": serde_json::to_string(&entry.list_parameters).expect("model parameters serialize")
-            }}))
-            .collect::<Vec<_>>();
-        Ok(ok_records(
-            &request.command,
-            records.clone(),
-            json!({"count": records.len()}),
-        ))
-    }
-
-    fn list_audio_models(
+    fn describe_model(
         &self,
         request: &CliCommandRequest,
-        kind: AudioModelKind,
-    ) -> Result<CliResult, CliFailure> {
-        require_no_arguments(request)?;
-        let settings = self.settings()?;
-        let records = settings.models.audio.iter()
-            .filter(|model| model.api_key_set && model.kind == kind)
-            .filter_map(|setting| self.models.audio().iter().find(|entry| entry.debrute_model_id == setting.debrute_model_id && entry.kind == kind))
-            .map(|entry| json!({"name": "model", "fields": {
-                "id": entry.debrute_model_id,
-                "kind": audio_kind_name(entry.kind),
-                "parameters": serde_json::to_string(&entry.list_parameters).expect("model parameters serialize")
-            }}))
-            .collect::<Vec<_>>();
-        Ok(ok_records(
-            &request.command,
-            records.clone(),
-            json!({"count": records.len()}),
-        ))
-    }
-
-    fn describe_image_model(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        let model_id = one_positional(request)?;
-        let entry = self
-            .models
-            .images()
-            .iter()
-            .find(|entry| entry.debrute_model_id == model_id)
-            .ok_or_else(|| unavailable("Image", model_id))?;
-        let documentation =
-            super::model_docs::describe_model(model_id, &request.command, &entry.request_example)?;
-        Ok(model_detail(
-            &request.command,
-            &entry.debrute_model_id,
-            None,
-            &entry.summary,
-            &entry.capabilities,
-            &entry.arguments_schema,
-            &documentation,
-        ))
-    }
-
-    fn describe_video_model(&self, request: &CliCommandRequest) -> Result<CliResult, CliFailure> {
-        let model_id = one_positional(request)?;
-        let entry = self
-            .models
-            .videos()
-            .iter()
-            .find(|entry| entry.debrute_model_id == model_id)
-            .ok_or_else(|| unavailable("Video", model_id))?;
-        let documentation =
-            super::model_docs::describe_model(model_id, &request.command, &entry.request_example)?;
-        Ok(model_detail(
-            &request.command,
-            &entry.debrute_model_id,
-            None,
-            &entry.summary,
-            &entry.capabilities,
-            &entry.arguments_schema,
-            &documentation,
-        ))
-    }
-
-    fn describe_audio_model(
-        &self,
-        request: &CliCommandRequest,
-        kind: AudioModelKind,
+        kind: ModelKind,
     ) -> Result<CliResult, CliFailure> {
         let model_id = one_positional(request)?;
         let entry = self
             .models
-            .audio()
-            .iter()
-            .find(|entry| entry.debrute_model_id == model_id)
-            .ok_or_else(|| audio_unavailable(model_id))?;
-        if entry.kind != kind {
-            return Err(CliFailure::new(
-                "audio_model_kind_mismatch",
-                format!("Audio model kind does not match command: {model_id}"),
-            )
-            .with_field("model", model_id.to_owned()));
-        }
-        let documentation =
-            super::model_docs::describe_model(model_id, &request.command, &entry.request_example)?;
+            .find(model_id)
+            .filter(|definition| definition.kind() == kind)
+            .ok_or_else(|| unavailable(kind, model_id))?;
         Ok(model_detail(
             &request.command,
-            &entry.debrute_model_id,
-            Some(audio_kind_name(entry.kind)),
-            &entry.summary,
-            &entry.capabilities,
-            &entry.arguments_schema,
-            &documentation,
+            entry.id(),
+            entry.arguments_schema(),
+            entry.manual(),
         ))
     }
 
@@ -681,51 +526,23 @@ fn required_root(request: &CliCommandRequest) -> Result<&Path, CliFailure> {
 fn model_detail(
     command: &str,
     model_id: &str,
-    kind: Option<&str>,
-    summary: &str,
-    capabilities: &Value,
     arguments_schema: &Value,
-    documentation: &super::model_docs::ModelDocumentation,
+    manual_markdown: &str,
 ) -> CliResult {
-    let mut model_fields = Map::new();
-    model_fields.insert("id".to_owned(), Value::String(model_id.to_owned()));
-    if let Some(kind) = kind {
-        model_fields.insert("kind".to_owned(), Value::String(kind.to_owned()));
-    }
     ok_records(
         command,
-        vec![
-            Value::Object(Map::from_iter([
-                ("name".to_owned(), Value::String("model".to_owned())),
-                ("fields".to_owned(), Value::Object(model_fields)),
-            ])),
-            json!({"name": "official_doc", "fields": {
-                "urls": serde_json::to_string(documentation.source_urls).expect("URLs serialize"),
-                "snapshot": documentation.snapshot_path,
-                "captured_at": documentation.captured_at
-            }}),
-        ],
+        vec![json!({"name": "model", "fields": {"id": model_id}})],
         json!({
-            "summary": summary,
-            "capabilities": serde_json::to_string(capabilities).expect("capabilities serialize"),
             "arguments_schema": serde_json::to_string(arguments_schema).expect("schema serializes"),
-        "description_markdown": documentation.description_markdown
+            "manual_markdown": manual_markdown
         }),
     )
 }
 
-fn unavailable(kind: &str, model_id: &str) -> CliFailure {
+fn unavailable(kind: ModelKind, model_id: &str) -> CliFailure {
     CliFailure::new(
         "model_unavailable",
-        format!("{kind} model is unknown: {model_id}"),
-    )
-    .with_field("model", model_id.to_owned())
-}
-
-fn audio_unavailable(model_id: &str) -> CliFailure {
-    CliFailure::new(
-        "audio_model_unavailable",
-        format!("Audio model is unknown: {model_id}"),
+        format!("{} Model is unknown: {model_id}", model_kind_name(kind)),
     )
     .with_field("model", model_id.to_owned())
 }
@@ -802,14 +619,6 @@ fn model_artifact_fields(lookup: &ModelArtifactProvenanceLookup) -> Value {
         "hash": lookup.sha256,
         "metadata": serde_json::to_string(lookup).expect("lookup serializes")
     })
-}
-
-fn audio_kind_name(kind: AudioModelKind) -> &'static str {
-    match kind {
-        AudioModelKind::Tts => "tts",
-        AudioModelKind::Music => "music",
-        AudioModelKind::SoundEffect => "sound-effect",
-    }
 }
 
 fn operation_records(snapshot: &ModelOperationSnapshot) -> Vec<Value> {

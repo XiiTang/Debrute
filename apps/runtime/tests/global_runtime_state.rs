@@ -7,20 +7,20 @@ use std::{
 };
 
 use debrute_runtime::global::{
-    AudioModelKind, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService,
-    GlobalSettingsError, ModelCatalog,
+    GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService, GlobalSettingsError,
 };
 use debrute_runtime::integrations::{
     CommandResult, IntegrationCommand, IntegrationOperation, IntegrationProcessAdapter,
     IntegrationService, Platform, ProbeResult,
 };
+use debrute_runtime::models::ModelCatalog;
 use serde_json::json;
 use uuid::Uuid;
 
 #[test]
-fn defaults_recent_projects_and_model_settings_match_the_final_global_contract() {
+fn defaults_and_recent_projects_match_the_final_global_contract() {
     let home = temporary_home("defaults");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
     let initial = store
@@ -44,10 +44,6 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
     );
     assert!(initial.chrome.recent_project_roots.is_empty());
     assert!(!initial.plugins.photoshop.enabled);
-    assert_eq!(initial.models.image.len(), 13);
-    assert_eq!(initial.models.video.len(), 4);
-    assert_eq!(initial.models.audio.len(), 16);
-
     for index in 0..14 {
         let root = project_root(&home, &index.to_string());
         store
@@ -77,7 +73,7 @@ fn defaults_recent_projects_and_model_settings_match_the_final_global_contract()
 #[test]
 fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
     let home = temporary_home("photoshop-plugin-setting");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
     let enabled = store
@@ -127,7 +123,7 @@ fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
 #[test]
 fn canvas_text_appearance_is_one_complete_validated_global_setting() {
     let home = temporary_home("canvas-text-appearance");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
     let result = store
@@ -185,7 +181,7 @@ fn canvas_text_appearance_is_one_complete_validated_global_setting() {
 #[test]
 fn canvas_hierarchy_edge_visibility_is_one_global_boolean_setting() {
     let home = temporary_home("canvas-hierarchy-edge-visibility");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
     let hidden = store
@@ -257,7 +253,7 @@ fn canvas_text_appearance_patch_with(field: &str, value: serde_json::Value) -> s
 #[test]
 fn distinct_canonical_roots_are_independent_recent_projects() {
     let home = temporary_home("canonical-roots");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
     let alpha = project_root(&home, "alpha");
     let copied_alpha = project_root(&home, "copied-alpha");
@@ -282,7 +278,7 @@ fn distinct_canonical_roots_are_independent_recent_projects() {
 #[test]
 fn patch_persists_canonical_settings_and_redacts_model_secrets() {
     let home = temporary_home("patch");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
     let result = store
@@ -348,7 +344,7 @@ fn patch_persists_canonical_settings_and_redacts_model_secrets() {
 #[test]
 fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
     let home = temporary_home("invalid");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
     for input in [
@@ -406,18 +402,13 @@ fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
     assert!(!home.join("config/global_settings.json").exists());
     assert!(!home.join("config/secrets.json").exists());
 
-    let malformed = store
-        .patch(&json!({ "adobeBridge": { "enabled": "yes" } }), &catalog)
-        .expect_err("removed Photoshop settings must be rejected");
-    assert!(matches!(malformed, GlobalSettingsError::Validation(_)));
-
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
 
 #[test]
 fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
     let home = temporary_home("strict-persistence");
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
+    let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
     store
         .patch(
@@ -458,57 +449,6 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
     fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
     let mut settings: serde_json::Value =
         serde_json::from_str(&settings_source).expect("settings should parse as JSON");
-    settings["canvas"]
-        .as_object_mut()
-        .expect("Canvas settings should be an object")
-        .remove("hierarchyEdgesVisible");
-    fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
-    )
-    .expect("obsolete Canvas settings fixture should write");
-    assert!(matches!(
-        store.read_view(&catalog),
-        Err(GlobalSettingsError::Json(_))
-    ));
-
-    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
-    let mut settings: serde_json::Value =
-        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
-    settings
-        .as_object_mut()
-        .expect("settings should be an object")
-        .remove("canvas");
-    fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
-    )
-    .expect("obsolete settings fixture should write");
-    assert!(matches!(
-        store.read_view(&catalog),
-        Err(GlobalSettingsError::Json(_))
-    ));
-
-    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
-    let mut settings: serde_json::Value =
-        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
-    settings
-        .as_object_mut()
-        .expect("settings should be an object")
-        .remove("plugins");
-    fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&settings).expect("settings should serialize"),
-    )
-    .expect("pre-Plugin settings fixture should write");
-    assert!(matches!(
-        store.read_view(&catalog),
-        Err(GlobalSettingsError::Json(_))
-    ));
-
-    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
-    let mut settings: serde_json::Value =
-        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
     let models = settings["models"]
         .as_array_mut()
         .expect("model configs should be an array");
@@ -541,59 +481,11 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
 }
 
 #[test]
-fn bundled_catalog_keeps_image_video_tts_music_and_sound_effect_as_closed_families() {
-    let catalog = ModelCatalog::bundled().expect("bundled model catalog should parse");
-    assert_eq!(catalog.images().len(), 13);
-    assert_eq!(catalog.videos().len(), 4);
-    assert_eq!(
-        catalog
-            .audio()
-            .iter()
-            .filter(|entry| entry.kind == AudioModelKind::Tts)
-            .count(),
-        9
-    );
-    assert_eq!(
-        catalog
-            .audio()
-            .iter()
-            .filter(|entry| entry.kind == AudioModelKind::Music)
-            .count(),
-        5
-    );
-    assert_eq!(
-        catalog
-            .audio()
-            .iter()
-            .filter(|entry| entry.kind == AudioModelKind::SoundEffect)
-            .count(),
-        2
-    );
-    assert!(catalog.contains_image("gpt-image-2"));
-    assert!(catalog.contains_image("doubao-seedream-5-0-pro-260628"));
-    assert!(catalog.contains_image("qwen-image-2.0-pro-2026-06-22"));
-    assert!(catalog.contains_image("qwen-image-2.0-2026-03-03"));
-    assert!(catalog.contains_video("doubao-seedance-2-0-260128"));
-    assert!(catalog.contains_video("doubao-seedance-2-0-mini-260615"));
-    assert!(catalog.contains_video("minimax-h3"));
-    assert!(catalog.contains_audio("openai-gpt-4o-mini-tts"));
-    assert!(!catalog.contains_audio("gpt-image-2"));
-    let image = catalog
-        .images()
-        .iter()
-        .find(|entry| entry.debrute_model_id == "gpt-image-2")
-        .expect("full image catalog entry should exist");
-    assert!(!image.choose_when.is_empty());
-    assert!(image.arguments_schema.is_object());
-    assert_eq!(image.request_example.input["model"], "gpt-image-2");
-}
-
-#[test]
 fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     let home = temporary_home("runtime-events");
     let service = GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     );
     let alpha = project_root(&home, "alpha");
@@ -648,7 +540,7 @@ fn model_api_key_reveal_returns_the_exact_secret_without_publishing_global_state
     let home = temporary_home("api-key-reveal");
     let service = GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     );
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -699,7 +591,7 @@ fn global_snapshot_captures_product_projection_at_its_revision_barrier() {
     let home = temporary_home("product-snapshot-barrier");
     let service = GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     );
 
@@ -722,7 +614,7 @@ fn desktop_presentation_startup_snapshot_does_not_probe_integrations() {
     let adapter = Arc::new(BlockingScanAdapter::default());
     let service = GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
     );
 
@@ -742,7 +634,7 @@ fn workbench_global_settings_snapshot_does_not_probe_integrations() {
     let adapter = Arc::new(BlockingScanAdapter::default());
     let service = Arc::new(GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
     ));
     let (finished_tx, finished_rx) = mpsc::channel();
@@ -786,7 +678,7 @@ fn global_event_dispatch_stays_ordered_while_the_first_observer_call_is_blocked(
     let home = temporary_home("ordered-dispatch");
     let service = Arc::new(GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     ));
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -879,7 +771,7 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     let home = temporary_home("recent-linearization");
     let service = Arc::new(GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     ));
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -938,7 +830,7 @@ fn rejected_integration_operations_do_not_publish_transition_events() {
     let home = temporary_home("rejected-integration");
     let service = GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     );
     service.integrations_rescan();
@@ -982,7 +874,7 @@ fn an_external_integration_scan_does_not_block_recent_project_commits() {
     let adapter = Arc::new(BlockingScanAdapter::default());
     let service = Arc::new(GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
-        ModelCatalog::bundled().expect("bundled model catalog should parse"),
+        ModelCatalog::bundled(),
         IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
     ));
     let scan_service = Arc::clone(&service);

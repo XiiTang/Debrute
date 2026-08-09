@@ -70,14 +70,44 @@ one exact request and result contract. Every Debrute Model remains a peer,
 including Models in the same Model Kind.
 _Avoid_: Provider, account, generic model adapter
 
+**Model Contract Parity**:
+The product direction of aligning one exact Debrute Model as closely as
+practicable with the complete official generation request and response contract
+of the upstream Model it identifies. Provider account, billing, credential, and
+unrelated management APIs are outside that contract. Known limitations remain
+explicit, while safe unknown-field pass-through does not by itself prove
+documented parity.
+_Avoid_: Best-effort adapter, undocumented subset, unknown-field pass-through
+
+**Model Catalog**:
+The Runtime-owned, versioned collection of exact Debrute Model discovery
+metadata, Debrute defaults, and request-schema documentation shipped with the
+product. It describes supported contracts; it is neither an upstream provider
+catalog nor executable provider-business-rule validation.
+_Avoid_: Provider model list, executable schema
+
+**Model Selection Summary**:
+A concise, source-backed natural-language description that lets an Agent rule a
+configured Debrute Model in or out before reading its complete manual. It states
+selection-relevant hard capabilities and constraints rather than reproducing a
+parameter schema.
+_Avoid_: Capability map, parameter list, marketing summary
+
+**Model Manual**:
+The source-backed, complete Agent-facing guide for one exact Debrute Model,
+returned after selection to explain its detailed request, constraints, example,
+and result behavior. It identifies its official sources and capture date without
+repeating the Model Selection Summary.
+_Avoid_: Provider documentation, list summary, executable schema
+
 **Configured Model**:
 A Debrute Model with a locally stored API key, eligible for model discovery and
 execution; routing overrides are optional.
 _Avoid_: Enabled model, available provider
 
 **Accepted Model Binding**:
-The immutable effective route and credential bound to one Debrute Model for one
-accepted Model Operation.
+The immutable effective route, credential, argument-default schema, and exact
+executor bound to one Debrute Model for one accepted Model Operation.
 _Avoid_: Live model settings, per-request configuration copy
 
 **Model Artifact**:

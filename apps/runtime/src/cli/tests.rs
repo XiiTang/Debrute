@@ -24,7 +24,6 @@ fn registry_exactly_matches_the_final_cli_matrix() {
         commands,
         vec![
             "runtime.status",
-            "runtime.doctor",
             "runtime.stop",
             "skills.status",
             "models.image.list",
@@ -294,8 +293,8 @@ fn agent_records_match_the_unversioned_golden_encoding() {
         "status": "ok",
         "command": "models.image.list",
         "records": [
-            {"name": "model", "fields": {"id": "gpt-image-2", "parameters": "{\"prompt\":\"required\"}"}},
-            {"name": "model", "fields": {"id": "gemini preview", "parameters": "{\"image_size\":\"1K|2K\"}"}}
+            {"name": "model", "fields": {"id": "gpt-image-2", "summary": "Exact output-size constraints."}},
+            {"name": "model", "fields": {"id": "gemini preview", "summary": "Up to ten reference images."}}
         ],
         "fields": {"count": 2}
     }))
@@ -304,8 +303,8 @@ fn agent_records_match_the_unversioned_golden_encoding() {
         rendered,
         concat!(
             "debrute ok cmd=models.image.list\n",
-            "model id=gpt-image-2 parameters=\"{\\\"prompt\\\":\\\"required\\\"}\"\n",
-            "model id=\"gemini preview\" parameters=\"{\\\"image_size\\\":\\\"1K|2K\\\"}\"\n",
+            "model id=gpt-image-2 summary=\"Exact output-size constraints.\"\n",
+            "model id=\"gemini preview\" summary=\"Up to ten reference images.\"\n",
             "count=2"
         )
     );
@@ -367,23 +366,20 @@ fn agent_errors_use_code_and_optional_log_without_a_message_field() {
 }
 
 #[test]
-fn runtime_observation_reports_the_ready_native_tray_contract() {
+fn runtime_status_reports_only_the_lifecycle_state() {
     let fixture = CliFixture::new();
-    for command in ["runtime.status", "runtime.doctor"] {
-        let result = fixture
-            .service
-            .run(&json!({
-                "command": command,
-                "positional": [],
-                "options": {},
-                "cwd": fixture.root
-            }))
-            .expect("Runtime observation should run");
-        let result = serde_json::to_value(result).unwrap();
-        assert_eq!(result["status"], "ok");
-        assert_eq!(result["fields"]["runtime_state"], "ready");
-        assert_eq!(result["fields"]["native_tray"], "active");
-    }
+    let result = fixture
+        .service
+        .run(&json!({
+            "command": "runtime.status",
+            "positional": [],
+            "options": {},
+            "cwd": fixture.root
+        }))
+        .expect("Runtime observation should run");
+    let result = serde_json::to_value(result).unwrap();
+    assert_eq!(result["status"], "ok");
+    assert_eq!(result["fields"], json!({"runtime_state": "ready"}));
 }
 
 #[test]
@@ -464,7 +460,43 @@ fn project_validate_is_read_only_for_sparse_canvas_state() {
 }
 
 #[test]
-fn model_describe_uses_the_request_command() {
+fn model_list_returns_only_configured_exact_model_summaries() {
+    let fixture = CliFixture::new();
+    fixture.configure_model("gpt-image-2");
+    fixture.configure_model("minimax-h3");
+
+    let listed = fixture
+        .service
+        .run(&json!({
+            "command": "models.image.list",
+            "positional": [],
+            "options": {},
+            "cwd": fixture.root
+        }))
+        .expect("model list should return configured exact Models");
+    let listed = serde_json::to_value(listed).unwrap();
+    assert_eq!(listed["fields"], json!({"count": 1}));
+    assert_eq!(listed["records"].as_array().unwrap().len(), 1);
+    let model = &listed["records"][0];
+    assert_eq!(model["name"], "model");
+    assert_eq!(model["fields"]["id"], "gpt-image-2");
+    assert!(
+        model["fields"]["summary"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(
+        model["fields"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["id", "summary"]
+    );
+}
+
+#[test]
+fn model_describe_returns_only_the_exact_definition_contract() {
     let fixture = CliFixture::new();
     let described = fixture
         .service
@@ -477,12 +509,34 @@ fn model_describe_uses_the_request_command() {
         .expect("model describe should return a record");
     let described = serde_json::to_value(described).unwrap();
     assert_eq!(described["status"], "ok");
-    let markdown = described["fields"]["description_markdown"]
+    assert_eq!(
+        described["records"],
+        json!([{
+            "name": "model",
+            "fields": {"id": "gpt-image-2"}
+        }])
+    );
+    assert_eq!(
+        described["fields"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["arguments_schema", "manual_markdown"]
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(
+            described["fields"]["arguments_schema"]
+                .as_str()
+                .expect("schema")
+        )
+        .expect("arguments schema should remain JSON")
+        .is_object()
+    );
+    let markdown = described["fields"]["manual_markdown"]
         .as_str()
-        .expect("description");
-    assert!(markdown.contains("debrute request single"));
-    assert!(markdown.contains("debrute request single --input request.jsonl"));
-    assert!(!markdown.contains("request single <project>"));
+        .expect("manual");
+    assert!(markdown.contains("gpt-image-2"));
 }
 
 #[test]
@@ -584,6 +638,22 @@ impl CliFixture {
             _services: services,
             service,
         }
+    }
+
+    fn configure_model(&self, model_id: &str) {
+        self._services
+            .global()
+            .settings_save(&json!({
+                "modelSetting": {
+                    "modelId": model_id,
+                    "setting": {
+                        "baseUrlOverride": null,
+                        "requestModelIdOverride": null,
+                        "apiKey": format!("test-key-{model_id}")
+                    }
+                }
+            }))
+            .expect("fixture Model should be configured");
     }
 }
 

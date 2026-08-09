@@ -1,0 +1,159 @@
+# minimax-h3
+
+## Official sources
+
+- https://platform.minimax.io/docs/api-reference/video-generation-v2-create
+- https://platform.minimax.io/docs/api-reference/video-generation-v2-query
+- https://platform.minimax.io/docs/api-reference/video-generation-v2-delete
+- https://platform.minimax.io/docs/guides/video-generation
+- https://platform.minimax.io/docs/guides/rate-limits
+- https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create
+- https://huggingface.co/MiniMaxAI/MiniMax-H3
+
+Captured: 2026-08-09
+
+This manual describes Debrute Model `minimax-h3`. Its default remote request
+model id is `MiniMax-H3`, and its default global base URL is
+`https://api.minimax.io`. Accounts using the China platform may explicitly set
+the Model base URL to `https://api.minimaxi.com`; Debrute does not move keys or
+requests between regions automatically.
+
+This integration covers Direct Generation only. `H3-Context-IR` and Video
+Regeneration are separate MiniMax APIs and are not parameters or hidden stages
+of this Debrute Model.
+
+## Endpoint and lifecycle
+
+Debrute creates one asynchronous task and polls that same task:
+
+```text
+POST   <base>/v2/video_generation
+GET    <base>/v2/query/video_generation/{task_id}
+DELETE <base>/v2/video_generation/{task_id}
+```
+
+The create request uses `Authorization: Bearer <API key>` and the configured
+request model id. Task states are `queued`, `running`, `succeeded`, `failed`,
+and `cancelled`. Debrute follows the official example's 10-second polling
+interval. A successful task supplies a temporary `task.content.url`, which is
+downloaded immediately into the accepted output directory rather than retained
+as a durable remote URL.
+
+## Native request fields
+
+Callers use the MiniMax field names directly:
+
+- `content`: the multimodal content array;
+- `resolution`: `768P` or `2K`;
+- `duration`: an integer from 4 through 15 seconds;
+- `ratio`: `adaptive`, `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, or `9:16`;
+- `callback_url`: an optional caller-owned status webhook.
+
+Debrute does not manufacture generation defaults for these fields. The Model
+definition documents MiniMax's required, enum, range, cardinality, and cross-field rules,
+but Runtime does not execute those provider rules before submission. Missing,
+`null`, malformed, unlisted, or region-specific JSON that can be serialized and
+forwarded without loss reaches the selected endpoint, which remains the
+authority on acceptance.
+
+The China create documentation additionally lists
+`aigc_watermark: boolean`; the global create documentation does not. It is not
+part of the global definition's parameter list, but a caller-supplied value is still
+forwarded unchanged to either explicitly selected endpoint.
+
+## Content and media
+
+Supported native content shapes are:
+
+- `{"type":"text","text":"..."}`;
+- `image_url.url` with role `first_frame`, `last_frame`, or
+  `reference_image`;
+- `video_url.url` with role `reference_video`;
+- `audio_url.url` with role `reference_audio`.
+
+MiniMax accepts public HTTP(S) URLs, Base64 data URIs, and `mm_file://` file
+references in the documented media fields. Debrute leaves those forms intact.
+Every other string in the same native `.url` fields is an absolute or
+CLI-working-directory-relative local media path. It must resolve to an existing
+recognizable ordinary media file and is converted to a data URI under Debrute's
+resource limits.
+
+The official provider limits currently include images up to 30 MB, reference
+videos up to 50 MB, reference audio up to 15 MB, and a request body up to
+64 MB. A request may contain at most 9 reference images, 3 reference videos,
+and 3 reference audio files, with at most 12 reference-media items total.
+Video and audio references also have documented duration limits. These are
+provider rules, not duplicated Runtime admission checks. Debrute's independent
+request and artifact safety limits still apply.
+
+## Ratio and combinations
+
+Text-only generation requires a concrete ratio and does not accept
+`adaptive`. First/last-frame generation follows the supplied image shape and
+uses adaptive behavior. Multimodal reference generation may omit `ratio` for
+provider-owned adaptive behavior or select a documented ratio.
+
+Frame roles cannot be mixed with reference-media roles. Reference audio cannot
+be the only media input; MiniMax requires a reference image or video alongside
+it. These rules are documented for request construction and enforced by the
+remote endpoint.
+
+## Callback
+
+`callback_url` is where MiniMax contacts a public service owned by the caller;
+it is not an upload URL and is not the generated-video download URL. MiniMax
+first sends a challenge that the service must echo within three seconds, then
+posts task-state changes. Debrute only forwards this field and continues to
+poll; it does not host the callback, answer the challenge, or use callbacks to
+complete an Operation.
+
+The current official contract does not specify a callback signature, shared
+secret, IP allowlist, retry count, idempotency key, or exactly-once guarantee.
+
+## Cancellation and output
+
+MiniMax documents remote cancellation only while a task is queued. If a local
+Operation is cancelled after the task id is known and before `running` has been
+observed, Debrute makes one best-effort DELETE request with a separate five
+second bound. A race, rejection, timeout, or network failure does not change the
+local cancellation result. Once `running` or a remote terminal state is
+observed, Debrute does not use DELETE because that endpoint cannot stop running
+work and can delete completed task records.
+
+Local `cancelled` means Debrute stopped local polling, downloads, later Batch
+Items, and commits. It does not guarantee MiniMax stopped computation, removed
+the task, or avoided billing.
+
+A successful download is committed as exactly one `PrimaryVideo`. MiniMax
+describes H3 output as video with native stereo audio, but Debrute treats the
+returned file as an opaque video artifact: it does not inspect for an audio
+track, split audio, or fail when an embedded track is absent.
+
+MiniMax currently limits parallel H3 V2 running tasks to 2 for free-tier
+accounts and 15 for paid-tier accounts. Debrute does not add a provider-level
+concurrency scheduler; the selected account and endpoint enforce that limit.
+
+## Debrute request
+
+The default active video Model request timeout is 30 minutes. Save the following one-line JSON object as UTF-8 JSONL, then submit it with `debrute request single --input request.jsonl`; use `--timeout <Ns|Nm|Nh>` when an override is needed. The JSONL record is self-contained: `output.directory` may be absolute or relative to the directory where `debrute` is invoked.
+
+```json
+{
+  "model": "minimax-h3",
+  "arguments": {
+    "content": [
+      {
+        "type": "text",
+        "text": "A boy playing basketball by the sea"
+      }
+    ],
+    "resolution": "2K",
+    "duration": 5,
+    "ratio": "16:9"
+  },
+  "output": {
+    "directory": "generated",
+    "name": "video"
+  }
+}
+```

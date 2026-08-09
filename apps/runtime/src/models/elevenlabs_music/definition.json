@@ -1,0 +1,42 @@
+{
+  "id": "elevenlabs-music",
+  "kind": "music",
+  "summary": "Music from either a prompt or composition plan, 3 seconds to 10 minutes; seed cannot be combined with prompt; supports instrumental output, while C2PA signing applies only to MP3.",
+  "defaultBaseUrl": "https://api.elevenlabs.io/v1",
+  "defaultRequestModelId": "music_v2",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Music prompt."
+      },
+      "composition_plan": {
+        "type": "object"
+      },
+      "music_length_ms": {
+        "type": "integer",
+        "minimum": 3000,
+        "maximum": 600000
+      },
+      "seed": {
+        "type": "integer"
+      },
+      "force_instrumental": {
+        "type": "boolean"
+      },
+      "store_for_inpainting": {
+        "type": "boolean"
+      },
+      "sign_with_c2pa": {
+        "type": "boolean"
+      },
+      "output_format": {
+        "type": "string"
+      },
+      "finetune_id": {
+        "type": "string"
+      }
+    }
+  }
+}

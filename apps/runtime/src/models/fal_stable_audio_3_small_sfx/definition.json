@@ -1,0 +1,57 @@
+{
+  "id": "fal-stable-audio-3-small-sfx",
+  "kind": "sound-effect",
+  "summary": "Text-to-sound-effect with duration, negative prompt, steps/guidance, prompt expansion, and safety controls; MP3/WAV/FLAC/OGG/Opus/M4A/AAC output; bitrate is a string such as 192k.",
+  "defaultBaseUrl": "https://queue.fal.run",
+  "defaultRequestModelId": "fal-ai/stable-audio-3/small/sfx/text-to-audio",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "prompt"
+    ],
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "negative_prompt": {
+        "type": "string"
+      },
+      "duration": {
+        "type": "number"
+      },
+      "num_inference_steps": {
+        "type": "integer"
+      },
+      "guidance_scale": {
+        "type": "number"
+      },
+      "seed": {
+        "type": "integer"
+      },
+      "enable_prompt_expansion": {
+        "type": "boolean"
+      },
+      "enable_safety_checker": {
+        "type": "boolean"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "mp3",
+          "wav",
+          "flac",
+          "ogg",
+          "opus",
+          "m4a",
+          "aac"
+        ]
+      },
+      "bitrate": {
+        "type": "string"
+      },
+      "sync_mode": {
+        "type": "boolean"
+      }
+    }
+  }
+}

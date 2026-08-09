@@ -465,6 +465,23 @@ fn product_entrypoint_and_architecture_contracts_are_closed() {
 
     let wrong_architecture = fixture.write_seed("0.0.6", ReleaseArchitecture::X64);
     assert!(fixture.store.materialize_seed(&wrong_architecture).is_err());
+
+    let unexpected_entrypoint = fixture.write_seed("0.0.7", ReleaseArchitecture::Arm64);
+    let manifest_path = unexpected_entrypoint.join("product-manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["entrypoints"]["unexpectedEntrypoint"] = json!("unexpected/file");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        fixture
+            .store
+            .materialize_seed(&unexpected_entrypoint)
+            .is_err()
+    );
 }
 
 #[test]
@@ -940,7 +957,6 @@ impl Fixture {
             ("web/index.html", "web"),
             ("runtime/debrute", "cli"),
             ("skills/debrute-core/SKILL.md", "skills"),
-            ("model-docs/models.json", "models"),
             ("native-workers/manifest.json", "worker"),
         ];
         let mut manifest_files = Vec::new();
@@ -972,7 +988,6 @@ impl Fixture {
                 web: "web/index.html".to_owned(),
                 cli: "runtime/debrute".to_owned(),
                 skills: "skills/debrute-core/SKILL.md".to_owned(),
-                model_docs: "model-docs/models.json".to_owned(),
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
             files: manifest_files,

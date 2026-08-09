@@ -1,0 +1,53 @@
+{
+  "id": "doubao-seed-tts-2-0",
+  "kind": "tts",
+  "summary": "TTS with a required speaker through the Volcengine V3 chunked endpoint; completed output can be MP3, OGG Opus, or raw PCM.",
+  "defaultBaseUrl": "https://openspeech.bytedance.com/api/v3",
+  "defaultRequestModelId": "seed-tts-2.0",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "speaker"
+    ],
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "speaker": {
+        "type": "string"
+      },
+      "audio_params": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "mp3",
+              "ogg_opus",
+              "pcm"
+            ]
+          },
+          "sample_rate": {
+            "type": "integer"
+          },
+          "bit_rate": {
+            "type": "integer"
+          },
+          "emotion": {
+            "type": "string"
+          },
+          "emotion_scale": {
+            "type": "number"
+          },
+          "speech_rate": {
+            "type": "integer"
+          },
+          "loudness_rate": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

@@ -14,9 +14,11 @@ only their settings and implementation group.
 
 ## Rules
 
-- Pick the use case first. Run the matching `debrute models tts|music|sfx list`,
-  choose only a returned configured Model, and run its `describe` command once.
-- Build `arguments` only from the returned Debrute documentation, example, and
+- Pick the use case first. Run the matching `debrute models tts|music|sfx list`
+  and use each returned `summary` to eliminate configured Models that cannot
+  meet the brief's hard requirements. Run `describe` only for the selected
+  candidate.
+- Build `arguments` only from the returned `manual_markdown` and
   `arguments_schema`; never include API keys.
 - Submit Single through strict JSONL or direct `--model`, `--arguments`, and
   `--output` options; never combine the two sources. Batch is JSONL-only:

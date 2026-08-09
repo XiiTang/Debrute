@@ -10,7 +10,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use super::models::{ModelCatalog, ModelSettingsView, settings_view};
+use crate::models::ModelCatalog;
+
+use super::models::{ModelSettingsView, settings_view};
 
 const RECENT_PROJECT_LIMIT: usize = 12;
 
@@ -227,7 +229,7 @@ impl GlobalConfigStore {
         if model_id.is_empty() || model_id.trim() != model_id {
             return validation("Model id must be a canonical non-empty string.");
         }
-        if !catalog.contains(model_id) {
+        if catalog.find(model_id).is_none() {
             return validation(format!("Unknown model: {model_id}"));
         }
         let _guard = self.lock();
@@ -473,7 +475,7 @@ fn apply_model_patch(
     if raw_model_id.is_empty() || raw_model_id.trim() != raw_model_id {
         return validation("Model id must be a canonical non-empty string.");
     }
-    if !catalog.contains(raw_model_id) {
+    if catalog.find(raw_model_id).is_none() {
         return validation(format!("Unknown model: {raw_model_id}"));
     }
     let model_id = raw_model_id;
@@ -588,7 +590,7 @@ fn validate_model_configs(
         {
             return validation("Model debruteModelId must be a canonical non-empty string.");
         }
-        if !catalog.contains(&config.debrute_model_id) {
+        if catalog.find(&config.debrute_model_id).is_none() {
             return validation(format!("Unknown model: {}", config.debrute_model_id));
         }
         if configs[..index]
@@ -634,7 +636,7 @@ fn validate_secret_map(
                 "Secrets config modelApiKeys keys must be canonical non-empty strings.",
             );
         }
-        if !catalog.contains(key) {
+        if catalog.find(key).is_none() {
             return validation(format!(
                 "Secrets config modelApiKeys contains unknown model: {key}"
             ));
@@ -874,7 +876,7 @@ mod tests {
         let project = home.join("project");
         fs::create_dir_all(&project).unwrap();
         let project_root = project.to_string_lossy().into_owned();
-        let catalog = ModelCatalog::bundled().unwrap();
+        let catalog = ModelCatalog::bundled();
         let store = GlobalConfigStore::new(&home);
         store
             .remember_recent_project(&project_root, &catalog)

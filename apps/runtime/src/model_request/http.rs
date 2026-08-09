@@ -508,7 +508,10 @@ fn map_request_error(request_timeout: Duration, error: &reqwest::Error) -> Model
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+    use crate::model_request::types::HttpBody;
 
     #[test]
     fn public_media_rejects_loopback_and_private_ranges() {
@@ -543,6 +546,29 @@ mod tests {
         assert_eq!(
             validate_request_size(&body, 3).unwrap_err().code(),
             "model_request_too_large"
+        );
+    }
+
+    #[test]
+    fn json_requests_receive_the_transport_content_type() {
+        let request = ModelHttpRequest {
+            method: HttpMethod::Post,
+            url: "https://model.example/v1/generate".to_owned(),
+            headers: BTreeMap::new(),
+            body: HttpBody::Json(json!({"prompt": "poster"}))
+                .try_into()
+                .expect("fixture JSON body"),
+            maximum_response_bytes: 1024,
+            target_policy: HttpTargetPolicy::ModelEndpoint,
+        };
+
+        let headers = outbound_headers(&request).expect("outbound headers");
+
+        assert_eq!(
+            headers
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json")
         );
     }
 

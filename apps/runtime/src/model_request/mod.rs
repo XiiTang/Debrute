@@ -1,12 +1,12 @@
-mod audio;
-mod common;
+pub(crate) mod audio;
+pub(crate) mod common;
 mod http;
-mod image;
+pub(crate) mod image;
 mod provenance;
 mod redaction;
 mod service;
-mod types;
-mod video;
+pub(crate) mod types;
+pub(crate) mod video;
 
 pub use provenance::{
     ModelArtifactProvenanceLookup, ModelArtifactProvenanceRecord, ModelArtifactProvenanceResponse,

@@ -189,17 +189,21 @@ debrute models music list
 debrute models sfx list
 ```
 
-Descriptions provide official source URLs, repository snapshots, Debrute
-examples, and the authoritative `arguments_schema`, including which exact
-Model fields accept local paths. They describe the caller-visible request
-contract, not internal adapter conversion. API keys remain in local Runtime
-settings and must not be included in Model Request input.
+Each list command returns only exact Models that currently have an API key in
+local Runtime settings. Every record contains only the Model `id` and its short
+selection `summary`; listing is a local screening step and does not contact the
+remote endpoint or prove that the key is valid.
+
+Each describe command reads the selected exact Model definition directly and
+returns only its `id`, authoritative `arguments_schema`, and complete
+`manual_markdown`. The schema supplies the machine-readable request surface;
+the manual owns detailed constraints, examples, and source-backed usage
+guidance. API keys must not be included in Model Request input.
 
 Other common commands include:
 
 ```sh
 debrute runtime status
-debrute runtime doctor
 debrute runtime stop
 debrute skills status
 debrute project status /path/to/project
@@ -209,6 +213,9 @@ debrute workbench start /path/to/project --frontend desktop
 debrute model-artifact lookup --path generated/example.png
 debrute commands
 ```
+
+`runtime status` reports only Runtime lifecycle state. Model availability is
+reported by the matching `models ... list` command instead.
 
 Project roots and Model Artifact lookup paths may be absolute or relative to the
 CLI working directory. The CLI makes root arguments absolute; commands that

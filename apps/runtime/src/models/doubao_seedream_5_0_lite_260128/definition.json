@@ -1,0 +1,75 @@
+{
+  "id": "doubao-seedream-5-0-lite-260128",
+  "kind": "image",
+  "summary": "Image generation/editing with single or grouped output; groups produce up to 15 images, and multi-reference groups use 2–14 inputs with input plus output capped at 15; 2K/4K or explicit sizes; PNG/JPEG.",
+  "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+  "defaultRequestModelId": "doubao-seedream-5-0-lite-260128",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs.",
+        "maxItems": 14
+      },
+      "size": {
+        "type": "string"
+      },
+      "output_format": {
+        "type": "string",
+        "default": "png",
+        "enum": [
+          "png",
+          "jpeg"
+        ]
+      },
+      "response_format": {
+        "type": "string",
+        "default": "url",
+        "enum": [
+          "url",
+          "b64_json"
+        ]
+      },
+      "watermark": {
+        "type": "boolean",
+        "default": false
+      },
+      "sequential_image_generation": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "auto"
+        ]
+      },
+      "sequential_image_generation_options": {
+        "type": "object",
+        "properties": {
+          "max_images": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15
+          }
+        }
+      },
+      "optimize_prompt_options": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

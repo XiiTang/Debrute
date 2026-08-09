@@ -1,0 +1,77 @@
+{
+  "id": "fal-ai/flux/dev",
+  "kind": "image",
+  "summary": "Pure text-to-image with six size presets or custom dimensions, one or more outputs, and JPEG/PNG output; no reference-image input.",
+  "defaultBaseUrl": "https://fal.run",
+  "defaultRequestModelId": "fal-ai/flux/dev",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image_size": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "square_hd",
+              "square",
+              "portrait_4_3",
+              "portrait_16_9",
+              "landscape_4_3",
+              "landscape_16_9"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              }
+            }
+          }
+        ]
+      },
+      "num_inference_steps": {
+        "type": "integer"
+      },
+      "seed": {
+        "type": "integer"
+      },
+      "guidance_scale": {
+        "type": "number"
+      },
+      "num_images": {
+        "type": "integer"
+      },
+      "enable_safety_checker": {
+        "type": "boolean"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "jpeg",
+          "png"
+        ]
+      },
+      "acceleration": {
+        "type": "string",
+        "enum": [
+          "none",
+          "regular",
+          "high"
+        ]
+      },
+      "sync_mode": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

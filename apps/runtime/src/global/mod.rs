@@ -7,11 +7,7 @@ mod store;
 
 pub(crate) use root_state::{root_cache_directory, root_state_directory};
 
-pub use models::{
-    AudioModelCatalogEntry, AudioModelKind, AudioModelSettingRecord, ImageModelCatalogEntry,
-    ImageModelSettingRecord, ModelCatalog, ModelRequestExample, ModelSettingsView,
-    VideoModelCatalogEntry, VideoModelSettingRecord,
-};
+pub use models::{AudioModelSettingRecord, ModelSettingRecord, ModelSettingsView};
 pub use runtime::{
     DebruteGlobalSettingsView, GlobalRuntimeChange, GlobalRuntimeEvent, GlobalRuntimeObserver,
     GlobalRuntimeService,

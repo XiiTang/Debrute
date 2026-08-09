@@ -77,6 +77,24 @@ describe('local source installation', () => {
     }
   });
 
+  it('rejects an unexpected Product entrypoint', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'debrute-local-product-entrypoint-'));
+    try {
+      const seed = join(root, 'seed');
+      writeProduct(seed, '0.0.3', 'source');
+      const manifestPath = join(seed, 'product-manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      manifest.entrypoints.unexpectedEntrypoint = 'unexpected/file';
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+      await expect(validateProductSeed(seed)).rejects.toThrow(
+        'Product seed manifest is invalid (entrypoints)'
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects Windows arm64 outside the supported Product matrix', async () => {
     const root = mkdtempSync(join(tmpdir(), 'debrute-local-product-platform-'));
     try {
@@ -143,7 +161,6 @@ function writeProduct(directory: string, version: string, payload: string): void
     web: 'web/index.html',
     cli: 'runtime/debrute',
     skills: 'skills/debrute-core/SKILL.md',
-    modelDocs: 'model-docs/models.json',
     nativeWorkers: 'native-workers/manifest.json'
   };
   const contents = new Map([
@@ -151,7 +168,6 @@ function writeProduct(directory: string, version: string, payload: string): void
     [entrypoints.web, `web-${payload}`],
     [entrypoints.cli, `cli-${payload}`],
     [entrypoints.skills, `skills-${payload}`],
-    [entrypoints.modelDocs, `models-${payload}`],
     [entrypoints.nativeWorkers, `workers-${payload}`],
     ['payload.txt', payload]
   ]);

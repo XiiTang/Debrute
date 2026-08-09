@@ -1,0 +1,33 @@
+{
+  "id": "google-lyria-3-pro-preview",
+  "kind": "music",
+  "summary": "Preview single-turn music generation lasting about several minutes from text/timestamps and up to 10 images; 44.1 kHz stereo MP3 or WAV with SynthID; no duration parameter.",
+  "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "defaultRequestModelId": "lyria-3-pro-preview",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "prompt"
+    ],
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "maxItems": 10
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "mp3",
+          "wav"
+        ]
+      }
+    }
+  }
+}

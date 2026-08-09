@@ -1,0 +1,31 @@
+{
+  "id": "grok-imagine",
+  "kind": "image",
+  "summary": "Vydra text-to-image only: one synchronous image from a prompt of at most 5,000 characters and one of seven aspect ratios; no image input or batch output.",
+  "defaultBaseUrl": "https://vydra.ai/api/v1",
+  "defaultRequestModelId": "grok-imagine",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "maxLength": 5000
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "enum": [
+          "16:9",
+          "9:16",
+          "4:3",
+          "3:4",
+          "1:1",
+          "3:2",
+          "2:3"
+        ]
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

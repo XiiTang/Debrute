@@ -1,0 +1,26 @@
+{
+  "id": "google-lyria-3-clip-preview",
+  "kind": "music",
+  "summary": "Preview single-turn music generation fixed at 30 seconds from text and up to 10 images; 44.1 kHz stereo MP3 with SynthID; no multi-turn editing.",
+  "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "defaultRequestModelId": "lyria-3-clip-preview",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "prompt"
+    ],
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "maxItems": 10
+      }
+    }
+  }
+}

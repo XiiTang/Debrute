@@ -1,4 +1,3 @@
-mod model_docs;
 mod parser;
 mod records;
 mod service;

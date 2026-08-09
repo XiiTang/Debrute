@@ -3,9 +3,8 @@ import { Eye, EyeOff } from '../ui/index.js';
 import type {
   AudioModelKind,
   AudioModelSettingRecord,
-  ImageModelSettingRecord,
-  SaveModelSettingInput,
-  VideoModelSettingRecord
+  ModelSettingRecord,
+  SaveModelSettingInput
 } from '@debrute/app-protocol';
 import { Card, CloseButton, EmptyState, Field, IconButton, Input, SecretInput } from '../ui/index.js';
 import { useI18n } from '../i18n/index.js';
@@ -18,7 +17,6 @@ export interface ModelDraft {
 }
 
 type SaveStatus = { status: 'idle' } | { status: 'error'; message: string };
-type MediaModelSettingRecord = ImageModelSettingRecord | VideoModelSettingRecord | AudioModelSettingRecord;
 
 interface ApiKeyInputProps {
   value: string;
@@ -35,11 +33,11 @@ interface ApiKeyInputProps {
 
 type MediaModelSettingsActions = Pick<WorkbenchSettingsActions, 'revealModelApiKey' | 'saveGlobalSettings'>;
 
-export function ImageModelSettings({ settings, actions }: { settings: ImageModelSettingRecord[]; actions: MediaModelSettingsActions }): React.ReactElement {
+export function ImageModelSettings({ settings, actions }: { settings: ModelSettingRecord[]; actions: MediaModelSettingsActions }): React.ReactElement {
   return <MediaModelSettings models={settings} actions={actions} />;
 }
 
-export function VideoModelSettings({ settings, actions }: { settings: VideoModelSettingRecord[]; actions: MediaModelSettingsActions }): React.ReactElement {
+export function VideoModelSettings({ settings, actions }: { settings: ModelSettingRecord[]; actions: MediaModelSettingsActions }): React.ReactElement {
   return <MediaModelSettings models={settings} actions={actions} />;
 }
 
@@ -59,7 +57,7 @@ function MediaModelSettings({
   models,
   actions
 }: {
-  models: MediaModelSettingRecord[];
+  models: ModelSettingRecord[];
   actions: MediaModelSettingsActions;
 }): React.ReactElement {
   const i18n = useI18n();
@@ -91,7 +89,7 @@ function MediaModelCard({
   onReveal,
   onSave
 }: {
-  model: MediaModelSettingRecord;
+  model: ModelSettingRecord;
   onReveal: () => Promise<string>;
   onSave: (input: SaveModelSettingInput) => Promise<void>;
 }): React.ReactElement {
@@ -307,7 +305,7 @@ function ApiKeyInput({
   return <Field label={label}>{input}</Field>;
 }
 
-export function modelToDraft(model: ImageModelSettingRecord | VideoModelSettingRecord | AudioModelSettingRecord): ModelDraft {
+export function modelToDraft(model: ModelSettingRecord): ModelDraft {
   return {
     baseUrlOverride: model.baseUrlOverride ?? '',
     requestModelIdOverride: model.requestModelIdOverride ?? '',
@@ -336,7 +334,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function mediaModelPersistedSignature(model: ImageModelSettingRecord | VideoModelSettingRecord | AudioModelSettingRecord): string {
+function mediaModelPersistedSignature(model: ModelSettingRecord): string {
   return JSON.stringify({
     debruteModelId: model.debruteModelId,
     baseUrlOverride: model.baseUrlOverride ?? null,
@@ -345,7 +343,7 @@ function mediaModelPersistedSignature(model: ImageModelSettingRecord | VideoMode
   });
 }
 
-function modelDraftMatchesPersisted(draft: ModelDraft, model: ImageModelSettingRecord | VideoModelSettingRecord | AudioModelSettingRecord): boolean {
+function modelDraftMatchesPersisted(draft: ModelDraft, model: ModelSettingRecord): boolean {
   return draft.baseUrlOverride.trim() === (model.baseUrlOverride ?? '')
     && draft.requestModelIdOverride.trim() === (model.requestModelIdOverride ?? '')
     && draft.apiKeyInput === '';

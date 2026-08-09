@@ -10,6 +10,8 @@ mod control_frame;
 mod control_server;
 #[path = "desktop_window_topology.rs"]
 mod desktop_window_topology;
+#[path = "exact_model_registry.rs"]
+mod exact_model_registry;
 #[path = "global_runtime_state.rs"]
 mod global_runtime_state;
 #[path = "integration_state.rs"]

@@ -44,21 +44,25 @@ accounting. Model Artifacts retain their independent 256 MiB per-asset and
 512 MiB per Model Operation limits.
 
 The Catalog is descriptive documentation, not an executable provider-schema
-gate or parameter-name allowlist. After the adapter removes and transforms the
-known fields it owns, remaining safely serializable arguments are
-forwarded at that Model's documented request location so the remote endpoint can
-accept a newly supported field or return its current authoritative error. Known
-arguments still reach the remote endpoint without local required, type, nested,
-range, enum, or cross-field rejection whenever the mapping is lossless. Runtime
-does not coerce a wrong JSON type into a supported one or guess how an unknown
-field changes response transport; if the remote endpoint accepts such a request
-but returns an unsupported response shape, the exact adapter reports that
-response error.
+gate or parameter-name allowlist. Its schema and Model Manual describe the
+complete official generation request and response contract targeted by that
+exact Debrute Model, subject only to explicitly reviewed product limitations.
+After the executor removes and transforms the fields it owns, remaining safely
+serializable arguments are forwarded at that Model's documented request
+location so the remote endpoint can accept a newly introduced field or return
+its current authoritative error. This pass-through preserves useful remote
+behavior but does not by itself establish Model Contract Parity: a new official
+field or result form must still be reviewed, documented, and handled by the
+exact Model executor.
 
-The Catalog and Agent manual list the understood, recommended argument surface.
-They do not enumerate fields a Model does not use and do not add negative
-statements such as “this model does not use parameter X.” Absence is sufficient;
-an Agent may still try a remote field and learn from the original remote result.
+Known arguments still reach the remote endpoint without local required, type,
+nested, range, enum, or cross-field rejection whenever the mapping is lossless.
+Runtime does not coerce a wrong JSON type into a supported one or guess how an
+unknown field changes response transport; if the remote endpoint accepts such a
+request but returns an unsupported response shape, the exact executor reports
+that response error. Fields that the official Model does not use remain absent
+from its definition. A known official capability that Debrute cannot cover is
+documented as an explicit product limitation rather than hidden by absence.
 
 This was chosen over duplicating those remote rules in Runtime because a stale
 local validator can reject a request that the remote endpoint currently allows
@@ -73,5 +77,5 @@ Agent-visible `log` after applying credential and inline-payload redaction and
 an error-text size limit. It does not add a parallel provider-error object,
 expose arbitrary response headers or the complete response body, replace a
 useful remote rejection with a generic model-business-error message, change
-arguments, or submit a fallback request. The otherwise-unobservable
-The Operation exposes no parallel details/logs error layers.
+arguments, or submit a fallback request. The Model Operation exposes no
+parallel details or log error layers.

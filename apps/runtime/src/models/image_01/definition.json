@@ -1,0 +1,71 @@
+{
+  "id": "image-01",
+  "kind": "image",
+  "summary": "Text or character-reference image generation with prompt up to 1,500 characters, 1–9 outputs, preset ratios or paired 512–2048 dimensions divisible by 8, and base64 or 24-hour URL output.",
+  "defaultBaseUrl": "https://api.minimax.io",
+  "defaultRequestModelId": "image-01",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "maxLength": 1500
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "enum": [
+          "1:1",
+          "16:9",
+          "4:3",
+          "3:2",
+          "2:3",
+          "3:4",
+          "9:16",
+          "21:9"
+        ]
+      },
+      "width": {
+        "type": "integer",
+        "minimum": 512,
+        "maximum": 2048,
+        "multipleOf": 8
+      },
+      "height": {
+        "type": "integer",
+        "minimum": 512,
+        "maximum": 2048,
+        "multipleOf": 8
+      },
+      "response_format": {
+        "type": "string",
+        "default": "base64",
+        "enum": [
+          "url",
+          "base64"
+        ]
+      },
+      "seed": {
+        "type": "integer"
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9
+      },
+      "prompt_optimizer": {
+        "type": "boolean"
+      },
+      "subject_reference": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

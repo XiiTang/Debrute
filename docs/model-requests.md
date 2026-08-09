@@ -38,25 +38,41 @@ provider, account, credential, request, or response abstraction.
 
 ## Model Catalogs
 
-Image, video, and audio catalogs are compiled product contracts. Each Debrute
-Model owns a stable ID, selection guidance, official default base URL and request
-model ID, concise list parameters, capabilities, a machine-readable argument
-schema, usage notes, and a Debrute request example. Audio models additionally
-own exactly one kind: TTS, music, or sound effect.
+The image, video, and audio Catalog is a compiled Runtime view over exact Model
+contracts. Each Debrute Model owns one directory containing `definition.json`,
+`manual.md`, its exact executor, and Model-specific evidence. The definition
+contains only the stable ID, Model Kind, one concise selection summary, the
+default base URL, the default request model ID, and the argument schema. Audio
+Models own exactly one Kind: TTS, music, or sound effect.
+
+The summary is the first-pass hard-screening surface. It uses short natural
+language because constraints such as reference counts, dimensions, ratios, and
+cross-field cases are not always represented accurately by one generic flag or
+parameter name. The argument schema records the exact Model's known argument
+names, shapes, and Debrute-owned defaults. The manual carries the detailed
+construction guidance, official-source context, and examples without repeating
+the summary.
 
 `models ... list` is local configuration screening. It returns only catalog
-entries whose Model ID has a configured API key; it performs no network request
-and does not prove the key, account, endpoint, or requested parameters will
-succeed. `models ... describe` returns the selected catalog contract together
-with official source URLs, a repository snapshot, captured documentation text,
-and examples. Agents use list to choose a candidate and describe to construct
-the exact request.
+entries whose Model ID has a configured API key and emits only `id` and
+`summary`; it performs no network request and does not prove the key, account,
+endpoint, or requested parameters will succeed. `models ... describe` emits the
+selected `id`, serialized `arguments_schema`, and `manual_markdown`. Agents use
+list to eliminate candidates that cannot meet hard requirements, then describe
+only the remaining candidate to construct the exact request.
 
-Catalog list parameters and argument schemas use the selected model's own
-parameter names. Debrute does not invent a universal image-input schema or ask
-callers to construct an upstream Seedance content array. Official documentation
-snapshots and deterministic mocked tests are the admission evidence for a
-supported catalog entry; source code from unrelated wrappers is not authority.
+There is no separate capability table, list-parameter table, or standalone
+central Catalog JSON. One explicit Rust composition root registers every exact
+Model-owned contract and forms the unified in-memory Catalog view. Product
+assembly compiles definitions and manuals into Runtime rather than packaging a
+second editable or generated Catalog artifact.
+
+Argument schemas use the selected Model's own parameter names. Debrute does not
+invent a universal image-input schema or ask callers to construct an upstream
+Seedance content array. Official primary documentation captured in the
+Model-owned manual and deterministic Model-owned tests are the admission
+evidence for a supported Catalog entry; source code from unrelated wrappers is
+not authority.
 Catalog schemas describe the fields Debrute knows; Runtime does not execute
 their provider `required`, type, nested-shape, enum, range, cardinality, or
 cross-field rules as local admission. They are also not an allowlist. Missing,
@@ -203,7 +219,7 @@ change intent, drop references, downgrade output, switch models, or fall back to
 another request shape when validation or execution fails.
 
 H3 success downloads `task.content.url` and commits exactly one video output.
-Its cataloged generated-audio capability records MiniMax's product description;
+Its Model-owned summary and manual record MiniMax's generated-audio behavior;
 Runtime does not inspect for an embedded audio track, extract audio, or make
 track presence a success condition.
 
@@ -332,16 +348,17 @@ surfaces are documented together in [`security.md`](./security.md).
 ## Executable Authorities
 
 - Model Operation and Artifact Pointer shapes: `apps/runtime/src/model_operation.rs`.
-- Catalogs and model settings views: `apps/runtime/src/global/models.rs` and
-  `assets/runtime-model-catalog.json`.
-- Exact model execution, adapters, redaction, public remote URL policy, and
-  output commit: `apps/runtime/src/model_request/`.
-- Official model documentation: `assets/model-docs/snapshots/` and
-  `apps/runtime/src/cli/model_docs.rs`.
+- Exact Model definitions, manuals, executors, and Model-owned tests:
+  `apps/runtime/src/models/<model>/`.
+- Unified Model Catalog and exact executor registration:
+  `apps/runtime/src/models/mod.rs`.
+- Shared acceptance, redaction, public remote URL policy, and output commit:
+  `apps/runtime/src/model_request/`.
 - Global settings and secret persistence: `apps/runtime/src/global/`.
 - Model Artifact provenance: `apps/runtime/src/model_request/provenance.rs`.
 - CLI parsing, Runtime CLI services, and Agent Record rendering:
   `apps/runtime/src/cli/` and `apps/runtime/src/bin/debrute.rs`.
 - Settings UI: `apps/web/src/workbench/settings/`.
-- Source-backed coverage: colocated tests, `tests/contracts/`, and
-  `apps/runtime/src/model_request/` tests.
+- Source-backed coverage: Model-owned tests under `apps/runtime/src/models/`,
+  shared-mechanism tests under `apps/runtime/src/model_request/`, and
+  cross-boundary contracts under `tests/contracts/`.

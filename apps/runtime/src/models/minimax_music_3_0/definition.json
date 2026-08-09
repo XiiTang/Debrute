@@ -1,0 +1,37 @@
+{
+  "id": "minimax-music-3-0",
+  "kind": "music",
+  "summary": "Vocal or instrumental music with prompt up to 2,000 characters and non-instrumental lyrics from 1 to 3,500 characters; completed output is hex audio or a 24-hour URL; streaming is not handled.",
+  "defaultBaseUrl": "https://api.minimax.io",
+  "defaultRequestModelId": "music-3.0",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "maxLength": 2000
+      },
+      "lyrics": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 3500
+      },
+      "is_instrumental": {
+        "type": "boolean"
+      },
+      "lyrics_optimizer": {
+        "type": "boolean"
+      },
+      "audio_setting": {
+        "type": "object"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "hex",
+          "url"
+        ]
+      }
+    }
+  }
+}

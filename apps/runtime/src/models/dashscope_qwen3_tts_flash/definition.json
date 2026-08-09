@@ -1,0 +1,39 @@
+{
+  "id": "dashscope-qwen3-tts-flash",
+  "kind": "tts",
+  "summary": "TTS with a required voice and at most 600 input characters; supports Auto or explicit Chinese, English, German, Italian, Portuguese, Spanish, Japanese, Korean, French, or Russian; returns a 24-hour WAV URL.",
+  "defaultBaseUrl": "https://dashscope.aliyuncs.com/api/v1",
+  "defaultRequestModelId": "qwen3-tts-flash",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "voice"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 600
+      },
+      "voice": {
+        "type": "string"
+      },
+      "language_type": {
+        "type": "string",
+        "enum": [
+          "Auto",
+          "Chinese",
+          "English",
+          "German",
+          "Italian",
+          "Portuguese",
+          "Spanish",
+          "Japanese",
+          "Korean",
+          "French",
+          "Russian"
+        ]
+      }
+    }
+  }
+}

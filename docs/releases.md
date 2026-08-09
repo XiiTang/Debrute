@@ -10,18 +10,19 @@ warning. The complete release targets are macOS arm64, macOS x64, and Windows
 x64.
 
 The Desktop installer contains one versioned Product seed: Rust Runtime and
-`debrute` CLI binaries, official Skills and model documentation, Web workbench
-resources, declared native workers, the target's pinned Raster Preview native
-libraries, and a strict Product manifest. Bootstrap validates the seed,
-installs it under the user's Product root, and retargets stable Runtime and CLI
-entrypoints to that version.
+`debrute` CLI binaries, official Skills, Web workbench resources, declared
+native workers, the target's pinned Raster Preview native libraries, and a
+strict Product manifest. Bootstrap validates the seed, installs it under the
+user's Product root, and retargets stable Runtime and CLI entrypoints to that
+version.
 
 Runtime discovers Product updates. An available update exposes the same direct
 Install action in the Workbench title bar and **Settings > General**. Either
 button is the user's final authorization: Debrute immediately prepares the
 complete update, installs it, and restarts without a second confirmation. A
 Product update keeps Desktop, Runtime, CLI, Web assets, official Skills, model
-documentation, and declared native workers on the same Product version.
+definitions and manuals compiled into Runtime, and declared native workers on
+the same Product version.
 Photoshop plugins are separately packaged and are not replaced by this Product
 update.
 
@@ -43,11 +44,12 @@ Clippy to product libraries and binaries. Developers and agents run
 
 Desktop assembly creates one strict Product seed containing Runtime and CLI,
 declared native workers, the target's checksum-pinned libvips payload, official
-model documentation, official Skills, Web assets, and their hashes. On macOS,
-the Runtime executable and the Product's single libvips payload live inside an
-`LSUIElement` Runtime application bundle; both Runtime and the adjacent CLI load
-that signed library. Windows keeps its DLLs beside the Runtime and CLI
-executables. Bootstrap installs an exact
+Skills, Web assets, and their hashes. Model definitions and manuals are compiled
+into Runtime rather than copied into a separate packaged documentation tree. On
+macOS, the Runtime executable and the Product's single libvips payload live
+inside an `LSUIElement` Runtime application bundle; both Runtime and the
+adjacent CLI load that signed library. Windows keeps its DLLs beside the Runtime
+and CLI executables. Bootstrap installs an exact
 validated version under
 `~/.debrute/products/versions/<version>` and selects it through `current`;
 macOS Runtime and CLI wrappers live under `~/.debrute/bin/`. Windows keeps the
@@ -55,7 +57,7 @@ stable Runtime at `~/.debrute/products/current/runtime/debrute-runtime.exe` and
 the CLI wrapper at `~/.debrute/bin/debrute.cmd`. Both launch surfaces supply
 that exact Runtime path explicitly, and
 official Skills are materialized under `~/.agents/skills/`. Runtime exposes any
-validation or materialization failure through product status and doctor.
+validation or materialization failure through product status.
 
 The Product seed is the only packaged owner of Workbench Web assets. Desktop
 assembly consumes the complete current `apps/web/dist` output directly and

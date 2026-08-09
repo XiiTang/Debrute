@@ -1,0 +1,91 @@
+{
+  "id": "elevenlabs-multilingual-v2",
+  "kind": "tts",
+  "summary": "Single-voice TTS in 29 languages with up to 10,000 input characters; intended for stable long-form speech; output format availability depends on the ElevenLabs subscription.",
+  "defaultBaseUrl": "https://api.elevenlabs.io/v1",
+  "defaultRequestModelId": "eleven_multilingual_v2",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "voice_id"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 10000
+      },
+      "voice_id": {
+        "type": "string"
+      },
+      "output_format": {
+        "type": "string"
+      },
+      "voice_settings": {
+        "type": "object",
+        "properties": {
+          "stability": {
+            "type": "number"
+          },
+          "similarity_boost": {
+            "type": "number"
+          },
+          "style": {
+            "type": "number"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "use_speaker_boost": {
+            "type": "boolean"
+          }
+        }
+      },
+      "pronunciation_dictionary_locators": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "pronunciation_dictionary_id": {
+              "type": "string"
+            },
+            "version_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pronunciation_dictionary_id",
+            "version_id"
+          ]
+        }
+      },
+      "seed": {
+        "type": "integer"
+      },
+      "previous_text": {
+        "type": "string"
+      },
+      "next_text": {
+        "type": "string"
+      },
+      "previous_request_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "next_request_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "apply_text_normalization": {
+        "type": "string"
+      },
+      "apply_language_text_normalization": {
+        "type": "boolean"
+      }
+    }
+  }
+}

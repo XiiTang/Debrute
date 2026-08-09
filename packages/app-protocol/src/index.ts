@@ -347,8 +347,8 @@ export interface DebruteGlobalSettingsView {
   chrome: DebruteGlobalChromeSettings;
   plugins: DebruteGlobalPluginSettings;
   models: {
-    image: ImageModelSettingRecord[];
-    video: VideoModelSettingRecord[];
+    image: ModelSettingRecord[];
+    video: ModelSettingRecord[];
     audio: AudioModelSettingRecord[];
   };
 }
@@ -553,20 +553,15 @@ export type CanvasVideoPreviewEnsureResponse =
   | { status: 'source-changed' }
   | { status: 'failed'; message: string };
 
-interface ApiKeySettingState {
-  apiKeySet: boolean;
-}
-
-export type ImageModelSettingRecord = {
+export type ModelSettingRecord = {
   debruteModelId: string;
   summary: string;
-  supportsEditing: boolean;
-  supportsTextRendering: boolean;
   defaultBaseUrl: string;
   defaultRequestModelId: string;
   baseUrlOverride: string | null;
   requestModelIdOverride: string | null;
-} & ApiKeySettingState;
+  apiKeySet: boolean;
+};
 
 export interface SaveModelSettingInput {
   baseUrlOverride: string | null;
@@ -578,31 +573,11 @@ export interface RevealModelApiKeyResponse {
   apiKey: string;
 }
 
-export type VideoModelSettingRecord = {
-  debruteModelId: string;
-  summary: string;
-  supportsTextToVideo: boolean;
-  supportsImageReferences: boolean;
-  supportsVideoReferences: boolean;
-  supportsAudioReferences: boolean;
-  supportsGeneratedAudio: boolean;
-  defaultBaseUrl: string;
-  defaultRequestModelId: string;
-  baseUrlOverride: string | null;
-  requestModelIdOverride: string | null;
-} & ApiKeySettingState;
-
 export type AudioModelKind = 'tts' | 'music' | 'sound-effect';
 
-export type AudioModelSettingRecord = {
-  debruteModelId: string;
+export type AudioModelSettingRecord = ModelSettingRecord & {
   kind: AudioModelKind;
-  summary: string;
-  defaultBaseUrl: string;
-  defaultRequestModelId: string;
-  baseUrlOverride: string | null;
-  requestModelIdOverride: string | null;
-} & ApiKeySettingState;
+};
 
 type IntegrationId = 'ffmpeg' | 'imagemagick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
 type IntegrationBinaryId = 'ffmpeg' | 'ffprobe' | 'magick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';

@@ -356,8 +356,7 @@ fn needs_quotes(value: &str) -> bool {
 
 fn record_field_order(name: &str) -> &'static [&'static str] {
     match name {
-        "model" => &["id", "kind", "parameters"],
-        "official_doc" => &["urls", "snapshot", "captured_at"],
+        "model" => &["id", "summary"],
         "operation" => &[
             "id",
             "model_kind",
@@ -391,12 +390,12 @@ fn record_field_order(name: &str) -> &'static [&'static str] {
 
 fn result_field_order(command: &str) -> &'static [&'static str] {
     match command {
-        "runtime.status" | "runtime.doctor" => &[
-            "runtime_state",
-            "native_tray",
-            "runtime_instance",
-            "diagnostics",
-        ],
+        "runtime.status" => &["runtime_state"],
+        "models.image.describe"
+        | "models.video.describe"
+        | "models.tts.describe"
+        | "models.music.describe"
+        | "models.sfx.describe" => &["arguments_schema", "manual_markdown"],
         "project.status" | "project.validate" => {
             &["project_root", "project_name", "errors", "warnings"]
         }

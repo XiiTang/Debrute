@@ -1,0 +1,73 @@
+{
+  "id": "gpt-image-2",
+  "kind": "image",
+  "summary": "Image generation/editing with automatically high-fidelity inputs and PNG/JPEG/WebP output; each dimension must be a multiple of 16, long edge at most 3840, aspect ratio at most 3:1, and total pixels 655,360–8,294,400; no transparency, and Debrute handles only completed non-streaming responses.",
+  "defaultBaseUrl": "https://api.openai.com/v1",
+  "defaultRequestModelId": "gpt-image-2",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs."
+      },
+      "mask": {
+        "type": "string",
+        "debruteImageInput": true,
+        "description": "Absolute or CLI-working-directory-relative image path, public http(s) URL, or data:image URI."
+      },
+      "size": {
+        "type": "string"
+      },
+      "quality": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "background": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "opaque"
+        ]
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "png",
+          "jpeg",
+          "webp"
+        ]
+      },
+      "output_compression": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "moderation": {
+        "type": "string"
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "user": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

@@ -98,7 +98,6 @@ impl WindowsFixture {
             ("web/index.html", "web"),
             ("runtime/debrute.exe", "cli"),
             ("skills/debrute-core/SKILL.md", "skills"),
-            ("model-docs/models.json", "models"),
             ("native-workers/manifest.json", "worker"),
         ];
         let mut manifest_files = Vec::new();
@@ -125,7 +124,6 @@ impl WindowsFixture {
                 web: "web/index.html".to_owned(),
                 cli: "runtime/debrute.exe".to_owned(),
                 skills: "skills/debrute-core/SKILL.md".to_owned(),
-                model_docs: "model-docs/models.json".to_owned(),
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
             files: manifest_files,

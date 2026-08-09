@@ -1,0 +1,100 @@
+{
+  "id": "minimax-speech-2-8-hd",
+  "kind": "tts",
+  "summary": "TTS with fewer than 10,000 input characters, 40 languages, sound tags, and a required system or cloned voice; MP3/PCM/FLAC/WAV/G.711 μ-law/Ogg-Opus output as hex or 24-hour URL; WAV and Debrute handling are non-streaming.",
+  "defaultBaseUrl": "https://api.minimax.io",
+  "defaultRequestModelId": "speech-2.8-hd",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "voice_setting"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 9999
+      },
+      "voice_setting": {
+        "type": "object",
+        "properties": {
+          "voice_id": {
+            "type": "string"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "vol": {
+            "type": "number"
+          },
+          "pitch": {
+            "type": "integer"
+          },
+          "text_normalization": {
+            "type": "boolean"
+          },
+          "latex_read": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "voice_id"
+        ]
+      },
+      "audio_setting": {
+        "type": "object",
+        "properties": {
+          "sample_rate": {
+            "type": "integer"
+          },
+          "bitrate": {
+            "type": "integer"
+          },
+        "format": {
+          "type": "string",
+          "enum": [
+            "mp3",
+            "pcm",
+            "flac",
+            "wav",
+            "pcmu_raw",
+            "pcmu_wav",
+            "opus"
+          ]
+          },
+          "channel": {
+            "type": "integer"
+          },
+          "force_cbr": {
+            "type": "boolean"
+          }
+        }
+      },
+      "emotion": {
+        "type": "string"
+      },
+      "language_boost": {
+        "type": "string"
+      },
+      "pronunciation_dict": {
+        "type": "object"
+      },
+      "voice_modify": {
+        "type": "object"
+      },
+      "subtitle_enable": {
+        "type": "boolean"
+      },
+      "subtitle_type": {
+        "type": "string"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "hex",
+          "url"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "id": "gemini-3.1-flash-image",
+  "kind": "image",
+  "summary": "Stable image generation/editing with up to 14 image references (up to 10 high-fidelity objects and 4 characters) and 512/1K/2K/4K output; this Debrute executor accepts text and images, not video or audio input.",
+  "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "defaultRequestModelId": "gemini-3.1-flash-image",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs.",
+        "maxItems": 14
+      },
+      "aspect_ratio": {
+        "type": "string"
+      },
+      "image_size": {
+        "type": "string",
+        "enum": [
+          "512",
+          "1K",
+          "2K",
+          "4K"
+        ]
+      },
+      "delivery": {
+        "type": "string",
+        "default": "uri",
+        "enum": [
+          "uri",
+          "inline"
+        ]
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "id": "minimax-h3",
+  "kind": "video",
+  "summary": "4–15-second video at 768P or 2K from required text plus up to 9 images, 3 videos, and 3 audio files (12 reference media total); first/last-frame and reference modes are mutually exclusive, and text-only video cannot use adaptive ratio.",
+  "defaultBaseUrl": "https://api.minimax.io",
+  "defaultRequestModelId": "MiniMax-H3",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "array",
+        "minItems": 1,
+        "contains": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ]
+        },
+        "minContains": 1,
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "text"
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 7000
+                }
+              },
+              "required": [
+                "type",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "image_url"
+                },
+                "image_url": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "first_frame",
+                    "last_frame",
+                    "reference_image"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "image_url"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "video_url"
+                },
+                "video_url": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                "role": {
+                  "const": "reference_video"
+                }
+              },
+              "required": [
+                "type",
+                "video_url",
+                "role"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "audio_url"
+                },
+                "audio_url": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                "role": {
+                  "const": "reference_audio"
+                }
+              },
+              "required": [
+                "type",
+                "audio_url",
+                "role"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "resolution": {
+        "type": "string",
+        "enum": [
+          "768P",
+          "2K"
+        ]
+      },
+      "duration": {
+        "type": "integer",
+        "minimum": 4,
+        "maximum": 15
+      },
+      "ratio": {
+        "type": "string",
+        "enum": [
+          "adaptive",
+          "21:9",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ]
+      },
+      "callback_url": {
+        "type": "string",
+        "format": "uri"
+      }
+    },
+    "xProviderRules": {
+      "contentModes": [
+        "text-only content requires a concrete non-adaptive ratio",
+        "first_frame and last_frame image roles use adaptive image-driven ratio behavior",
+        "reference_image, reference_video, and reference_audio roles may use adaptive or a concrete ratio"
+      ],
+      "roleCombinations": [
+        "first_frame and last_frame roles cannot be mixed with reference_image, reference_video, or reference_audio roles",
+        "reference_audio requires at least one reference_image or reference_video"
+      ],
+      "mediaLimits": {
+        "first_frame": 1,
+        "last_frame": 1,
+        "reference_image": 9,
+        "reference_video": 3,
+        "reference_audio": 3,
+        "total_reference_media": 12
+      }
+    },
+    "required": [
+      "content",
+      "resolution",
+      "duration"
+    ]
+  }
+}

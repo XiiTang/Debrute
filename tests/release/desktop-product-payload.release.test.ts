@@ -81,9 +81,6 @@ describe('desktop fresh install product payload', () => {
       mkdirSync(join(root, 'apps/desktop/dist-electron/product-seed/web/assets'), { recursive: true });
       mkdirSync(join(root, 'apps/desktop/build'), { recursive: true });
       mkdirSync(join(root, 'skills/debrute-core'), { recursive: true });
-      mkdirSync(join(root, 'assets/model-docs/snapshots/image'), { recursive: true });
-      mkdirSync(join(root, 'assets/model-docs/snapshots/video'), { recursive: true });
-      mkdirSync(join(root, 'assets/model-docs/snapshots/audio'), { recursive: true });
       mkdirSync(join(root, 'apps/runtime/src/control'), { recursive: true });
       writeFileSync(join(root, 'package.json'), '{"version":"1.2.3"}');
       writeFileSync(join(root, 'target/release/debrute-runtime'), 'runtime');
@@ -98,10 +95,6 @@ describe('desktop fresh install product payload', () => {
       writeFileSync(join(root, 'apps/web/dist/index.html'), '<!doctype html>');
       writeFileSync(join(root, 'apps/desktop/dist-electron/product-seed/web/assets/stale-hash.js'), 'stale');
       writeFileSync(join(root, 'skills/debrute-core/SKILL.md'), '---\nname: debrute-core\n---\n');
-      writeFileSync(join(root, 'assets/runtime-model-catalog.json'), '{}');
-      writeFileSync(join(root, 'assets/model-docs/snapshots/image/example.md'), '# Image model\n');
-      writeFileSync(join(root, 'assets/model-docs/snapshots/video/example.md'), '# Video model\n');
-      writeFileSync(join(root, 'assets/model-docs/snapshots/audio/example.md'), '# Audio model\n');
       writeFileSync(join(root, 'apps/runtime/src/control/protocol.rs'), [
         'pub const CONTROL_PROTOCOL: &str = "debrute-control";',
         'pub const CONTROL_PROTOCOL_VERSION: u32 = 1;'
@@ -114,10 +107,12 @@ describe('desktop fresh install product payload', () => {
         architecture: 'arm64'
       });
       expect(existsSync(join(assembled.destination, 'web/assets/stale-hash.js'))).toBe(false);
-      expect(assembled.manifest?.entrypoints).toMatchObject({
+      expect(assembled.manifest?.entrypoints).toEqual({
         runtime: 'runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime',
         cli: 'runtime/debrute',
-        web: 'web/index.html'
+        web: 'web/index.html',
+        skills: 'skills/debrute-core/SKILL.md',
+        nativeWorkers: 'native-workers/manifest.json'
       });
       expect(assembled.manifest?.files.every((file) => /^[a-f0-9]{64}$/.test(file.sha256))).toBe(true);
       expect(assembled.manifest?.files.map((file) => file.path)).not.toContain('product-manifest.json');

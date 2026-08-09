@@ -1,0 +1,46 @@
+{
+  "id": "gemini-3-pro-image",
+  "kind": "image",
+  "summary": "Professional image generation/editing with up to 14 references (up to 6 high-fidelity objects, 5 people, and 3 style images) and 1K/2K/4K output; Debrute stores image blocks but not interleaved output text.",
+  "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "defaultRequestModelId": "gemini-3-pro-image",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs.",
+        "maxItems": 14
+      },
+      "aspect_ratio": {
+        "type": "string"
+      },
+      "image_size": {
+        "type": "string",
+        "enum": [
+          "1K",
+          "2K",
+          "4K"
+        ]
+      },
+      "delivery": {
+        "type": "string",
+        "default": "uri",
+        "enum": [
+          "uri",
+          "inline"
+        ]
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

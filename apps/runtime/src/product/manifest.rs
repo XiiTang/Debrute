@@ -24,8 +24,7 @@ pub const DEBRUTE_UPDATE_PUBLIC_KEY_BYTES: [u8; 32] = [
     0x89, 0x80, 0xf0, 0x44, 0x85, 0x9c, 0x90, 0xb3, 0xdd, 0x6b, 0x01, 0x3d, 0x01, 0xbb, 0x0e, 0x4b,
     0x89, 0xa3, 0x0e, 0x70, 0xe3, 0xf6, 0xfb, 0x13, 0x7e, 0xfc, 0x8b, 0x10, 0x59, 0xef, 0x5a, 0x51,
 ];
-const REQUIRED_PRODUCT_COMPONENTS: [&str; 5] =
-    ["runtime", "web", "skills", "model-docs", "native-workers"];
+const REQUIRED_PRODUCT_COMPONENTS: [&str; 4] = ["runtime", "web", "skills", "native-workers"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -55,7 +54,6 @@ pub struct ProductEntrypoints {
     pub web: String,
     pub cli: String,
     pub skills: String,
-    pub model_docs: String,
     pub native_workers: String,
 }
 
@@ -117,7 +115,6 @@ impl ProductManifest {
                 web: "web/index.html".to_owned(),
                 cli: "runtime/debrute".to_owned(),
                 skills: "skills/debrute-core/SKILL.md".to_owned(),
-                model_docs: "model-docs/models.json".to_owned(),
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
             ProductPlatform::Windows => ProductEntrypoints {
@@ -125,7 +122,6 @@ impl ProductManifest {
                 web: "web/index.html".to_owned(),
                 cli: "runtime/debrute.exe".to_owned(),
                 skills: "skills/debrute-core/SKILL.md".to_owned(),
-                model_docs: "model-docs/models.json".to_owned(),
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
         };
@@ -137,7 +133,6 @@ impl ProductManifest {
             &self.entrypoints.web,
             &self.entrypoints.cli,
             &self.entrypoints.skills,
-            &self.entrypoints.model_docs,
             &self.entrypoints.native_workers,
         ] {
             if !paths.contains(entrypoint) {

@@ -23,7 +23,7 @@ use crate::{
     executable_path::resolve_executable,
     global::{
         DebruteGlobalSettingsView, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent,
-        GlobalRuntimeService, ModelCatalog,
+        GlobalRuntimeService,
     },
     integrations::{IntegrationOperation, Platform},
     model_operation::{
@@ -31,6 +31,7 @@ use crate::{
         OperationState,
     },
     model_request::{ModelArtifactProvenanceStore, ModelRequestExecutor},
+    models::ModelCatalog,
     photoshop::{PhotoshopEnableMutationError, PhotoshopGatewayLifecycle, PhotoshopIntegration},
     project::{
         CanvasFeedbackArtifacts, MediaToolPaths, NativeProjectNodeAdapter, OpenProjectSession,
@@ -270,13 +271,7 @@ impl WorkbenchRuntimeServices {
         };
         let terminals = TerminalService::new(projects.clone());
         let native_shell = Arc::new(ProjectNativeShellService::new(&workers));
-        let catalog = Arc::new(ModelCatalog::bundled().map_err(|error| {
-            RuntimeHttpServiceError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "model_catalog_invalid",
-                error.to_string(),
-            )
-        })?);
+        let catalog = Arc::new(ModelCatalog::bundled());
         let global_store = Arc::new(GlobalConfigStore::new(&debrute_home));
         let integrations = workers.integration_service(platform, env_path, path_ext);
         let global = Arc::new(GlobalRuntimeService::new(

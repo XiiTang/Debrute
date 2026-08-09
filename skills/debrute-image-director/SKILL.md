@@ -13,11 +13,12 @@ Use `debrute` as the execution interface for image generation and editing.
 
 ## Rules
 
-- Run `debrute models image list`, choose only a returned configured Model, and
-  run `debrute models image describe <model-id>` once before constructing input.
-- Build `arguments` only from the returned `description_markdown`, Debrute
-  example, and `arguments_schema`. Do not copy source API SDK examples or put an
-  API key in a request.
+- Run `debrute models image list` and use each returned `summary` to eliminate
+  configured Models that cannot meet the brief's hard requirements. Run
+  `debrute models image describe <model-id>` only for the selected candidate.
+- Build `arguments` only from the returned `manual_markdown` and
+  `arguments_schema`. Do not copy source API SDK examples or put an API key in a
+  request.
 - Single may use one strict JSONL record or direct `--model`, `--arguments`, and
   `--output` options. Never combine `--input` with a direct request option. Use
   `debrute request batch --input <requests.jsonl>` for a planned set; Batch is
@@ -35,7 +36,7 @@ Use `debrute` as the execution interface for image generation and editing.
   replacement happens only during output commit.
 - Put input paths in the exact `arguments` fields named by `models image
   describe`. Paths may be absolute or relative to the CLI working directory.
-  CLI does not classify or upload media; the selected Model adapter owns the
+  CLI does not classify or upload media; the selected Model executor owns the
   conversion. Preserve documented data URLs, native references, public HTTP(S)
   values, shapes, and media constraints.
 - An output inside an open Project becomes an ordinary Project Tree entry and

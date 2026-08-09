@@ -21,7 +21,7 @@ use super::{
     },
     redaction::redact_model_request_value,
     types::{
-        HttpBody, HttpMethod, HttpTargetPolicy, ModelArtifactPayload, ModelExecution,
+        HttpBody, HttpMethod, HttpTargetPolicy, ModelExecution, ModelExecutionDraft,
         ModelHttpRequest, ModelHttpResponse, ModelHttpTransport, ModelRequestCancellation,
         ModelRequestDeadline, ModelRequestError, PreparedHttpBody, ResolvedModelRequestModel,
     },
@@ -139,13 +139,16 @@ pub(crate) struct ExecutionContext<'a> {
     pub cancellation: &'a ModelRequestCancellation,
     pub transport: &'a dyn ModelHttpTransport,
     deadline: ModelRequestDeadline,
-    pub safe_responses: Vec<Value>,
+    safe_responses: Vec<Value>,
     model_output_media_bytes: usize,
     response_log_bytes: usize,
     response_log_truncated: bool,
     limits: ModelRequestResourceLimits,
     request_bytes_reserved: usize,
 }
+
+pub(crate) type ModelExecutor =
+    for<'a> fn(&mut ExecutionContext<'a>) -> Result<ModelExecutionDraft, ModelRequestError>;
 
 impl<'a> ExecutionContext<'a> {
     pub(crate) fn new(
@@ -634,11 +637,14 @@ fn push_bounded_response_log(
     }
 }
 
-pub(crate) fn execute_result(
-    payloads: Vec<ModelArtifactPayload>,
-    safe_request: Value,
-    context: ExecutionContext<'_>,
+pub(crate) fn execute_model(
+    executor: ModelExecutor,
+    mut context: ExecutionContext<'_>,
 ) -> Result<ModelExecution, ModelRequestError> {
+    let ModelExecutionDraft {
+        payloads,
+        safe_request,
+    } = executor(&mut context)?;
     if payloads.is_empty() {
         return Err(ModelRequestError::new(
             "model_response_invalid",
@@ -740,13 +746,6 @@ fn materialize_nested_defaults(
         }
     }
     Ok(())
-}
-
-pub(crate) fn authorization(api_key: &str) -> BTreeMap<String, String> {
-    BTreeMap::from([
-        ("authorization".to_owned(), format!("Bearer {api_key}")),
-        ("content-type".to_owned(), "application/json".to_owned()),
-    ])
 }
 
 pub(crate) fn is_string_array(value: &Value) -> bool {
@@ -1491,6 +1490,7 @@ mod tests {
 
     use super::*;
     use crate::model_request::ModelArtifactProvenanceStore;
+    use crate::model_request::types::ModelArtifactPayload;
 
     #[test]
     fn catalog_defaults_materialize_recursively_without_replacing_explicit_values() {

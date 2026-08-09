@@ -1,0 +1,58 @@
+{
+  "id": "doubao-seedream-5-0-pro-260628",
+  "kind": "image",
+  "summary": "Image generation and precise editing with up to 10 ordered references; 1K/2K or supported explicit sizes; PNG/JPEG; each input must be under 30 MB and 36 megapixels.",
+  "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+  "defaultRequestModelId": "doubao-seedream-5-0-pro-260628",
+  "argumentsSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "debruteImageInput": true,
+        "description": "Ordered absolute or CLI-working-directory-relative image paths, public http(s) URLs, or data:image URIs.",
+        "maxItems": 10
+      },
+      "size": {
+        "type": "string"
+      },
+      "output_format": {
+        "type": "string",
+        "default": "png",
+        "enum": [
+          "png",
+          "jpeg"
+        ]
+      },
+      "response_format": {
+        "type": "string",
+        "default": "url",
+        "enum": [
+          "url",
+          "b64_json"
+        ]
+      },
+      "watermark": {
+        "type": "boolean",
+        "default": false
+      },
+      "optimize_prompt_options": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

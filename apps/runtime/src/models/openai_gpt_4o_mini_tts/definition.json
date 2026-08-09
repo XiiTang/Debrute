@@ -1,0 +1,64 @@
+{
+  "id": "openai-gpt-4o-mini-tts",
+  "kind": "tts",
+  "summary": "Deprecated TTS with up to 4,096 input characters and 4,096 instruction characters, built-in or custom voice, MP3/Opus/AAC/FLAC/WAV/PCM output, and speed 0.25–4; Debrute does not handle SSE output.",
+  "defaultBaseUrl": "https://api.openai.com/v1",
+  "defaultRequestModelId": "gpt-4o-mini-tts",
+  "argumentsSchema": {
+    "type": "object",
+    "required": [
+      "text",
+      "voice"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 4096
+      },
+      "voice": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        ]
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "mp3",
+          "opus",
+          "aac",
+          "flac",
+          "wav",
+          "pcm"
+        ]
+      },
+      "stream_format": {
+        "type": "string",
+        "enum": [
+          "audio"
+        ]
+      },
+      "speed": {
+        "type": "number",
+        "minimum": 0.25,
+        "maximum": 4
+      },
+      "instructions": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    }
+  }
+}

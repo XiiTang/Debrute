@@ -99,7 +99,6 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('win-unpacked/debrute.exe');
     expect(buildDesktopBlock).toContain('Debrute.app/Contents/MacOS/Debrute');
     expect(packagedDesktopSmoke).toContain('runtime_state=ready');
-    expect(packagedDesktopSmoke).toContain('native_tray=active');
     expect(packagedDesktopSmoke).toContain('chromium.connectOverCDP');
     expect(packagedDesktopSmoke).toContain('window.debruteShell');
     expect(packagedDesktopSmoke).toContain('workbench-connection-ended');
