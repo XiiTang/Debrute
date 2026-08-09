@@ -15,7 +15,8 @@ describe('GitHub release workflow contract', () => {
   it('uses a release workflow with preflight, Desktop, and final publish jobs', () => {
     expect(workflow).toContain('preflight:');
     expect(workflow).toContain('node scripts/validate-release-version-contract.mjs');
-    expect(workflow).toContain('runs-on: macos-latest');
+    expect(workflow).toContain('runs-on: macos-15-intel');
+    expect(workflow).toContain('run: brew install ripgrep');
     expect(workflow).toContain('Prepare pinned native raster payload');
     expect(workflow).toContain('pnpm native:raster:prepare');
     expect(workflow).toContain('build-desktop:');
@@ -39,6 +40,17 @@ describe('GitHub release workflow contract', () => {
     expect(releaseDocs).toContain('debrute-product-X.Y.Z-macos-arm64.zip');
     expect(releaseDocs).toContain('debrute-product-X.Y.Z-windows-x64.zip');
     expect(releaseDocs).toContain('required eight-file');
+    expect(releaseDocs).toMatch(/not\s+Authenticode-signed/);
+    expect(releaseDocs).toContain('Unknown Publisher');
+  });
+
+  it('preserves byte-hashed Canvas font subset inputs across Windows checkout', () => {
+    const gitAttributes = readFileSync(join(process.cwd(), '.gitattributes'), 'utf8');
+
+    expect(gitAttributes).toContain('scripts/canvas-text-font-subset/*.cc text eol=lf');
+    expect(gitAttributes).toContain('scripts/canvas-text-font-subset/*.h text eol=lf');
+    expect(gitAttributes).toContain('assets/wasm/LICENSES/*.txt text eol=lf');
+    expect(gitAttributes).toContain('assets/wasm/*.wasm binary');
   });
 
   it('rejects unexpected files from the final release upload set', () => {
@@ -60,7 +72,7 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('electron-builder --win nsis --x64 --publish never');
     expect(buildDesktopBlock).toContain('debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}');
     expect(workflow).toContain('Generate signed update manifest');
-    expect(buildDesktopBlock).toContain('Archive signed Product seed');
+    expect(buildDesktopBlock).toContain('Archive Product seed');
     expect(buildDesktopBlock).toContain('node scripts/archive-product-seed.mjs');
     expect(buildDesktopBlock).toContain('debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip');
   });
@@ -79,10 +91,10 @@ describe('GitHub release workflow contract', () => {
     expect(watcherProbeIndex).toBeLessThan(buildDesktopBlock.indexOf('- run: pnpm build'));
   });
 
-  it('smoke tests signed macOS and Windows packages through the public product surface', () => {
+  it('smoke tests macOS and Windows packages through the public product surface', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
 
-    expect(buildDesktopBlock).toContain('Smoke test signed packaged Desktop and Runtime');
+    expect(buildDesktopBlock).toContain('Smoke test packaged Desktop and Runtime');
     expect(buildDesktopBlock).toContain('scripts/smoke-packaged-desktop.mjs');
     expect(buildDesktopBlock).toContain('win-unpacked/debrute.exe');
     expect(buildDesktopBlock).toContain('Debrute.app/Contents/MacOS/Debrute');
@@ -98,26 +110,32 @@ describe('GitHub release workflow contract', () => {
     expect(packagedDesktopSmoke).toContain("process.kill(-child.pid, 'SIGKILL')");
     expect(packagedDesktopSmoke).toContain('AbortSignal.timeout');
     expect(packagedDesktopSmoke).toContain("child.kill('SIGKILL')");
+    expect(packagedDesktopSmoke).toContain('function delay(milliseconds)');
+    expect(packagedDesktopSmoke).not.toContain('const delay =');
     expect(packagedDesktopSmoke).not.toMatch(/(?:pkill|killall|Get-Process)/);
+    expect(packagedDesktopSmoke).toContain('verifyMacosDesktopSignature(options)');
+    expect(packagedDesktopSmoke).not.toContain('Get-AuthenticodeSignature');
   });
 
-  it('signs native Product binaries before assembling each supported Product archive', () => {
+  it('signs macOS Product binaries and publishes Windows without Authenticode', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
-    const archiveIndex = buildDesktopBlock.indexOf('Archive signed Product seed');
+    const archiveIndex = buildDesktopBlock.indexOf('Archive Product seed');
 
     expect(buildDesktopBlock).toContain('Sign macOS Product binaries and rebuild the strict seed');
     expect(buildDesktopBlock).toContain('codesign --verify --strict --verbose=2 "$binary"');
-    expect(buildDesktopBlock).toContain('Sign Windows Product binaries and rebuild the strict seed');
-    expect(buildDesktopBlock).toContain('WINDOWS_CSC_LINK_SECRET: ${{ secrets.WINDOWS_CSC_LINK }}');
-    expect(buildDesktopBlock).toContain('& $signTool verify /pa /v $binary');
     expect(buildDesktopBlock.indexOf('Sign macOS Product binaries')).toBeLessThan(archiveIndex);
-    expect(buildDesktopBlock.indexOf('Sign Windows Product binaries')).toBeLessThan(archiveIndex);
+    expect(buildDesktopBlock).toContain('Build unsigned Windows Desktop assets');
+    expect(buildDesktopBlock).not.toContain('Sign Windows Product binaries');
+    expect(buildDesktopBlock).not.toContain('WINDOWS_CSC_LINK');
+    expect(buildDesktopBlock).not.toContain('WINDOWS_CSC_KEY_PASSWORD');
+    expect(buildDesktopBlock).not.toContain('signtool.exe');
   });
 
   it('configures the final signed macOS Desktop identity', () => {
     expect(desktopPackage.build.appId).toBe('io.github.xiitang.debrute');
     expect(desktopPackage.build.mac).toMatchObject({
       category: 'public.app-category.productivity',
+      executableName: 'Debrute',
       artifactName: 'debrute-desktop-${version}-macos-${arch}.${ext}',
       hardenedRuntime: true,
       gatekeeperAssess: false,

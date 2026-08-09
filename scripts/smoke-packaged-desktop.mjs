@@ -12,7 +12,7 @@ const options = parseArguments(process.argv.slice(2));
 await access(options.desktop);
 await access(options.cli);
 verifyPackagedRuntimeSubsystem(options);
-verifyDesktopSignature(options);
+verifyMacosDesktopSignature(options);
 
 const port = await reserveLoopbackPort();
 const desktop = spawn(options.desktop, [
@@ -180,26 +180,17 @@ function describeDesktopExit(exit) {
   return exit.error?.message ?? String(exit.code ?? exit.signal);
 }
 
-function verifyDesktopSignature({ desktop, platform }) {
-  if (platform === 'darwin') {
-    const marker = '/Contents/MacOS/';
-    const markerIndex = desktop.indexOf(marker);
-    if (markerIndex < 0) throw new Error('macOS Desktop path is not inside an application bundle.');
-    const application = desktop.slice(0, markerIndex);
-    const result = spawnSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', application], {
-      encoding: 'utf8',
-      timeout: 15_000
-    });
-    if (result.status !== 0) throw new Error(`macOS signature is invalid:\n${result.stderr}`);
-    return;
-  }
-  const literal = desktop.replaceAll("'", "''");
-  const result = spawnSync('powershell.exe', [
-    '-NoProfile',
-    '-Command',
-    `$signature = Get-AuthenticodeSignature -LiteralPath '${literal}'; if ($signature.Status -ne 'Valid') { Write-Error $signature.StatusMessage; exit 1 }`
-  ], { encoding: 'utf8', timeout: 15_000 });
-  if (result.status !== 0) throw new Error(`Windows signature is invalid:\n${result.stderr}`);
+function verifyMacosDesktopSignature({ desktop, platform }) {
+  if (platform !== 'darwin') return;
+  const marker = '/Contents/MacOS/';
+  const markerIndex = desktop.indexOf(marker);
+  if (markerIndex < 0) throw new Error('macOS Desktop path is not inside an application bundle.');
+  const application = desktop.slice(0, markerIndex);
+  const result = spawnSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', application], {
+    encoding: 'utf8',
+    timeout: 15_000
+  });
+  if (result.status !== 0) throw new Error(`macOS signature is invalid:\n${result.stderr}`);
 }
 
 function verifyPackagedRuntimeSubsystem({ cli, platform }) {
@@ -303,7 +294,9 @@ async function withDeadline(promise, milliseconds, message) {
   }
 }
 
-const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 function parseArguments(argv) {
   const values = new Map();

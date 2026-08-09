@@ -13,7 +13,7 @@ env:
 
 jobs:
   preflight:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,10 +24,12 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: taiki-e/install-action@v2.79.11
+      - uses: taiki-e/install-action@v2.85.11
         with:
           tool: nextest@0.9.140
           fallback: none
+      - name: Install architecture scanner dependency
+        run: brew install ripgrep
       - run: pnpm install --frozen-lockfile
       - name: Prepare pinned native raster payload
         run: pnpm native:raster:prepare
@@ -73,7 +75,7 @@ jobs:
           cache: pnpm
       - name: Install pinned cargo-nextest
         if: matrix.platform == 'win32'
-        uses: taiki-e/install-action@v2.79.11
+        uses: taiki-e/install-action@v2.85.11
         with:
           tool: nextest@0.9.140
           fallback: none
@@ -157,32 +159,7 @@ jobs:
           codesign --force --options runtime --timestamp --sign "$CSC_NAME" "$RUNTIME_APP"
           codesign --verify --deep --strict --verbose=2 "$RUNTIME_APP"
           node scripts/refresh-product-seed-manifest.mjs
-      - name: Sign Windows Product binaries and rebuild the strict seed
-        if: matrix.platform == 'win32'
-        shell: pwsh
-        env:
-          WINDOWS_CSC_LINK_SECRET: ${{ secrets.WINDOWS_CSC_LINK }}
-          WINDOWS_CSC_KEY_PASSWORD_SECRET: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CSC_LINK_SECRET) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CSC_KEY_PASSWORD_SECRET)) {
-            throw 'WINDOWS_CSC_LINK and WINDOWS_CSC_KEY_PASSWORD are required.'
-          }
-          $pfx = Join-Path $env:RUNNER_TEMP 'debrute-windows-signing.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CSC_LINK_SECRET))
-          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $signTool) { throw 'signtool.exe is unavailable.' }
-          foreach ($binary in @('target/release/debrute-runtime.exe', 'target/release/debrute.exe')) {
-            & $signTool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:WINDOWS_CSC_KEY_PASSWORD_SECRET $binary
-            if ($LASTEXITCODE -ne 0) { throw "Failed to sign $binary" }
-            & $signTool verify /pa /v $binary
-            if ($LASTEXITCODE -ne 0) { throw "Failed to verify $binary" }
-          }
-          "WIN_CSC_LINK=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "WIN_CSC_KEY_PASSWORD=$env:WINDOWS_CSC_KEY_PASSWORD_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          node scripts/assemble-product-seed.mjs
-      - name: Archive signed Product seed
+      - name: Archive Product seed
         shell: bash
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -203,13 +180,13 @@ jobs:
           node scripts/notarize-macos-artifact.cjs \
             --path "$DMG_PATH" \
             --label "debrute-desktop-${VERSION}-macos-${{ matrix.arch }}.dmg"
-      - name: Build signed Windows Desktop assets
+      - name: Build unsigned Windows Desktop assets
         if: matrix.platform == 'win32'
         shell: bash
         run: |
           set -euo pipefail
           pnpm --filter @debrute/desktop exec electron-builder --win nsis --x64 --publish never
-      - name: Smoke test signed packaged Desktop and Runtime
+      - name: Smoke test packaged Desktop and Runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -289,9 +266,9 @@ jobs:
 
           Desktop assets:
           - macOS: signed and notarized DMG installers for Apple Silicon and Intel Macs.
-          - Windows: NSIS installer for x64.
+          - Windows: NSIS installer for x64. This release is not Authenticode-signed, so Windows may show an Unknown Publisher or SmartScreen warning.
 
-          Runtime update payloads for macOS and Windows are complete signed Product seeds; they are consumed by Debrute Runtime and are not separate user installers.
+          Runtime update payloads for macOS and Windows are complete Product seeds authenticated by the signed update manifest; they are consumed by Debrute Runtime and are not separate user installers.
 
           Install Debrute by downloading the desktop installer for your platform. The runtime materializes the matching debrute CLI and official Skills on first launch, and product updates keep Desktop, runtime, CLI, and Skills on the same version.
           EOF

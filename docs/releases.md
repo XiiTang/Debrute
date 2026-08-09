@@ -4,15 +4,17 @@ Debrute publishes Desktop installers and Runtime-consumed complete Product
 archives on GitHub Releases.
 
 macOS Desktop builds are signed and notarized by Apple before publication.
-Windows Desktop and Product binaries are Authenticode-signed. The complete
-release targets are macOS arm64, macOS x64, and Windows x64.
+Windows Desktop installers and Product binaries are currently not
+Authenticode-signed, so Windows may show an **Unknown Publisher** or SmartScreen
+warning. The complete release targets are macOS arm64, macOS x64, and Windows
+x64.
 
-The Desktop installer contains one versioned Product seed: signed Rust Runtime
-and `debrute` CLI binaries, official Skills and model documentation, Web
-workbench resources, declared native workers, the target's pinned Raster
-Preview native libraries, and a strict Product manifest. Bootstrap validates
-the seed, installs it under the user's Product root, and retargets stable
-Runtime and CLI entrypoints to that version.
+The Desktop installer contains one versioned Product seed: Rust Runtime and
+`debrute` CLI binaries, official Skills and model documentation, Web workbench
+resources, declared native workers, the target's pinned Raster Preview native
+libraries, and a strict Product manifest. Bootstrap validates the seed,
+installs it under the user's Product root, and retargets stable Runtime and CLI
+entrypoints to that version.
 
 Runtime discovers Product updates. An available update exposes the same direct
 Install action in the Workbench title bar and **Settings > General**. Either
@@ -224,10 +226,16 @@ invalid credentials, command failure, malformed output, and timeout all fail the
 release step explicitly. A timeout stops the CI wait but does not cancel Apple's
 server-side submission.
 
-Windows release jobs require `WINDOWS_CSC_LINK` and
-`WINDOWS_CSC_KEY_PASSWORD`. The workflow signs and verifies the Rust Runtime and
-CLI before assembling the Product archive, then passes the same certificate to
-Electron Builder for the NSIS installer.
+Windows release jobs do not currently use an Authenticode certificate. The
+Windows Desktop executable, NSIS installer, Runtime, and CLI are published
+without a Windows publisher signature. Manual installation may therefore show
+an **Unknown Publisher** or SmartScreen warning. Download manual installers only
+from the official GitHub Release.
+
+This does not weaken the in-product update trust boundary: Runtime accepts an
+update only after verifying the detached Ed25519 signature on the update
+manifest and the declared SHA-256 digest and byte size of both the Desktop
+installer and complete Product archive.
 
 ## Signed Manifest Verification
 
@@ -254,8 +262,10 @@ architectures and Windows x64. macOS jobs require signing and
 notarization credentials and must pass the repository signing verifier before
 their artifacts can reach the publish job.
 
-Every required macOS and Windows matrix job also starts its signed unpacked
-Electron Builder application and runs the same packaged-product smoke check.
+Every required macOS and Windows matrix job also starts its unpacked Electron
+Builder application and runs the same packaged-product smoke check. The macOS
+job verifies the application signature before launch; the Windows job exercises
+the intentionally unsigned package without an Authenticode assertion.
 The check requires the bundled Runtime to reach `Ready` with its native tray,
 and uses an Electron remote-debugging endpoint bound only to loopback for that
 CI process to verify that one Desktop page loaded the packaged Web assets,

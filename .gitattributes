@@ -1,0 +1,4 @@
+scripts/canvas-text-font-subset/*.cc text eol=lf
+scripts/canvas-text-font-subset/*.h text eol=lf
+assets/wasm/LICENSES/*.txt text eol=lf
+assets/wasm/*.wasm binary

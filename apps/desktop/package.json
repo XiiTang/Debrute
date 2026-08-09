@@ -53,6 +53,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "executableName": "Debrute",
       "artifactName": "debrute-desktop-${version}-macos-${arch}.${ext}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
