@@ -5,13 +5,9 @@ use std::{
     fs::File,
     io::{Read as _, Seek as _, SeekFrom},
     pin::Pin,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     task::{Context, Poll},
     thread,
-    time::Duration,
 };
 
 use axum::{
@@ -26,22 +22,15 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::{
-    project::{
-        CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasSourceTarget,
-        CanvasStatePatch, CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
-        CanvasVideoPreviewEnsureStatus, CanvasVideoPreviewProbeStatus, CanvasVideoPreviewTarget,
-        PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath,
-        ProjectError, ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind,
-        ProjectRelativePath, ProjectRevisionResult, ProjectSession, ProjectUploadEntry,
-        RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
-        admit_project_path_entries, open_leased_project_file, read_project_text_file,
-        resolve_existing_project_path,
-    },
-    terminal::{
-        TERMINAL_PROTOCOL_VERSION, TerminalClientFrame, TerminalEvent, TerminalObservation,
-        TerminalServerFrame,
-    },
+use crate::project::{
+    CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasSourceTarget,
+    CanvasStatePatch, CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
+    CanvasVideoPreviewEnsureStatus, CanvasVideoPreviewProbeStatus, CanvasVideoPreviewTarget,
+    PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath, ProjectError,
+    ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind, ProjectRelativePath,
+    ProjectRevisionResult, ProjectSession, ProjectUploadEntry, RevisionedFilePlan,
+    RevisionedFileResponse, UpdateCanvasFeedbackInput, admit_project_path_entries,
+    open_leased_project_file, read_project_text_file, resolve_existing_project_path,
 };
 
 use super::{
@@ -50,20 +39,11 @@ use super::{
     routes::{json_body, json_body_with_limit, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
     services::{make_canvas_resolved_source_public, project_response},
-    websocket::{
-        MAX_WEBSOCKET_FRAME_BYTES, WebSocketConnection, WebSocketMessage, WebSocketUpgrade,
-        read_message, read_text, write_close, write_pong, write_text,
-    },
+    terminal_hub,
+    websocket::WebSocketUpgrade,
 };
 
 const FILE_STREAM_CHUNK: usize = 64 * 1024;
-const TERMINAL_HUB_OUTBOUND_CAPACITY: usize = 64;
-const TERMINAL_HUB_AUXILIARY_RESERVE_TIMEOUT: Duration = Duration::from_secs(5);
-const TERMINAL_HUB_WRITER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
-#[cfg(not(test))]
-const TERMINAL_HUB_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(test)]
-const TERMINAL_HUB_WRITE_TIMEOUT: Duration = Duration::from_millis(50);
 
 pub(super) async fn text_file(
     State(state): State<WorkbenchRouterState>,
@@ -1185,6 +1165,8 @@ pub(super) async fn terminal_websocket(
     request: Request,
 ) -> Response {
     let runtime = Arc::clone(&state.services);
+    let connections = Arc::clone(runtime.connections());
+    let terminals = runtime.terminals().clone();
     let canonical_root = workbench_connection
         .canonical_root
         .clone()
@@ -1194,495 +1176,15 @@ pub(super) async fn terminal_websocket(
         Err(response) => return response,
     };
     upgrade.on_upgrade(move |connection| {
-        tokio::spawn(run_terminal_websocket(
-            connection,
-            runtime,
+        tokio::spawn(terminal_hub::run(
+            connection.into_io(),
+            connections,
+            terminals,
             workbench_connection.browser_session,
             binding_id,
             canonical_root,
         ));
     })
-}
-
-async fn run_terminal_websocket(
-    connection: WebSocketConnection,
-    runtime: Arc<WorkbenchRuntimeServices>,
-    browser_session: String,
-    binding_id: String,
-    canonical_root: String,
-) {
-    let (mut reader, mut writer) = tokio::io::split(connection.into_io());
-    let first = tokio::time::timeout(
-        Duration::from_secs(5),
-        read_text(&mut reader, MAX_WEBSOCKET_FRAME_BYTES),
-    )
-    .await;
-    let Ok(Ok(Some(first))) = first else {
-        let _ = write_close(&mut writer).await;
-        return;
-    };
-    let Ok(TerminalClientFrame::Bind {
-        protocol_version,
-        connection_credential,
-    }) = serde_json::from_str::<TerminalClientFrame>(&first)
-    else {
-        let _ = write_close(&mut writer).await;
-        return;
-    };
-    if protocol_version != TERMINAL_PROTOCOL_VERSION {
-        let _ = write_close(&mut writer).await;
-        return;
-    }
-    let Some(mut project_lifetime) = runtime.connections().subscribe_project_lifetime(
-        &browser_session,
-        &connection_credential,
-        &binding_id,
-    ) else {
-        let _ = write_close(&mut writer).await;
-        return;
-    };
-    let observer_id = uuid::Uuid::new_v4().to_string();
-    let topology = match runtime.terminals().subscribe_topology(&canonical_root) {
-        Ok(topology) => topology,
-        Err(_) => {
-            let _ = write_close(&mut writer).await;
-            return;
-        }
-    };
-    let observations = Arc::new(Mutex::new(HashMap::<String, Arc<AtomicBool>>::new()));
-    let (sender, receiver) =
-        mpsc::channel::<TerminalOutboundMessage>(TERMINAL_HUB_OUTBOUND_CAPACITY);
-    let outbound_loss = Arc::new(tokio::sync::Notify::new());
-    let sync = TerminalServerFrame::Sync {
-        protocol_version: TERMINAL_PROTOCOL_VERSION,
-        topology_revision: topology.snapshot.revision,
-        sessions: topology.snapshot.sessions.clone(),
-    };
-    if write_terminal_frame(&mut writer, &sync).await.is_err() {
-        return;
-    }
-    let mut writer_task = tokio::spawn(run_terminal_writer(
-        writer,
-        receiver,
-        Arc::clone(&outbound_loss),
-    ));
-    let topology_sender = sender.clone();
-    let topology_outbound_loss = Arc::clone(&outbound_loss);
-    let topology_stop = Arc::new(AtomicBool::new(false));
-    let topology_thread_stop = Arc::clone(&topology_stop);
-    thread::spawn(move || {
-        while !topology_thread_stop.load(Ordering::Acquire) {
-            match topology.recv_timeout(Duration::from_millis(100)) {
-                Ok(snapshot) => {
-                    if topology_sender
-                        .try_send(TerminalOutboundMessage::Frame(
-                            TerminalServerFrame::Topology {
-                                topology_revision: snapshot.revision,
-                                sessions: snapshot.sessions,
-                            },
-                        ))
-                        .is_err()
-                    {
-                        topology_outbound_loss.notify_one();
-                        return;
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    topology_outbound_loss.notify_one();
-                    return;
-                }
-            }
-        }
-    });
-    loop {
-        tokio::select! {
-            incoming = read_message(&mut reader, MAX_WEBSOCKET_FRAME_BYTES) => {
-                let incoming = match incoming {
-                    Ok(Some(WebSocketMessage::Text(incoming))) => incoming,
-                    Ok(Some(WebSocketMessage::Ping(payload))) => {
-                        if !send_terminal_outbound(
-                            &sender,
-                            TerminalOutboundMessage::Pong(payload),
-                        ).await { break; }
-                        continue;
-                    }
-                    Ok(Some(WebSocketMessage::Pong)) => continue,
-                    Ok(Some(WebSocketMessage::Close) | None) | Err(_) => break,
-                };
-                let frame = match serde_json::from_str::<TerminalClientFrame>(&incoming) {
-                    Ok(frame) => frame,
-                    Err(error) => {
-                        let frame = terminal_protocol_error(
-                            None,
-                            None,
-                            "terminal_frame_invalid",
-                            error.to_string(),
-                        );
-                        let _ = send_terminal_outbound(
-                            &sender,
-                            TerminalOutboundMessage::Frame(frame),
-                        ).await;
-                        break;
-                    }
-                };
-                if handle_terminal_client_frame(
-                    &runtime,
-                    &canonical_root,
-                    &observer_id,
-                    frame,
-                    &sender,
-                    &observations,
-                    &outbound_loss,
-                ).await == TerminalClientFrameOutcome::CloseHub {
-                    break;
-                }
-            }
-            () = outbound_loss.notified() => break,
-            _ = project_lifetime.recv() => break,
-        }
-    }
-    topology_stop.store(true, Ordering::Release);
-    for stop in observations
-        .lock()
-        .expect("Terminal observation registry lock poisoned")
-        .values()
-    {
-        stop.store(true, Ordering::Release);
-    }
-    let _ = runtime
-        .terminals()
-        .detach_attachment(&canonical_root, &observer_id);
-    let _ = tokio::time::timeout(
-        TERMINAL_HUB_WRITER_SHUTDOWN_TIMEOUT,
-        sender.send(TerminalOutboundMessage::Close),
-    )
-    .await;
-    drop(sender);
-    if tokio::time::timeout(TERMINAL_HUB_WRITER_SHUTDOWN_TIMEOUT, &mut writer_task)
-        .await
-        .is_err()
-    {
-        writer_task.abort();
-        let _ = writer_task.await;
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TerminalClientFrameOutcome {
-    Continue,
-    CloseHub,
-}
-
-enum TerminalOutboundMessage {
-    Frame(TerminalServerFrame),
-    Pong(Vec<u8>),
-    Close,
-}
-
-async fn handle_terminal_client_frame(
-    runtime: &WorkbenchRuntimeServices,
-    canonical_root: &str,
-    observer_id: &str,
-    frame: TerminalClientFrame,
-    sender: &mpsc::Sender<TerminalOutboundMessage>,
-    observations: &Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
-    outbound_loss: &Arc<tokio::sync::Notify>,
-) -> TerminalClientFrameOutcome {
-    match frame {
-        TerminalClientFrame::Bind { .. } => {
-            let _ = send_terminal_outbound(
-                sender,
-                TerminalOutboundMessage::Frame(terminal_protocol_error(
-                    None,
-                    None,
-                    "terminal_already_bound",
-                    "Terminal hub is already bound.",
-                )),
-            )
-            .await;
-            TerminalClientFrameOutcome::CloseHub
-        }
-        TerminalClientFrame::Observe { terminal_id } => {
-            if observations
-                .lock()
-                .expect("Terminal observation registry lock poisoned")
-                .contains_key(&terminal_id)
-            {
-                return TerminalClientFrameOutcome::Continue;
-            }
-            let Some(permit) = reserve_terminal_control_outbound(sender).await else {
-                return TerminalClientFrameOutcome::CloseHub;
-            };
-            let observation =
-                match runtime
-                    .terminals()
-                    .observe(canonical_root, &terminal_id, observer_id)
-                {
-                    Ok(observation) => observation,
-                    Err(error) => {
-                        permit.send(TerminalOutboundMessage::Frame(terminal_protocol_error(
-                            None,
-                            Some(terminal_id.clone()),
-                            error.code(),
-                            error.to_string(),
-                        )));
-                        return TerminalClientFrameOutcome::Continue;
-                    }
-                };
-            permit.send(TerminalOutboundMessage::Frame(
-                TerminalServerFrame::Observed {
-                    session: Box::new(observation.session.clone()),
-                    checkpoint: observation.checkpoint.clone(),
-                },
-            ));
-            spawn_terminal_observation(
-                terminal_id,
-                observation,
-                sender.clone(),
-                Arc::clone(observations),
-                Arc::clone(outbound_loss),
-            );
-            TerminalClientFrameOutcome::Continue
-        }
-        TerminalClientFrame::Unobserve { terminal_id } => {
-            if let Some(stop) = observations
-                .lock()
-                .expect("Terminal observation registry lock poisoned")
-                .remove(&terminal_id)
-            {
-                stop.store(true, Ordering::Release);
-            }
-            TerminalClientFrameOutcome::Continue
-        }
-        TerminalClientFrame::Input {
-            request_id,
-            terminal_id,
-            sequence,
-            data,
-        } => {
-            execute_terminal_control(sender, || {
-                match runtime.terminals().write_input(
-                    canonical_root,
-                    &terminal_id,
-                    observer_id,
-                    sequence,
-                    data,
-                ) {
-                    Ok(acknowledged) => TerminalServerFrame::InputAck {
-                        request_id,
-                        terminal_id: terminal_id.clone(),
-                        sequence: acknowledged,
-                    },
-                    Err(error) => terminal_protocol_error(
-                        Some(request_id),
-                        Some(terminal_id.clone()),
-                        error.code(),
-                        error.to_string(),
-                    ),
-                }
-            })
-            .await
-        }
-        TerminalClientFrame::Resize {
-            request_id,
-            terminal_id,
-            cols,
-            rows,
-        } => {
-            execute_terminal_control(sender, || {
-                match runtime.terminals().resize(
-                    canonical_root,
-                    &terminal_id,
-                    observer_id,
-                    cols,
-                    rows,
-                ) {
-                    Ok(session) => TerminalServerFrame::Resized {
-                        request_id,
-                        session,
-                    },
-                    Err(error) => terminal_protocol_error(
-                        Some(request_id),
-                        Some(terminal_id.clone()),
-                        error.code(),
-                        error.to_string(),
-                    ),
-                }
-            })
-            .await
-        }
-    }
-}
-
-async fn execute_terminal_control(
-    sender: &mpsc::Sender<TerminalOutboundMessage>,
-    operation: impl FnOnce() -> TerminalServerFrame,
-) -> TerminalClientFrameOutcome {
-    let Some(permit) = reserve_terminal_control_outbound(sender).await else {
-        return TerminalClientFrameOutcome::CloseHub;
-    };
-    let response = operation();
-    permit.send(TerminalOutboundMessage::Frame(response));
-    TerminalClientFrameOutcome::Continue
-}
-
-async fn reserve_terminal_control_outbound(
-    sender: &mpsc::Sender<TerminalOutboundMessage>,
-) -> Option<mpsc::OwnedPermit<TerminalOutboundMessage>> {
-    sender.clone().reserve_owned().await.ok()
-}
-
-async fn reserve_terminal_auxiliary_outbound(
-    sender: &mpsc::Sender<TerminalOutboundMessage>,
-) -> Option<mpsc::OwnedPermit<TerminalOutboundMessage>> {
-    tokio::time::timeout(
-        TERMINAL_HUB_AUXILIARY_RESERVE_TIMEOUT,
-        sender.clone().reserve_owned(),
-    )
-    .await
-    .ok()?
-    .ok()
-}
-
-async fn send_terminal_outbound(
-    sender: &mpsc::Sender<TerminalOutboundMessage>,
-    message: TerminalOutboundMessage,
-) -> bool {
-    let Some(permit) = reserve_terminal_auxiliary_outbound(sender).await else {
-        return false;
-    };
-    permit.send(message);
-    true
-}
-
-async fn run_terminal_writer<Writer>(
-    mut writer: Writer,
-    mut receiver: mpsc::Receiver<TerminalOutboundMessage>,
-    outbound_loss: Arc<tokio::sync::Notify>,
-) where
-    Writer: tokio::io::AsyncWrite + Unpin,
-{
-    while let Some(message) = receiver.recv().await {
-        let closing = matches!(message, TerminalOutboundMessage::Close);
-        let result = tokio::time::timeout(TERMINAL_HUB_WRITE_TIMEOUT, async {
-            match message {
-                TerminalOutboundMessage::Frame(frame) => {
-                    write_terminal_frame(&mut writer, &frame).await
-                }
-                TerminalOutboundMessage::Pong(payload) => write_pong(&mut writer, &payload).await,
-                TerminalOutboundMessage::Close => write_close(&mut writer).await,
-            }
-        })
-        .await;
-        if !matches!(result, Ok(Ok(()))) {
-            outbound_loss.notify_one();
-            return;
-        }
-        if closing {
-            return;
-        }
-    }
-}
-
-fn spawn_terminal_observation(
-    terminal_id: String,
-    observation: TerminalObservation,
-    sender: mpsc::Sender<TerminalOutboundMessage>,
-    observations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
-    outbound_loss: Arc<tokio::sync::Notify>,
-) {
-    let stop = Arc::new(AtomicBool::new(false));
-    observations
-        .lock()
-        .expect("Terminal observation registry lock poisoned")
-        .insert(terminal_id.clone(), Arc::clone(&stop));
-    thread::spawn(move || {
-        while !stop.load(Ordering::Acquire) {
-            match observation.recv_timeout(Duration::from_millis(100)) {
-                Ok(event) => {
-                    if sender
-                        .try_send(TerminalOutboundMessage::Frame(terminal_event_frame(event)))
-                        .is_err()
-                    {
-                        outbound_loss.notify_one();
-                        break;
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-        }
-        let mut registry = observations
-            .lock()
-            .expect("Terminal observation registry lock poisoned");
-        if registry
-            .get(&terminal_id)
-            .is_some_and(|current| Arc::ptr_eq(current, &stop))
-        {
-            registry.remove(&terminal_id);
-        }
-    });
-}
-
-fn terminal_event_frame(event: TerminalEvent) -> TerminalServerFrame {
-    match event {
-        TerminalEvent::Output {
-            terminal_id,
-            sequence,
-            data_base64,
-        } => TerminalServerFrame::Output {
-            terminal_id,
-            sequence,
-            data_base64,
-        },
-        TerminalEvent::Status(session) => TerminalServerFrame::Status { session },
-        TerminalEvent::Exit {
-            terminal_id,
-            exit_code,
-            signal,
-        } => TerminalServerFrame::Exit {
-            terminal_id,
-            exit_code,
-            signal,
-        },
-        TerminalEvent::Error {
-            terminal_id,
-            code,
-            message,
-        } => TerminalServerFrame::Error {
-            request_id: None,
-            terminal_id: Some(terminal_id),
-            code,
-            message,
-        },
-    }
-}
-
-fn terminal_protocol_error(
-    request_id: Option<u64>,
-    terminal_id: Option<String>,
-    code: impl Into<String>,
-    message: impl Into<String>,
-) -> TerminalServerFrame {
-    TerminalServerFrame::Error {
-        request_id,
-        terminal_id,
-        code: code.into(),
-        message: message.into(),
-    }
-}
-
-async fn write_terminal_frame<Writer>(
-    writer: &mut Writer,
-    frame: &TerminalServerFrame,
-) -> std::io::Result<()>
-where
-    Writer: tokio::io::AsyncWrite + Unpin,
-{
-    let text = serde_json::to_string(frame)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    write_text(writer, &text).await
 }
 
 fn command_for_scope(
@@ -1962,6 +1464,11 @@ fn required_query_value<'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
+
     use super::*;
 
     #[tokio::test]
@@ -2062,142 +1569,5 @@ mod tests {
 
         assert_eq!(body.as_ref(), expected);
         std::fs::remove_file(path).unwrap();
-    }
-
-    #[tokio::test]
-    async fn terminal_control_reserves_response_capacity_before_side_effect() {
-        let (sender, mut receiver) = mpsc::channel(1);
-        sender
-            .try_send(TerminalOutboundMessage::Frame(
-                TerminalServerFrame::Topology {
-                    topology_revision: 0,
-                    sessions: Vec::new(),
-                },
-            ))
-            .unwrap();
-        let side_effect_executed = Arc::new(AtomicBool::new(false));
-        let operation_marker = Arc::clone(&side_effect_executed);
-
-        let outcome = {
-            let handling = execute_terminal_control(&sender, move || {
-                operation_marker.store(true, Ordering::Release);
-                TerminalServerFrame::Resized {
-                    request_id: 7,
-                    session: terminal_session("terminal-1", 100, 40),
-                }
-            });
-            tokio::pin!(handling);
-            assert!(
-                tokio::time::timeout(Duration::from_millis(25), &mut handling)
-                    .await
-                    .is_err(),
-                "control handling should wait until its response slot is reserved"
-            );
-            assert!(!side_effect_executed.load(Ordering::Acquire));
-            assert!(matches!(
-                receiver.recv().await,
-                Some(TerminalOutboundMessage::Frame(
-                    TerminalServerFrame::Topology { .. }
-                ))
-            ));
-            handling.as_mut().await
-        };
-        assert_eq!(outcome, TerminalClientFrameOutcome::Continue);
-        assert!(side_effect_executed.load(Ordering::Acquire));
-        assert!(matches!(
-            receiver.recv().await,
-            Some(TerminalOutboundMessage::Frame(
-                TerminalServerFrame::Resized {
-                    request_id: 7,
-                    session,
-                }
-            )) if session.id == "terminal-1" && session.cols == 100 && session.rows == 40
-        ));
-    }
-
-    #[tokio::test]
-    async fn terminal_control_skips_side_effect_when_writer_is_gone() {
-        let (sender, receiver) = mpsc::channel(1);
-        drop(receiver);
-        let side_effect_executed = Arc::new(AtomicBool::new(false));
-        let operation_marker = Arc::clone(&side_effect_executed);
-
-        let outcome = execute_terminal_control(&sender, move || {
-            operation_marker.store(true, Ordering::Release);
-            TerminalServerFrame::Resized {
-                request_id: 8,
-                session: terminal_session("terminal-2", 120, 50),
-            }
-        })
-        .await;
-
-        assert_eq!(outcome, TerminalClientFrameOutcome::CloseHub);
-        assert!(!side_effect_executed.load(Ordering::Acquire));
-    }
-
-    #[tokio::test]
-    async fn terminal_writer_times_out_a_stalled_connection() {
-        let (sender, receiver) = mpsc::channel(1);
-        sender
-            .send(TerminalOutboundMessage::Frame(
-                TerminalServerFrame::Topology {
-                    topology_revision: 0,
-                    sessions: Vec::new(),
-                },
-            ))
-            .await
-            .unwrap();
-        drop(sender);
-        let outbound_loss = Arc::new(tokio::sync::Notify::new());
-
-        run_terminal_writer(PendingTerminalWriter, receiver, Arc::clone(&outbound_loss)).await;
-
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), outbound_loss.notified())
-                .await
-                .is_ok(),
-            "a stalled writer should publish outbound loss"
-        );
-    }
-
-    struct PendingTerminalWriter;
-
-    fn terminal_session(id: &str, cols: u16, rows: u16) -> crate::terminal::TerminalSessionView {
-        crate::terminal::TerminalSessionView {
-            id: id.to_owned(),
-            title: "Terminal".to_owned(),
-            cwd_project_relative_path: String::new(),
-            cols,
-            rows,
-            status: crate::terminal::TerminalSessionStatus::Running,
-            exit_code: None,
-            signal: None,
-            created_at: "2026-07-30T00:00:00Z".to_owned(),
-            updated_at: "2026-07-30T00:00:00Z".to_owned(),
-        }
-    }
-
-    impl tokio::io::AsyncWrite for PendingTerminalWriter {
-        fn poll_write(
-            self: Pin<&mut Self>,
-            _context: &mut Context<'_>,
-            _buffer: &[u8],
-        ) -> Poll<std::io::Result<usize>> {
-            Poll::Pending
-        }
-
-        fn poll_flush(
-            self: Pin<&mut Self>,
-            _context: &mut Context<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn poll_shutdown(
-            self: Pin<&mut Self>,
-            _context: &mut Context<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
     }
 }

@@ -585,7 +585,8 @@ or Project Uses. See
 - Native ownership, lifecycle, and tray: `apps/runtime/src/control/`,
   `apps/runtime/src/main.rs`, and `apps/runtime/src/tray.rs`.
 - Workbench sessions, connections, Working Copies, and routing:
-  `apps/runtime/src/workbench/`.
+  `apps/runtime/src/workbench/`; the Terminal Hub connection state machine is
+  `apps/runtime/src/workbench/terminal_hub.rs`.
 - Global configuration: `apps/runtime/src/global/`.
 - Project sessions, typed uses, and revisions:
   `apps/runtime/src/project/registry.rs` and `service.rs`.
@@ -594,7 +595,8 @@ or Project Uses. See
 - Model execution, redaction, downloads, and output commit:
   `apps/runtime/src/model_request/`.
 - Desktop window host: `apps/desktop/src/electron/`.
-- Terminal ownership: `apps/runtime/src/terminal/`.
+- Terminal Session, PTY, emulator, and process-tree ownership:
+  `apps/runtime/src/terminal/`.
 - Product bootstrap and update: `apps/runtime/src/product/`.
 - Browser client connection: `apps/web/src/api/httpWorkbenchApiClient.ts` and
   `apps/web/src/workbench/WorkbenchApp.tsx`.

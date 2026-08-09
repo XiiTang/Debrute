@@ -8,6 +8,7 @@ mod project_routes;
 mod routes;
 mod routing;
 mod services;
+mod terminal_hub;
 pub(crate) mod websocket;
 mod working_copy;
 
