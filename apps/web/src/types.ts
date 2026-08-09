@@ -86,7 +86,6 @@ export interface WorkbenchActions {
   openTextEditorWindow: (projectRelativePath: string) => void;
   toggleTextFileWordWrap: (projectRelativePath: string) => void;
   updateCanvasNodeLayouts: (input: {
-    interaction: 'move' | 'resize';
     selectedProjectRelativePaths: string[];
     nodeLayouts: Array<{ projectRelativePath: string; x: number; y: number; width: number; height: number }>;
   }) => Promise<void>;

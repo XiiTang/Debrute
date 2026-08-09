@@ -26,7 +26,7 @@ interface SubmittedManualLayoutDraft {
 
 export function createCanvasManualLayoutLifecycle(input: {
   initialProjection: CanvasProjection;
-  submitManualLayout(mutation: Pick<CanvasManualLayoutDraft, 'interaction' | 'nodeLayouts'>): Promise<void>;
+  submitManualLayout(mutation: Pick<CanvasManualLayoutDraft, 'nodeLayouts'>): Promise<void>;
 }): CanvasManualLayoutLifecycle {
   let projection = input.initialProjection;
   let active: CanvasManualLayoutDraft | undefined;
@@ -84,7 +84,6 @@ export function createCanvasManualLayoutLifecycle(input: {
       });
       if (!geometryChanged) {
         await input.submitManualLayout({
-          interaction: draft.interaction,
           nodeLayouts: []
         });
         return;
@@ -93,7 +92,6 @@ export function createCanvasManualLayoutLifecycle(input: {
       submitted.push(submission);
       try {
         await input.submitManualLayout({
-          interaction: draft.interaction,
           nodeLayouts: [...draft.nodeLayouts]
         });
       } catch (error) {

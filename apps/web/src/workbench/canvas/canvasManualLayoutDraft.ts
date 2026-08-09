@@ -12,7 +12,6 @@ export interface CanvasLayoutOverride {
 }
 
 export interface CanvasManualLayoutDraft {
-  interaction: 'move' | 'resize';
   nodeLayouts: CanvasLayoutOverride[];
 }
 
@@ -25,7 +24,6 @@ export function canvasManualLayoutDraftFromMoveInteraction(input: {
     y: input.point.y - input.interaction.start.y
   };
   return {
-    interaction: 'move',
     nodeLayouts: input.interaction.origins.map((origin) => ({
       projectRelativePath: origin.projectRelativePath,
       x: origin.x + delta.x,
@@ -51,7 +49,6 @@ export function canvasManualLayoutDraftFromResizeInteraction(input: {
     input.interaction.preserveAspect
   );
   return {
-    interaction: 'resize',
     nodeLayouts: [{
       projectRelativePath: input.interaction.node.projectRelativePath,
       x: next.x,

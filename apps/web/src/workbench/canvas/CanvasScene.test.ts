@@ -96,6 +96,57 @@ describe('CanvasScene', () => {
     });
   });
 
+  it('uses the compact automatic audio size without rewriting Manual Layout', () => {
+    const resources = {
+      resources: [
+        { projectRelativePath: '', nodeKind: 'directory' as const },
+        {
+          projectRelativePath: 'theme.mp3',
+          nodeKind: 'file' as const,
+          mediaKind: 'audio' as const,
+          availability: {
+            state: 'available' as const,
+            size: 10,
+            mimeType: 'audio/mpeg',
+            fileUrl: '/theme.mp3',
+            revision: 'revision-audio'
+          }
+        }
+      ]
+    };
+    const measureGenericIdentityRows = measuredWidths(() => 20);
+    const automatic = projectCanvasNodeScene({
+      canonicalRoot: '/project',
+      resources,
+      state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
+      measureGenericIdentityRows
+    });
+    const manual = projectCanvasNodeScene({
+      canonicalRoot: '/project',
+      resources,
+      state: {
+        expandedDirectories: [],
+        nodeStates: {
+          'theme.mp3': { manualLayout: { x: 900, y: 800, width: 7_000, height: 6_000 } }
+        },
+        occlusionOrder: []
+      },
+      measureGenericIdentityRows
+    });
+
+    expect(automatic.nodes.find((node) => node.projectRelativePath === 'theme.mp3')).toMatchObject({
+      width: 3_200,
+      height: 680
+    });
+    expect(manual.nodes.find((node) => node.projectRelativePath === 'theme.mp3')).toMatchObject({
+      x: 900,
+      y: 800,
+      width: 7_000,
+      height: 6_000,
+      layoutMode: 'manual'
+    });
+  });
+
   it('overlays manual state and derives overlap-only stacking order', () => {
     const measuredLabels: string[][] = [];
     const result = projectCanvasNodeScene({

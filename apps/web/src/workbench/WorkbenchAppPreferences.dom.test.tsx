@@ -358,6 +358,25 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
+  it('runs the visible Open Project shortcut in the browser host', async () => {
+    const chooseProjectRoot = vi.fn(async () => undefined);
+    const { container, root } = await renderWorkbenchApp('/', { chooseProjectRoot });
+    const event = new KeyboardEvent('keydown', {
+      key: 'o',
+      metaKey: true,
+      cancelable: true
+    });
+
+    await act(async () => {
+      window.dispatchEvent(event);
+      await Promise.resolve();
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(chooseProjectRoot).toHaveBeenCalledOnce();
+    await unmount(root, container);
+  });
+
   it('presents a Project failure in the Desktop window selected for the request', async () => {
     let projectOpenRequested: ((projectRoot: string) => void) | undefined;
     window.debruteShell = shellApiFixture({

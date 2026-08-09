@@ -30,7 +30,14 @@ export type {
   WriteProjectTextFileInput
 } from './project.js';
 
-export type { NativeEditCommandId, NativeMenuCommand, NativeMenuCommandId } from './workbenchChrome.js';
+export {
+  workbenchCommandShortcutAccelerator,
+  workbenchCommandShortcutLabel,
+  workbenchCommandShortcutMatches,
+  type NativeEditCommandId,
+  type NativeMenuCommand,
+  type NativeMenuCommandId
+} from './workbenchChrome.js';
 
 export type CanvasNodeKind = 'directory' | 'file';
 export type CanvasMediaKind = 'image' | 'video' | 'audio' | 'text' | 'unknown';

@@ -128,7 +128,6 @@ const CanvasScene = React.memo(function CanvasScene({
   const runtimeInput: Parameters<typeof createCanvasEditorRuntime>[0] = {
     initialProjection: projection,
     submitManualLayout: (mutation) => actionsRef.current.updateCanvasNodeLayouts({
-      interaction: mutation.interaction,
       selectedProjectRelativePaths: [...mutation.selectedProjectRelativePaths],
       nodeLayouts: [...mutation.nodeLayouts]
     })

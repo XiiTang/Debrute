@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildWorkbenchTitleBarState,
+  workbenchMenuCommandItem,
   type WorkbenchMenuCommandId
 } from './workbenchTitleBarState';
 
@@ -40,6 +41,8 @@ describe('Workbench title-bar state', () => {
     expect(commandIds(state)).toContain('project.open-recent');
     expect(commandIds(state)).toContain('window.close');
     expect(commandIds(state)).toContain('edit.paste-and-match-style');
+    expect(workbenchMenuCommandItem(state, 'project.open-picker')).toMatchObject({ shortcutLabel: 'Ctrl+O' });
+    expect(workbenchMenuCommandItem(state, 'edit.redo')).toMatchObject({ shortcutLabel: 'Ctrl+Y' });
   });
 
   it('uses Web menus without native window controls for browser Workbench', () => {
@@ -60,6 +63,7 @@ describe('Workbench title-bar state', () => {
     expect(state.menus.map((menu) => menu.label)).toEqual(['File', 'Edit']);
     expect(commandIds(state)).not.toContain('window.close');
     expect(commandIds(state)).not.toContain('edit.paste-and-match-style');
+    expect(workbenchMenuCommandItem(state, 'project.open-picker')).toMatchObject({ shortcutLabel: '⌘O' });
   });
 
   it('omits native-only File commands without separator artifacts in the browser', () => {

@@ -1,7 +1,12 @@
-import type { DebruteProductPlatform, NativeMenuCommandId } from '@debrute/app-protocol';
+import {
+  workbenchCommandShortcutLabel,
+  type DebruteProductPlatform,
+  type NativeMenuCommandId
+} from '@debrute/app-protocol';
 import { createI18n, type WorkbenchI18n, type WorkbenchLocale } from '../i18n';
 
 type WorkbenchHostKind = 'web' | 'desktop';
+type WorkbenchNativeMenuCommandId = Exclude<NativeMenuCommandId, 'project.open-path'>;
 
 export type WorkbenchMenuId = 'file' | 'edit' | 'view';
 
@@ -26,6 +31,7 @@ export type WorkbenchMenuItem =
       label: string;
       commandId: WorkbenchMenuCommandId;
       enabled: boolean;
+      shortcutLabel?: string;
       payload?: Record<string, string | boolean>;
     }
   | {
@@ -65,6 +71,28 @@ export function buildWorkbenchTitleBarState(input: {
     presentation: titleBarPresentationForPlatform(input),
     menus: buildWorkbenchMenus({ ...input, i18n })
   };
+}
+
+export function workbenchMenuCommandItem(
+  state: WorkbenchTitleBarState,
+  commandId: WorkbenchMenuCommandId
+): Extract<WorkbenchMenuItem, { kind: 'command' }> | undefined {
+  for (const menu of state.menus) {
+    for (const item of menu.items) {
+      if (item.kind === 'command' && item.commandId === commandId) {
+        return item;
+      }
+      if (item.kind === 'submenu') {
+        const match = item.items.find((child): child is Extract<WorkbenchMenuItem, { kind: 'command' }> => (
+          child.kind === 'command' && child.commandId === commandId
+        ));
+        if (match) {
+          return match;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 function titleBarPresentationForPlatform(input: {
@@ -186,5 +214,28 @@ function buildWorkbenchMenus(input: {
       ]
     });
   }
-  return menus;
+  return menus.map((menu) => ({
+    ...menu,
+    items: addShortcutLabels(menu.items, input.platform)
+  }));
+}
+
+function addShortcutLabels(
+  items: readonly WorkbenchMenuItem[],
+  platform: DebruteProductPlatform
+): WorkbenchMenuItem[] {
+  return items.map((item) => {
+    if (item.kind === 'submenu') {
+      return { ...item, items: addShortcutLabels(item.items, platform) };
+    }
+    if (item.kind === 'separator' || !isNativeMenuCommandId(item.commandId)) {
+      return item;
+    }
+    const shortcutLabel = workbenchCommandShortcutLabel(item.commandId, platform);
+    return shortcutLabel ? { ...item, shortcutLabel } : item;
+  });
+}
+
+function isNativeMenuCommandId(commandId: WorkbenchMenuCommandId): commandId is WorkbenchNativeMenuCommandId {
+  return commandId !== 'project.open-recent' && commandId !== 'project.clear-recent';
 }

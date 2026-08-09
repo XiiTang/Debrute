@@ -1,4 +1,9 @@
-import type { CanvasPerfLongAnimationFrameInput, CanvasPerfSessionId, CanvasPerfTraceEvent } from './CanvasPerfMonitor';
+import type {
+  CanvasPerfFrameIntervalInput,
+  CanvasPerfLongAnimationFrameInput,
+  CanvasPerfSessionId,
+  CanvasPerfTraceEvent
+} from './CanvasPerfMonitor';
 
 interface CanvasPerfPerformanceApi {
   mark(name: string, options?: PerformanceMarkOptions): void;
@@ -33,14 +38,57 @@ export function createCanvasPerfBrowserAdapter(input: {
   supportedEntryTypes?: readonly string[] | undefined;
   highVolumeMarks?: boolean | undefined;
   onLongAnimationFrame?: ((input: CanvasPerfLongAnimationFrameInput) => void) | undefined;
+  requestAnimationFrame?: ((callback: FrameRequestCallback) => number) | undefined;
+  cancelAnimationFrame?: ((handle: number) => void) | undefined;
+  onFrameInterval?: ((input: CanvasPerfFrameIntervalInput) => void) | undefined;
 } = {}): CanvasPerfBrowserAdapter {
   const performanceApi = input.performanceApi ?? performance;
   const observerConstructor = canvasPerfObserverConstructor();
   const observerFactory = input.performanceObserverFactory
     ?? (observerConstructor ? (callback: CanvasPerfLongAnimationFrameObserverCallback) => new observerConstructor(callback) : undefined);
   const supportedEntryTypes = input.supportedEntryTypes ?? observerConstructor?.supportedEntryTypes ?? [];
+  const animationFrameApi = globalThis as typeof globalThis & {
+    requestAnimationFrame?: ((callback: FrameRequestCallback) => number) | undefined;
+    cancelAnimationFrame?: ((handle: number) => void) | undefined;
+  };
+  const requestFrame = input.requestAnimationFrame ?? animationFrameApi.requestAnimationFrame?.bind(globalThis);
+  const cancelFrame = input.cancelAnimationFrame ?? animationFrameApi.cancelAnimationFrame?.bind(globalThis);
   let observer: CanvasPerfLongAnimationFrameObserver | undefined;
+  let animationFrameId: number | undefined;
+  let previousFrameTimestamp: number | undefined;
   const observedSessions = new Map<CanvasPerfSessionId, CanvasPerfObservedSession>();
+
+  const stopFrameSampler = () => {
+    if (animationFrameId !== undefined && cancelFrame) {
+      cancelFrame(animationFrameId);
+    }
+    animationFrameId = undefined;
+    previousFrameTimestamp = undefined;
+  };
+
+  const sampleFrame = (timestamp: number) => {
+    animationFrameId = undefined;
+    if (observedSessions.size === 0) {
+      previousFrameTimestamp = undefined;
+      return;
+    }
+    if (previousFrameTimestamp !== undefined) {
+      input.onFrameInterval?.({
+        timestamp,
+        source: 'CanvasPerfBrowserAdapter',
+        frameIntervalMs: Math.max(0, timestamp - previousFrameTimestamp)
+      });
+    }
+    previousFrameTimestamp = timestamp;
+    animationFrameId = requestFrame?.(sampleFrame);
+  };
+
+  const ensureFrameSampler = () => {
+    if (!input.onFrameInterval || !requestFrame || animationFrameId !== undefined) {
+      return;
+    }
+    animationFrameId = requestFrame(sampleFrame);
+  };
 
   const disconnectObserver = () => {
     if (!observer) {
@@ -97,6 +145,7 @@ export function createCanvasPerfBrowserAdapter(input: {
           startedAt: event.timestamp
         });
         ensureObserver();
+        ensureFrameSampler();
         if (performanceApi) {
           safeMark(performanceApi, sessionMarkName(event.type, event.sessionId, 'start'), {
             source: event.source
@@ -111,7 +160,7 @@ export function createCanvasPerfBrowserAdapter(input: {
           const end = sessionMarkName(event.summary.type, event.sessionId, 'end');
           safeMark(performanceApi, end, {
             durationMs: event.summary.durationMs,
-            frameCount: event.summary.frameCount,
+            frameIntervalCount: event.summary.frameIntervalCount,
             mountedNodeCount: event.summary.mountedNodeCount,
             visibleNodeCount: event.summary.visibleNodeCount,
             culledNodeCount: event.summary.culledNodeCount
@@ -124,6 +173,7 @@ export function createCanvasPerfBrowserAdapter(input: {
         }
         if (observedSessions.size === 0) {
           disconnectObserver();
+          stopFrameSampler();
         }
         return;
       }
@@ -134,6 +184,7 @@ export function createCanvasPerfBrowserAdapter(input: {
     dispose() {
       observedSessions.clear();
       disconnectObserver();
+      stopFrameSampler();
     }
   };
 }

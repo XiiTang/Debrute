@@ -22,7 +22,7 @@ describe('CanvasPerfBrowserAdapter', () => {
     ]);
     expect(marks[1]?.detail).toEqual({
       durationMs: 50,
-      frameCount: 2,
+      frameIntervalCount: 2,
       mountedNodeCount: 8,
       visibleNodeCount: 5,
       culledNodeCount: 3
@@ -136,7 +136,89 @@ describe('CanvasPerfBrowserAdapter', () => {
     expect(longAnimationFrames).toEqual([]);
   });
 
-  it('ignores high-volume frame and counter events unless explicitly enabled', () => {
+  it('samples full rAF frame intervals while a session is active', () => {
+    const animationFrames = manualAnimationFrames();
+    const frameIntervals: unknown[] = [];
+    const adapter = createCanvasPerfBrowserAdapter({
+      performanceApi: { mark: vi.fn(), measure: vi.fn() },
+      requestAnimationFrame: animationFrames.request,
+      cancelAnimationFrame: animationFrames.cancel,
+      onFrameInterval: (frameInterval) => frameIntervals.push(frameInterval)
+    });
+
+    adapter.recordEvent(sessionStart('camera-pan:1', 'camera-pan'));
+    animationFrames.fire(100);
+    animationFrames.fire(116);
+    animationFrames.fire(132);
+    animationFrames.fire(182);
+    adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+
+    expect(frameIntervals).toEqual([
+      { timestamp: 116, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 16 },
+      { timestamp: 132, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 16 },
+      { timestamp: 182, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 50 }
+    ]);
+    expect(animationFrames.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one sampler across overlapping sessions and stops after the last session', () => {
+    const animationFrames = manualAnimationFrames();
+    const frameIntervals: unknown[] = [];
+    const adapter = createCanvasPerfBrowserAdapter({
+      performanceApi: { mark: vi.fn(), measure: vi.fn() },
+      requestAnimationFrame: animationFrames.request,
+      cancelAnimationFrame: animationFrames.cancel,
+      onFrameInterval: (frameInterval) => frameIntervals.push(frameInterval)
+    });
+
+    adapter.recordEvent(sessionStart('camera-pan:1', 'camera-pan'));
+    expect(animationFrames.pendingCount()).toBe(1);
+    adapter.recordEvent(sessionStart('pointer-move-node:2', 'pointer-move-node'));
+    expect(animationFrames.pendingCount()).toBe(1);
+
+    animationFrames.fire(100);
+    adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+    expect(animationFrames.pendingCount()).toBe(1);
+    animationFrames.fire(116);
+    adapter.recordEvent(sessionEnd('pointer-move-node:2', 'pointer-move-node'));
+
+    expect(frameIntervals).toEqual([
+      { timestamp: 116, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 16 }
+    ]);
+    expect(animationFrames.pendingCount()).toBe(0);
+    expect(animationFrames.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('measures browser frames independently of high-volume business events', () => {
+    const animationFrames = manualAnimationFrames();
+    const frameIntervals: unknown[] = [];
+    const adapter = createCanvasPerfBrowserAdapter({
+      performanceApi: { mark: vi.fn(), measure: vi.fn() },
+      requestAnimationFrame: animationFrames.request,
+      cancelAnimationFrame: animationFrames.cancel,
+      onFrameInterval: (frameInterval) => frameIntervals.push(frameInterval)
+    });
+
+    adapter.recordEvent(sessionStart('camera-pan:1', 'camera-pan'));
+    animationFrames.fire(100);
+    for (let index = 0; index < 20; index += 1) {
+      adapter.recordEvent({
+        kind: 'counter',
+        timestamp: 101 + index,
+        source: 'CanvasStageRuntime',
+        name: 'stage-camera-write',
+        value: 1
+      });
+    }
+    animationFrames.fire(120);
+    adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+
+    expect(frameIntervals).toEqual([
+      { timestamp: 120, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 20 }
+    ]);
+  });
+
+  it('ignores high-volume frame intervals and counter events unless explicitly enabled', () => {
     const mark = vi.fn();
     const adapter = createCanvasPerfBrowserAdapter({ performanceApi: { mark, measure: vi.fn() } });
 
@@ -149,26 +231,20 @@ describe('CanvasPerfBrowserAdapter', () => {
       value: 1
     });
     adapter.recordEvent({
-      kind: 'frame',
+      kind: 'frame-interval',
       timestamp: 2,
-      source: 'CanvasSurface',
-      elapsedMs: 16,
-      cameraState: 'moving',
-      mountedNodeCount: 1,
-      visibleNodeCount: 1,
-      culledNodeCount: 0,
-      reactCommitCount: 0,
-      renderSnapshotBuildCount: 0,
-      renderSnapshotReuseCount: 0,
-      stageWriteCount: 0,
-      rasterPreviewWorkCount: 0
+      source: 'CanvasPerfBrowserAdapter',
+      frameIntervalMs: 16
     });
 
     expect(mark).not.toHaveBeenCalled();
   });
 });
 
-function sessionStart(sessionId: 'camera-pan:1', sessionType: 'camera-pan'): CanvasPerfTraceEvent {
+function sessionStart(
+  sessionId: 'camera-pan:1' | 'pointer-move-node:2',
+  sessionType: 'camera-pan' | 'pointer-move-node'
+): CanvasPerfTraceEvent {
   return {
     kind: 'session-start',
     sessionId,
@@ -179,7 +255,10 @@ function sessionStart(sessionId: 'camera-pan:1', sessionType: 'camera-pan'): Can
   };
 }
 
-function sessionEnd(sessionId: 'camera-pan:1', sessionType: 'camera-pan'): CanvasPerfTraceEvent {
+function sessionEnd(
+  sessionId: 'camera-pan:1' | 'pointer-move-node:2',
+  sessionType: 'camera-pan' | 'pointer-move-node'
+): CanvasPerfTraceEvent {
   return {
     kind: 'session-end',
     sessionId,
@@ -189,12 +268,12 @@ function sessionEnd(sessionId: 'camera-pan:1', sessionType: 'camera-pan'): Canva
       sessionId,
       type: sessionType,
       durationMs: 50,
-      frameCount: 2,
-      p50FrameMs: 16,
-      p95FrameMs: 24,
-      p99FrameMs: 24,
-      minFrameMs: 16,
-      maxFrameMs: 24,
+      frameIntervalCount: 2,
+      p50FrameIntervalMs: 16,
+      p95FrameIntervalMs: 24,
+      p99FrameIntervalMs: 24,
+      minFrameIntervalMs: 16,
+      maxFrameIntervalMs: 24,
       mountedNodeCount: 8,
       visibleNodeCount: 5,
       culledNodeCount: 3,
@@ -202,5 +281,36 @@ function sessionEnd(sessionId: 'camera-pan:1', sessionType: 'camera-pan'): Canva
       cameraState: 'idle',
       counters: {}
     }
+  };
+}
+
+function manualAnimationFrames(): {
+  request: (callback: FrameRequestCallback) => number;
+  cancel: ReturnType<typeof vi.fn<(id: number) => void>>;
+  fire: (timestamp: number) => void;
+  pendingCount: () => number;
+} {
+  let nextId = 1;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  const request = (callback: FrameRequestCallback) => {
+    const id = nextId;
+    nextId += 1;
+    callbacks.set(id, callback);
+    return id;
+  };
+  const cancel = vi.fn<(id: number) => void>((id) => {
+    callbacks.delete(id);
+  });
+  return {
+    request,
+    cancel,
+    fire(timestamp) {
+      const pending = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of pending) {
+        callback(timestamp);
+      }
+    },
+    pendingCount: () => callbacks.size
   };
 }

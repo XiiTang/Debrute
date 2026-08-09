@@ -93,19 +93,10 @@ export interface CanvasPerfFinalState {
   cameraState: 'idle' | 'moving';
 }
 
-export interface CanvasPerfFrameInput {
+export interface CanvasPerfFrameIntervalInput {
   timestamp: number;
   source: CanvasPerfEventSource;
-  elapsedMs: number;
-  cameraState: 'idle' | 'moving';
-  mountedNodeCount: number;
-  visibleNodeCount: number;
-  culledNodeCount: number;
-  reactCommitCount: number;
-  renderSnapshotBuildCount: number;
-  renderSnapshotReuseCount: number;
-  stageWriteCount: number;
-  rasterPreviewWorkCount: number;
+  frameIntervalMs: number;
 }
 
 export interface CanvasPerfSessionStartInput {
@@ -151,7 +142,7 @@ export interface CanvasPerfLongAnimationFrameInput {
 export type CanvasPerfTraceEvent =
   | ({ kind: 'session-start'; sessionId: CanvasPerfSessionId } & CanvasPerfSessionStartInput)
   | ({ kind: 'session-end'; summary: CanvasPerfSessionSummary } & CanvasPerfSessionEndInput)
-  | ({ kind: 'frame' } & CanvasPerfFrameInput)
+  | ({ kind: 'frame-interval' } & CanvasPerfFrameIntervalInput)
   | ({ kind: 'counter'; value: number } & CanvasPerfCounterInput)
   | ({ kind: 'mark' } & CanvasPerfMarkInput)
   | ({ kind: 'long-animation-frame' } & CanvasPerfLongAnimationFrameInput);
@@ -168,12 +159,12 @@ export interface CanvasPerfSessionSummary extends Partial<CanvasPerfFinalState> 
   sessionId: CanvasPerfSessionId;
   type: CanvasPerfSessionType;
   durationMs: number;
-  frameCount: number;
-  p50FrameMs: number;
-  p95FrameMs: number;
-  p99FrameMs: number;
-  minFrameMs: number;
-  maxFrameMs: number;
+  frameIntervalCount: number;
+  p50FrameIntervalMs: number;
+  p95FrameIntervalMs: number;
+  p99FrameIntervalMs: number;
+  minFrameIntervalMs: number;
+  maxFrameIntervalMs: number;
   counters: Partial<Record<CanvasPerfCounterName, number>>;
   longAnimationFrames?: CanvasPerfLongAnimationFrame[] | undefined;
   detail?: Record<string, unknown> | undefined;
@@ -182,7 +173,7 @@ export interface CanvasPerfSessionSummary extends Partial<CanvasPerfFinalState> 
 export interface CanvasPerfMonitor {
   startSession(input: CanvasPerfSessionStartInput): CanvasPerfSessionId;
   endSession(input: CanvasPerfSessionEndInput): CanvasPerfSessionSummary | undefined;
-  recordFrame(input: CanvasPerfFrameInput): void;
+  recordFrameInterval(input: CanvasPerfFrameIntervalInput): void;
   recordCounter(input: CanvasPerfCounterInput): void;
   recordMark(input: CanvasPerfMarkInput): void;
   recordLongAnimationFrame(input: CanvasPerfLongAnimationFrameInput): void;
@@ -197,7 +188,7 @@ interface ActiveCanvasPerfSession {
   type: CanvasPerfSessionType;
   startedAt: number;
   detail?: Record<string, unknown> | undefined;
-  frames: CanvasPerfFrameInput[];
+  frameIntervals: CanvasPerfFrameIntervalInput[];
   counters: Partial<Record<CanvasPerfCounterName, number>>;
   longAnimationFrames: CanvasPerfLongAnimationFrame[];
 }
@@ -250,7 +241,7 @@ export function createCanvasPerfMonitor(input: {
         type: start.type,
         startedAt: start.timestamp,
         detail: start.detail,
-        frames: [],
+        frameIntervals: [],
         counters: {},
         longAnimationFrames: []
       });
@@ -268,11 +259,11 @@ export function createCanvasPerfMonitor(input: {
       emit({ kind: 'session-end', ...end, summary: lastSession });
       return lastSession;
     },
-    recordFrame(frame) {
+    recordFrameInterval(frameInterval) {
       for (const active of activeSessions.values()) {
-        active.frames.push(frame);
+        active.frameIntervals.push(frameInterval);
       }
-      emit({ kind: 'frame', ...frame });
+      emit({ kind: 'frame-interval', ...frameInterval });
     },
     recordCounter(counter) {
       const value = counter.value ?? 1;
@@ -323,28 +314,20 @@ export function createCanvasPerfMonitor(input: {
 }
 
 function summarizeSession(active: ActiveCanvasPerfSession, end: CanvasPerfSessionEndInput): CanvasPerfSessionSummary {
-  const frameTimes = active.frames.map((frame) => frame.elapsedMs).sort((left, right) => left - right);
-  const lastFrame = active.frames[active.frames.length - 1];
-  const finalState: Partial<CanvasPerfFinalState> = {
-    ...(lastFrame ? {
-      mountedNodeCount: lastFrame.mountedNodeCount,
-      visibleNodeCount: lastFrame.visibleNodeCount,
-      culledNodeCount: lastFrame.culledNodeCount,
-      cameraState: lastFrame.cameraState
-    } : {}),
-    ...end.finalState
-  };
+  const frameIntervals = active.frameIntervals
+    .map((frameInterval) => frameInterval.frameIntervalMs)
+    .sort((left, right) => left - right);
   return {
     sessionId: active.sessionId,
     type: active.type,
     durationMs: Math.max(0, end.timestamp - active.startedAt),
-    frameCount: active.frames.length,
-    p50FrameMs: percentile(frameTimes, 0.5),
-    p95FrameMs: percentile(frameTimes, 0.95),
-    p99FrameMs: percentile(frameTimes, 0.99),
-    minFrameMs: frameTimes[0] ?? 0,
-    maxFrameMs: frameTimes[frameTimes.length - 1] ?? 0,
-    ...finalState,
+    frameIntervalCount: active.frameIntervals.length,
+    p50FrameIntervalMs: percentile(frameIntervals, 0.5),
+    p95FrameIntervalMs: percentile(frameIntervals, 0.95),
+    p99FrameIntervalMs: percentile(frameIntervals, 0.99),
+    minFrameIntervalMs: frameIntervals[0] ?? 0,
+    maxFrameIntervalMs: frameIntervals[frameIntervals.length - 1] ?? 0,
+    ...end.finalState,
     counters: { ...active.counters },
     ...(active.longAnimationFrames.length > 0 ? { longAnimationFrames: [...active.longAnimationFrames] } : {}),
     ...(end.detail ?? active.detail ? { detail: { ...(active.detail ?? {}), ...(end.detail ?? {}) } } : {})

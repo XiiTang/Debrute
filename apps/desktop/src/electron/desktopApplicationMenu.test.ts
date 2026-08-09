@@ -22,7 +22,7 @@ describe('buildDesktopApplicationMenu', () => {
     const close = submenu.find((item) => 'label' in item && item.label === 'Close Window');
     const quit = submenu.find((item) => 'label' in item && item.label === 'Quit Debrute');
 
-    expect(close).toMatchObject({ role: 'close', accelerator: 'Ctrl+W' });
+    expect(close).toMatchObject({ role: 'close', accelerator: 'CmdOrCtrl+W' });
     expect(quit).toMatchObject({ accelerator: 'Ctrl+Q' });
     expect(submenu.at(-2)).toMatchObject({ type: 'separator' });
 
@@ -88,5 +88,26 @@ describe('buildDesktopApplicationMenu', () => {
       copy.click({} as never, window, {} as never);
     }
     expect(dispatchEditCommand).toHaveBeenCalledWith(window, 'edit.copy');
+  });
+
+  it('derives every active Edit accelerator from the shared shortcut contract', () => {
+    const template = buildDesktopApplicationMenu({
+      platform: 'win32',
+      recentItems: [],
+      newWindow: vi.fn(),
+      openProject: vi.fn(),
+      reloadWorkbench: vi.fn(),
+      dispatchEditCommand: vi.fn(),
+      quitProduct: vi.fn()
+    });
+    const edit = template.find((item) => item.label === 'Edit');
+    const submenu = Array.isArray(edit?.submenu) ? edit.submenu : [];
+
+    expect(submenu.find((item) => 'role' in item && item.role === 'undo'))
+      .toMatchObject({ accelerator: 'CmdOrCtrl+Z' });
+    expect(submenu.find((item) => 'role' in item && item.role === 'redo'))
+      .toMatchObject({ accelerator: 'CmdOrCtrl+Y' });
+    expect(submenu.find((item) => 'role' in item && item.role === 'pasteAndMatchStyle'))
+      .toMatchObject({ accelerator: 'CmdOrCtrl+Shift+V' });
   });
 });

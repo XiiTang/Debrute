@@ -120,13 +120,14 @@ display it should remain visually sharp at its smaller on-screen size; tier
 changes are verified from the requested and decoded pixel width, not from an
 intentional blur or visible loss of quality.
 
-Resource zoom follows the live camera while idle, freezes at the last idle zoom
-for the whole movement, and catches up to the final camera zoom when movement
-settles. A pure pan leaves the resource-zoom state untouched at both the moving
-and idle transitions, so it does not render `CanvasSurface`. This keeps camera
-transforms independent from preview-resolution churn. The short camera-idle
-threshold answers only whether interaction is still in progress; it does not
-authorize an immediate quality replacement.
+Resource zoom stays fixed while camera input is changing. Every live camera
+update restarts one Canvas-wide 500 ms Preview Quality Settlement timer. At the
+boundary, Canvas adopts the latest zoom only when that exact camera is idle; a
+new update replaces the pending target. The short camera-idle transition does
+not start or restart this timer. A pure pan and a zoom that returns to the
+current resource zoom schedule no quality update, so they do not render
+`CanvasSurface`. This keeps camera transforms independent from preview-
+resolution churn and emits only the final quality target for one gesture.
 
 ## Shared Raster Preview Presentation
 
@@ -157,10 +158,12 @@ immediately because there is no visible content to preserve.
 A continuity change synchronously excludes every older layer from rendering.
 Width-only changes preserve the current visible layer. Load or decode failure
 keeps a valid visible layer, records one typed local failure, and waits for an
-explicit node retry. There is no automatic retry, fixed settle timeout,
-double-animation-frame promotion delay, or media-specific presentation
-reducer. Text may request a layout-effect DOM-commit acknowledgement for its
-editor handoff; that acknowledgement does not claim that a browser paint
+explicit node retry. There is no automatic retry, presentation-owned settle
+timeout, double-animation-frame promotion delay, or media-specific presentation
+reducer. Preview Quality Settlement is the upstream Canvas resource-zoom
+authority; the shared presentation receives its settled value and owns no
+quality timer. Text may request a layout-effect DOM-commit acknowledgement for
+its editor handoff; that acknowledgement does not claim that a browser paint
 occurred and schedules no animation frame.
 
 Canonical source production remains media-specific. Images use revision-bound
@@ -183,9 +186,10 @@ DOM elements, decode promises, failures, or visible presentation state.
 Initial requests and quality replacements use the same start phase. A decoded
 replacement uses the publication phase; an initial result does not consume a
 publication slot because no older visible layer exists. Resource zoom remains
-fixed during camera motion, so intermediate width requests coalesce without a
-post-idle timer. Culling changes shell display only and never changes preview
-membership or canonical-source work.
+fixed until the Canvas-wide Preview Quality Settlement, so the scheduler
+receives no intermediate width variants and owns no post-idle timer. Culling
+changes shell display only and never changes preview membership or canonical-
+source work.
 
 Text and video producer registries observe interaction imperatively and rerun
 only while producer work remains. Their Runtime contexts expose stable command
@@ -425,19 +429,23 @@ for every Project page served by that process. Starting without the flag keeps
 it off; production builds do not expose the probe. Unit tests instantiate
 diagnostics directly instead of turning on the live global probe.
 `CanvasPerfMonitor` records structured pan, minimap, move, and resize sessions;
-frames; ownership-specific counters; final Canvas counts; and optional Long
-Animation Frame entries. Summaries report observed work rather than making
-machine-dependent timing promises.
+browser rAF frame intervals; ownership-specific counters; explicit final Canvas
+counts; and optional Long Animation Frame entries. Frame-interval summaries
+report p50, p95, p99, minimum, and maximum interval duration rather than
+interpreting camera or pointer callback frequency as browser frame time.
 When diagnostics are enabled, one React Profiler boundary surrounds the Canvas
 surface subtree so the `react-commit` counter includes nested preview-provider
 and node commits rather than only `CanvasSurface` renders.
 
 `CanvasPerfBrowserAdapter` maps session boundaries to browser performance marks
-and measures and observes non-buffered Long Animation Frames only when supported
-and while a session needs them. Ended sessions are removed immediately, so a
-later observer cannot replay their frame entries into another capture.
-Browser performance API failures are isolated from Canvas interaction.
-High-volume marks are opt-in.
+and measures. While any interaction session is active, one shared rAF loop uses
+the first callback as its baseline and records each subsequent full frame
+interval; overlapping sessions do not create another sampler, and the final
+session end cancels it. The adapter separately observes non-buffered Long
+Animation Frames only when supported and while a session needs them. Ended
+sessions are removed immediately, so a later observer cannot replay their
+entries into another capture. Browser performance API failures are isolated
+from Canvas interaction. High-volume marks are opt-in.
 
 An explicitly enabled development Canvas registers
 `window.__debruteCanvasPerf`. A caller can start a clean capture, perform an

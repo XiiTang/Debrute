@@ -84,6 +84,7 @@ export interface CanvasFeedbackCanvasBinding {
   focusedCapsuleId: string | undefined;
   getCurrentTargetProjectRelativePath(): string | undefined;
   suspendHoverTarget(): void;
+  dismissTarget(): void;
   handleTargetChange(target: CanvasFeedbackBarTarget | undefined): void;
   invalidateTarget(projectRelativePath: string): void;
   handleDraft(draft: CanvasLocalFeedbackDraft): void;
@@ -557,8 +558,23 @@ export function useCanvasFeedbackInteraction(input: {
     input.overlayRuntime.suspendFeedbackBarPlacement();
   }, [clearTargetTimer, input.overlayRuntime]);
 
+  const dismissTarget = useCallback(() => {
+    clearTargetTimer();
+    targetEpochRef.current += 1;
+    focusDeferredTargetRef.current = undefined;
+    hoveredRef.current = false;
+    focusedCapsuleIdRef.current = undefined;
+    setFocusedCapsuleId(undefined);
+    targetRef.current = undefined;
+    input.overlayRuntime.clearFeedbackBarPlacement();
+    setTarget(undefined);
+  }, [clearTargetTimer, input.overlayRuntime]);
+
   const handleTargetChange = useCallback((nextTarget: CanvasFeedbackBarTarget | undefined) => {
     clearTargetTimer();
+    if (!nextTarget && !targetRef.current) {
+      return;
+    }
     if (nextTarget?.kind === 'selection') {
       input.overlayRuntime.resumeFeedbackBarPlacement();
     } else if (nextTarget?.kind === 'node') {
@@ -613,16 +629,8 @@ export function useCanvasFeedbackInteraction(input: {
       || targetRef.current.projectRelativePath !== projectRelativePath) {
       return;
     }
-    clearTargetTimer();
-    targetEpochRef.current += 1;
-    focusDeferredTargetRef.current = undefined;
-    hoveredRef.current = false;
-    focusedCapsuleIdRef.current = undefined;
-    setFocusedCapsuleId(undefined);
-    targetRef.current = undefined;
-    input.overlayRuntime.clearFeedbackBarPlacement();
-    setTarget(undefined);
-  }, [clearTargetTimer, input.overlayRuntime]);
+    dismissTarget();
+  }, [dismissTarget]);
 
   const handlePointerEnter = useCallback(() => {
     hoveredRef.current = true;
@@ -779,6 +787,7 @@ export function useCanvasFeedbackInteraction(input: {
     focusedCapsuleId,
     getCurrentTargetProjectRelativePath,
     suspendHoverTarget,
+    dismissTarget,
     handleTargetChange,
     invalidateTarget,
     handleDraft,
@@ -793,6 +802,7 @@ export function useCanvasFeedbackInteraction(input: {
     localMode,
     localSpatialItems,
     suspendHoverTarget,
+    dismissTarget,
     composition,
     suppressedSpatialItemIds
   ]);

@@ -75,6 +75,10 @@ visible layer on replacement failure, and retries only explicitly. It has no
 off-DOM preloader, media-specific presentation reducer, fixed settle timeout,
 or animation-frame paint proxy.
 
+ADR 0012's Preview Quality Settlement is the upstream Canvas resource-zoom
+authority. It supplies one settled quality input to this presentation contract;
+it does not add a timer or settlement state to the shared presentation.
+
 This accepts two type-specific maintenance registries and type-specific protocol
 operations in exchange for preserving each source producer's real lifecycle.
 Reusing the Text registry or introducing one generic Preview Task Registry would

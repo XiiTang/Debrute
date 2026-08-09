@@ -14,6 +14,7 @@ import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
+import { CANVAS_PREVIEW_QUALITY_SETTLE_MS } from './CanvasResourceZoom.js';
 import { areCanvasNodeShellPropsEqual, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface
@@ -24,7 +25,6 @@ import {
   canvasFeedbackBarTargetForSelection,
   isCanvasPrimaryPointerEvent,
   pointerEventModifiers,
-  recordCanvasPerfFrame,
   syncCanvasPerfPointerInteractionSessionState,
   syncCanvasPerfSessionState,
   canvasPreviewResourceInteractionState,
@@ -670,14 +670,27 @@ describe('CanvasSurface', () => {
       edges: [],
     };
     const runtime = canvasRuntimeFixture(projection);
+    const dismissTarget = vi.fn();
+    const targetChanges: Array<CanvasFeedbackBarTarget | undefined> = [];
     const elementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
 
     try {
       await act(async () => {
-        root.render(surface(projection, { runtime }));
+        root.render(surface(projection, {
+          runtime,
+          canvasFeedback: feedbackDocument({}),
+          feedbackInteraction: feedbackInteractionFixture({
+            dismissTarget,
+            handleTargetChange: (target) => targetChanges.push(target)
+          })
+        }));
       });
       const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
       const nodeElement = container.querySelector<HTMLElement>('[data-canvas-node-path="flow/a.png"]')!;
+      Object.defineProperty(surfaceElement, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => new DOMRect(0, 0, 1280, 720)
+      });
       surfaceElement.setPointerCapture = vi.fn();
       surfaceElement.releasePointerCapture = vi.fn();
       const elementFromPoint = vi.fn(() => nodeElement);
@@ -692,12 +705,35 @@ describe('CanvasSurface', () => {
           clientX: 20,
           clientY: 20
         }));
+      });
+      await act(async () => {
         nodeElement.dispatchEvent(pointerEvent('pointerdown', {
           pointerId: 31,
           button: 0,
           clientX: 20,
           clientY: 20
         }));
+      });
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({
+        kind: 'move-node',
+        phase: 'pending'
+      });
+      expect(dismissTarget).not.toHaveBeenCalled();
+
+      await act(async () => {
+        nodeElement.dispatchEvent(pointerEvent('pointermove', {
+          pointerId: 31,
+          clientX: 22,
+          clientY: 22
+        }));
+      });
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({
+        kind: 'move-node',
+        phase: 'pending'
+      });
+      expect(dismissTarget).not.toHaveBeenCalled();
+
+      await act(async () => {
         nodeElement.dispatchEvent(pointerEvent('pointermove', {
           pointerId: 31,
           clientX: 60,
@@ -710,6 +746,10 @@ describe('CanvasSurface', () => {
       });
       expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
       expect(nodeElement.hasAttribute('data-canvas-hovered')).toBe(false);
+      expect(dismissTarget).toHaveBeenCalledOnce();
+      const presentedAfterMove = runtime.scene.getPresentedNodes().get('flow/a.png')!;
+      expect(runtime.scene.getRenderSnapshot().nodesByPath.get('flow/a.png')?.x)
+        .not.toBe(presentedAfterMove.x);
 
       await act(async () => {
         nodeElement.dispatchEvent(pointerEvent('pointerup', {
@@ -723,12 +763,67 @@ describe('CanvasSurface', () => {
 
       expect(elementFromPoint).toHaveBeenCalledTimes(1);
       expect(nodeElement.getAttribute('data-canvas-hovered')).toBe('true');
+      expect(targetChanges.at(-1)).toMatchObject({
+        kind: 'node',
+        projectRelativePath: 'flow/a.png',
+        anchorRect: {
+          x: presentedAfterMove.x,
+          y: presentedAfterMove.y,
+          width: presentedAfterMove.width,
+          height: presentedAfterMove.height
+        }
+      });
     } finally {
       if (elementFromPointDescriptor) {
         Object.defineProperty(document, 'elementFromPoint', elementFromPointDescriptor);
       } else {
         Reflect.deleteProperty(document, 'elementFromPoint');
       }
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('dismisses Feedback targeting immediately when node resize begins', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const projection: CanvasProjection = {
+      nodes: [nodeFixture('flow/a.png', 10, 10)],
+      edges: [],
+    };
+    const runtime = canvasRuntimeFixture(projection, {
+      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+    });
+    const dismissTarget = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(surface(projection, {
+          runtime,
+          canvasFeedback: feedbackDocument({}),
+          feedbackInteraction: feedbackInteractionFixture({ dismissTarget })
+        }));
+      });
+      const resizeHandle = container.querySelector<HTMLButtonElement>('[aria-label="Resize node se"]')!;
+      resizeHandle.setPointerCapture = vi.fn();
+
+      await act(async () => {
+        resizeHandle.dispatchEvent(pointerEvent('pointerdown', {
+          pointerId: 32,
+          button: 0,
+          clientX: 210,
+          clientY: 130
+        }));
+      });
+
+      expect(runtime.getSnapshot().pointerInteraction).toMatchObject({
+        kind: 'resize-node',
+        phase: 'active'
+      });
+      expect(dismissTarget).toHaveBeenCalledOnce();
+    } finally {
       runtime.dispose();
       await act(async () => root.unmount());
       container.remove();
@@ -1614,6 +1709,7 @@ describe('CanvasSurface', () => {
                 focusedCapsuleId: undefined,
                 getCurrentTargetProjectRelativePath: () => undefined,
                 suspendHoverTarget: vi.fn(),
+                dismissTarget: vi.fn(),
                 handleTargetChange: (target) => targetChanges.push(target),
                 invalidateTarget: vi.fn(),
                 handleDraft: vi.fn(),
@@ -2109,6 +2205,7 @@ describe('CanvasSurface', () => {
                 focusedCapsuleId: undefined,
                 getCurrentTargetProjectRelativePath: () => undefined,
                 suspendHoverTarget: vi.fn(),
+                dismissTarget: vi.fn(),
                 handleTargetChange: (target) => targetChanges.push(target),
                 invalidateTarget: vi.fn(),
                 handleDraft: vi.fn(),
@@ -2274,18 +2371,20 @@ describe('CanvasSurface', () => {
     try {
       await act(async () => {
         root.render(
-          <I18nProvider locale="en">
-            <CanvasSurface
-              productPlatform="darwin"
-              canvasState={emptyCanvasState}
-              projection={projection}
-              runtime={runtime}
-              actions={actions}
-              textFileBuffers={{}}
-              canvasFeedback={undefined}
-              textPreviewStyleDependencyKey="dark"
-            />
-          </I18nProvider>
+          <React.StrictMode>
+            <I18nProvider locale="en">
+              <CanvasSurface
+                productPlatform="darwin"
+                canvasState={emptyCanvasState}
+                projection={projection}
+                runtime={runtime}
+                actions={actions}
+                textFileBuffers={{}}
+                canvasFeedback={undefined}
+                textPreviewStyleDependencyKey="dark"
+              />
+            </I18nProvider>
+          </React.StrictMode>
         );
       });
       await settleCanvasImageHandoff();
@@ -2296,7 +2395,7 @@ describe('CanvasSurface', () => {
         runtime.camera.setCamera({ x: 0, y: 0, z: 1 });
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(CANVAS_CAMERA_IDLE_MS);
+        await vi.advanceTimersByTimeAsync(CANVAS_PREVIEW_QUALITY_SETTLE_MS);
       });
       await settleCanvasImageHandoff();
 
@@ -2555,15 +2654,13 @@ describe('CanvasSurface', () => {
     expect(started).toEqual(['cover.png']);
   });
 
-  it('starts, frames, and ends a camera session from camera state changes', () => {
+  it('starts and ends a camera session with timestamped counters and explicit final state', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
-    const reactCommitCountRef = { current: 0 };
 
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       snapshot: { cameraState: 'moving', camera: { x: 0, y: 0, z: 1 } },
       minimapOpen: false
     });
@@ -2575,101 +2672,68 @@ describe('CanvasSurface', () => {
       source: 'CanvasRasterPreviewPresentation',
       name: 'raster-preview-requested'
     });
-    reactCommitCountRef.current = 1;
-    recordCanvasPerfFrame({
-      perfMonitor: monitor,
-      sessionRef,
-      cameraState: 'moving',
-      renderSnapshot: {
-        nodesByPath: new Map([
-          ['flow/a.png', nodeFixture('flow/a.png', 0, 0)],
-          ['flow/b.png', nodeFixture('flow/b.png', 5000, 0)]
-        ]),
-        edgeGroups: []
-      },
-      cullingCounts: {
-        displayVisibleNodeCount: 1,
-        culledNodeCount: 1,
-        visibleEdgeCount: 0
-      },
-      reactCommitCountRef
-    });
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
-      minimapOpen: false
+      minimapOpen: false,
+      getFinalState: () => ({
+        mountedNodeCount: 2,
+        visibleNodeCount: 1,
+        culledNodeCount: 1,
+        zoomLevel: 1,
+        cameraState: 'idle'
+      })
     });
 
     expect(monitor.getLastSession()).toMatchObject({
       type: 'camera-pan',
-      frameCount: 1,
+      frameIntervalCount: 0,
       mountedNodeCount: 2,
       visibleNodeCount: 1,
-      culledNodeCount: 1
+      culledNodeCount: 1,
+      counters: {
+        'render-snapshot-build': 1,
+        'render-snapshot-reuse': 1,
+        'stage-camera-write': 1,
+        'raster-preview-requested': 1
+      }
     });
-    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
-      kind: 'frame',
-      renderSnapshotBuildCount: 1,
-      renderSnapshotReuseCount: 1,
-      stageWriteCount: 1,
-      rasterPreviewWorkCount: 1
-    });
+    expect(monitor.getTrace().events.some((event) => event.kind === 'frame-interval')).toBe(false);
   });
 
-  it('records moving camera frames without image node work when no image node counter fired', () => {
+  it('does not synthesize per-frame work counters for camera input callbacks', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
-    const reactCommitCountRef = { current: 0 };
 
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       snapshot: {
         cameraState: 'moving',
         camera: { x: 0, y: 0, z: 1 }
       },
       minimapOpen: false
     });
-    recordCanvasPerfFrame({
+    syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      cameraState: 'moving',
-      renderSnapshot: {
-        nodesByPath: new Map([
-          ['flow/a.png', nodeFixture('flow/a.png', 0, 0)]
-        ]),
-        edgeGroups: []
-      },
-      cullingCounts: {
-        displayVisibleNodeCount: 1,
-        culledNodeCount: 0,
-        visibleEdgeCount: 0
-      },
-      reactCommitCountRef
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
+      minimapOpen: false
     });
 
-    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
-      kind: 'frame',
-      cameraState: 'moving',
-      reactCommitCount: 0,
-      renderSnapshotBuildCount: 0,
-      rasterPreviewWorkCount: 0
-    });
+    expect(monitor.getLastSession()?.counters).toEqual({});
+    expect(monitor.getTrace().events.map((event) => event.kind)).toEqual(['session-start', 'session-end']);
   });
 
-  it('starts, frames, and ends a move drag session with render commits', () => {
+  it('starts and ends a move drag session with direct render commit counters', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
-    const reactCommitCountRef = { current: 0 };
     const activeNode = nodeFixture('flow/a.png', 0, 0);
 
     syncCanvasPerfPointerInteractionSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       pointerInteraction: {
         kind: 'move-node',
         pointerId: 42,
@@ -2686,33 +2750,27 @@ describe('CanvasSurface', () => {
       },
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
     });
-    reactCommitCountRef.current = 1;
-    recordCanvasPerfFrame({
-      perfMonitor: monitor,
-      sessionRef,
-      cameraState: 'idle',
-      renderSnapshot: {
-        nodesByPath: new Map([[activeNode.projectRelativePath, activeNode]]),
-        edgeGroups: []
-      },
-      cullingCounts: {
-        displayVisibleNodeCount: 1,
-        culledNodeCount: 0,
-        visibleEdgeCount: 0
-      },
-      reactCommitCountRef
+    monitor.recordCounter({
+      timestamp: 1,
+      source: 'CanvasSurface',
+      sessionTypes: ['pointer-move-node'],
+      name: 'react-commit'
     });
     syncCanvasPerfPointerInteractionSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       pointerInteraction: undefined,
-      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
+      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
+      getFinalState: () => ({
+        mountedNodeCount: 1,
+        visibleNodeCount: 1,
+        culledNodeCount: 0
+      })
     });
 
     expect(monitor.getLastSession()).toMatchObject({
       type: 'pointer-move-node',
-      frameCount: 1,
+      frameIntervalCount: 0,
       mountedNodeCount: 1,
       visibleNodeCount: 1,
       culledNodeCount: 0,
@@ -2720,16 +2778,11 @@ describe('CanvasSurface', () => {
         'react-commit': 1
       }
     });
-    expect(monitor.getTrace().events.find((event) => event.kind === 'frame')).toMatchObject({
-      kind: 'frame',
-      cameraState: 'idle'
-    });
   });
 
   it('monitors the full pointer operation and records whether it activated', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
-    const reactCommitCountRef = { current: 0 };
     const pointerInteraction = {
       kind: 'move-node' as const,
       pointerId: 43,
@@ -2747,7 +2800,6 @@ describe('CanvasSurface', () => {
     syncCanvasPerfPointerInteractionSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       pointerInteraction,
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
     });
@@ -2757,14 +2809,12 @@ describe('CanvasSurface', () => {
     syncCanvasPerfPointerInteractionSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       pointerInteraction: { ...pointerInteraction, phase: 'active', current: { x: 5, y: 0 } },
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
     });
     syncCanvasPerfPointerInteractionSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       pointerInteraction: undefined,
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
     });
@@ -2778,14 +2828,12 @@ describe('CanvasSurface', () => {
     syncCanvasPerfPointerInteractionSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       pointerInteraction: pendingOnlyInteraction,
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
     });
     syncCanvasPerfPointerInteractionSessionState({
       perfMonitor: monitor,
       sessionRef,
-      reactCommitCountRef,
       pointerInteraction: undefined,
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } }
     });
@@ -2863,6 +2911,7 @@ function feedbackInteractionFixture(
     focusedCapsuleId: undefined,
     getCurrentTargetProjectRelativePath: () => undefined,
     suspendHoverTarget: vi.fn(),
+    dismissTarget: vi.fn(),
     handleTargetChange: vi.fn(),
     invalidateTarget: vi.fn(),
     handleDraft: vi.fn(),

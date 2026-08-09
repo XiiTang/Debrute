@@ -21,7 +21,6 @@ describe('Canvas Manual Layout lifecycle', () => {
 
     await lifecycle.submitFinishedInteraction(finished);
     expect(submitted).toEqual([{
-      interaction: 'move',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 20, y: 0, width: 200, height: 120 }
       ]
@@ -143,7 +142,6 @@ describe('Canvas Manual Layout lifecycle', () => {
 
     await lifecycle.submitFinishedInteraction(moveState('flow/a.png', 0, 0));
     expect(submitManualLayout).toHaveBeenCalledWith({
-      interaction: 'move',
       nodeLayouts: []
     });
 

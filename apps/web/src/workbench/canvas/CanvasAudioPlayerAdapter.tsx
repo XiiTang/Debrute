@@ -12,6 +12,7 @@ import {
 export interface CanvasAudioPlayerAdapterProps {
   readonly source: string;
   readonly contentInteractionActive: boolean;
+  readonly playerLabel: string;
   readonly onError: (message: string) => void;
   readonly errorMessage: string;
 }
@@ -19,12 +20,17 @@ export interface CanvasAudioPlayerAdapterProps {
 export function CanvasAudioPlayerAdapter({
   source,
   contentInteractionActive,
+  playerLabel,
   onError,
   errorMessage
 }: CanvasAudioPlayerAdapterProps): React.ReactElement {
+  const setMediaController = React.useCallback((controller: HTMLElement | null) => {
+    controller?.setAttribute('aria-label', playerLabel);
+  }, [playerLabel]);
+
   return (
     <div className="canvas-audio-player">
-      <MediaController audio noHotkeys={!contentInteractionActive}>
+      <MediaController ref={setMediaController} audio noHotkeys={!contentInteractionActive}>
         <audio
           slot="media"
           src={source}

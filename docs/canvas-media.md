@@ -11,7 +11,7 @@ is documented in [`canvas-feedback.md`](./canvas-feedback.md).
 Canvas classifies visible Project files as image, video, audio, text, or
 unknown from their current Project path. Available nodes carry a revisioned raw
 file URL and MIME type. Available images and videos use intrinsic dimensions for
-automatic layout; audio uses a fixed Canvas size, and an unavailable video uses
+automatic layout; audio uses a fixed `3200 × 680` scene-unit Canvas size, and an unavailable video uses
 a fixed `3200 × 1800` scene-unit fallback so its Content Region remains usable.
 
 Every available file node derives its media revision by streaming the exact
@@ -26,8 +26,12 @@ Image nodes use the derived raster-preview lifecycle in
 Media Chrome control composition over a native audio playback element, with no
 native browser controls or browser-owned pill presentation. Their upper title
 bar is the Node Manipulation Region and their lower player is the Content
-Region. The native playback element uses no preloading, the node retains a fixed
-presentation size, and Audio playback state is not stored in Canvas state.
+Region. The Automatic Layout presentation is exactly the 32-pixel title row and
+36-pixel control row without a video surface or empty media area. Manual Layout
+continues to preserve its complete user-owned rectangle. The Media Chrome
+controller exposes the Workbench-localized Audio Player region name after its
+custom element connects. The native playback element uses no preloading, and
+Audio playback state is not stored in Canvas state.
 Audio uses the same mounted Media Chrome composition while content-inactive and
 content-active. Ending Content Activation neither pauses nor unloads it; the
 active state changes interaction ownership and Content Region presentation, not

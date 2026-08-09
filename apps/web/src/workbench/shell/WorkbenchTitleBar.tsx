@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Bell, ChevronRight, Maximize2, Minus, Square, X } from '../ui/index.js';
 import type { WorkbenchMenuId, WorkbenchMenuItem, WorkbenchTitleBarState } from './workbenchTitleBarState';
 import { IconButton, Menu } from '../ui/index.js';
@@ -47,6 +47,7 @@ export function WorkbenchTitleBar({
   const rootRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRefs = useRef(new Map<WorkbenchMenuId, HTMLButtonElement>());
+  const pendingKeyboardSubmenuEntryRef = useRef<string | undefined>(undefined);
   const capturedBehaviorOwnerRef = useRef<WorkbenchBehaviorOwner | undefined>(undefined);
   const currentMenu = state.menus.find((menu) => menu.id === openMenu);
 
@@ -66,6 +67,25 @@ export function WorkbenchTitleBar({
     window.addEventListener('pointerdown', closeOnPointerDown, { capture: true });
     return () => window.removeEventListener('pointerdown', closeOnPointerDown, { capture: true });
   }, [openMenu]);
+
+  useLayoutEffect(() => {
+    const itemId = pendingKeyboardSubmenuEntryRef.current;
+    if (!itemId || openSubmenu !== itemId) {
+      return;
+    }
+    pendingKeyboardSubmenuEntryRef.current = undefined;
+    focusFirstEnabledMenuItem(document.getElementById(`workbench-titlebar-submenu-${itemId}`));
+  }, [openSubmenu]);
+
+  const enterSubmenuByKeyboard = (itemId: string) => {
+    const existing = document.getElementById(`workbench-titlebar-submenu-${itemId}`);
+    if (existing) {
+      focusFirstEnabledMenuItem(existing);
+      return;
+    }
+    pendingKeyboardSubmenuEntryRef.current = itemId;
+    setOpenSubmenu(itemId);
+  };
 
   useEffect(() => {
     if (!openMenu) {
@@ -215,6 +235,7 @@ export function WorkbenchTitleBar({
               i18n,
               openSubmenu,
               setOpenSubmenu,
+              enterSubmenuByKeyboard,
               onCommand: (command) => {
                 const owner = capturedBehaviorOwnerRef.current;
                 capturedBehaviorOwnerRef.current = undefined;
@@ -238,12 +259,14 @@ interface RenderMenuItemOptions {
   openSubmenu: string | undefined;
   i18n: WorkbenchI18n;
   setOpenSubmenu(openSubmenu: string | undefined): void;
+  enterSubmenuByKeyboard(itemId: string): void;
   onCommand: WorkbenchTitleBarProps['onCommand'];
 }
 
 function renderMenuItem(
   item: WorkbenchMenuItem,
-  options: RenderMenuItemOptions
+  options: RenderMenuItemOptions,
+  level: 'parent' | 'submenu' = 'parent'
 ): React.ReactNode {
   if (item.kind === 'separator') {
     return <Menu.Separator key={item.id} />;
@@ -260,7 +283,7 @@ function renderMenuItem(
         <Menu.Item
           className="workbench-titlebar__submenu-trigger"
           disabled={!item.enabled}
-          icon={<ChevronRight />}
+          end={<ChevronRight aria-hidden="true" />}
           aria-haspopup="menu"
           aria-expanded={submenuOpen}
           aria-controls={submenuId}
@@ -269,16 +292,11 @@ function renderMenuItem(
               options.setOpenSubmenu(submenuOpen ? undefined : item.id);
             }
           }}
-          onFocus={() => {
-            if (item.enabled) {
-              options.setOpenSubmenu(item.id);
-            }
-          }}
           onKeyDown={(event) => {
             const action = titleBarMenuKeyAction(event.key);
             if (action === 'open-submenu' && item.enabled) {
               event.preventDefault();
-              options.setOpenSubmenu(item.id);
+              options.enterSubmenuByKeyboard(item.id);
             }
             if (action === 'close-submenu') {
               event.preventDefault();
@@ -304,7 +322,7 @@ function renderMenuItem(
               options.setOpenSubmenu(undefined);
             }}
           >
-            {item.items.map((subItem) => renderMenuItem(subItem, options))}
+            {item.items.map((subItem) => renderMenuItem(subItem, options, 'submenu'))}
           </Menu>
         ) : null}
       </div>
@@ -314,7 +332,11 @@ function renderMenuItem(
     <Menu.Item
       key={item.id}
       disabled={!item.enabled}
-      onMouseEnter={() => options.setOpenSubmenu(undefined)}
+      end={item.shortcutLabel ? (
+        <kbd className="workbench-titlebar__menu-shortcut">{item.shortcutLabel}</kbd>
+      ) : undefined}
+      onFocus={level === 'parent' ? () => options.setOpenSubmenu(undefined) : undefined}
+      onMouseEnter={level === 'parent' ? () => options.setOpenSubmenu(undefined) : undefined}
       onClick={() => {
         if (item.enabled) {
           options.onCommand(item);
@@ -324,6 +346,10 @@ function renderMenuItem(
       {item.label}
     </Menu.Item>
   );
+}
+
+function focusFirstEnabledMenuItem(menu: HTMLElement | null): void {
+  menu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
 }
 
 function titleBarClassName(state: WorkbenchTitleBarState): string {

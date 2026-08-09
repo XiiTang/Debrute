@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Loader2 } from './ui/index.js';
-import type {
-  DebruteProductPlatform,
-  DebruteWorkbenchRoute,
-  ProjectPathEntry
+import {
+  workbenchCommandShortcutMatches,
+  type DebruteProductPlatform,
+  type DebruteWorkbenchRoute,
+  type ProjectPathEntry
 } from '@debrute/app-protocol';
 import {
   DebruteHttpRequestError,
@@ -23,6 +24,7 @@ import {
 } from './canvas/CanvasScene.js';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
 import { createCanvasOcclusionMutationLane } from './canvas/CanvasOcclusionMutationLane.js';
+import { canvasNodeLayoutMutationPatch } from './canvas/canvasNodeLayoutMutation.js';
 import {
   CanvasFeedbackInteractionBar,
   useCanvasFeedbackInteraction
@@ -80,6 +82,7 @@ import { WorkbenchTitleBar } from './shell/WorkbenchTitleBar';
 import { executeDocumentEditCommand, executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands.js';
 import {
   buildWorkbenchTitleBarState,
+  workbenchMenuCommandItem,
   type WorkbenchMenuItem
 } from './shell/workbenchTitleBarState';
 import {
@@ -985,6 +988,11 @@ function WorkbenchBoundProjectApp({
     try {
       await enqueueCanvasOcclusionMutation(async (accepted) => {
         const context = canvasMutationContext(accepted);
+        const currentScene = projectCanvasNodeScene({
+          canonicalRoot: accepted.canonicalRoot,
+          resources: context.resources,
+          state: context.state
+        });
         const nextState = {
           ...context.state,
           nodeStates: { ...context.state.nodeStates }
@@ -1000,27 +1008,21 @@ function WorkbenchBoundProjectApp({
             }
           };
         }
-        const scene = projectCanvasNodeScene({
+        const nextScene = projectCanvasNodeScene({
           canonicalRoot: accepted.canonicalRoot,
           resources: context.resources,
           state: nextState
         });
-        await api.patchCanvasState({
-          occlusionOrder: raiseProjectedCanvasSelection(
-            context.state.occlusionOrder,
-            scene.nodes,
-            input.selectedProjectRelativePaths
-          ),
-          nodeStateUpdates: input.nodeLayouts.map((layout) => ({
-            projectRelativePath: layout.projectRelativePath,
-            manualLayout: {
-              x: layout.x,
-              y: layout.y,
-              width: layout.width,
-              height: layout.height
-            }
-          }))
+        const patch = canvasNodeLayoutMutationPatch({
+          currentNodes: currentScene.nodes,
+          nextNodes: nextScene.nodes,
+          currentOcclusionOrder: context.state.occlusionOrder,
+          selectedProjectRelativePaths: input.selectedProjectRelativePaths,
+          nodeLayouts: input.nodeLayouts
         });
+        if (patch) {
+          await api.patchCanvasState(patch);
+        }
       });
     } catch (error) {
       projectActivities.report({
@@ -1511,6 +1513,18 @@ function WorkbenchBoundProjectApp({
       if (event.defaultPrevented || event.isComposing) {
         return;
       }
+      if (
+        !getDebruteShellApi()
+        && workbenchCommandShortcutMatches('project.open-picker', event, productPlatform)
+      ) {
+        const item = workbenchMenuCommandItem(effectiveTitleBarState, 'project.open-picker');
+        if (item) {
+          handleTitleBarCommand(item);
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
       const command = workbenchFocusCommandFromKeyboardEvent(event, productPlatform);
       if (!command || !focusCommandRouter.dispatch(command)) {
         return;
@@ -1520,7 +1534,7 @@ function WorkbenchBoundProjectApp({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [focusCommandRouter, productPlatform]);
+  }, [effectiveTitleBarState, focusCommandRouter, handleTitleBarCommand, productPlatform]);
   useEffect(() => {
     const shell = getDebruteShellApi();
     return shell?.onNativeEditCommand((commandId) => {

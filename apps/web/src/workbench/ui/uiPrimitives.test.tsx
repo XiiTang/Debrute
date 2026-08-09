@@ -102,6 +102,26 @@ describe('Workbench UI primitives', () => {
     })).toBe(2);
   });
 
+  it('renders menu start and end content only when supplied', () => {
+    const html = renderToStaticMarkup(
+      <Menu ariaLabel="Layout actions">
+        <Menu.Item>Plain</Menu.Item>
+        <Menu.Item
+          start={<span data-testid="menu-start" />}
+          end={<span data-testid="menu-end">Ctrl+O</span>}
+        >
+          Open
+        </Menu.Item>
+      </Menu>
+    );
+
+    expect(html.match(/db-menu__item-start/g)).toHaveLength(1);
+    expect(html.match(/db-menu__item-end/g)).toHaveLength(1);
+    expect(html).toContain('data-testid="menu-start"');
+    expect(html).toContain('data-testid="menu-end"');
+    expect(html).not.toContain('db-menu__item-icon');
+  });
+
   it('centralizes tab keyboard focus order and skips disabled tabs', () => {
     expect(getNextTabIndex({
       currentIndex: 0,

@@ -92,12 +92,14 @@ const MenuRoot = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
 
 const MenuItem = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'default' | 'danger';
-  icon?: React.ReactNode;
+  start?: React.ReactNode;
+  end?: React.ReactNode;
 }>(function MenuItem({
   variant = 'default',
   disabled,
   className,
-  icon,
+  start,
+  end,
   children,
   type = 'button',
   ...props
@@ -112,8 +114,9 @@ const MenuItem = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<
       aria-disabled={disabled || undefined}
       className={cx('db-menu__item', `db-menu__item--${variant}`, className)}
     >
-      <span className="db-menu__item-icon" aria-hidden="true">{icon}</span>
+      {start ? <span className="db-menu__item-start" aria-hidden="true">{start}</span> : null}
       <span className="db-menu__item-label">{children}</span>
+      {end ? <span className="db-menu__item-end">{end}</span> : null}
     </button>
   );
 });

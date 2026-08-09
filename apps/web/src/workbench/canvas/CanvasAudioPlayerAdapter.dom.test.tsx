@@ -39,6 +39,7 @@ describe('CanvasAudioPlayerAdapter', () => {
           <CanvasAudioPlayerAdapter
             source="/media/theme.mp3"
             contentInteractionActive={false}
+            playerLabel="Audio player"
             errorMessage="Unable to load theme.mp3."
             onError={() => undefined}
           />
@@ -73,6 +74,7 @@ describe('CanvasAudioPlayerAdapter', () => {
           <CanvasAudioPlayerAdapter
             source="/media/theme.mp3"
             contentInteractionActive={false}
+            playerLabel="Audio player"
             errorMessage="Unable to load theme.mp3."
             onError={() => undefined}
           />
@@ -86,6 +88,7 @@ describe('CanvasAudioPlayerAdapter', () => {
           <CanvasAudioPlayerAdapter
             source="/media/theme.mp3"
             contentInteractionActive
+            playerLabel="Audio player"
             errorMessage="Unable to load theme.mp3."
             onError={() => undefined}
           />
@@ -111,6 +114,7 @@ describe('CanvasAudioPlayerAdapter', () => {
           <CanvasAudioPlayerAdapter
             source="/media/theme.mp3"
             contentInteractionActive
+            playerLabel="Audio player"
             errorMessage="Unable to load theme.mp3."
             onError={onError}
           />

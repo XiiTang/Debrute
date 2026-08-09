@@ -718,7 +718,7 @@
 .canvas-video-player media-controller {
   --media-control-background: color-mix(in srgb, var(--db-surface-2) 94%, transparent);
   --media-control-hover-background: var(--db-surface-3);
-  --media-control-bar-height: 32px;
+  --media-control-height: 24px;
   --media-control-padding: 6px;
   --media-font-size: var(--db-font-xs);
   color: var(--db-text);

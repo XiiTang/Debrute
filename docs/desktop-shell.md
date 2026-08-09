@@ -73,6 +73,12 @@ nothing. A request with a live native source targets only that source; a
 destroyed source discards the request. A request without a source targets the
 only live window when exactly one exists, and otherwise creates one ordinary
 Root Workbench carrying the initial Project in its one-use launch context.
+In the Windows Web title bar, pointer movement from the **Open Recent** trigger
+into one of its Project children keeps that submenu open; entering another File
+menu sibling closes it. Keyboard focus alone does not open the submenu; Right
+Arrow opens it and moves focus to its first enabled child, while Left Arrow
+returns focus to the trigger. Command, outside-pointer, and menu-close behavior
+continue through the same title-bar menu lifecycle.
 
 An existing target receives one semantic Project-open event and performs the
 normal Workbench binding operation itself. The new-window target submits its
@@ -196,6 +202,14 @@ title bar. Electron owns the native application menu. Native edit roles
 implement undo, redo, cut, copy, paste, paste-and-match-style, delete, select
 all, and speech commands; supported semantic commands are forwarded to the
 focused Workbench window.
+
+One platform-aware shortcut catalog defines keyboard matching, visible Web-menu
+labels, and Electron accelerators for shared Workbench commands. A shortcut on
+one of those commands therefore cannot drift from the command that the active
+host executes. Product-wide native roles such as Quit remain outside that
+Workbench command catalog. Title-bar Web menu items reserve no empty icon or
+shortcut columns: start and end content exist only for items that actually
+provide them, and each title-bar menu sizes to its content within the viewport.
 
 The Windows Web title bar forwards its closed native edit-command subset,
 including Delete and Paste and Match Style, to Electron for actual execution.

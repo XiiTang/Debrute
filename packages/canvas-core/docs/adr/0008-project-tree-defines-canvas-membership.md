@@ -79,7 +79,9 @@ Scene coordinates use a scale of 10 relative to CSS pixels:
 
 The generic-node width and label-measurement rules in the first two bullets,
 plus the unavailable-video part of the media-sizing rule, are superseded by ADR
-0010; the original generic sizing text remains here as decision history.
+0010. The audio-size bullet is superseded by the current Canvas media
+presentation contract in `docs/canvas-media.md`; the original sizing text
+remains here as decision history.
 
 - root, directory, unknown, and unavailable nodes are 48 CSS pixels high and
   `clamp(120, measured label width + 54, 360)` CSS pixels wide;

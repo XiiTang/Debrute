@@ -140,15 +140,21 @@
   top: var(--db-titlebar-height);
   left: 8px;
   z-index: var(--db-z-titlebar-menu);
-  min-width: 220px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
 }
 
 .workbench-titlebar__submenu {
   position: relative;
 }
 
-.workbench-titlebar__submenu-trigger .db-menu__item-icon {
-  justify-self: center;
+.workbench-titlebar__menu-shortcut {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--db-text-muted);
+  font: inherit;
+  white-space: nowrap;
 }
 
 .workbench-titlebar__submenu-menu {
@@ -156,5 +162,6 @@
   top: -5px;
   left: calc(100% + 4px);
   z-index: calc(var(--db-z-titlebar-menu) + 1);
-  min-width: 220px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
 }

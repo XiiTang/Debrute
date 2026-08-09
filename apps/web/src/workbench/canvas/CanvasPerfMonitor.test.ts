@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   createCanvasPerfMonitor,
   type CanvasPerfCounterName,
-  type CanvasPerfFrameInput,
+  type CanvasPerfFrameIntervalInput,
   type CanvasPerfTraceEvent
 } from './CanvasPerfMonitor';
 
 describe('CanvasPerfMonitor', () => {
-  it('records ordered session, counter, frame, mark, LoAF, and summary data', () => {
+  it('records ordered session, counter, frame interval, mark, LoAF, and summary data', () => {
     const emitted: CanvasPerfTraceEvent[] = [];
     const monitor = createCanvasPerfMonitor({
       onEvent: (event) => emitted.push(event)
@@ -21,9 +21,9 @@ describe('CanvasPerfMonitor', () => {
     });
 
     monitor.recordCounter({ timestamp: 108, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
-    monitor.recordFrame(frame(116, 16, { reactCommitCount: 0 }));
+    monitor.recordFrameInterval(frameInterval(116, 16));
     monitor.recordCounter({ timestamp: 120, source: 'CanvasSurface', name: 'react-commit' });
-    monitor.recordFrame(frame(132, 24, { reactCommitCount: 1 }));
+    monitor.recordFrameInterval(frameInterval(132, 24));
     monitor.recordLongAnimationFrame({
       timestamp: 140,
       source: 'CanvasPerfBrowserAdapter',
@@ -59,12 +59,12 @@ describe('CanvasPerfMonitor', () => {
       sessionId,
       type: 'camera-pan',
       durationMs: 60,
-      frameCount: 2,
-      p50FrameMs: 16,
-      p95FrameMs: 24,
-      p99FrameMs: 24,
-      minFrameMs: 16,
-      maxFrameMs: 24,
+      frameIntervalCount: 2,
+      p50FrameIntervalMs: 16,
+      p95FrameIntervalMs: 24,
+      p99FrameIntervalMs: 24,
+      minFrameIntervalMs: 16,
+      maxFrameIntervalMs: 24,
       mountedNodeCount: 8,
       visibleNodeCount: 5,
       culledNodeCount: 3,
@@ -86,9 +86,9 @@ describe('CanvasPerfMonitor', () => {
     expect(trace.events.map((event) => event.kind)).toEqual([
       'session-start',
       'counter',
-      'frame',
+      'frame-interval',
       'counter',
-      'frame',
+      'frame-interval',
       'long-animation-frame',
       'mark',
       'session-end'
@@ -229,24 +229,15 @@ describe('CanvasPerfMonitor', () => {
   });
 });
 
-function frame(
+function frameInterval(
   timestamp: number,
-  elapsedMs: number,
-  overrides: Partial<CanvasPerfFrameInput> = {}
-): CanvasPerfFrameInput {
+  frameIntervalMs: number,
+  overrides: Partial<CanvasPerfFrameIntervalInput> = {}
+): CanvasPerfFrameIntervalInput {
   return {
     timestamp,
-    source: 'CanvasSurface',
-    elapsedMs,
-    cameraState: 'moving',
-    mountedNodeCount: 8,
-    visibleNodeCount: 5,
-    culledNodeCount: 3,
-    reactCommitCount: 0,
-    renderSnapshotBuildCount: 0,
-    renderSnapshotReuseCount: 0,
-    stageWriteCount: 0,
-    rasterPreviewWorkCount: 0,
+    source: 'CanvasPerfBrowserAdapter',
+    frameIntervalMs,
     ...overrides
   };
 }

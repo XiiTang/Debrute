@@ -224,7 +224,6 @@ interface GestureState {
 export function createCanvasEditorRuntime(initial: {
   initialProjection: CanvasProjection;
   submitManualLayout(mutation: {
-    interaction: 'move' | 'resize';
     selectedProjectRelativePaths: readonly string[];
     nodeLayouts: CanvasLayoutOverride[];
   }): Promise<void>;

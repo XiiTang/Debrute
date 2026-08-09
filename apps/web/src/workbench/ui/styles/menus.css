@@ -43,8 +43,7 @@
 .db-menu__item {
   min-width: 0;
   min-height: var(--db-control-md);
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: var(--db-space-3);
   border: 0;
@@ -72,16 +71,25 @@
   color: color-mix(in oklch, var(--db-danger) 82%, white);
 }
 
-.db-menu__item-icon {
+.db-menu__item-start,
+.db-menu__item-end {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
   color: var(--db-text-muted);
 }
 
 .db-menu__item-label {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--db-font-sm);
+}
+
+.db-menu__item-end {
+  margin-left: auto;
 }
 
 .db-menu__separator {

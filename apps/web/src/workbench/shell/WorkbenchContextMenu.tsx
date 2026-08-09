@@ -150,7 +150,7 @@ export function WorkbenchContextMenu({
             key={item.command}
             disabled={item.disabled === true}
             variant={item.command === 'delete' || item.command === 'delete-permanently' ? 'danger' : 'default'}
-            icon={contextMenuIcon(item.command)}
+            start={contextMenuIcon(item.command)}
             onClick={() => {
               if (item.disabled === true) {
                 return;
@@ -188,7 +188,8 @@ function PhotoshopSubmenu({
       <Menu.Item
         ref={triggerRef}
         aria-haspopup="menu"
-        icon={<Send size={14} />}
+        start={<Send size={14} />}
+        end={<ChevronRight size={12} />}
         onClick={focusFirstTarget}
         onKeyDown={(event) => {
           if (event.key === 'ArrowRight') {
@@ -199,7 +200,6 @@ function PhotoshopSubmenu({
         }}
       >
         {workbenchContextMenuCommandLabel('send-to-photoshop', i18n)}
-        <ChevronRight className="workbench-context-submenu__chevron" size={12} />
       </Menu.Item>
       <Menu
         ref={submenuRef}

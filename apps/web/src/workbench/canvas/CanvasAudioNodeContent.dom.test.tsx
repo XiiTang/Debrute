@@ -8,11 +8,13 @@ vi.mock('./CanvasAudioPlayerAdapter.js', () => ({
   CanvasAudioPlayerAdapter: ({
     source,
     contentInteractionActive,
+    playerLabel,
     errorMessage,
     onError
   }: {
     source: string;
     contentInteractionActive: boolean;
+    playerLabel: string;
     errorMessage: string;
     onError: (message: string) => void;
   }) => (
@@ -20,6 +22,7 @@ vi.mock('./CanvasAudioPlayerAdapter.js', () => ({
       data-testid="audio-player-adapter"
       data-source={source}
       data-content-active={contentInteractionActive ? 'true' : 'false'}
+      data-player-label={playerLabel}
     >
       <button type="button" data-testid="audio-error" onClick={() => onError(errorMessage)}>fail</button>
     </div>
@@ -43,6 +46,7 @@ describe('CanvasAudioNodeContent', () => {
       expect(container.querySelector('.db-canvas-node-titlebar')?.getAttribute('data-canvas-node-zone')).toBe('manipulation');
       expect(container.querySelector('.canvas-audio-content')?.getAttribute('data-canvas-node-zone')).toBe('content');
       expect(player.getAttribute('data-content-active')).toBe('false');
+      expect(player.getAttribute('data-player-label')).toBe('Audio player');
 
       await renderAudio(root, audioNode(), true);
       expect(container.querySelector('[data-testid="audio-player-adapter"]')).toBe(player);

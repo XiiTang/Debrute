@@ -105,9 +105,14 @@ pointer position reconciles the final target. The same node restores the cached
 current placement immediately, a different node remains hidden until the new
 placement is written, and an empty result leaves the old Bar hidden until its
 ordinary target-loss clear completes. An active Canvas pointer interaction
-retains the existing target-loss lifecycle. A pending pointer interaction still
-retains its hover target. Every Canvas Node, including directories and the
-Project root, gets the fixed Feedback Marks
+retains the existing target-loss lifecycle unless it manipulates Canvas Node
+geometry. A pending node move still retains its hover target. Crossing the move
+threshold or beginning a resize immediately closes the current single-node or
+multi-selection Bar and clears its placement. Pointer release uses the existing
+single reconciliation to derive a new target from current presented node
+geometry; it performs no manipulation-specific delay, second hit-test, or
+reopen path. Every Canvas Node, including directories and the Project root,
+gets the fixed Feedback Marks
 and a node-comment authoring affordance. Image files also get pin and rectangle
 tools. Video files get moment-comment, moment-pin, and moment-rectangle tools
 only while a mounted player can supply a real timestamp.

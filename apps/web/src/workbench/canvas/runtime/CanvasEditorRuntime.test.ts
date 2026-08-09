@@ -717,7 +717,6 @@ describe('CanvasEditorRuntime', () => {
     });
     await runtime.input.finishPointerInteraction({ pointerId: 13, screenPoint: { x: 10, y: 15 } });
     expect(submitManualLayout).toHaveBeenCalledWith({
-      interaction: 'move',
       selectedProjectRelativePaths: ['flow/a.png', 'flow/b.png'],
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 20, y: 35, width: 100, height: 80 },

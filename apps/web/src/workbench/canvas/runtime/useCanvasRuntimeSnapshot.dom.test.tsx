@@ -6,10 +6,10 @@ import type {
   CanvasRuntimePointerInteraction,
   CanvasRuntimeSnapshot
 } from './CanvasEditorRuntime.js';
-import { useCanvasPointerInteraction } from './useCanvasRuntimeSnapshot.js';
+import { useCanvasActiveSelectionMarquee } from './useCanvasRuntimeSnapshot.js';
 
-describe('useCanvasPointerInteraction', () => {
-  it('rerenders on pointer interaction changes and unsubscribes on unmount', async () => {
+describe('useCanvasActiveSelectionMarquee', () => {
+  it('rerenders only for active selection marquee snapshots and unsubscribes on unmount', async () => {
     let pointerInteraction: CanvasRuntimePointerInteraction | undefined;
     const listeners = new Set<(next: CanvasRuntimePointerInteraction | undefined) => void>();
     const unsubscribe = vi.fn();
@@ -25,26 +25,38 @@ describe('useCanvasPointerInteraction', () => {
         };
       }
     } as CanvasEditorRuntime;
-    const renders: Array<CanvasRuntimePointerInteraction['kind'] | undefined> = [];
+    const renders: Array<number | undefined> = [];
     const container = document.createElement('div');
     const root = createRoot(container);
 
     function Probe(): ReactElement {
-      const interaction = useCanvasPointerInteraction(runtime);
-      renders.push(interaction?.kind);
-      return <span>{interaction?.kind ?? 'idle'}</span>;
+      const marquee = useCanvasActiveSelectionMarquee(runtime);
+      renders.push(marquee?.rect?.x);
+      return <span>{marquee?.rect?.x ?? 'idle'}</span>;
     }
 
     await act(async () => root.render(<Probe />));
     expect(renders).toEqual([undefined]);
 
-    pointerInteraction = selectionMarquee();
+    pointerInteraction = moveInteraction();
     await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
-    expect(renders).toEqual([undefined, 'selection-marquee']);
+    pointerInteraction = resizeInteraction();
+    await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
+    pointerInteraction = selectionMarquee('pending');
+    await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
+    expect(renders).toEqual([undefined]);
+
+    pointerInteraction = selectionMarquee('active', 10);
+    await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
+    expect(renders).toEqual([undefined, 10]);
+
+    pointerInteraction = selectionMarquee('active', 20);
+    await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
+    expect(renders).toEqual([undefined, 10, 20]);
 
     pointerInteraction = undefined;
     await act(async () => listeners.forEach((listener) => listener(pointerInteraction)));
-    expect(renders).toEqual([undefined, 'selection-marquee', undefined]);
+    expect(renders).toEqual([undefined, 10, 20, undefined]);
 
     await act(async () => root.unmount());
     expect(unsubscribe).toHaveBeenCalledOnce();
@@ -65,11 +77,14 @@ function runtimeSnapshot(
   };
 }
 
-function selectionMarquee(): CanvasRuntimePointerInteraction {
+function selectionMarquee(
+  phase: 'pending' | 'active',
+  x = 10
+): CanvasRuntimePointerInteraction {
   return {
     kind: 'selection-marquee',
     pointerId: 1,
-    phase: 'pending',
+    phase,
     startScreen: { x: 10, y: 20 },
     currentScreen: { x: 10, y: 20 },
     start: { x: 10, y: 20 },
@@ -77,6 +92,42 @@ function selectionMarquee(): CanvasRuntimePointerInteraction {
     initialSelection: undefined,
     initialContentInteractionProjectRelativePath: undefined,
     additive: false,
-    topEdgeInset: 0
+    topEdgeInset: 0,
+    ...(phase === 'active' ? { rect: { x, y: 20, width: 30, height: 40 } } : {})
+  };
+}
+
+function moveInteraction(): CanvasRuntimePointerInteraction {
+  return {
+    kind: 'move-node',
+    pointerId: 2,
+    phase: 'active',
+    startScreen: { x: 0, y: 0 },
+    currentScreen: { x: 10, y: 10 },
+    start: { x: 0, y: 0 },
+    current: { x: 10, y: 10 },
+    initialSelection: undefined,
+    initialContentInteractionProjectRelativePath: undefined,
+    pressedProjectRelativePath: 'node.png',
+    additive: false,
+    origins: [{ projectRelativePath: 'node.png', x: 0, y: 0, width: 100, height: 100 }]
+  };
+}
+
+function resizeInteraction(): CanvasRuntimePointerInteraction {
+  return {
+    kind: 'resize-node',
+    pointerId: 3,
+    phase: 'active',
+    startScreen: { x: 0, y: 0 },
+    currentScreen: { x: 10, y: 10 },
+    handle: 'se',
+    start: { x: 0, y: 0 },
+    current: { x: 10, y: 10 },
+    initialSelection: undefined,
+    initialContentInteractionProjectRelativePath: undefined,
+    node: { projectRelativePath: 'node.png', nodeKind: 'file', mediaKind: 'image' },
+    origin: { x: 0, y: 0, width: 100, height: 100 },
+    preserveAspect: false
   };
 }

@@ -65,6 +65,7 @@ export function CanvasAudioNodeContent({
               key={`${source}:${retryKey}`}
               source={source}
               contentInteractionActive={contentInteractionActive}
+              playerLabel={i18n.t('canvas.node.audioPlayer')}
               errorMessage={i18n.t('canvas.node.unableToLoad', { path: node.projectRelativePath })}
               onError={(message) => {
                 setError(message);

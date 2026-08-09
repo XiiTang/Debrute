@@ -260,6 +260,12 @@ Changing width preserves continuity; changing any pixel-producing input does
 not.
 _Avoid_: Preview Variant Identity, source URL, load key
 
+**Preview Quality Settlement**:
+The transient boundary after which the Canvas may adopt the latest camera scale
+for Preview Variant selection. It follows 500 ms of uninterrupted camera quiet,
+is independent of interaction idle, and is shared across raster media.
+_Avoid_: Camera idle, resource debounce, preview publication
+
 **Feedback Mark**:
 A selected categorical review signal that applies to one Project Path target as a
 whole. One atomic Mark command may set or clear it across an exact path

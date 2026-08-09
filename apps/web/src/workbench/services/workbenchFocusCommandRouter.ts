@@ -1,4 +1,7 @@
-import type { DebruteProductPlatform } from '@debrute/app-protocol';
+import {
+  workbenchCommandShortcutMatches,
+  type DebruteProductPlatform
+} from '@debrute/app-protocol';
 import type { CanvasProjection } from '../canvas/CanvasScene.js';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.js';
 import { canvasNodeSelection, selectedNodeProjectRelativePaths } from '../canvas/runtime/canvasSelection.js';
@@ -99,21 +102,22 @@ export function workbenchFocusCommandFromKeyboardEvent(
   if (event.key === 'Escape') {
     return 'escape';
   }
-  const primary = platform === 'darwin' ? event.metaKey : event.ctrlKey;
-  if (primary) {
-    const key = event.key.toLowerCase();
-    if (key === 'a') return 'select-all';
-    if (key === 'c') return 'copy';
-    if (key === 'x') return 'cut';
-    if (key === 'v') return 'paste';
-    if (platform === 'darwin' && event.key === 'Backspace') {
-      return event.altKey ? 'delete-permanently' : 'trash';
-    }
+  if (workbenchCommandShortcutMatches('edit.delete-permanently', event, platform)) {
+    return 'delete-permanently';
   }
-  if (platform !== 'darwin' && event.key === 'Delete') {
-    return event.shiftKey ? 'delete-permanently' : 'trash';
-  }
-  return undefined;
+  const commandIds = [
+    'edit.select-all',
+    'edit.copy',
+    'edit.cut',
+    'edit.paste',
+    'edit.delete'
+  ] as const;
+  const commandId = commandIds.find((candidate) => (
+    workbenchCommandShortcutMatches(candidate, event, platform)
+  ));
+  return commandId
+    ? workbenchFocusCommandFromMenuCommandId(commandId)
+    : undefined;
 }
 
 export function workbenchFocusCommandFromMenuCommandId(

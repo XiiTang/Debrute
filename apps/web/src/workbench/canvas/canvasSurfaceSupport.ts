@@ -15,9 +15,6 @@ import {
 } from '../shell/floatingBars';
 import type { DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
 import {
-  CANVAS_PERF_INTERACTION_SESSION_TYPES,
-  type CanvasPerfCounterName,
-  type CanvasPerfCounterTotals,
   type CanvasPerfFinalState,
   type CanvasPerfMonitor,
   type CanvasPerfSessionId
@@ -48,9 +45,6 @@ export function isCanvasPrimaryPointerEvent(
 
 export interface CanvasPerfRuntimeSession {
   sessionId: CanvasPerfSessionId;
-  lastFrameTimestamp: number;
-  reactCommitCount: number;
-  counterTotals: CanvasPerfCounterTotals;
   pointerInteractionActivated?: boolean | undefined;
 }
 
@@ -62,29 +56,12 @@ export interface CanvasPerfDebugSnapshotContext {
   surfaceElement: HTMLElement | null;
 }
 
-const STAGE_WRITE_COUNTERS = [
-  'stage-camera-write',
-  'stage-node-layout-write',
-  'stage-node-visibility-write',
-  'stage-edge-visibility-write',
-  'stage-edge-geometry-write'
-] as const satisfies readonly CanvasPerfCounterName[];
-
-const RASTER_PREVIEW_WORK_COUNTERS = [
-  'raster-preview-requested',
-  'raster-preview-pending-mounted',
-  'raster-preview-decoded',
-  'raster-preview-published',
-  'raster-preview-failed',
-  'raster-preview-retried'
-] as const satisfies readonly CanvasPerfCounterName[];
-
 export function syncCanvasPerfSessionState(input: {
   perfMonitor: CanvasPerfMonitor | undefined;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
-  reactCommitCountRef: { current: number };
   snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
   minimapOpen: boolean;
+  getFinalState?: (() => Partial<CanvasPerfFinalState>) | undefined;
 }): void {
   const perfMonitor = input.perfMonitor;
   if (!perfMonitor) {
@@ -102,12 +79,7 @@ export function syncCanvasPerfSessionState(input: {
           zoomLevel: input.snapshot.camera.z
         }
       });
-      input.sessionRef.current = {
-        sessionId,
-        lastFrameTimestamp: timestamp,
-        reactCommitCount: input.reactCommitCountRef.current,
-        counterTotals: perfMonitor.getCounterTotals()
-      };
+      input.sessionRef.current = { sessionId };
     }
     return;
   }
@@ -119,7 +91,8 @@ export function syncCanvasPerfSessionState(input: {
       source: 'CanvasSurface',
       finalState: {
         zoomLevel: input.snapshot.camera.z,
-        cameraState: input.snapshot.cameraState
+        cameraState: input.snapshot.cameraState,
+        ...input.getFinalState?.()
       }
     });
     input.sessionRef.current = undefined;
@@ -129,10 +102,9 @@ export function syncCanvasPerfSessionState(input: {
 export function syncCanvasPerfPointerInteractionSessionState(input: {
   perfMonitor: CanvasPerfMonitor | undefined;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
-  reactCommitCountRef: { current: number };
   pointerInteraction: CanvasRuntimePointerInteraction | undefined;
   snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
-  finalState?: Partial<CanvasPerfFinalState> | undefined;
+  getFinalState?: (() => Partial<CanvasPerfFinalState>) | undefined;
 }): void {
   const perfMonitor = input.perfMonitor;
   if (!perfMonitor) {
@@ -153,9 +125,6 @@ export function syncCanvasPerfPointerInteractionSessionState(input: {
       });
       input.sessionRef.current = {
         sessionId,
-        lastFrameTimestamp: timestamp,
-        reactCommitCount: input.reactCommitCountRef.current,
-        counterTotals: perfMonitor.getCounterTotals(),
         pointerInteractionActivated: input.pointerInteraction.phase === 'active'
       };
     } else if (input.pointerInteraction.phase === 'active') {
@@ -172,73 +141,12 @@ export function syncCanvasPerfPointerInteractionSessionState(input: {
       finalState: {
         zoomLevel: input.snapshot.camera.z,
         cameraState: input.snapshot.cameraState,
-        ...input.finalState
+        ...input.getFinalState?.()
       },
       detail: { activated: session.pointerInteractionActivated === true }
     });
     input.sessionRef.current = undefined;
   }
-}
-
-export function recordCanvasPerfFrame(input: {
-  perfMonitor: CanvasPerfMonitor | undefined;
-  sessionRef: { current: CanvasPerfRuntimeSession | undefined };
-  cameraState: CanvasRuntimeSnapshot['cameraState'];
-  renderSnapshot: CanvasSceneSnapshot;
-  cullingCounts: CanvasCullingCounts;
-  reactCommitCountRef: { current: number };
-}): void {
-  const perfMonitor = input.perfMonitor;
-  if (!perfMonitor || !input.sessionRef.current) {
-    return;
-  }
-  const timestamp = canvasPerfTimestamp();
-  const session = input.sessionRef.current;
-  const elapsedMs = Math.max(0, timestamp - session.lastFrameTimestamp);
-  const reactCommitCount = Math.max(0, input.reactCommitCountRef.current - session.reactCommitCount);
-  session.lastFrameTimestamp = timestamp;
-  session.reactCommitCount = input.reactCommitCountRef.current;
-  if (reactCommitCount > 0) {
-    perfMonitor.recordCounter({
-      timestamp,
-      source: 'CanvasSurface',
-      sessionTypes: CANVAS_PERF_INTERACTION_SESSION_TYPES,
-      name: 'react-commit',
-      value: reactCommitCount
-    });
-  }
-  const counterTotals = perfMonitor.getCounterTotals();
-  perfMonitor.recordFrame({
-    timestamp,
-    source: 'CanvasSurface',
-    elapsedMs,
-    cameraState: input.cameraState,
-    mountedNodeCount: input.renderSnapshot.nodesByPath.size,
-    visibleNodeCount: input.cullingCounts.displayVisibleNodeCount,
-    culledNodeCount: input.cullingCounts.culledNodeCount,
-    reactCommitCount,
-    renderSnapshotBuildCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-build'),
-    renderSnapshotReuseCount: counterDelta(counterTotals, session.counterTotals, 'render-snapshot-reuse'),
-    stageWriteCount: counterDeltaSum(counterTotals, session.counterTotals, STAGE_WRITE_COUNTERS),
-    rasterPreviewWorkCount: counterDeltaSum(counterTotals, session.counterTotals, RASTER_PREVIEW_WORK_COUNTERS)
-  });
-  session.counterTotals = counterTotals;
-}
-
-function counterDelta(
-  current: CanvasPerfCounterTotals,
-  previous: CanvasPerfCounterTotals,
-  name: CanvasPerfCounterName
-): number {
-  return Math.max(0, (current[name] ?? 0) - (previous[name] ?? 0));
-}
-
-function counterDeltaSum(
-  current: CanvasPerfCounterTotals,
-  previous: CanvasPerfCounterTotals,
-  names: readonly CanvasPerfCounterName[]
-): number {
-  return names.reduce((total, name) => total + counterDelta(current, previous, name), 0);
 }
 
 function canvasPerfPointerInteractionSessionDetail(state: CanvasRuntimePointerInteraction): Record<string, unknown> {

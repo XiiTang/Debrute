@@ -1,4 +1,9 @@
-import type { DebruteProductPlatform, NativeEditCommandId } from '@debrute/app-protocol';
+import {
+  workbenchCommandShortcutAccelerator,
+  type DebruteProductPlatform,
+  type NativeEditCommandId,
+  type NativeMenuCommandId
+} from '@debrute/app-protocol';
 
 export interface DesktopApplicationMenuInput {
   platform: DebruteProductPlatform;
@@ -20,9 +25,9 @@ export function buildDesktopApplicationMenu(
   input: DesktopApplicationMenuInput
 ): Electron.MenuItemConstructorOptions[] {
   const closeItems: Electron.MenuItemConstructorOptions[] = input.platform === 'darwin'
-    ? [{ role: 'close' }]
+    ? [{ role: 'close', accelerator: accelerator('window.close', input.platform) }]
     : [
-        { label: 'Close Window', accelerator: 'Ctrl+W', role: 'close' },
+        { label: 'Close Window', accelerator: accelerator('window.close', input.platform), role: 'close' },
         { type: 'separator' },
         { label: 'Quit Debrute', accelerator: 'Ctrl+Q', click: input.quitProduct }
       ];
@@ -44,11 +49,11 @@ export function buildDesktopApplicationMenu(
     {
       label: 'File',
       submenu: [
-        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: input.newWindow },
+        { label: 'New Window', accelerator: accelerator('window.new', input.platform), click: input.newWindow },
         { type: 'separator' },
         {
           label: 'Open Project…',
-          accelerator: 'CmdOrCtrl+O',
+          accelerator: accelerator('project.open-picker', input.platform),
           click: (_item, window) => input.openProject(window)
         },
         { label: 'Open Recent', submenu: input.recentItems },
@@ -59,13 +64,18 @@ export function buildDesktopApplicationMenu(
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        editCommandItem('Cut', 'CmdOrCtrl+X', 'edit.cut', input),
-        editCommandItem('Copy', 'CmdOrCtrl+C', 'edit.copy', input),
-        editCommandItem('Paste', 'CmdOrCtrl+V', 'edit.paste', input),
-        ...(input.platform === 'darwin' ? [{ role: 'pasteAndMatchStyle' as const }] : []),
-        editCommandItem('Delete', input.platform === 'darwin' ? 'Command+Backspace' : 'Delete', 'edit.delete', input),
-        editCommandItem('Select All', 'CmdOrCtrl+A', 'edit.select-all', input),
+        { role: 'undo', accelerator: accelerator('edit.undo', input.platform) },
+        { role: 'redo', accelerator: accelerator('edit.redo', input.platform) },
+        { type: 'separator' },
+        editCommandItem('Cut', 'edit.cut', input),
+        editCommandItem('Copy', 'edit.copy', input),
+        editCommandItem('Paste', 'edit.paste', input),
+        {
+          role: 'pasteAndMatchStyle',
+          accelerator: accelerator('edit.paste-and-match-style', input.platform)
+        },
+        editCommandItem('Delete', 'edit.delete', input),
+        editCommandItem('Select All', 'edit.select-all', input),
         ...(input.platform === 'darwin' ? [
           { type: 'separator' as const },
           {
@@ -83,10 +93,14 @@ export function buildDesktopApplicationMenu(
       submenu: [
         {
           label: 'Reload Workbench',
-          accelerator: 'CmdOrCtrl+R',
+          accelerator: accelerator('view.reload', input.platform),
           click: (_item, window) => input.reloadWorkbench(window)
         },
-        { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' },
+        {
+          role: 'toggleDevTools',
+          accelerator: accelerator('view.toggle-devtools', input.platform)
+        },
+        { type: 'separator' }, { role: 'resetZoom' },
         { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }
       ]
     },
@@ -96,13 +110,23 @@ export function buildDesktopApplicationMenu(
 
 function editCommandItem(
   label: string,
-  accelerator: string,
   command: NativeEditCommandId,
   input: DesktopApplicationMenuInput
 ): Electron.MenuItemConstructorOptions {
   return {
     label,
-    accelerator,
+    accelerator: accelerator(command, input.platform),
     click: (_item, window) => input.dispatchEditCommand(window, command)
   };
+}
+
+function accelerator(
+  commandId: NativeMenuCommandId,
+  platform: DebruteProductPlatform
+): string {
+  const value = workbenchCommandShortcutAccelerator(commandId, platform);
+  if (!value) {
+    throw new Error(`Native menu command has no shortcut: ${commandId}`);
+  }
+  return value;
 }

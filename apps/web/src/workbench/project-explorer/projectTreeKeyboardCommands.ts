@@ -1,3 +1,8 @@
+import {
+  workbenchCommandShortcutMatches,
+  type DebruteProductPlatform
+} from '@debrute/app-protocol';
+
 export type ProjectTreeKeyboardCommand =
   | 'copy'
   | 'cut'
@@ -30,35 +35,25 @@ export function projectTreeKeyboardCommandFromEvent(
   if (event.key === 'F2' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
     return 'rename';
   }
-  const key = event.key.toLowerCase();
-  const primaryModifier = platform === 'darwin' ? event.metaKey === true : event.ctrlKey === true;
-  if (primaryModifier && !event.altKey && !event.shiftKey && key === 'c') {
-    return 'copy';
-  }
-  if (primaryModifier && !event.altKey && !event.shiftKey && key === 'x') {
-    return 'cut';
-  }
-  if (primaryModifier && !event.altKey && !event.shiftKey && key === 'v') {
-    return 'paste';
-  }
-  if (platform === 'darwin' && event.metaKey === true && event.altKey === true && key === 'backspace') {
-    return 'delete-permanently';
-  }
-  if (platform === 'darwin' && event.metaKey === true && !event.ctrlKey && !event.altKey && !event.shiftKey && key === 'backspace') {
-    return 'delete';
-  }
-  if (
-    platform !== 'darwin'
-    && event.key === 'Delete'
-    && event.shiftKey === true
-    && !event.ctrlKey
-    && !event.metaKey
-    && !event.altKey
-  ) {
-    return 'delete-permanently';
-  }
-  if (event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-    return 'delete';
+  const keyboardEvent = {
+    key: event.key,
+    ctrlKey: event.ctrlKey === true,
+    metaKey: event.metaKey === true,
+    altKey: event.altKey === true,
+    shiftKey: event.shiftKey === true
+  };
+  const commands = [
+    ['edit.copy', 'copy'],
+    ['edit.cut', 'cut'],
+    ['edit.paste', 'paste'],
+    ['edit.delete', 'delete'],
+    ['edit.delete-permanently', 'delete-permanently']
+  ] as const;
+  const match = commands.find(([commandId]) => (
+    workbenchCommandShortcutMatches(commandId, keyboardEvent, platform)
+  ));
+  if (match) {
+    return match[1];
   }
   return undefined;
 }
@@ -77,4 +72,3 @@ function isEditableKeyboardTarget(target: unknown): boolean {
   const tagName = record.tagName.toLowerCase();
   return tagName === 'input' || tagName === 'textarea' || tagName === 'select';
 }
-import type { DebruteProductPlatform } from '@debrute/app-protocol';

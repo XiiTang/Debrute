@@ -314,6 +314,28 @@ describe('CanvasFeedbackInteraction', () => {
     }
   });
 
+  it('dismisses the Feedback Bar immediately for an active node manipulation', async () => {
+    vi.useFakeTimers();
+    const overlayRuntime = createCanvasOverlayRuntime();
+    const clearFeedbackBarPlacement = vi.spyOn(overlayRuntime, 'clearFeedbackBarPlacement');
+    const probe = await renderInteraction(apiFixture(), { overlayRuntime });
+    try {
+      await act(async () => {
+        probe.current.handleTargetChange(feedbackTarget('image.png'));
+        probe.current.handlePointerEnter();
+        probe.current.canvas.dismissTarget();
+      });
+
+      expect(probe.current.currentTarget).toBeUndefined();
+      expect(clearFeedbackBarPlacement).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTime(120));
+      expect(clearFeedbackBarPlacement).toHaveBeenCalledOnce();
+    } finally {
+      await probe.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it('preserves the remaining dismissal buffer when a focused Capsule blurs after pointer leave', async () => {
     vi.useFakeTimers();
     const probe = await renderInteraction(apiFixture());

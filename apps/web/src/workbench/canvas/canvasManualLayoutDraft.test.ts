@@ -19,7 +19,6 @@ describe('Canvas Manual Layout drafts', () => {
     });
 
     expect(draft).toEqual({
-      interaction: 'move',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 },
         { projectRelativePath: 'flow/b.png', x: 50, y: 70, width: 100, height: 80 }
@@ -40,7 +39,6 @@ describe('Canvas Manual Layout drafts', () => {
     });
 
     expect(draft).toEqual({
-      interaction: 'resize',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 220, height: 130 }
       ]
@@ -94,7 +92,6 @@ describe('Canvas Manual Layout drafts', () => {
       interaction: moveState([origin('flow/a.png', 10, 20, 200, 120)], { x: 5, y: 6 }),
       point: { x: 25, y: 36 }
     })).toEqual({
-      interaction: 'move',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 30, y: 50, width: 200, height: 120 }
       ]
@@ -110,7 +107,6 @@ describe('Canvas Manual Layout drafts', () => {
       }),
       point: { x: 30, y: 40 }
     })).toEqual({
-      interaction: 'resize',
       nodeLayouts: [
         { projectRelativePath: 'flow/a.png', x: 10, y: 20, width: 230, height: 120 }
       ]

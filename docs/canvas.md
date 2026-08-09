@@ -54,7 +54,7 @@ pixels and converted once through the scene scale of 10. Camera zoom and
 transient error copy never change node geometry or label overflow; only an
 identity row wider than the automatic maximum is ellipsized. Manual Layout does
 not use these bounds. Text nodes use `4200 × 2800` scene units, audio uses
-`3200 × 960`, available image and video nodes use intrinsic dimensions, and an
+`3200 × 680`, available image and video nodes use intrinsic dimensions, and an
 unavailable video uses a `3200 × 1800` fallback so its title bar and Content
 Region remain usable.
 
@@ -85,6 +85,13 @@ overlapping unselected nodes while preserving the selected nodes' internal
 order. Newly disclosed overlapping nodes start above existing nodes. Selection
 is transient. Workbench focus changes do not clear it or control Content
 Activation.
+
+Finishing a move or resize submits one prospective layout mutation through the
+latest accepted Canvas state. Workbench removes unchanged geometry and an
+unchanged occlusion order from that mutation, then skips persistence only when
+the complete patch is empty. Ending a drag at its current rectangle can still
+persist a selection raise when the final overlap order changed; the interaction
+kind itself is not persisted or forwarded through the layout command chain.
 
 ## Interaction
 

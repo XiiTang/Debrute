@@ -151,6 +151,9 @@ describe('WorkbenchTitleBar', () => {
         fileButton.click();
       });
 
+      expect(requireButton(container, 'Open Project...')
+        .querySelector('.workbench-titlebar__menu-shortcut')?.textContent).toBe('Ctrl+O');
+
       const titleBar = container.querySelector('.workbench-titlebar');
       const menuPopover = container.querySelector('.workbench-titlebar__menu-popover');
       expect(menuPopover).not.toBeNull();
@@ -163,6 +166,11 @@ describe('WorkbenchTitleBar', () => {
       expect(recentTrigger.getAttribute('aria-controls')).toBe('workbench-titlebar-submenu-project.open-recent');
 
       await act(async () => {
+        recentTrigger.focus();
+      });
+      expect(recentTrigger.getAttribute('aria-expanded')).toBe('false');
+
+      await act(async () => {
         recentTrigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
       });
 
@@ -170,7 +178,9 @@ describe('WorkbenchTitleBar', () => {
       const submenu = submenuId ? document.getElementById(submenuId) : null;
       expect(recentTrigger.getAttribute('aria-expanded')).toBe('true');
       expect(submenu?.getAttribute('role')).toBe('menu');
-      expect(requireButton(container, '/tmp/alpha').getAttribute('role')).toBe('menuitem');
+      const recentProject = requireButton(container, '/tmp/alpha');
+      expect(recentProject.getAttribute('role')).toBe('menuitem');
+      expect(document.activeElement).toBe(recentProject);
 
       await act(async () => {
         submenu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
@@ -191,6 +201,78 @@ describe('WorkbenchTitleBar', () => {
         payload: { projectRoot: '/tmp/alpha' }
       }));
       expect(fileButton.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('keeps Open Recent open while the pointer enters a child and closes it over a sibling', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onCommand = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <WorkbenchTitleBar
+              {...closedActivityProps}
+              state={buildWorkbenchTitleBarState({
+                platform: 'win32',
+                host: 'web', locale: 'en',
+                projectTitle: 'Alpha',
+                recentProjects: [{ projectRoot: '/tmp/alpha' }]
+              })}
+              nativeWindowState={{ maximized: false }}
+              onCommand={onCommand}
+              onWindowCommand={() => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        requireButton(container, 'File').click();
+      });
+      const recentTrigger = requireButton(container, 'Open Recent');
+      await act(async () => {
+        recentTrigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      });
+
+      const recentProject = requireButton(container, '/tmp/alpha');
+      await act(async () => {
+        recentTrigger.dispatchEvent(new MouseEvent('mouseout', {
+          bubbles: true,
+          relatedTarget: recentProject
+        }));
+      });
+
+      expect(recentTrigger.getAttribute('aria-expanded')).toBe('true');
+      expect(recentProject.isConnected).toBe(true);
+      await act(async () => {
+        recentProject.click();
+      });
+      expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({
+        commandId: 'project.open-recent',
+        payload: { projectRoot: '/tmp/alpha' }
+      }));
+
+      await act(async () => {
+        requireButton(container, 'File').click();
+      });
+      const reopenedRecentTrigger = requireButton(container, 'Open Recent');
+      await act(async () => {
+        reopenedRecentTrigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      });
+      await act(async () => {
+        const sibling = requireButton(container, 'Open Project...');
+        reopenedRecentTrigger.dispatchEvent(new MouseEvent('mouseout', {
+          bubbles: true,
+          relatedTarget: sibling
+        }));
+      });
+      expect(reopenedRecentTrigger.getAttribute('aria-expanded')).toBe('false');
     } finally {
       await unmount(root, container);
     }
@@ -342,7 +424,10 @@ describe('WorkbenchTitleBar', () => {
 });
 
 function requireButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent === label);
+  const button = Array.from(container.querySelectorAll('button')).find((candidate) => (
+    candidate.querySelector('.db-menu__item-label')?.textContent === label
+    || candidate.textContent === label
+  ));
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`Expected button ${label}.`);
   }
