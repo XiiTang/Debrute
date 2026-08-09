@@ -85,12 +85,31 @@ interface LayoutRect extends LayoutSize {
   y: number;
 }
 
-export function projectCanvasNodeScene(input: {
+export interface ProjectCanvasNodeSceneInput {
   canonicalRoot: string;
   resources: CanvasResourceView;
   state: CanvasState;
   measureGenericIdentityRows?: CanvasGenericIdentityRowMeasurer;
-}): CanvasNodeSceneProjection {
+}
+
+export function projectCanvasNodeScene(
+  input: ProjectCanvasNodeSceneInput
+): CanvasNodeSceneProjection {
+  const nodes = projectCanvasSceneNodes(input);
+  const occlusionOrder = reconcileCanvasOcclusionOrder(input.state.occlusionOrder, nodes);
+  const zByPath = new Map(occlusionOrder.map((path, index) => [path, nodes.length + index]));
+  for (const node of nodes) {
+    node.z = zByPath.get(node.projectRelativePath) ?? node.z;
+  }
+  return {
+    nodes,
+    occlusionOrder
+  };
+}
+
+export function projectCanvasSceneNodes(
+  input: ProjectCanvasNodeSceneInput
+): ProjectedCanvasNode[] {
   const trees = buildLayoutTrees(input.resources.resources);
   const labels = new Map(input.resources.resources.map((resource) => [
     resource.projectRelativePath,
@@ -153,15 +172,7 @@ export function projectCanvasNodeScene(input: {
       ...(resource.videoPresentation ? { videoPresentation: resource.videoPresentation } : {})
     };
   });
-  const occlusionOrder = reconcileCanvasOcclusionOrder(input.state.occlusionOrder, nodes);
-  const zByPath = new Map(occlusionOrder.map((path, index) => [path, nodes.length + index]));
-  for (const node of nodes) {
-    node.z = zByPath.get(node.projectRelativePath) ?? node.z;
-  }
-  return {
-    nodes,
-    occlusionOrder
-  };
+  return nodes;
 }
 
 export function projectCanvasHierarchyEdges(

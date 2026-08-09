@@ -19,13 +19,10 @@ import {
   canvasPathAncestors,
   projectCanvasHierarchyEdges,
   projectCanvasNodeScene,
-  raiseCanvasSelection as raiseProjectedCanvasSelection,
   type CanvasProjection
 } from './canvas/CanvasScene.js';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
-import { createCanvasOcclusionMutationLane } from './canvas/CanvasOcclusionMutationLane.js';
-import { canvasNodeLayoutMutationPatch } from './canvas/canvasNodeLayoutMutation.js';
-import { canvasNodesWithLayoutOverrides } from './canvas/canvasManualLayoutDraft.js';
+import { createCanvasOcclusionOrderWrites } from './canvas/CanvasOcclusionOrderWrites.js';
 import { createCanvasStateChangeIntake } from './canvas/CanvasStateChangeIntake.js';
 import {
   CanvasFeedbackInteractionBar,
@@ -609,21 +606,11 @@ function WorkbenchBoundProjectApp({
     initialProjectPresentation.viewportRect
   );
   const canvasOverlayRuntime = useMemo(() => createCanvasOverlayRuntime(), []);
-  const canvasOcclusionMutationLane = useMemo(() => createCanvasOcclusionMutationLane(), []);
-  const enqueueCanvasOcclusionMutation = useCallback(<Result,>(
-    mutation: (
-      accepted: Extract<WorkbenchProjectProjectionState, { status: 'bound' }>
-    ) => Promise<Result>
-  ): Promise<Result> => {
-    const generation = projectProjection.generation;
-    return canvasOcclusionMutationLane.run(async () => {
-      const accepted = api.projectProjection.getState();
-      if (accepted.status !== 'bound' || accepted.generation !== generation) {
-        throw new Error('Canvas mutation belongs to an inactive Project.');
-      }
-      return mutation(accepted);
-    });
-  }, [api.projectProjection, canvasOcclusionMutationLane, projectProjection.generation]);
+  const canvasOcclusionOrderWrites = useMemo(() => createCanvasOcclusionOrderWrites({
+    generation: projectProjection.generation,
+    readProjectProjection: () => api.projectProjection.getState(),
+    patchCanvasState: (patch) => api.patchCanvasState(patch)
+  }), [api, projectProjection.generation]);
   const workbenchViewportRectRef = useRef(workbenchViewportRect);
   const textFileBuffersRef = useRef(textFileBuffers);
   const textEditorWindowsRef = useRef(textEditorWindows);
@@ -704,41 +691,11 @@ function WorkbenchBoundProjectApp({
     const newlyVisible = previous
       ? [...visiblePaths].filter((path) => !previous.has(path))
       : [];
-    const currentOcclusionOrder = newlyVisible.length === 0
-      ? canvasNodeScene.occlusionOrder
-      : raiseProjectedCanvasSelection(
-          canvasNodeScene.occlusionOrder,
-          newlyVisible
-        );
-    if (equalStringArrays(canvasProjectionSource.state.occlusionOrder, currentOcclusionOrder)) {
-      return;
-    }
-    void enqueueCanvasOcclusionMutation(async (accepted) => {
-      const context = canvasMutationContext(accepted);
-      const scene = projectCanvasNodeScene({
-        canonicalRoot: accepted.canonicalRoot,
-        resources: context.resources,
-        state: context.state
-      });
-      const currentVisiblePaths = new Set(
-        scene.nodes.map((node) => node.projectRelativePath)
-      );
-      const currentlyNew = newlyVisible.filter((path) => currentVisiblePaths.has(path));
-      const occlusionOrder = currentlyNew.length === 0
-        ? scene.occlusionOrder
-        : raiseProjectedCanvasSelection(
-            scene.occlusionOrder,
-            currentlyNew
-          );
-      if (equalStringArrays(context.state.occlusionOrder, occlusionOrder)) {
-        return;
-      }
-      await api.patchCanvasState({ occlusionOrder });
-    }).catch(() => projectActivities.report({
+    void canvasOcclusionOrderWrites.reconcileVisibility(newlyVisible).catch(() => projectActivities.report({
       kind: 'canvas-operation-failed',
       operation: 'raise-selection'
     }));
-  }, [api, canvasNodeScene, canvasProjectionSource, enqueueCanvasOcclusionMutation, projectActivities]);
+  }, [canvasNodeScene, canvasOcclusionOrderWrites, canvasProjectionSource, projectActivities]);
   const centerCanvasProjectionNode = useCallback((
     nodes: CanvasProjection['nodes'] | undefined,
     projectRelativePath: string
@@ -1007,29 +964,7 @@ function WorkbenchBoundProjectApp({
 
   const updateCanvasNodeLayouts = useCallback<WorkbenchActions['updateCanvasNodeLayouts']>(async (input) => {
     try {
-      await enqueueCanvasOcclusionMutation(async (accepted) => {
-        const context = canvasMutationContext(accepted);
-        const currentScene = projectCanvasNodeScene({
-          canonicalRoot: accepted.canonicalRoot,
-          resources: context.resources,
-          state: context.state
-        });
-        const nextNodes = canvasNodesWithLayoutOverrides({
-          nodes: currentScene.nodes,
-          layoutOverrides: input.nodeLayouts
-        });
-        const patch = canvasNodeLayoutMutationPatch({
-          currentNodes: currentScene.nodes,
-          nextNodes,
-          currentOcclusionOrder: context.state.occlusionOrder,
-          nextOcclusionOrder: currentScene.occlusionOrder,
-          selectedProjectRelativePaths: input.selectedProjectRelativePaths,
-          nodeLayouts: input.nodeLayouts
-        });
-        if (patch) {
-          await api.patchCanvasState(patch);
-        }
-      });
+      await canvasOcclusionOrderWrites.commitManualLayouts(input);
     } catch (error) {
       projectActivities.report({
         kind: 'canvas-operation-failed',
@@ -1037,46 +972,11 @@ function WorkbenchBoundProjectApp({
       });
       throw error;
     }
-  }, [api, enqueueCanvasOcclusionMutation, projectActivities]);
+  }, [canvasOcclusionOrderWrites, projectActivities]);
 
   const resetCanvasNodeLayouts = useCallback<WorkbenchActions['resetCanvasNodeLayouts']>(async (input) => {
-    await enqueueCanvasOcclusionMutation(async (accepted) => {
-      const context = canvasMutationContext(accepted);
-      const nodePaths = 'all' in input
-        ? Object.entries(context.state.nodeStates)
-            .filter(([, nodeState]) => nodeState.manualLayout !== undefined)
-            .map(([path]) => path)
-        : input.nodePaths;
-      const nextState = {
-        ...context.state,
-        nodeStates: { ...context.state.nodeStates }
-      };
-      for (const path of nodePaths) {
-        const current = nextState.nodeStates[path];
-        if (!current) {
-          continue;
-        }
-        const { manualLayout: _manualLayout, ...remaining } = current;
-        if (Object.keys(remaining).length === 0) {
-          delete nextState.nodeStates[path];
-        } else {
-          nextState.nodeStates[path] = remaining;
-        }
-      }
-      const scene = projectCanvasNodeScene({
-        canonicalRoot: accepted.canonicalRoot,
-        resources: context.resources,
-        state: nextState
-      });
-      await api.patchCanvasState({
-        occlusionOrder: scene.occlusionOrder,
-        nodeStateUpdates: nodePaths.map((projectRelativePath) => ({
-          projectRelativePath,
-          manualLayout: null
-        }))
-      });
-    });
-  }, [api, enqueueCanvasOcclusionMutation]);
+    await canvasOcclusionOrderWrites.resetManualLayouts(input);
+  }, [canvasOcclusionOrderWrites]);
 
   const updateCanvasVideoPlaybackState = useCallback<WorkbenchActions['updateCanvasVideoPlaybackState']>(async (input) => {
     try {
@@ -1120,19 +1020,7 @@ function WorkbenchBoundProjectApp({
 
   const raiseCanvasSelection = useCallback<WorkbenchActions['raiseCanvasSelection']>(async (input) => {
     try {
-      await enqueueCanvasOcclusionMutation(async (accepted) => {
-        const context = canvasMutationContext(accepted);
-        const occlusionOrder = raiseProjectedCanvasSelection(
-          context.state.occlusionOrder,
-          input.projectRelativePaths
-        );
-        if (equalStringArrays(context.state.occlusionOrder, occlusionOrder)) {
-          return;
-        }
-        await api.patchCanvasState({
-          occlusionOrder
-        });
-      });
+      await canvasOcclusionOrderWrites.raiseSelection(input.projectRelativePaths);
     } catch (error) {
       projectActivities.report({
         kind: 'canvas-operation-failed',
@@ -1140,7 +1028,7 @@ function WorkbenchBoundProjectApp({
       });
       throw error;
     }
-  }, [api, enqueueCanvasOcclusionMutation, projectActivities]);
+  }, [canvasOcclusionOrderWrites, projectActivities]);
 
   const presentProjectOpenFailure = useCallback((failure: Error, attemptedPath?: string) => {
     if (hasAcceptedProject) {
@@ -2095,24 +1983,6 @@ function projectOpenPresentationFromFailure(
     ...(projectRoot ? { attemptedPath: projectRoot } : {}),
     error: i18n.t('projectOpen.openFailed', { message: failure.message })
   };
-}
-
-function canvasMutationContext(
-  project: Extract<WorkbenchProjectProjectionState, { status: 'bound' }>
-) {
-  if (project.snapshot.canvasWorkspace.status !== 'available') {
-    throw new Error(project.snapshot.canvasWorkspace.message);
-  }
-  const resources = project.snapshot.canvasWorkspace.canvasResources;
-  const state = project.snapshot.canvasWorkspace.workspace;
-  return {
-    resources,
-    state
-  };
-}
-
-function equalStringArrays(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function projectRootFromOpenError(error: Error): string | undefined {
