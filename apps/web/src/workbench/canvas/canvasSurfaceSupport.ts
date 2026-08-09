@@ -50,7 +50,7 @@ export interface CanvasPerfRuntimeSession {
 
 export interface CanvasPerfDebugSnapshotContext {
   runtime: Pick<CanvasEditorRuntime, 'getSnapshot'>;
-  resourceZoom: number;
+  getResourceZoom(): number;
   renderSnapshot: CanvasSceneSnapshot;
   renderLifecycle: Pick<CanvasRenderLifecycle, 'getCullingCounts'>;
   surfaceElement: HTMLElement | null;
@@ -193,7 +193,7 @@ export function canvasPerfDebugSnapshot(input: CanvasPerfDebugSnapshotContext): 
     mountedNodeCount,
     visibleNodeCount: cullingCounts.displayVisibleNodeCount,
     culledNodeCount: cullingCounts.culledNodeCount,
-    resourceZoom: input.resourceZoom,
+    resourceZoom: input.getResourceZoom(),
     imageLayers: canvasImageLayerDebugCounts(input.surfaceElement)
   };
 }

@@ -14,15 +14,44 @@ describe('CanvasResourceZoom', () => {
     expect(initialCanvasResourceZoom(1.25)).toBe(1.25);
   });
 
+  it('publishes the settled zoom through one external-store snapshot', () => {
+    vi.useFakeTimers();
+    const snapshot = cameraSnapshot('moving', 2);
+    const settlement = createAttachedSettlement({
+      initialZoom: 1,
+      getCameraSnapshot: () => snapshot
+    });
+    const listener = vi.fn();
+    const unsubscribe = settlement.subscribe(listener);
+
+    expect(settlement.getSnapshot()).toBe(1);
+
+    settlement.observeCamera(2);
+    snapshot.cameraState = 'idle';
+    vi.advanceTimersByTime(CANVAS_PREVIEW_QUALITY_SETTLE_MS);
+
+    expect(settlement.getSnapshot()).toBe(2);
+    expect(listener).toHaveBeenCalledOnce();
+
+    unsubscribe();
+    snapshot.cameraState = 'moving';
+    snapshot.camera.z = 3;
+    settlement.observeCamera(3);
+    snapshot.cameraState = 'idle';
+    vi.advanceTimersByTime(CANVAS_PREVIEW_QUALITY_SETTLE_MS);
+
+    expect(settlement.getSnapshot()).toBe(3);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
   it('publishes the latest zoom only after 500ms of uninterrupted camera quiet', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 2);
-    const settled: number[] = [];
-    const settlement = createCanvasResourceZoomSettlement({
+    const settlement = createAttachedSettlement({
       initialZoom: 1,
-      getCameraSnapshot: () => snapshot,
-      onSettledZoom: (zoom) => settled.push(zoom)
+      getCameraSnapshot: () => snapshot
     });
+    const settled = settledZooms(settlement);
 
     settlement.observeCamera(2);
     snapshot.cameraState = 'idle';
@@ -36,12 +65,11 @@ describe('CanvasResourceZoom', () => {
   it('restarts the one settlement timer from each live camera update', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 2);
-    const settled: number[] = [];
-    const settlement = createCanvasResourceZoomSettlement({
+    const settlement = createAttachedSettlement({
       initialZoom: 1,
-      getCameraSnapshot: () => snapshot,
-      onSettledZoom: (zoom) => settled.push(zoom)
+      getCameraSnapshot: () => snapshot
     });
+    const settled = settledZooms(settlement);
 
     settlement.observeCamera(2);
     vi.advanceTimersByTime(300);
@@ -59,12 +87,11 @@ describe('CanvasResourceZoom', () => {
   it('does not add the camera-idle transition as a second timer', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 2);
-    const settled: number[] = [];
-    const settlement = createCanvasResourceZoomSettlement({
+    const settlement = createAttachedSettlement({
       initialZoom: 1,
-      getCameraSnapshot: () => snapshot,
-      onSettledZoom: (zoom) => settled.push(zoom)
+      getCameraSnapshot: () => snapshot
     });
+    const settled = settledZooms(settlement);
 
     settlement.observeCamera(2);
     snapshot.cameraState = 'idle';
@@ -79,12 +106,11 @@ describe('CanvasResourceZoom', () => {
   it('does not publish if the camera is moving at the settlement boundary', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 2);
-    const settled: number[] = [];
-    const settlement = createCanvasResourceZoomSettlement({
+    const settlement = createAttachedSettlement({
       initialZoom: 1,
-      getCameraSnapshot: () => snapshot,
-      onSettledZoom: (zoom) => settled.push(zoom)
+      getCameraSnapshot: () => snapshot
     });
+    const settled = settledZooms(settlement);
 
     settlement.observeCamera(2);
     vi.advanceTimersByTime(CANVAS_PREVIEW_QUALITY_SETTLE_MS);
@@ -97,11 +123,11 @@ describe('CanvasResourceZoom', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 1);
     const settled = vi.fn();
-    const settlement = createCanvasResourceZoomSettlement({
+    const settlement = createAttachedSettlement({
       initialZoom: 1,
-      getCameraSnapshot: () => snapshot,
-      onSettledZoom: settled
+      getCameraSnapshot: () => snapshot
     });
+    settlement.subscribe(settled);
 
     settlement.observeCamera(1);
 
@@ -113,11 +139,11 @@ describe('CanvasResourceZoom', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 2);
     const settled = vi.fn();
-    const settlement = createCanvasResourceZoomSettlement({
+    const settlement = createAttachedSettlement({
       initialZoom: 1,
-      getCameraSnapshot: () => snapshot,
-      onSettledZoom: settled
+      getCameraSnapshot: () => snapshot
     });
+    settlement.subscribe(settled);
 
     settlement.observeCamera(2);
     snapshot.camera.z = 1;
@@ -129,18 +155,19 @@ describe('CanvasResourceZoom', () => {
     expect(settled).not.toHaveBeenCalled();
   });
 
-  it('cancels pending settlement when disposed', () => {
+  it('cancels pending settlement when detached', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 2);
     const settled = vi.fn();
     const settlement = createCanvasResourceZoomSettlement({
       initialZoom: 1,
-      getCameraSnapshot: () => snapshot,
-      onSettledZoom: settled
+      getCameraSnapshot: () => snapshot
     });
+    const detach = settlement.attach();
+    settlement.subscribe(settled);
 
     settlement.observeCamera(2);
-    settlement.dispose();
+    detach();
     snapshot.cameraState = 'idle';
     vi.advanceTimersByTime(CANVAS_PREVIEW_QUALITY_SETTLE_MS);
 
@@ -148,6 +175,22 @@ describe('CanvasResourceZoom', () => {
     expect(settled).not.toHaveBeenCalled();
   });
 });
+
+function createAttachedSettlement(
+  input: Parameters<typeof createCanvasResourceZoomSettlement>[0]
+): ReturnType<typeof createCanvasResourceZoomSettlement> {
+  const settlement = createCanvasResourceZoomSettlement(input);
+  settlement.attach();
+  return settlement;
+}
+
+function settledZooms(
+  settlement: ReturnType<typeof createCanvasResourceZoomSettlement>
+): number[] {
+  const settled: number[] = [];
+  settlement.subscribe(() => settled.push(settlement.getSnapshot()));
+  return settled;
+}
 
 function cameraSnapshot(cameraState: 'idle' | 'moving', z: number): {
   cameraState: 'idle' | 'moving';

@@ -33,7 +33,13 @@ preserving node membership, selection, Manual Layout Drafts, and node spatial
 state. Restoring visibility derives Hierarchy Edges from the latest nodes and
 routes them against the latest presented layouts.
 
-An accepted Scene Projection replaces React membership once. Canvas State
+An accepted Scene Projection replaces React membership once. For paths retained
+across that replacement, `CanvasRenderLifecycle` compares the previous and next
+presented `x`, `y`, width, height, and z values and writes only changed layouts
+through `CanvasStageRuntime` before synchronizing the replacement scene's
+culling. New paths receive their initial layout when their shell registers and
+removed paths leave with their shell. Node content rerenders remain unable to
+replay geometry. Canvas State
 events whose Folder Disclosure is unchanged carry authoritative final node-state
 deltas and an optional authoritative Occlusion Order. The mounted Scene applies
 each exact path directly: content subscribers notify only that node shell,
@@ -189,10 +195,13 @@ Resource zoom stays fixed while camera input is changing. Every live camera
 update restarts one Canvas-wide 500 ms Preview Quality Settlement timer. At the
 boundary, Canvas adopts the latest zoom only when that exact camera is idle; a
 new update replaces the pending target. The short camera-idle transition does
-not start or restart this timer. A pure pan and a zoom that returns to the
-current resource zoom schedule no quality update, so they do not render
-`CanvasSurface`. This keeps camera transforms independent from preview-
-resolution churn and emits only the final quality target for one gesture.
+not start or restart this timer. Settlement publishes through one external
+resource-zoom snapshot subscribed to only by Raster Preview Presentation;
+adopting a quality target does not render `CanvasSurface`, its node list, or
+non-raster node content. A pure pan and a zoom that returns to the current
+resource zoom publish no quality update. This keeps camera transforms
+independent from preview-resolution churn and emits only the final quality
+target for one gesture.
 
 ## Shared Raster Preview Presentation
 

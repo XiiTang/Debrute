@@ -6,7 +6,8 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  useSyncExternalStore
 } from 'react';
 import {
   canvasPreviewVariantKey,
@@ -25,9 +26,10 @@ import {
   type CanvasPerfCounterName,
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor.js';
+import type { CanvasResourceZoomSource } from './CanvasResourceZoom.js';
 
 export interface CanvasRasterPreviewEnvironment {
-  resourceZoom: number;
+  resourceZoomSource: CanvasResourceZoomSource;
   devicePixelRatio: number;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
   perfMonitor?: Pick<CanvasPerfMonitor, 'recordCounter'> | undefined;
@@ -131,20 +133,25 @@ export function useCanvasRasterPreviewPresentation(input: {
   onPointerDown?: React.PointerEventHandler<HTMLImageElement> | undefined;
 }): CanvasRasterPreviewPresentation {
   const environment = useCanvasRasterPreviewEnvironment();
+  const resourceZoom = useSyncExternalStore(
+    environment.resourceZoomSource.subscribe,
+    environment.resourceZoomSource.getSnapshot,
+    environment.resourceZoomSource.getSnapshot
+  );
   const [state, setState] = useState<CanvasRasterPreviewState>({});
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [committedSourceKey, setCommittedSourceKey] = useState<CanvasPreviewVariantKey>();
   const desired = useMemo(() => canvasRasterPreviewDesiredSource({
     request: input.request,
     nodeDisplayWidth: input.nodeDisplayWidth,
-    resourceZoom: environment.resourceZoom,
+    resourceZoom,
     devicePixelRatio: environment.devicePixelRatio,
     retryAttempt
   }), [
     environment.devicePixelRatio,
-    environment.resourceZoom,
     input.nodeDisplayWidth,
     input.request,
+    resourceZoom,
     retryAttempt
   ]);
   const continuityKey = input.request.continuityKey;

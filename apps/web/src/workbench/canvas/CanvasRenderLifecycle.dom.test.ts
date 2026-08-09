@@ -176,6 +176,42 @@ describe('CanvasRenderLifecycle', () => {
     expect([...fixture.runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['new']);
   });
 
+  it('updates retained node DOM from replacement Projection layout', () => {
+    const stableNode = directoryNode('stable', 0, 0, 1);
+    const reflowedNode = directoryNode('reflowed', 0, 200, 2);
+    const fixture = createFixture({ nodes: [stableNode, reflowedNode] });
+    const stableElement = document.createElement('div');
+    const reflowedElement = document.createElement('div');
+    const unregisterStable = fixture.stageRuntime.registerNodeShell('stable', stableElement, stableNode);
+    const unregisterReflowed = fixture.stageRuntime.registerNodeShell('reflowed', reflowedElement, reflowedNode);
+    const setNodeLayout = vi.spyOn(fixture.stageRuntime, 'setNodeLayout');
+
+    expect(stableElement.style.transform).toBe('translate(0px, 0px)');
+    expect(reflowedElement.style.transform).toBe('translate(0px, 200px)');
+
+    const reflowedReplacement = {
+      ...directoryNode('reflowed', 0, 400, 3),
+      width: 120,
+      height: 140
+    };
+    fixture.runtime.acceptProjection(projection([
+      stableNode,
+      directoryNode('new-child', 0, 200, 2),
+      reflowedReplacement
+    ]));
+
+    expect(setNodeLayout).toHaveBeenCalledOnce();
+    expect(setNodeLayout).toHaveBeenCalledWith('reflowed', reflowedReplacement);
+    expect(stableElement.style.transform).toBe('translate(0px, 0px)');
+    expect(reflowedElement.style.transform).toBe('translate(0px, 400px)');
+    expect(reflowedElement.style.width).toBe('120px');
+    expect(reflowedElement.style.height).toBe('140px');
+    expect(reflowedElement.style.zIndex).toBe('3');
+
+    unregisterReflowed();
+    unregisterStable();
+  });
+
   it('records viewport culling and idle publication without rebuilding the scene', () => {
     vi.useFakeTimers();
     const monitor = createCanvasPerfMonitor();

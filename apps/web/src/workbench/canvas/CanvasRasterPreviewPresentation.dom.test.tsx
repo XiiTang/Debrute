@@ -14,6 +14,11 @@ import type {
   CanvasPreviewResourceRequest,
   CanvasPreviewResourceScheduler
 } from './CanvasPreviewResourceScheduler';
+import {
+  CANVAS_PREVIEW_QUALITY_SETTLE_MS,
+  createCanvasResourceZoomSettlement,
+  type CanvasResourceZoomSettlement
+} from './CanvasResourceZoom.js';
 
 describe('CanvasRasterPreviewPresentation', () => {
   let container: HTMLDivElement;
@@ -35,6 +40,48 @@ describe('CanvasRasterPreviewPresentation', () => {
     await act(async () => root.unmount());
     container.remove();
     restoreProperty(HTMLImageElement.prototype, 'decode', decodeDescriptor);
+    vi.useRealTimers();
+  });
+
+  it('adopts a settled resource zoom without rerendering its environment provider', async () => {
+    vi.useFakeTimers();
+    const scheduler = createManualScheduler();
+    const request = previewRequest('sha256:external-zoom');
+    const cameraSnapshot = {
+      cameraState: 'moving' as 'idle' | 'moving',
+      camera: { z: 2 }
+    };
+    const resourceZoom = createCanvasResourceZoomSettlement({
+      initialZoom: 1,
+      getCameraSnapshot: () => cameraSnapshot
+    });
+    resourceZoom.attach();
+    const providerRender = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <ExternalResourceZoomHarness
+          resourceZoom={resourceZoom}
+          scheduler={scheduler.value}
+          request={request}
+          providerRender={providerRender}
+        />
+      );
+    });
+    await act(async () => scheduler.runStart());
+    await settlePending(container);
+    expect(imageFor(container, 'visible')?.src).toContain('w=320');
+
+    resourceZoom.observeCamera(2);
+    cameraSnapshot.cameraState = 'idle';
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CANVAS_PREVIEW_QUALITY_SETTLE_MS);
+    });
+
+    expect(providerRender).toHaveBeenCalledOnce();
+    expect(scheduler.starts).toHaveLength(1);
+    await act(async () => scheduler.runStart());
+    expect(imageFor(container, 'pending')?.src).toContain('w=640');
   });
 
   it('keeps the visible variant until a decoded pending DOM image is published', async () => {
@@ -270,6 +317,29 @@ function Harness({
   );
 }
 
+function ExternalResourceZoomHarness({
+  resourceZoom,
+  scheduler,
+  request,
+  providerRender
+}: {
+  resourceZoom: CanvasResourceZoomSettlement;
+  scheduler: CanvasPreviewResourceScheduler;
+  request: CanvasRasterPreviewRequest;
+  providerRender: () => void;
+}): React.ReactElement {
+  providerRender();
+  return (
+    <CanvasRasterPreviewEnvironmentProvider value={{
+      resourceZoomSource: resourceZoom,
+      devicePixelRatio: 1,
+      previewResourceScheduler: scheduler
+    }}>
+      <Harness request={request} displayWidth={320} />
+    </CanvasRasterPreviewEnvironmentProvider>
+  );
+}
+
 async function renderHarness(
   root: Root,
   scheduler: CanvasPreviewResourceScheduler,
@@ -287,7 +357,7 @@ async function renderHarness(
   await act(async () => {
     root.render(
       <CanvasRasterPreviewEnvironmentProvider value={{
-        resourceZoom: 1,
+        resourceZoomSource: fixedResourceZoom(1),
         devicePixelRatio: 1,
         previewResourceScheduler: scheduler
       }}>
@@ -295,6 +365,16 @@ async function renderHarness(
       </CanvasRasterPreviewEnvironmentProvider>
     );
   });
+}
+
+function fixedResourceZoom(resourceZoom: number): Pick<
+  CanvasResourceZoomSettlement,
+  'getSnapshot' | 'subscribe'
+> {
+  return {
+    getSnapshot: () => resourceZoom,
+    subscribe: () => () => undefined
+  };
 }
 
 function imageFor(container: ParentNode, layer: 'visible' | 'pending'): HTMLImageElement | null {

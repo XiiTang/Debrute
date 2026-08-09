@@ -8,9 +8,14 @@ export function initialCanvasResourceZoom(cameraZoom: number): number {
 
 export const CANVAS_PREVIEW_QUALITY_SETTLE_MS = 500;
 
-export interface CanvasResourceZoomSettlement {
+export interface CanvasResourceZoomSource {
+  getSnapshot(): number;
+  subscribe(listener: () => void): () => void;
+}
+
+export interface CanvasResourceZoomSettlement extends CanvasResourceZoomSource {
+  attach(): () => void;
   observeCamera(cameraZoom: number): void;
-  dispose(): void;
 }
 
 export function createCanvasResourceZoomSettlement(input: {
@@ -19,12 +24,12 @@ export function createCanvasResourceZoomSettlement(input: {
     cameraState: CanvasCameraState;
     camera: { z: number };
   };
-  onSettledZoom: (zoom: number) => void;
 }): CanvasResourceZoomSettlement {
   let resourceZoom = initialCanvasResourceZoom(input.initialZoom);
   let pendingZoom = resourceZoom;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
-  let disposed = false;
+  let activeAttachment: object | undefined;
+  const listeners = new Set<() => void>();
 
   const clearSettleTimer = () => {
     if (settleTimer !== undefined) {
@@ -34,8 +39,27 @@ export function createCanvasResourceZoomSettlement(input: {
   };
 
   return {
+    getSnapshot: () => resourceZoom,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    attach() {
+      if (activeAttachment) {
+        throw new Error('Canvas Resource Zoom Settlement is already attached.');
+      }
+      const attachment = {};
+      activeAttachment = attachment;
+      return () => {
+        if (activeAttachment !== attachment) {
+          return;
+        }
+        activeAttachment = undefined;
+        clearSettleTimer();
+      };
+    },
     observeCamera(cameraZoom) {
-      if (disposed) {
+      if (!activeAttachment) {
         return;
       }
       assertResourceZoomInput(cameraZoom);
@@ -55,12 +79,10 @@ export function createCanvasResourceZoomSettlement(input: {
           return;
         }
         resourceZoom = pendingZoom;
-        input.onSettledZoom(resourceZoom);
+        for (const listener of listeners) {
+          listener();
+        }
       }, CANVAS_PREVIEW_QUALITY_SETTLE_MS);
-    },
-    dispose() {
-      disposed = true;
-      clearSettleTimer();
     }
   };
 }

@@ -6,7 +6,10 @@ import {
   createCanvasCullingController,
   type CanvasCullingCounts
 } from './CanvasCullingController.js';
-import type { CanvasScenePresentationUpdate } from './CanvasScenePresentation.js';
+import type {
+  CanvasScenePresentationUpdate,
+  CanvasSceneSnapshot
+} from './CanvasScenePresentation.js';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction,
@@ -55,6 +58,7 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
   let pendingFrame: number | undefined;
   let frameEpoch = 0;
   let activeSubscriptions: (() => void)[] | undefined;
+  let acceptedRenderSnapshot: CanvasSceneSnapshot | undefined;
 
   const recordCounter = (
     name: 'render-snapshot-build' | 'render-snapshot-reuse' | 'viewport-cull-queued' | 'viewport-idle-publish'
@@ -118,6 +122,19 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
     }
   };
 
+  const syncReplacementLayouts = (
+    previous: CanvasSceneSnapshot,
+    next: CanvasSceneSnapshot
+  ): void => {
+    for (const [path, nextNode] of next.nodesByPath) {
+      const previousNode = previous.nodesByPath.get(path);
+      if (!previousNode || sameCanvasNodeLayout(previousNode, nextNode)) {
+        continue;
+      }
+      input.stageRuntime.setNodeLayout(path, nextNode);
+    }
+  };
+
   const requestCullingSync = (): void => {
     if (pendingFrame !== undefined) {
       return;
@@ -138,7 +155,8 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       if (activeSubscriptions) {
         throw new Error('Canvas Render Lifecycle is already attached.');
       }
-      culling.acceptScene(input.runtime.scene.getRenderSnapshot());
+      acceptedRenderSnapshot = input.runtime.scene.getRenderSnapshot();
+      culling.acceptScene(acceptedRenderSnapshot);
       const initialSnapshot = input.runtime.getSnapshot();
       input.stageRuntime.setCamera(initialSnapshot.camera);
       input.stageRuntime.setSelectedNodePaths(
@@ -149,7 +167,13 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
       const subscriptions = [
         input.runtime.scene.subscribeRenderSnapshot(() => {
           cancelPendingFrame();
-          culling.acceptScene(input.runtime.scene.getRenderSnapshot());
+          const nextRenderSnapshot = input.runtime.scene.getRenderSnapshot();
+          const previousRenderSnapshot = acceptedRenderSnapshot;
+          acceptedRenderSnapshot = nextRenderSnapshot;
+          culling.acceptScene(nextRenderSnapshot);
+          if (previousRenderSnapshot) {
+            syncReplacementLayouts(previousRenderSnapshot, nextRenderSnapshot);
+          }
           recordCounter('render-snapshot-build');
           publishPreviewOrder(input.runtime.getSnapshot());
         }),
@@ -193,6 +217,7 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
           return;
         }
         cancelPendingFrame();
+        acceptedRenderSnapshot = undefined;
         for (const unsubscribe of subscriptions) {
           unsubscribe();
         }
@@ -235,4 +260,15 @@ function sameCanvasRect(left: CanvasRect, right: CanvasRect): boolean {
     && left.y === right.y
     && left.width === right.width
     && left.height === right.height;
+}
+
+function sameCanvasNodeLayout(
+  left: { x: number; y: number; width: number; height: number; z: number },
+  right: { x: number; y: number; width: number; height: number; z: number }
+): boolean {
+  return left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height
+    && left.z === right.z;
 }

@@ -87,7 +87,10 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
   return (
     <I18nProvider locale="en">
       <CanvasRasterPreviewEnvironmentProvider value={{
-        resourceZoom: 1,
+        resourceZoomSource: {
+          getSnapshot: () => 1,
+          subscribe: () => () => undefined
+        },
         devicePixelRatio: 1,
         previewResourceScheduler
       }}>

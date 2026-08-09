@@ -2657,6 +2657,63 @@ describe('CanvasSurface', () => {
     }
   });
 
+  it('does not commit the Canvas React tree when preview quality settles without raster consumers', async () => {
+    vi.useFakeTimers();
+    const restoreAnimationFrame = installAnimationFrame();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const projection: CanvasProjection = {
+      nodes: Array.from({ length: 32 }, (_item, index) => (
+        directoryFixture(`folder-${index}`, index * 240, 0)
+      )),
+      edges: []
+    };
+    const runtime = canvasRuntimeFixture(projection, {
+      camera: { x: 0, y: 0, z: 1 }
+    });
+    const commits = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <React.Profiler id="directory-canvas" onRender={commits}>
+            <I18nProvider locale="en">
+              <CanvasSurface
+                productPlatform="darwin"
+                expandedDirectories={emptyCanvasState.expandedDirectories}
+                projection={projection}
+                runtime={runtime}
+                actions={actions}
+                textFileBuffers={{}}
+                canvasFeedback={undefined}
+                textPreviewStyleDependencyKey="dark"
+              />
+            </I18nProvider>
+          </React.Profiler>
+        );
+      });
+      commits.mockClear();
+
+      await act(async () => {
+        runtime.camera.setCamera({ x: 0, y: 0, z: 2 });
+        await vi.advanceTimersByTimeAsync(CANVAS_PREVIEW_QUALITY_SETTLE_MS - 1);
+      });
+      commits.mockClear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      expect(commits).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      runtime.dispose();
+      container.remove();
+      restoreAnimationFrame();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not wait for Canvas settings before rendering the Canvas shell', () => {
     const projection: CanvasProjection = {
       nodes: [{ ...nodeFixture('flow/cover.png', 0, 0), width: 2400, height: 1200 }],

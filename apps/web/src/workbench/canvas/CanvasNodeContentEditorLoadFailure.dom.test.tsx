@@ -59,7 +59,10 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
         root.render(
           <I18nProvider locale="en">
             <CanvasRasterPreviewEnvironmentProvider value={{
-              resourceZoom: 1,
+              resourceZoomSource: {
+                getSnapshot: () => 1,
+                subscribe: () => () => undefined
+              },
               devicePixelRatio: 1,
               previewResourceScheduler
             }}>

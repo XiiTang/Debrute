@@ -40,7 +40,6 @@ import { CanvasNodeShell } from './CanvasNodeShell';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import {
   createCanvasResourceZoomSettlement,
-  initialCanvasResourceZoom,
   type CanvasResourceZoomSettlement
 } from './CanvasResourceZoom.js';
 import {
@@ -217,27 +216,16 @@ function CanvasSurfaceRuntime({
   const cutPathSet = useMemo(() => new Set(cutPaths), [cutPaths]);
   const contentInteractionPath = useCanvasContentInteraction(runtime);
   const surfaceSize = useCanvasSurfaceSize(runtime);
-  const initialRuntimeSnapshot = runtime.getSnapshot();
-  const [resourceZoom, setResourceZoom] = useState(() => (
-    initialCanvasResourceZoom(initialRuntimeSnapshot.camera.z)
-  ));
-  const resourceZoomSettlementRef = useRef<CanvasResourceZoomSettlement | undefined>(undefined);
-  useLayoutEffect(() => {
-    const initialZoom = initialCanvasResourceZoom(runtime.getSnapshot().camera.z);
-    const settlement = createCanvasResourceZoomSettlement({
-      initialZoom,
-      getCameraSnapshot: runtime.getSnapshot,
-      onSettledZoom: setResourceZoom
-    });
-    resourceZoomSettlementRef.current = settlement;
-    setResourceZoom(initialZoom);
-    return () => {
-      settlement.dispose();
-      if (resourceZoomSettlementRef.current === settlement) {
-        resourceZoomSettlementRef.current = undefined;
-      }
-    };
-  }, [runtime]);
+  const resourceZoomSettlement = useMemo<CanvasResourceZoomSettlement>(() => (
+    createCanvasResourceZoomSettlement({
+      initialZoom: runtime.getSnapshot().camera.z,
+      getCameraSnapshot: runtime.getSnapshot
+    })
+  ), [runtime]);
+  useLayoutEffect(
+    () => resourceZoomSettlement.attach(),
+    [resourceZoomSettlement]
+  );
   const fittedCanvasRef = useRef(false);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const canvasPerfPointerInteractionSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
@@ -415,15 +403,15 @@ function CanvasSurfaceRuntime({
   );
   const canvasPerfDebugContextRef = useRef<CanvasPerfDebugSnapshotContext | undefined>(undefined);
   const rasterPreviewEnvironment = useMemo<CanvasRasterPreviewEnvironment>(() => ({
-    resourceZoom,
+    resourceZoomSource: resourceZoomSettlement,
     devicePixelRatio,
     previewResourceScheduler,
     perfMonitor: instrumentationMonitor
-  }), [devicePixelRatio, instrumentationMonitor, previewResourceScheduler, resourceZoom]);
+  }), [devicePixelRatio, instrumentationMonitor, previewResourceScheduler, resourceZoomSettlement]);
 
   canvasPerfDebugContextRef.current = {
     runtime,
-    resourceZoom,
+    getResourceZoom: resourceZoomSettlement.getSnapshot,
     renderSnapshot,
     renderLifecycle,
     surfaceElement: surfaceRef.current
@@ -511,10 +499,11 @@ function CanvasSurfaceRuntime({
   useLayoutEffect(() => runtime.subscribeCamera((liveCamera) => {
     const snapshot = runtime.getSnapshot();
     previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState(snapshot));
-    resourceZoomSettlementRef.current?.observeCamera(liveCamera.z);
+    resourceZoomSettlement.observeCamera(liveCamera.z);
   }), [
     runtime,
-    previewResourceScheduler
+    previewResourceScheduler,
+    resourceZoomSettlement
   ]);
 
   useEffect(() => {
