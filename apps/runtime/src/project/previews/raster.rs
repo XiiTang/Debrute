@@ -208,7 +208,6 @@ fn parse_svg(path: &Path, file: &mut File) -> Result<resvg::usvg::Tree, ProjectE
     })
 }
 
-#[allow(clippy::cast_precision_loss)]
 fn render_svg(
     path: &Path,
     file: &mut File,
@@ -362,11 +361,6 @@ fn bounded_dimensions(
     })
 }
 
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
 fn finite_svg_dimension(value: f32, path: &Path) -> Result<u32, ProjectError> {
     if !value.is_finite() || value <= 0.0 || value > MAX_SVG_DIMENSION as f32 {
         return Err(ProjectError::service(

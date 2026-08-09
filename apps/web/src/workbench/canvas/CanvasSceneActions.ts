@@ -2,6 +2,7 @@ import type { WorkbenchActions } from '../../types';
 
 export type CanvasSceneActions = Pick<WorkbenchActions,
   | 'readProjectTextFile'
+  | 'resolveCanvasSources'
   | 'saveCanvasTextPreviewSource'
   | 'readCanvasTextPreviewSources'
   | 'probeCanvasVideoPreviewSources'

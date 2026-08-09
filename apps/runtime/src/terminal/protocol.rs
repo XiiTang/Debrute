@@ -31,7 +31,7 @@ pub struct TerminalSessionView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[allow(clippy::struct_excessive_bools)] // Independent terminal modes are explicit wire fields.
+// Independent terminal modes are explicit wire fields.
 pub struct TerminalCheckpoint {
     pub terminal_id: String,
     pub output_sequence: u64,

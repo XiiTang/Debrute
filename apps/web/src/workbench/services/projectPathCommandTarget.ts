@@ -3,7 +3,7 @@ import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
 
 export interface WorkbenchProjectPathCommandCandidate {
   pathEntry: ProjectPathEntry;
-  availability?: 'available' | 'missing' | 'unreadable';
+  availability?: 'available' | 'resolving' | 'missing' | 'unreadable';
 }
 
 interface WorkbenchProjectPathCommandTargetFields {

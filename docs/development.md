@@ -280,10 +280,15 @@ node scripts/run-cargo-with-native-raster.mjs -- run -p debrute-runtime --bin de
 `pnpm verify` is the timed daily repository gate. It runs doctor, Control generation once, the complete TypeScript check once, product-target Clippy, TypeScript and Rust tests, architecture lint, and a production artifact build that does not repeat generation or type checking. `pnpm verify:all` runs the same stages with all-target Clippy instead. During implementation, use focused tests and checks, complete code review, then run `pnpm verify:all` once for final handoff. Each verification run prints per-stage and total wall-clock durations, including the failed stage when it stops early.
 
 `pnpm dev` starts or reuses the shared Rust Runtime, starts Vite, and prints the
-browser Workbench URL. Opening it creates a fresh POST SSE Workbench connection.
-Runtime owns the native macOS or Windows tray and remains running when the
-browser closes. Use the tray's **Quit Debrute** command or `debrute runtime stop`
-when an explicit Product Quit is required.
+exact browser Workbench URL without opening or focusing a browser. Open that URL
+in the browser requested by the user; an Agent uses its current harness's
+built-in browser when the user does not specify one. Direct activation of the
+system default browser remains an explicit
+`debrute workbench start [<project>] --frontend browser` action. Opening the URL
+creates a fresh POST SSE Workbench connection. Runtime owns the native macOS or
+Windows tray and remains running when the browser closes. Use the tray's
+**Quit Debrute** command or `debrute runtime stop` when an explicit Product Quit
+is required.
 
 The development launcher prepares the target's repository-locked upstream
 libvips archive before building Runtime and uses the same normalized library

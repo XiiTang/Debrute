@@ -20,6 +20,7 @@ glossaries instead.
 - [Remote Media Fetches Bind Validated DNS](./0011-remote-media-fetches-bind-validated-dns.md)
 - [Project Paths Are Realpath-Bound](./0012-project-paths-are-realpath-bound.md)
 - [Tests Own Their External Resources](./0013-tests-own-their-external-resources.md)
+- [Project Source Resolution Is Demand-Driven](./0069-project-source-resolution-is-demand-driven.md)
 
 ### Product Identity
 

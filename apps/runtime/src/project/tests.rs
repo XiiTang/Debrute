@@ -1,4 +1,12 @@
-use std::{collections::BTreeMap, fs, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fs,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use uuid::Uuid;
 
@@ -41,6 +49,74 @@ fn available_canvas_workspace(snapshot: &ProjectSnapshot) -> &CanvasWorkspaceDoc
         CanvasWorkspaceSnapshot::Unavailable { code, message } => {
             panic!("Canvas Workspace unavailable ({code:?}): {message}")
         }
+    }
+}
+
+#[derive(Default)]
+struct VideoTextTrackNodeAdapter {
+    video_presentation_calls: AtomicUsize,
+}
+
+impl ProjectNodeAdapter for VideoTextTrackNodeAdapter {
+    fn video_presentation(
+        &self,
+        _project_root: &std::path::Path,
+        project_relative_path: &str,
+    ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
+        self.video_presentation_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(
+            (project_relative_path == "clip.mp4").then_some(CanvasVideoPresentation {
+                kind: CanvasVideoPresentationKind::Video,
+                width: 1280,
+                height: 720,
+                duration_seconds: Some(1.0),
+                text_tracks: Vec::new(),
+            }),
+        )
+    }
+
+    fn video_text_tracks(
+        &self,
+        _project_root: &std::path::Path,
+        project_relative_path: &ProjectRelativePath,
+    ) -> Result<Vec<CanvasVideoTextTrack>, ProjectError> {
+        Ok(if project_relative_path == "clip.mp4" {
+            vec![CanvasVideoTextTrack {
+                project_relative_path: "clip.en.vtt".to_owned(),
+                file_url: None,
+                revision: String::new(),
+                kind: CanvasVideoTextTrackKind::Subtitles,
+                label: "English".to_owned(),
+                srclang: Some("en".to_owned()),
+                default: true,
+            }]
+        } else {
+            Vec::new()
+        })
+    }
+}
+
+fn resolving_source_target(snapshot: &ProjectSnapshot, path: &str) -> CanvasSourceTarget {
+    let CanvasWorkspaceSnapshot::Available {
+        canvas_resources, ..
+    } = &snapshot.canvas_workspace
+    else {
+        panic!("expected an available Canvas workspace");
+    };
+    let resource = canvas_resources
+        .resources
+        .iter()
+        .find(|resource| resource.project_relative_path() == path)
+        .unwrap();
+    let CanvasResource::File { availability, .. } = resource else {
+        panic!("expected a Canvas file resource");
+    };
+    let CanvasNodeAvailability::Resolving { source_token, .. } = availability.as_ref() else {
+        panic!("expected a resolving Canvas file resource");
+    };
+    CanvasSourceTarget {
+        project_relative_path: relative(path),
+        source_token: source_token.clone(),
     }
 }
 
@@ -111,14 +187,72 @@ fn canvas_resource_media_facts_use_exact_shared_classification() {
             *media_kind, expected_kind,
             "unexpected media kind for {path}"
         );
-        let CanvasNodeAvailability::Available { mime_type, .. } = availability.as_ref() else {
-            panic!("expected available Canvas resource for {path}")
+        let CanvasNodeAvailability::Resolving { mime_type, .. } = availability.as_ref() else {
+            panic!("expected unresolved Canvas resource descriptor for {path}")
         };
         assert_eq!(
             mime_type, expected_mime_type,
             "unexpected MIME type for {path}"
         );
     }
+
+    drop(service);
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn resolving_a_video_resolves_its_text_track_through_the_shared_source_cache() {
+    let base = std::env::temp_dir().join(format!("debrute-project-tracks-{}", Uuid::new_v4()));
+    let home = base.join("home");
+    let root = base.join("project");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("clip.mp4"), b"video bytes").unwrap();
+    fs::write(root.join("clip.en.vtt"), b"WEBVTT\n").unwrap();
+
+    let adapter = Arc::new(VideoTextTrackNodeAdapter::default());
+    let mut service = ProjectService::open(&root, &home, adapter.clone()).unwrap();
+    assert_eq!(adapter.video_presentation_calls.load(Ordering::SeqCst), 1);
+    let snapshot = service.snapshot();
+    let video_target = resolving_source_target(snapshot, "clip.mp4");
+    let track_target = resolving_source_target(snapshot, "clip.en.vtt");
+
+    let source_digests = ProjectSourceDigestResolver::default();
+    let resolved = service
+        .resolve_canvas_sources(&[video_target], &source_digests)
+        .unwrap();
+    assert_eq!(adapter.video_presentation_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(resolved.sources.len(), 2);
+    let track = resolved
+        .sources
+        .iter()
+        .find(|source| source.resource.project_relative_path() == "clip.en.vtt")
+        .unwrap();
+    let CanvasResource::File { availability, .. } = &track.resource else {
+        panic!("expected a resolved text track");
+    };
+    assert!(matches!(
+        availability.as_ref(),
+        CanvasNodeAvailability::Available { .. }
+    ));
+    let video = resolved
+        .sources
+        .iter()
+        .find(|source| source.resource.project_relative_path() == "clip.mp4")
+        .unwrap();
+    let CanvasResource::File {
+        video_presentation: Some(presentation),
+        ..
+    } = &video.resource
+    else {
+        panic!("expected a resolved video presentation");
+    };
+    assert!(!presentation.text_tracks[0].revision.is_empty());
+
+    let resolved_again = service
+        .resolve_canvas_sources(&[track_target], &source_digests)
+        .unwrap();
+    assert_eq!(resolved_again.sources.len(), 1);
+    assert_eq!(resolved_again.sources[0].resource, track.resource);
 
     drop(service);
     fs::remove_dir_all(base).unwrap();

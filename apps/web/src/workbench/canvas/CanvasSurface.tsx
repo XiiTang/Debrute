@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { DebruteProductPlatform } from '@debrute/app-protocol';
+import type { CanvasResourceView, DebruteProductPlatform } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
   CanvasFeedbackEntry,
@@ -124,6 +124,33 @@ interface CanvasSurfaceProps {
   textPreviewStyleDependencyKey: string;
 }
 
+type CanvasFileResource = Extract<CanvasResourceView['resources'][number], { nodeKind: 'file' }>;
+
+type CanvasSourceResult = {
+  sourceToken: string;
+  resource?: CanvasFileResource;
+  error?: string;
+};
+
+type CanvasSourceFields = Pick<ProjectedCanvasNode, 'availability'> & Partial<Pick<
+  ProjectedCanvasNode,
+  'mediaKind' | 'imageDimensions' | 'textLanguage' | 'videoPresentation'
+>>;
+
+function canvasNodeWithSourceFields(
+  node: ProjectedCanvasNode,
+  source: CanvasSourceFields
+): ProjectedCanvasNode {
+  return {
+    ...node,
+    availability: source.availability,
+    ...(source.mediaKind ? { mediaKind: source.mediaKind } : {}),
+    ...(source.imageDimensions ? { imageDimensions: source.imageDimensions } : {}),
+    ...(source.textLanguage ? { textLanguage: source.textLanguage } : {}),
+    ...(source.videoPresentation ? { videoPresentation: source.videoPresentation } : {})
+  };
+}
+
 export function CanvasSurface({
   canvasState,
   projection,
@@ -203,6 +230,58 @@ function CanvasSurfaceRuntime({
 }: CanvasSurfaceProps & {
   perfMonitor: CanvasPerfMonitor | undefined;
 }): React.ReactElement {
+  const projectionNodesByPath = useMemo(
+    () => new Map(projection.nodes.map((node) => [node.projectRelativePath, node])),
+    [projection]
+  );
+  const projectionNodesByPathRef = useRef(projectionNodesByPath);
+  projectionNodesByPathRef.current = projectionNodesByPath;
+  const sourceAttemptsRef = useRef(new Set<string>());
+  const sourceQueueRef = useRef<readonly ProjectedCanvasNode[]>([]);
+  const sourceQueueIndexRef = useRef(0);
+  const sourceQueueProjectionRef = useRef<CanvasProjection | undefined>(undefined);
+  const sourceQueueScheduleRevisionRef = useRef(-1);
+  const sourceRequestInFlightRef = useRef(false);
+  const [sourceResults, setSourceResults] = useState<ReadonlyMap<string, CanvasSourceResult>>(
+    () => new Map()
+  );
+  const [sourceScheduleRevision, setSourceScheduleRevision] = useState(0);
+  const [sourceSettlementRevision, setSourceSettlementRevision] = useState(0);
+  const effectiveProjection = useMemo<CanvasProjection>(() => ({
+    ...projection,
+    nodes: projection.nodes.map((node): ProjectedCanvasNode => {
+      if (node.availability.state !== 'resolving') {
+        return node;
+      }
+      const result = sourceResults.get(node.projectRelativePath);
+      if (!result || result.sourceToken !== node.availability.sourceToken) {
+        return node;
+      }
+      if (result.error) {
+        return {
+          ...node,
+          availability: { state: 'unreadable', message: result.error }
+        };
+      }
+      if (!result.resource) {
+        return node;
+      }
+      return canvasNodeWithSourceFields(node, result.resource);
+    })
+  }), [projection, sourceResults]);
+  useEffect(() => {
+    const currentTokens = new Map(projection.nodes.flatMap((node) => (
+      node.availability.state === 'resolving'
+        ? [[node.projectRelativePath, node.availability.sourceToken] as const]
+        : []
+    )));
+    setSourceResults((previous) => {
+      const next = new Map(
+        [...previous].filter(([path, result]) => currentTokens.get(path) === result.sourceToken)
+      );
+      return next.size === previous.size ? previous : next;
+    });
+  }, [projection]);
   const localFeedbackMode = feedbackInteraction?.localMode;
   const feedbackComposition = feedbackInteraction?.composition;
   const localSpatialFeedbackItems = feedbackInteraction?.localSpatialItems ?? [];
@@ -302,7 +381,7 @@ function CanvasSurfaceRuntime({
     return byPath;
   }, [canvasFeedback, feedbackComposition, feedbackInteraction?.focusedCapsuleId, localSpatialFeedbackItems]);
 
-  const projectedNodes = projection.nodes;
+  const projectedNodes = effectiveProjection.nodes;
   const projectedNodesRef = useRef(projectedNodes);
   projectedNodesRef.current = projectedNodes;
   const videoTargetsRef = useRef(new Map<string, CanvasVideoPlayerHandle>());
@@ -386,6 +465,138 @@ function CanvasSurfaceRuntime({
     perfMonitor: instrumentationMonitor
   }), [instrumentationMonitor, runtime, stageRuntime]);
   useLayoutEffect(() => renderLifecycle.attach(), [renderLifecycle]);
+  useEffect(() => {
+    const schedule = () => setSourceScheduleRevision((current) => current + 1);
+    const unsubscribeCameraState = runtime.subscribeCameraState((state) => {
+      if (state === 'idle') {
+        schedule();
+      }
+    });
+    const unsubscribePointerInteraction = runtime.subscribePointerInteraction((interaction) => {
+      if (interaction === undefined) {
+        schedule();
+      }
+    });
+    return () => {
+      unsubscribeCameraState();
+      unsubscribePointerInteraction();
+    };
+  }, [runtime]);
+  useEffect(() => {
+    const snapshot = runtime.getSnapshot();
+    if (snapshot.cameraState !== 'idle' || snapshot.pointerInteraction !== undefined) {
+      return;
+    }
+    if (sourceRequestInFlightRef.current) {
+      return;
+    }
+    if (
+      sourceQueueProjectionRef.current !== projection
+      || sourceQueueScheduleRevisionRef.current !== sourceScheduleRevision
+    ) {
+      const currentKeys = new Set(projection.nodes.flatMap((node) => (
+        node.availability.state === 'resolving'
+          ? [`${node.projectRelativePath}\u001f${node.availability.sourceToken}`]
+          : []
+      )));
+      sourceAttemptsRef.current = new Set(
+        [...sourceAttemptsRef.current].filter((key) => currentKeys.has(key))
+      );
+      sourceQueueRef.current = projection.nodes
+        .filter((node) => node.availability.state === 'resolving' && node.mediaKind !== 'unknown')
+        .sort((left, right) => (
+          renderLifecycle.previewDistanceSquaredForNode(left.projectRelativePath)
+            - renderLifecycle.previewDistanceSquaredForNode(right.projectRelativePath)
+          || left.projectRelativePath.localeCompare(right.projectRelativePath)
+        ));
+      sourceQueueIndexRef.current = 0;
+      sourceQueueProjectionRef.current = projection;
+      sourceQueueScheduleRevisionRef.current = sourceScheduleRevision;
+    }
+    let candidate: ProjectedCanvasNode | undefined;
+    while (sourceQueueIndexRef.current < sourceQueueRef.current.length) {
+      const queued = sourceQueueRef.current[sourceQueueIndexRef.current];
+      sourceQueueIndexRef.current += 1;
+      if (queued?.availability.state !== 'resolving') {
+        continue;
+      }
+      const result = sourceResults.get(queued.projectRelativePath);
+      const attemptKey = `${queued.projectRelativePath}\u001f${queued.availability.sourceToken}`;
+      if (
+        result?.sourceToken === queued.availability.sourceToken
+        || sourceAttemptsRef.current.has(attemptKey)
+      ) {
+        continue;
+      }
+      candidate = queued;
+      break;
+    }
+    if (!candidate || candidate.availability.state !== 'resolving') {
+      return;
+    }
+    const projectRelativePath = candidate.projectRelativePath;
+    const sourceToken = candidate.availability.sourceToken;
+    const attemptKey = `${projectRelativePath}\u001f${sourceToken}`;
+    sourceAttemptsRef.current.add(attemptKey);
+    sourceRequestInFlightRef.current = true;
+    void actions.resolveCanvasSources({
+      targets: [{ projectRelativePath, sourceToken }]
+    }).then((response) => {
+      const current = projectionNodesByPathRef.current.get(projectRelativePath);
+      if (current?.availability.state !== 'resolving'
+        || current.availability.sourceToken !== sourceToken) {
+        return;
+      }
+      const resolved = response.sources.find((source) => source.sourceToken === sourceToken);
+      if (!resolved || resolved.resource.nodeKind !== 'file') {
+        throw new Error(`Runtime did not resolve Canvas source: ${projectRelativePath}`);
+      }
+      setSourceResults((previous) => {
+        const next = new Map(previous);
+        for (const source of response.sources) {
+          if (source.resource.nodeKind !== 'file') {
+            continue;
+          }
+          const currentSource = projectionNodesByPathRef.current.get(
+            source.resource.projectRelativePath
+          );
+          if (currentSource?.availability.state === 'resolving'
+            && currentSource.availability.sourceToken === source.sourceToken) {
+            next.set(source.resource.projectRelativePath, {
+              sourceToken: source.sourceToken,
+              resource: source.resource
+            });
+          }
+        }
+        return next;
+      });
+    }).catch((error: unknown) => {
+      const current = projectionNodesByPathRef.current.get(projectRelativePath);
+      if (current?.availability.state !== 'resolving'
+        || current.availability.sourceToken !== sourceToken) {
+        return;
+      }
+      setSourceResults((previous) => {
+        const next = new Map(previous);
+        next.set(projectRelativePath, {
+          sourceToken,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return next;
+      });
+    }).finally(() => {
+      sourceRequestInFlightRef.current = false;
+      setSourceSettlementRevision((currentRevision) => currentRevision + 1);
+    });
+  }, [
+    actions,
+    projection,
+    renderLifecycle,
+    runtime,
+    sourceResults,
+    sourceScheduleRevision,
+    sourceSettlementRevision
+  ]);
   const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({
     perfMonitor: instrumentationMonitor,
     distanceSquaredForNode: renderLifecycle.previewDistanceSquaredForNode
@@ -939,10 +1150,16 @@ function CanvasSurfaceRuntime({
     }
   }, [handleNodeContextMenu, runtime]);
 
-  const renderedNodes = useMemo(
-    () => [...renderSnapshot.nodesByPath.values()],
-    [renderSnapshot]
-  );
+  const renderedNodes = useMemo(() => {
+    const sourceNodes = new Map(projectedNodes.map((node) => [node.projectRelativePath, node]));
+    return [...renderSnapshot.nodesByPath.values()].map((node) => {
+      const sourceNode = sourceNodes.get(node.projectRelativePath);
+      if (!sourceNode || sourceNode.availability === node.availability) {
+        return node;
+      }
+      return canvasNodeWithSourceFields(node, sourceNode);
+    });
+  }, [projectedNodes, renderSnapshot]);
   const activeContentInteractionNode = useMemo(() => {
     if (!contentInteractionPath) {
       return undefined;

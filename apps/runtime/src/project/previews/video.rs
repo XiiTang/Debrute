@@ -23,9 +23,11 @@ use super::{
         RasterPreviewVariantOutputPolicy, RasterPreviewVariantRequest, RasterPreviewVariantService,
     },
 };
+#[cfg(test)]
+use crate::project::project_media_revision;
 use crate::project::{
     CANVAS_VIDEO_TIME_MAX_MS, ProjectCapabilityFs, ProjectError, ProjectRelativePath,
-    open_no_symlink_existing_project_file, project_media_revision,
+    ProjectSourceLease, open_no_symlink_existing_project_file,
     resolve_no_symlink_existing_project_path,
 };
 
@@ -64,7 +66,7 @@ pub struct CanvasVideoMetadata {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanvasVideoPreviewTarget {
-    pub project_relative_path: String,
+    pub project_relative_path: ProjectRelativePath,
     pub source_revision: String,
     pub frame_time_ms: u64,
 }
@@ -127,23 +129,21 @@ impl CanvasVideoPreviewService {
         }
     }
 
-    /// Reads the fixed ffprobe projection for one Project video.
+    /// Reads container metadata without materializing or hashing the saved-file source.
     ///
     /// # Errors
     /// Returns an error for an invalid path, unavailable ffprobe, cancellation, or invalid output.
-    pub fn read_metadata(
+    pub(crate) fn read_project_metadata(
         &self,
         project_root: &Path,
-        project_relative_path: &str,
+        project_relative_path: &ProjectRelativePath,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasVideoMetadata, ProjectError> {
-        let source = StableVideoInput::open(
+        let source = resolve_no_symlink_existing_project_path(
             project_root,
-            project_relative_path,
-            &self.stable_input_copy_admission,
-            cancellation,
+            project_relative_path.as_directory_path(),
         )?;
-        self.read_metadata_path(&source.path, cancellation)
+        self.read_metadata_path(&source, cancellation)
     }
 
     pub(crate) fn feedback_frame(
@@ -181,16 +181,22 @@ impl CanvasVideoPreviewService {
     ///
     /// # Errors
     /// Returns an error only when the whole request is cancelled.
-    pub fn probe_sources(
+    pub(crate) fn probe_sources(
         &self,
-        project_root: &Path,
+        leases: &[ProjectSourceLease],
         targets: &[CanvasVideoPreviewTarget],
         cancellation: &PreviewCancellation,
     ) -> Result<Vec<CanvasVideoPreviewProbeView>, ProjectError> {
+        if leases.len() != targets.len() {
+            return Err(ProjectError::service(
+                "canvas_source_lease_mismatch",
+                "Canvas video preview targets require matching source leases.",
+            ));
+        }
         let mut result = Vec::with_capacity(targets.len());
-        for target in targets.iter().cloned() {
+        for (lease, target) in leases.iter().zip(targets.iter().cloned()) {
             cancellation.check()?;
-            let status = match self.probe_source(project_root, &target, cancellation) {
+            let status = match self.probe_source(lease, &target, cancellation) {
                 Ok(status) => status,
                 Err(error) if error.code() == "canvas_preview_cancelled" => return Err(error),
                 Err(error) => CanvasVideoPreviewProbeStatus::Failed {
@@ -206,9 +212,9 @@ impl CanvasVideoPreviewService {
     ///
     /// # Errors
     /// Returns an error when the request is cancelled.
-    pub fn ensure_source(
+    pub(crate) fn ensure_source(
         &self,
-        project_root: &Path,
+        lease: &ProjectSourceLease,
         target: &CanvasVideoPreviewTarget,
         canonical_source_identity: &str,
         cancellation: &PreviewCancellation,
@@ -216,12 +222,7 @@ impl CanvasVideoPreviewService {
         if assert_canonical_source_identity_current(target, canonical_source_identity).is_err() {
             return Ok(CanvasVideoPreviewEnsureStatus::SourceChanged);
         }
-        match self.ensure_source_inner(
-            project_root,
-            target,
-            canonical_source_identity,
-            cancellation,
-        ) {
+        match self.ensure_source_inner(lease, target, canonical_source_identity, cancellation) {
             Ok(source) => Ok(CanvasVideoPreviewEnsureStatus::Ready {
                 canonical_source_identity: source.canonical_source_identity,
                 source_width: source.source_width,
@@ -247,20 +248,21 @@ impl CanvasVideoPreviewService {
     ///
     /// # Errors
     /// Returns an error for invalid identity, unavailable source, cancellation, or decode failure.
-    pub fn resolve_variant(
+    pub(crate) fn resolve_variant(
         &self,
-        project_root: &Path,
+        lease: &ProjectSourceLease,
         target: &CanvasVideoPreviewTarget,
         canonical_source_identity: &str,
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
+        let project_root = lease.project_root();
         let directory = video_source_directory(
-            &target.project_relative_path,
+            target.project_relative_path.as_str(),
             &target.source_revision,
             canonical_source_identity,
         )?;
-        assert_source_revision(project_root, target)?;
+        assert_source_revision(lease, target)?;
         assert_canonical_source_identity_current(target, canonical_source_identity)?;
         let cache_root = self.cache_root(project_root)?;
         let (source_project_path, source) =
@@ -274,7 +276,7 @@ impl CanvasVideoPreviewService {
                     [
                         (
                             "project_relative_path".to_owned(),
-                            target.project_relative_path.clone(),
+                            target.project_relative_path.as_str().to_owned(),
                         ),
                         ("source_revision".to_owned(), target.source_revision.clone()),
                         (
@@ -302,7 +304,7 @@ impl CanvasVideoPreviewService {
             },
             cancellation,
             || {
-                assert_source_revision(project_root, target)?;
+                assert_source_revision(lease, target)?;
                 assert_canonical_source_identity_current(target, canonical_source_identity)
             },
         )
@@ -310,15 +312,16 @@ impl CanvasVideoPreviewService {
 
     fn probe_source(
         &self,
-        project_root: &Path,
+        lease: &ProjectSourceLease,
         target: &CanvasVideoPreviewTarget,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasVideoPreviewProbeStatus, ProjectError> {
+        let project_root = lease.project_root();
         cancellation.check()?;
-        assert_source_revision(project_root, target)?;
+        assert_source_revision(lease, target)?;
         let canonical_source_identity = frame_canonical_source_identity(target.frame_time_ms)?;
         let directory = video_source_directory(
-            &target.project_relative_path,
+            target.project_relative_path.as_str(),
             &target.source_revision,
             &canonical_source_identity,
         )?;
@@ -341,13 +344,14 @@ impl CanvasVideoPreviewService {
 
     fn ensure_source_inner(
         &self,
-        project_root: &Path,
+        lease: &ProjectSourceLease,
         target: &CanvasVideoPreviewTarget,
         canonical_source_identity: &str,
         cancellation: &PreviewCancellation,
     ) -> Result<ResolvedSource, ProjectError> {
+        let project_root = lease.project_root();
         cancellation.check()?;
-        assert_source_revision(project_root, target)?;
+        assert_source_revision(lease, target)?;
         assert_canonical_source_identity_current(target, canonical_source_identity)?;
         let key = format!(
             "{}\0{}\0{}\0{canonical_source_identity}",
@@ -356,10 +360,10 @@ impl CanvasVideoPreviewService {
             target.source_revision
         );
         let _lock = self.source_locks.acquire(&key, cancellation)?;
-        assert_source_revision(project_root, target)?;
+        assert_source_revision(lease, target)?;
         assert_canonical_source_identity_current(target, canonical_source_identity)?;
         let directory = video_source_directory(
-            &target.project_relative_path,
+            target.project_relative_path.as_str(),
             &target.source_revision,
             canonical_source_identity,
         )?;
@@ -369,9 +373,8 @@ impl CanvasVideoPreviewService {
         let source = if let Some(source) = existing_file(&cache_root, &source_relative)? {
             source
         } else {
-            let video = StableVideoInput::open(
-                project_root,
-                &target.project_relative_path,
+            let video = StableVideoInput::open_resolved(
+                lease,
                 &self.stable_input_copy_admission,
                 cancellation,
             )?;
@@ -394,7 +397,7 @@ impl CanvasVideoPreviewService {
                 cancellation,
             )?;
             let publication = (|| {
-                assert_source_revision(project_root, target)?;
+                assert_source_revision(lease, target)?;
                 let bytes = read_file_limited(
                     &temporary.path,
                     MAX_EXTRACTED_FRAME_BYTES,
@@ -407,7 +410,7 @@ impl CanvasVideoPreviewService {
                     &bytes,
                     || {
                         cancellation.check()?;
-                        assert_source_revision(project_root, target)?;
+                        assert_source_revision(lease, target)?;
                         assert_canonical_source_identity_current(target, canonical_source_identity)
                     },
                 )
@@ -546,7 +549,7 @@ fn assert_canonical_source_identity_current(
             [
                 (
                     "project_relative_path".to_owned(),
-                    target.project_relative_path.clone(),
+                    target.project_relative_path.as_str().to_owned(),
                 ),
                 ("source_revision".to_owned(), target.source_revision.clone()),
                 (
@@ -678,6 +681,53 @@ struct StableVideoInput {
 }
 
 impl StableVideoInput {
+    fn open_resolved(
+        lease: &ProjectSourceLease,
+        copy_admission: &Semaphore,
+        cancellation: &PreviewCancellation,
+    ) -> Result<Self, ProjectError> {
+        let relative = lease.project_relative_path().clone();
+        cancellation.check()?;
+        lease.verify_current()?;
+        let mut source = lease.try_clone_file()?;
+        let source_length = lease.size();
+        let directory =
+            std::env::temp_dir().join(format!(".debrute-runtime-video-{}", Uuid::new_v4()));
+        fs::create_dir(&directory)?;
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+        }
+        let path = directory.join("source");
+        let project = ProjectCapabilityFs::open(lease.project_root())?;
+        let temporary_directory =
+            cap_std::fs::Dir::open_ambient_dir(&directory, cap_std::ambient_authority())?;
+        let publication = (|| {
+            if project
+                .hard_link_to(&relative, &temporary_directory, "source")
+                .is_err()
+            {
+                copy_stable_video(
+                    &mut source,
+                    &path,
+                    &directory,
+                    &relative,
+                    source_length,
+                    copy_admission,
+                    cancellation,
+                )?;
+            }
+            cancellation.check()?;
+            lease.verify_current()
+        })();
+        if let Err(error) = publication {
+            let _ = fs::remove_dir_all(&directory);
+            return Err(error);
+        }
+        Ok(Self { path, directory })
+    }
+
     fn open(
         project_root: &Path,
         project_relative_path: &str,
@@ -689,8 +739,8 @@ impl StableVideoInput {
         let mut source = open_no_symlink_existing_project_file(project_root, &relative)?;
         let source_identity = debrute_native_fs::file_identity(&source)?;
         let source_metadata = source.metadata()?;
-        let source_revision = project_media_revision(&mut source)?;
         let source_length = source_metadata.len();
+        let source_modified = source_metadata.modified()?;
         let directory =
             std::env::temp_dir().join(format!(".debrute-runtime-video-{}", Uuid::new_v4()));
         fs::create_dir(&directory)?;
@@ -730,8 +780,11 @@ impl StableVideoInput {
             }
             cancellation.check()?;
             let current_identity = debrute_native_fs::file_identity(&source)?;
-            let current_revision = project_media_revision(&mut source)?;
-            if source_identity != current_identity || source_revision != current_revision {
+            let current_metadata = source.metadata()?;
+            if source_identity != current_identity
+                || source_length != current_metadata.len()
+                || source_modified != current_metadata.modified()?
+            {
                 return Err(ProjectError::service(
                     "project_path_changed",
                     format!("Project video changed while its stable input was created: {relative}"),
@@ -847,24 +900,29 @@ impl Drop for StableVideoInput {
 }
 
 fn assert_source_revision(
-    project_root: &Path,
+    lease: &ProjectSourceLease,
     target: &CanvasVideoPreviewTarget,
 ) -> Result<(), ProjectError> {
-    let relative = ProjectRelativePath::parse(&target.project_relative_path)?;
-    let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
-    let actual = project_media_revision(&mut file)?;
-    if actual == target.source_revision {
-        Ok(())
-    } else {
+    if lease.project_relative_path() != &target.project_relative_path
+        || lease.revision() != target.source_revision
+    {
         Err(ProjectError::service_with_fields(
             "canvas_video_preview_source_revision_mismatch",
-            format!("Canvas video preview revision does not match source: {relative}"),
+            format!(
+                "Canvas video preview revision does not match source: {}",
+                target.project_relative_path
+            ),
             [
-                ("project_relative_path".to_owned(), relative.to_string()),
+                (
+                    "project_relative_path".to_owned(),
+                    target.project_relative_path.as_str().to_owned(),
+                ),
                 ("source_revision".to_owned(), target.source_revision.clone()),
-                ("actual_revision".to_owned(), actual),
+                ("actual_revision".to_owned(), lease.revision().to_owned()),
             ],
         ))
+    } else {
+        lease.verify_current()
     }
 }
 
@@ -982,7 +1040,7 @@ mod tests {
         fs::write(root.join("media/clip.mp4"), b"video").unwrap();
         let mut video = File::open(root.join("media/clip.mp4")).unwrap();
         let target = CanvasVideoPreviewTarget {
-            project_relative_path: "media/clip.mp4".to_owned(),
+            project_relative_path: ProjectRelativePath::parse("media/clip.mp4").unwrap(),
             source_revision: project_media_revision(&mut video).unwrap(),
             frame_time_ms: 0,
         };
@@ -994,9 +1052,17 @@ mod tests {
             Arc::new(RasterPreviewVariantService::new(raster_pool)),
             root.join("home"),
         );
+        let leases = vec![
+            ProjectSourceLease::for_test(
+                &root,
+                &target.project_relative_path,
+                target.source_revision.clone(),
+            )
+            .unwrap(),
+        ];
         let sources = service
             .probe_sources(
-                &root,
+                &leases,
                 std::slice::from_ref(&target),
                 &PreviewCancellation::default(),
             )

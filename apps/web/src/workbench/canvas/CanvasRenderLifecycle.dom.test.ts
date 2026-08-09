@@ -74,6 +74,30 @@ describe('CanvasRenderLifecycle', () => {
     unregisterNear();
   });
 
+  it('culls offscreen Selection while retaining the one Content Activation node', () => {
+    const fixture = createFixture({
+      nodes: [
+        directoryNode('near', 0, 0, 1),
+        textNode('far.md', 5000, 0, 2)
+      ]
+    });
+    const far = document.createElement('div');
+    const unregisterFar = fixture.stageRuntime.registerNodeShell('far.md', far);
+
+    fixture.runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['far.md'] });
+
+    expect(far.style.display).toBe('none');
+
+    fixture.runtime.activateContent('far.md');
+
+    expect(far.style.display).toBe('block');
+
+    fixture.runtime.endContentActivation();
+
+    expect(far.style.display).toBe('none');
+    unregisterFar();
+  });
+
   it('writes the live camera immediately and coalesces direct viewport culling per frame', () => {
     const fixture = createFixture();
     const setCamera = vi.spyOn(fixture.stageRuntime, 'setCamera');
@@ -249,5 +273,27 @@ function directoryNode(path: string, x: number, y: number, z: number): Projected
       size: 0,
       mimeType: 'inode/directory'
     }
+  };
+}
+
+function textNode(path: string, x: number, y: number, z: number): ProjectedCanvasNode {
+  return {
+    nodeKind: 'file',
+    mediaKind: 'text',
+    projectRelativePath: path,
+    displayName: path,
+    x,
+    y,
+    width: 100,
+    height: 100,
+    z,
+    availability: {
+      state: 'available',
+      fileUrl: `/files/${path}`,
+      revision: 'sha256:text',
+      size: 1,
+      mimeType: 'text/markdown'
+    },
+    textLanguage: 'markdown'
   };
 }

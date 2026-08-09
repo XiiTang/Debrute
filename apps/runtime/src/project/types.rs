@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ProjectError, feedback::CanvasFeedbackDocument};
+use super::{ProjectError, ProjectRelativePath, feedback::CanvasFeedbackDocument};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -147,6 +147,23 @@ pub struct CanvasState {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum CanvasNodeAvailability {
+    Resolving {
+        size: u64,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+        #[serde(rename = "sourceToken")]
+        source_token: String,
+        #[serde(
+            rename = "canvasImagePreviewable",
+            skip_serializing_if = "Option::is_none"
+        )]
+        canvas_image_previewable: Option<bool>,
+        #[serde(
+            rename = "canvasImagePreviewSourceWidth",
+            skip_serializing_if = "Option::is_none"
+        )]
+        canvas_image_preview_source_width: Option<u64>,
+    },
     Available {
         size: u64,
         #[serde(rename = "mimeType")]
@@ -261,6 +278,25 @@ impl CanvasResource {
 #[serde(rename_all = "camelCase")]
 pub struct CanvasResourceView {
     pub resources: Vec<CanvasResource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanvasSourceTarget {
+    pub project_relative_path: ProjectRelativePath,
+    pub source_token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanvasResolvedSource {
+    pub source_token: String,
+    pub resource: CanvasResource,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanvasSourceResolutionView {
+    pub sources: Vec<CanvasResolvedSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

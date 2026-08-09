@@ -1157,7 +1157,6 @@ fn spawn_terminal(
 }
 
 // PTY acquisition and every rollback edge form one startup transaction.
-#[allow(clippy::needless_pass_by_value)]
 fn start_terminal_actor(
     mut view: TerminalSessionView,
     shared_view: Arc<Mutex<TerminalSessionView>>,
@@ -1316,7 +1315,7 @@ fn start_terminal_actor(
     })
 }
 
-#[allow(clippy::needless_pass_by_value)] // The dedicated writer thread owns its queue receiver.
+// The dedicated writer thread owns its queue receiver.
 fn write_terminal_input(
     mut writer: Box<dyn Write + Send>,
     receiver: mpsc::Receiver<PtyWrite>,
@@ -1388,7 +1387,7 @@ fn read_terminal_output(
     let _ = commands.send(ActorCommand::ReaderClosed);
 }
 
-#[allow(clippy::needless_pass_by_value)] // The actor thread owns its receiver.
+// The actor thread owns its receiver.
 // One actor match is the serialized PTY authority.
 fn run_terminal_actor(mut actor: TerminalActor, receiver: mpsc::Receiver<ActorCommand>) {
     let mut pending = VecDeque::new();
@@ -1856,7 +1855,7 @@ impl TerminalActor {
         Ok(())
     }
 
-    #[allow(clippy::needless_pass_by_value)] // One event value is fanned out to all observers.
+    // One event value is fanned out to all observers.
     fn publish(&mut self, event: TerminalEvent) {
         self.observers.retain(|_, observer| {
             observer.active.load(Ordering::Acquire)
@@ -2063,7 +2062,7 @@ fn attach_terminal_tree(
         .map_err(|error| TerminalError::new("terminal_spawn_failed", error.to_string()))
 }
 
-#[allow(clippy::needless_pass_by_value)] // map_err transfers source-error ownership here.
+// map_err transfers source-error ownership here.
 fn project_terminal_error(error: crate::project::ProjectError) -> TerminalError {
     TerminalError::new(error.code(), error.to_string())
 }

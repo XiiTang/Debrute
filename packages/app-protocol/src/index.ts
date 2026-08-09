@@ -84,6 +84,14 @@ export interface CanvasState {
 
 type CanvasNodeAvailability =
   | {
+      state: 'resolving';
+      size: number;
+      mimeType: string;
+      sourceToken: string;
+      canvasImagePreviewable?: boolean;
+      canvasImagePreviewSourceWidth?: number;
+    }
+  | {
       state: 'available';
       size: number;
       mimeType: string;
@@ -132,6 +140,20 @@ type CanvasResource =
 
 export interface CanvasResourceView {
   resources: CanvasResource[];
+}
+
+export interface CanvasSourceResolutionRequest {
+  targets: Array<{
+    projectRelativePath: string;
+    sourceToken: string;
+  }>;
+}
+
+export interface CanvasSourceResolutionResponse {
+  sources: Array<{
+    sourceToken: string;
+    resource: CanvasResourceView['resources'][number];
+  }>;
 }
 
 export const CANVAS_FEEDBACK_MARKS = [
@@ -1495,6 +1517,18 @@ function isCanvasNodeAvailability(value: unknown): boolean {
     return hasExactKeys(value, ['state', 'message'])
       && typeof value.message === 'string';
   }
+  if (value.state === 'resolving') {
+    return hasExactKeys(
+      value,
+      ['state', 'size', 'mimeType', 'sourceToken'],
+      ['canvasImagePreviewable', 'canvasImagePreviewSourceWidth']
+    )
+      && isFiniteNumber(value.size)
+      && typeof value.mimeType === 'string'
+      && typeof value.sourceToken === 'string'
+      && (value.canvasImagePreviewable === undefined || typeof value.canvasImagePreviewable === 'boolean')
+      && (value.canvasImagePreviewSourceWidth === undefined || isFiniteNumber(value.canvasImagePreviewSourceWidth));
+  }
   return value.state === 'available'
     && hasExactKeys(
       value,
@@ -1750,6 +1784,7 @@ export interface WorkbenchApiClient {
     onError: (error: Error) => void
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
+  resolveCanvasSources(input: CanvasSourceResolutionRequest): Promise<CanvasSourceResolutionResponse>;
   loadProjectDirectory(projectRelativeDirectory: string): Promise<RevisionedProjectResult>;
   writeProjectTextFile(input: WriteProjectTextFileInput): Promise<WorkbenchProjectTextFileWriteResult>;
   putTextWorkingCopy(bindingId: string, input: WorkbenchTextWorkingCopy): Promise<WorkbenchTextWorkingCopy>;

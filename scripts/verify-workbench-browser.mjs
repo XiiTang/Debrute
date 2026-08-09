@@ -189,7 +189,6 @@ function startWorkbenchRuntime() {
       HOME: fixtureHome,
       USERPROFILE: fixtureHome,
       TMPDIR: fixtureTemporaryDirectory,
-      DEBRUTE_DEV_NO_OPEN: '1',
       DEBRUTE_DEV_STOP_RUNTIME_ON_EXIT: '1',
       ...(toolHome ? {
         CARGO_HOME: process.env.CARGO_HOME ?? join(toolHome, '.cargo'),

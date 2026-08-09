@@ -759,6 +759,7 @@ fn replacement_publishes_the_prepared_project_and_releases_the_source_use() {
             runtime.origin(),
             source_binding_id
         ))
+        .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .send()
@@ -789,8 +790,6 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
     let second_file = Path::new(&second_project.root).join("second.txt");
     fs::write(&first_file, b"first tab").expect("first file should be written");
     fs::write(&second_file, b"second tab").expect("second file should be written");
-    let first_revision = media_revision(&first_file);
-    let second_revision = media_revision(&second_file);
     let client = test_client();
 
     let (cookie, first_credential, mut first_events) = open_unbound_connection(&client, &runtime);
@@ -813,13 +812,25 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
         &second_credential,
     );
     let second_binding_id = second_project.binding_id();
-    assert_eq!(
-        first_events.next_of_type("project.bound")["type"],
-        "project.bound"
+    let first_bound = first_events.next_of_type("project.bound");
+    let second_bound = second_events.next_of_type("project.bound");
+    let first_revision = resolve_canvas_source_from_bound(
+        &client,
+        &runtime,
+        &first_project,
+        &cookie,
+        &first_credential,
+        &first_bound,
+        "first.txt",
     );
-    assert_eq!(
-        second_events.next_of_type("project.bound")["type"],
-        "project.bound"
+    let second_revision = resolve_canvas_source_from_bound(
+        &client,
+        &runtime,
+        &second_project,
+        &cookie,
+        &second_credential,
+        &second_bound,
+        "second.txt",
     );
 
     let wrong_connection = client
@@ -870,6 +881,69 @@ fn ordinary_browser_tabs_share_one_session_without_sharing_connection_authority(
 }
 
 #[test]
+fn project_open_publishes_file_descriptors_before_exact_sources_are_resolved() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("source-descriptor-open");
+    fs::write(
+        Path::new(&project.root).join("audio.mp3"),
+        b"not-real-audio",
+    )
+    .expect("audio fixture should be written");
+    let client = test_client();
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+
+    open_project(&client, &runtime, &project, &cookie, &credential);
+
+    let bound = events.next_of_type("project.bound");
+    let resources = bound["project"]["snapshot"]["canvasWorkspace"]["canvasResources"]["resources"]
+        .as_array()
+        .expect("Canvas resources should be present");
+    let audio = resources
+        .iter()
+        .find(|resource| resource["projectRelativePath"] == "audio.mp3")
+        .expect("audio descriptor should be present");
+    assert_eq!(audio["availability"]["state"], "resolving");
+    let source_token = audio["availability"]["sourceToken"]
+        .as_str()
+        .expect("source token should be present");
+    assert!(audio["availability"].get("revision").is_none());
+
+    let resolved = client
+        .post(format!(
+            "{}/api/workbench/bindings/{}/canvas-sources/resolve",
+            runtime.origin(),
+            project.binding_id()
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({
+            "targets": [{
+                "projectRelativePath": "audio.mp3",
+                "sourceToken": source_token
+            }]
+        }))
+        .send()
+        .expect("Canvas source resolution should complete");
+    let resolved_status = resolved.status().as_u16();
+    let resolved_body = resolved
+        .text()
+        .expect("Canvas source resolution should return a body");
+    assert_eq!(resolved_status, 200, "{resolved_body}");
+    let resolved: Value =
+        serde_json::from_str(&resolved_body).expect("Canvas source resolution should return JSON");
+    assert_eq!(resolved["sources"][0]["sourceToken"], source_token);
+    assert_eq!(
+        resolved["sources"][0]["resource"]["availability"]["state"],
+        "available"
+    );
+    assert_eq!(
+        resolved["sources"][0]["resource"]["availability"]["revision"],
+        media_revision(&Path::new(&project.root).join("audio.mp3"))
+    );
+}
+
+#[test]
 fn passive_media_routes_reject_missing_or_empty_identity_values() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("media-query-contract");
@@ -916,10 +990,19 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
     image::RgbaImage::new(8, 4)
         .save(&image_path)
         .expect("image fixture should be written");
-    let revision = media_revision(&image_path);
     let client = test_client();
-    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
+    let bound = events.next_of_type("project.bound");
+    let revision = resolve_canvas_source_from_bound(
+        &client,
+        &runtime,
+        &project,
+        &cookie,
+        &credential,
+        &bound,
+        "image.png",
+    );
 
     let response = client
         .get(format!(
@@ -953,7 +1036,7 @@ fn image_previews_are_private_immutable_and_still_reject_stale_revisions() {
         stale
             .json::<Value>()
             .expect("stale response should be JSON")["error"]["code"],
-        "canvas_preview_revision_mismatch"
+        "stale_revision"
     );
 }
 
@@ -1461,13 +1544,23 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("video-preview-sources");
     let project_root = Path::new(&project.root);
-    fs::create_dir_all(project_root.join("media")).expect("media directory should be created");
-    let video = project_root.join("media/clip.mp4");
-    fs::write(&video, b"video").expect("video fixture should be written");
-    let source_revision = media_revision(&video);
+    let video = project_root.join("clip.png");
+    image::RgbaImage::new(2, 2)
+        .save(&video)
+        .expect("source fixture should be written");
     let client = test_client();
-    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
+    let bound = events.next_of_type("project.bound");
+    let source_revision = resolve_canvas_source_from_bound(
+        &client,
+        &runtime,
+        &project,
+        &cookie,
+        &credential,
+        &bound,
+        "clip.png",
+    );
 
     let response = client
         .post(format!(
@@ -1480,7 +1573,7 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
             "targets": [{
-                "projectRelativePath": "media/clip.mp4",
+                "projectRelativePath": "clip.png",
                 "sourceRevision": source_revision,
                 "frameTimeMs": 0
             }]
@@ -1494,12 +1587,12 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
         .expect("video preview source response should be JSON");
     assert!(body["sources"].is_object());
     assert_eq!(
-        body["sources"]["media/clip.mp4"]["projectRelativePath"],
-        "media/clip.mp4"
+        body["sources"]["clip.png"]["projectRelativePath"],
+        "clip.png"
     );
-    assert_eq!(body["sources"]["media/clip.mp4"]["status"], "needs-source");
+    assert_eq!(body["sources"]["clip.png"]["status"], "needs-source");
     assert_eq!(
-        body["sources"]["media/clip.mp4"]["canonicalSourceIdentity"],
+        body["sources"]["clip.png"]["canonicalSourceIdentity"],
         "frame-v1--ms-0"
     );
 
@@ -1514,7 +1607,7 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
             "target": {
-                "projectRelativePath": "media/clip.mp4",
+                "projectRelativePath": "clip.png",
                 "sourceRevision": source_revision,
                 "frameTimeMs": 0
             },
@@ -1600,6 +1693,50 @@ fn open_project(
         .expect("bound response should contain a binding id")
         .to_owned();
     *project.binding_id.lock().unwrap() = Some(binding_id);
+}
+
+fn resolve_canvas_source_from_bound(
+    client: &Client,
+    runtime: &TestRuntime,
+    project: &TestProject,
+    cookie: &str,
+    credential: &str,
+    bound: &Value,
+    project_relative_path: &str,
+) -> String {
+    let resources = bound["project"]["snapshot"]["canvasWorkspace"]["canvasResources"]["resources"]
+        .as_array()
+        .expect("Canvas resources should be present");
+    let source_token = resources
+        .iter()
+        .find(|resource| resource["projectRelativePath"] == project_relative_path)
+        .and_then(|resource| resource["availability"]["sourceToken"].as_str())
+        .expect("Canvas source descriptor should contain a token");
+    let response = client
+        .post(format!(
+            "{}/api/workbench/bindings/{}/canvas-sources/resolve",
+            runtime.origin(),
+            project.binding_id()
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, credential)
+        .json(&json!({
+            "targets": [{
+                "projectRelativePath": project_relative_path,
+                "sourceToken": source_token
+            }]
+        }))
+        .send()
+        .expect("Canvas source resolution should complete");
+    assert_eq!(response.status().as_u16(), 200);
+    response
+        .json::<Value>()
+        .expect("Canvas source resolution should return JSON")["sources"][0]["resource"]
+        ["availability"]["revision"]
+        .as_str()
+        .expect("resolved Canvas source should contain a revision")
+        .to_owned()
 }
 
 struct SseEvents {

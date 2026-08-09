@@ -277,6 +277,14 @@ export function CanvasVideoNodeContent({
     throw new Error(`Video content received a directory node: ${node.projectRelativePath}`);
   }
   if (node.availability.state !== 'available') {
+    if (node.availability.state === 'resolving') {
+      return (
+        <section className="canvas-video-node">
+          {titleBar}
+          <div className="canvas-video-player-shell" data-canvas-node-zone="content" />
+        </section>
+      );
+    }
     const title = node.availability.state === 'missing'
       ? i18n.t('canvas.node.missingFile')
       : i18n.t('canvas.node.unreadableFile');

@@ -28,7 +28,9 @@ export function CanvasAudioNodeContent({
   const source = node.availability.state === 'available'
     ? node.availability.fileUrl
     : undefined;
-  const availabilityError = node.availability.state === 'available' || node.availability.state === 'directory'
+  const availabilityError = node.availability.state === 'available'
+      || node.availability.state === 'directory'
+      || node.availability.state === 'resolving'
     ? undefined
     : node.availability.message;
 

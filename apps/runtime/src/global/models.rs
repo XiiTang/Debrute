@@ -32,10 +32,6 @@ pub struct ImageModelCatalogEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "the fields mirror the closed TypeScript model catalog contract"
-)]
 pub struct VideoModelCatalogEntry {
     pub debrute_model_id: String,
     pub summary: String,
@@ -187,10 +183,6 @@ pub struct ImageModelSettingRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "the fields mirror the public model settings protocol"
-)]
 pub struct VideoModelSettingRecord {
     pub debrute_model_id: String,
     pub summary: String,

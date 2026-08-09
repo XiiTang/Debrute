@@ -1,5 +1,3 @@
-#![allow(clippy::missing_errors_doc, clippy::needless_pass_by_value)]
-
 use std::{
     env,
     path::Path,
@@ -168,6 +166,7 @@ pub struct WorkbenchRuntimeServices {
     activity: Arc<ActivityService>,
     activity_events: broadcast::Sender<ActivityEvent>,
     working_copies: Arc<WorkingCopyStore>,
+    canvas_source_digests: Arc<crate::project::ProjectSourceDigestResolver>,
 }
 
 impl WorkbenchRuntimeServices {
@@ -388,6 +387,7 @@ impl WorkbenchRuntimeServices {
             activity,
             activity_events,
             working_copies,
+            canvas_source_digests: Arc::new(crate::project::ProjectSourceDigestResolver::default()),
         });
         let (recent_projects, theme_preference) = services
             .global
@@ -405,6 +405,12 @@ impl WorkbenchRuntimeServices {
     #[must_use]
     pub fn global(&self) -> &Arc<GlobalRuntimeService> {
         &self.global
+    }
+
+    pub(crate) fn canvas_source_digests(
+        &self,
+    ) -> &Arc<crate::project::ProjectSourceDigestResolver> {
+        &self.canvas_source_digests
     }
 
     pub fn settings_save(
@@ -1250,31 +1256,38 @@ pub(crate) fn public_canvas_resource_view(
 ) -> crate::project::CanvasResourceView {
     let mut public_resources = resources.clone();
     for resource in &mut public_resources.resources {
-        if let crate::project::CanvasResource::File {
-            project_relative_path,
-            availability,
-            video_presentation,
-            ..
-        } = resource
+        make_canvas_resource_public(resource, binding_id);
+    }
+    public_resources
+}
+
+pub(crate) fn make_canvas_resource_public(
+    resource: &mut crate::project::CanvasResource,
+    binding_id: &str,
+) {
+    if let crate::project::CanvasResource::File {
+        project_relative_path,
+        availability,
+        video_presentation,
+        ..
+    } = resource
+    {
+        if let crate::project::CanvasNodeAvailability::Available {
+            file_url, revision, ..
+        } = availability.as_mut()
         {
-            if let crate::project::CanvasNodeAvailability::Available {
-                file_url, revision, ..
-            } = availability.as_mut()
-            {
-                *file_url = project_file_url(binding_id, project_relative_path, revision);
-            }
-            if let Some(presentation) = video_presentation {
-                for track in &mut presentation.text_tracks {
-                    track.file_url = Some(project_file_url(
-                        binding_id,
-                        &track.project_relative_path,
-                        &track.revision,
-                    ));
-                }
+            *file_url = project_file_url(binding_id, project_relative_path, revision);
+        }
+        if let Some(presentation) = video_presentation {
+            for track in &mut presentation.text_tracks {
+                track.file_url = Some(project_file_url(
+                    binding_id,
+                    &track.project_relative_path,
+                    &track.revision,
+                ));
             }
         }
     }
-    public_resources
 }
 
 fn project_file_url(binding_id: &str, project_relative_path: &str, revision: &str) -> String {

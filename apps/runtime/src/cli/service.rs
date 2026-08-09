@@ -1,5 +1,3 @@
-#![allow(clippy::needless_pass_by_value, clippy::unused_self)]
-
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},

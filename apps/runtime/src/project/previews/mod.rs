@@ -7,7 +7,6 @@ mod raster_variants;
 mod video;
 
 use std::{
-    collections::HashMap,
     fs::File,
     io::Read as _,
     path::{Path, PathBuf},
@@ -28,11 +27,12 @@ use crate::{process::ProcessCancellation, workers::RuntimeWorkerServices};
 use super::{
     CanvasImageDimensions, CanvasImagePreviewInfo, CanvasVideoPresentation,
     CanvasVideoPresentationKind, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
-    ProjectCapabilityFs, ProjectDirectoryPath, ProjectError, ProjectNodeAdapter, ProjectPathKind,
-    ProjectRelativePath, ProjectTreeEntry, assert_project_tree_visible_path,
-    open_no_symlink_existing_project_file, project_media_revision,
-    resolve_no_symlink_existing_project_path,
+    ProjectCapabilityFs, ProjectDirectoryPath, ProjectError, ProjectNodeAdapter,
+    ProjectRelativePath, ProjectSourceLease, assert_project_tree_visible_path,
+    open_no_symlink_existing_project_file, resolve_no_symlink_existing_project_path,
 };
+#[cfg(test)]
+use crate::project::project_media_revision;
 use cache::{
     Semaphore, atomic_write, project_relative_path_cache_key, project_revision_cache_key,
     safe_cache_segment,
@@ -128,9 +128,10 @@ impl ProjectNodeAdapter for NativeProjectNodeAdapter {
         project_root: &Path,
         project_relative_path: &str,
     ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
-        let metadata = self.previews.video.read_metadata(
+        let project_relative_path = ProjectRelativePath::parse(project_relative_path)?;
+        let metadata = self.previews.video.read_project_metadata(
             project_root,
-            project_relative_path,
+            &project_relative_path,
             &PreviewCancellation::default(),
         )?;
         Ok(Some(CanvasVideoPresentation {
@@ -138,8 +139,16 @@ impl ProjectNodeAdapter for NativeProjectNodeAdapter {
             width: metadata.width,
             height: metadata.height,
             duration_seconds: metadata.duration_seconds,
-            text_tracks: video_text_tracks(project_root, project_relative_path)?,
+            text_tracks: Vec::new(),
         }))
+    }
+
+    fn video_text_tracks(
+        &self,
+        project_root: &Path,
+        project_relative_path: &ProjectRelativePath,
+    ) -> Result<Vec<CanvasVideoTextTrack>, ProjectError> {
+        video_text_tracks(project_root, project_relative_path)
     }
 
     fn image_preview_info(
@@ -236,46 +245,15 @@ impl ProjectPreviewService {
         })
     }
 
-    /// Removes image-preview cache entries that no longer match a current,
-    /// previewable Project source and its exact revision.
+    /// Invalidates image previews for one changed Project source without reading source bytes.
     ///
     /// # Errors
-    /// Returns an error when the cache directory cannot be reconciled safely.
-    pub fn reconcile_image_cache(
+    /// Returns an error when the cache directory cannot be traversed safely.
+    pub(crate) fn invalidate_image_cache_source(
         &self,
         project_root: &Path,
-        files: &[ProjectTreeEntry],
+        project_relative_path: &ProjectRelativePath,
     ) -> Result<(), ProjectError> {
-        let mut expected = HashMap::new();
-        for entry in files {
-            if entry.kind != ProjectPathKind::File {
-                continue;
-            }
-            let Ok(relative) = previewable_image_path(&entry.project_relative_path) else {
-                continue;
-            };
-            let Ok(mut file) = open_no_symlink_existing_project_file(project_root, &relative)
-            else {
-                continue;
-            };
-            let path = resolve_no_symlink_existing_project_path(
-                project_root,
-                relative.as_directory_path(),
-            )?;
-            if self
-                .raster_variants
-                .metadata_file(&path, &mut file, &PreviewCancellation::default())
-                .is_err()
-            {
-                continue;
-            }
-            let revision = project_media_revision(&mut file)?;
-            expected.insert(
-                project_relative_path_cache_key(&relative)?,
-                project_revision_cache_key(&revision)?,
-            );
-        }
-
         let cache_root = self.cache_root(project_root)?;
         let cache_fs = ProjectCapabilityFs::open(&cache_root)?;
         let cache_directory = ProjectDirectoryPath::parse("canvas-image-previews")?;
@@ -286,28 +264,28 @@ impl ProjectPreviewService {
             }
             Err(error) => return Err(error),
         };
-        let sources = cache.entries()?.collect::<Result<Vec<_>, _>>()?;
-        for source in sources {
-            let source_type = source.file_type()?;
-            let source_name = source.file_name().into_string().ok();
-            let expected_revision = source_name
-                .as_ref()
-                .and_then(|name| expected.get(name))
-                .filter(|_| source_type.is_dir() && !source_type.is_symlink());
-            let Some(expected_revision) = expected_revision else {
+        let source_key = project_relative_path_cache_key(project_relative_path.as_str())?;
+        for source in cache.entries()?.collect::<Result<Vec<_>, _>>()? {
+            if source.file_name() == std::ffi::OsStr::new(&source_key) {
                 remove_capability_entry(&cache, &source)?;
-                continue;
-            };
-            let source_directory = source.open_dir()?;
-            for revision in source_directory.entries()?.collect::<Result<Vec<_>, _>>()? {
-                let file_type = revision.file_type()?;
-                let current_revision = revision.file_name()
-                    == std::ffi::OsStr::new(expected_revision)
-                    && file_type.is_dir()
-                    && !file_type.is_symlink();
-                if !current_revision {
-                    remove_capability_entry(&source_directory, &revision)?;
-                }
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Clears derived image previews when a watcher cannot identify changed paths.
+    ///
+    /// # Errors
+    /// Returns an error when the cache directory cannot be traversed safely.
+    pub(crate) fn clear_image_cache(&self, project_root: &Path) -> Result<(), ProjectError> {
+        let cache_root = self.cache_root(project_root)?;
+        let cache_fs = ProjectCapabilityFs::open(&cache_root)?;
+        let root = cache_fs.open_directory(&ProjectDirectoryPath::root())?;
+        for entry in root.entries()?.collect::<Result<Vec<_>, _>>()? {
+            if entry.file_name() == std::ffi::OsStr::new("canvas-image-previews") {
+                remove_capability_entry(&root, &entry)?;
+                break;
             }
         }
         Ok(())
@@ -345,34 +323,33 @@ impl ProjectPreviewService {
         )
     }
 
-    /// Resolves one deterministic revision-bound image preview.
+    /// Resolves one image preview from the Runtime-owned exact source lease.
     ///
     /// # Errors
-    /// Returns an error for invalid identity, stale source, cancellation, or decode failure.
-    pub fn resolve_image_preview(
+    /// Returns an error for an invalid image, changed source, cancellation, or decode failure.
+    pub(crate) fn resolve_image_preview_lease(
         &self,
-        project_root: &Path,
-        project_relative_path: &str,
-        revision: &str,
+        lease: &ProjectSourceLease,
         width: u32,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasPreviewFile, ProjectError> {
-        let relative = previewable_image_path(project_relative_path)?;
-        let source = open_revisioned_source(project_root, &relative, revision)?;
+        let relative = previewable_image_path(lease.project_relative_path().as_str())?;
+        lease.verify_current()?;
+        let source = resolve_no_symlink_existing_project_path(
+            lease.project_root(),
+            relative.as_directory_path(),
+        )?;
         let cache_directory = format!(
             "canvas-image-previews/{}/{}",
             project_relative_path_cache_key(&relative)?,
-            project_revision_cache_key(revision)?
+            project_revision_cache_key(lease.revision())?
         );
-        let source_root = source.project_root.clone();
-        let source_relative = source.relative.clone();
-        let source_identity = source.identity;
-        let cache_root = self.cache_root(project_root)?;
+        let cache_root = self.cache_root(lease.project_root())?;
         self.raster_variants.resolve(
             &cache_root,
             RasterPreviewVariantRequest {
-                source_path: source.path,
-                source_file: source.file,
+                source_path: source,
+                source_file: lease.try_clone_file()?,
                 source_content_type: direct_image_content_type(&relative),
                 cache_directory,
                 width,
@@ -382,7 +359,7 @@ impl ProjectPreviewService {
                 ),
             },
             cancellation,
-            || verify_source_snapshot(&source_root, &source_relative, &source_identity, revision),
+            || lease.verify_current(),
         )
     }
 
@@ -528,71 +505,6 @@ fn remove_capability_entry(
     Ok(())
 }
 
-struct RevisionedSource {
-    project_root: PathBuf,
-    relative: String,
-    path: PathBuf,
-    file: File,
-    identity: debrute_native_fs::PathIdentity,
-}
-
-fn open_revisioned_source(
-    project_root: &Path,
-    relative: &str,
-    expected_revision: &str,
-) -> Result<RevisionedSource, ProjectError> {
-    if expected_revision.is_empty() {
-        return Err(ProjectError::service(
-            "missing_revision",
-            "Canvas preview revision is required.",
-        ));
-    }
-    let relative = ProjectRelativePath::parse(relative)?;
-    let path =
-        resolve_no_symlink_existing_project_path(project_root, relative.as_directory_path())?;
-    let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
-    let actual = project_media_revision(&mut file)?;
-    if actual != expected_revision {
-        return Err(ProjectError::service_with_fields(
-            "canvas_preview_revision_mismatch",
-            format!("Canvas preview revision does not match source: {relative}"),
-            [
-                ("project_relative_path".to_owned(), relative.to_string()),
-                ("expected_revision".to_owned(), expected_revision.to_owned()),
-                ("actual_revision".to_owned(), actual),
-            ],
-        ));
-    }
-    let identity = debrute_native_fs::file_identity(&file)?;
-    Ok(RevisionedSource {
-        project_root: project_root.to_path_buf(),
-        relative: relative.into_string(),
-        path,
-        file,
-        identity,
-    })
-}
-
-fn verify_source_snapshot(
-    project_root: &Path,
-    relative: &str,
-    identity: &debrute_native_fs::PathIdentity,
-    expected_revision: &str,
-) -> Result<(), ProjectError> {
-    let relative = ProjectRelativePath::parse(relative)?;
-    let mut current = open_no_symlink_existing_project_file(project_root, &relative)?;
-    let current_revision = project_media_revision(&mut current)?;
-    let current_identity = debrute_native_fs::file_identity(&current)?;
-    if current_revision == expected_revision && &current_identity == identity {
-        Ok(())
-    } else {
-        Err(ProjectError::service(
-            "canvas_preview_revision_mismatch",
-            "Canvas preview source changed during rendering.",
-        ))
-    }
-}
-
 fn verify_text_preview_source(
     project_root: &Path,
     source_path: &str,
@@ -696,14 +608,13 @@ fn existing_file(
 
 fn video_text_tracks(
     project_root: &Path,
-    video_path: &str,
+    video_path: &ProjectRelativePath,
 ) -> Result<Vec<CanvasVideoTextTrack>, ProjectError> {
-    let video = ProjectRelativePath::parse(video_path)?;
-    let directory_relative = video.parent();
-    let name = video
+    let directory_relative = video_path.parent();
+    let name = video_path
         .as_str()
         .rsplit_once('/')
-        .map_or(video.as_str(), |(_, name)| name);
+        .map_or(video_path.as_str(), |(_, name)| name);
     let base = name.rsplit_once('.').map_or(name, |(base, _)| base);
     let directory = ProjectCapabilityFs::open(project_root)?.open_directory(&directory_relative)?;
     let mut tracks = directory
@@ -723,15 +634,11 @@ fn video_text_tracks(
             } else {
                 format!("{directory_relative}/{name}")
             };
-            parse_video_track(&video, &relative).map(|track| (relative, track))
+            parse_video_track(video_path.as_str(), &relative).map(|track| (relative, track))
         })
         .map(|(relative, parsed)| {
-            let admitted = ProjectRelativePath::parse(&relative)?;
-            let mut file = open_no_symlink_existing_project_file(project_root, &admitted)?;
-            let revision = project_media_revision(&mut file)?;
-            Ok(VideoTrack {
+            Ok::<_, ProjectError>(VideoTrack {
                 project_relative_path: relative,
-                revision,
                 kind: video_text_track_kind(&parsed.kind),
                 label: parsed.label,
                 srclang: parsed.srclang,
@@ -757,7 +664,7 @@ fn video_text_tracks(
         .map(|track| CanvasVideoTextTrack {
             project_relative_path: track.project_relative_path,
             file_url: None,
-            revision: track.revision,
+            revision: String::new(),
             kind: track.kind,
             label: track.label,
             srclang: track.srclang,
@@ -772,7 +679,6 @@ fn video_text_tracks(
 
 struct VideoTrack {
     project_relative_path: String,
-    revision: String,
     kind: CanvasVideoTextTrackKind,
     label: String,
     srclang: Option<String>,
@@ -871,6 +777,13 @@ mod tests {
         root.canonicalize().unwrap()
     }
 
+    fn source_lease(root: &Path, project_relative_path: &str) -> ProjectSourceLease {
+        let relative = ProjectRelativePath::parse(project_relative_path).unwrap();
+        let mut file = open_no_symlink_existing_project_file(root, &relative).unwrap();
+        let revision = project_media_revision(&mut file).unwrap();
+        ProjectSourceLease::for_test(root, project_relative_path, revision).unwrap()
+    }
+
     #[test]
     fn raster_preview_pool_admits_three_jobs_and_holds_the_fourth() {
         let service = Arc::new(ProjectPreviewService::new(
@@ -950,20 +863,13 @@ mod tests {
     #[test]
     fn image_preview_is_revision_bound_and_deterministic() {
         let root = fixture();
-        let mut source = File::open(root.join("assets/source.png")).unwrap();
-        let revision = project_media_revision(&mut source).unwrap();
+        let lease = source_lease(&root, "assets/source.png");
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
         );
         let result = service
-            .resolve_image_preview(
-                &root,
-                "assets/source.png",
-                &revision,
-                4,
-                &PreviewCancellation::default(),
-            )
+            .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
             .unwrap();
         assert_eq!(result.content_type, "image/png");
         assert!(
@@ -972,18 +878,15 @@ mod tests {
                 .ends_with("raster-engine-v1/preview-w4.png")
         );
         assert!(result.absolute_path.is_file());
+        ImageBuffer::from_pixel(9, 4, Rgba([0_u8, 0, 0, 255]))
+            .save(root.join("assets/source.png"))
+            .unwrap();
         assert_eq!(
             service
-                .resolve_image_preview(
-                    &root,
-                    "assets/source.png",
-                    "stale",
-                    4,
-                    &PreviewCancellation::default(),
-                )
+                .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
                 .unwrap_err()
                 .code(),
-            "canvas_preview_revision_mismatch"
+            "canvas_source_changed"
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -992,21 +895,14 @@ mod tests {
     fn intrinsic_image_width_returns_the_revision_bound_source_without_an_equal_width_cache() {
         let root = fixture();
         let source_path = root.join("assets/source.png");
-        let mut source = File::open(&source_path).unwrap();
-        let revision = project_media_revision(&mut source).unwrap();
+        let lease = source_lease(&root, "assets/source.png");
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
         );
 
         let mut result = service
-            .resolve_image_preview(
-                &root,
-                "assets/source.png",
-                &revision,
-                8,
-                &PreviewCancellation::default(),
-            )
+            .resolve_image_preview_lease(&lease, 8, &PreviewCancellation::default())
             .unwrap();
 
         assert_eq!(result.absolute_path, source_path);
@@ -1024,21 +920,14 @@ mod tests {
         ImageBuffer::from_pixel(8, 4, Rgb([24_u8, 48, 96]))
             .save_with_format(&source_path, image::ImageFormat::Tiff)
             .unwrap();
-        let mut source = File::open(&source_path).unwrap();
-        let revision = project_media_revision(&mut source).unwrap();
+        let lease = source_lease(&root, "assets/source.tiff");
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
         );
 
         let result = service
-            .resolve_image_preview(
-                &root,
-                "assets/source.tiff",
-                &revision,
-                8,
-                &PreviewCancellation::default(),
-            )
+            .resolve_image_preview_lease(&lease, 8, &PreviewCancellation::default())
             .unwrap();
 
         assert_ne!(result.absolute_path, source_path);
@@ -1062,21 +951,14 @@ mod tests {
         ImageBuffer::from_pixel(9_000, 1, Rgba([1_u8, 2, 3, 255]))
             .save(&source_path)
             .unwrap();
-        let mut source = File::open(&source_path).unwrap();
-        let revision = project_media_revision(&mut source).unwrap();
+        let lease = source_lease(&root, "assets/panorama.png");
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
         );
 
         let result = service
-            .resolve_image_preview(
-                &root,
-                "assets/panorama.png",
-                &revision,
-                8_500,
-                &PreviewCancellation::default(),
-            )
+            .resolve_image_preview_lease(&lease, 8_500, &PreviewCancellation::default())
             .unwrap();
 
         assert_eq!(image::open(result.absolute_path).unwrap().width(), 8_500);
@@ -1088,8 +970,7 @@ mod tests {
         let root = fixture();
         let source_path = root.join("assets/large.jpg");
         write_solid_jpeg(&source_path, 5_000, 4_000);
-        let mut source = File::open(&source_path).unwrap();
-        let revision = project_media_revision(&mut source).unwrap();
+        let lease = source_lease(&root, "assets/large.jpg");
         let service = ProjectPreviewService::new(
             &RuntimeWorkerServices::new(),
             MediaToolPaths::unavailable(),
@@ -1106,13 +987,7 @@ mod tests {
         );
 
         let result = service
-            .resolve_image_preview(
-                &root,
-                "assets/large.jpg",
-                &revision,
-                625,
-                &PreviewCancellation::default(),
-            )
+            .resolve_image_preview_lease(&lease, 625, &PreviewCancellation::default())
             .unwrap();
         assert_eq!(result.content_type, "image/jpeg");
         assert_eq!(
@@ -1217,23 +1092,17 @@ mod tests {
     }
 
     #[test]
-    fn image_cache_reconcile_removes_old_revisions_and_invalid_entries() {
+    fn image_cache_source_invalidation_removes_only_the_changed_path() {
         let root = fixture();
         let home = std::env::temp_dir().join(format!("debrute-preview-home-{}", Uuid::new_v4()));
         let source_path = root.join("assets/source.png");
         let workers = RuntimeWorkerServices::new();
         let service =
             ProjectPreviewService::new_with_home(&workers, MediaToolPaths::unavailable(), &home);
-        let mut source = File::open(&source_path).unwrap();
-        let first_revision = project_media_revision(&mut source).unwrap();
+        let lease = source_lease(&root, "assets/source.png");
+        let first_revision = lease.revision().to_owned();
         let preview = service
-            .resolve_image_preview(
-                &root,
-                "assets/source.png",
-                &first_revision,
-                4,
-                &PreviewCancellation::default(),
-            )
+            .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
             .unwrap();
         drop(preview);
         ImageBuffer::from_pixel(16, 9, Rgba([1_u8, 2, 3, 255]))
@@ -1245,18 +1114,12 @@ mod tests {
                 .join("canvas/canvas-image-previews");
         fs::write(cache_root.join("invalid-entry"), "invalid").unwrap();
         service
-            .reconcile_image_cache(
+            .invalidate_image_cache_source(
                 &root,
-                &[ProjectTreeEntry {
-                    project_relative_path: "assets/source.png".to_owned(),
-                    kind: ProjectPathKind::File,
-                    size_bytes: None,
-                    directory_state: None,
-                    directory_error: None,
-                }],
+                &ProjectRelativePath::parse("assets/source.png").unwrap(),
             )
             .unwrap();
-        assert!(!cache_root.join("invalid-entry").exists());
+        assert!(cache_root.join("invalid-entry").exists());
         assert!(
             !cache_root
                 .join(project_relative_path_cache_key("assets/source.png").unwrap())
@@ -1268,42 +1131,23 @@ mod tests {
     }
 
     #[test]
-    fn image_cache_hit_still_validates_the_current_source() {
+    fn image_cache_hit_still_validates_the_current_source_snapshot() {
         let root = fixture();
         let source_path = root.join("assets/source.png");
         let workers = RuntimeWorkerServices::new();
         let service = ProjectPreviewService::new(&workers, MediaToolPaths::unavailable());
-        let mut source = File::open(&source_path).unwrap();
-        let metadata = source.metadata().unwrap();
-        let revision = project_media_revision(&mut source).unwrap();
+        let lease = source_lease(&root, "assets/source.png");
         drop(
             service
-                .resolve_image_preview(
-                    &root,
-                    "assets/source.png",
-                    &revision,
-                    4,
-                    &PreviewCancellation::default(),
-                )
+                .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
                 .unwrap(),
         );
-        let damaged = vec![0_u8; usize::try_from(metadata.len()).unwrap()];
-        fs::write(&source_path, damaged).unwrap();
-        File::options()
-            .write(true)
-            .open(&source_path)
-            .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
+        ImageBuffer::from_pixel(9, 4, Rgba([0_u8, 0, 0, 255]))
+            .save(&source_path)
             .unwrap();
         assert!(
             service
-                .resolve_image_preview(
-                    &root,
-                    "assets/source.png",
-                    &revision,
-                    4,
-                    &PreviewCancellation::default(),
-                )
+                .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
                 .is_err()
         );
         fs::remove_dir_all(root).unwrap();
@@ -1311,7 +1155,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn image_cache_reconcile_never_follows_an_external_symlink() {
+    fn image_cache_clear_never_follows_an_external_symlink() {
         use std::os::unix::fs::symlink;
 
         let root = fixture();
@@ -1330,9 +1174,9 @@ mod tests {
         let workers = RuntimeWorkerServices::new();
         let service =
             ProjectPreviewService::new_with_home(&workers, MediaToolPaths::unavailable(), &home);
-        assert!(service.reconcile_image_cache(&root, &[]).is_err());
+        assert!(service.clear_image_cache(&root).is_ok());
         assert!(external.join("must-survive").is_file());
-        fs::remove_file(cache).unwrap();
+        assert!(!cache.exists());
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(home).unwrap();
         fs::remove_dir_all(external).unwrap();

@@ -1273,6 +1273,7 @@ function WorkbenchBoundProjectApp({
   const actions: WorkbenchActions = useMemo(() => ({
     lookupModelArtifactProvenance: api.lookupModelArtifactProvenance,
     readProjectTextFile: api.readProjectTextFile,
+    resolveCanvasSources: api.resolveCanvasSources,
     writeProjectTextFile: api.writeProjectTextFile,
     saveCanvasTextPreviewSource: api.saveCanvasTextPreviewSource,
     readCanvasTextPreviewSources: api.readCanvasTextPreviewSources,

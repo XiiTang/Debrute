@@ -137,6 +137,16 @@ describe('Workbench event decoding', () => {
     const event = projectEventWithCanvasResource(resource);
 
     expect(decodeWorkbenchEvent(event)).toEqual(event);
+    const resolvingEvent = projectEventWithCanvasResource({
+      ...resource,
+      availability: {
+        state: 'resolving',
+        size: 42,
+        mimeType: 'video/mp4',
+        sourceToken: 'source-1'
+      }
+    });
+    expect(decodeWorkbenchEvent(resolvingEvent)).toEqual(resolvingEvent);
     for (const invalid of [
       {
         ...resource,

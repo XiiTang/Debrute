@@ -172,15 +172,19 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
           );
           syncCulling();
         }),
+        input.runtime.subscribeContentInteraction(() => {
+          syncCulling();
+        }),
         input.runtime.subscribeSurfaceSize(() => {
           cancelPendingFrame();
           publishPreviewOrder(input.runtime.getSnapshot());
         }),
         input.runtime.subscribePointerInteraction((pointerInteraction) => {
-          if (pointerInteraction !== undefined) {
-            return;
+          if (pointerInteraction === undefined) {
+            publishPreviewOrder(input.runtime.getSnapshot());
+          } else {
+            syncCulling();
           }
-          publishPreviewOrder(input.runtime.getSnapshot());
         })
       ];
       activeSubscriptions = subscriptions;
@@ -210,7 +214,9 @@ export function createCanvasRenderLifecycle(input: CanvasRenderLifecycleInput): 
 
 function displayRetainedNodePaths(snapshot: CanvasRuntimeSnapshot): ReadonlySet<string> {
   return new Set([
-    ...selectedNodeProjectRelativePaths(snapshot.selection),
+    ...(snapshot.contentInteractionProjectRelativePath
+      ? [snapshot.contentInteractionProjectRelativePath]
+      : []),
     ...activeNodeProjectRelativePaths(snapshot.pointerInteraction)
   ]);
 }

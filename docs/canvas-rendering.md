@@ -49,9 +49,11 @@ the query result plus visibility deltas rather than scanning every mounted node
 and edge on each camera or pointer event. Repeating synchronization with the
 same scene, camera, and surface does not repeat geometric work, while
 `CanvasStageRuntime` writes only changed node-shell and edge-group `display`
-values. Selected and active move/resize nodes remain display-visible when they
-are outside the viewport, but retention-only changes do not repeat geometric
-work or alter preview scheduling identity. These direct DOM writes do not
+values. Canvas Content Activation and active move/resize retain their node's
+display outside the viewport; ordinary Canvas Node Selection does not. A playing
+video remains mounted and keeps playing when its shell is culled, independently
+of Selection and Canvas Content Activation. Retention-only changes do not repeat
+geometric work or alter preview scheduling identity. These direct DOM writes do not
 publish a React scene snapshot and do not remove node-local preview state. This
 culling state is a rendering decision, not Folder Disclosure or Canvas
 visibility.
@@ -85,6 +87,29 @@ Canvas membership ends. The exact viewport controls direct DOM culling; its
 center controls preview distance ordering without creating an inside/outside
 tier. Debrute does not switch to Canvas/WebGL or a reduced-detail renderer at a
 particular shape count.
+
+## Saved-File Source Resolution
+
+Project open publishes lightweight Canvas file descriptors before computing
+exact Source Revisions. A descriptor contains the path, media classification,
+size, MIME type, a session-local source token, and presentation metadata needed
+for stable geometry; it contains no raw-file URL or exact content hash.
+
+Workbench requests exact sources from the current Folder Disclosure only after
+camera and pointer interaction are idle. Every disclosed known-media node is
+eventually requested even when it is outside the viewport; viewport distance
+orders work but does not define membership. Unknown files are not requested.
+Runtime admits one source digest at a time across Workbench requests, computes
+SHA-256 once for the current path version, and records the result in the Project
+Session without publishing a Project revision. No timer, whole-Project source
+scan, or persistent source cache participates in this flow.
+
+The resolved source creates a Runtime-owned Project Source Lease. Raw Range,
+image-preview, and video-preview requests reuse that lease and validate current
+file identity, size, and modification time without hashing the complete file
+again. Watcher and Project Path mutations invalidate the affected descriptor and
+lease. A later descriptor receives a new source token and therefore cannot adopt
+an older response.
 
 ## Image Preview Source Selection
 
@@ -390,18 +415,19 @@ Image-preview cache identity has four levels:
 The source-path cache key combines a readable encoded path prefix with a stable hash so
 long or similar paths remain distinct. The direct-source tier has no entry in
 this cache. Derived-variant cache hits must be regular non-symlink files.
-Project open and refresh reconcile the cache against current visible,
-metadata-previewable image files: unavailable sources and superseded file
-revisions are deleted. Runtime reads and writes only the exact current
+An identified image-source change invalidates only that source-path cache
+directory. A watcher rescan that cannot identify paths clears the derived image
+cache structurally; Project open does not scan or hash files to reconcile it.
+Runtime reads and writes only the exact current
 `raster-engine-v<version>` path and does not enumerate or delete sibling
 engine-version directories. The
 entire cache tree is excluded from Project visibility, so previews cannot
 recursively become Canvas inputs.
 
-Preview caches use structural reconciliation rather than a byte quota, LRU,
-TTL, or background cleanup timer. Image caches retain requested quantized-width
-variants only for the current visible source and file revision under the exact
-current engine path.
+Preview caches use path-driven structural invalidation rather than a byte quota,
+LRU, TTL, or background cleanup timer. Image caches retain requested
+quantized-width variants under the exact source revision and current engine
+path until the corresponding source path is invalidated.
 Text caches resolve only the exact requested source identity for each Project
 path; superseded target-identity directories do not participate in current
 lookup. Video caches retain the current source revision and the source identity

@@ -8,7 +8,7 @@ Debrute is a pnpm TypeScript monorepo with a Cargo workspace for the Rust Runtim
 
 - `pnpm install` installs the workspace.
 - `pnpm doctor` checks local tooling.
-- `pnpm dev` starts or reuses the Workbench runtime and prints its launch URL.
+- `pnpm dev` starts or reuses the Workbench runtime and prints its launch URL without opening a browser. Open that URL in the browser requested by the user; when none is specified, use the current Agent harness's built-in browser. Use `debrute workbench start [<project>] --frontend browser` only when direct system-default-browser activation is requested.
 - `pnpm dev:electron` starts or attaches Electron to the shared Rust Runtime. Source-development Web is launched by `pnpm dev` or `pnpm dev:electron`; Vite proxies relative Workbench traffic to the exact Runtime origin without a token file or second backend.
 - `pnpm check` generates the Runtime-owned Control bindings and runs the complete TypeScript project-reference check.
 - `pnpm check:rust` checks Rust formatting and runs Clippy with warnings denied for product libraries and binaries.

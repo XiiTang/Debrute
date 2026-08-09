@@ -4,19 +4,60 @@ use std::{
     fs,
     io::{Read as _, Seek as _, SeekFrom},
     path::Path,
+    sync::Mutex,
 };
 
 use sha2::{Digest as _, Sha256};
 
-use super::{
-    CanvasMediaKind, ProjectError, assert_project_tree_visible_path,
-    open_no_symlink_existing_project_file,
-};
+use super::{CanvasMediaKind, ProjectError, ProjectSourceLease, assert_project_tree_visible_path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ByteRange {
     pub start: u64,
     pub end: u64,
+}
+
+#[derive(Default)]
+pub(crate) struct ProjectSourceDigestResolver {
+    admission: Mutex<()>,
+}
+
+impl ProjectSourceDigestResolver {
+    pub(crate) fn resolve(&self, file: &mut fs::File) -> Result<String, ProjectError> {
+        let _permit = self
+            .admission
+            .lock()
+            .expect("Project source digest admission lock poisoned");
+        project_media_revision(file)
+    }
+}
+
+/// Plans a raw response from a previously resolved exact saved-file source.
+///
+/// # Errors
+/// Returns a typed error when the source changed or the byte range is invalid.
+pub(crate) fn open_leased_project_file(
+    lease: &ProjectSourceLease,
+    range_header: Option<&str>,
+) -> Result<RevisionedFileResponse, ProjectError> {
+    lease.verify_current()?;
+    let relative = assert_project_tree_visible_path(lease.project_relative_path().as_str())?;
+    let file_size = lease.size();
+    let range = match parse_byte_range(range_header, file_size) {
+        ParsedRange::Full => None,
+        ParsedRange::Partial(range) => Some(range),
+        ParsedRange::Unsatisfiable => {
+            return Ok(RevisionedFileResponse::RangeNotSatisfiable { file_size });
+        }
+    };
+    Ok(RevisionedFileResponse::File(RevisionedFilePlan {
+        file: lease.try_clone_file()?,
+        project_relative_path: relative.to_string(),
+        revision: lease.revision().to_owned(),
+        content_type: project_content_type(&relative).to_owned(),
+        file_size,
+        range,
+    }))
 }
 
 #[derive(Debug)]
@@ -47,64 +88,6 @@ impl RevisionedFilePlan {
 pub enum RevisionedFileResponse {
     File(RevisionedFilePlan),
     RangeNotSatisfiable { file_size: u64 },
-}
-
-/// Opens the exact visible Project file represented by a revision and plans one byte range.
-///
-/// The returned handle, rather than a path reopened by the transport, is the serving authority.
-///
-/// # Errors
-/// Returns a typed error for missing/stale revisions, invalid paths, directories, or I/O failure.
-pub fn open_revisioned_project_file(
-    project_root: &Path,
-    project_relative_path: &str,
-    expected_revision: &str,
-    range_header: Option<&str>,
-) -> Result<RevisionedFileResponse, ProjectError> {
-    if expected_revision.is_empty() {
-        return Err(ProjectError::service(
-            "missing_revision",
-            format!(
-                "Project file revision is required for raw file responses: {project_relative_path}"
-            ),
-        ));
-    }
-    let relative = assert_project_tree_visible_path(project_relative_path)?;
-    let mut file = open_no_symlink_existing_project_file(project_root, &relative)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(ProjectError::service(
-            "not_found",
-            format!("Project path is not a file: {relative}"),
-        ));
-    }
-    let revision = project_media_revision(&mut file)?;
-    if revision != expected_revision {
-        return Err(ProjectError::service_with_fields(
-            "stale_revision",
-            format!("Project file revision does not match source: {relative}"),
-            [
-                ("expected_revision".to_owned(), expected_revision.to_owned()),
-                ("actual_revision".to_owned(), revision),
-            ],
-        ));
-    }
-    let file_size = metadata.len();
-    let range = match parse_byte_range(range_header, file_size) {
-        ParsedRange::Full => None,
-        ParsedRange::Partial(range) => Some(range),
-        ParsedRange::Unsatisfiable => {
-            return Ok(RevisionedFileResponse::RangeNotSatisfiable { file_size });
-        }
-    };
-    Ok(RevisionedFileResponse::File(RevisionedFilePlan {
-        file,
-        project_relative_path: relative.to_string(),
-        revision: expected_revision.to_owned(),
-        content_type: project_content_type(&relative).to_owned(),
-        file_size,
-        range,
-    }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

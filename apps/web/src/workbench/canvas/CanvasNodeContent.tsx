@@ -141,10 +141,16 @@ export function CanvasNodeContent({
     textBufferEnsureKey
   ]);
 
-  const availabilityProblem = node.availability.state === 'available' || node.availability.state === 'directory'
+  const availabilityProblem = node.availability.state === 'available'
+      || node.availability.state === 'directory'
+      || node.availability.state === 'resolving'
     ? undefined
     : { title: nodeAvailabilityTitle(node.availability.state, i18n), message: node.availability.message };
   const problem = availabilityProblem;
+
+  if (node.availability.state === 'resolving') {
+    return <CanvasGenericNodeContent node={node} problem={undefined} />;
+  }
 
   if (node.nodeKind === 'directory' || node.mediaKind === 'unknown' || !node.mediaKind) {
     return <CanvasGenericNodeContent node={node} problem={problem} />;

@@ -283,6 +283,22 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('resolves exact Canvas sources through the current Project binding', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+    await client.openProject({ projectRoot: '/tmp/project' });
+    const input = {
+      targets: [{ projectRelativePath: 'media/clip.mp4', sourceToken: 'source-1' }]
+    };
+
+    await expect(client.resolveCanvasSources(input)).resolves.toEqual({ sources: [] });
+
+    const call = harness.calls.at(-1);
+    expect(call?.path).toBe('/api/workbench/bindings/project-1/canvas-sources/resolve');
+    expect(JSON.parse(String(call?.init?.body))).toEqual(input);
+    client.dispose();
+  });
+
   it('replaces a bound Project directly without prepare, commit, or unload requests', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
@@ -651,6 +667,9 @@ function createHarness(globalRevision = 1, initialCanonicalRoot?: string) {
     }
     if (path === '/api/workbench/bindings/project-1/canvas-video-previews/probe') {
       return Response.json({ sources: {} });
+    }
+    if (path === '/api/workbench/bindings/project-1/canvas-sources/resolve') {
+      return Response.json({ sources: [] });
     }
     if (path === '/api/workbench/bindings/project-1/canvas-video-previews/ensure') {
       return Response.json({ status: 'source-changed' });

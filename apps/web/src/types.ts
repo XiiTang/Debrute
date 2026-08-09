@@ -1,6 +1,8 @@
 import type {
   CanvasTextPreviewSourceAvailabilityRequest,
   CanvasTextPreviewSourceAvailabilityResponse,
+  CanvasSourceResolutionRequest,
+  CanvasSourceResolutionResponse,
   CanvasVideoPreviewEnsureRequest,
   CanvasVideoPreviewEnsureResponse,
   CanvasVideoPreviewProbeRequest,
@@ -73,6 +75,7 @@ export interface FloatingTextEditorWindowState {
 export interface WorkbenchActions {
   lookupModelArtifactProvenance: (input: { projectRelativePath: string }) => Promise<ModelArtifactProvenanceLookup>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
+  resolveCanvasSources: (input: CanvasSourceResolutionRequest) => Promise<CanvasSourceResolutionResponse>;
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources: (input: CanvasTextPreviewSourceAvailabilityRequest) => Promise<CanvasTextPreviewSourceAvailabilityResponse>;

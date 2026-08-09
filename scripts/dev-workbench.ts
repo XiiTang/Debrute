@@ -53,17 +53,13 @@ removeRuntimeLost = control.onRuntimeLost((error) => {
   });
 });
 const launchUrl = new URL('/', viteOrigin);
-const openArguments = process.env.DEBRUTE_DEV_NO_OPEN === '1'
-  ? []
-  : ['--open', launchUrl.pathname];
 const command = packageManagerCommand(workspaceRoot, [
   '--filter',
   '@debrute/web',
   'dev',
   '--port',
   String(vitePort),
-  '--strictPort',
-  ...openArguments
+  '--strictPort'
 ]);
 vite = spawn(command.command, command.args, {
   cwd: workspaceRoot,

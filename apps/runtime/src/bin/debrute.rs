@@ -1,5 +1,3 @@
-#![allow(clippy::needless_pass_by_value)]
-
 use std::{
     fs::File,
     io::{Read as _, Write as _, stdin, stdout},
@@ -701,7 +699,6 @@ type PlatformConnection = std::os::unix::net::UnixStream;
 type PlatformConnection = debrute_native_control::WindowsControlConnection;
 
 #[cfg(target_os = "macos")]
-#[allow(clippy::unnecessary_wraps)]
 fn platform_endpoint() -> Result<PlatformControlEndpoint, CliRunError> {
     Ok(PlatformControlEndpoint::for_current_user())
 }

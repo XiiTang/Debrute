@@ -250,7 +250,6 @@ fn has_token(headers: &HeaderMap, name: header::HeaderName, expected: &str) -> b
     })
 }
 
-#[allow(clippy::many_single_char_names)]
 fn sha1(input: &[u8]) -> [u8; 20] {
     let bit_length = (input.len() as u64).wrapping_mul(8);
     let mut message = input.to_vec();

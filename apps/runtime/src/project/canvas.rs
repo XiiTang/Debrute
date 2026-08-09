@@ -190,12 +190,22 @@ pub(super) fn visible_canvas_entries(
     entries
         .iter()
         .filter(|entry| {
-            canvas_path_ancestors(&entry.project_relative_path)
-                .iter()
-                .all(|ancestor| expanded.contains(ancestor.as_str()))
+            canvas_path_ancestors_are_expanded(&entry.project_relative_path, |ancestor| {
+                expanded.contains(ancestor)
+            })
         })
         .cloned()
         .collect()
+}
+
+#[must_use]
+pub(super) fn canvas_path_is_visible(path: &str, state: &CanvasState) -> bool {
+    canvas_path_ancestors_are_expanded(path, |ancestor| {
+        state
+            .expanded_directories
+            .binary_search_by(|expanded| expanded.as_str().cmp(ancestor))
+            .is_ok()
+    })
 }
 
 #[must_use]
@@ -300,14 +310,9 @@ fn canvas_node_state_is_empty(node: &CanvasNodeState) -> bool {
     node.manual_layout.is_none() && node.video_playback.is_none() && node.text_viewport.is_none()
 }
 
-fn canvas_path_ancestors(path: &str) -> Vec<String> {
-    if path.is_empty() {
-        return Vec::new();
-    }
-    let segments = path.split('/').collect::<Vec<_>>();
-    (1..segments.len())
-        .map(|length| segments[..length].join("/"))
-        .collect()
+fn canvas_path_ancestors_are_expanded(path: &str, mut contains: impl FnMut(&str) -> bool) -> bool {
+    path.match_indices('/')
+        .all(|(separator, _)| contains(&path[..separator]))
 }
 
 #[cfg(test)]

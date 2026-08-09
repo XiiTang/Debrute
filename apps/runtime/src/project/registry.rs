@@ -12,10 +12,11 @@ use uuid::Uuid;
 
 use super::{
     AdmittedProjectPathEntry, CanonicalProjectRoot, CanvasFeedbackArtifacts,
-    CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasStatePatch, ProjectChange,
-    ProjectDirectoryPath, ProjectError, ProjectEvent, ProjectNativeShellService,
-    ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
-    ProjectPathOperationStatus, ProjectRelativePath, ProjectService, ProjectSnapshot,
+    CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasSourceResolutionView,
+    CanvasSourceTarget, CanvasStatePatch, ProjectChange, ProjectDirectoryPath, ProjectError,
+    ProjectEvent, ProjectNativeShellService, ProjectNodeAdapter, ProjectPathBatchItemResult,
+    ProjectPathEntry, ProjectPathKind, ProjectPathOperationStatus, ProjectRelativePath,
+    ProjectService, ProjectSnapshot, ProjectSourceDigestResolver, ProjectSourceLease,
     ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput,
     copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
     import_upload_project_entries, move_project_paths, rename_project_path,
@@ -776,6 +777,32 @@ impl ProjectSession {
         Ok(sync_snapshot(&state))
     }
 
+    /// Resolves exact saved-file sources without creating a Project revision.
+    ///
+    /// # Errors
+    /// Returns a typed error when a target is stale, hidden, or unreadable.
+    pub(crate) fn resolve_canvas_sources(
+        &self,
+        targets: &[CanvasSourceTarget],
+        source_digests: &ProjectSourceDigestResolver,
+    ) -> Result<CanvasSourceResolutionView, ProjectError> {
+        let mut state = self.open_state()?;
+        state
+            .service
+            .resolve_canvas_sources(targets, source_digests)
+    }
+
+    pub(crate) fn canvas_source_lease(
+        &self,
+        project_relative_path: &ProjectRelativePath,
+        expected_revision: &str,
+    ) -> Result<ProjectSourceLease, ProjectError> {
+        let state = self.open_state()?;
+        state
+            .service
+            .canvas_source_lease(project_relative_path, expected_revision)
+    }
+
     /// Captures the current public session summary.
     ///
     /// # Errors
@@ -1139,16 +1166,16 @@ impl ProjectSession {
         &self,
         paths: Vec<ProjectWatchPath>,
     ) -> Result<(), ProjectError> {
-        self.apply_watched_refresh(ProjectWatchSignal::Paths(paths))
+        self.apply_watched_refresh(&ProjectWatchSignal::Paths(paths))
     }
 
     fn apply_watcher_backend_error(&self, message: String) -> Result<(), ProjectError> {
-        self.apply_watched_refresh(ProjectWatchSignal::RescanRequired(message))
+        self.apply_watched_refresh(&ProjectWatchSignal::RescanRequired(message))
     }
 
     // One delivery guard owns the complete refresh transaction.
-    fn apply_watched_refresh(&self, signal: ProjectWatchSignal) -> Result<(), ProjectError> {
-        let feedback_source = match &signal {
+    fn apply_watched_refresh(&self, signal: &ProjectWatchSignal) -> Result<(), ProjectError> {
+        let feedback_source = match signal {
             ProjectWatchSignal::Paths(paths)
                 if paths.len() == 1
                     && paths[0].project_relative_path != super::CANVAS_FEEDBACK_PROJECT_PATH =>
@@ -1159,7 +1186,7 @@ impl ProjectSession {
         };
         let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
-        if let ProjectWatchSignal::Paths(paths) = &signal
+        if let ProjectWatchSignal::Paths(paths) = signal
             && state.service.watch_paths_match_current_documents(paths)
         {
             return Ok(());
@@ -1169,13 +1196,13 @@ impl ProjectSession {
             .checked_add(1)
             .ok_or(ProjectError::RevisionExhausted)?;
         let previous = state.service.snapshot().clone();
-        let diagnostic_path = match &signal {
+        let diagnostic_path = match signal {
             ProjectWatchSignal::Paths(paths) => paths
                 .first()
                 .map_or("", |path| path.project_relative_path.as_str()),
             ProjectWatchSignal::RescanRequired(_) => "",
         };
-        let refresh_result = match &signal {
+        let refresh_result = match signal {
             ProjectWatchSignal::Paths(paths) => state.service.refresh_watched_paths(paths),
             ProjectWatchSignal::RescanRequired(_) => {
                 state.service.refresh_loaded_snapshot_for_watcher()
@@ -1184,7 +1211,7 @@ impl ProjectSession {
         let refresh = match refresh_result {
             Ok(refresh) => refresh,
             Err(error) => {
-                let message = match &signal {
+                let message = match signal {
                     ProjectWatchSignal::Paths(_) => error.to_string(),
                     ProjectWatchSignal::RescanRequired(watch_error) => {
                         format!("{watch_error}; loaded Project Tree refresh failed: {error}")
@@ -1217,7 +1244,7 @@ impl ProjectSession {
             }
         };
         let mut snapshot = if let Some(error) = &refresh.refresh_error {
-            let message = match &signal {
+            let message = match signal {
                 ProjectWatchSignal::Paths(_) => error.to_string(),
                 ProjectWatchSignal::RescanRequired(watch_error) => {
                     format!("{watch_error}; loaded Project state refresh failed: {error}")
@@ -1240,7 +1267,6 @@ impl ProjectSession {
             snapshot = state.service.complete_path_state_persistence(&errors);
         }
         if snapshots_equivalent(&previous, &snapshot) {
-            let files = snapshot.project_tree.clone();
             state.service.preserve_public_snapshot(previous);
             let feedback = state.service.canvas_feedback().clone();
             let project_revision = state.project_revision;
@@ -1259,13 +1285,7 @@ impl ProjectSession {
             if let Some(error) = dispatch_error {
                 self.feedback_artifacts.report_dispatch_error(&error);
             }
-            if let Some(source) = feedback_source.as_deref() {
-                self.feedback_artifacts
-                    .reconcile_image_cache_for_source(&self.root, &files, source);
-            } else {
-                self.feedback_artifacts
-                    .reconcile_image_cache(&self.root, &files);
-            }
+            self.invalidate_image_cache_for_watch_signal(signal);
             return Ok(());
         }
         state.project_revision = next_revision;
@@ -1285,7 +1305,6 @@ impl ProjectSession {
             change,
         };
         publish_event(&mut state, &event);
-        let files = state.service.snapshot().project_tree.clone();
         let feedback = state.service.canvas_feedback().clone();
         let project_revision = state.project_revision;
         let dispatch_error = match feedback_source.as_deref() {
@@ -1304,14 +1323,28 @@ impl ProjectSession {
         if let Some(error) = dispatch_error {
             self.feedback_artifacts.report_dispatch_error(&error);
         }
-        if let Some(source) = feedback_source.as_deref() {
-            self.feedback_artifacts
-                .reconcile_image_cache_for_source(&self.root, &files, source);
-        } else {
-            self.feedback_artifacts
-                .reconcile_image_cache(&self.root, &files);
-        }
+        self.invalidate_image_cache_for_watch_signal(signal);
         Ok(())
+    }
+
+    fn invalidate_image_cache_for_watch_signal(&self, signal: &ProjectWatchSignal) {
+        match signal {
+            ProjectWatchSignal::Paths(paths) => {
+                for path in paths {
+                    match ProjectRelativePath::parse(&path.project_relative_path) {
+                        Ok(relative) => self
+                            .feedback_artifacts
+                            .invalidate_image_cache_source(&self.root, &relative),
+                        Err(error) => self
+                            .feedback_artifacts
+                            .report_runtime_error(&self.root, &error),
+                    }
+                }
+            }
+            ProjectWatchSignal::RescanRequired(_) => {
+                self.feedback_artifacts.clear_image_cache(&self.root);
+            }
+        }
     }
 
     fn unsubscribe(&self, id: Uuid) {

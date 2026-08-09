@@ -1,5 +1,6 @@
 import type {
   WorkbenchActivityNoticeInput,
+  CanvasSourceResolutionResponse,
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasVideoPreviewEnsureResponse,
   CanvasVideoPreviewProbeResponse,
@@ -708,6 +709,12 @@ export function createHttpWorkbenchApiClient(options: {
       onError
     ),
     readProjectTextFile: (projectRelativePath) => requestForCurrentProject<WorkbenchProjectTextFile>('GET', `/files/text/${encodeProjectPath(projectRelativePath)}`),
+    resolveCanvasSources: (input) => runProjectRequest((scope, signal) => request<CanvasSourceResolutionResponse>(
+      'POST',
+      projectPathFor(scope.bindingId, '/canvas-sources/resolve'),
+      input,
+      signal
+    )),
     loadProjectDirectory: (projectRelativeDirectory) => requestProjectMutation(
       'POST',
       projectPath('/files/load-directory'),

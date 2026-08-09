@@ -88,22 +88,15 @@ impl CanvasFeedbackArtifacts {
                 session: Arc::downgrade(session),
             },
         );
-        if let Ok(feedback) = session.canvas_feedback() {
-            if let Ok(snapshot) = session.sync_snapshot()
-                && let Err(error) = self
-                    .previews
-                    .reconcile_image_cache(session.root(), &snapshot.snapshot.project_tree)
-            {
-                self.report_runtime_error_for_epoch(session.root(), epoch, &error);
-            }
-            if let Err(error) = self.scheduler.enqueue_document(
+        if let Ok(feedback) = session.canvas_feedback()
+            && let Err(error) = self.scheduler.enqueue_document(
                 session.root(),
                 epoch,
                 feedback.project_revision,
                 feedback.value,
-            ) {
-                self.report_runtime_error_for_epoch(session.root(), epoch, &error);
-            }
+            )
+        {
+            self.report_runtime_error_for_epoch(session.root(), epoch, &error);
         }
     }
 
@@ -150,28 +143,29 @@ impl CanvasFeedbackArtifacts {
             })
     }
 
-    pub(crate) fn reconcile_image_cache_for_source(
+    pub(crate) fn invalidate_image_cache_source(
         &self,
         root: &Path,
-        files: &[crate::project::ProjectTreeEntry],
-        project_relative_path: &str,
+        project_relative_path: &crate::project::ProjectRelativePath,
     ) {
-        let epoch = self.epoch(root);
-        if canvas_media_kind_from_path(project_relative_path) == CanvasMediaKind::Image
-            && let Err(error) = self.previews.reconcile_image_cache(root, files)
-            && let Some(epoch) = epoch
+        if canvas_media_kind_from_path(project_relative_path.as_str()) == CanvasMediaKind::Image
+            && let Err(error) = self
+                .previews
+                .invalidate_image_cache_source(root, project_relative_path)
         {
-            self.report_runtime_error_for_epoch(root, epoch, &error);
+            self.report_runtime_error(root, &error);
         }
     }
 
-    pub(crate) fn reconcile_image_cache(
-        &self,
-        root: &Path,
-        files: &[crate::project::ProjectTreeEntry],
-    ) {
+    pub(crate) fn report_runtime_error(&self, root: &Path, error: &ProjectError) {
+        if let Some(epoch) = self.epoch(root) {
+            self.report_runtime_error_for_epoch(root, epoch, error);
+        }
+    }
+
+    pub(crate) fn clear_image_cache(&self, root: &Path) {
         let epoch = self.epoch(root);
-        if let Err(error) = self.previews.reconcile_image_cache(root, files)
+        if let Err(error) = self.previews.clear_image_cache(root)
             && let Some(epoch) = epoch
         {
             self.report_runtime_error_for_epoch(root, epoch, &error);
@@ -561,7 +555,6 @@ fn run_scheduler(
 }
 
 // The command is consumed by the coordinator and never observed by its caller again.
-#[allow(clippy::needless_pass_by_value)]
 fn handle_scheduler_command(
     state: &mut SchedulerState,
     command: SchedulerCommand,
@@ -1263,7 +1256,6 @@ fn create_canvas_feedback_overlay_svg(
     )
 }
 
-#[allow(clippy::cast_possible_truncation)]
 fn spatial_item_svg(item: &CanvasFeedbackItem, width: u32, height: u32) -> Option<String> {
     let label = item.label?;
     let geometry = item.geometry.as_ref()?;

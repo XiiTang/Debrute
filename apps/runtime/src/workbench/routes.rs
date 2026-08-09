@@ -1,9 +1,4 @@
-#![allow(
-    clippy::items_after_statements,
-    clippy::manual_let_else,
-    clippy::needless_pass_by_value,
-    clippy::result_large_err
-)]
+#![allow(clippy::result_large_err)]
 
 use std::{
     any::Any,
@@ -431,6 +426,10 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             patch(super::project_routes::canvas_state_patch),
         )
         .route(
+            "/workbench/bindings/{binding_id}/canvas-sources/resolve",
+            post(super::project_routes::canvas_sources_resolve),
+        )
+        .route(
             "/workbench/bindings/{binding_id}/canvas-image-preview",
             get(super::project_routes::image_preview).head(super::project_routes::image_preview),
         )
@@ -760,11 +759,17 @@ async fn project_open(
         Ok(body) => body,
         Err(response) => return response,
     };
-    let result = services.bind_connection_project_root(
-        &browser.0,
-        &connection.credential,
-        &input.project_root,
-    );
+    let browser_session_id = browser.0;
+    let connection_credential = connection.credential;
+    let result = tokio::task::spawn_blocking(move || {
+        services.bind_connection_project_root(
+            &browser_session_id,
+            &connection_credential,
+            &input.project_root,
+        )
+    })
+    .await
+    .expect("Project open worker must complete");
     result.map_or_else(service_error_response, project_binding_response)
 }
 
@@ -820,11 +825,18 @@ async fn project_replace(
         Err(response) => return response,
     };
     let services = Arc::clone(&state.services);
-    match services.replace_connection_project_root(
-        &browser.0,
-        &connection.credential,
-        &input.project_root,
-    ) {
+    let browser_session_id = browser.0;
+    let connection_credential = connection.credential;
+    let result = tokio::task::spawn_blocking(move || {
+        services.replace_connection_project_root(
+            &browser_session_id,
+            &connection_credential,
+            &input.project_root,
+        )
+    })
+    .await
+    .expect("Project replace worker must complete");
+    match result {
         Ok(result) => project_binding_response(result),
         Err(error) => service_error_response(error),
     }

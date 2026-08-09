@@ -78,6 +78,7 @@ describe('CanvasEditor', () => {
 });
 
 const actions: CanvasEditorActions = {
+  resolveCanvasSources: async () => ({ sources: [] }),
   readProjectTextFile: async () => {
     throw new Error('not used');
   },

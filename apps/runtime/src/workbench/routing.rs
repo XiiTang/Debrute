@@ -1,5 +1,3 @@
-#![allow(clippy::items_after_statements, clippy::manual_let_else)]
-
 use std::{path::PathBuf, sync::Arc};
 
 use axum::{

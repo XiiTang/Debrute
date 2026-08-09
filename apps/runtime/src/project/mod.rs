@@ -32,8 +32,8 @@ pub use paths::*;
 pub(crate) use platform::{rename_no_replace, replace_file};
 pub use previews::*;
 pub use registry::*;
-pub(crate) use service::ProjectService;
 pub use service::{CanvasImagePreviewInfo, DefaultProjectNodeAdapter, ProjectNodeAdapter};
+pub(crate) use service::{ProjectService, ProjectSourceLease};
 pub(crate) use tree::{ProjectTree, ProjectTreeChange};
 pub use types::*;
 

@@ -182,6 +182,254 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain('Delete');
   });
 
+  it('resolves an offscreen disclosed source after the Canvas is interaction-idle', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const projection: CanvasProjection = {
+      nodes: [{
+        ...nodeFixture('flow/a.png', 5000, 5000),
+        availability: {
+          state: 'resolving',
+          size: 4,
+          mimeType: 'image/png',
+          sourceToken: 'source-a'
+        }
+      }],
+      edges: []
+    };
+    const resolveCanvasSources = vi.fn(async () => ({
+      sources: [{
+        sourceToken: 'source-a',
+        resource: {
+          nodeKind: 'file' as const,
+          projectRelativePath: 'flow/a.png',
+          mediaKind: 'image' as const,
+          availability: {
+            state: 'available' as const,
+            size: 4,
+            mimeType: 'image/png',
+            fileUrl: '/raw/flow/a.png?v=sha256%3Aa',
+            revision: 'sha256:a'
+          }
+        }
+      }]
+    }));
+
+    try {
+      await act(async () => {
+        root.render(surface(projection, {
+          actions: { ...actions, resolveCanvasSources }
+        }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(resolveCanvasSources).toHaveBeenCalledTimes(1);
+      expect(resolveCanvasSources).toHaveBeenCalledWith({
+        targets: [{ projectRelativePath: 'flow/a.png', sourceToken: 'source-a' }]
+      });
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('uses the Project path tie-break and adopts dependent sources without another request', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const projection: CanvasProjection = {
+      nodes: ['b', 'a'].map((name) => ({
+        ...nodeFixture(`flow/${name}.png`, 5000, 5000),
+        availability: {
+          state: 'resolving' as const,
+          size: 4,
+          mimeType: 'image/png',
+          sourceToken: `source-${name}`
+        }
+      })),
+      edges: []
+    };
+    const resolveCanvasSources = vi.fn(async () => ({
+      sources: ['a', 'b'].map((name) => ({
+        sourceToken: `source-${name}`,
+        resource: {
+          nodeKind: 'file' as const,
+          projectRelativePath: `flow/${name}.png`,
+          mediaKind: 'image' as const,
+          availability: {
+            state: 'available' as const,
+            size: 4,
+            mimeType: 'image/png',
+            fileUrl: `/raw/flow/${name}.png?v=sha256%3A${name}`,
+            revision: `sha256:${name}`
+          }
+        }
+      }))
+    }));
+
+    try {
+      await act(async () => {
+        root.render(surface(projection, {
+          actions: { ...actions, resolveCanvasSources }
+        }));
+      });
+      await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(resolveCanvasSources).toHaveBeenCalledWith({
+        targets: [{ projectRelativePath: 'flow/a.png', sourceToken: 'source-a' }]
+      });
+      expect(resolveCanvasSources).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('keeps source resolution single-flight across repeated interaction endings', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const projection: CanvasProjection = {
+      nodes: ['a', 'b'].map((name, index) => ({
+        ...nodeFixture(`flow/${name}.png`, index * 100, index * 100),
+        availability: {
+          state: 'resolving' as const,
+          size: 4,
+          mimeType: 'image/png',
+          sourceToken: `source-${name}`
+        }
+      })),
+      edges: []
+    };
+    const runtime = canvasRuntimeFixture(projection);
+    const firstResolution = deferred<{
+      sources: Array<{
+        sourceToken: string;
+        resource: {
+          nodeKind: 'file';
+          projectRelativePath: string;
+          mediaKind: 'image';
+          availability: {
+            state: 'available';
+            size: number;
+            mimeType: string;
+            fileUrl: string;
+            revision: string;
+          };
+        };
+      }>;
+    }>();
+    const resolvedSource = (name: string) => ({
+      sourceToken: `source-${name}`,
+      resource: {
+        nodeKind: 'file' as const,
+        projectRelativePath: `flow/${name}.png`,
+        mediaKind: 'image' as const,
+        availability: {
+          state: 'available' as const,
+          size: 4,
+          mimeType: 'image/png',
+          fileUrl: `/raw/flow/${name}.png?v=sha256%3A${name}`,
+          revision: `sha256:${name}`
+        }
+      }
+    });
+    const resolveCanvasSources = vi.fn()
+      .mockImplementationOnce(() => firstResolution.promise)
+      .mockResolvedValueOnce({ sources: [resolvedSource('b')] });
+
+    try {
+      await act(async () => {
+        root.render(surface(projection, {
+          runtime,
+          actions: { ...actions, resolveCanvasSources }
+        }));
+      });
+      await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        runtime.input.beginNodeMove({
+          pointerId: 91,
+          projectRelativePath: 'flow/a.png',
+          screenPoint: { x: 0, y: 0 }
+        });
+        await runtime.input.finishPointerInteraction({ pointerId: 91 });
+        runtime.input.beginNodeMove({
+          pointerId: 92,
+          projectRelativePath: 'flow/a.png',
+          screenPoint: { x: 0, y: 0 }
+        });
+        await runtime.input.finishPointerInteraction({ pointerId: 92 });
+      });
+      expect(resolveCanvasSources).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        firstResolution.resolve({ sources: [resolvedSource('a')] });
+        await firstResolution.promise;
+      });
+      await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(2));
+    } finally {
+      runtime.dispose();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('drops a hidden source failure so redisclosure starts a new attempt', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const node = {
+      ...nodeFixture('flow/a.png', 10, 10),
+      availability: {
+        state: 'resolving' as const,
+        size: 4,
+        mimeType: 'image/png',
+        sourceToken: 'source-a'
+      }
+    };
+    const projection: CanvasProjection = { nodes: [node], edges: [] };
+    const runtime = canvasRuntimeFixture(projection);
+    const resolveCanvasSources = vi.fn()
+      .mockRejectedValueOnce(new Error('first attempt failed'))
+      .mockResolvedValueOnce({ sources: [] });
+
+    try {
+      await act(async () => {
+        root.render(surface(projection, {
+          runtime,
+          actions: { ...actions, resolveCanvasSources }
+        }));
+      });
+      await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        root.render(surface({ nodes: [], edges: [] }, {
+          runtime,
+          actions: { ...actions, resolveCanvasSources }
+        }));
+      });
+      await act(async () => {
+        root.render(surface(projection, {
+          runtime,
+          actions: { ...actions, resolveCanvasSources }
+        }));
+      });
+
+      await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(2));
+    } finally {
+      await act(async () => root.unmount());
+      runtime.dispose();
+      container.remove();
+    }
+  });
+
   it('raises an unchanged selected node again when it is clicked', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -3185,6 +3433,7 @@ function feedbackDocument(entries: CanvasFeedbackDocument['entries']): CanvasFee
 }
 
 const actions: WorkbenchActions = {
+  resolveCanvasSources: async () => ({ sources: [] }),
   lookupModelArtifactProvenance: async () => {
     throw new Error('not used');
   },

@@ -54,7 +54,6 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
 # Parameter count is an interface-design signal. Intentional exceptions use
 # function-local `#[expect(clippy::too_many_arguments, reason = "...")]`.
 too_many_arguments = "warn"

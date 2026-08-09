@@ -1134,7 +1134,6 @@ fn spawn_control_accept_worker(
 }
 
 #[cfg(target_os = "macos")]
-#[allow(clippy::unnecessary_wraps)]
 fn platform_control_endpoint() -> Result<PlatformControlEndpoint, EndpointError> {
     Ok(MacOsControlEndpoint::for_current_user())
 }

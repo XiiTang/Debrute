@@ -44,6 +44,9 @@ export function nodeStatusLabel(node: ProjectedCanvasNode): string {
   if (node.availability.state === 'available') {
     return `${node.availability.mimeType} / ${node.availability.size} bytes`;
   }
+  if (node.availability.state === 'resolving') {
+    return `${node.availability.mimeType} / resolving`;
+  }
   return `${node.availability.state}: ${node.availability.message}`;
 }
 

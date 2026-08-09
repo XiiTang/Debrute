@@ -1,10 +1,4 @@
-#![allow(
-    clippy::items_after_statements,
-    clippy::manual_let_else,
-    clippy::needless_pass_by_value,
-    clippy::result_large_err,
-    clippy::single_match_else
-)]
+#![allow(clippy::result_large_err)]
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -34,14 +28,14 @@ use tokio::sync::mpsc;
 
 use crate::{
     project::{
-        CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasStatePatch,
-        CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
+        CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasSourceTarget,
+        CanvasStatePatch, CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
         CanvasVideoPreviewEnsureStatus, CanvasVideoPreviewProbeStatus, CanvasVideoPreviewTarget,
         PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath,
         ProjectError, ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind,
         ProjectRelativePath, ProjectRevisionResult, ProjectSession, ProjectUploadEntry,
         RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
-        admit_project_path_entries, open_revisioned_project_file, read_project_text_file,
+        admit_project_path_entries, open_leased_project_file, read_project_text_file,
         resolve_existing_project_path,
     },
     terminal::{
@@ -55,7 +49,7 @@ use super::{
     multipart::read_multipart,
     routes::{json_body, json_body_with_limit, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
-    services::project_response,
+    services::{make_canvas_resource_public, project_response},
     websocket::{
         MAX_WEBSOCKET_FRAME_BYTES, WebSocketConnection, WebSocketMessage, WebSocketUpgrade,
         read_message, read_text, write_close, write_pong, write_text,
@@ -135,7 +129,15 @@ pub(super) async fn raw_file(
         Ok(value) => value,
         Err(()) => return invalid_input("Range header is ambiguous."),
     };
-    match open_revisioned_project_file(session.root(), &path, revision, range) {
+    let path = match ProjectRelativePath::parse(&path) {
+        Ok(path) => path,
+        Err(error) => return project_error(error),
+    };
+    let lease = match session.canvas_source_lease(&path, revision) {
+        Ok(lease) => lease,
+        Err(error) => return project_error(error),
+    };
+    match open_leased_project_file(&lease, range) {
         Ok(RevisionedFileResponse::File(plan)) => {
             revisioned_file_response(plan, method == Method::HEAD)
         }
@@ -650,17 +652,80 @@ pub(super) async fn image_preview(
         Err(response) => return response,
     };
     let previews = Arc::clone(runtime.previews());
-    let project_root = session.root().to_path_buf();
-    let path = path.to_owned();
+    let path = match ProjectRelativePath::parse(path) {
+        Ok(path) => path,
+        Err(error) => return project_error(error),
+    };
     let revision = revision.to_owned();
     blocking_preview_response(
         method == Method::HEAD,
         PreviewCachePolicy::Immutable,
         move |cancellation| {
-            previews.resolve_image_preview(&project_root, &path, &revision, width, cancellation)
+            let lease = session.canvas_source_lease(&path, &revision)?;
+            previews.resolve_image_preview_lease(&lease, width, cancellation)
         },
     )
     .await
+}
+
+pub(super) async fn canvas_sources_resolve(
+    State(state): State<WorkbenchRouterState>,
+    Extension(scope): Extension<ProjectAuthorization>,
+    request: Request,
+) -> Response {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Target {
+        project_relative_path: String,
+        source_token: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Input {
+        targets: Vec<Target>,
+    }
+    let input: Input = match json_body(request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    if input.targets.is_empty() {
+        return invalid_input("Canvas source resolution requires at least one target.");
+    }
+    let targets = match input
+        .targets
+        .into_iter()
+        .map(|target| {
+            Ok(CanvasSourceTarget {
+                project_relative_path: ProjectRelativePath::parse(&target.project_relative_path)?,
+                source_token: target.source_token,
+            })
+        })
+        .collect::<Result<Vec<_>, ProjectError>>()
+    {
+        Ok(targets) => targets,
+        Err(error) => return project_error(error),
+    };
+    let runtime = Arc::clone(&state.services);
+    let session = match project_session(&runtime, &scope) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    let binding_id = scope.binding_id.clone();
+    let source_digests = Arc::clone(runtime.canvas_source_digests());
+    let result = tokio::task::spawn_blocking(move || {
+        session.resolve_canvas_sources(&targets, &source_digests)
+    })
+    .await
+    .expect("Canvas source worker must complete");
+    match result {
+        Ok(mut view) => {
+            for source in &mut view.sources {
+                make_canvas_resource_public(&mut source.resource, &binding_id);
+            }
+            Json(view).into_response()
+        }
+        Err(error) => project_error(error),
+    }
 }
 
 pub(super) async fn text_preview_source_save(
@@ -860,21 +925,32 @@ pub(super) async fn video_preview_probe(
         Ok(session) => session,
         Err(response) => return response,
     };
-    let targets = input
+    let targets = match input
         .targets
         .into_iter()
-        .map(|target| CanvasVideoPreviewTarget {
-            project_relative_path: target.project_relative_path,
-            source_revision: target.source_revision,
-            frame_time_ms: target.frame_time_ms,
+        .map(|target| {
+            Ok(CanvasVideoPreviewTarget {
+                project_relative_path: ProjectRelativePath::parse(&target.project_relative_path)?,
+                source_revision: target.source_revision,
+                frame_time_ms: target.frame_time_ms,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, ProjectError>>()
+    {
+        Ok(targets) => targets,
+        Err(error) => return project_error(error),
+    };
     let previews = Arc::clone(runtime.previews());
-    let project_root = session.root().to_path_buf();
     let sources = match blocking_preview_task(move |cancellation| {
+        let leases = targets
+            .iter()
+            .map(|target| {
+                session.canvas_source_lease(&target.project_relative_path, &target.source_revision)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         previews
             .video()
-            .probe_sources(&project_root, &targets, cancellation)
+            .probe_sources(&leases, &targets, cancellation)
     })
     .await
     {
@@ -883,10 +959,15 @@ pub(super) async fn video_preview_probe(
     };
     let sources = sources
         .into_iter()
-        .map(|source| (source.target.project_relative_path.clone(), source))
+        .map(|source| {
+            (
+                source.target.project_relative_path.as_str().to_owned(),
+                source,
+            )
+        })
         .map(|(path, source)| {
             let mut value = json!({
-                "projectRelativePath": source.target.project_relative_path,
+                "projectRelativePath": source.target.project_relative_path.as_str(),
                 "sourceRevision": source.target.source_revision,
                 "frameTimeMs": source.target.frame_time_ms,
             });
@@ -946,16 +1027,22 @@ pub(super) async fn video_preview_ensure(
         Ok(session) => session,
         Err(response) => return response,
     };
+    let project_relative_path =
+        match ProjectRelativePath::parse(&input.target.project_relative_path) {
+            Ok(path) => path,
+            Err(error) => return project_error(error),
+        };
     let target = CanvasVideoPreviewTarget {
-        project_relative_path: input.target.project_relative_path,
+        project_relative_path,
         source_revision: input.target.source_revision,
         frame_time_ms: input.target.frame_time_ms,
     };
     let previews = Arc::clone(runtime.previews());
-    let project_root = session.root().to_path_buf();
     let result = match blocking_preview_task(move |cancellation| {
+        let lease =
+            session.canvas_source_lease(&target.project_relative_path, &target.source_revision)?;
         previews.video().ensure_source(
-            &project_root,
+            &lease,
             &target,
             &input.canonical_source_identity,
             cancellation,
@@ -1009,7 +1096,10 @@ pub(super) async fn video_preview(
         }
     };
     let project_relative_path = match required_query_value(&query, "path") {
-        Ok(path) => path.to_owned(),
+        Ok(path) => match ProjectRelativePath::parse(path) {
+            Ok(path) => path,
+            Err(error) => return project_error(error),
+        },
         Err(response) => return response,
     };
     let source_revision = match required_query_value(&query, "sourceRevision") {
@@ -1031,13 +1121,14 @@ pub(super) async fn video_preview(
         Err(response) => return response,
     };
     let previews = Arc::clone(runtime.previews());
-    let project_root = session.root().to_path_buf();
     blocking_preview_response(
         method == Method::HEAD,
         PreviewCachePolicy::Revalidate,
         move |cancellation| {
+            let lease = session
+                .canvas_source_lease(&target.project_relative_path, &target.source_revision)?;
             previews.video().resolve_variant(
-                &project_root,
+                &lease,
                 &target,
                 &canonical_source_identity,
                 width,
