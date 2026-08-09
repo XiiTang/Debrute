@@ -155,7 +155,9 @@ describe('CanvasRenderLifecycle', () => {
     expect(fixture.runtime.scene.getRenderSnapshot()).toBe(sceneBeforeMove);
     expect(fixture.runtime.scene.getRenderSnapshot().nodesByPath.get('back')?.x).toBe(0);
     expect(back.style.transform).toBe('translate(5px, 0px)');
-    expect(back.style.zIndex).toBe('2');
+    expect(Number(back.style.zIndex)).toBeGreaterThan(
+      fixture.runtime.scene.getPresentedNodes().get('front')!.z
+    );
     expect(listener).not.toHaveBeenCalled();
 
     unsubscribe();

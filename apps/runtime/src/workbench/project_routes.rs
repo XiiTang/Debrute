@@ -49,7 +49,7 @@ use super::{
     multipart::read_multipart,
     routes::{json_body, json_body_with_limit, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
-    services::{make_canvas_resource_public, project_response},
+    services::{make_canvas_resolved_source_public, project_response},
     websocket::{
         MAX_WEBSOCKET_FRAME_BYTES, WebSocketConnection, WebSocketMessage, WebSocketUpgrade,
         read_message, read_text, write_close, write_pong, write_text,
@@ -720,7 +720,7 @@ pub(super) async fn canvas_sources_resolve(
     match result {
         Ok(mut view) => {
             for source in &mut view.sources {
-                make_canvas_resource_public(&mut source.resource, &binding_id);
+                make_canvas_resolved_source_public(source, &binding_id);
             }
             Json(view).into_response()
         }
@@ -1725,7 +1725,9 @@ fn command_response(
 
 fn command_response_body(result: ProjectCommandResult) -> Result<Value, RuntimeHttpServiceError> {
     Ok(match result {
-        ProjectCommandResult::Snapshot(_) | ProjectCommandResult::CanvasFeedbackUpdated { .. } => {
+        ProjectCommandResult::Snapshot(_)
+        | ProjectCommandResult::CanvasStateUpdated
+        | ProjectCommandResult::CanvasFeedbackUpdated { .. } => {
             json!({})
         }
         ProjectCommandResult::TextFileSaved { file, .. } => {

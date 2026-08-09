@@ -1,7 +1,7 @@
 import React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import { Boxes } from '../ui/index.js';
-import type { CanvasFeedbackDocument, CanvasState } from '@debrute/app-protocol';
+import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
 import type { CanvasProjection } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
@@ -31,7 +31,7 @@ export function CanvasEditor({
   onOpenContextMenu,
   interactionBlocked = false,
 }: {
-  canvas: { state: CanvasState; projection: CanvasProjection } | undefined;
+  canvas: { expandedDirectories: readonly string[]; projection: CanvasProjection } | undefined;
   hasProject: boolean;
   projectOpenAttemptedPath?: string | undefined;
   projectOpenError?: string | undefined;
@@ -71,7 +71,7 @@ export function CanvasEditor({
 
   return (
     <CanvasScene
-      canvasState={canvas.state}
+      expandedDirectories={canvas.expandedDirectories}
       projection={canvas.projection}
       actions={actions}
       textFileBuffers={textFileBuffers}
@@ -90,7 +90,7 @@ export function CanvasEditor({
 }
 
 interface CanvasSceneProps {
-  canvasState: CanvasState;
+  expandedDirectories: readonly string[];
   projection: CanvasProjection;
   actions: CanvasSceneActions;
   textFileBuffers: Record<string, TextFileBuffer>;
@@ -107,7 +107,7 @@ interface CanvasSceneProps {
 }
 
 const CanvasScene = React.memo(function CanvasScene({
-  canvasState,
+  expandedDirectories,
   projection,
   actions,
   textFileBuffers,
@@ -160,7 +160,7 @@ const CanvasScene = React.memo(function CanvasScene({
   return (
     <section className="canvas-shell">
       <CanvasSurface
-        canvasState={canvasState}
+        expandedDirectories={expandedDirectories}
         projection={projection}
         runtime={runtime}
         actions={actions}

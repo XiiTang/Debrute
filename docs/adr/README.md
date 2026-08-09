@@ -21,6 +21,7 @@ glossaries instead.
 - [Project Paths Are Realpath-Bound](./0012-project-paths-are-realpath-bound.md)
 - [Tests Own Their External Resources](./0013-tests-own-their-external-resources.md)
 - [Project Source Resolution Is Demand-Driven](./0069-project-source-resolution-is-demand-driven.md)
+- [Canvas Source Settlement Is Path Local](./0070-canvas-source-settlement-is-path-local.md)
 
 ### Product Identity
 
@@ -117,6 +118,7 @@ and enforced by Rust and contract tests.
 - [Preview Maintenance Shares Presentation, Not Source Execution](../../packages/canvas-core/docs/adr/0007-preview-maintenance-shares-scheduling-not-execution.md)
 - [Project Tree Defines Canvas Membership](../../packages/canvas-core/docs/adr/0008-project-tree-defines-canvas-membership.md)
 - [Canvas Workspace Contains One Canvas State](../../packages/canvas-core/docs/adr/0009-canvas-workspace-contains-one-canvas-state.md)
+- [Canvas State Events Follow Projection Scope](../../packages/canvas-core/docs/adr/0013-canvas-state-events-follow-projection-scope.md)
 
 ## Capability Decisions
 

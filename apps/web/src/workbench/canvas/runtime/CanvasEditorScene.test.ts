@@ -53,11 +53,17 @@ describe('CanvasEditorRuntime scene', () => {
         x: 120,
         y: 50,
         width: 100,
-        height: 100,
-        z: 5
+        height: 100
       }],
       geometryChanged: true
     });
+    expect(updates[0]?.nodeLayouts[0]?.z).toBeGreaterThan(
+      Math.max(
+        runtime.scene.getPresentedNodes().get('target')!.z,
+        runtime.scene.getPresentedNodes().get('unrelated')!.z,
+        runtime.scene.getPresentedNodes().get('unrelated-target')!.z
+      )
+    );
     expect(updates[0]?.edgeGroups.map((group) => group.id)).toEqual(['source']);
     expect(updates[0]?.edgeGroups[0]?.path)
       .toBe('M 220 100 L 260 100 M 260 50 L 260 100 M 260 50 L 300 50');

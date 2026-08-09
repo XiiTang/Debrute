@@ -11,7 +11,9 @@ and
 with presentation geometry refined by
 [camera-independent content and chrome](../packages/canvas-core/docs/adr/0010-canvas-presentation-separates-content-from-screen-space-chrome.md)
 and interaction refined by
-[distinct Selection, Content Activation, and manipulation](../packages/canvas-core/docs/adr/0011-canvas-node-selection-content-activation-and-manipulation-are-distinct.md).
+[distinct Selection, Content Activation, and manipulation](../packages/canvas-core/docs/adr/0011-canvas-node-selection-content-activation-and-manipulation-are-distinct.md),
+with state-only event transport defined by
+[authoritative Canvas State deltas](../packages/canvas-core/docs/adr/0014-canvas-state-events-carry-authoritative-deltas.md).
 
 ## Runtime Authority
 
@@ -30,7 +32,14 @@ without clearing their retained state.
 Runtime does not compute node rectangles, edges, overlaps, or z values. Every
 durable Canvas change enters one `patchCanvasState` command and atomically
 updates the root-scoped Canvas Workspace Document. Runtime validates Project
-paths, normalizes sparse state, and publishes one complete Project snapshot.
+paths and normalizes sparse state. A patch that leaves Folder Disclosure
+unchanged publishes one `canvas.state.changed` event carrying only authoritative
+complete resulting node states for changed paths plus `occlusionOrder` when that
+order changed. Workbench structurally applies that delta to its canonical Canvas
+state while retaining Folder Disclosure, Project Tree, and Canvas Resource View
+identities. A Folder Disclosure change
+continues through the Project Tree loader and publishes one complete Project
+snapshot. A no-op publishes neither.
 
 ## Workbench Authority
 
@@ -85,6 +94,17 @@ overlapping unselected nodes while preserving the selected nodes' internal
 order. Newly disclosed overlapping nodes start above existing nodes. Selection
 is transient. Workbench focus changes do not clear it or control Content
 Activation.
+
+A Selection Raise is a stable partition of the latest Runtime-confirmed
+`occlusionOrder`; it does not rebuild the Project Tree, Canvas Resource View, or
+Automatic Layout. It is recomputed only when Selection changes, when the
+Runtime-confirmed base Occlusion Order changes, or when Canvas membership is
+replaced. Unchanged-selection drag frames update only draft geometry and keep
+the existing raised z values. A completed move or resize already derives the final
+overlap-only order from its final scene once, then applies that same stable
+selection partition. The persistence chain builds the current scene once,
+overlays the submitted rectangles directly, and performs no second Automatic
+Layout scene or overlap reconciliation.
 
 Finishing a move or resize submits one prospective layout mutation through the
 latest accepted Canvas state. Workbench removes unchanged geometry and an

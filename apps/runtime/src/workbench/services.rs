@@ -1290,6 +1290,27 @@ pub(crate) fn make_canvas_resource_public(
     }
 }
 
+pub(crate) fn make_canvas_resolved_source_public(
+    source: &mut crate::project::CanvasResolvedSource,
+    binding_id: &str,
+) {
+    if let crate::project::CanvasNodeAvailability::Available {
+        file_url, revision, ..
+    } = &mut source.availability
+    {
+        *file_url = project_file_url(binding_id, &source.project_relative_path, revision);
+    }
+    if let Some(tracks) = &mut source.video_text_tracks {
+        for track in tracks {
+            track.file_url = Some(project_file_url(
+                binding_id,
+                &track.project_relative_path,
+                &track.revision,
+            ));
+        }
+    }
+}
+
 fn project_file_url(binding_id: &str, project_relative_path: &str, revision: &str) -> String {
     format!(
         "/api/workbench/bindings/{}/files/raw/{}?v={}",

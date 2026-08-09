@@ -1,3 +1,4 @@
+import type { CanvasStateChange } from '@debrute/app-protocol';
 import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene.js';
 import {
   getCanvasResizePreserveAspect,
@@ -135,6 +136,7 @@ export interface CanvasEditorRuntime {
   getSelectionIntentRevision(): number;
   bindSurface(elements: CanvasSurfaceElements): () => void;
   acceptProjection(projection: CanvasProjection): void;
+  acceptCanvasStateChange(change: CanvasStateChange): void;
   setSelection(selection: CanvasSelection | undefined): void;
   setSelectionAndEndContentActivation(selection: CanvasSelection | undefined): void;
   activateContent(projectRelativePath: string): void;
@@ -221,6 +223,18 @@ interface GestureState {
   origin: CanvasPoint;
 }
 
+interface CanvasSurfaceRect extends CanvasSize {
+  left: number;
+  top: number;
+}
+
+const UNBOUND_CANVAS_SURFACE_RECT: CanvasSurfaceRect = {
+  left: 0,
+  top: 0,
+  width: 1,
+  height: 1
+};
+
 export function createCanvasEditorRuntime(initial: {
   initialProjection: CanvasProjection;
   submitManualLayout(mutation: {
@@ -256,6 +270,7 @@ export function createCanvasEditorRuntime(initial: {
     }
   });
   let acceptedProjection = initial.initialProjection;
+  let acceptedMembershipNodes = initial.initialProjection.nodes;
   const state: RuntimeState = {
     camera: initial.camera ?? canvasCameraReset(),
     cameraState: 'idle',
@@ -267,6 +282,7 @@ export function createCanvasEditorRuntime(initial: {
   assertCanvasCamera(state.camera);
 
   let boundElements: CanvasSurfaceElements | undefined;
+  let measuredSurfaceRect = UNBOUND_CANVAS_SURFACE_RECT;
   let resizeObserver: ResizeObserver | undefined;
   let idleTimer: number | undefined;
   let gestureState: GestureState | undefined;
@@ -372,9 +388,15 @@ export function createCanvasEditorRuntime(initial: {
     scheduleIdle();
   };
 
-  const surfaceRect = (): DOMRect | { left: number; top: number; width: number; height: number } => (
-    boundElements?.surface.getBoundingClientRect() ?? { left: 0, top: 0, width: 1, height: 1 }
-  );
+  const refreshSurfaceRect = (): CanvasSurfaceRect => {
+    const rect = boundElements?.surface.getBoundingClientRect();
+    measuredSurfaceRect = rect
+      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      : UNBOUND_CANVAS_SURFACE_RECT;
+    return measuredSurfaceRect;
+  };
+
+  const surfaceRect = (): CanvasSurfaceRect => measuredSurfaceRect;
 
   const measuredSurfaceSize = (): CanvasSize => normalizedSurfaceSize(state.surfaceSize);
 
@@ -861,8 +883,8 @@ export function createCanvasEditorRuntime(initial: {
     if (projection === acceptedProjection) {
       return;
     }
-    if (projection.nodes === acceptedProjection.nodes) {
-      acceptedProjection = projection;
+    if (projection.nodes === acceptedMembershipNodes) {
+      acceptedProjection = { ...acceptedProjection, edges: projection.edges };
       scenePresentation.setHierarchyEdges(projection.edges);
       scenePresentation.publishRenderSnapshot();
       return;
@@ -897,6 +919,7 @@ export function createCanvasEditorRuntime(initial: {
         : undefined
     );
     manualLayoutLifecycle.acceptProjection(projection);
+    acceptedMembershipNodes = projection.nodes;
     acceptedProjection = projection;
     scenePresentation.setProjection(projection, canvasPresentation(nextSelection));
     if (nextPointerInteraction?.kind === 'selection-marquee') {
@@ -928,6 +951,18 @@ export function createCanvasEditorRuntime(initial: {
     }
   };
 
+  const acceptCanvasStateChange = (change: CanvasStateChange): void => {
+    scenePresentation.acceptCanvasStateChange(change);
+    acceptedProjection = scenePresentation.getProjection();
+    manualLayoutLifecycle.acceptNodes(
+      change.nodeStates.flatMap(({ projectRelativePath }) => {
+        const node = scenePresentation.getAcceptedNode(projectRelativePath);
+        return node ? [node] : [];
+      })
+    );
+    scenePresentation.applyPresentation(canvasPresentation(state.selection));
+  };
+
   const runtime: CanvasEditorRuntime = {
     camera: cameraController,
     coordinates,
@@ -935,6 +970,7 @@ export function createCanvasEditorRuntime(initial: {
     input: {
       screenToCanvasPoint: screenToCanvas,
       beginSelectionMarquee: (input) => {
+        refreshSurfaceRect();
         setPointerInteraction({
           kind: 'selection-marquee',
           pointerId: input.pointerId,
@@ -950,6 +986,7 @@ export function createCanvasEditorRuntime(initial: {
         }, { notifySnapshot: false });
       },
       beginNodeMove: (input) => {
+        refreshSurfaceRect();
         const initialSelection = state.selection;
         const additive = additiveSelectionModifier(input.modifiers);
         const node = presentedNode(input.projectRelativePath);
@@ -987,6 +1024,7 @@ export function createCanvasEditorRuntime(initial: {
         }, { notifySnapshot: false });
       },
       beginNodeResize: (input) => {
+        refreshSurfaceRect();
         const node = presentedNode(input.projectRelativePath);
         const initialSelection = state.selection;
         const initialContentInteractionProjectRelativePath = state.contentInteractionProjectRelativePath;
@@ -1253,9 +1291,10 @@ export function createCanvasEditorRuntime(initial: {
     getSelectionIntentRevision: () => selectionIntentRevision,
     bindSurface: (elements) => {
       boundElements = elements;
+      const surfaceRect = refreshSurfaceRect();
       const nextSize = {
-        width: elements.surface.getBoundingClientRect().width,
-        height: elements.surface.getBoundingClientRect().height
+        width: surfaceRect.width,
+        height: surfaceRect.height
       };
       state.surfaceSize = nextSize;
       invalidateSnapshot();
@@ -1264,14 +1303,11 @@ export function createCanvasEditorRuntime(initial: {
       detachWindowInput();
       detachWindowInput = attachWindowInput();
       resizeObserver?.disconnect();
-      resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (!entry) {
-          return;
-        }
+      resizeObserver = new ResizeObserver(() => {
+        const rect = refreshSurfaceRect();
         const size = {
-          width: entry.contentRect.width,
-          height: entry.contentRect.height
+          width: rect.width,
+          height: rect.height
         };
         if (state.surfaceSize?.width === size.width && state.surfaceSize.height === size.height) {
           return;
@@ -1285,6 +1321,7 @@ export function createCanvasEditorRuntime(initial: {
       return () => {
         if (boundElements === elements) {
           boundElements = undefined;
+          measuredSurfaceRect = UNBOUND_CANVAS_SURFACE_RECT;
         }
         resizeObserver?.disconnect();
         resizeObserver = undefined;
@@ -1293,6 +1330,7 @@ export function createCanvasEditorRuntime(initial: {
       };
     },
     acceptProjection,
+    acceptCanvasStateChange,
     setSelection: commitSelectionPreservingValidActivation,
     setSelectionAndEndContentActivation: commitSelectionAndEndContentActivation,
     activateContent,

@@ -46,6 +46,7 @@ import {
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor.js';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
+import type { CanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime.js';
 import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
 import {
   canvasChangedRecordPaths,
@@ -111,6 +112,21 @@ interface CanvasTextPreviewTargetResolution {
   target?: CanvasTextPreviewTarget | undefined;
 }
 
+function beginCanvasTextPreviewTargetResolution(
+  input: CanvasTextPreviewTargetInput,
+  onResolved: (target: CanvasTextPreviewTarget) => void
+): CanvasTextPreviewTargetResolution {
+  const resolution: CanvasTextPreviewTargetResolution = {
+    input,
+    pending: resolveCanvasTextPreviewTarget(input).then((target) => {
+      resolution.target = target;
+      onResolved(target);
+      return target;
+    })
+  };
+  return resolution;
+}
+
 interface CanvasTextPreviewCoverageJob {
   readonly abortController: AbortController;
 }
@@ -131,6 +147,7 @@ interface CanvasTextPreviewFontCandidate {
 
 export interface CanvasTextPreviewRuntimeValue {
   retryPreview(projectRelativePath: string): void;
+  acceptNode(node: ProjectedCanvasNode): void;
   getNodeSnapshot(node: ProjectedCanvasNode): CanvasTextPreviewNodeSnapshot;
   subscribeNode(node: ProjectedCanvasNode, listener: () => void): () => void;
 }
@@ -152,6 +169,9 @@ export function useCanvasTextPreviewRuntime(): CanvasTextPreviewRuntimeValue {
 
 export function useCanvasTextPreviewNode(node: ProjectedCanvasNode): CanvasTextPreviewNodeSnapshot {
   const runtime = useCanvasTextPreviewRuntime();
+  useLayoutEffect(() => {
+    runtime.acceptNode(node);
+  }, [node, runtime]);
   const subscribe = useCallback(
     (listener: () => void) => runtime.subscribeNode(node, listener),
     [node, runtime]
@@ -162,6 +182,7 @@ export function useCanvasTextPreviewNode(node: ProjectedCanvasNode): CanvasTextP
 
 export function CanvasTextPreviewProvider({
   nodes,
+  sourceResolutionRuntime,
   activeInlineTextPath,
   textFileBuffers,
   actions,
@@ -172,6 +193,7 @@ export function CanvasTextPreviewProvider({
   children
 }: {
   nodes: ProjectedCanvasNode[];
+  sourceResolutionRuntime: Pick<CanvasSourceResolutionRuntime, 'getNode'>;
   activeInlineTextPath?: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   actions: CanvasSceneActions;
@@ -189,7 +211,6 @@ export function CanvasTextPreviewProvider({
   const [fontCandidate, setFontCandidate] = useState<CanvasTextPreviewFontCandidate>();
   const [captureLayerRoot, setCaptureLayerRoot] = useState<HTMLElement>();
   const [previewErrors, setPreviewErrors] = useState<Record<string, CanvasTextPreviewErrorState>>({});
-  const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasTextPreviewTarget>>({});
   const [tasks, setTasks] = useState<Map<string, CanvasTextPreviewTask>>(() => new Map());
   const [availabilitySettlementVersion, setAvailabilitySettlementVersion] = useState(0);
   const [contentReadSettlementVersion, setContentReadSettlementVersion] = useState(0);
@@ -197,7 +218,6 @@ export function CanvasTextPreviewProvider({
   const currentTargetKeysRef = useRef(new Map<string, CanvasPreviewTargetKey>());
   const currentTargetsRef = useRef<Record<string, CanvasTextPreviewTarget>>({});
   const targetResolutionsRef = useRef(new Map<string, CanvasTextPreviewTargetResolution>());
-  const targetGenerationRef = useRef(0);
   const tasksRef = useRef(tasks);
   const sourceAvailabilityRef = useRef(sourceAvailability);
   const previewErrorsRef = useRef(previewErrors);
@@ -251,7 +271,6 @@ export function CanvasTextPreviewProvider({
   textFileBuffersRef.current = textFileBuffers;
   activeInlineTextPathRef.current = activeInlineTextPath;
   styleKeyRef.current = styleKeyState.key;
-  currentTargetsRef.current = currentTargets;
   tasksRef.current = tasks;
   sourceAvailabilityRef.current = sourceAvailability;
   previewErrorsRef.current = previewErrors;
@@ -285,7 +304,26 @@ export function CanvasTextPreviewProvider({
       detail
     });
   }, [perfMonitor]);
-
+  const beginTargetResolution = useCallback((input: CanvasTextPreviewTargetInput) => (
+    beginCanvasTextPreviewTargetResolution(input, (target) => {
+      recordTextPreviewCounter('text-preview-target-identity-computed', {
+        projectRelativePath: target.projectRelativePath,
+        targetIdentity: target.targetIdentity,
+        contentDigest: target.contentDigest,
+        estimatedBytes: target.estimatedBytes,
+        language: target.language,
+        wordWrap: target.wordWrap,
+        contentCssWidth: target.contentCssWidth,
+        contentCssHeight: target.contentCssHeight,
+        scrollTop: target.scrollTop,
+        scrollLeft: target.scrollLeft,
+        styleKey: target.styleKey,
+        sourcePixelWidth: target.sourcePixelWidth,
+        sourcePixelHeight: target.sourcePixelHeight,
+        sourceScale: target.sourceScale
+      });
+    })
+  ), [recordTextPreviewCounter]);
   const updateTasks = useCallback((
     update: (current: Map<string, CanvasTextPreviewTask>) => Map<string, CanvasTextPreviewTask>
   ) => {
@@ -295,6 +333,43 @@ export function CanvasTextPreviewProvider({
       return next;
     });
   }, []);
+
+  const commitTargets = useCallback((targets: CanvasTextPreviewTarget[]) => {
+    const targetKeys = new Map(targets.map((target) => [
+      target.projectRelativePath,
+      canvasTextPreviewTargetKey(target)
+    ]));
+    const byPath = Object.fromEntries(targets.map((target) => [target.projectRelativePath, target]));
+    markChangedNodeRecords(currentTargetsRef.current, byPath);
+    currentTargetKeysRef.current = targetKeys;
+    currentTargetsRef.current = byPath;
+
+    const nextAvailability = canvasTextPreviewCurrentSourceAvailability({
+      targets,
+      sourceAvailability: sourceAvailabilityRef.current
+    });
+    if (!canvasRecordValuesEqual(sourceAvailabilityRef.current, nextAvailability)) {
+      markChangedNodeRecords(sourceAvailabilityRef.current, nextAvailability);
+      sourceAvailabilityRef.current = nextAvailability;
+      setSourceAvailability(nextAvailability);
+    }
+
+    const nextErrors = canvasRecordsMatchingTargetKeys(previewErrorsRef.current, targetKeys);
+    if (!canvasRecordValuesEqual(previewErrorsRef.current, nextErrors)) {
+      markChangedNodeRecords(previewErrorsRef.current, nextErrors);
+      previewErrorsRef.current = nextErrors;
+      setPreviewErrors(nextErrors);
+    }
+
+    const workTargets = targets.filter((target) => (
+      target.projectRelativePath !== activeInlineTextPathRef.current
+    ));
+    updateTasks((current) => reconcileCanvasTextPreviewTasks({
+      previous: current,
+      targets: workTargets,
+      sourceAvailability: sourceAvailabilityRef.current
+    }));
+  }, [markChangedNodeRecords, updateTasks]);
 
   const isCurrentTarget = useCallback((epoch: number, target: CanvasTextPreviewTarget): boolean => (
     mountedRef.current
@@ -453,11 +528,11 @@ export function CanvasTextPreviewProvider({
     if (!styleKeyState.key) {
       return;
     }
-    const generation = targetGenerationRef.current + 1;
-    targetGenerationRef.current = generation;
     const previous = targetResolutionsRef.current;
     const next = new Map<string, CanvasTextPreviewTargetResolution>();
-    for (const node of nodes) {
+    for (const projectedNode of nodes) {
+      const node = sourceResolutionRuntime.getNode(projectedNode.projectRelativePath)
+        ?? projectedNode;
       if (!isStableCanvasTextNode(node)) {
         continue;
       }
@@ -482,60 +557,19 @@ export function CanvasTextPreviewProvider({
         next.set(path, existing);
         continue;
       }
-      const resolution: CanvasTextPreviewTargetResolution = {
-        input: targetInput,
-        pending: resolveCanvasTextPreviewTarget(targetInput).then((target) => {
-          resolution.target = target;
-          recordTextPreviewCounter('text-preview-target-identity-computed', {
-            projectRelativePath: target.projectRelativePath,
-            targetIdentity: target.targetIdentity,
-            contentDigest: target.contentDigest,
-            estimatedBytes: target.estimatedBytes,
-            language: target.language,
-            wordWrap: target.wordWrap,
-            contentCssWidth: target.contentCssWidth,
-            contentCssHeight: target.contentCssHeight,
-            scrollTop: target.scrollTop,
-            scrollLeft: target.scrollLeft,
-            styleKey: target.styleKey,
-            sourcePixelWidth: target.sourcePixelWidth,
-            sourcePixelHeight: target.sourcePixelHeight,
-            sourceScale: target.sourceScale
-          });
-          return target;
-        })
-      };
+      const resolution = beginTargetResolution(targetInput);
       next.set(path, resolution);
     }
     targetResolutionsRef.current = next;
-    commitCanvasTextPreviewTargets({
-      targets: [...next.values()].flatMap((resolution) => resolution.target ? [resolution.target] : []),
-      currentTargetKeysRef,
-      currentTargetsRef,
-      setCurrentTargets,
-      setSourceAvailability,
-      sourceAvailabilityRef,
-      setPreviewErrors,
-      markChangedNodeRecords
-    });
+    commitTargets([...next.values()].flatMap((resolution) => resolution.target ? [resolution.target] : []));
     void Promise.all([...next.values()].map((resolution) => resolution.pending)).then((resolved) => {
       if (!mountedRef.current
-        || generation !== targetGenerationRef.current
         || targetResolutionsRef.current !== next) {
         return;
       }
-      commitCanvasTextPreviewTargets({
-        targets: resolved,
-        currentTargetKeysRef,
-        currentTargetsRef,
-        setCurrentTargets,
-        setSourceAvailability,
-        sourceAvailabilityRef,
-        setPreviewErrors,
-        markChangedNodeRecords
-      });
+      commitTargets(resolved);
     });
-  }, [activeInlineTextPath, markChangedNodeRecords, nodes, recordTextPreviewCounter, styleKeyState.key, textFileBuffers]);
+  }, [activeInlineTextPath, beginTargetResolution, commitTargets, nodes, sourceResolutionRuntime, styleKeyState.key, textFileBuffers]);
 
   useEffect(() => {
     const path = activeInlineTextPath;
@@ -551,17 +585,6 @@ export function CanvasTextPreviewProvider({
       return withoutRecordPath(current, path);
     });
   }, [activeInlineTextPath, markNodePathChanged, previewResourceScheduler]);
-
-  useEffect(() => {
-    const workTargets = Object.values(currentTargets).filter((target) => (
-      target.projectRelativePath !== activeInlineTextPath
-    ));
-    updateTasks((current) => reconcileCanvasTextPreviewTasks({
-      previous: current,
-      targets: workTargets,
-      sourceAvailability
-    }));
-  }, [activeInlineTextPath, currentTargets, sourceAvailability, updateTasks]);
 
   useEffect(() => {
     const stateCounts = Object.fromEntries(
@@ -1085,9 +1108,6 @@ export function CanvasTextPreviewProvider({
       : undefined;
   }, []);
 
-  const commandHandlersRef = useRef({ retryPreview });
-  commandHandlersRef.current = { retryPreview };
-
   const deriveNodeSnapshot = useCallback((node: ProjectedCanvasNode): CanvasTextPreviewNodeSnapshot => {
     const target = currentTargetForRenderedNode(node);
     let request: CanvasRasterPreviewRequest = {};
@@ -1112,6 +1132,88 @@ export function CanvasTextPreviewProvider({
     snapshotsEqual: sameCanvasTextPreviewNodeSnapshot
   }), [deriveNodeSnapshot]);
 
+  const acceptNode = useCallback((node: ProjectedCanvasNode) => {
+    const styleKey = styleKeyRef.current;
+    if (!styleKey) {
+      return;
+    }
+    const path = node.projectRelativePath;
+    const input = path === activeInlineTextPathRef.current
+      ? undefined
+      : canvasTextPreviewTargetInput({
+        node,
+        buffer: textFileBuffersRef.current[path],
+        styleKey
+      });
+    const previous = targetResolutionsRef.current.get(path);
+    if (!input) {
+      if (!previous) {
+        return;
+      }
+      const nextResolutions = new Map(targetResolutionsRef.current);
+      nextResolutions.delete(path);
+      targetResolutionsRef.current = nextResolutions;
+      currentTargetKeysRef.current.delete(path);
+      delete currentTargetsRef.current[path];
+      if (path in sourceAvailabilityRef.current) {
+        const nextAvailability = withoutRecordPath(sourceAvailabilityRef.current, path);
+        sourceAvailabilityRef.current = nextAvailability;
+        setSourceAvailability(nextAvailability);
+      }
+      if (path in previewErrorsRef.current) {
+        const nextErrors = withoutRecordPath(previewErrorsRef.current, path);
+        previewErrorsRef.current = nextErrors;
+        setPreviewErrors(nextErrors);
+      }
+      updateTasks((current) => {
+        if (!current.has(path)) {
+          return current;
+        }
+        const next = new Map(current);
+        next.delete(path);
+        return next;
+      });
+      previewResourceScheduler.cancel('text', path);
+      nodeSnapshotStore.flush(new Set([path]));
+      return;
+    }
+    if (previous && canvasTextPreviewTargetInputsEqual(previous.input, input)) {
+      return;
+    }
+    const resolution = beginTargetResolution(input);
+    targetResolutionsRef.current = new Map(targetResolutionsRef.current).set(path, resolution);
+    void resolution.pending.then((target) => {
+      if (!mountedRef.current || targetResolutionsRef.current.get(path) !== resolution) {
+        return;
+      }
+      const targetKey = canvasTextPreviewTargetKey(target);
+      currentTargetKeysRef.current.set(path, targetKey);
+      currentTargetsRef.current[path] = target;
+      const availability = sourceAvailabilityRef.current[path];
+      if (availability && availability.targetKey !== targetKey) {
+        const nextAvailability = withoutRecordPath(sourceAvailabilityRef.current, path);
+        sourceAvailabilityRef.current = nextAvailability;
+        setSourceAvailability(nextAvailability);
+      }
+      const previewError = previewErrorsRef.current[path];
+      if (previewError && previewError.targetKey !== targetKey) {
+        const nextErrors = withoutRecordPath(previewErrorsRef.current, path);
+        previewErrorsRef.current = nextErrors;
+        setPreviewErrors(nextErrors);
+      }
+      updateTasks((current) => reconcileCanvasTextPreviewTarget({
+        previous: current,
+        target,
+        active: activeInlineTextPathRef.current === path,
+        availability: sourceAvailabilityRef.current[path]
+      }));
+      nodeSnapshotStore.flush(new Set([path]));
+    });
+  }, [beginTargetResolution, nodeSnapshotStore, previewResourceScheduler, updateTasks]);
+
+  const commandHandlersRef = useRef({ retryPreview, acceptNode });
+  commandHandlersRef.current = { retryPreview, acceptNode };
+
   useLayoutEffect(() => {
     const changedPaths = new Set(changedNodePathsRef.current);
     changedNodePathsRef.current.clear();
@@ -1120,6 +1222,7 @@ export function CanvasTextPreviewProvider({
 
   const value = useMemo<CanvasTextPreviewRuntimeValue>(() => ({
     retryPreview: (...args) => commandHandlersRef.current.retryPreview(...args),
+    acceptNode: (...args) => commandHandlersRef.current.acceptNode(...args),
     getNodeSnapshot: nodeSnapshotStore.getSnapshot,
     subscribeNode: nodeSnapshotStore.subscribe
   }), [nodeSnapshotStore]);
@@ -1230,44 +1333,6 @@ function canvasTextPreviewTargetInputsEqual(
     && left.styleKey === right.styleKey;
 }
 
-function commitCanvasTextPreviewTargets(input: {
-  targets: CanvasTextPreviewTarget[];
-  currentTargetKeysRef: React.MutableRefObject<Map<string, CanvasPreviewTargetKey>>;
-  currentTargetsRef: React.MutableRefObject<Record<string, CanvasTextPreviewTarget>>;
-  setCurrentTargets: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewTarget>>>;
-  setSourceAvailability: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewSourceAvailability>>>;
-  sourceAvailabilityRef: React.MutableRefObject<Record<string, CanvasTextPreviewSourceAvailability>>;
-  setPreviewErrors: React.Dispatch<React.SetStateAction<Record<string, CanvasTextPreviewErrorState>>>;
-  markChangedNodeRecords<Value>(
-    previous: Readonly<Record<string, Value>>,
-    next: Readonly<Record<string, Value>>
-  ): void;
-}): void {
-  const targetKeys = new Map(input.targets.map((target) => [target.projectRelativePath, canvasTextPreviewTargetKey(target)]));
-  const byPath = Object.fromEntries(input.targets.map((target) => [target.projectRelativePath, target]));
-  if (canvasRecordValuesEqual(input.currentTargetsRef.current, byPath)) {
-    return;
-  }
-  input.currentTargetKeysRef.current = targetKeys;
-  input.markChangedNodeRecords(input.currentTargetsRef.current, byPath);
-  input.currentTargetsRef.current = byPath;
-  input.setCurrentTargets(byPath);
-  input.setSourceAvailability((current) => {
-    const next = canvasTextPreviewCurrentSourceAvailability({
-      targets: input.targets,
-      sourceAvailability: current
-    });
-    input.markChangedNodeRecords(current, next);
-    input.sourceAvailabilityRef.current = next;
-    return next;
-  });
-  input.setPreviewErrors((current) => {
-    const next = canvasRecordsMatchingTargetKeys(current, targetKeys);
-    input.markChangedNodeRecords(current, next);
-    return next;
-  });
-}
-
 function orderCanvasTextPreviewTasks(input: {
   tasks: ReadonlyMap<string, CanvasTextPreviewTask>;
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;
@@ -1277,6 +1342,40 @@ function orderCanvasTextPreviewTasks(input: {
     items: [...input.tasks.values()],
     nodesByPath: input.nodesByPath,
     visibleRect: input.visibleRect
+  });
+}
+
+function reconcileCanvasTextPreviewTarget(input: {
+  previous: Map<string, CanvasTextPreviewTask>;
+  target: CanvasTextPreviewTarget;
+  active: boolean;
+  availability: CanvasTextPreviewSourceAvailability | undefined;
+}): Map<string, CanvasTextPreviewTask> {
+  const path = input.target.projectRelativePath;
+  const targetKey = canvasTextPreviewTargetKey(input.target);
+  if (input.active || (input.availability?.targetKey === targetKey && input.availability.available)) {
+    if (!input.previous.has(path)) {
+      return input.previous;
+    }
+    const next = new Map(input.previous);
+    next.delete(path);
+    return next;
+  }
+  const existing = input.previous.get(path);
+  if (existing && canvasTextPreviewTargetKey(existing) === targetKey) {
+    if (input.availability?.targetKey === targetKey
+      && !input.availability.available
+      && existing.state === 'checking') {
+      const next = new Map(input.previous);
+      next.set(path, { ...existing, state: 'needs-content' });
+      return next;
+    }
+    return input.previous;
+  }
+  return new Map(input.previous).set(path, {
+    ...input.target,
+    attempt: {},
+    state: input.availability?.targetKey === targetKey ? 'needs-content' : 'checking'
   });
 }
 

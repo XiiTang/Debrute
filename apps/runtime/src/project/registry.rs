@@ -13,13 +13,14 @@ use uuid::Uuid;
 use super::{
     AdmittedProjectPathEntry, CanonicalProjectRoot, CanvasFeedbackArtifacts,
     CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasSourceResolutionView,
-    CanvasSourceTarget, CanvasStatePatch, ProjectChange, ProjectDirectoryPath, ProjectError,
-    ProjectEvent, ProjectNativeShellService, ProjectNodeAdapter, ProjectPathBatchItemResult,
-    ProjectPathEntry, ProjectPathKind, ProjectPathOperationStatus, ProjectRelativePath,
-    ProjectService, ProjectSnapshot, ProjectSourceDigestResolver, ProjectSourceLease,
-    ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput,
-    copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
-    import_upload_project_entries, move_project_paths, rename_project_path,
+    CanvasSourceTarget, CanvasStatePatch, CanvasStatePatchOutcome, ProjectChange,
+    ProjectDirectoryPath, ProjectError, ProjectEvent, ProjectNativeShellService,
+    ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
+    ProjectPathOperationStatus, ProjectRelativePath, ProjectService, ProjectSnapshot,
+    ProjectSourceDigestResolver, ProjectSourceLease, ProjectSyncSnapshot, ProjectTextFile,
+    ProjectUploadEntry, UpdateCanvasFeedbackInput, copy_project_paths, create_project_path,
+    delete_project_paths, import_local_project_paths, import_upload_project_entries,
+    move_project_paths, rename_project_path,
     watcher::{
         ProjectFileWatcher, ProjectWatchBackendFactory, ProjectWatchPath, ProjectWatchSignal,
     },
@@ -94,7 +95,8 @@ impl ProjectMutation<ProjectCommandResult> {
             | ProjectCommandResult::PathsChanged {
                 snapshot: current, ..
             } => current.clone_from(snapshot),
-            ProjectCommandResult::CanvasFeedbackUpdated { .. } => {}
+            ProjectCommandResult::CanvasStateUpdated
+            | ProjectCommandResult::CanvasFeedbackUpdated { .. } => {}
         }
         match &mut self.change {
             Some(
@@ -103,7 +105,11 @@ impl ProjectMutation<ProjectCommandResult> {
                     snapshot: current, ..
                 },
             ) => current.clone_from(snapshot),
-            Some(ProjectChange::CanvasFeedbackChanged { .. }) | None => {}
+            Some(
+                ProjectChange::CanvasStateChanged { .. }
+                | ProjectChange::CanvasFeedbackChanged { .. },
+            )
+            | None => {}
         }
     }
 }
@@ -168,6 +174,7 @@ pub enum ProjectCommand {
 /// Typed result produced by one successfully accepted [`ProjectCommand`].
 pub enum ProjectCommandResult {
     Snapshot(ProjectSnapshot),
+    CanvasStateUpdated,
     CanvasFeedbackUpdated {
         feedback: CanvasFeedbackDocument,
     },
@@ -1479,16 +1486,18 @@ fn execute_project_command(
             let snapshot = service.reset_canvas()?;
             Ok(project_snapshot_mutation(snapshot))
         }
-        ProjectCommand::PatchCanvasState { patch } => {
-            let (snapshot, changed) = service.patch_canvas_state(&patch)?;
-            if changed {
-                Ok(project_snapshot_mutation(snapshot))
-            } else {
-                Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
-                    snapshot,
-                )))
+        ProjectCommand::PatchCanvasState { patch } => match service.patch_canvas_state(&patch)? {
+            CanvasStatePatchOutcome::Unchanged => Ok(ProjectMutation::unchanged(
+                ProjectCommandResult::CanvasStateUpdated,
+            )),
+            CanvasStatePatchOutcome::StateChanged(change) => Ok(ProjectMutation::changed(
+                ProjectCommandResult::CanvasStateUpdated,
+                ProjectChange::CanvasStateChanged { change },
+            )),
+            CanvasStatePatchOutcome::ProjectChanged(snapshot) => {
+                Ok(project_snapshot_mutation(*snapshot))
             }
-        }
+        },
         ProjectCommand::UpdateCanvasFeedback { input } => {
             let affects_rendered_artifact = input.affects_rendered_artifact();
             let update = service.update_canvas_feedback(&input)?;

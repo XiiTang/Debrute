@@ -187,7 +187,7 @@ describe('CanvasFeedbackInteraction', () => {
       probe.current.handleTargetChange(feedbackSelectionTarget(['image.png', 'second.png']));
     });
 
-    expect(probe.current.currentTarget).toMatchObject({
+    expect(probe.current.targetStore.getSnapshot()).toMatchObject({
       kind: 'selection',
       projectRelativePaths: ['image.png', 'second.png']
     });
@@ -207,7 +207,7 @@ describe('CanvasFeedbackInteraction', () => {
       probe.current.invalidateTarget('image.png');
     });
 
-    expect(probe.current.currentTarget).toBeUndefined();
+    expect(probe.current.targetStore.getSnapshot()).toBeUndefined();
     expect(probe.current.focusedCapsuleId).toBeUndefined();
     expect(probe.current.capsulesForPath('image.png').find((capsule) => capsule.itemId === 'feedback-a')?.comment)
       .toBe('Protected draft');
@@ -228,7 +228,7 @@ describe('CanvasFeedbackInteraction', () => {
       });
 
       await act(async () => vi.advanceTimersByTime(120));
-      expect(probe.current.currentTarget).toBeUndefined();
+      expect(probe.current.targetStore.getSnapshot()).toBeUndefined();
     } finally {
       await probe.unmount();
       vi.useRealTimers();
@@ -307,7 +307,7 @@ describe('CanvasFeedbackInteraction', () => {
       expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
 
       await act(async () => vi.advanceTimersByTime(1));
-      expect(probe.current.currentTarget).toBeUndefined();
+      expect(probe.current.targetStore.getSnapshot()).toBeUndefined();
     } finally {
       await probe.unmount();
       vi.useRealTimers();
@@ -326,7 +326,7 @@ describe('CanvasFeedbackInteraction', () => {
         probe.current.canvas.dismissTarget();
       });
 
-      expect(probe.current.currentTarget).toBeUndefined();
+      expect(probe.current.targetStore.getSnapshot()).toBeUndefined();
       expect(clearFeedbackBarPlacement).toHaveBeenCalledOnce();
       await act(async () => vi.advanceTimersByTime(120));
       expect(clearFeedbackBarPlacement).toHaveBeenCalledOnce();
@@ -353,7 +353,7 @@ describe('CanvasFeedbackInteraction', () => {
       expect(currentNodeTarget(probe.current)?.projectRelativePath).toBe('image.png');
 
       await act(async () => vi.advanceTimersByTime(1));
-      expect(probe.current.currentTarget).toBeUndefined();
+      expect(probe.current.targetStore.getSnapshot()).toBeUndefined();
     } finally {
       await probe.unmount();
       vi.useRealTimers();
@@ -1082,7 +1082,8 @@ function mutationResult(_feedback: CanvasFeedbackDocument): WorkbenchCanvasFeedb
 }
 
 function currentNodeTarget(interaction: CanvasFeedbackInteraction): CanvasFeedbackNodeBarTarget | undefined {
-  return interaction.currentTarget?.kind === 'node' ? interaction.currentTarget : undefined;
+  const target = interaction.targetStore.getSnapshot();
+  return target?.kind === 'node' ? target : undefined;
 }
 
 function feedbackTarget(projectRelativePath: string): CanvasFeedbackNodeBarTarget {

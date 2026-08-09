@@ -1149,6 +1149,12 @@ pub(crate) fn project_stream_value(item: ProjectStreamItem, binding_id: &str) ->
                 "snapshot": snapshot
                 })
             }
+            ProjectChange::CanvasStateChanged { change } => json!({
+                "type": "canvas.state.changed",
+                "bindingId": binding_id,
+                "projectRevision": event.project_revision,
+                "change": change
+            }),
             ProjectChange::CanvasFeedbackChanged { feedback, .. } => json!({
                 "type": "canvas.feedback.changed",
                 "bindingId": binding_id,

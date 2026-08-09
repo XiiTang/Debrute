@@ -97,8 +97,10 @@ excludes player controls, the title bar, Canvas chrome, and letterboxing.
 ## Workbench Editing And Display
 
 Semantically hovering one node opens the shared full floating Feedback Bar.
-Camera movement clears the Stage hover but retains the transient node Bar target
-in React state. Canvas suspends only that Bar's overlay presentation while
+The current Bar target lives in one Bar-private external channel; only the Bar
+subscribes to it, and target changes do not commit the Workbench or Canvas
+React trees. Camera movement clears the Stage hover but retains the transient
+node Bar target in that channel. Canvas suspends only that Bar's overlay presentation while
 transformed nodes pass beneath the pointer; it does not suspend a multi-selection
 Bar or a Bar whose Capsule owns focus. At camera idle, one hit-test at the last
 pointer position reconciles the final target. The same node restores the cached
@@ -107,8 +109,8 @@ placement is written, and an empty result leaves the old Bar hidden until its
 ordinary target-loss clear completes. An active Canvas pointer interaction
 retains the existing target-loss lifecycle unless it manipulates Canvas Node
 geometry. A pending node move still retains its hover target. Crossing the move
-threshold or beginning a resize immediately closes the current single-node or
-multi-selection Bar and clears its placement. Pointer release uses the existing
+threshold or beginning a resize publishes no target, immediately unmounts the
+current single-node or multi-selection Bar, and clears its placement. Pointer release uses the existing
 single reconciliation to derive a new target from current presented node
 geometry; it performs no manipulation-specific delay, second hit-test, or
 reopen path. Every Canvas Node, including directories and the Project root,

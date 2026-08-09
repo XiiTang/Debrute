@@ -221,38 +221,24 @@ fn resolving_a_video_resolves_its_text_track_through_the_shared_source_cache() {
         .resolve_canvas_sources(&[video_target], &source_digests)
         .unwrap();
     assert_eq!(adapter.video_presentation_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(resolved.sources.len(), 2);
-    let track = resolved
-        .sources
-        .iter()
-        .find(|source| source.resource.project_relative_path() == "clip.en.vtt")
-        .unwrap();
-    let CanvasResource::File { availability, .. } = &track.resource else {
-        panic!("expected a resolved text track");
-    };
-    assert!(matches!(
-        availability.as_ref(),
-        CanvasNodeAvailability::Available { .. }
-    ));
-    let video = resolved
-        .sources
-        .iter()
-        .find(|source| source.resource.project_relative_path() == "clip.mp4")
-        .unwrap();
-    let CanvasResource::File {
-        video_presentation: Some(presentation),
-        ..
-    } = &video.resource
-    else {
-        panic!("expected a resolved video presentation");
-    };
-    assert!(!presentation.text_tracks[0].revision.is_empty());
+    assert_eq!(resolved.sources.len(), 1);
+    let video = &resolved.sources[0];
+    assert_eq!(video.project_relative_path, "clip.mp4");
+    let video_text_tracks = video.video_text_tracks.as_ref().unwrap();
+    assert!(!video_text_tracks[0].revision.is_empty());
 
     let resolved_again = service
         .resolve_canvas_sources(&[track_target], &source_digests)
         .unwrap();
     assert_eq!(resolved_again.sources.len(), 1);
-    assert_eq!(resolved_again.sources[0].resource, track.resource);
+    assert_eq!(
+        resolved_again.sources[0].project_relative_path,
+        "clip.en.vtt"
+    );
+    assert!(matches!(
+        &resolved_again.sources[0].availability,
+        CanvasNodeAvailability::Available { .. }
+    ));
 
     drop(service);
     fs::remove_dir_all(base).unwrap();
@@ -496,9 +482,11 @@ fn canvas_patch_commits_when_confirmed_path_feedback_cannot_be_pruned() {
     }))
     .unwrap();
 
-    let (snapshot, changed) = service.patch_canvas_state(&patch).unwrap();
-
-    assert!(changed);
+    let CanvasStatePatchOutcome::ProjectChanged(snapshot) =
+        service.patch_canvas_state(&patch).unwrap()
+    else {
+        panic!("Folder Disclosure must publish a complete Project snapshot");
+    };
     let workspace = available_canvas_workspace(&snapshot);
     assert_eq!(workspace.state.expanded_directories, vec!["assets"]);
     assert_eq!(service.canvas_feedback(), &feedback_before);
@@ -573,6 +561,101 @@ fn idempotent_canvas_patch_does_not_report_a_change() {
         .unwrap();
 
     assert_eq!(opened.session.sync_snapshot().unwrap(), before);
+    drop(opened);
+    registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn state_only_canvas_patch_publishes_an_authoritative_delta_without_a_project_snapshot() {
+    let (base, root, registry) = fixture();
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .unwrap();
+    let before = opened.session.sync_snapshot().unwrap();
+    let mut subscription = opened.session.subscribe().unwrap();
+    assert!(matches!(
+        subscription.recv().unwrap(),
+        ProjectStreamItem::Snapshot(_)
+    ));
+    let patch = serde_json::from_value(serde_json::json!({
+        "nodeStateUpdates": [{
+            "projectRelativePath": "visible.txt",
+            "manualLayout": {"x": 10.0, "y": 20.0, "width": 300.0, "height": 200.0}
+        }]
+    }))
+    .unwrap();
+
+    let result = opened
+        .session
+        .execute(ProjectCommand::PatchCanvasState { patch })
+        .unwrap();
+
+    assert!(matches!(
+        result.value,
+        ProjectCommandResult::CanvasStateUpdated
+    ));
+    let ProjectStreamItem::Event(event) = subscription.recv().unwrap() else {
+        panic!("expected a Canvas State event");
+    };
+    let ProjectChange::CanvasStateChanged { change } = event.change else {
+        panic!("expected a path-local Canvas State delta");
+    };
+    assert_eq!(change.node_states.len(), 1);
+    assert_eq!(change.node_states[0].project_relative_path, "visible.txt");
+    assert!(change.node_states[0].state.is_some());
+    assert_eq!(change.occlusion_order, None);
+    let after = opened.session.sync_snapshot().unwrap();
+    assert_eq!(after.project_revision, before.project_revision + 1);
+    assert_eq!(after.snapshot.project_tree, before.snapshot.project_tree);
+    assert_eq!(
+        match &after.snapshot.canvas_workspace {
+            CanvasWorkspaceSnapshot::Available {
+                canvas_resources, ..
+            } => canvas_resources,
+            CanvasWorkspaceSnapshot::Unavailable { .. } => panic!("Canvas became unavailable"),
+        },
+        match &before.snapshot.canvas_workspace {
+            CanvasWorkspaceSnapshot::Available {
+                canvas_resources, ..
+            } => canvas_resources,
+            CanvasWorkspaceSnapshot::Unavailable { .. } => panic!("Canvas was unavailable"),
+        }
+    );
+
+    drop(opened);
+    registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn folder_disclosure_canvas_patch_still_publishes_a_complete_project_snapshot() {
+    let (base, root, registry) = fixture();
+    fs::create_dir(root.join("assets")).unwrap();
+    fs::write(root.join("assets/child.txt"), "child").unwrap();
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .unwrap();
+    let mut subscription = opened.session.subscribe().unwrap();
+    assert!(matches!(
+        subscription.recv().unwrap(),
+        ProjectStreamItem::Snapshot(_)
+    ));
+    let patch = serde_json::from_value(serde_json::json!({
+        "expandedDirectories": ["assets"]
+    }))
+    .unwrap();
+
+    opened
+        .session
+        .execute(ProjectCommand::PatchCanvasState { patch })
+        .unwrap();
+
+    let ProjectStreamItem::Event(event) = subscription.recv().unwrap() else {
+        panic!("expected a Project event");
+    };
+    assert!(matches!(event.change, ProjectChange::ProjectChanged(_)));
+
     drop(opened);
     registry.close().unwrap();
     fs::remove_dir_all(base).unwrap();

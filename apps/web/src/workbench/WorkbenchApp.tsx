@@ -25,11 +25,13 @@ import {
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
 import { createCanvasOcclusionMutationLane } from './canvas/CanvasOcclusionMutationLane.js';
 import { canvasNodeLayoutMutationPatch } from './canvas/canvasNodeLayoutMutation.js';
+import { canvasNodesWithLayoutOverrides } from './canvas/canvasManualLayoutDraft.js';
+import { createCanvasStateChangeIntake } from './canvas/CanvasStateChangeIntake.js';
 import {
   CanvasFeedbackInteractionBar,
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
-import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './canvas/runtime/CanvasEditorRuntime';
+import type { CanvasEditorRuntime } from './canvas/runtime/CanvasEditorRuntime';
 import {
   canvasNodeSelection
 } from './canvas/runtime/canvasSelection.js';
@@ -98,7 +100,6 @@ import {
 } from './project-explorer/workbenchFileCommands';
 import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController.js';
 import {
-  feedbackBarPlacementForCanvasTarget,
   canvasHierarchyEdgeVisibilityButtonRect,
   canvasMinimapButtonRect,
   canvasResetLayoutButtonRect,
@@ -566,6 +567,14 @@ function WorkbenchBoundProjectApp({
   const [mountedCanvasRuntime, setMountedCanvasRuntime] = useState<CanvasEditorRuntime>();
   const focusCommandRouterRef = useRef<WorkbenchFocusCommandRouter | undefined>(undefined);
   const canvasRuntimeScopeKey = projectProjection.generation;
+  const canvasStateChangeIntake = useMemo(
+    () => createCanvasStateChangeIntake(),
+    [canvasRuntimeScopeKey]
+  );
+  const handleCanvasRuntimeChange = useCallback((runtime: CanvasEditorRuntime | undefined) => {
+    canvasStateChangeIntake.setRuntime(runtime);
+    setMountedCanvasRuntime(runtime);
+  }, [canvasStateChangeIntake]);
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(
     initialProjectPresentation.floatingPanels
   );
@@ -647,21 +656,26 @@ function WorkbenchBoundProjectApp({
     }
   }, [canvasRuntime]);
   const hierarchyEdgesVisible = canvasGlobalSettingsController.settings.hierarchyEdgesVisible;
-  const canvasNodeScene = useMemo(() => (
-    canvasState
-    && availableCanvasWorkspace
-    && canonicalRoot
-      ? projectCanvasNodeScene({
+  const canvasStateRef = useRef(canvasState);
+  canvasStateRef.current = canvasState;
+  const canvasProjectionSource = useMemo(() => (
+    canvasStateRef.current && availableCanvasWorkspace && canonicalRoot
+      ? {
           canonicalRoot,
           resources: availableCanvasWorkspace.canvasResources,
-          state: canvasState
-        })
+          state: canvasStateRef.current
+        }
       : undefined
-  ), [availableCanvasWorkspace, canonicalRoot, canvasState]);
+  // Canvas State events preserve membership; the mounted Runtime accepts their deltas directly.
+  ), [availableCanvasWorkspace?.canvasResources, canonicalRoot]);
+  const canvasNodeScene = useMemo(() => (
+    canvasProjectionSource ? projectCanvasNodeScene(canvasProjectionSource) : undefined
+  ), [canvasProjectionSource]);
   const canvasProjection = useMemo<CanvasProjection | undefined>(() => (
     canvasNodeScene
       ? {
           nodes: canvasNodeScene.nodes,
+          occlusionOrder: canvasNodeScene.occlusionOrder,
           edges: hierarchyEdgesVisible
             ? projectCanvasHierarchyEdges(canvasNodeScene.nodes)
             : EMPTY_CANVAS_HIERARCHY_EDGES
@@ -669,13 +683,16 @@ function WorkbenchBoundProjectApp({
       : undefined
   ), [canvasNodeScene, hierarchyEdgesVisible]);
   const canvas = useMemo(() => (
-    canvasState && canvasProjection
-      ? { state: canvasState, projection: canvasProjection }
+    canvasProjectionSource && canvasProjection
+      ? {
+          expandedDirectories: canvasProjectionSource.state.expandedDirectories,
+          projection: canvasProjection
+        }
       : undefined
-  ), [canvasProjection, canvasState]);
+  ), [canvasProjection, canvasProjectionSource]);
   const visibleCanvasPathsRef = useRef<Set<string> | undefined>(undefined);
   useEffect(() => {
-    if (!canvasState || !canvasNodeScene) {
+    if (!canvasProjectionSource || !canvasNodeScene) {
       visibleCanvasPathsRef.current = undefined;
       return;
     }
@@ -691,10 +708,9 @@ function WorkbenchBoundProjectApp({
       ? canvasNodeScene.occlusionOrder
       : raiseProjectedCanvasSelection(
           canvasNodeScene.occlusionOrder,
-          canvasNodeScene.nodes,
           newlyVisible
         );
-    if (equalStringArrays(canvasState.occlusionOrder, currentOcclusionOrder)) {
+    if (equalStringArrays(canvasProjectionSource.state.occlusionOrder, currentOcclusionOrder)) {
       return;
     }
     void enqueueCanvasOcclusionMutation(async (accepted) => {
@@ -712,7 +728,6 @@ function WorkbenchBoundProjectApp({
         ? scene.occlusionOrder
         : raiseProjectedCanvasSelection(
             scene.occlusionOrder,
-            scene.nodes,
             currentlyNew
           );
       if (equalStringArrays(context.state.occlusionOrder, occlusionOrder)) {
@@ -723,12 +738,13 @@ function WorkbenchBoundProjectApp({
       kind: 'canvas-operation-failed',
       operation: 'raise-selection'
     }));
-  }, [api, canvasNodeScene, canvasState, enqueueCanvasOcclusionMutation, projectActivities]);
+  }, [api, canvasNodeScene, canvasProjectionSource, enqueueCanvasOcclusionMutation, projectActivities]);
   const centerCanvasProjectionNode = useCallback((
     nodes: CanvasProjection['nodes'] | undefined,
     projectRelativePath: string
   ) => {
-    const node = nodes?.find((item) => item.projectRelativePath === projectRelativePath);
+    const node = canvasRuntime?.scene.getAcceptedNode(projectRelativePath)
+      ?? nodes?.find((item) => item.projectRelativePath === projectRelativePath);
     const runtimeSnapshot = canvasRuntime?.getSnapshot();
     if (!node || !canvasRuntime || !runtimeSnapshot?.surfaceSize) {
       return;
@@ -932,6 +948,10 @@ function WorkbenchBoundProjectApp({
     return api.onEvent((event) => {
       feedbackInteraction.applyEvent(event);
 
+      if (event.type === 'canvas.state.changed') {
+        canvasStateChangeIntake.accept(event.change);
+      }
+
       if (event.type === 'project.fileChanged') {
         void refreshTextFileBuffer(event.event.projectRelativePath);
         if (event.event.projectRelativePath === '.debrute/feedback/feedback.json') {
@@ -940,6 +960,7 @@ function WorkbenchBoundProjectApp({
       }
     });
   }, [
+    canvasStateChangeIntake,
     feedbackInteraction.applyEvent,
     feedbackInteraction.load,
     refreshTextFileBuffer
@@ -993,30 +1014,15 @@ function WorkbenchBoundProjectApp({
           resources: context.resources,
           state: context.state
         });
-        const nextState = {
-          ...context.state,
-          nodeStates: { ...context.state.nodeStates }
-        };
-        for (const layout of input.nodeLayouts) {
-          nextState.nodeStates[layout.projectRelativePath] = {
-            ...nextState.nodeStates[layout.projectRelativePath],
-            manualLayout: {
-              x: layout.x,
-              y: layout.y,
-              width: layout.width,
-              height: layout.height
-            }
-          };
-        }
-        const nextScene = projectCanvasNodeScene({
-          canonicalRoot: accepted.canonicalRoot,
-          resources: context.resources,
-          state: nextState
+        const nextNodes = canvasNodesWithLayoutOverrides({
+          nodes: currentScene.nodes,
+          layoutOverrides: input.nodeLayouts
         });
         const patch = canvasNodeLayoutMutationPatch({
           currentNodes: currentScene.nodes,
-          nextNodes: nextScene.nodes,
+          nextNodes,
           currentOcclusionOrder: context.state.occlusionOrder,
+          nextOcclusionOrder: currentScene.occlusionOrder,
           selectedProjectRelativePaths: input.selectedProjectRelativePaths,
           nodeLayouts: input.nodeLayouts
         });
@@ -1116,17 +1122,15 @@ function WorkbenchBoundProjectApp({
     try {
       await enqueueCanvasOcclusionMutation(async (accepted) => {
         const context = canvasMutationContext(accepted);
-        const scene = projectCanvasNodeScene({
-          canonicalRoot: accepted.canonicalRoot,
-          resources: context.resources,
-          state: context.state
-        });
+        const occlusionOrder = raiseProjectedCanvasSelection(
+          context.state.occlusionOrder,
+          input.projectRelativePaths
+        );
+        if (equalStringArrays(context.state.occlusionOrder, occlusionOrder)) {
+          return;
+        }
         await api.patchCanvasState({
-          occlusionOrder: raiseProjectedCanvasSelection(
-            context.state.occlusionOrder,
-            scene.nodes,
-            input.projectRelativePaths
-          )
+          occlusionOrder
         });
       });
     } catch (error) {
@@ -1384,34 +1388,9 @@ function WorkbenchBoundProjectApp({
     hierarchyEdgeVisibilityButtonRect,
     ...(canvasMinimapOpen ? [minimapPanelPlacement] : [])
   ];
-  useEffect(() => {
-    const target = feedbackInteraction.currentTarget;
-    if (!canvasRuntime || !target) {
-      return;
-    }
-    const syncFeedbackBarPlacement = (camera: CanvasRuntimeSnapshot['camera']) => {
-      const placement = feedbackBarPlacementForCanvasTarget({
-        target,
-        camera,
-        viewportRect: workbenchViewportRect,
-        reservedRects: floatingBarReservedRects
-      });
-      if (placement) {
-        canvasOverlayRuntime.setFeedbackBarPlacement(placement);
-      } else {
-        canvasOverlayRuntime.clearFeedbackBarPlacement();
-      }
-    };
-    syncFeedbackBarPlacement(canvasRuntime.camera.getCamera());
-    return canvasRuntime.subscribeCamera(syncFeedbackBarPlacement);
-  }, [
-    canvasRuntime,
-    canvasOverlayRuntime,
-    feedbackInteraction.currentTarget,
-    floatingBarReservedRects,
-    workbenchViewportRect
-  ]);
-  const canResetCanvasLayout = Boolean(canvasProjection?.nodes.some((node) => node.layoutMode === 'manual'));
+  const canResetCanvasLayout = Boolean(
+    canvasState && Object.values(canvasState.nodeStates).some((node) => node.manualLayout !== undefined)
+  );
   const resetCanvasLayout = useCallback(() => {
     void actions.resetCanvasNodeLayouts({ all: true }).catch(() => {
       projectActivities.report({
@@ -1666,7 +1645,7 @@ function WorkbenchBoundProjectApp({
       productPlatform={productPlatform}
       cutPaths={canvasCutPaths}
       feedbackInteraction={feedbackInteraction.canvas}
-      onRuntimeChange={setMountedCanvasRuntime}
+      onRuntimeChange={handleCanvasRuntimeChange}
       onOpenContextMenu={openWorkbenchContextMenu}
       interactionBlocked={projectPresentationBlocked}
     />
@@ -1840,6 +1819,9 @@ function WorkbenchBoundProjectApp({
                 <CanvasFeedbackInteractionBar
                   interaction={feedbackInteraction}
                   overlayRuntime={canvasOverlayRuntime}
+                  canvasRuntime={canvasRuntime}
+                  viewportRect={workbenchViewportRect}
+                  reservedRects={floatingBarReservedRects}
                 />
               </>
             ) : null}

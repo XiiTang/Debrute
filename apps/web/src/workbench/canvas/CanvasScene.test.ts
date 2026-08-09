@@ -246,8 +246,9 @@ describe('CanvasScene', () => {
     ];
 
     expect(reconcileCanvasOcclusionOrder(['c', 'b', 'a'], nodes)).toEqual(['b', 'a']);
-    expect(raiseCanvasSelection(['c', 'b', 'a'], nodes, ['a', 'b'])).toEqual(['b', 'a']);
-    expect(raiseCanvasSelection(['c', 'b', 'a'], nodes, ['b'])).toEqual(['a', 'b']);
+    expect(raiseCanvasSelection(['b', 'a'], ['a', 'b'])).toEqual(['b', 'a']);
+    expect(raiseCanvasSelection(['b', 'a'], ['b'])).toEqual(['a', 'b']);
+    expect(raiseCanvasSelection(['b', 'a'], ['c'])).toEqual(['b', 'a']);
   });
 
   it('places direct-child directories vertically before one ordered horizontal file row', () => {

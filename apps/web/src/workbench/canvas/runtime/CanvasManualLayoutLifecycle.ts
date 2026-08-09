@@ -16,6 +16,7 @@ export interface CanvasManualLayoutLifecycle {
   setActiveInteraction(interaction: CanvasRuntimeLayoutInteraction | undefined): void;
   submitFinishedInteraction(interaction: CanvasRuntimeLayoutInteraction): Promise<void>;
   acceptProjection(projection: CanvasProjection): void;
+  acceptNodes(nodes: readonly CanvasProjection['nodes'][number][]): void;
   dispose(): void;
 }
 
@@ -52,6 +53,45 @@ export function createCanvasManualLayoutLifecycle(input: {
       }
     }
     return { layoutOverrides: [...merged.values()] };
+  };
+
+  const reconcileSubmittedPaths = (
+    nodesByPath: ReadonlyMap<string, CanvasProjection['nodes'][number]>,
+    touchedPaths: ReadonlySet<string>
+  ) => {
+    const confirmedSubmissionByPath = new Map<string, number>();
+    for (let index = submitted.length - 1; index >= 0; index -= 1) {
+      const submission = submitted[index]!;
+      for (const layout of submission.draft.nodeLayouts) {
+        if (!touchedPaths.has(layout.projectRelativePath)
+          || confirmedSubmissionByPath.has(layout.projectRelativePath)
+        ) {
+          continue;
+        }
+        const node = nodesByPath.get(layout.projectRelativePath);
+        if (node && sameLayout(node, layout)) {
+          confirmedSubmissionByPath.set(layout.projectRelativePath, submission.id);
+        }
+      }
+    }
+    submitted = submitted
+      .map((submission) => ({
+        ...submission,
+        draft: {
+          ...submission.draft,
+          nodeLayouts: submission.draft.nodeLayouts.filter((layout) => {
+            if (!touchedPaths.has(layout.projectRelativePath)) {
+              return true;
+            }
+            if (!nodesByPath.has(layout.projectRelativePath)) {
+              return false;
+            }
+            const confirmedSubmissionId = confirmedSubmissionByPath.get(layout.projectRelativePath);
+            return confirmedSubmissionId === undefined || submission.id > confirmedSubmissionId;
+          })
+        }
+      }))
+      .filter((submission) => submission.draft.nodeLayouts.length > 0);
   };
 
   return {
@@ -105,34 +145,24 @@ export function createCanvasManualLayoutLifecycle(input: {
       }
       projection = nextProjection;
       const nodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
-      const confirmedSubmissionByPath = new Map<string, number>();
-      for (let index = submitted.length - 1; index >= 0; index -= 1) {
-        const submission = submitted[index]!;
-        for (const layout of submission.draft.nodeLayouts) {
-          if (confirmedSubmissionByPath.has(layout.projectRelativePath)) {
-            continue;
-          }
-          const node = nodesByPath.get(layout.projectRelativePath);
-          if (node && sameLayout(node, layout)) {
-            confirmedSubmissionByPath.set(layout.projectRelativePath, submission.id);
-          }
-        }
+      reconcileSubmittedPaths(nodesByPath, new Set([
+        ...projection.nodes.map((node) => node.projectRelativePath),
+        ...submitted.flatMap((submission) => submission.draft.nodeLayouts.map((layout) => layout.projectRelativePath))
+      ]));
+    },
+    acceptNodes(nodes) {
+      if (disposed || nodes.length === 0) {
+        return;
       }
-      submitted = submitted
-        .map((submission) => ({
-          ...submission,
-          draft: {
-            ...submission.draft,
-            nodeLayouts: submission.draft.nodeLayouts.filter((layout) => {
-              if (!nodesByPath.has(layout.projectRelativePath)) {
-                return false;
-              }
-              const confirmedSubmissionId = confirmedSubmissionByPath.get(layout.projectRelativePath);
-              return confirmedSubmissionId === undefined || submission.id > confirmedSubmissionId;
-            })
-          }
-        }))
-        .filter((submission) => submission.draft.nodeLayouts.length > 0);
+      const updates = new Map(nodes.map((node) => [node.projectRelativePath, node]));
+      projection = {
+        ...projection,
+        nodes: projection.nodes.map((node) => updates.get(node.projectRelativePath) ?? node)
+      };
+      reconcileSubmittedPaths(
+        new Map(nodes.map((node) => [node.projectRelativePath, node])),
+        new Set(updates.keys())
+      );
     },
     dispose() {
       disposed = true;

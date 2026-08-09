@@ -21,6 +21,7 @@ import {
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
+const sourceNodeReader = { getNode: () => undefined };
 
 afterEach(() => {
   if (root) {
@@ -369,6 +370,30 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(previewSrc()).toContain('canonicalSourceIdentity=frame-v1--ms-0');
   });
 
+  it('publishes an accepted source target only to the matching video path', async () => {
+    const [a, b] = [videoNode('media/a.mp4', 'rev-a'), videoNode('media/b.mp4', 'rev-b')];
+    let runtime: CanvasVideoPreviewRuntimeValue | undefined;
+    await renderVideoPreviewProvider({
+      nodes: [a, b],
+      actions: actionsWith(),
+      children: <VideoRuntimeCapture onRuntime={(value) => { runtime = value; }} />
+    });
+    await flushEffects();
+    expect(runtime!.getNodeSnapshot(a).request.continuityKey).toBeTruthy();
+    expect(runtime!.getNodeSnapshot(b).request.continuityKey).toBeTruthy();
+    const aListener = vi.fn();
+    const bListener = vi.fn();
+    const unsubscribeA = runtime!.subscribeNode(a, aListener);
+    const unsubscribeB = runtime!.subscribeNode(b, bListener);
+
+    await act(async () => runtime!.acceptNode(videoNode('media/a.mp4', 'rev-a2')));
+
+    expect(aListener).toHaveBeenCalled();
+    expect(bListener).not.toHaveBeenCalled();
+    unsubscribeA();
+    unsubscribeB();
+  });
+
 });
 
 function VideoRuntimeConsumer(): React.ReactElement {
@@ -407,6 +432,7 @@ async function renderVideoPreviewProvider(input: {
     root?.render(
       <CanvasVideoPreviewProvider
         nodes={nodes}
+        sourceResolutionRuntime={sourceNodeReader}
         activeVideoPaths={new Set()}
         actions={input.actions}
         previewOrder={previewOrderSource()}

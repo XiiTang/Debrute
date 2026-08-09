@@ -68,6 +68,7 @@ const previewOrder: CanvasPreviewOrderSource = {
   getPreviewOrderSnapshot: () => previewOrderSnapshot,
   subscribePreviewOrder: () => () => undefined
 };
+const sourceNodeReader = { getNode: () => undefined };
 
 function CanvasNodeContent(
   props: Omit<CanvasNodeContentProps, 'onContentError'> & {
@@ -92,6 +93,7 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
       }}>
         <CanvasVideoPreviewProvider
           nodes={[]}
+          sourceResolutionRuntime={sourceNodeReader}
           activeVideoPaths={new Set()}
           actions={actionsFixture()}
           previewOrder={previewOrder}
@@ -99,6 +101,7 @@ function TestProviders({ children }: { children: React.ReactNode }): React.React
         >
           <CanvasTextPreviewProvider
             nodes={[]}
+            sourceResolutionRuntime={sourceNodeReader}
             textFileBuffers={{}}
             actions={actionsFixture()}
             previewOrder={previewOrder}

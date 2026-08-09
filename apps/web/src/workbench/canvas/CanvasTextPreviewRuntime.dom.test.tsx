@@ -24,6 +24,7 @@ import type { CanvasTextPreviewFontSession } from './font-subset/CanvasTextPrevi
 type SavePreviewResult = Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>;
 
 const TEST_PROFILE = DEFAULT_CANVAS_TEXT_RENDER_PROFILE;
+const sourceNodeReader = { getNode: () => undefined };
 
 const fontEnvironmentMock = vi.hoisted(() => {
   const activeFont = {
@@ -426,6 +427,79 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     ) === '');
   });
 
+  it('publishes an accepted source target only to the matching text path', async () => {
+    const [a, b] = [textNode('a.md', 0, 0), textNode('b.md', 0, 1000)];
+    let runtime: ReturnType<typeof useCanvasTextPreviewRuntime> | undefined;
+    await renderProvider({
+      nodes: [a, b],
+      actions: actionsFixture(),
+      interactionActive: true,
+      children: <TextRuntimeCapture onRuntime={(value) => { runtime = value; }} />
+    });
+    await waitFor(() => Boolean(runtime?.getNodeSnapshot(a).request.continuityKey));
+    await waitFor(() => Boolean(runtime?.getNodeSnapshot(b).request.continuityKey));
+    const aListener = vi.fn();
+    const bListener = vi.fn();
+    const unsubscribeA = runtime!.subscribeNode(a, aListener);
+    const unsubscribeB = runtime!.subscribeNode(b, bListener);
+
+    const updatedA = {
+      ...a,
+      availability: {
+        ...a.availability,
+        fileUrl: '/api/workbench/bindings/p/files/raw/a.md?v=sha256%3Aa2',
+        revision: 'sha256:a2'
+      }
+    };
+    await act(async () => runtime!.acceptNode(updatedA));
+    await waitFor(() => aListener.mock.calls.length === 1);
+
+    expect(bListener).not.toHaveBeenCalled();
+    unsubscribeA();
+    unsubscribeB();
+  });
+
+  it('does not let an old bulk target resolution overwrite a newer path target', async () => {
+    const node = textNode('race.md', 0, 0);
+    const oldDigest = deferred<ArrayBuffer>();
+    const newDigest = deferred<ArrayBuffer>();
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest')
+      .mockImplementationOnce(() => oldDigest.promise)
+      .mockImplementationOnce(() => newDigest.promise);
+    let runtime: ReturnType<typeof useCanvasTextPreviewRuntime> | undefined;
+    try {
+      await renderProvider({
+        nodes: [node],
+        actions: actionsFixture(),
+        interactionActive: true,
+        children: <TextRuntimeCapture onRuntime={(value) => { runtime = value; }} />
+      });
+      await waitFor(() => digestSpy.mock.calls.length === 1 && runtime !== undefined);
+      const updated = {
+        ...node,
+        availability: {
+          ...node.availability,
+          fileUrl: '/api/workbench/bindings/p/files/raw/race.md?v=sha256%3Anew',
+          revision: 'sha256:new'
+        }
+      };
+
+      runtime!.acceptNode(updated);
+      await waitFor(() => digestSpy.mock.calls.length === 2);
+      newDigest.resolve(new Uint8Array(32).fill(2).buffer);
+      await waitFor(() => Boolean(runtime!.getNodeSnapshot(updated).request.continuityKey));
+      const accepted = runtime!.getNodeSnapshot(updated).request.continuityKey;
+
+      oldDigest.resolve(new Uint8Array(32).fill(1).buffer);
+      await flushWork();
+      await flushWork();
+
+      expect(runtime!.getNodeSnapshot(updated).request.continuityKey).toBe(accepted);
+    } finally {
+      digestSpy.mockRestore();
+    }
+  });
+
   it('admits a node leaving edit mode after the current upload finishes', async () => {
     const save = deferred<SavePreviewResult>();
     const nodes = [textNode('a.md', 0, 0), textNode('b.md', 0, 1000)];
@@ -519,6 +593,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
         <CanvasTextRenderProfileGate profile={TEST_PROFILE} pending={null}>
           <CanvasTextPreviewProvider
             nodes={input.nodes}
+            sourceResolutionRuntime={sourceNodeReader}
             activeInlineTextPath={input.activeInlineTextPath}
             textFileBuffers={buffers}
             actions={input.actions}

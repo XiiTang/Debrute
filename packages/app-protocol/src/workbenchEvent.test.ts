@@ -109,6 +109,46 @@ describe('Workbench event decoding', () => {
     expect(decodeWorkbenchEvent(event)).toEqual(event);
   });
 
+  it('accepts an authoritative Canvas State delta event', () => {
+    const event = {
+      type: 'canvas.state.changed',
+      bindingId: 'project-1',
+      projectRevision: 2,
+      change: {
+        nodeStates: [{
+          projectRelativePath: 'clips/demo.mp4',
+          state: {
+            manualLayout: { x: 10, y: 20, width: 300, height: 200 }
+          }
+        }],
+        occlusionOrder: ['clips/demo.mp4']
+      }
+    };
+
+    expect(decodeWorkbenchEvent(event)).toEqual(event);
+    expect(decodeWorkbenchEvent({
+      ...event,
+      change: { ...event.change, unknown: true }
+    })).toBeUndefined();
+    expect(decodeWorkbenchEvent({
+      ...event,
+      change: {
+        ...event.change,
+        nodeStates: [...event.change.nodeStates, event.change.nodeStates[0]]
+      }
+    })).toBeUndefined();
+    expect(decodeWorkbenchEvent({
+      ...event,
+      change: { nodeStates: [] }
+    })).toBeUndefined();
+    expect(decodeWorkbenchEvent({
+      ...event,
+      change: {
+        nodeStates: [{ projectRelativePath: '', state: { manualLayout: { x: 1, y: 2, width: 3, height: 4 } } }]
+      }
+    })).toBeDefined();
+  });
+
   it('rejects unknown fields in nested Canvas resource facts', () => {
     const resource = {
       projectRelativePath: 'clips/demo.mp4',

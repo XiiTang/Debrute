@@ -243,6 +243,65 @@ describe('CanvasEditorRuntime', () => {
     expect(runtime.coordinates.screenToCanvas({ x: 300, y: 250 })).toEqual({ x: 80, y: 90 });
   });
 
+  it('refreshes the complete Surface geometry when its ResizeObserver fires', () => {
+    let notifyResize!: ResizeObserverCallback;
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: class {
+        constructor(callback: ResizeObserverCallback) {
+          notifyResize = callback;
+        }
+
+        observe(): void {}
+        disconnect(): void {}
+      }
+    });
+    const runtime = createRuntime({ camera: { x: 40, y: 20, z: 2 } });
+    const surfaceRect = { left: 100, top: 50, width: 800, height: 600 };
+    const surface = fakeElement(surfaceRect);
+    const readBounds = vi.spyOn(surface, 'getBoundingClientRect');
+    runtime.bindSurface({ surface: surface as unknown as HTMLElement });
+    surfaceRect.left = 200;
+    surfaceRect.top = 100;
+
+    notifyResize([{
+      contentRect: { width: 800, height: 600 }
+    } as ResizeObserverEntry], {} as ResizeObserver);
+
+    expect(readBounds).toHaveBeenCalledTimes(2);
+    expect(runtime.coordinates.screenToCanvas({ x: 400, y: 300 })).toEqual({ x: 80, y: 90 });
+  });
+
+  it('reuses one measured Surface geometry throughout a pointer interaction', () => {
+    const runtime = createMarqueeRuntime();
+    const surface = fakeElement({ left: 100, top: 50, width: 800, height: 600 });
+    const readBounds = vi.spyOn(surface, 'getBoundingClientRect');
+    runtime.bindSurface({ surface: surface as unknown as HTMLElement });
+
+    runtime.input.beginSelectionMarquee({
+      pointerId: 4,
+      screenPoint: { x: 120, y: 80 },
+      modifiers: noModifiers()
+    });
+    runtime.input.updatePointerInteraction({
+      pointerId: 4,
+      screenPoint: { x: 180, y: 140 },
+      modifiers: noModifiers()
+    });
+    runtime.input.updatePointerInteraction({
+      pointerId: 4,
+      screenPoint: { x: 220, y: 180 },
+      modifiers: noModifiers()
+    });
+
+    expect(readBounds).toHaveBeenCalledTimes(2);
+    expect(runtime.getSnapshot().pointerInteraction).toMatchObject({
+      kind: 'selection-marquee',
+      current: { x: 120, y: 130 }
+    });
+  });
+
   it('activates a Selection Marquee after four CSS pixels and recomputes intersecting nodes', async () => {
     const runtime = createMarqueeRuntime();
     runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.png'] });
@@ -609,6 +668,62 @@ describe('CanvasEditorRuntime', () => {
       selection: undefined
     });
     expect([...runtime.scene.getRenderSnapshot().nodesByPath.keys()]).toEqual(['flow/b.md']);
+  });
+
+  it('accepts a Canvas State delta without replacing the render snapshot', () => {
+    const runtime = createRuntime();
+    const renderChanges = vi.fn();
+    const acceptedA = vi.fn();
+    const acceptedB = vi.fn();
+    runtime.scene.subscribeRenderSnapshot(renderChanges);
+    runtime.scene.subscribeAcceptedNode('flow/a.png', acceptedA);
+    runtime.scene.subscribeAcceptedNode('flow/b.png', acceptedB);
+
+    runtime.acceptCanvasStateChange({
+      nodeStates: [{
+        projectRelativePath: 'flow/a.png',
+        state: { videoPlayback: { currentTimeMs: 1200 } }
+      }]
+    });
+
+    expect(runtime.scene.getAcceptedNode('flow/a.png')?.videoPlayback).toEqual({ currentTimeMs: 1200 });
+    expect(acceptedA).toHaveBeenCalledOnce();
+    expect(acceptedB).not.toHaveBeenCalled();
+    expect(renderChanges).not.toHaveBeenCalled();
+  });
+
+  it('preserves accepted node state when only Hierarchy Edges change after a delta', () => {
+    const nodes = [
+      { ...canvasProjection('flow/a.png', 10).nodes[0]!, y: 20 },
+      { ...canvasProjection('flow/b.png', 30).nodes[0]!, y: 40 }
+    ];
+    const runtime = createCanvasEditorRuntime({
+      initialProjection: { nodes, edges: [] },
+      submitManualLayout: async () => undefined
+    });
+    runtime.acceptCanvasStateChange({
+      nodeStates: [{
+        projectRelativePath: 'flow/a.png',
+        state: { manualLayout: { x: 100, y: 120, width: 200, height: 220 } }
+      }]
+    });
+
+    runtime.acceptProjection({
+      nodes,
+      edges: [{
+        id: 'flow/a.png\u001fflow/b.png',
+        sourceProjectRelativePath: 'flow/a.png',
+        targetProjectRelativePath: 'flow/b.png'
+      }]
+    });
+
+    expect(runtime.scene.getAcceptedNode('flow/a.png')).toMatchObject({
+      x: 100,
+      y: 120,
+      width: 200,
+      height: 220,
+      layoutMode: 'manual'
+    });
   });
 
   it('keeps node pointer interaction in the runtime snapshot', async () => {

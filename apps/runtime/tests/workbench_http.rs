@@ -933,12 +933,10 @@ fn project_open_publishes_file_descriptors_before_exact_sources_are_resolved() {
     let resolved: Value =
         serde_json::from_str(&resolved_body).expect("Canvas source resolution should return JSON");
     assert_eq!(resolved["sources"][0]["sourceToken"], source_token);
+    assert_eq!(resolved["sources"][0]["projectRelativePath"], "audio.mp3");
+    assert_eq!(resolved["sources"][0]["availability"]["state"], "available");
     assert_eq!(
-        resolved["sources"][0]["resource"]["availability"]["state"],
-        "available"
-    );
-    assert_eq!(
-        resolved["sources"][0]["resource"]["availability"]["revision"],
+        resolved["sources"][0]["availability"]["revision"],
         media_revision(&Path::new(&project.root).join("audio.mp3"))
     );
 }
@@ -1076,7 +1074,7 @@ fn project_path_entries_reject_unknown_fields_at_the_http_boundary() {
 }
 
 #[test]
-fn canvas_state_patch_accepts_one_complete_sparse_patch() {
+fn canvas_state_patch_publishes_only_the_authoritative_delta_for_one_sparse_patch() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("canvas-state-patch");
     fs::write(Path::new(&project.root).join("note.txt"), "note")
@@ -1116,47 +1114,22 @@ fn canvas_state_patch_accepts_one_complete_sparse_patch() {
         .expect("Canvas state patch should complete");
     assert_eq!(response.status().as_u16(), 200);
 
-    let changed = events.next_of_type("project.changed");
-    let snapshot = changed["snapshot"]
-        .as_object()
-        .expect("Project snapshot should be an object");
-    assert_eq!(snapshot.len(), 5);
-    for key in [
-        "canonicalRoot",
-        "projectTree",
-        "canvasWorkspace",
-        "diagnostics",
-        "health",
-    ] {
-        assert!(snapshot.contains_key(key), "missing Project field {key}");
-    }
-    let health = snapshot["health"]
-        .as_object()
-        .expect("Project health should be an object");
-    assert_eq!(health.len(), 3);
-    for key in ["projectName", "diagnosticCounts", "checkedAt"] {
-        assert!(
-            health.contains_key(key),
-            "missing Project health field {key}"
-        );
-    }
-    let canvas_workspace = snapshot["canvasWorkspace"]
-        .as_object()
-        .expect("available Canvas workspace should be an object");
+    let changed = events.next_of_type("canvas.state.changed");
     assert_eq!(
-        canvas_workspace.len(),
-        3,
-        "available Canvas workspace should expose exactly three fields"
+        changed
+            .as_object()
+            .expect("Canvas State event should be an object")
+            .len(),
+        4
     );
-    for key in ["status", "workspace", "canvasResources"] {
-        assert!(
-            canvas_workspace.contains_key(key),
-            "missing Canvas workspace field {key}"
-        );
-    }
-    let canvas = &changed["snapshot"]["canvasWorkspace"]["workspace"];
+    assert!(changed.get("snapshot").is_none());
+    let canvas = &changed["change"];
     assert_eq!(
-        canvas["nodeStates"]["note.txt"]["manualLayout"],
+        canvas["nodeStates"][0]["projectRelativePath"],
+        json!("note.txt")
+    );
+    assert_eq!(
+        canvas["nodeStates"][0]["state"]["manualLayout"],
         json!({ "x": 10.0, "y": 20.0, "width": 320.0, "height": 180.0 })
     );
     assert_eq!(canvas["occlusionOrder"], json!(["note.txt"]));
@@ -1732,8 +1705,8 @@ fn resolve_canvas_source_from_bound(
     assert_eq!(response.status().as_u16(), 200);
     response
         .json::<Value>()
-        .expect("Canvas source resolution should return JSON")["sources"][0]["resource"]
-        ["availability"]["revision"]
+        .expect("Canvas source resolution should return JSON")["sources"][0]["availability"]
+        ["revision"]
         .as_str()
         .expect("resolved Canvas source should contain a revision")
         .to_owned()

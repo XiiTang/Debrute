@@ -15,6 +15,7 @@ export function canvasNodeLayoutMutationPatch(input: {
   currentNodes: readonly CanvasProjectedRect[];
   nextNodes: readonly CanvasProjectedRect[];
   currentOcclusionOrder: readonly string[];
+  nextOcclusionOrder: readonly string[];
   selectedProjectRelativePaths: readonly string[];
   nodeLayouts: readonly CanvasProjectedRect[];
 }): CanvasNodeLayoutMutationPatch | undefined {
@@ -29,8 +30,7 @@ export function canvasNodeLayoutMutationPatch(input: {
       && !sameGeometry(current, layout);
   });
   const nextOcclusionOrder = raiseCanvasSelection(
-    input.currentOcclusionOrder,
-    input.nextNodes,
+    input.nextOcclusionOrder,
     input.selectedProjectRelativePaths
   );
   const occlusionChanged = !sameOrder(input.currentOcclusionOrder, nextOcclusionOrder);

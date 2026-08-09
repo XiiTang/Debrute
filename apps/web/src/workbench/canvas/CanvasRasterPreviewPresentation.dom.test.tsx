@@ -121,6 +121,40 @@ describe('CanvasRasterPreviewPresentation', () => {
     expect(imageFor(container, 'pending')).toBeNull();
   });
 
+  it('finishes the current DOM image decode across a parent rerender', async () => {
+    const scheduler = createManualScheduler();
+    const request = previewRequest('sha256:rerender');
+    const decode = deferred<void>();
+    const completeDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'complete');
+    const naturalWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth');
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', { configurable: true, get: () => true });
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', { configurable: true, get: () => 640 });
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', {
+      configurable: true,
+      value: () => decode.promise
+    });
+    try {
+      await renderHarness(root, scheduler.value, request, 320);
+      await act(async () => scheduler.runStart());
+      const pending = imageFor(container, 'pending');
+
+      await renderHarness(root, scheduler.value, {
+        ...request,
+        variantTarget: { ...request.variantTarget! }
+      }, 320);
+      await act(async () => {
+        decode.resolve(undefined);
+        await decode.promise;
+      });
+
+      expect(imageFor(container, 'visible')).toBe(pending);
+      expect(imageFor(container, 'pending')).toBeNull();
+    } finally {
+      restoreProperty(HTMLImageElement.prototype, 'complete', completeDescriptor);
+      restoreProperty(HTMLImageElement.prototype, 'naturalWidth', naturalWidthDescriptor);
+    }
+  });
+
   it('mounts only the latest scheduled width when zoom changes repeatedly', async () => {
     const scheduler = createManualScheduler();
     const request = previewRequest('sha256:latest');

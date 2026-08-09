@@ -201,17 +201,13 @@ describe('CanvasSurface', () => {
     const resolveCanvasSources = vi.fn(async () => ({
       sources: [{
         sourceToken: 'source-a',
-        resource: {
-          nodeKind: 'file' as const,
-          projectRelativePath: 'flow/a.png',
-          mediaKind: 'image' as const,
-          availability: {
-            state: 'available' as const,
-            size: 4,
-            mimeType: 'image/png',
-            fileUrl: '/raw/flow/a.png?v=sha256%3Aa',
-            revision: 'sha256:a'
-          }
+        projectRelativePath: 'flow/a.png',
+        availability: {
+          state: 'available' as const,
+          size: 4,
+          mimeType: 'image/png',
+          fileUrl: '/raw/flow/a.png?v=sha256%3Aa',
+          revision: 'sha256:a'
         }
       }]
     }));
@@ -236,7 +232,7 @@ describe('CanvasSurface', () => {
     }
   });
 
-  it('uses the Project path tie-break and adopts dependent sources without another request', async () => {
+  it('uses the Project path tie-break and resolves each source through the serial lane', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -252,20 +248,18 @@ describe('CanvasSurface', () => {
       })),
       edges: []
     };
-    const resolveCanvasSources = vi.fn(async () => ({
-      sources: ['a', 'b'].map((name) => ({
-        sourceToken: `source-${name}`,
-        resource: {
-          nodeKind: 'file' as const,
-          projectRelativePath: `flow/${name}.png`,
-          mediaKind: 'image' as const,
-          availability: {
-            state: 'available' as const,
-            size: 4,
-            mimeType: 'image/png',
-            fileUrl: `/raw/flow/${name}.png?v=sha256%3A${name}`,
-            revision: `sha256:${name}`
-          }
+    const resolveCanvasSources = vi.fn(async (request: {
+      targets: Array<{ projectRelativePath: string; sourceToken: string }>;
+    }) => ({
+      sources: request.targets.map(({ projectRelativePath, sourceToken }) => ({
+        sourceToken,
+        projectRelativePath,
+        availability: {
+          state: 'available' as const,
+          size: 4,
+          mimeType: 'image/png',
+          fileUrl: `/raw/${projectRelativePath}`,
+          revision: `sha256:${projectRelativePath}`
         }
       }))
     }));
@@ -276,15 +270,15 @@ describe('CanvasSurface', () => {
           actions: { ...actions, resolveCanvasSources }
         }));
       });
-      await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(2));
       await act(async () => {
         await Promise.resolve();
       });
 
-      expect(resolveCanvasSources).toHaveBeenCalledWith({
-        targets: [{ projectRelativePath: 'flow/a.png', sourceToken: 'source-a' }]
-      });
-      expect(resolveCanvasSources).toHaveBeenCalledTimes(1);
+      expect(resolveCanvasSources.mock.calls.map(([request]) => request.targets[0]?.projectRelativePath)).toEqual([
+        'flow/a.png',
+        'flow/b.png'
+      ]);
     } finally {
       await act(async () => root.unmount());
       container.remove();
@@ -311,33 +305,25 @@ describe('CanvasSurface', () => {
     const firstResolution = deferred<{
       sources: Array<{
         sourceToken: string;
-        resource: {
-          nodeKind: 'file';
-          projectRelativePath: string;
-          mediaKind: 'image';
-          availability: {
-            state: 'available';
-            size: number;
-            mimeType: string;
-            fileUrl: string;
-            revision: string;
-          };
+        projectRelativePath: string;
+        availability: {
+          state: 'available';
+          size: number;
+          mimeType: string;
+          fileUrl: string;
+          revision: string;
         };
       }>;
     }>();
     const resolvedSource = (name: string) => ({
       sourceToken: `source-${name}`,
-      resource: {
-        nodeKind: 'file' as const,
-        projectRelativePath: `flow/${name}.png`,
-        mediaKind: 'image' as const,
-        availability: {
-          state: 'available' as const,
-          size: 4,
-          mimeType: 'image/png',
-          fileUrl: `/raw/flow/${name}.png?v=sha256%3A${name}`,
-          revision: `sha256:${name}`
-        }
+      projectRelativePath: `flow/${name}.png`,
+      availability: {
+        state: 'available' as const,
+        size: 4,
+        mimeType: 'image/png',
+        fileUrl: `/raw/flow/${name}.png?v=sha256%3A${name}`,
+        revision: `sha256:${name}`
       }
     });
     const resolveCanvasSources = vi.fn()
@@ -370,7 +356,10 @@ describe('CanvasSurface', () => {
       expect(resolveCanvasSources).toHaveBeenCalledTimes(1);
 
       await act(async () => {
-        firstResolution.resolve({ sources: [resolvedSource('a')] });
+        const firstPath = resolveCanvasSources.mock.calls[0]![0].targets[0]!.projectRelativePath;
+        firstResolution.resolve({
+          sources: [resolvedSource(firstPath.endsWith('/a.png') ? 'a' : 'b')]
+        });
         await firstResolution.promise;
       });
       await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(2));
@@ -642,7 +631,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -776,7 +765,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -788,8 +777,11 @@ describe('CanvasSurface', () => {
         );
       });
       const surfaceElement = container.querySelector<HTMLElement>('[data-testid="canvas-surface"]')!;
+      const marqueeElement = container.querySelector<HTMLElement>('[data-testid="canvas-selection-marquee"]')!;
       const setPointerCapture = vi.fn();
       surfaceElement.setPointerCapture = setPointerCapture;
+      expect(marqueeElement).not.toBeNull();
+      expect(marqueeElement.hidden).toBe(true);
 
       await act(async () => {
         surfaceElement.dispatchEvent(pointerEvent('pointerdown', {
@@ -813,7 +805,11 @@ describe('CanvasSurface', () => {
           clientY: 80
         }));
       });
-      expect(container.querySelector('[data-testid="canvas-selection-marquee"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="canvas-selection-marquee"]')).toBe(marqueeElement);
+      expect(marqueeElement.hidden).toBe(false);
+      expect(marqueeElement.style.transform).toBe('translate3d(0px, 0px, 0px)');
+      expect(marqueeElement.style.width).toBe('80px');
+      expect(marqueeElement.style.height).toBe('80px');
 
       await act(async () => {
         surfaceElement.dispatchEvent(pointerEvent('lostpointercapture', { pointerId: 7 }));
@@ -823,7 +819,8 @@ describe('CanvasSurface', () => {
         kind: 'nodes',
         projectRelativePaths: ['flow/a.png']
       });
-      expect(container.querySelector('[data-testid="canvas-selection-marquee"]')).toBeNull();
+      expect(container.querySelector('[data-testid="canvas-selection-marquee"]')).toBe(marqueeElement);
+      expect(marqueeElement.hidden).toBe(true);
       await act(async () => {
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       });
@@ -885,7 +882,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1095,7 +1092,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1353,7 +1350,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1466,7 +1463,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -1835,7 +1832,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
@@ -1888,7 +1885,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={{ ...actions, updateCanvasVideoPlaybackState }}
@@ -1943,7 +1940,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -2045,7 +2042,7 @@ describe('CanvasSurface', () => {
             <I18nProvider locale="en">
               <CanvasSurface
                 productPlatform="darwin"
-                canvasState={emptyCanvasState}
+                expandedDirectories={emptyCanvasState.expandedDirectories}
                 projection={projection}
                 runtime={runtime}
                 actions={{
@@ -2439,7 +2436,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -2521,7 +2518,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={runtime}
               actions={actions}
@@ -2623,7 +2620,7 @@ describe('CanvasSurface', () => {
             <I18nProvider locale="en">
               <CanvasSurface
                 productPlatform="darwin"
-                canvasState={emptyCanvasState}
+                expandedDirectories={emptyCanvasState.expandedDirectories}
                 projection={projection}
                 runtime={runtime}
                 actions={actions}
@@ -2669,7 +2666,7 @@ describe('CanvasSurface', () => {
       <CanvasEditor
         productPlatform="darwin"
         canvas={{
-          state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
+          expandedDirectories: [],
           projection
         }}
         hasProject
@@ -2716,7 +2713,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -2774,7 +2771,7 @@ describe('CanvasSurface', () => {
           <I18nProvider locale="en">
             <CanvasSurface
               productPlatform="darwin"
-              canvasState={emptyCanvasState}
+              expandedDirectories={emptyCanvasState.expandedDirectories}
               projection={projection}
               runtime={canvasRuntimeFixture(projection)}
               actions={actions}
@@ -3117,7 +3114,7 @@ function surface(
     <I18nProvider locale="en">
       <CanvasSurface
         productPlatform="darwin"
-        canvasState={input.canvasState ?? emptyCanvasState}
+        expandedDirectories={(input.canvasState ?? emptyCanvasState).expandedDirectories}
         projection={projection}
         runtime={runtime}
         actions={input.actions ?? actions}

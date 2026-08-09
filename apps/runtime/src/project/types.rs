@@ -145,6 +145,21 @@ pub struct CanvasState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanvasNodeStateChange {
+    pub project_relative_path: String,
+    pub state: Option<CanvasNodeState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanvasStateChange {
+    pub node_states: Vec<CanvasNodeStateChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occlusion_order: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum CanvasNodeAvailability {
     Resolving {
@@ -290,7 +305,10 @@ pub struct CanvasSourceTarget {
 #[serde(rename_all = "camelCase")]
 pub struct CanvasResolvedSource {
     pub source_token: String,
-    pub resource: CanvasResource,
+    pub project_relative_path: String,
+    pub availability: CanvasNodeAvailability,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_text_tracks: Option<Vec<CanvasVideoTextTrack>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -389,10 +407,20 @@ pub enum ProjectChange {
         project_relative_path: String,
         snapshot: ProjectSnapshot,
     },
+    CanvasStateChanged {
+        change: CanvasStateChange,
+    },
     CanvasFeedbackChanged {
         feedback: CanvasFeedbackDocument,
         affects_rendered_artifact: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CanvasStatePatchOutcome {
+    Unchanged,
+    StateChanged(CanvasStateChange),
+    ProjectChanged(Box<ProjectSnapshot>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -20,6 +20,7 @@ import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { CanvasSceneActions } from './CanvasSceneActions.js';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
 import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
+import type { CanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime.js';
 import {
   canvasChangedRecordPaths,
   canvasRecordsMatchingTargetKeys,
@@ -68,6 +69,7 @@ interface CanvasVideoPreviewEnsureRequestState {
 
 export interface CanvasVideoPreviewRuntimeValue {
   retryPreview(projectRelativePath: string): void;
+  acceptNode(node: ProjectedCanvasNode): void;
   getNodeSnapshot(node: ProjectedCanvasNode): CanvasVideoPreviewNodeSnapshot;
   subscribeNode(node: ProjectedCanvasNode, listener: () => void): () => void;
 }
@@ -89,6 +91,9 @@ export function useCanvasVideoPreviewRuntime(): CanvasVideoPreviewRuntimeValue {
 
 export function useCanvasVideoPreviewNode(node: ProjectedCanvasNode): CanvasVideoPreviewNodeSnapshot {
   const runtime = useCanvasVideoPreviewRuntime();
+  useLayoutEffect(() => {
+    runtime.acceptNode(node);
+  }, [node, runtime]);
   const subscribe = useCallback(
     (listener: () => void) => runtime.subscribeNode(node, listener),
     [node, runtime]
@@ -99,6 +104,7 @@ export function useCanvasVideoPreviewNode(node: ProjectedCanvasNode): CanvasVide
 
 export function CanvasVideoPreviewProvider({
   nodes,
+  sourceResolutionRuntime,
   activeVideoPaths,
   actions,
   previewOrder,
@@ -106,20 +112,20 @@ export function CanvasVideoPreviewProvider({
   children
 }: {
   nodes: ProjectedCanvasNode[];
+  sourceResolutionRuntime: Pick<CanvasSourceResolutionRuntime, 'getNode'>;
   activeVideoPaths: ReadonlySet<string>;
   actions: CanvasSceneActions;
   previewOrder: CanvasPreviewOrderSource;
   previewResourceScheduler: CanvasPreviewResourceScheduler;
   children: React.ReactNode;
 }): React.ReactElement {
-  const [currentTargets, setCurrentTargets] = useState<Record<string, CanvasVideoPreviewTarget>>({});
   const [tasks, setTasks] = useState<Map<string, CanvasVideoPreviewTask>>(() => new Map());
   const [canonicalSources, setCanonicalSources] = useState<Record<string, CanvasVideoPreviewCanonicalSource>>({});
   const [previewErrors, setPreviewErrors] = useState<Record<string, {
     targetKey: CanvasPreviewTargetKey;
     message: string;
   }>>({});
-  const currentTargetsRef = useRef(currentTargets);
+  const currentTargetsRef = useRef<Record<string, CanvasVideoPreviewTarget>>({});
   const tasksRef = useRef(tasks);
   const canonicalSourcesRef = useRef(canonicalSources);
   const previewErrorsRef = useRef(previewErrors);
@@ -128,16 +134,17 @@ export function CanvasVideoPreviewProvider({
   const probeRequestRef = useRef<CanvasVideoPreviewProbeRequestState | undefined>(undefined);
   const ensureRequestRef = useRef<CanvasVideoPreviewEnsureRequestState | undefined>(undefined);
   const mountedRef = useRef(true);
+  const activeVideoPathsRef = useRef(activeVideoPaths);
   const previewOrderSnapshot = useSyncExternalStore(
     previewOrder.subscribePreviewOrder,
     previewOrder.getPreviewOrderSnapshot,
     previewOrder.getPreviewOrderSnapshot
   );
   const nodesByPath = useMemo(() => new Map(nodes.map((node) => [node.projectRelativePath, node])), [nodes]);
-  currentTargetsRef.current = currentTargets;
   tasksRef.current = tasks;
   canonicalSourcesRef.current = canonicalSources;
   previewErrorsRef.current = previewErrors;
+  activeVideoPathsRef.current = activeVideoPaths;
 
   const markChangedNodeRecords = useCallback(<Value,>(
     previous: Readonly<Record<string, Value>>,
@@ -173,21 +180,18 @@ export function CanvasVideoPreviewProvider({
     visibleRect: previewOrderSnapshot
   }), [nodesByPath, previewOrderSnapshot, tasks]);
   useEffect(() => {
-    const targets = canvasVideoPreviewTargetsForNodes(nodes);
+    const targets = canvasVideoPreviewTargetsForNodes(nodes.map((node) => (
+      sourceResolutionRuntime.getNode(node.projectRelativePath) ?? node
+    )));
     const workTargets = targets.filter((target) => !activeVideoPaths.has(target.projectRelativePath));
     const nextTargets = Object.fromEntries(targets.map((target) => [target.projectRelativePath, target]));
     const nextTargetKeys = new Map(targets.map((target) => [
       target.projectRelativePath,
       canvasVideoPreviewTargetKey(target)
     ]));
+    markChangedNodeRecords(currentTargetsRef.current, nextTargets);
+    currentTargetsRef.current = nextTargets;
     currentTargetKeysRef.current = nextTargetKeys;
-    setCurrentTargets((current) => {
-      if (sameCanvasVideoPreviewTargets(current, nextTargets)) {
-        return current;
-      }
-      markChangedNodeRecords(current, nextTargets);
-      return nextTargets;
-    });
 
     const retainedCanonicalSources = canvasRecordsMatchingTargetKeys(
       canonicalSourcesRef.current,
@@ -222,7 +226,7 @@ export function CanvasVideoPreviewProvider({
       ensureRequest.abortController.abort();
       ensureRequestRef.current = undefined;
     }
-  }, [activeVideoPaths, markChangedNodeRecords, nodes, updateTasks]);
+  }, [activeVideoPaths, markChangedNodeRecords, nodes, sourceResolutionRuntime, updateTasks]);
 
   useEffect(() => {
     if (interactionActiveRef.current || probeRequestRef.current) {
@@ -475,8 +479,6 @@ export function CanvasVideoPreviewProvider({
     clearCanvasVideoPreviewError(target);
   }, [updateTasks]);
 
-  const commandHandlersRef = useRef({ retryPreview });
-  commandHandlersRef.current = { retryPreview };
   const deriveNodeSnapshot = useCallback((node: ProjectedCanvasNode): CanvasVideoPreviewNodeSnapshot => {
     const target = currentTargetsRef.current[node.projectRelativePath];
     if (!target) {
@@ -501,6 +503,77 @@ export function CanvasVideoPreviewProvider({
     )
   }), [deriveNodeSnapshot]);
 
+  const acceptNode = useCallback((node: ProjectedCanvasNode) => {
+    const path = node.projectRelativePath;
+    const target = canvasVideoPreviewTargetsForNodes([node])[0];
+    if (!target) {
+      if (!currentTargetKeysRef.current.has(path)) {
+        return;
+      }
+      currentTargetKeysRef.current.delete(path);
+      delete currentTargetsRef.current[path];
+      changedNodePathsRef.current.add(path);
+      if (path in canonicalSourcesRef.current) {
+        const next = { ...canonicalSourcesRef.current };
+        delete next[path];
+        canonicalSourcesRef.current = next;
+        setCanonicalSources(next);
+      }
+      if (path in previewErrorsRef.current) {
+        const next = { ...previewErrorsRef.current };
+        delete next[path];
+        previewErrorsRef.current = next;
+        setPreviewErrors(next);
+      }
+      updateTasks((current) => {
+        if (!current.has(path)) {
+          return current;
+        }
+        const next = new Map(current);
+        next.delete(path);
+        return next;
+      });
+      previewResourceScheduler.cancel('video', path);
+      nodeSnapshotStore.flush(new Set([path]));
+      return;
+    }
+    const targetKey = canvasVideoPreviewTargetKey(target);
+    if (currentTargetKeysRef.current.get(path) === targetKey) {
+      return;
+    }
+    currentTargetKeysRef.current.set(path, targetKey);
+    currentTargetsRef.current[path] = target;
+    changedNodePathsRef.current.add(path);
+    const ready = canonicalSourcesRef.current[path]?.targetKey === targetKey;
+    if (!ready && path in canonicalSourcesRef.current) {
+      const next = { ...canonicalSourcesRef.current };
+      delete next[path];
+      canonicalSourcesRef.current = next;
+      setCanonicalSources(next);
+    }
+    if (previewErrorsRef.current[path]?.targetKey !== targetKey && path in previewErrorsRef.current) {
+      const next = { ...previewErrorsRef.current };
+      delete next[path];
+      previewErrorsRef.current = next;
+      setPreviewErrors(next);
+    }
+    updateTasks((current) => {
+      const next = new Map(current);
+      if (ready || activeVideoPathsRef.current.has(path)) {
+        next.delete(path);
+      } else {
+        const existing = current.get(path);
+        next.set(path, existing && canvasVideoPreviewTargetKey(existing) === targetKey
+          ? existing
+          : { ...target, state: 'needs-probe' });
+      }
+      return next;
+    });
+    nodeSnapshotStore.flush(new Set([path]));
+  }, [nodeSnapshotStore, previewResourceScheduler, updateTasks]);
+
+  const commandHandlersRef = useRef({ retryPreview, acceptNode });
+  commandHandlersRef.current = { retryPreview, acceptNode };
   useLayoutEffect(() => {
     const changedPaths = new Set(changedNodePathsRef.current);
     changedNodePathsRef.current.clear();
@@ -509,6 +582,7 @@ export function CanvasVideoPreviewProvider({
 
   const value = useMemo<CanvasVideoPreviewRuntimeValue>(() => ({
     retryPreview: (...args) => commandHandlersRef.current.retryPreview(...args),
+    acceptNode: (...args) => commandHandlersRef.current.acceptNode(...args),
     getNodeSnapshot: nodeSnapshotStore.getSnapshot,
     subscribeNode: nodeSnapshotStore.subscribe
   }), [nodeSnapshotStore]);
@@ -602,15 +676,6 @@ function isCurrentCanvasVideoPreviewTarget(
   currentTargetKeys: ReadonlyMap<string, CanvasPreviewTargetKey>
 ): boolean {
   return currentTargetKeys.get(target.projectRelativePath) === canvasVideoPreviewTargetKey(target);
-}
-
-function sameCanvasVideoPreviewTargets(
-  left: Readonly<Record<string, CanvasVideoPreviewTarget>>,
-  right: Readonly<Record<string, CanvasVideoPreviewTarget>>
-): boolean {
-  return canvasRecordValuesEqual(left, right, (leftTarget, rightTarget) => (
-    canvasVideoPreviewTargetKey(leftTarget) === canvasVideoPreviewTargetKey(rightTarget)
-  ));
 }
 
 function isAbortError(error: unknown): boolean {

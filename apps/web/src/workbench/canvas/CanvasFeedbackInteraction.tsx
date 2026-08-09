@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   WorkbenchApiClient,
   WorkbenchEvent,
@@ -14,16 +14,20 @@ import {
 } from '@debrute/app-protocol';
 import {
   sameCanvasFeedbackBarTarget,
+  feedbackBarPlacementForCanvasTarget,
+  type FloatingBarRect,
   type CanvasFeedbackBarTarget,
   type CanvasFeedbackNodeBarTarget,
   type CanvasLocalFeedbackDraft
 } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
+import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import type { CanvasFeedbackComposition } from './canvasFeedbackComposition';
 import { CanvasFeedbackBar, CanvasFeedbackSelectionBar } from './CanvasFeedbackBar.js';
 
 const FEEDBACK_BAR_DISMISS_DELAY_MS = 120;
+const EMPTY_FLOATING_BAR_RECTS: readonly FloatingBarRect[] = [];
 
 type CanvasFeedbackApi = Pick<WorkbenchApiClient,
   | 'putFeedbackWorkingCopy'
@@ -49,7 +53,7 @@ export interface CanvasFeedbackCapsule {
 
 export interface CanvasFeedbackInteraction {
   feedback: CanvasFeedbackDocument | undefined;
-  currentTarget: CanvasFeedbackBarTarget | undefined;
+  targetStore: CanvasFeedbackTargetStore;
   localMode: CanvasMediaFeedbackMode | undefined;
   composition: CanvasFeedbackComposition | undefined;
   authoringItemId: string | undefined;
@@ -74,6 +78,44 @@ export interface CanvasFeedbackInteraction {
   load(): Promise<void>;
   applyEvent(event: WorkbenchEvent): void;
   canvas: CanvasFeedbackCanvasBinding;
+}
+
+export interface CanvasFeedbackTargetStore {
+  getSnapshot(): CanvasFeedbackBarTarget | undefined;
+  subscribe(listener: () => void): () => void;
+  publish(target: CanvasFeedbackBarTarget | undefined): void;
+}
+
+function createCanvasFeedbackTargetStore(): CanvasFeedbackTargetStore {
+  let target: CanvasFeedbackBarTarget | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => target,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    publish(next) {
+      if (sameCanvasFeedbackTargetSnapshot(target, next)) {
+        return;
+      }
+      target = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    }
+  };
+}
+
+function sameCanvasFeedbackTargetSnapshot(
+  left: CanvasFeedbackBarTarget | undefined,
+  right: CanvasFeedbackBarTarget | undefined
+): boolean {
+  return sameCanvasFeedbackBarTarget(left, right)
+    && (left?.kind !== 'node' || right?.kind !== 'node' || (
+      left.startVideoMomentFeedback === right.startVideoMomentFeedback
+      && left.seekToMoment === right.seekToMoment
+    ));
 }
 
 export interface CanvasFeedbackCanvasBinding {
@@ -106,8 +148,9 @@ export function useCanvasFeedbackInteraction(input: {
   const deletingItemKeysRef = useRef(new Set<string>());
   const marksMutationPendingRef = useRef(false);
   const [marksMutationPending, setMarksMutationPending] = useState(false);
-  const [target, setTarget] = useState<CanvasFeedbackBarTarget | undefined>(undefined);
-  const targetRef = useRef<CanvasFeedbackBarTarget | undefined>(undefined);
+  const targetStoreRef = useRef<CanvasFeedbackTargetStore | undefined>(undefined);
+  targetStoreRef.current ??= createCanvasFeedbackTargetStore();
+  const targetStore = targetStoreRef.current;
   const [localMode, setLocalMode] = useState<CanvasMediaFeedbackMode>(undefined);
   const [composition, setComposition] = useState<CanvasFeedbackComposition | undefined>(undefined);
   const compositionRef = useRef<CanvasFeedbackComposition | undefined>(undefined);
@@ -130,7 +173,6 @@ export function useCanvasFeedbackInteraction(input: {
   feedbackRef.current = feedback;
   localValuesRef.current = localValues;
   focusedCapsuleIdRef.current = focusedCapsuleId;
-  targetRef.current = target;
 
   const clearComposition = useCallback((itemId: string) => {
     if (compositionRef.current?.itemId !== itemId) {
@@ -324,12 +366,13 @@ export function useCanvasFeedbackInteraction(input: {
     focusedCapsuleIdRef.current = itemId;
     setFocusedCapsuleId(itemId);
     const capsule = descriptorForItem(itemId);
+    const target = targetStore.getSnapshot();
     if (target?.kind === 'node'
       && capsule?.scope === 'moment'
       && capsule.momentTimeSeconds !== undefined) {
       target?.seekToMoment?.(capsule.momentTimeSeconds);
     }
-  }, [descriptorForItem, target]);
+  }, [descriptorForItem, targetStore]);
 
   const blurCapsule = useCallback(async (itemId: string) => {
     releaseAuthoringItem(itemId);
@@ -340,15 +383,11 @@ export function useCanvasFeedbackInteraction(input: {
       setFocusedCapsuleId(undefined);
       if (deferredTarget) {
         targetEpochRef.current += 1;
-        targetRef.current = deferredTarget;
-        setTarget((current) => (
-          sameCanvasFeedbackBarTarget(current, deferredTarget) ? current : deferredTarget
-        ));
+        targetStore.publish(deferredTarget);
       } else if (deferredTarget === null && !hoveredRef.current) {
         targetEpochRef.current += 1;
         input.overlayRuntime.clearFeedbackBarPlacement();
-        targetRef.current = undefined;
-        setTarget(undefined);
+        targetStore.publish(undefined);
       } else if (!hoveredRef.current && targetClearTimerRef.current === undefined) {
         const targetEpoch = targetEpochRef.current;
         window.setTimeout(() => {
@@ -358,8 +397,7 @@ export function useCanvasFeedbackInteraction(input: {
             && !focusedCapsuleIdRef.current
           ) {
             input.overlayRuntime.clearFeedbackBarPlacement();
-            targetRef.current = undefined;
-            setTarget(undefined);
+            targetStore.publish(undefined);
           }
         }, 0);
       }
@@ -435,7 +473,7 @@ export function useCanvasFeedbackInteraction(input: {
     localValuesRef.current = next;
     setLocalValue(itemId, undefined);
     clearComposition(itemId);
-  }, [clearComposition, deleteAcceptedItem, input.overlayRuntime, persistWorkingCopy, releaseAuthoringItem, setLocalValue, updateFeedback]);
+  }, [clearComposition, deleteAcceptedItem, input.overlayRuntime, persistWorkingCopy, releaseAuthoringItem, setLocalValue, targetStore, updateFeedback]);
 
   const deleteCapsule = useCallback(async (itemId: string) => {
     const descriptor = descriptorForItem(itemId);
@@ -514,8 +552,7 @@ export function useCanvasFeedbackInteraction(input: {
   const activateCapsule = useCallback((nextTarget: CanvasFeedbackNodeBarTarget, itemId: string) => {
     clearTargetTimer();
     targetEpochRef.current += 1;
-    targetRef.current = nextTarget;
-    setTarget(nextTarget);
+    targetStore.publish(nextTarget);
     focusDeferredTargetRef.current = undefined;
     focusedCapsuleIdRef.current = itemId;
     setFocusedCapsuleId(itemId);
@@ -523,16 +560,15 @@ export function useCanvasFeedbackInteraction(input: {
     if (capsule?.scope === 'moment' && capsule.momentTimeSeconds !== undefined) {
       nextTarget.seekToMoment?.(capsule.momentTimeSeconds);
     }
-  }, [clearTargetTimer, descriptorForItem]);
+  }, [clearTargetTimer, descriptorForItem, targetStore]);
 
   const clearTarget = useCallback(() => {
     if (focusedCapsuleIdRef.current) {
       return;
     }
     input.overlayRuntime.clearFeedbackBarPlacement();
-    targetRef.current = undefined;
-    setTarget(undefined);
-  }, [input.overlayRuntime]);
+    targetStore.publish(undefined);
+  }, [input.overlayRuntime, targetStore]);
 
   const scheduleTargetClear = useCallback(() => {
     clearTargetTimer();
@@ -544,19 +580,18 @@ export function useCanvasFeedbackInteraction(input: {
     }, FEEDBACK_BAR_DISMISS_DELAY_MS);
   }, [clearTarget, clearTargetTimer]);
 
-  const getCurrentTargetProjectRelativePath = useCallback(() => (
-    targetRef.current?.kind === 'node'
-      ? targetRef.current.projectRelativePath
-      : undefined
-  ), []);
+  const getCurrentTargetProjectRelativePath = useCallback(() => {
+    const target = targetStore.getSnapshot();
+    return target?.kind === 'node' ? target.projectRelativePath : undefined;
+  }, [targetStore]);
 
   const suspendHoverTarget = useCallback(() => {
     clearTargetTimer();
-    if (focusedCapsuleIdRef.current || targetRef.current?.kind !== 'node') {
+    if (focusedCapsuleIdRef.current || targetStore.getSnapshot()?.kind !== 'node') {
       return;
     }
     input.overlayRuntime.suspendFeedbackBarPlacement();
-  }, [clearTargetTimer, input.overlayRuntime]);
+  }, [clearTargetTimer, input.overlayRuntime, targetStore]);
 
   const dismissTarget = useCallback(() => {
     clearTargetTimer();
@@ -565,22 +600,22 @@ export function useCanvasFeedbackInteraction(input: {
     hoveredRef.current = false;
     focusedCapsuleIdRef.current = undefined;
     setFocusedCapsuleId(undefined);
-    targetRef.current = undefined;
     input.overlayRuntime.clearFeedbackBarPlacement();
-    setTarget(undefined);
-  }, [clearTargetTimer, input.overlayRuntime]);
+    targetStore.publish(undefined);
+  }, [clearTargetTimer, input.overlayRuntime, targetStore]);
 
   const handleTargetChange = useCallback((nextTarget: CanvasFeedbackBarTarget | undefined) => {
     clearTargetTimer();
-    if (!nextTarget && !targetRef.current) {
+    const currentTarget = targetStore.getSnapshot();
+    if (!nextTarget && !currentTarget) {
       return;
     }
     if (nextTarget?.kind === 'selection') {
       input.overlayRuntime.resumeFeedbackBarPlacement();
     } else if (nextTarget?.kind === 'node') {
       if (
-        targetRef.current?.kind === 'node'
-        && targetRef.current.projectRelativePath === nextTarget.projectRelativePath
+        currentTarget?.kind === 'node'
+        && currentTarget.projectRelativePath === nextTarget.projectRelativePath
       ) {
         input.overlayRuntime.resumeFeedbackBarPlacement();
       } else {
@@ -590,21 +625,17 @@ export function useCanvasFeedbackInteraction(input: {
     if (nextTarget?.kind === 'selection') {
       focusDeferredTargetRef.current = undefined;
       targetEpochRef.current += 1;
-      targetRef.current = nextTarget;
-      setTarget((current) => (
-        sameCanvasFeedbackBarTarget(current, nextTarget) ? current : nextTarget
-      ));
+      targetStore.publish(nextTarget);
       return;
     }
-    if (targetRef.current?.kind === 'selection') {
+    if (currentTarget?.kind === 'selection') {
       focusDeferredTargetRef.current = undefined;
       targetEpochRef.current += 1;
-      targetRef.current = nextTarget;
       if (nextTarget) {
-        setTarget(nextTarget);
+        targetStore.publish(nextTarget);
       } else {
         input.overlayRuntime.clearFeedbackBarPlacement();
-        setTarget(undefined);
+        targetStore.publish(undefined);
       }
       return;
     }
@@ -615,22 +646,19 @@ export function useCanvasFeedbackInteraction(input: {
     focusDeferredTargetRef.current = undefined;
     targetEpochRef.current += 1;
     if (nextTarget) {
-      targetRef.current = nextTarget;
-      setTarget((current) => (
-        sameCanvasFeedbackBarTarget(current, nextTarget) ? current : nextTarget
-      ));
+      targetStore.publish(nextTarget);
       return;
     }
     scheduleTargetClear();
-  }, [clearTargetTimer, input.overlayRuntime, scheduleTargetClear]);
+  }, [clearTargetTimer, input.overlayRuntime, scheduleTargetClear, targetStore]);
 
   const invalidateTarget = useCallback((projectRelativePath: string) => {
-    if (targetRef.current?.kind !== 'node'
-      || targetRef.current.projectRelativePath !== projectRelativePath) {
+    const target = targetStore.getSnapshot();
+    if (target?.kind !== 'node' || target.projectRelativePath !== projectRelativePath) {
       return;
     }
     dismissTarget();
-  }, [dismissTarget]);
+  }, [dismissTarget, targetStore]);
 
   const handlePointerEnter = useCallback(() => {
     hoveredRef.current = true;
@@ -639,11 +667,11 @@ export function useCanvasFeedbackInteraction(input: {
 
   const handlePointerLeave = useCallback(() => {
     hoveredRef.current = false;
-    if (targetRef.current?.kind === 'selection') {
+    if (targetStore.getSnapshot()?.kind === 'selection') {
       return;
     }
     scheduleTargetClear();
-  }, [scheduleTargetClear]);
+  }, [scheduleTargetClear, targetStore]);
 
   const handleModeChange = useCallback((mode: CanvasMediaFeedbackMode) => {
     if (!mode) {
@@ -654,6 +682,7 @@ export function useCanvasFeedbackInteraction(input: {
       setLocalMode(undefined);
       return;
     }
+    const target = targetStore.getSnapshot();
     if (target?.kind !== 'node') {
       return;
     }
@@ -668,13 +697,12 @@ export function useCanvasFeedbackInteraction(input: {
     compositionRef.current = nextComposition;
     setComposition(nextComposition);
     setLocalMode(mode);
-  }, [target]);
+  }, [targetStore]);
 
   const handleDraft = useCallback((draft: CanvasLocalFeedbackDraft) => {
     clearTargetTimer();
     targetEpochRef.current += 1;
-    targetRef.current = draft.feedbackBarTarget;
-    setTarget(draft.feedbackBarTarget);
+    targetStore.publish(draft.feedbackBarTarget);
     const currentComposition = compositionRef.current;
     const reuseCurrent = currentComposition
       && currentComposition.geometry === undefined
@@ -714,7 +742,7 @@ export function useCanvasFeedbackInteraction(input: {
     focusedCapsuleIdRef.current = itemId;
     setFocusedCapsuleId(itemId);
     setLocalMode(undefined);
-  }, [clearTargetTimer, setLocalValue]);
+  }, [clearTargetTimer, setLocalValue, targetStore]);
 
   const restoreWorkingCopies = useCallback((workingCopies: Record<string, WorkbenchFeedbackWorkingCopy> | undefined) => {
     const next = workingCopies ?? {};
@@ -809,7 +837,7 @@ export function useCanvasFeedbackInteraction(input: {
 
   return useMemo(() => ({
     feedback,
-    currentTarget: target,
+    targetStore,
     localMode,
     composition,
     authoringItemId,
@@ -860,18 +888,48 @@ export function useCanvasFeedbackInteraction(input: {
     composition,
     restoreWorkingCopies,
     setMark,
-    target
+    targetStore
   ]);
 }
 
 export function CanvasFeedbackInteractionBar({
   interaction,
-  overlayRuntime
+  overlayRuntime,
+  canvasRuntime,
+  viewportRect,
+  reservedRects = EMPTY_FLOATING_BAR_RECTS
 }: {
   interaction: CanvasFeedbackInteraction;
   overlayRuntime: CanvasOverlayRuntime;
+  canvasRuntime?: CanvasEditorRuntime | undefined;
+  viewportRect?: FloatingBarRect | undefined;
+  reservedRects?: readonly FloatingBarRect[] | undefined;
 }): React.ReactElement | null {
-  const target = interaction.currentTarget;
+  const target = useSyncExternalStore(
+    interaction.targetStore.subscribe,
+    interaction.targetStore.getSnapshot,
+    interaction.targetStore.getSnapshot
+  );
+  useEffect(() => {
+    if (!canvasRuntime || !target || !viewportRect) {
+      return;
+    }
+    const syncPlacement = (camera: ReturnType<typeof canvasRuntime.camera.getCamera>) => {
+      const placement = feedbackBarPlacementForCanvasTarget({
+        target,
+        camera,
+        viewportRect,
+        reservedRects
+      });
+      if (placement) {
+        overlayRuntime.setFeedbackBarPlacement(placement);
+      } else {
+        overlayRuntime.clearFeedbackBarPlacement();
+      }
+    };
+    syncPlacement(canvasRuntime.camera.getCamera());
+    return canvasRuntime.subscribeCamera(syncPlacement);
+  }, [canvasRuntime, overlayRuntime, reservedRects, target, viewportRect]);
   if (!target) {
     return null;
   }

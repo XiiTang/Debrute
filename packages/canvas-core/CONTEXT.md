@@ -85,6 +85,15 @@ Occlusion Order. Project membership, hierarchy, Automatic Layout, Selection,
 and camera are derived or transient.
 _Avoid_: Project Tree, live editor state
 
+**Canvas State Change Event**:
+The Runtime event carrying each changed Project path's complete normalized
+resulting Canvas Node State, or `null` when that sparse state was removed, plus
+the complete Occlusion Order only when it changed. It follows a Canvas State
+patch that leaves Folder Disclosure unchanged and does not replace the Project
+Tree or Canvas Resource View. Folder Disclosure changes continue to publish a
+complete Project snapshot.
+_Avoid_: Field patch event, complete Canvas Workspace event, Project refresh
+
 **Canvas Resource View**:
 The Runtime view produced from Canvas State and the shared Project Tree. It
 adds visible paths, current availability, node kinds, and media facts without

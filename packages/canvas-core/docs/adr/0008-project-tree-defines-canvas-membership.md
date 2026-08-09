@@ -6,7 +6,8 @@ status: accepted
 
 ADR 0010 supersedes this ADR's original generic-node width rules. ADR 0011
 supersedes its original transient Selection, focus, pointer-routing, and node
-interaction rules. The corresponding original passages remain below only as
+interaction rules. ADR 0013 supersedes its rule that every changed Canvas patch
+publishes a complete Project snapshot. The corresponding original passages remain below only as
 decision history; current contracts are stated in the newer ADRs and public
 Canvas documentation.
 

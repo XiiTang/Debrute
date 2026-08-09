@@ -37,7 +37,7 @@ describe('CanvasEditor', () => {
       await act(async () => {
         root.render(
           <CanvasEditor
-            canvas={{ state: canvasState, projection }}
+            canvas={{ expandedDirectories: canvasState.expandedDirectories, projection }}
             hasProject
             projectOpening={false}
             actions={actions}
@@ -54,7 +54,7 @@ describe('CanvasEditor', () => {
       await act(async () => {
         root.render(
           <CanvasEditor
-            canvas={{ state: canvasState, projection }}
+            canvas={{ expandedDirectories: canvasState.expandedDirectories, projection }}
             hasProject
             projectOpenError="unrelated project-open presentation update"
             projectOpening={false}

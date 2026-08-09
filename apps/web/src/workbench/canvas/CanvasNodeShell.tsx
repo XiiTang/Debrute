@@ -90,18 +90,14 @@ function CanvasNodeShellComponent({
     if (!element) {
       return;
     }
-    return stageRuntime.registerNodeShell(node.projectRelativePath, element);
-  }, [stageRuntime, node.projectRelativePath]);
-
-  useLayoutEffect(() => {
-    stageRuntime.setNodeLayout(node.projectRelativePath, {
+    return stageRuntime.registerNodeShell(node.projectRelativePath, element, {
       x: node.x,
       y: node.y,
       width: node.width,
       height: node.height,
       z: zIndex
     });
-  }, [stageRuntime, node.height, node.projectRelativePath, node.width, node.x, node.y, zIndex]);
+  }, [stageRuntime, node.projectRelativePath]);
 
   const textPresentationGeometry = node.mediaKind === 'text'
     ? canvasTextPresentationGeometry(node)

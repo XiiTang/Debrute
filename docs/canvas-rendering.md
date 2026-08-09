@@ -33,8 +33,27 @@ preserving node membership, selection, Manual Layout Drafts, and node spatial
 state. Restoring visibility derives Hierarchy Edges from the latest nodes and
 routes them against the latest presented layouts.
 
-An accepted Scene Projection replaces React membership once. During a live Manual
-Layout Draft, Runtime derives the presentation once and the Scene updates only
+An accepted Scene Projection replaces React membership once. Canvas State
+events whose Folder Disclosure is unchanged carry authoritative final node-state
+deltas and an optional authoritative Occlusion Order. The mounted Scene applies
+each exact path directly: content subscribers notify only that node shell,
+geometry updates only that node's spatial entry and affected edge groups, and an
+Occlusion Order change updates base z values once. These changes do not replace
+the React membership snapshot or run whole-scene culling. Automatic Layout
+rectangles remain attached to the accepted resource projection, so removing a
+Manual Layout restores its exact current automatic baseline without rebuilding
+the Project Tree or resource projection.
+
+Selection Raise retains one path-to-rank map. A Selection change preserves the
+rank and z value of retained paths, orders only newly entered paths by their
+current presentation order, and places them in unused ranks below the retained
+Selection. Rank space is reserved from current Projection membership; only
+exhausting that space rebases the selected paths. Selection changes never scan
+the Canvas Scene Projection or inspect unrelated nodes. A true Projection
+replacement remains the only operation that rebuilds against complete
+membership.
+
+During a live Manual Layout Draft, Runtime derives the presentation once and the Scene updates only
 the changed node layouts, routing groups, and spatial-index entries. The
 `CanvasRenderLifecycle` consumes that one delta, writes it through
 `CanvasStageRuntime`, synchronizes culling, publishes preview order, and owns at
@@ -53,7 +72,10 @@ values. Canvas Content Activation and active move/resize retain their node's
 display outside the viewport; ordinary Canvas Node Selection does not. A playing
 video remains mounted and keeps playing when its shell is culled, independently
 of Selection and Canvas Content Activation. Retention-only changes do not repeat
-geometric work or alter preview scheduling identity. These direct DOM writes do not
+geometric work or alter preview scheduling identity. Node shells register their
+initial rectangles once. After registration, `CanvasStageRuntime` is the sole
+writer of node transform, size, z-index, and visibility; a path-local React
+content update cannot replay stale geometry or z. These direct DOM writes do not
 publish a React scene snapshot and do not remove node-local preview state. This
 culling state is a rendering decision, not Folder Disclosure or Canvas
 visibility.
@@ -66,6 +88,13 @@ camera subscription first gates semantic interaction and then reveals the
 blocker. On idle it first hides the blocker and then performs exactly one
 semantic hit-test at the last pointer position. It owns no selection, Feedback,
 or preview state and it is not an active hit target while the camera is idle.
+
+The Selection marquee is one permanently mounted, normally hidden Surface DOM
+element. Pointer and camera subscriptions write its transform and size directly;
+marquee points do not publish React state or trigger React commits. Runtime
+measures the Surface at bind, at interaction start, and on resize, then reuses
+that geometry throughout the pointer interaction, so pointer moves do not read
+layout.
 
 When camera movement becomes idle, the lifecycle ensures that the final camera
 has been synchronized and publishes its viewport rectangle for preview-resource
@@ -103,6 +132,17 @@ Runtime admits one source digest at a time across Workbench requests, computes
 SHA-256 once for the current path version, and records the result in the Project
 Session without publishing a Project revision. No timer, whole-Project source
 scan, or persistent source cache participates in this flow.
+
+One Canvas-owned Source Resolution Runtime keeps this queue outside React
+state. A response contains only Project path, source token, availability, and
+resolved video text tracks when present; stable media classification and
+geometry remain in the accepted Canvas Resource View. Settlement publishes to
+the exact Project-path external-store subscription, so the matching node shell
+and media-preview target update without replacing the Canvas Scene Projection,
+rebuilding its spatial index, rescanning the Project Tree, or rerendering
+unrelated node shells. The request lane remains single-flight; an interaction
+ending may reprioritize pending work but cannot dispatch a second request until
+the current request settles.
 
 The resolved source creates a Runtime-owned Project Source Lease. Raw Range,
 image-preview, and video-preview requests reuse that lease and validate current
@@ -175,7 +215,9 @@ A pending variant is a real mounted `<img>`, not an off-DOM `Image` object or a
 preliminary fetch. Its `load` event, or cached `complete` state with positive
 intrinsic width, begins `decode()`. The decoded element is promoted only when
 its continuity key, variant key, retry attempt, and DOM membership are still
-current. The same keyed DOM element becomes visible; it is not loaded again.
+current. A parent rerender does not cancel or restart that element's in-flight
+decode; only replacing or disconnecting the keyed element makes its completion
+stale. The same keyed DOM element becomes visible; it is not loaded again.
 When a visible variant already exists, it remains mounted until the scheduler
 publishes the decoded replacement. An initial decoded variant may publish
 immediately because there is no visible content to preserve.

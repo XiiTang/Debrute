@@ -41,6 +41,7 @@ interface CanvasProjectedNodeGeometry extends CanvasProjectedRect {
   layoutMode?: 'manual';
   videoPlayback?: CanvasVideoPlaybackState;
   textViewport?: CanvasTextViewportState;
+  automaticLayout?: Readonly<LayoutRect>;
 }
 
 export interface ProjectedCanvasNode extends CanvasProjectedNodeGeometry {
@@ -60,6 +61,7 @@ export interface CanvasStructureEdgeProjection {
 export interface CanvasProjection {
   nodes: ProjectedCanvasNode[];
   edges: CanvasStructureEdgeProjection[];
+  occlusionOrder?: readonly string[];
 }
 
 export interface CanvasNodeSceneProjection {
@@ -123,7 +125,8 @@ export function projectCanvasNodeScene(input: {
 
   const nodes = input.resources.resources.map((resource, index): ProjectedCanvasNode => {
     const state = input.state.nodeStates[resource.projectRelativePath];
-    const layout = state?.manualLayout ?? automaticLayouts.get(resource.projectRelativePath)!;
+    const automaticLayout = automaticLayouts.get(resource.projectRelativePath)!;
+    const layout = state?.manualLayout ?? automaticLayout;
     const common = {
       projectRelativePath: resource.projectRelativePath,
       displayName: resourceLabel(resource, input.canonicalRoot),
@@ -133,6 +136,7 @@ export function projectCanvasNodeScene(input: {
       width: layout.width,
       height: layout.height,
       z: index,
+      automaticLayout,
       ...(state?.manualLayout ? { layoutMode: 'manual' as const } : {}),
       ...(state?.videoPlayback ? { videoPlayback: state.videoPlayback } : {}),
       ...(state?.textViewport ? { textViewport: state.textViewport } : {})
@@ -346,14 +350,12 @@ export function reconcileCanvasOcclusionOrder(
 
 export function raiseCanvasSelection(
   currentOrder: readonly string[],
-  nodes: readonly CanvasProjectedRect[],
   selectedPaths: readonly string[]
 ): string[] {
-  const reconciled = reconcileCanvasOcclusionOrder(currentOrder, nodes);
   const selected = new Set(selectedPaths);
-  return reconciled
+  return currentOrder
     .filter((path) => !selected.has(path))
-    .concat(reconciled.filter((path) => selected.has(path)));
+    .concat(currentOrder.filter((path) => selected.has(path)));
 }
 
 export function canvasPathAncestors(path: string): string[] {

@@ -54,7 +54,7 @@ export interface ProjectDiagnostic {
   entityId?: string;
 }
 
-interface CanvasManualLayout {
+export interface CanvasManualLayout {
   x: number;
   y: number;
   width: number;
@@ -70,7 +70,7 @@ export interface CanvasTextViewportState {
   scrollLeft: number;
 }
 
-interface CanvasNodeState {
+export interface CanvasNodeState {
   manualLayout?: CanvasManualLayout;
   videoPlayback?: CanvasVideoPlaybackState;
   textViewport?: CanvasTextViewportState;
@@ -80,6 +80,16 @@ export interface CanvasState {
   expandedDirectories: string[];
   nodeStates: Record<string, CanvasNodeState>;
   occlusionOrder: string[];
+}
+
+export interface CanvasNodeStateChange {
+  projectRelativePath: string;
+  state: CanvasNodeState | null;
+}
+
+export interface CanvasStateChange {
+  nodeStates: CanvasNodeStateChange[];
+  occlusionOrder?: string[];
 }
 
 type CanvasNodeAvailability =
@@ -152,7 +162,9 @@ export interface CanvasSourceResolutionRequest {
 export interface CanvasSourceResolutionResponse {
   sources: Array<{
     sourceToken: string;
-    resource: CanvasResourceView['resources'][number];
+    projectRelativePath: string;
+    availability: CanvasNodeAvailability;
+    videoTextTracks?: CanvasVideoTextTrack[];
   }>;
 }
 
@@ -1184,6 +1196,7 @@ interface WorkbenchFileWatchEvent {
 export type WorkbenchEvent =
   | { type: 'project.changed'; bindingId: string; projectRevision: number; snapshot: WorkbenchProjectSessionSnapshot }
   | { type: 'project.fileChanged'; bindingId: string; projectRevision: number; event: WorkbenchFileWatchEvent; snapshot: WorkbenchProjectSessionSnapshot }
+  | { type: 'canvas.state.changed'; bindingId: string; projectRevision: number; change: CanvasStateChange }
   | { type: 'canvas.feedback.changed'; bindingId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
   | { type: 'recentProjects.changed'; revision: number; recentProjectRoots: string[] }
   | { type: 'globalSettings.changed'; revision: number; settings: DebruteGlobalSettingsView }
@@ -1249,6 +1262,8 @@ const workbenchEventValidators = {
     && isProtocolObject(value.event)
     && typeof value.event.projectRelativePath === 'string'
     && isWorkbenchProjectSessionSnapshot(value.snapshot),
+  'canvas.state.changed': (value) => isRevisionedProjectEvent(value)
+    && isCanvasStateChange(value.change),
   'canvas.feedback.changed': (value) => isRevisionedProjectEvent(value)
     && isCanvasFeedbackDocument(value.feedback),
   'recentProjects.changed': (value) => isNonNegativeInteger(value.revision)
@@ -1451,6 +1466,27 @@ function isCanvasNodeState(value: unknown): boolean {
       && value.textViewport.scrollTop >= 0
       && isFiniteNumber(value.textViewport.scrollLeft)
       && value.textViewport.scrollLeft >= 0
+    ));
+}
+
+function isCanvasStateChange(value: unknown): value is CanvasStateChange {
+  if (!isProtocolObject(value)
+    || !hasExactKeys(value, ['nodeStates'], ['occlusionOrder'])
+    || !Array.isArray(value.nodeStates)
+    || !value.nodeStates.every((entry) => isProtocolObject(entry)
+      && hasExactKeys(entry, ['projectRelativePath', 'state'])
+      && typeof entry.projectRelativePath === 'string'
+      && (entry.state === null || isCanvasNodeState(entry.state)))
+  ) {
+    return false;
+  }
+  const paths = value.nodeStates.map((entry) => entry.projectRelativePath as string);
+  return (paths.length > 0 || value.occlusionOrder !== undefined)
+    && new Set(paths).size === paths.length
+    && (value.occlusionOrder === undefined || (
+      Array.isArray(value.occlusionOrder)
+      && value.occlusionOrder.every((path) => typeof path === 'string')
+      && new Set(value.occlusionOrder).size === value.occlusionOrder.length
     ));
 }
 

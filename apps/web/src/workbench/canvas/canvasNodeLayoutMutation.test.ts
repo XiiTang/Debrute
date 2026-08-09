@@ -9,6 +9,7 @@ describe('Canvas node layout mutation', () => {
       currentNodes: nodes,
       nextNodes: nodes,
       currentOcclusionOrder: ['a.png', 'b.png'],
+      nextOcclusionOrder: ['a.png', 'b.png'],
       selectedProjectRelativePaths: ['a.png'],
       nodeLayouts: [rect('a.png', 0)]
     })).toEqual({
@@ -23,6 +24,7 @@ describe('Canvas node layout mutation', () => {
       currentNodes: nodes,
       nextNodes: nodes,
       currentOcclusionOrder: ['b.png', 'a.png'],
+      nextOcclusionOrder: ['b.png', 'a.png'],
       selectedProjectRelativePaths: ['a.png'],
       nodeLayouts: [rect('a.png', 0)]
     })).toBeUndefined();
@@ -36,6 +38,7 @@ describe('Canvas node layout mutation', () => {
       currentNodes,
       nextNodes,
       currentOcclusionOrder: ['b.png', 'a.png'],
+      nextOcclusionOrder: ['b.png', 'a.png'],
       selectedProjectRelativePaths: ['a.png'],
       nodeLayouts: [rect('a.png', 10)]
     })).toEqual({
@@ -53,6 +56,7 @@ describe('Canvas node layout mutation', () => {
       currentNodes: nodes,
       nextNodes: nodes,
       currentOcclusionOrder: [],
+      nextOcclusionOrder: [],
       selectedProjectRelativePaths: ['a.png'],
       nodeLayouts: [rect('a.png', 10)]
     })).toBeUndefined();

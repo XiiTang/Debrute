@@ -11,26 +11,46 @@ use std::{
 
 use super::{
     CanonicalProjectRoot, CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument,
-    CanvasImageDimensions, CanvasMediaKind, CanvasNodeAvailability, CanvasResolvedSource,
-    CanvasResource, CanvasResourceView, CanvasSourceResolutionView, CanvasSourceTarget,
-    CanvasState, CanvasStatePatch, CanvasVideoPresentation, CanvasVideoTextTrack,
-    CanvasWorkspaceDocument, CanvasWorkspaceSnapshot, CanvasWorkspaceStore,
-    CanvasWorkspaceUnavailable, ProjectCapabilityFs, ProjectDiagnostic, ProjectDiagnosticCounts,
-    ProjectDiagnosticSeverity, ProjectDirectoryPath, ProjectError, ProjectHealthSummary,
-    ProjectPathKind, ProjectRelativePath, ProjectSnapshot, ProjectSourceDigestResolver,
-    ProjectTree, ProjectTreeChange, ProjectTreeEntry, UpdateCanvasFeedbackInput,
-    apply_canvas_state_patch, canvas_media_kind_from_path, canvas_path_is_visible,
-    normalize_feedback_path, open_no_symlink_existing_project_file, project_content_hash,
-    project_content_type, project_media_kind_from_content_type, project_text_file_type_for_path,
-    prune_canvas_state_path, read_canvas_feedback_state, resolve_no_symlink_existing_project_path,
-    rewrite_canvas_state_path, update_canvas_feedback_document, visible_canvas_entries,
-    write_canvas_feedback_document,
+    CanvasImageDimensions, CanvasMediaKind, CanvasNodeAvailability, CanvasNodeStateChange,
+    CanvasResolvedSource, CanvasResource, CanvasResourceView, CanvasSourceResolutionView,
+    CanvasSourceTarget, CanvasState, CanvasStateChange, CanvasStatePatch, CanvasStatePatchOutcome,
+    CanvasVideoPresentation, CanvasVideoTextTrack, CanvasWorkspaceDocument,
+    CanvasWorkspaceSnapshot, CanvasWorkspaceStore, CanvasWorkspaceUnavailable, ProjectCapabilityFs,
+    ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectDirectoryPath,
+    ProjectError, ProjectHealthSummary, ProjectPathKind, ProjectRelativePath, ProjectSnapshot,
+    ProjectSourceDigestResolver, ProjectTree, ProjectTreeChange, ProjectTreeEntry,
+    UpdateCanvasFeedbackInput, apply_canvas_state_patch, canvas_media_kind_from_path,
+    canvas_path_is_visible, normalize_feedback_path, open_no_symlink_existing_project_file,
+    project_content_hash, project_content_type, project_media_kind_from_content_type,
+    project_text_file_type_for_path, prune_canvas_state_path, read_canvas_feedback_state,
+    resolve_no_symlink_existing_project_path, rewrite_canvas_state_path,
+    update_canvas_feedback_document, visible_canvas_entries, write_canvas_feedback_document,
 };
 
 type CanvasNodeAdapterData = (
     Option<CanvasImagePreviewInfo>,
     Option<CanvasVideoPresentation>,
 );
+
+fn resolved_canvas_source(source_token: String, resource: &CanvasResource) -> CanvasResolvedSource {
+    let CanvasResource::File {
+        project_relative_path,
+        availability,
+        video_presentation,
+        ..
+    } = resource
+    else {
+        unreachable!("a resolved Canvas source is a file");
+    };
+    CanvasResolvedSource {
+        source_token,
+        project_relative_path: project_relative_path.clone(),
+        availability: availability.as_ref().clone(),
+        video_text_tracks: video_presentation
+            .as_ref()
+            .map(|presentation| presentation.text_tracks.clone()),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasImagePreviewInfo {
@@ -650,9 +670,26 @@ impl ProjectService {
     pub fn patch_canvas_state(
         &mut self,
         patch: &CanvasStatePatch,
-    ) -> Result<(ProjectSnapshot, bool), ProjectError> {
+    ) -> Result<CanvasStatePatchOutcome, ProjectError> {
         let current = self.available_canvas_workspace()?.state.clone();
         let mut next = apply_canvas_state_patch(&current, patch)?;
+        if next.expanded_directories == current.expanded_directories {
+            Self::validate_canvas_state_paths_in(&self.project_tree, &next)?;
+            if next == current {
+                return Ok(CanvasStatePatchOutcome::Unchanged);
+            }
+            let change = canvas_state_change(&current, &next);
+            let mut document = self.available_canvas_workspace()?.clone();
+            document.state = next;
+            self.persist_workspace(document.clone())?;
+            let CanvasWorkspaceSnapshot::Available { workspace, .. } =
+                &mut self.snapshot.canvas_workspace
+            else {
+                unreachable!("an available Canvas Workspace has an available snapshot");
+            };
+            workspace.clone_from(&document);
+            return Ok(CanvasStatePatchOutcome::StateChanged(change));
+        }
         let directories = disclosed_directory_closure(&next);
         let mut project_tree = self.project_tree.clone();
         let change = project_tree.load_directories(&directories)?;
@@ -663,7 +700,7 @@ impl ProjectService {
         Self::validate_canvas_state_paths_in(&project_tree, &next)?;
         let canvas_changed = next != current;
         if !canvas_changed && invalidated.is_empty() {
-            return Ok((self.snapshot.clone(), false));
+            return Ok(CanvasStatePatchOutcome::Unchanged);
         }
         if canvas_changed {
             let mut document = self.available_canvas_workspace()?.clone();
@@ -680,7 +717,7 @@ impl ProjectService {
         let snapshot = feedback_error.map_or(snapshot, |error| {
             self.record_path_state_persistence_failure(&error.to_string())
         });
-        Ok((snapshot, canvas_changed || !invalidated.is_empty()))
+        Ok(CanvasStatePatchOutcome::ProjectChanged(Box::new(snapshot)))
     }
 
     fn validate_canvas_state_paths_in(
@@ -1113,10 +1150,10 @@ impl ProjectService {
                     ..
                 } if matches!(availability.as_ref(), CanvasNodeAvailability::Available { .. })
             ) {
-                sources.push(CanvasResolvedSource {
-                    source_token: target.source_token.clone(),
-                    resource: cached.resource.clone(),
-                });
+                sources.push(resolved_canvas_source(
+                    target.source_token.clone(),
+                    &cached.resource,
+                ));
                 continue;
             }
             let mut file =
@@ -1153,7 +1190,7 @@ impl ProjectService {
                     },
                 ),
             };
-            sources.extend(self.resolve_video_text_track_sources(&mut resource, source_digests)?);
+            self.resolve_video_text_track_sources(&mut resource, source_digests)?;
             self.inspection_cache.insert(
                 path.to_owned(),
                 CachedCanvasFileInspection {
@@ -1164,10 +1201,10 @@ impl ProjectService {
                     resource: resource.clone(),
                 },
             );
-            sources.push(CanvasResolvedSource {
-                source_token: target.source_token.clone(),
-                resource,
-            });
+            sources.push(resolved_canvas_source(
+                target.source_token.clone(),
+                &resource,
+            ));
         }
         Ok(CanvasSourceResolutionView { sources })
     }
@@ -1176,7 +1213,7 @@ impl ProjectService {
         &mut self,
         resource: &mut CanvasResource,
         source_digests: &ProjectSourceDigestResolver,
-    ) -> Result<Vec<CanvasResolvedSource>, ProjectError> {
+    ) -> Result<(), ProjectError> {
         let track_paths = match resource {
             CanvasResource::File {
                 video_presentation: Some(presentation),
@@ -1189,7 +1226,7 @@ impl ProjectService {
             _ => Vec::new(),
         };
         if track_paths.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
         let targets = track_paths
             .iter()
@@ -1216,18 +1253,11 @@ impl ProjectService {
         let revisions = resolved
             .sources
             .iter()
-            .filter_map(|source| match &source.resource {
-                CanvasResource::File {
-                    project_relative_path,
-                    availability,
-                    ..
-                } => match availability.as_ref() {
-                    CanvasNodeAvailability::Available { revision, .. } => {
-                        Some((project_relative_path.clone(), revision.clone()))
-                    }
-                    _ => None,
-                },
-                CanvasResource::Directory { .. } => None,
+            .filter_map(|source| match &source.availability {
+                CanvasNodeAvailability::Available { revision, .. } => {
+                    Some((source.project_relative_path.clone(), revision.clone()))
+                }
+                _ => None,
             })
             .collect::<HashMap<_, _>>();
         let CanvasResource::File {
@@ -1251,7 +1281,7 @@ impl ProjectService {
                     )
                 })?;
         }
-        Ok(resolved.sources)
+        Ok(())
     }
 
     pub(crate) fn canvas_source_lease(
@@ -1512,6 +1542,27 @@ impl ProjectService {
                 .count(),
         };
         self.snapshot.health.checked_at = crate::now_rfc3339();
+    }
+}
+
+fn canvas_state_change(current: &CanvasState, next: &CanvasState) -> CanvasStateChange {
+    let paths = current
+        .node_states
+        .keys()
+        .chain(next.node_states.keys())
+        .collect::<std::collections::BTreeSet<_>>();
+    let node_states = paths
+        .into_iter()
+        .filter(|path| current.node_states.get(*path) != next.node_states.get(*path))
+        .map(|path| CanvasNodeStateChange {
+            project_relative_path: path.clone(),
+            state: next.node_states.get(path).cloned(),
+        })
+        .collect();
+    CanvasStateChange {
+        node_states,
+        occlusion_order: (current.occlusion_order != next.occlusion_order)
+            .then(|| next.occlusion_order.clone()),
     }
 }
 

@@ -418,31 +418,32 @@ function CanvasRasterPreviewImageLayer({
   onPointerDown?: React.PointerEventHandler<HTMLImageElement> | undefined;
 }): React.ReactElement {
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const loadStartedRef = useRef(false);
-  const settledRef = useRef(false);
+  const decodePhaseRef = useRef<'idle' | 'decoding' | 'settled'>('idle');
 
   const decodePending = useCallback((image: HTMLImageElement) => {
-    if (layer !== 'pending' || loadStartedRef.current || settledRef.current) {
+    if (layer !== 'pending' || decodePhaseRef.current !== 'idle') {
       return;
     }
-    loadStartedRef.current = true;
-    let cancelled = false;
+    decodePhaseRef.current = 'decoding';
     void image.decode().then(() => {
-      if (cancelled || settledRef.current || !image.isConnected) {
+      if (decodePhaseRef.current !== 'decoding') {
         return;
       }
-      settledRef.current = true;
+      decodePhaseRef.current = 'settled';
+      if (!image.isConnected) {
+        return;
+      }
       onDecoded(source);
     }, (error: unknown) => {
-      if (cancelled || settledRef.current) {
+      if (decodePhaseRef.current !== 'decoding') {
         return;
       }
-      settledRef.current = true;
+      decodePhaseRef.current = 'settled';
+      if (!image.isConnected) {
+        return;
+      }
       onFailure(source, 'decode', error);
     });
-    return () => {
-      cancelled = true;
-    };
   }, [layer, onDecoded, onFailure, source]);
 
   useLayoutEffect(() => {
@@ -451,7 +452,7 @@ function CanvasRasterPreviewImageLayer({
     }
     const image = imageRef.current;
     if (image?.complete && image.naturalWidth > 0) {
-      return decodePending(image);
+      decodePending(image);
     }
     return undefined;
   }, [decodePending, layer]);

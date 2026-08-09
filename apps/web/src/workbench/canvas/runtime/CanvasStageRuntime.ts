@@ -32,7 +32,7 @@ interface RegisteredCanvasEdgeGroup extends RegisteredCanvasDisplay<SVGPathEleme
 export interface CanvasStageRuntime {
   bindStage(stage: HTMLElement): () => void;
   setCamera(camera: CanvasCamera): void;
-  registerNodeShell(path: string, element: HTMLElement): () => void;
+  registerNodeShell(path: string, element: HTMLElement, initialLayout?: CanvasNodeLayout): () => void;
   setHoveredNode(path: string | undefined): void;
   setSelectedNodePaths(paths: ReadonlySet<string>): void;
   isSingleSelectedNode(path: string): boolean;
@@ -130,10 +130,13 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
       camera = nextCamera;
       writeStageCamera(nextCamera);
     },
-    registerNodeShell: (path, element) => {
+    registerNodeShell: (path, element, initialLayout) => {
       const record = nodes.get(path) ?? {};
       record.element = element;
       nodes.set(path, record);
+      if (initialLayout && !record.layout) {
+        record.layout = initialLayout;
+      }
       if (record.layout) {
         writeNodeLayout(record, record.layout);
       }

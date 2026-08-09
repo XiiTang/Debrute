@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { CanvasResourceView, DebruteProductPlatform } from '@debrute/app-protocol';
+import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
   CanvasFeedbackEntry,
   CanvasFeedbackGeometry,
-  CanvasState,
   CanvasTextViewportState
 } from '@debrute/app-protocol';
 import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
@@ -56,6 +55,10 @@ import {
 } from './CanvasVideoPreviewRuntime.js';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import type { CanvasSceneActions } from './CanvasSceneActions.js';
+import {
+  createCanvasSourceResolutionRuntime,
+  type CanvasSourceResolutionRuntime
+} from './CanvasSourceResolutionRuntime.js';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge } from './CanvasPerfDebugBridge';
 import {
@@ -78,7 +81,6 @@ import {
   selectedNodeProjectRelativePaths
 } from './runtime/canvasSelection.js';
 import {
-  useCanvasActiveSelectionMarquee,
   useCanvasContentInteraction,
   useCanvasSurfaceSize
 } from './runtime/useCanvasRuntimeSnapshot.js';
@@ -109,7 +111,7 @@ interface CanvasCompletedClickCandidate {
 }
 
 interface CanvasSurfaceProps {
-  canvasState: CanvasState;
+  expandedDirectories: readonly string[];
   projection: CanvasProjection;
   runtime: CanvasEditorRuntime;
   actions: CanvasSceneActions;
@@ -124,35 +126,8 @@ interface CanvasSurfaceProps {
   textPreviewStyleDependencyKey: string;
 }
 
-type CanvasFileResource = Extract<CanvasResourceView['resources'][number], { nodeKind: 'file' }>;
-
-type CanvasSourceResult = {
-  sourceToken: string;
-  resource?: CanvasFileResource;
-  error?: string;
-};
-
-type CanvasSourceFields = Pick<ProjectedCanvasNode, 'availability'> & Partial<Pick<
-  ProjectedCanvasNode,
-  'mediaKind' | 'imageDimensions' | 'textLanguage' | 'videoPresentation'
->>;
-
-function canvasNodeWithSourceFields(
-  node: ProjectedCanvasNode,
-  source: CanvasSourceFields
-): ProjectedCanvasNode {
-  return {
-    ...node,
-    availability: source.availability,
-    ...(source.mediaKind ? { mediaKind: source.mediaKind } : {}),
-    ...(source.imageDimensions ? { imageDimensions: source.imageDimensions } : {}),
-    ...(source.textLanguage ? { textLanguage: source.textLanguage } : {}),
-    ...(source.videoPresentation ? { videoPresentation: source.videoPresentation } : {})
-  };
-}
-
 export function CanvasSurface({
-  canvasState,
+  expandedDirectories,
   projection,
   runtime,
   actions,
@@ -194,7 +169,7 @@ export function CanvasSurface({
 
   return (
     <CanvasSurfaceRuntime
-      canvasState={canvasState}
+      expandedDirectories={expandedDirectories}
       projection={projection}
       runtime={runtime}
       actions={actions}
@@ -213,7 +188,7 @@ export function CanvasSurface({
 }
 
 function CanvasSurfaceRuntime({
-  canvasState,
+  expandedDirectories,
   projection,
   runtime,
   actions,
@@ -230,58 +205,6 @@ function CanvasSurfaceRuntime({
 }: CanvasSurfaceProps & {
   perfMonitor: CanvasPerfMonitor | undefined;
 }): React.ReactElement {
-  const projectionNodesByPath = useMemo(
-    () => new Map(projection.nodes.map((node) => [node.projectRelativePath, node])),
-    [projection]
-  );
-  const projectionNodesByPathRef = useRef(projectionNodesByPath);
-  projectionNodesByPathRef.current = projectionNodesByPath;
-  const sourceAttemptsRef = useRef(new Set<string>());
-  const sourceQueueRef = useRef<readonly ProjectedCanvasNode[]>([]);
-  const sourceQueueIndexRef = useRef(0);
-  const sourceQueueProjectionRef = useRef<CanvasProjection | undefined>(undefined);
-  const sourceQueueScheduleRevisionRef = useRef(-1);
-  const sourceRequestInFlightRef = useRef(false);
-  const [sourceResults, setSourceResults] = useState<ReadonlyMap<string, CanvasSourceResult>>(
-    () => new Map()
-  );
-  const [sourceScheduleRevision, setSourceScheduleRevision] = useState(0);
-  const [sourceSettlementRevision, setSourceSettlementRevision] = useState(0);
-  const effectiveProjection = useMemo<CanvasProjection>(() => ({
-    ...projection,
-    nodes: projection.nodes.map((node): ProjectedCanvasNode => {
-      if (node.availability.state !== 'resolving') {
-        return node;
-      }
-      const result = sourceResults.get(node.projectRelativePath);
-      if (!result || result.sourceToken !== node.availability.sourceToken) {
-        return node;
-      }
-      if (result.error) {
-        return {
-          ...node,
-          availability: { state: 'unreadable', message: result.error }
-        };
-      }
-      if (!result.resource) {
-        return node;
-      }
-      return canvasNodeWithSourceFields(node, result.resource);
-    })
-  }), [projection, sourceResults]);
-  useEffect(() => {
-    const currentTokens = new Map(projection.nodes.flatMap((node) => (
-      node.availability.state === 'resolving'
-        ? [[node.projectRelativePath, node.availability.sourceToken] as const]
-        : []
-    )));
-    setSourceResults((previous) => {
-      const next = new Map(
-        [...previous].filter(([path, result]) => currentTokens.get(path) === result.sourceToken)
-      );
-      return next.size === previous.size ? previous : next;
-    });
-  }, [projection]);
   const localFeedbackMode = feedbackInteraction?.localMode;
   const feedbackComposition = feedbackInteraction?.composition;
   const localSpatialFeedbackItems = feedbackInteraction?.localSpatialItems ?? [];
@@ -381,7 +304,7 @@ function CanvasSurfaceRuntime({
     return byPath;
   }, [canvasFeedback, feedbackComposition, feedbackInteraction?.focusedCapsuleId, localSpatialFeedbackItems]);
 
-  const projectedNodes = effectiveProjection.nodes;
+  const projectedNodes = projection.nodes;
   const projectedNodesRef = useRef(projectedNodes);
   projectedNodesRef.current = projectedNodes;
   const videoTargetsRef = useRef(new Map<string, CanvasVideoPlayerHandle>());
@@ -465,138 +388,22 @@ function CanvasSurfaceRuntime({
     perfMonitor: instrumentationMonitor
   }), [instrumentationMonitor, runtime, stageRuntime]);
   useLayoutEffect(() => renderLifecycle.attach(), [renderLifecycle]);
-  useEffect(() => {
-    const schedule = () => setSourceScheduleRevision((current) => current + 1);
-    const unsubscribeCameraState = runtime.subscribeCameraState((state) => {
-      if (state === 'idle') {
-        schedule();
-      }
-    });
-    const unsubscribePointerInteraction = runtime.subscribePointerInteraction((interaction) => {
-      if (interaction === undefined) {
-        schedule();
-      }
-    });
-    return () => {
-      unsubscribeCameraState();
-      unsubscribePointerInteraction();
-    };
-  }, [runtime]);
-  useEffect(() => {
-    const snapshot = runtime.getSnapshot();
-    if (snapshot.cameraState !== 'idle' || snapshot.pointerInteraction !== undefined) {
-      return;
-    }
-    if (sourceRequestInFlightRef.current) {
-      return;
-    }
-    if (
-      sourceQueueProjectionRef.current !== projection
-      || sourceQueueScheduleRevisionRef.current !== sourceScheduleRevision
-    ) {
-      const currentKeys = new Set(projection.nodes.flatMap((node) => (
-        node.availability.state === 'resolving'
-          ? [`${node.projectRelativePath}\u001f${node.availability.sourceToken}`]
-          : []
-      )));
-      sourceAttemptsRef.current = new Set(
-        [...sourceAttemptsRef.current].filter((key) => currentKeys.has(key))
-      );
-      sourceQueueRef.current = projection.nodes
-        .filter((node) => node.availability.state === 'resolving' && node.mediaKind !== 'unknown')
-        .sort((left, right) => (
-          renderLifecycle.previewDistanceSquaredForNode(left.projectRelativePath)
-            - renderLifecycle.previewDistanceSquaredForNode(right.projectRelativePath)
-          || left.projectRelativePath.localeCompare(right.projectRelativePath)
-        ));
-      sourceQueueIndexRef.current = 0;
-      sourceQueueProjectionRef.current = projection;
-      sourceQueueScheduleRevisionRef.current = sourceScheduleRevision;
-    }
-    let candidate: ProjectedCanvasNode | undefined;
-    while (sourceQueueIndexRef.current < sourceQueueRef.current.length) {
-      const queued = sourceQueueRef.current[sourceQueueIndexRef.current];
-      sourceQueueIndexRef.current += 1;
-      if (queued?.availability.state !== 'resolving') {
-        continue;
-      }
-      const result = sourceResults.get(queued.projectRelativePath);
-      const attemptKey = `${queued.projectRelativePath}\u001f${queued.availability.sourceToken}`;
-      if (
-        result?.sourceToken === queued.availability.sourceToken
-        || sourceAttemptsRef.current.has(attemptKey)
-      ) {
-        continue;
-      }
-      candidate = queued;
-      break;
-    }
-    if (!candidate || candidate.availability.state !== 'resolving') {
-      return;
-    }
-    const projectRelativePath = candidate.projectRelativePath;
-    const sourceToken = candidate.availability.sourceToken;
-    const attemptKey = `${projectRelativePath}\u001f${sourceToken}`;
-    sourceAttemptsRef.current.add(attemptKey);
-    sourceRequestInFlightRef.current = true;
-    void actions.resolveCanvasSources({
-      targets: [{ projectRelativePath, sourceToken }]
-    }).then((response) => {
-      const current = projectionNodesByPathRef.current.get(projectRelativePath);
-      if (current?.availability.state !== 'resolving'
-        || current.availability.sourceToken !== sourceToken) {
-        return;
-      }
-      const resolved = response.sources.find((source) => source.sourceToken === sourceToken);
-      if (!resolved || resolved.resource.nodeKind !== 'file') {
-        throw new Error(`Runtime did not resolve Canvas source: ${projectRelativePath}`);
-      }
-      setSourceResults((previous) => {
-        const next = new Map(previous);
-        for (const source of response.sources) {
-          if (source.resource.nodeKind !== 'file') {
-            continue;
-          }
-          const currentSource = projectionNodesByPathRef.current.get(
-            source.resource.projectRelativePath
-          );
-          if (currentSource?.availability.state === 'resolving'
-            && currentSource.availability.sourceToken === source.sourceToken) {
-            next.set(source.resource.projectRelativePath, {
-              sourceToken: source.sourceToken,
-              resource: source.resource
-            });
-          }
-        }
-        return next;
-      });
-    }).catch((error: unknown) => {
-      const current = projectionNodesByPathRef.current.get(projectRelativePath);
-      if (current?.availability.state !== 'resolving'
-        || current.availability.sourceToken !== sourceToken) {
-        return;
-      }
-      setSourceResults((previous) => {
-        const next = new Map(previous);
-        next.set(projectRelativePath, {
-          sourceToken,
-          error: error instanceof Error ? error.message : String(error)
-        });
-        return next;
-      });
-    }).finally(() => {
-      sourceRequestInFlightRef.current = false;
-      setSourceSettlementRevision((currentRevision) => currentRevision + 1);
-    });
-  }, [
-    actions,
-    projection,
-    renderLifecycle,
+  const sourceResolutionRuntime = useMemo(() => createCanvasSourceResolutionRuntime({
     runtime,
-    sourceResults,
-    sourceScheduleRevision,
-    sourceSettlementRevision
-  ]);
+    resolveCanvasSources: actions.resolveCanvasSources,
+    distanceSquaredForNode: renderLifecycle.previewDistanceSquaredForNode
+  }), [actions.resolveCanvasSources, renderLifecycle, runtime]);
+  useLayoutEffect(() => sourceResolutionRuntime.attach(), [sourceResolutionRuntime]);
+  useLayoutEffect(() => {
+    sourceResolutionRuntime.acceptProjection(projection);
+  }, [projection, sourceResolutionRuntime]);
+  const currentProjectedNode = useCallback((projectRelativePath: string) => {
+    const accepted = runtime.scene.getAcceptedNode(projectRelativePath);
+    return accepted
+      ? sourceResolutionRuntime.getNodeSnapshot(accepted)
+      : sourceResolutionRuntime.getNode(projectRelativePath)
+        ?? projectedNodesRef.current.find((node) => node.projectRelativePath === projectRelativePath);
+  }, [runtime, sourceResolutionRuntime]);
   const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({
     perfMonitor: instrumentationMonitor,
     distanceSquaredForNode: renderLifecycle.previewDistanceSquaredForNode
@@ -920,9 +727,7 @@ function CanvasSurfaceRuntime({
       return;
     }
     if (target.zone === 'manipulation') {
-      const node = projectedNodesRef.current.find((candidate) => (
-        candidate.projectRelativePath === target.projectRelativePath
-      ));
+      const node = runtime.scene.getAcceptedNode(target.projectRelativePath);
       if (node) {
         beginNodeMove(node, event);
       }
@@ -964,7 +769,8 @@ function CanvasSurfaceRuntime({
     interactionRuntime,
     pointerScreenPoint,
     productPlatform,
-    resolvePointerTarget
+    resolvePointerTarget,
+    runtime
   ]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<Element>) => {
@@ -1031,16 +837,13 @@ function CanvasSurfaceRuntime({
       && releaseTarget?.kind === 'node'
       && releaseTarget.projectRelativePath.length > 0
       && releaseTarget.projectRelativePath === finishedInteraction.pressedProjectRelativePath
-      && projectedNodesRef.current.some((node) => (
-        node.projectRelativePath === releaseTarget.projectRelativePath
-        && node.nodeKind === 'directory'
-      ))
+      && runtime.scene.getAcceptedNode(releaseTarget.projectRelativePath)?.nodeKind === 'directory'
       ? finishedInteraction.pressedProjectRelativePath
       : undefined;
     if (directoryTogglePath !== undefined) {
       void actions.setCanvasDirectoryExpanded({
         projectRelativePath: directoryTogglePath,
-        expanded: !canvasState.expandedDirectories.includes(directoryTogglePath)
+        expanded: !expandedDirectories.includes(directoryTogglePath)
       });
     }
     if (clickCandidate
@@ -1085,7 +888,7 @@ function CanvasSurfaceRuntime({
         // Pointer capture may already have ended in the browser.
       }
     }
-  }, [actions, applyInteractionState, canvasState.expandedDirectories, interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
+  }, [actions, applyInteractionState, expandedDirectories, interactionRuntime, pointerScreenPoint, productPlatform, resolvePointerReleaseTarget, runtime]);
 
   const handlePointerUpEvent = useCallback((event: React.PointerEvent<Element>) => {
     void handlePointerUp(event).catch(() => undefined);
@@ -1114,7 +917,7 @@ function CanvasSurfaceRuntime({
       ? selectedNodeProjectRelativePaths(currentSelection)
       : [node.projectRelativePath];
     const selectedEntries = selectedPaths.flatMap((path) => {
-      const selectedNode = projectedNodes.find((candidate) => candidate.projectRelativePath === path);
+      const selectedNode = currentProjectedNode(path);
       return selectedNode ? [projectPathCommandEntryForCanvasNode(selectedNode)] : [];
     });
     onOpenContextMenu?.({
@@ -1125,7 +928,7 @@ function CanvasSurfaceRuntime({
       x: event.clientX,
       y: event.clientY
     });
-  }, [onOpenContextMenu, projectedNodes, runtime]);
+  }, [currentProjectedNode, onOpenContextMenu, runtime]);
 
   const handleSurfaceContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const target = resolveCanvasDomInteractionTarget(event.currentTarget, event.target);
@@ -1142,36 +945,28 @@ function CanvasSurfaceRuntime({
     ) {
       return;
     }
-    const node = projectedNodesRef.current.find((candidate) => (
-      candidate.projectRelativePath === target.projectRelativePath
-    ));
+    const node = currentProjectedNode(target.projectRelativePath);
     if (node) {
       handleNodeContextMenu(node, event);
     }
-  }, [handleNodeContextMenu, runtime]);
+  }, [currentProjectedNode, handleNodeContextMenu, runtime]);
 
-  const renderedNodes = useMemo(() => {
-    const sourceNodes = new Map(projectedNodes.map((node) => [node.projectRelativePath, node]));
-    return [...renderSnapshot.nodesByPath.values()].map((node) => {
-      const sourceNode = sourceNodes.get(node.projectRelativePath);
-      if (!sourceNode || sourceNode.availability === node.availability) {
-        return node;
-      }
-      return canvasNodeWithSourceFields(node, sourceNode);
-    });
-  }, [projectedNodes, renderSnapshot]);
+  const renderedNodes = useMemo(
+    () => [...renderSnapshot.nodesByPath.values()],
+    [renderSnapshot]
+  );
   const activeContentInteractionNode = useMemo(() => {
     if (!contentInteractionPath) {
       return undefined;
     }
-    const selectedNode = projectedNodes.find((node) => node.projectRelativePath === contentInteractionPath);
+    const selectedNode = runtime.scene.getAcceptedNode(contentInteractionPath);
     return selectedNode
       && (selectedNode.mediaKind === 'text'
         || selectedNode.mediaKind === 'video'
         || selectedNode.mediaKind === 'audio')
       ? selectedNode
       : undefined;
-  }, [contentInteractionPath, projectedNodes]);
+  }, [contentInteractionPath, runtime]);
   const activeInlineTextPath = activeContentInteractionNode?.mediaKind === 'text'
     ? activeContentInteractionNode.projectRelativePath
     : undefined;
@@ -1230,9 +1025,7 @@ function CanvasSurfaceRuntime({
     setContentHandoffRequest((current) => current?.requestId === requestId ? undefined : current);
   }, []);
   const handleUpdateVideoPlaybackTime = useCallback((projectRelativePath: string, currentTimeMs: number) => {
-    const node = projectedNodesRef.current.find((candidate) => (
-      candidate.projectRelativePath === projectRelativePath
-    ));
+    const node = runtime.scene.getAcceptedNode(projectRelativePath);
     if (node?.mediaKind !== 'video') {
       return;
     }
@@ -1250,9 +1043,7 @@ function CanvasSurfaceRuntime({
         return;
       }
       videoPlaybackUpdateVersionsRef.current.delete(updateKey);
-      const durableNode = projectedNodesRef.current.find((candidate) => (
-        candidate.projectRelativePath === projectRelativePath
-      ));
+      const durableNode = runtime.scene.getAcceptedNode(projectRelativePath);
       if (durableNode?.mediaKind !== 'video') {
         return;
       }
@@ -1261,18 +1052,16 @@ function CanvasSurfaceRuntime({
         ?.restorePersistedTime(durableNode.videoPlayback?.currentTimeMs ?? 0);
       throw error;
     });
-  }, [actions]);
+  }, [actions, runtime]);
   const handleUpdateTextViewport = useCallback((projectRelativePath: string, viewport: CanvasTextViewportState) => {
-    const node = projectedNodesRef.current.find((candidate) => (
-      candidate.projectRelativePath === projectRelativePath
-    ));
+    const node = runtime.scene.getAcceptedNode(projectRelativePath);
     if (node?.mediaKind !== 'text') {
       return;
     }
     void actions.updateCanvasTextViewportState({
       updates: [{ projectRelativePath, ...viewport }]
     }).catch(() => undefined);
-  }, [actions]);
+  }, [actions, runtime]);
 
   useEffect(() => {
     const videoPaths = new Set(projectedNodes.filter(isProjectedVideoNode).map((node) => node.projectRelativePath));
@@ -1344,7 +1133,7 @@ function CanvasSurfaceRuntime({
     if (!onLocalFeedbackDraft) {
       return;
     }
-    const node = projectedNodes.find((item) => item.projectRelativePath === draft.projectRelativePath);
+    const node = runtime.scene.getPresentedNodes().get(draft.projectRelativePath);
     const surfaceRect = surfaceRef.current?.getBoundingClientRect();
     if (!node || !surfaceRect) {
       return;
@@ -1381,7 +1170,6 @@ function CanvasSurfaceRuntime({
     feedbackComposition?.momentTimeSeconds,
     localFeedbackMode,
     onLocalFeedbackDraft,
-    projectedNodes,
     runtime
   ]);
 
@@ -1389,7 +1177,7 @@ function CanvasSurfaceRuntime({
     if (!feedbackInteraction) {
       return;
     }
-    const node = projectedNodes.find((item) => item.projectRelativePath === projectRelativePath);
+    const node = runtime.scene.getPresentedNodes().get(projectRelativePath);
     const surfaceRect = surfaceRef.current?.getBoundingClientRect();
     if (!node || !surfaceRect) {
       return;
@@ -1400,7 +1188,7 @@ function CanvasSurfaceRuntime({
       return;
     }
     feedbackInteraction.activateCapsule(nextTarget, itemId);
-  }, [feedbackBarTargetForNode, feedbackInteraction, projectedNodes, runtime]);
+  }, [feedbackBarTargetForNode, feedbackInteraction, runtime]);
 
   const emitFeedbackBarTarget = useCallback(() => {
     if (!onFeedbackBarTargetChange || !canvasFeedback) {
@@ -1603,6 +1391,7 @@ function CanvasSurfaceRuntime({
         <CanvasRasterPreviewEnvironmentProvider value={rasterPreviewEnvironment}>
           <CanvasVideoPreviewProvider
             nodes={projectedNodes}
+            sourceResolutionRuntime={sourceResolutionRuntime}
             activeVideoPaths={activeVideoPaths}
             actions={actions}
             previewOrder={renderLifecycle}
@@ -1610,6 +1399,7 @@ function CanvasSurfaceRuntime({
           >
             <CanvasTextPreviewProvider
               nodes={projectedNodes}
+              sourceResolutionRuntime={sourceResolutionRuntime}
               activeInlineTextPath={activeInlineTextPath}
               textFileBuffers={textFileBuffers}
               actions={actions}
@@ -1622,6 +1412,8 @@ function CanvasSurfaceRuntime({
                 <CanvasSurfaceNodeShell
                   key={node.projectRelativePath}
                   node={node}
+                  runtime={runtime}
+                  sourceResolutionRuntime={sourceResolutionRuntime}
                   cut={cutPathSet.has(node.projectRelativePath)}
                   contentInteractionActive={activeContentInteractionNode?.projectRelativePath === node.projectRelativePath}
                   zIndex={node.z}
@@ -1670,7 +1462,6 @@ function CanvasSurfaceRuntime({
       />
       <CanvasSelectionMarqueeOverlay
         runtime={runtime}
-        surfaceElement={surfaceRef.current}
       />
     </div>
   );
@@ -1750,6 +1541,8 @@ function CanvasSurfaceEdgeGroupPath({
 
 interface CanvasSurfaceNodeShellProps {
   node: ProjectedCanvasNode;
+  runtime: CanvasEditorRuntime;
+  sourceResolutionRuntime: CanvasSourceResolutionRuntime;
   cut: boolean;
   contentInteractionActive: boolean;
   zIndex: number;
@@ -1779,6 +1572,24 @@ interface CanvasSurfaceNodeShellProps {
 }
 
 function CanvasSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.ReactElement {
+  const subscribeAcceptedNode = useCallback((listener: () => void) => (
+    props.runtime.scene.subscribeAcceptedNode(props.node.projectRelativePath, listener)
+  ), [props.node.projectRelativePath, props.runtime]);
+  const getAcceptedNode = useCallback(() => (
+    props.runtime.scene.getAcceptedNode(props.node.projectRelativePath) ?? props.node
+  ), [props.node, props.runtime]);
+  const acceptedNode = useSyncExternalStore(
+    subscribeAcceptedNode,
+    getAcceptedNode,
+    getAcceptedNode
+  );
+  const subscribeSource = useCallback((listener: () => void) => (
+    props.sourceResolutionRuntime.subscribeNode(acceptedNode, listener)
+  ), [acceptedNode, props.sourceResolutionRuntime]);
+  const getSourceSnapshot = useCallback(() => (
+    props.sourceResolutionRuntime.getNodeSnapshot(acceptedNode)
+  ), [acceptedNode, props.sourceResolutionRuntime]);
+  const node = useSyncExternalStore(subscribeSource, getSourceSnapshot, getSourceSnapshot);
   const subscribe = useCallback((listener: () => void) => (
     props.stageRuntime.subscribeSingleSelectedNode(props.node.projectRelativePath, listener)
   ), [props.node.projectRelativePath, props.stageRuntime]);
@@ -1786,11 +1597,11 @@ function CanvasSurfaceNodeShell(props: CanvasSurfaceNodeShellProps): React.React
     props.stageRuntime.isSingleSelectedNode(props.node.projectRelativePath)
   ), [props.node.projectRelativePath, props.stageRuntime]);
   const showResizeHandles = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const resolvedProps = { ...props, showResizeHandles };
-  if (props.node.mediaKind === 'text') {
+  const resolvedProps = { ...props, node, showResizeHandles };
+  if (node.mediaKind === 'text') {
     return <CanvasTextSurfaceNodeShell {...resolvedProps} />;
   }
-  if (props.node.mediaKind === 'video') {
+  if (node.mediaKind === 'video') {
     return <CanvasVideoSurfaceNodeShell {...resolvedProps} />;
   }
   return <CanvasSurfaceNodeShellBase {...resolvedProps} />;
@@ -1894,28 +1705,65 @@ function CanvasSurfaceNodeShellBase({
 }
 
 function CanvasSelectionMarqueeOverlay({
-  runtime,
-  surfaceElement
+  runtime
 }: {
   runtime: CanvasEditorRuntime;
-  surfaceElement: HTMLElement | null;
-}): React.ReactElement | null {
-  const interaction = useCanvasActiveSelectionMarquee(runtime);
-  if (!interaction || !surfaceElement) {
-    return null;
-  }
-  const screenRect = runtime.coordinates.canvasRectToScreen(interaction.rect);
-  const surfaceRect = surfaceElement.getBoundingClientRect();
+}): React.ReactElement {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    let lastTransform: string | undefined;
+    let lastWidth: string | undefined;
+    let lastHeight: string | undefined;
+
+    const writeMarquee = () => {
+      const element = elementRef.current;
+      if (!element) {
+        return;
+      }
+      const snapshot = runtime.getSnapshot();
+      const interaction = snapshot.pointerInteraction;
+      if (interaction?.kind !== 'selection-marquee'
+        || interaction.phase !== 'active'
+        || interaction.rect === undefined) {
+        element.hidden = true;
+        return;
+      }
+      const { camera } = snapshot;
+      const transform = `translate3d(${camera.x + interaction.rect.x * camera.z}px, ${camera.y + interaction.rect.y * camera.z}px, 0px)`;
+      const width = `${interaction.rect.width * camera.z}px`;
+      const height = `${interaction.rect.height * camera.z}px`;
+      element.hidden = false;
+      if (lastTransform !== transform) {
+        element.style.transform = transform;
+        lastTransform = transform;
+      }
+      if (lastWidth !== width) {
+        element.style.width = width;
+        lastWidth = width;
+      }
+      if (lastHeight !== height) {
+        element.style.height = height;
+        lastHeight = height;
+      }
+    };
+
+    writeMarquee();
+    const unsubscribePointer = runtime.subscribePointerInteraction(writeMarquee);
+    const unsubscribeCamera = runtime.subscribeCamera(writeMarquee);
+    return () => {
+      unsubscribePointer();
+      unsubscribeCamera();
+    };
+  }, [runtime]);
+
   return (
     <div
+      ref={elementRef}
       className="canvas-selection-marquee"
       data-testid="canvas-selection-marquee"
-      style={{
-        left: screenRect.x - surfaceRect.left,
-        top: screenRect.y - surfaceRect.top,
-        width: screenRect.width,
-        height: screenRect.height
-      }}
+      hidden
+      aria-hidden="true"
     />
   );
 }
