@@ -43,7 +43,6 @@ remain authoritative when prose and implementation differ.
 - [Canvas rendering and preview resources](./canvas-rendering.md)
 - [Canvas media presentation](./canvas-media.md)
 - [Canvas feedback](./canvas-feedback.md)
-- [Canvas generic-node geometry and content interaction implementation record](./canvas-generic-node-geometry-and-content-interaction-implementation.md)
 - [Text files, editing, and Canvas previews](./text-files.md)
 
 ## Capabilities And Integrations
@@ -53,7 +52,6 @@ remain authoritative when prose and implementation differ.
 - [Model Artifacts and provenance](./model-artifacts.md)
 - [Local integrations](./integrations.md)
 - [Photoshop file transfer](./photoshop.md)
-- [Plugin Integration runtime controls plan](./plugin-integration-controls-plan.md)
 
 ## Engineering
 

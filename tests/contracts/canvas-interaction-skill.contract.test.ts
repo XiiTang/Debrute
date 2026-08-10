@@ -25,7 +25,7 @@ describe('Debrute repository Skill', () => {
     expect(skill).not.toContain('Cline:');
     expect(skill).not.toContain('Codex app:');
     expect(skill).toContain('debrute request batch --input');
-    expect(skill).toContain('debrute models tts describe openai-gpt-4o-mini-tts');
+    expect(skill).toContain('debrute models tts describe openai-tts-1');
     expect(skill).toContain('debrute models music describe elevenlabs-music');
     expect(skill).toContain('debrute models sfx describe elevenlabs-sound-effects');
   });

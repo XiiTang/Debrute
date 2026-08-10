@@ -90,7 +90,7 @@ describe('Workbench context menu', () => {
     expect(withDocument.some((item) => item.kind === 'photoshop-submenu')).toBe(true);
   });
 
-  it('preserves Photoshop format, size, and AVIF host compatibility boundaries', () => {
+  it('preserves Photoshop format, size, and negotiated AVIF host capabilities', () => {
     expect(isPhotoshopTransferEligible({
       projectRelativePath: 'cover.png', kind: 'file', sizeBytes: PHOTOSHOP_MAX_FILE_BYTES
     })).toBe(true);
@@ -108,15 +108,15 @@ describe('Workbench context menu', () => {
         status: 'connected',
         transferActive: false,
         sessions: [{
-          pluginSessionId: 'legacy',
+          pluginSessionId: 'png-only',
           hostVersion: '26.7.0',
           placementMimeTypes: ['image/png'],
-          documents: [{ documentId: 7, title: 'Legacy.psd' }]
+          documents: [{ documentId: 7, title: 'PngOnly.psd' }]
         }, {
-          pluginSessionId: 'current',
+          pluginSessionId: 'avif-capable',
           hostVersion: '26.8.0',
           placementMimeTypes: ['image/avif'],
-          documents: [{ documentId: 8, title: 'Current.psd' }]
+          documents: [{ documentId: 8, title: 'AvifCapable.psd' }]
         }]
       }
     });

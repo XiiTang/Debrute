@@ -22,14 +22,12 @@ mod gemini_3_1_flash_tts_preview;
 mod gemini_3_pro_image;
 mod google_lyria_3_clip_preview;
 mod google_lyria_3_pro_preview;
-mod gpt_image_1;
 mod gpt_image_2;
 mod grok_imagine;
 mod image_01;
 mod minimax_h3;
 mod minimax_music_3_0;
 mod minimax_speech_2_8_hd;
-mod openai_gpt_4o_mini_tts;
 mod openai_tts_1;
 mod openai_tts_1_hd;
 mod qwen_image_2_0_2026_03_03;
@@ -113,7 +111,6 @@ impl ModelCatalog {
             fal_ai_flux_dev_image_to_image::registration,
             gemini_3_1_flash_image::registration,
             gemini_3_pro_image::registration,
-            gpt_image_1::registration,
             gpt_image_2::registration,
             grok_imagine::registration,
             image_01::registration,
@@ -137,7 +134,6 @@ impl ModelCatalog {
             google_lyria_3_pro_preview::registration,
             minimax_music_3_0::registration,
             minimax_speech_2_8_hd::registration,
-            openai_gpt_4o_mini_tts::registration,
             openai_tts_1::registration,
             openai_tts_1_hd::registration,
         ];

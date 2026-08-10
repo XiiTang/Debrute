@@ -570,7 +570,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       });
 
       expect(apiState.api!.openProject).not.toHaveBeenCalled();
-      expect(container.querySelector('.settings-page')?.textContent).toContain('image/openai/gpt-image-1');
+      expect(container.querySelector('.settings-page')?.textContent).toContain('gpt-image-2');
 
       await unmount(root, container);
     });
@@ -1227,10 +1227,10 @@ function globalSettingsWithHierarchyEdgesVisible(
 
 function imageSettingsFixture(): ModelSettingRecord[] {
   return [{
-    debruteModelId: 'image/openai/gpt-image-1',
+    debruteModelId: 'gpt-image-2',
     summary: 'OpenAI image generation.',
     defaultBaseUrl: 'https://api.openai.com/v1',
-    defaultRequestModelId: 'gpt-image-1',
+    defaultRequestModelId: 'gpt-image-2',
     baseUrlOverride: null,
     requestModelIdOverride: null,
     apiKeySet: false

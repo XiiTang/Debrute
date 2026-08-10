@@ -112,9 +112,6 @@
       },
       "apply_language_text_normalization": {
         "type": "boolean"
-      },
-      "use_pvc_as_ivc": {
-        "type": "boolean"
       }
     }
   }

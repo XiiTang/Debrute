@@ -49,7 +49,7 @@ The bundled `debrute` CLI and official Skills are optional capabilities for Proj
 
 ## Continue In Professional Tools
 
-Debrute sits alongside the tools that finish the work. The included Photoshop UXP and CEP plugins move Project assets between Debrute and Photoshop while keeping the same files and Project identity.
+Debrute sits alongside the tools that finish the work. The included Photoshop UXP plugin moves Project assets between Debrute and Photoshop while keeping the same files and Project identity.
 
 ## Development Quick Start
 

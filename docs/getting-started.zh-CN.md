@@ -74,7 +74,7 @@ Feedback 是当前审阅状态，不是工作流历史或审批系统。除非�
 
 ## 继续在 Photoshop 中工作
 
-仓库包含 Photoshop UXP 和 CEP 插件。它们通过 Runtime 管理的 Bridge 传输 Project 资产，同时保留真实 Project 文件和路径身份。支持格式、安装方式与准确行为见 [Photoshop 文件传输](./photoshop.md)。
+仓库包含一个 Photoshop UXP 插件。它通过 Runtime 管理的集成传输 Project 资产，同时保留真实 Project 文件和路径身份。支持格式、安装方式与准确行为见 [Photoshop 文件传输](./photoshop.md)。
 
 ## 深入了解
 

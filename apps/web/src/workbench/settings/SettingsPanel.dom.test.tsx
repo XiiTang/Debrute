@@ -153,7 +153,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
 
       expect(mutateGlobalSettings).toHaveBeenCalledWith({
         operation: 'save-model-setting',
-        modelId: 'image/openai/gpt-image-1',
+        modelId: 'gpt-image-2',
         setting: {
           baseUrlOverride: null,
           requestModelIdOverride: null,
@@ -190,7 +190,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
 
       expect(mutateGlobalSettings).toHaveBeenCalledWith({
         operation: 'save-model-setting',
-        modelId: 'image/openai/gpt-image-1',
+        modelId: 'gpt-image-2',
         setting: {
           baseUrlOverride: null,
           requestModelIdOverride: null,
@@ -232,7 +232,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         requireButton(container, 'Show API key').click();
         await Promise.resolve();
       });
-      expect(revealModelApiKey).toHaveBeenCalledWith('image/openai/gpt-image-1');
+      expect(revealModelApiKey).toHaveBeenCalledWith('gpt-image-2');
       expect(keyInput.value).toBe(exactApiKey);
 
       await act(async () => {
@@ -487,10 +487,10 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
                 models: {
                   ...globalSettingsFixture().models,
                   image: [{
-                    debruteModelId: 'image/openai/gpt-image-1',
-                    summary: 'OpenAI gpt-image-1 image generation and edits.',
+                    debruteModelId: 'gpt-image-2',
+                    summary: 'OpenAI gpt-image-2 image generation and edits.',
                     defaultBaseUrl: 'https://api.openai.com/v1',
-                    defaultRequestModelId: 'gpt-image-1',
+                    defaultRequestModelId: 'gpt-image-2',
                     baseUrlOverride: null,
                     requestModelIdOverride: null,
                     apiKeySet: false
@@ -835,9 +835,9 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       </I18nProvider>
     );
 
-    expect(html).toContain('audio/openai/gpt-4o-mini-tts');
-    expect(html).not.toContain('audio/elevenlabs/music');
-    expect(html).not.toContain('audio/elevenlabs/sfx');
+    expect(html).toContain('openai-tts-1');
+    expect(html).not.toContain('elevenlabs-music');
+    expect(html).not.toContain('elevenlabs-sound-effects');
   });
 
   it('opens image, video, TTS, music, and SFX model settings as separate pages', async () => {
@@ -864,41 +864,41 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         imageModelsButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(container.querySelector('.settings-page')?.textContent).toContain('image/openai/gpt-image-1');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('video/google/veo-3');
+      expect(container.querySelector('.settings-page')?.textContent).toContain('gpt-image-2');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('doubao-seedance-2-0-260128');
 
       await act(async () => {
         videoModelsButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('image/openai/gpt-image-1');
-      expect(container.querySelector('.settings-page')?.textContent).toContain('video/google/veo-3');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('gpt-image-2');
+      expect(container.querySelector('.settings-page')?.textContent).toContain('doubao-seedance-2-0-260128');
 
       await act(async () => {
         ttsModelsButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('image/openai/gpt-image-1');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('video/google/veo-3');
-      expect(container.querySelector('.settings-page')?.textContent).toContain('audio/openai/gpt-4o-mini-tts');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/elevenlabs/music');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/elevenlabs/sfx');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('gpt-image-2');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('doubao-seedance-2-0-260128');
+      expect(container.querySelector('.settings-page')?.textContent).toContain('openai-tts-1');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('elevenlabs-music');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('elevenlabs-sound-effects');
 
       await act(async () => {
         musicModelsButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/openai/gpt-4o-mini-tts');
-      expect(container.querySelector('.settings-page')?.textContent).toContain('audio/elevenlabs/music');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/elevenlabs/sfx');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('openai-tts-1');
+      expect(container.querySelector('.settings-page')?.textContent).toContain('elevenlabs-music');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('elevenlabs-sound-effects');
 
       await act(async () => {
         sfxModelsButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/openai/gpt-4o-mini-tts');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('audio/elevenlabs/music');
-      expect(container.querySelector('.settings-page')?.textContent).toContain('audio/elevenlabs/sfx');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('openai-tts-1');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('elevenlabs-music');
+      expect(container.querySelector('.settings-page')?.textContent).toContain('elevenlabs-sound-effects');
     } finally {
       await unmount(root, container);
     }
@@ -935,47 +935,47 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
     plugins: { photoshop: { enabled: false } },
     models: {
       image: [{
-        debruteModelId: 'image/openai/gpt-image-1',
-        summary: 'OpenAI gpt-image-1 image generation and edits.',
+        debruteModelId: 'gpt-image-2',
+        summary: 'OpenAI gpt-image-2 image generation and edits.',
         defaultBaseUrl: 'https://api.openai.com/v1',
-        defaultRequestModelId: 'gpt-image-1',
+        defaultRequestModelId: 'gpt-image-2',
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: true
       }],
       video: [{
-        debruteModelId: 'video/google/veo-3',
-        summary: 'Google Veo 3 video generation.',
-        defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-        defaultRequestModelId: 'veo-3.0-generate-preview',
+        debruteModelId: 'doubao-seedance-2-0-260128',
+        summary: 'Doubao Seedance 2.0 video generation.',
+        defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+        defaultRequestModelId: 'doubao-seedance-2-0-260128',
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: false
       }],
       audio: [{
-        debruteModelId: 'audio/openai/gpt-4o-mini-tts',
+        debruteModelId: 'openai-tts-1',
         kind: 'tts',
-        summary: 'OpenAI gpt-4o-mini-tts TTS generation.',
+        summary: 'OpenAI tts-1 TTS generation.',
         defaultBaseUrl: 'https://api.openai.com/v1',
-        defaultRequestModelId: 'gpt-4o-mini-tts',
+        defaultRequestModelId: 'tts-1',
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: false
       }, {
-        debruteModelId: 'audio/elevenlabs/music',
+        debruteModelId: 'elevenlabs-music',
         kind: 'music',
         summary: 'ElevenLabs music generation.',
         defaultBaseUrl: 'https://api.elevenlabs.io/v1',
-        defaultRequestModelId: 'music',
+        defaultRequestModelId: 'music_v2',
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: false
       }, {
-        debruteModelId: 'audio/elevenlabs/sfx',
+        debruteModelId: 'elevenlabs-sound-effects',
         kind: 'sound-effect',
         summary: 'ElevenLabs sound effects generation.',
         defaultBaseUrl: 'https://api.elevenlabs.io/v1',
-        defaultRequestModelId: 'sound-generation',
+        defaultRequestModelId: 'eleven_text_to_sound_v2',
         baseUrlOverride: null,
         requestModelIdOverride: null,
         apiKeySet: false

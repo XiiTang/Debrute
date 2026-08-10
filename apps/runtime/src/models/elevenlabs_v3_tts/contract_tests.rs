@@ -22,7 +22,6 @@ fn owns_request_response_error_and_artifact_contract() {
         ("next_request_ids".to_owned(), json!(["next"])),
         ("apply_text_normalization".to_owned(), json!("on")),
         ("apply_language_text_normalization".to_owned(), json!(true)),
-        ("use_pvc_as_ivc".to_owned(), json!(false)),
     ]);
     let sentinel_key = "future_contract_sentinel_elevenlabs_v3_tts";
     let sentinel_value = "future-contract-sentinel::elevenlabs-v3-tts";
@@ -77,7 +76,6 @@ fn owns_request_response_error_and_artifact_contract() {
         "next_request_ids",
         "apply_text_normalization",
         "apply_language_text_normalization",
-        "use_pvc_as_ivc",
     ] {
         assert_eq!(body.get(field), arguments.get(field), "{field}");
     }

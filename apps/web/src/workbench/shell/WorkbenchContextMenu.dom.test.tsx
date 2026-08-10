@@ -153,11 +153,11 @@ describe('WorkbenchContextMenu lazy items', () => {
                 {
                   pluginSessionId: 'session-1',
                   documentId: 7,
-                  title: 'Legacy.psd',
+                  title: 'PngOnly.psd',
                   disabled: true,
                   requirement: 'photoshop_26_8_for_avif'
                 },
-                { pluginSessionId: 'session-2', documentId: 9, title: 'Current.psd' }
+                { pluginSessionId: 'session-2', documentId: 9, title: 'AvifCapable.psd' }
               ]
             }]}
             position={{ x: 12, y: 16 }}
@@ -175,25 +175,25 @@ describe('WorkbenchContextMenu lazy items', () => {
       trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     });
 
-    const legacy = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
-      (button) => button.textContent?.includes('Legacy.psd')
+    const pngOnly = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.includes('PngOnly.psd')
     );
-    const current = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
-      (button) => button.textContent?.includes('Current.psd')
+    const avifCapable = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.includes('AvifCapable.psd')
     );
-    expect(legacy?.disabled).toBe(true);
-    expect(legacy?.textContent).toContain('ps ≥26.8 以支持 AVIF');
-    expect(document.activeElement).toBe(current);
+    expect(pngOnly?.disabled).toBe(true);
+    expect(pngOnly?.textContent).toContain('ps ≥26.8 以支持 AVIF');
+    expect(document.activeElement).toBe(avifCapable);
 
     await act(async () => {
-      legacy?.click();
-      current?.click();
+      pngOnly?.click();
+      avifCapable?.click();
     });
     expect(onCommand).toHaveBeenCalledTimes(1);
     expect(onCommand).toHaveBeenCalledWith('send-to-photoshop', {
       pluginSessionId: 'session-2',
       documentId: 9,
-      title: 'Current.psd'
+      title: 'AvifCapable.psd'
     });
 
     await act(async () => root.unmount());

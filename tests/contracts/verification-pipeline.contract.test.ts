@@ -71,8 +71,8 @@ describe('timed verification pipeline', () => {
 
   it('rejects an unknown command-line argument', async () => {
     const { parseVerificationArguments } = await import('../../scripts/verification-pipeline.mjs');
-    expect(() => parseVerificationArguments(['--legacy-mode'])).toThrow(
-      'Unknown verify argument: --legacy-mode'
+    expect(() => parseVerificationArguments(['--unsupported-option'])).toThrow(
+      'Unknown verify argument: --unsupported-option'
     );
   });
 });

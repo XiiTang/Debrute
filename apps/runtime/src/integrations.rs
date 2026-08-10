@@ -355,13 +355,9 @@ fn parse_install_query(
                     let CatalogBackend::System { brew_package, .. } = &integration.backend else {
                         return None;
                     };
-                    entries
-                        .iter()
-                        .find(|entry| {
-                            entry.get("name").and_then(serde_json::Value::as_str)
-                                == Some(brew_package)
-                        })
-                        .or_else(|| entries.first())
+                    entries.iter().find(|entry| {
+                        entry.get("name").and_then(serde_json::Value::as_str) == Some(brew_package)
+                    })
                 })
                 .and_then(|entry| entry.get("versions"))
                 .and_then(|versions| versions.get("stable"))
@@ -1229,3 +1225,22 @@ impl fmt::Display for IntegrationError {
 }
 
 impl Error for IntegrationError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn brew_install_query_ignores_a_different_formula() {
+        let catalog = IntegrationCatalog::bundled();
+        let integration = catalog.get("ffmpeg").expect("ffmpeg should exist");
+        let query = parse_install_query(
+            "brew",
+            integration,
+            r#"{"formulae":[{"name":"imagemagick","versions":{"stable":"7.1"}}]}"#,
+        )
+        .expect("brew output should parse");
+
+        assert_eq!(query.latest_version, None);
+    }
+}

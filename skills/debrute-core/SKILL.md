@@ -40,7 +40,7 @@ debrute models video list
 debrute models video describe doubao-seedance-2-0-260128
 debrute request single --input video-request.jsonl --timeout 30m
 debrute models tts list
-debrute models tts describe openai-gpt-4o-mini-tts
+debrute models tts describe openai-tts-1
 debrute request single --input tts-request.jsonl
 debrute models music list
 debrute models music describe elevenlabs-music

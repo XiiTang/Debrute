@@ -110,7 +110,6 @@ fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
         json!({ "plugins": { "photoshop": { "enabled": "yes" } } }),
         json!({ "plugins": { "photoshop": { "enabled": true, "extra": true } } }),
         json!({ "plugins": { "illustrator": { "enabled": true } } }),
-        json!({ "adobeBridge": { "enabled": true } }),
     ] {
         assert!(serde_json::from_value::<GlobalSettingsMutation>(invalid).is_err());
     }

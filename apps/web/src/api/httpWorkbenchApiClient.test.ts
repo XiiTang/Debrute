@@ -392,7 +392,7 @@ describe('Runtime Workbench connection', () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
 
-    await expect(client.revealModelApiKey('image/openai/gpt-image-1')).resolves.toEqual({
+    await expect(client.revealModelApiKey('gpt-image-2')).resolves.toEqual({
       apiKey: '  密钥🔑  '
     });
 
@@ -401,7 +401,7 @@ describe('Runtime Workbench connection', () => {
     expect(reveal?.init?.method).toBe('POST');
     expect(header(reveal?.init, 'x-debrute-workbench-connection')).toBe('connection-1');
     expect(JSON.parse(String(reveal?.init?.body))).toEqual({
-      modelId: 'image/openai/gpt-image-1'
+      modelId: 'gpt-image-2'
     });
     client.dispose();
   });

@@ -74,7 +74,7 @@ Feedback is current review state, not workflow history or an approval system. An
 
 ## Continue In Photoshop
 
-The repository includes Photoshop UXP and CEP plugins. They transfer Project assets through the Runtime-owned bridge while preserving the real Project file and path identity. See [Photoshop file transfer](./photoshop.md) for supported formats, installation, and exact behavior.
+The repository includes a Photoshop UXP plugin. It transfers Project assets through the Runtime-owned integration while preserving the real Project file and path identity. See [Photoshop file transfer](./photoshop.md) for supported formats, installation, and exact behavior.
 
 ## Go Deeper
 

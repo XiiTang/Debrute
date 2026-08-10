@@ -39,9 +39,6 @@ with `xi-api-key: <key>` and `Content-Type: application/json`.
 - `apply_language_text_normalization` optionally enables language-specific
   normalization; the official endpoint currently documents it for Japanese
   and warns that it can substantially increase latency.
-- `use_pvc_as_ivc` is the endpoint's deprecated PVC-to-IVC workaround. It is
-  still forwarded when deliberately supplied, but should not be selected for
-  new usage without a current need.
 
 Eleven v3 supports 70+ languages, up to 5,000 input characters, and expressive
 audio tags in the text. This exact executor calls single-voice Create Speech.
