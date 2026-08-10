@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS validation
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install pinned cargo-nextest
+        uses: taiki-e/install-action@v2.85.11
+        with:
+          tool: nextest@0.9.140
+          fallback: none
+      - name: Cache Cargo downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-downloads-
+      - name: Install architecture scanner dependency
+        run: brew install ripgrep
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare pinned native raster payload
+        run: pnpm native:raster:prepare
+      - name: Check development toolchain
+        run: pnpm doctor
+      - name: Check generated Control contract and TypeScript
+        run: pnpm check
+      - name: Test TypeScript
+        run: pnpm test
+      - name: Check architecture boundaries
+        run: pnpm lint:arch
+      - name: Check macOS Rust product targets
+        run: pnpm check:rust
+      - name: Test macOS Rust
+        run: pnpm test:rust
+      - name: Report macOS Rust build footprint
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d target ]]; then
+            size="$(du -sh target | cut -f1)"
+          else
+            size="not created"
+          fi
+          printf '### macOS Rust build\n\n- `target/` size: %s\n' "$size" >> "$GITHUB_STEP_SUMMARY"
+
+  windows-rust:
+    name: Windows Rust validation
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install pinned cargo-nextest
+        uses: taiki-e/install-action@v2.85.11
+        with:
+          tool: nextest@0.9.140
+          fallback: none
+      - name: Cache Cargo downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-downloads-
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare pinned native raster payload
+        run: pnpm native:raster:prepare
+      - name: Check development toolchain
+        run: pnpm doctor
+      - name: Check Windows Rust product targets
+        run: pnpm check:rust
+      - name: Test Windows Rust
+        run: pnpm test:rust
+      - name: Report Windows Rust build footprint
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path target) {
+            $bytes = (Get-ChildItem target -Recurse -File | Measure-Object Length -Sum).Sum
+            $size = '{0:N2} GiB' -f ($bytes / 1GB)
+          } else {
+            $size = 'not created'
+          }
+          "### Windows Rust build`n`n- ``target/`` size: $size" >> $env:GITHUB_STEP_SUMMARY

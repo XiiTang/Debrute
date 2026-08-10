@@ -289,7 +289,20 @@ node scripts/run-cargo-with-native-raster.mjs -- run -p debrute-runtime --bin de
 
 `pnpm doctor` checks the local Node/pnpm/tooling surface needed for development and supported Product packaging. `pnpm check` generates Control bindings from the exact owning Runtime library, then uses the project-reference graph to type-check packages, Web, and the Electron Desktop from its one NodeNext `noEmit` configuration. `pnpm check:rust` formats and lints product libraries and binaries; `pnpm check:rust:all` is the exhaustive all-target lint gate for tests and examples as well.
 
-`pnpm verify` is the timed daily repository gate. It runs doctor, Control generation once, the complete TypeScript check once, product-target Clippy, TypeScript and Rust tests, architecture lint, and a production artifact build that does not repeat generation or type checking. `pnpm verify:all` runs the same stages with all-target Clippy instead. During implementation, use focused tests and checks, complete code review, then run `pnpm verify:all` once for final handoff. Each verification run prints per-stage and total wall-clock durations, including the failed stage when it stops early.
+`pnpm verify` is the complete timed repository gate. It runs doctor, Control generation once, the complete TypeScript check once, product-target Clippy, TypeScript and Rust tests, architecture lint, and a production artifact build that does not repeat generation or type checking. `pnpm verify:all` runs the same stages with all-target Clippy instead. During implementation and ordinary handoff, use affected tests and checks. Committing, merging, pushing, or handing off work does not by itself select either repository gate; use one only when explicitly requested, when test or build infrastructure or root workspace contracts change, when a genuinely cross-cutting high-risk change needs repository-wide evidence, or for release work. Each verification run prints per-stage and total wall-clock durations, including the failed stage when it stops early.
+
+Ordinary GitHub CI complements affected local validation. Pull requests targeting `main` and direct pushes to `main` run the shared checks and macOS Rust validation together on a standard macOS runner while a standard Windows runner validates Windows Rust paths. Pure documentation changes skip code validation, and a newer commit cancels an obsolete run. CI excludes production artifact builds and release-specific platform acceptance; [`testing.md`](./testing.md) owns the exact scope and measurement policy.
+
+Each Git worktree keeps its own Cargo `target/`. To reuse eligible Rust dependency and compilation results without sharing final artifacts, a developer may install `sccache` and either export `RUSTC_WRAPPER=sccache` or configure it outside the repository in the user Cargo config:
+
+```toml
+[build]
+rustc-wrapper = "sccache"
+```
+
+Repository-managed Cargo processes inherit either standard setting. The uncached path remains fully supported, `sccache` is not checked by `pnpm doctor` or installed by repository scripts, and new worktrees are not prewarmed.
+
+Because sccache otherwise includes absolute source paths in cache keys, cross-worktree reuse also requires `SCCACHE_BASEDIRS` (or the equivalent sccache `basedirs` configuration) to normalize each current worktree root. A machine-local wrapper may derive that root with `git rev-parse --show-toplevel` before launching sccache; this setup remains outside the repository because worktree locations belong to each developer's machine. Cargo metadata, linker work, incremental workspace crates, and other non-cacheable invocations may still compile separately in every worktree.
 
 `pnpm dev` starts or reuses the shared Rust Runtime, starts Vite, and prints the
 exact browser Workbench URL without opening or focusing a browser. Open that URL

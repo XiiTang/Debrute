@@ -41,6 +41,66 @@ skip, todo, conditional-run, and retry syntax is rejected.
 
 ## Scheduling And Performance
 
+Validation has three scopes:
+
+- **Affected validation** runs the smallest Vitest files, Cargo packages or test
+  targets, type checks, architecture checks, and live diagnostics that establish
+  the changed behavior. This is the default during development and ordinary
+  handoff.
+- **Repository verification** runs the complete local repository gate with
+  `pnpm verify`. Committing, merging, pushing, or handing off work does not by
+  itself select this scope. Use it when explicitly requested, when test or build
+  infrastructure or root workspace contracts change, or when a genuinely
+  cross-cutting high-risk change needs repository-wide evidence.
+- **Release verification** uses `pnpm verify:all` plus the applicable platform,
+  packaging, signing, and smoke checks. `pnpm verify:all` is also available when
+  exhaustive all-target Rust lint is explicitly required, but it is not a
+  default handoff step.
+
+Ordinary GitHub CI provides the repository-level safety net that complements
+affected local validation. It uses only standard GitHub-hosted runners available
+to the public repository; paid larger runners are outside the ordinary CI
+contract. It runs for pull requests targeting `main` and for direct pushes to
+`main`; pushing an ordinary development branch without a pull request does not
+start it. A newer commit to the same pull request or branch cancels an obsolete
+in-progress run so only the latest code completes validation. Changes confined
+to Markdown and `docs/` do not start code validation; source, test, script,
+configuration, lockfile, workflow, or product-resource changes do. Ordinary CI
+checks the development toolchain, generated Control contract and TypeScript
+graph, product-target Rust formatting and Clippy, TypeScript and Rust tests, and
+architecture boundaries. Production artifact builds, exhaustive all-target
+Clippy, real-browser and Electron diagnostics, native-watcher acceptance,
+signing, notarization, and platform packaging remain affected-development or
+release checks rather than ordinary CI work. Shared
+TypeScript and architecture checks run once; product-target Rust checks and Rust
+tests run on standard macOS and Windows runners so both supported Desktop
+platforms compile their host-specific paths. Linux is not an ordinary CI target
+while Debrute does not ship a Linux product. Two jobs run in parallel: macOS
+performs the shared checks and macOS Rust validation in one workspace, while
+Windows performs the Windows Rust validation. The initial workflow caches pnpm
+and Cargo dependency downloads but does not persist `target/` or install
+`sccache`. Each platform reports its Rust wall-clock duration and final `target/`
+size; compiled-output caching is reconsidered only from that evidence and the
+repository cache limit. The workflow composes the existing check and test
+commands directly; it does not add a `verify:ci` package script that agents might
+mistake for an ordinary local handoff command. Initial CI results are advisory:
+they do not enable branch protection or prohibit direct pushes to `main` until
+the new workflow has demonstrated stable execution and useful feedback. Each
+job has a 45-minute hang timeout. Stage durations are diagnostic evidence rather
+than a pass/fail performance budget until repeated hosted-runner measurements
+establish a normal range.
+
+Every Git worktree owns its own Cargo `target/` directory so concurrent builds,
+tests, binaries, and packaging cannot observe another worktree's final
+artifacts. Developers may opt into reuse of eligible Rust dependencies and
+compilation units with a shared local `sccache` cache by configuring a Rust
+compiler wrapper and normalizing each checkout root with `SCCACHE_BASEDIRS` or
+sccache `basedirs`; Cargo metadata, linker work, incremental workspace crates,
+and other non-cacheable invocations remain worktree-local. The standard
+uncached Cargo path remains the complete public development contract. Worktrees
+do not share `CARGO_TARGET_DIR`, and creating one does not prewarm it with a
+speculative build.
+
 The shared worker policy reserves two logical CPUs, caps unit work at four
 workers, caps DOM work at two, and serializes release
 projects. `DEBRUTE_TEST_WORKERS` may lower the parallel-safe worker ceiling with
@@ -63,13 +123,14 @@ because local machine load cannot distinguish a code regression from external
 contention. Timeouts remain separate hung-test limits: 5, 5, and 30 seconds
 respectively.
 
-Whole-repository verification has a separate sequential timing report. Daily
+Whole-repository verification has a separate sequential timing report.
 `pnpm verify` generates Control bindings and runs the complete TypeScript check
 once, lints Rust product libraries and binaries, runs every TypeScript and Rust
 test, checks architecture, and builds production artifacts without repeating
-generation or type checking. Final `pnpm verify:all` selects all-target Clippy
-instead of product-target Clippy; it does not run both. A failed stage stops the
-pipeline and the summary retains the completed and failed-stage durations.
+generation or type checking. Explicit exhaustive or release verification with
+`pnpm verify:all` selects all-target Clippy instead of product-target Clippy; it
+does not run both. A failed stage stops the pipeline and the summary retains the
+completed and failed-stage durations.
 
 ## Resource Ownership
 
@@ -334,8 +395,8 @@ connection.
 | `pnpm test:canvas-text` | native `canvas-text` tag selection |
 | `pnpm verify:browser:activity` | focused light/dark real-browser Activity surface acceptance |
 | `pnpm verify:browser:window-gestures` | focused real-browser Workbench drag, eight-direction resize, cursor-lock, and cancellation acceptance |
-| `pnpm verify` | timed daily repository gate with product-target Clippy |
-| `pnpm verify:all` | timed final repository gate with all-target Clippy |
+| `pnpm verify` | complete timed repository gate with product-target Clippy |
+| `pnpm verify:all` | explicit exhaustive or release gate with all-target Clippy |
 
 Normal runs print the resolved worker plan, group and total durations, slowest
 files and cases, and exceeded diagnostic thresholds. Profile output is written atomically to

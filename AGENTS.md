@@ -18,8 +18,9 @@ Debrute is a pnpm TypeScript monorepo with a Cargo workspace for the Rust Runtim
 - `pnpm test:rust:native-watcher` separately verifies the production Project watcher factory and worker against the host operating-system watcher.
 - `pnpm lint:arch` validates package boundary rules.
 - `pnpm build` independently generates bindings, type-checks, and builds the complete Desktop product output.
-- `pnpm verify` is the timed daily gate: doctor, one binding generation, one TypeScript check, product-target Clippy, tests, architecture lint, and artifact build.
-- `pnpm verify:all` runs that same pipeline with exhaustive all-target Clippy; use it once after review for final handoff and before release work.
+- `pnpm verify` is the complete timed repository gate: doctor, one binding generation, one TypeScript check, product-target Clippy, tests, architecture lint, and artifact build.
+- `pnpm verify:all` runs that same pipeline with exhaustive all-target Clippy. It is an explicit exhaustive or release gate, not a default handoff step.
+- Ordinary GitHub CI supplies the broader macOS and Windows safety net for pull requests and `main`; it does not make either local repository gate an ordinary handoff requirement.
 
 ## Coding Style & Naming Conventions
 
@@ -55,9 +56,11 @@ pnpm check
 
 Use real-browser or Electron diagnostics when the behavior depends on actual layout, loaded fonts, media decoding or playback, browser APIs, window topology, or timing that focused automated tests cannot establish. For live Canvas diagnostics, start the development Workbench with `pnpm dev -- --canvas-perf` or `pnpm dev:electron -- --canvas-perf`, use `window.__debruteCanvasPerf.startCapture()` before the interaction and `window.__debruteCanvasPerf.stopCapture()` after it, then inspect `trace.events`, `trace.sessions`, `counterTotals`, and `canvas`.
 
-During implementation, run the smallest affected Vitest files, Cargo targets, and type checks. Complete code review before the final whole-repository gate, then run `pnpm verify:all` once. `build:artifacts` scripts are internal verified-pipeline composition targets; developers and agents use the standalone `pnpm build` command instead.
+During implementation and ordinary handoff, run the smallest affected Vitest files, Cargo targets, type checks, architecture checks, and browser or Electron diagnostics that establish the changed behavior. Committing, merging, pushing, or handing off work does not by itself justify `pnpm verify` or `pnpm verify:all`. Run a repository gate only when the user requests it, the change affects test or build infrastructure or root workspace contracts, the change is genuinely cross-cutting and high-risk, or release work requires it. `build:artifacts` scripts are internal verified-pipeline composition targets; developers and agents use the standalone `pnpm build` command instead.
 
 Run direct Runtime Cargo or nextest commands through `node scripts/run-cargo-with-native-raster.mjs -- ...`; the Runtime build requires the prepared native raster environment. `pnpm doctor` enforces cargo-nextest `0.9.140`. Rust test binaries omit embedded debug information for normal development speed; when a failing test needs debugger-quality symbols, rerun only that focused target with `CARGO_PROFILE_TEST_DEBUG=2`.
+
+Keep each Git worktree's Cargo `target/` independent and do not prewarm new worktrees speculatively. A developer may configure a machine-local `sccache` wrapper with path normalization for each Git root to reuse eligible dependency and compilation results across worktrees; repository commands inherit that standard Cargo setting, but the public development contract does not require or install `sccache`.
 
 ## Commit & Pull Request Guidelines
 
