@@ -192,7 +192,7 @@ changes are verified from the requested and decoded pixel width, not from an
 intentional blur or visible loss of quality.
 
 Resource zoom stays fixed while camera input is changing. Every live camera
-update restarts one Canvas-wide 500 ms Preview Quality Settlement timer. At the
+update restarts one Canvas-wide 160 ms Preview Quality Settlement timer. At the
 boundary, Canvas adopts the latest zoom only when that exact camera is idle; a
 new update replaces the pending target. The short camera-idle transition does
 not start or restart this timer. Settlement publishes through one external

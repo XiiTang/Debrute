@@ -271,7 +271,7 @@ _Avoid_: Preview Variant Identity, source URL, load key
 
 **Preview Quality Settlement**:
 The transient boundary after which the Canvas may adopt the latest camera scale
-for Preview Variant selection. It follows 500 ms of uninterrupted camera quiet,
+for Preview Variant selection. It follows 160 ms of uninterrupted camera quiet,
 is independent of interaction idle, and is shared across raster media.
 _Avoid_: Camera idle, resource debounce, preview publication
 

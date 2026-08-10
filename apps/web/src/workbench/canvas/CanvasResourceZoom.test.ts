@@ -44,7 +44,7 @@ describe('CanvasResourceZoom', () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 
-  it('publishes the latest zoom only after 500ms of uninterrupted camera quiet', () => {
+  it('publishes the latest zoom only after 160ms of uninterrupted camera quiet', () => {
     vi.useFakeTimers();
     const snapshot = cameraSnapshot('moving', 2);
     const settlement = createAttachedSettlement({
@@ -55,7 +55,7 @@ describe('CanvasResourceZoom', () => {
 
     settlement.observeCamera(2);
     snapshot.cameraState = 'idle';
-    vi.advanceTimersByTime(CANVAS_PREVIEW_QUALITY_SETTLE_MS - 1);
+    vi.advanceTimersByTime(159);
     expect(settled).toEqual([]);
     vi.advanceTimersByTime(1);
 
@@ -72,11 +72,11 @@ describe('CanvasResourceZoom', () => {
     const settled = settledZooms(settlement);
 
     settlement.observeCamera(2);
-    vi.advanceTimersByTime(300);
+    vi.advanceTimersByTime(80);
     snapshot.camera.z = 3;
     settlement.observeCamera(3);
     snapshot.cameraState = 'idle';
-    vi.advanceTimersByTime(499);
+    vi.advanceTimersByTime(159);
     expect(settled).toEqual([]);
     vi.advanceTimersByTime(1);
 

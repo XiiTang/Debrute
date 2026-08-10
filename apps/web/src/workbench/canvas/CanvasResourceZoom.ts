@@ -6,7 +6,7 @@ export function initialCanvasResourceZoom(cameraZoom: number): number {
   return cameraZoom;
 }
 
-export const CANVAS_PREVIEW_QUALITY_SETTLE_MS = 500;
+export const CANVAS_PREVIEW_QUALITY_SETTLE_MS = 160;
 
 export interface CanvasResourceZoomSource {
   getSnapshot(): number;
