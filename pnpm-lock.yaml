@@ -179,6 +179,9 @@ importers:
       '@debrute/canvas-core':
         specifier: workspace:*
         version: link:../../packages/canvas-core
+      '@phosphor-icons/core':
+        specifier: 2.1.1
+        version: 2.1.1
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -868,6 +871,9 @@ packages:
   '@peculiar/webcrypto@1.7.1':
     resolution: {integrity: sha512-ODOov0sGMJMf3jPonOkgGqPknTsu+DdQ7kD++gz8aI+aFMOMHFbWAA2taqXXVTdP+OTOQR/znGvSpmkeI0WTYQ==}
     engines: {node: '>=14.18.0'}
+
+  '@phosphor-icons/core@2.1.1':
+    resolution: {integrity: sha512-v4ARvrip4qBCImOE5rmPUylOEK4iiED9ZyKjcvzuezqMaiRASCHKcRIuvvxL/twvLpkfnEODCOJp5dM4eZilxQ==}
 
   '@rolldown/binding-android-arm64@1.1.4':
     resolution: {integrity: sha512-EZLpf/8y7GXkkra90ML47kzik/GMP3EMcE9bPyHmRfxLC6z9+aW5A8poCsoxjrT5GfEcNAAvWwUHjvP1pUQkfw==}
@@ -3144,6 +3150,8 @@ snapshots:
       '@peculiar/utils': 2.0.3
       tslib: 2.8.1
       webcrypto-core: 1.9.2
+
+  '@phosphor-icons/core@2.1.1': {}
 
   '@rolldown/binding-android-arm64@1.1.4':
     optional: true

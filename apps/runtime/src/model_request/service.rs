@@ -348,17 +348,17 @@ mod tests {
 
         fn set_model(&self, host: &str, request_model_id: &str, api_key: &str) {
             self.global_config
-                .patch(
-                    &json!({
-                        "modelSetting": {
-                            "modelId": FIXTURE_MODEL_ID,
-                            "setting": {
-                                "baseUrlOverride": format!("https://{host}/v1"),
-                                "requestModelIdOverride": request_model_id,
-                                "apiKey": api_key
-                            }
+                .mutate(
+                    &serde_json::from_value(json!({
+                        "operation": "save-model-setting",
+                        "modelId": FIXTURE_MODEL_ID,
+                        "setting": {
+                            "baseUrlOverride": format!("https://{host}/v1"),
+                            "requestModelIdOverride": request_model_id,
+                            "apiKey": api_key
                         }
-                    }),
+                    }))
+                    .expect("fixture should contain a valid Global Settings intent"),
                     &self.catalog,
                 )
                 .unwrap();

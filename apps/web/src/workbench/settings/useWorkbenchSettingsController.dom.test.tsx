@@ -7,7 +7,7 @@ import type {
   WorkbenchApiClient
 } from '@debrute/app-protocol';
 import { createWorkbenchGlobalProjection } from '../services/WorkbenchGlobalProjection.js';
-import { useCanvasGlobalSettingsController } from '../services/useCanvasGlobalSettingsController.js';
+import { useWorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController.js';
 import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
@@ -16,12 +16,12 @@ import {
 describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   it('presents changes immediately while serializing and coalescing saves', async () => {
     const saves: Array<ReturnType<typeof deferred<{ ok: true }>>> = [];
-    const globalSettingsSave = vi.fn(() => {
+    const mutateGlobalSettings = vi.fn(() => {
       const save = deferred<{ ok: true }>();
       saves.push(save);
       return save.promise;
     });
-    const rendered = await renderController(globalSettingsSave);
+    const rendered = await renderController(mutateGlobalSettings);
 
     let first!: Promise<void>;
     let second!: Promise<void>;
@@ -34,7 +34,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     });
 
     expectCanvasFontSize(rendered.current, 15);
-    expect(savedFontSizes(globalSettingsSave)).toEqual([13]);
+    expect(savedFontSizes(mutateGlobalSettings)).toEqual([13]);
 
     await act(async () => {
       saves[0]!.resolve({ ok: true });
@@ -42,7 +42,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       await Promise.resolve();
     });
 
-    expect(savedFontSizes(globalSettingsSave)).toEqual([13, 15]);
+    expect(savedFontSizes(mutateGlobalSettings)).toEqual([13, 15]);
     expectCanvasFontSize(rendered.current, 15);
 
     await act(async () => {
@@ -56,8 +56,8 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
   it('keeps the submitted value after the response until a matching event arrives', async () => {
     const save = deferred<{ ok: true }>();
-    const globalSettingsSave = vi.fn(() => save.promise);
-    const rendered = await renderController(globalSettingsSave);
+    const mutateGlobalSettings = vi.fn(() => save.promise);
+    const rendered = await renderController(mutateGlobalSettings);
 
     let pending!: Promise<void>;
     await act(async () => {
@@ -108,13 +108,13 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   it('retires an older awaiting confirmation when a newer submission is confirmed first', async () => {
     const secondSave = deferred<{ ok: true }>();
     let saveCount = 0;
-    const globalSettingsSave = vi.fn(() => {
+    const mutateGlobalSettings = vi.fn(() => {
       saveCount += 1;
       return saveCount === 1
         ? Promise.resolve({ ok: true as const })
         : secondSave.promise;
     });
-    const rendered = await renderController(globalSettingsSave);
+    const rendered = await renderController(mutateGlobalSettings);
 
     await act(async () => {
       await saveAppearance(rendered.current, appearanceFixture(13));
@@ -133,15 +133,15 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
       acceptAppearance(rendered.projection, appearanceFixture(16));
     });
 
-    expect(savedFontSizes(globalSettingsSave)).toEqual([13, 14]);
+    expect(savedFontSizes(mutateGlobalSettings)).toEqual([13, 14]);
     expectCanvasFontSize(rendered.current, 16);
     await rendered.unmount();
   });
 
   it('rejects the current and coalesced saves and restores the latest accepted value after failure', async () => {
     const save = deferred<{ ok: true }>();
-    const globalSettingsSave = vi.fn(() => save.promise);
-    const rendered = await renderController(globalSettingsSave);
+    const mutateGlobalSettings = vi.fn(() => save.promise);
+    const rendered = await renderController(mutateGlobalSettings);
 
     let first!: Promise<void>;
     let second!: Promise<void>;
@@ -163,20 +163,20 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 
     await expect(first).rejects.toBe(failure);
     await expect(second).rejects.toBe(failure);
-    expect(savedFontSizes(globalSettingsSave)).toEqual([13]);
+    expect(savedFontSizes(mutateGlobalSettings)).toEqual([13]);
     expectCanvasFontSize(rendered.current, 11);
     await rendered.unmount();
   });
 
   it('does not save a fully idle value that already matches the accepted projection', async () => {
-    const globalSettingsSave = vi.fn(async () => ({ ok: true as const }));
-    const rendered = await renderController(globalSettingsSave);
+    const mutateGlobalSettings = vi.fn(async () => ({ ok: true as const }));
+    const rendered = await renderController(mutateGlobalSettings);
 
     await act(async () => {
       await saveAppearance(rendered.current, appearanceFixture(12));
     });
 
-    expect(globalSettingsSave).not.toHaveBeenCalled();
+    expect(mutateGlobalSettings).not.toHaveBeenCalled();
     expectCanvasFontSize(rendered.current, 12);
     await rendered.unmount();
   });
@@ -235,7 +235,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 });
 
 async function renderController(
-  globalSettingsSave: WorkbenchApiClient['globalSettingsSave'],
+  mutateGlobalSettings: WorkbenchApiClient['mutateGlobalSettings'],
   options: {
     integrationsRunOperation?: WorkbenchApiClient['integrationsRunOperation'];
   } = {}
@@ -257,7 +257,7 @@ async function renderController(
     state: { status: 'off', transferActive: false, sessions: [] }
   });
   const api = {
-    globalSettingsSave,
+    mutateGlobalSettings,
     integrationsRescan: vi.fn(async () => ({ ok: true as const })),
     integrationsRunOperation: options.integrationsRunOperation ?? vi.fn(),
     checkProductUpdate: vi.fn(),
@@ -270,14 +270,14 @@ async function renderController(
   let current!: WorkbenchSettingsController;
 
   function Probe(): null {
-    const canvasGlobalSettings = useCanvasGlobalSettingsController({
+    const globalSettingsController = useWorkbenchGlobalSettingsController({
       api,
       globalProjection: projection
     });
     current = useWorkbenchSettingsController({
       api,
       globalProjection: projection,
-      canvasGlobalSettings
+      globalSettingsController
     });
     return null;
   }
@@ -298,7 +298,10 @@ function saveAppearance(
   controller: WorkbenchSettingsController,
   appearance: CanvasTextAppearance
 ): Promise<void> {
-  return controller.actions.saveGlobalSettings({ canvas: { textAppearance: appearance } });
+  return controller.actions.mutateGlobalSettings({
+    operation: 'set-canvas-text-appearance',
+    textAppearance: appearance
+  });
 }
 
 function acceptAppearance(
@@ -324,7 +327,7 @@ function expectCanvasFontSize(controller: WorkbenchSettingsController, fontSizeP
 
 function savedFontSizes(save: ReturnType<typeof vi.fn>): number[] {
   return save.mock.calls.map(([input]) => (
-    (input as { canvas: { textAppearance: CanvasTextAppearance } }).canvas.textAppearance.fontSizePx
+    (input as { textAppearance: CanvasTextAppearance }).textAppearance.fontSizePx
   ));
 }
 
@@ -343,6 +346,7 @@ function settingsFixture(
     canvas: { hierarchyEdgesVisible: true, textAppearance: appearance },
     chrome: { recentProjectRoots: [] },
     plugins: { photoshop: { enabled: false } },
+    feedback: { catalog: [], actionBar: [] },
     models: { image: [], video: [], audio: [] }
   };
 }

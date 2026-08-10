@@ -79,7 +79,7 @@ describe('feedback bar target equality', () => {
 
 describe('floating bar placement', () => {
   it('places feedback below a node by default', () => {
-    const barSize = canvasFeedbackBarSizeForTarget({ localToolset: 'image' });
+    const barSize = canvasFeedbackBarSizeForTarget({ actionCount: 7, localToolset: 'image' });
     const placement = placeCanvasFeedbackBar({
       anchorViewportRect: { x: 300, y: 200, width: 200, height: 120 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
@@ -102,7 +102,7 @@ describe('floating bar placement', () => {
       anchorViewportRect,
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
+      barSize: canvasFeedbackBarSizeForTarget({ actionCount: 7, localToolset: 'image' })
     });
 
     expect(placement?.placement).toBe('below');
@@ -114,7 +114,7 @@ describe('floating bar placement', () => {
       anchorViewportRect: { x: 300, y: 650, width: 200, height: 40 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
+      barSize: canvasFeedbackBarSizeForTarget({ actionCount: 7, localToolset: 'image' })
     });
 
     expect(placement?.placement).toBe('above');
@@ -126,7 +126,7 @@ describe('floating bar placement', () => {
       anchorViewportRect: { x: 8, y: 200, width: 80, height: 80 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
+      barSize: canvasFeedbackBarSizeForTarget({ actionCount: 7, localToolset: 'image' })
     });
 
     expect(placement?.x).toBe(8);
@@ -137,7 +137,7 @@ describe('floating bar placement', () => {
       anchorViewportRect: { x: 300, y: 200, width: 200, height: 120 },
       viewportRect: { x: 0, y: 0, width: 1000, height: 700 },
       reservedRects: [{ x: 190, y: 320, width: 420, height: 48 }],
-      barSize: canvasFeedbackBarSizeForTarget({ localToolset: 'image' })
+      barSize: canvasFeedbackBarSizeForTarget({ actionCount: 7, localToolset: 'image' })
     });
 
     expect(placement?.placement).toBe('above');
@@ -158,6 +158,7 @@ describe('floating bar placement', () => {
 
   it('places retained feedback targets from the live Canvas camera', () => {
     expect(feedbackBarPlacementForCanvasTarget({
+    actionCount: 7,
       target: {
         kind: 'node',
         projectRelativePath: 'flow/cover.png',
@@ -181,15 +182,19 @@ describe('floating bar placement', () => {
 
   it('sizes feedback bars from fixed controls and visible action counts', () => {
     expect(canvasFeedbackBarSizeForTarget({
+      actionCount: 7,
       localToolset: 'none'
     })).toEqual({ width: 228, height: 124 });
     expect(canvasFeedbackBarSizeForTarget({
+      actionCount: 7,
       localToolset: 'image'
     })).toEqual({ width: 299, height: 124 });
     expect(canvasFeedbackBarSizeForTarget({
+      actionCount: 7,
       localToolset: 'video'
     })).toEqual({ width: 329, height: 124 });
     expect(canvasFeedbackBarSizeForTarget({
+      actionCount: 7,
       localToolset: 'none',
       marksOnly: true
     })).toEqual({ width: 228, height: 38 });
@@ -197,10 +202,12 @@ describe('floating bar placement', () => {
 
   it('adds width for extra visible feedback actions without media width buckets', () => {
     expect(canvasFeedbackBarSizeForTarget({
+      actionCount: 7,
       localToolset: 'none',
       extraActionCount: 1
     }).width).toBe(
       canvasFeedbackBarSizeForTarget({
+        actionCount: 7,
         localToolset: 'none'
       }).width
       + CANVAS_FEEDBACK_BAR_LAYOUT.actionButtonSize
@@ -219,6 +226,7 @@ describe('floating bar placement', () => {
     };
 
     const nodeOnlyPlacement = feedbackBarPlacementForCanvasTarget({
+    actionCount: 7,
       target: {
         ...baseTarget,
         localToolset: 'none'
@@ -228,6 +236,7 @@ describe('floating bar placement', () => {
       reservedRects: []
     });
     const imagePlacement = feedbackBarPlacementForCanvasTarget({
+    actionCount: 7,
       target: {
         ...baseTarget,
         localToolset: 'image'

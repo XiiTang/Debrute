@@ -53,14 +53,13 @@ interface DebruteGlobalSettingsView {
   plugins: PluginSettings;
 }
 
-interface SaveDebruteGlobalSettingsInput {
-  // Existing patches remain unchanged.
-  plugins?: {
-    photoshop: {
+type MutateDebruteGlobalSettingsInput =
+  | {
+      operation: 'set-photoshop-plugin-enabled';
       enabled: boolean;
-    };
-  };
-}
+    }
+  // Other closed Global Settings intents are separate union variants.
+  ;
 ```
 
 The Rust persisted schema mirrors this structure with closed
@@ -75,10 +74,10 @@ Only enable choices are stored. Gateway health, retry state, sessions,
 Documents, credentials, commands, transfer activity, and diagnostics remain
 process-memory state.
 
-Plugin patches are closed and atomic. Empty plugin patches, incomplete
-Photoshop values, unknown plugin names, and unknown fields are errors. A patch
-that attempts to disable busy Photoshop together with unrelated settings fails
-as one unit; it must not partially persist the unrelated fields.
+The Plugin mutation intent is closed and atomic. Incomplete Photoshop values,
+unknown plugin names, and unknown fields are errors. Because unrelated settings
+cannot share this intent, a busy Photoshop rejection cannot partially persist
+another preference.
 
 ### Live Photoshop Projection
 
@@ -173,14 +172,14 @@ without requiring the Settings page to open.
 6. Release the lifecycle-mutation lock and return success regardless of whether
    a host is present or the first bind round succeeds.
 
-An idempotent On patch creates neither a second server nor a second retry loop.
+An idempotent On intent creates neither a second server nor a second retry loop.
 
 ### Disable
 
 1. Acquire the Photoshop lifecycle-mutation lock, then the admission gate used
    by Photoshop command reservation and session admission.
 2. Inspect the current Photoshop active-command ownership. If any session owns
-   an active command, reject the complete settings patch with HTTP 409, code
+   an active command, reject the settings intent with HTTP 409, code
    `photoshop_transfer_in_progress`, and message `Transfer in progress.` Persist
    and change nothing.
 3. With new Photoshop admissions still blocked, persist `enabled: false`.
@@ -198,7 +197,7 @@ still prevents another settings transition from overtaking shutdown. If
 persistence fails, the lifecycle remains unchanged and admissions resume after
 the gate is released.
 
-An idempotent On patch during a transfer remains a no-op. The rejected mutation
+An idempotent On intent during a transfer remains a no-op. The rejected mutation
 is the actual On-to-Off transition; no admitted transfer can exist while the
 Integration is already Off.
 
@@ -316,10 +315,10 @@ Primary files:
 - `packages/app-protocol/src/index.ts`
 - `packages/app-protocol/src/workbenchEvent.test.ts`
 
-Add the explicit config/view/patch types and default-off persistence. Extend
+Add the explicit config/view/mutation types and default-off persistence. Extend
 closed validation and fixtures. Preserve the test that rejects `adobeBridge`,
 and add rejection tests for unknown plugin IDs, unknown nested fields, empty
-patches, and non-boolean values.
+objects, and non-boolean values.
 
 ### 2. Photoshop Lifecycle Authority
 
@@ -337,7 +336,7 @@ Primary files:
 Move gateway ownership behind the setting, add bind retry and complete session
 revocation, make active-command changes publish live state, and route settings
 mutation through a Runtime service boundary that can coordinate persistence and
-Photoshop admission. Do not let the HTTP route call an uncoordinated store patch
+Photoshop admission. Do not let the HTTP route call an uncoordinated store mutation
 for a Photoshop lifecycle change.
 
 Publish Global Settings and resulting Photoshop changes on the existing ordered
@@ -361,7 +360,7 @@ Primary files:
 - `apps/web/src/workbench/i18n/dictionaries.ts`
 
 Add navigation, combine the authoritative settings and live Photoshop
-resources, render the four statuses and exact copy, submit the closed patch, and
+resources, render the four statuses and exact copy, submit the closed intent, and
 implement Integration-local busy/in-flight disabling.
 
 ### 4. Context Menu

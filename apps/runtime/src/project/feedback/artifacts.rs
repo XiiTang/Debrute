@@ -1445,8 +1445,6 @@ mod tests {
     };
 
     use super::*;
-    #[cfg(target_os = "macos")]
-    use crate::project::CanvasFeedbackMark;
     use crate::project::{
         CanvasFeedbackGeometry, CanvasFeedbackItem, CanvasFeedbackItemKind, CanvasFeedbackScope,
         ProjectPreviewService,
@@ -1772,7 +1770,7 @@ mod tests {
         let timestamp = "2026-07-15T01:02:03.004Z".to_owned();
         let entry = CanvasFeedbackEntry {
             project_relative_path: "images/cover.png".to_owned(),
-            marks: vec![CanvasFeedbackMark::Like],
+            marks: vec!["like".to_owned()],
             next_moment_label: 1,
             next_spatial_label: 2,
             items: vec![CanvasFeedbackItem {

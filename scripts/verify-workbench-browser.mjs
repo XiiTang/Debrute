@@ -29,6 +29,7 @@ const fixtureTextPath = 'notes/browser-verification.md';
 const fixtureImagePath = 'images/browser-verification.png';
 const fixtureVideoPath = 'media/browser-verification.webm';
 const fixtureAudioPath = 'media/browser-verification.wav';
+let expectedPersistedFeedbackOrder;
 const fixtureGenericDirectoryPaths = [
   'taobao-product-detail-image-test',
   'taobao-product-detail-images',
@@ -496,11 +497,16 @@ async function waitForPendingPreviewRequests(pending, label) {
 function isExpectedAbortedPreviewRequest(request) {
   const path = new URL(request.url()).pathname;
   return request.failure()?.errorText === 'net::ERR_ABORTED'
-    && request.method() === 'GET'
     && (
-      path.endsWith('/canvas-text-preview')
-      || path.endsWith('/canvas-image-preview')
-      || path.endsWith('/canvas-video-preview')
+      (request.method() === 'GET' && (
+        path.endsWith('/canvas-text-preview')
+        || path.endsWith('/canvas-image-preview')
+        || path.endsWith('/canvas-video-preview')
+      ))
+      || (request.method() === 'POST' && (
+        path.endsWith('/canvas-video-previews/probe')
+        || path.endsWith('/canvas-video-previews/ensure')
+      ))
     );
 }
 
@@ -1081,16 +1087,72 @@ async function assertWorkbenchChrome(page, label) {
 
   const dockButtons = page.getByTestId('floating-dock').locator('button');
   const dockButtonCount = await dockButtons.count();
-  if (dockButtonCount < 4) {
-    throw new Error(`[${label}] FloatingDock expected at least 4 panel buttons, received ${dockButtonCount}.`);
+  if (dockButtonCount < 5) {
+    throw new Error(`[${label}] FloatingDock expected 5 panel buttons, received ${dockButtonCount}.`);
   }
-  await dockButtons.nth(1).click();
+  const dock = page.getByTestId('floating-dock');
+  await dock.getByRole('button', { name: 'Inspector', exact: true }).click();
   await page.getByTestId('floating-panel-inspector').waitFor({ state: 'visible', timeout: 10000 });
-  await dockButtons.nth(2).click();
+  await dock.getByRole('button', { name: 'Feedback', exact: true }).click();
+  const feedbackPanel = page.getByTestId('floating-panel-feedback');
+  await feedbackPanel.waitFor({ state: 'visible', timeout: 10000 });
+  await feedbackPanel.getByText('No feedback yet.').waitFor({ state: 'visible', timeout: 10000 });
+  await dock.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByTestId('floating-panel-settings').waitFor({ state: 'visible', timeout: 10000 });
-  await dockButtons.nth(2).click();
-  await dockButtons.nth(1).click();
-  console.log(`[${label}] Workbench launch, title bar, FloatingDock, Settings, Inspector, and minimap rendered.`);
+  const settingsPanel = page.getByTestId('floating-panel-settings');
+  await settingsPanel.getByRole('button', { name: 'Feedback', exact: true }).click();
+  await settingsPanel.getByRole('heading', { name: 'Feedback', exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await settingsPanel.getByRole('heading', { name: 'Floating Feedback Bar', exact: true })
+    .waitFor({ state: 'visible', timeout: 10000 });
+  const actionCount = await settingsPanel.locator('.feedback-action-bar-preview__item').count();
+  const catalogCount = await settingsPanel.locator('.feedback-catalog-row').count();
+  if (actionCount !== 7 || catalogCount !== 7) {
+    throw new Error(`[${label}] Feedback defaults expected 7 floating-bar items and 7 catalog entries, received ${actionCount} and ${catalogCount}.`);
+  }
+  const duplicateMembershipControls = await settingsPanel.locator(
+    '.feedback-catalog-row input[type="checkbox"], .feedback-catalog-create input[type="checkbox"], .feedback-action-bar-add'
+  ).count();
+  if (duplicateMembershipControls !== 0) {
+    throw new Error(`[${label}] Feedback settings exposed a duplicate floating-bar membership control.`);
+  }
+  if (label === 'narrow') {
+    const persistedNames = await settingsPanel.locator('.feedback-action-bar-preview__item bdi').allTextContents();
+    if (!expectedPersistedFeedbackOrder
+      || persistedNames.join('\u0000') !== expectedPersistedFeedbackOrder.join('\u0000')) {
+      throw new Error(`[${label}] Feedback floating-bar order did not persist across Workbench connections.`);
+    }
+  }
+  if (label === 'desktop') {
+    await settingsPanel.getByRole('button', {
+      name: 'Remove “like” from the Floating Feedback Bar',
+      exact: true
+    }).click();
+    await page.waitForFunction(() => (
+      document.querySelectorAll('[data-testid="floating-panel-settings"] .feedback-action-bar-preview__item').length === 6
+    ), undefined, { timeout: 10000 });
+    await settingsPanel.getByTitle('Drag “like” to the Floating Feedback Bar or activate its name to add it', { exact: true })
+      .dragTo(settingsPanel.locator('.feedback-action-bar-preview'));
+    await page.waitForFunction(() => (
+      document.querySelectorAll('[data-testid="floating-panel-settings"] .feedback-action-bar-preview__item').length === 7
+    ), undefined, { timeout: 10000 });
+    const restoredItems = settingsPanel.locator('.feedback-action-bar-preview__item');
+    await restoredItems.last().dragTo(restoredItems.nth(1));
+    await page.waitForFunction(() => (
+      (() => {
+        const names = [...document.querySelectorAll(
+          '[data-testid="floating-panel-settings"] .feedback-action-bar-preview__item bdi'
+        )].map((element) => element.textContent);
+        const likeIndex = names.indexOf('like');
+        return likeIndex > 0 && likeIndex < names.length - 1;
+      })()
+    ), undefined, { timeout: 10000 });
+    expectedPersistedFeedbackOrder = await restoredItems.locator('bdi').allTextContents();
+  }
+  await saveBrowserScreenshot(page, `${label}-feedback-settings.png`);
+  await dock.getByRole('button', { name: 'Settings', exact: true }).click();
+  await dock.getByRole('button', { name: 'Feedback', exact: true }).click();
+  await dock.getByRole('button', { name: 'Inspector', exact: true }).click();
+  console.log(`[${label}] Workbench launch, title bar, five FloatingDock panels, Feedback settings, and minimap rendered.`);
 }
 
 async function assertActivitySurfaces(page, label, readConnectionCredential) {

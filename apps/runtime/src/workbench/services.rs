@@ -408,28 +408,27 @@ impl WorkbenchRuntimeServices {
         &self.canvas_source_digests
     }
 
-    pub fn settings_save(
+    pub fn settings_mutate(
         &self,
-        input: &Value,
+        input: &crate::global::GlobalSettingsMutation,
     ) -> Result<DebruteGlobalSettingsView, RuntimeHttpServiceError> {
-        let requested_photoshop_enabled = input
-            .get("plugins")
-            .and_then(Value::as_object)
-            .and_then(|plugins| plugins.get("photoshop"))
-            .and_then(Value::as_object)
-            .and_then(|photoshop| photoshop.get("enabled"))
-            .and_then(Value::as_bool);
+        let requested_photoshop_enabled = match input {
+            crate::global::GlobalSettingsMutation::SetPhotoshopPluginEnabled { enabled } => {
+                Some(*enabled)
+            }
+            _ => None,
+        };
         let Some(enabled) = requested_photoshop_enabled else {
             return self
                 .global
-                .settings_save(input)
+                .settings_mutate(input)
                 .map_err(RuntimeHttpServiceError::from_global);
         };
         let (view, _) = self
             .photoshop
             .mutate_enabled(
                 enabled,
-                || self.global.settings_save(input),
+                || self.global.settings_mutate(input),
                 || self.photoshop_lifecycle.set_enabled(enabled),
             )
             .map_err(|error| match error {

@@ -1,4 +1,4 @@
-import { act, useEffect } from 'react';
+import { act, useEffect, useSyncExternalStore } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
 import type { DebruteGlobalSettingsView } from '@debrute/app-protocol';
@@ -53,7 +53,13 @@ async function renderController(
   let current!: WorkbenchPresentationController;
 
   function Probe(): null {
-    const controller = useWorkbenchPresentationController({ globalProjection });
+    const projection = useSyncExternalStore(
+      globalProjection.subscribe,
+      globalProjection.getState,
+      globalProjection.getState
+    );
+    if (projection.status === 'uninitialized') throw new Error('Expected initialized projection.');
+    const controller = useWorkbenchPresentationController({ settings: projection.settings });
     onRender(controller);
     useEffect(() => {
       current = controller;
@@ -99,6 +105,7 @@ function settingsFixture(
     },
     chrome: { recentProjectRoots: [] },
     plugins: { photoshop: { enabled: false } },
+    feedback: { catalog: [], actionBar: [] },
     models: { image: [], video: [], audio: [] }
   };
 }

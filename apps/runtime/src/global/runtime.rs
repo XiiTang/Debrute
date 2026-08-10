@@ -12,8 +12,8 @@ use crate::photoshop::PhotoshopStateView;
 use super::{
     models::ModelSettingsView,
     store::{
-        ChromeSettings, GlobalConfigStore, GlobalSettingsError, GlobalSettingsView, PluginSettings,
-        WorkbenchSettings,
+        ChromeSettings, FeedbackSettings, GlobalConfigStore, GlobalSettingsError,
+        GlobalSettingsMutation, GlobalSettingsView, PluginSettings, WorkbenchSettings,
     },
 };
 
@@ -26,6 +26,7 @@ pub struct DebruteGlobalSettingsView {
     pub canvas: super::store::CanvasSettings,
     pub chrome: ChromeSettings,
     pub plugins: PluginSettings,
+    pub feedback: FeedbackSettings,
     pub models: ModelSettingsView,
 }
 
@@ -169,20 +170,20 @@ impl GlobalRuntimeService {
         self.store.read_model_api_key(model_id, &self.catalog)
     }
 
-    /// Applies one settings patch and publishes exactly one revision only when
+    /// Applies one settings intent and publishes exactly one revision only when
     /// persisted public or secret state changed.
     ///
     /// # Errors
     ///
     /// Returns [`GlobalSettingsError`] for invalid input or state failures.
-    pub fn settings_save(
+    pub fn settings_mutate(
         &self,
-        input: &Value,
+        input: &GlobalSettingsMutation,
     ) -> Result<DebruteGlobalSettingsView, GlobalSettingsError> {
         let _delivery = self.lock_delivery();
         let (view, change) = {
             let _commit = self.lock_commit();
-            let result = self.store.patch(input, &self.catalog)?;
+            let result = self.store.mutate(input, &self.catalog)?;
             let view = complete_view(result.view);
             let change = result
                 .changed
@@ -391,6 +392,7 @@ fn complete_view(projection: GlobalSettingsView) -> DebruteGlobalSettingsView {
         canvas: projection.canvas,
         chrome: projection.chrome,
         plugins: projection.plugins,
+        feedback: projection.feedback,
         models: projection.models,
     }
 }

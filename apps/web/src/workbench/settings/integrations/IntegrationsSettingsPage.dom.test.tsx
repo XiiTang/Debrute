@@ -337,7 +337,7 @@ function createActions(overrides: Partial<WorkbenchSettingsActions> = {}): Workb
   return {
     checkProductUpdate: async () => undefined,
     applyProductUpdate: async () => undefined,
-    saveGlobalSettings: async () => undefined,
+    mutateGlobalSettings: async () => undefined,
     revealModelApiKey: async () => '',
     rescanIntegrations: async () => undefined,
     runIntegrationOperation: async (input: Parameters<WorkbenchSettingsActions['runIntegrationOperation']>[0]) => ({
@@ -395,7 +395,8 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
     chrome: { recentProjectRoots: [] },
     plugins: { photoshop: { enabled: false } },
     models: { image: [], video: [], audio: [] },
-    ...overrides
+    ...overrides,
+    feedback: overrides.feedback ?? { catalog: [], actionBar: [] }
   };
 }
 

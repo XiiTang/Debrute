@@ -7,7 +7,7 @@ import type {
   PhotoshopStateView,
   RunIntegrationOperationInput,
   RunIntegrationOperationResult,
-  SaveDebruteGlobalSettingsInput,
+  MutateDebruteGlobalSettingsInput,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
 import type { EventProjection, SettingsResource } from '../../types.js';
@@ -15,12 +15,12 @@ import type {
   WorkbenchGlobalProjection,
   WorkbenchGlobalProjectionState
 } from '../services/WorkbenchGlobalProjection.js';
-import type { CanvasGlobalSettingsController } from '../services/useCanvasGlobalSettingsController.js';
+import type { WorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController.js';
 
 export interface WorkbenchSettingsActions {
   checkProductUpdate(): Promise<void>;
   applyProductUpdate(): Promise<void>;
-  saveGlobalSettings(input: SaveDebruteGlobalSettingsInput): Promise<void>;
+  mutateGlobalSettings(input: MutateDebruteGlobalSettingsInput): Promise<void>;
   revealModelApiKey(modelId: string): Promise<string>;
   rescanIntegrations(): Promise<void>;
   runIntegrationOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
@@ -38,7 +38,7 @@ export interface WorkbenchSettingsController {
 export interface WorkbenchSettingsControllerInput {
   api: WorkbenchApiClient;
   globalProjection: WorkbenchGlobalProjection;
-  canvasGlobalSettings: CanvasGlobalSettingsController;
+  globalSettingsController: WorkbenchGlobalSettingsController;
 }
 
 export function useWorkbenchSettingsController(
@@ -75,13 +75,7 @@ export function useWorkbenchSettingsController(
   const actions = useMemo<WorkbenchSettingsActions>(() => ({
     checkProductUpdate: async () => { await input.api.checkProductUpdate(); },
     applyProductUpdate: async () => { await input.api.applyProductUpdate(); },
-    saveGlobalSettings: async (saveInput) => {
-      if (saveInput.canvas && Object.keys(saveInput).length === 1) {
-        await input.canvasGlobalSettings.save(saveInput.canvas);
-      } else {
-        await input.api.globalSettingsSave(saveInput);
-      }
-    },
+    mutateGlobalSettings: input.globalSettingsController.mutate,
     revealModelApiKey: async (modelId) => (await input.api.revealModelApiKey(modelId)).apiKey,
     rescanIntegrations,
     runIntegrationOperation: async (operationInput) => (
@@ -89,18 +83,15 @@ export function useWorkbenchSettingsController(
     )
   }), [
     input.api,
-    input.canvasGlobalSettings,
+    input.globalSettingsController,
     rescanIntegrations
   ]);
 
-  const canvasTextAppearance = input.canvasGlobalSettings.settings.textAppearance;
+  const canvasTextAppearance = input.globalSettingsController.settings.canvas.textAppearance;
   const globalSettings = useMemo<EventProjection<DebruteGlobalSettingsView>>(() => ({
     status: 'ready',
-    value: {
-      ...projection.settings,
-      canvas: input.canvasGlobalSettings.settings
-    }
-  }), [input.canvasGlobalSettings.settings, projection.settings]);
+    value: input.globalSettingsController.settings
+  }), [input.globalSettingsController.settings]);
   const integrations = integrationsLoadError
     ? { status: 'error' as const, message: integrationsLoadError }
     : projection.integrations;

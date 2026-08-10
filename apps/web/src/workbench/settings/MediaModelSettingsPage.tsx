@@ -31,7 +31,7 @@ interface ApiKeyInputProps {
   onRevealError: (error: unknown) => void;
 }
 
-type MediaModelSettingsActions = Pick<WorkbenchSettingsActions, 'revealModelApiKey' | 'saveGlobalSettings'>;
+type MediaModelSettingsActions = Pick<WorkbenchSettingsActions, 'revealModelApiKey' | 'mutateGlobalSettings'>;
 
 export function ImageModelSettings({ settings, actions }: { settings: ModelSettingRecord[]; actions: MediaModelSettingsActions }): React.ReactElement {
   return <MediaModelSettings models={settings} actions={actions} />;
@@ -73,8 +73,10 @@ function MediaModelSettings({
               key={model.debruteModelId}
               model={model}
               onReveal={() => actions.revealModelApiKey(model.debruteModelId)}
-              onSave={(input) => actions.saveGlobalSettings({
-                modelSetting: { modelId: model.debruteModelId, setting: input }
+              onSave={(input) => actions.mutateGlobalSettings({
+                operation: 'save-model-setting',
+                modelId: model.debruteModelId,
+                setting: input
               })}
             />
           ))}

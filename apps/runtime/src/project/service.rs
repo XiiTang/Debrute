@@ -508,6 +508,9 @@ impl ProjectService {
         for path in input.target_project_relative_paths() {
             let normalized = normalize_feedback_path(path)?;
             let normalized_path = ProjectDirectoryPath::parse(&normalized)?;
+            if !input.requires_existing_target() {
+                continue;
+            }
             let target = resolve_no_symlink_existing_project_path(&self.root, &normalized_path)
                 .map_err(|_| {
                     ProjectError::Validation(format!(

@@ -8,6 +8,16 @@ import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';
 import { I18nProvider } from '../i18n';
 
+const AVAILABLE_MARKS = [
+  { name: 'like', icon: 'heart' },
+  { name: 'dislike', icon: 'thumbs-down' },
+  { name: 'check', icon: 'check-circle' },
+  { name: 'cross', icon: 'x-circle' },
+  { name: 'pending', icon: 'clock' },
+  { name: 'important', icon: 'star' },
+  { name: 'needs_revision', icon: 'warning-circle' }
+] as const;
+
 const canvasStyles = readFileSync('apps/web/src/workbench/styles/canvas.css', 'utf8');
 
 describe('CanvasFeedbackBar', () => {
@@ -227,7 +237,7 @@ describe('CanvasFeedbackBar', () => {
   it('keeps accepted Marks displayed until the Runtime result is projected', async () => {
     const onSetMark = vi.fn();
     const view = await renderBar({ marks: [], onSetMark });
-    const important = view.container.querySelector('[aria-label="Important"]') as HTMLButtonElement;
+    const important = view.container.querySelector('[aria-label="important"]') as HTMLButtonElement;
 
     await act(async () => important.click());
 
@@ -335,6 +345,7 @@ describe('CanvasFeedbackBar', () => {
       root.render(
         <I18nProvider locale="en">
           <CanvasFeedbackSelectionBar
+            availableMarks={AVAILABLE_MARKS}
             marks={['like']}
             marksMutationPending
             onSetMark={onSetMark}
@@ -351,7 +362,7 @@ describe('CanvasFeedbackBar', () => {
     expect(container.querySelector('.canvas-feedback-local-mode')).toBeNull();
     expect(buttons).toHaveLength(7);
     expect(buttons.every((button) => button.disabled)).toBe(true);
-    expect(container.querySelector('[aria-label="Like"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[aria-label="like"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(cssRule('.canvas-feedback-bar--marks-only')).toContain('max-height: 38px;');
 
     await act(async () => root.unmount());
@@ -397,6 +408,7 @@ async function renderBar(options: BarOptions): Promise<{
       root.render(
         <I18nProvider locale="en">
           <CanvasFeedbackBar
+            availableMarks={AVAILABLE_MARKS}
             projectRelativePath={options.projectRelativePath ?? 'flow/cover.png'}
             capsules={options.capsules ?? []}
             focusedCapsuleId={options.focusedCapsuleId}

@@ -48,6 +48,12 @@ A Project-local collection of review marks and comments associated with Project
 Paths.
 _Avoid_: Canvas state
 
+**Feedback Name**:
+The exact Unicode string stored by a Feedback Document as the identity and
+visible meaning of one Feedback Mark. Case and distinct Unicode sequences remain
+distinct identities; no generated Mark ID or icon is Project state.
+_Avoid_: Mark ID, normalized name, Feedback icon
+
 **Project Diagnostic**:
 A current, non-persisted error or warning produced while Runtime interprets
 Project content and root-scoped state for one snapshot.

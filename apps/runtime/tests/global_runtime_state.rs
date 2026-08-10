@@ -8,13 +8,14 @@ use std::{
 
 use debrute_runtime::global::{
     GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService, GlobalSettingsError,
+    GlobalSettingsMutation,
 };
 use debrute_runtime::integrations::{
     CommandResult, IntegrationCommand, IntegrationOperation, IntegrationProcessAdapter,
     IntegrationService, Platform, ProbeResult,
 };
 use debrute_runtime::models::ModelCatalog;
-use serde_json::json;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 #[test]
@@ -77,8 +78,8 @@ fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
     let store = GlobalConfigStore::new(&home);
 
     let enabled = store
-        .patch(
-            &json!({ "plugins": { "photoshop": { "enabled": true } } }),
+        .mutate(
+            &mutation(json!({ "operation": "set-photoshop-plugin-enabled", "enabled": true })),
             &catalog,
         )
         .expect("Photoshop Integration should enable");
@@ -96,8 +97,8 @@ fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
     );
 
     let no_op = store
-        .patch(
-            &json!({ "plugins": { "photoshop": { "enabled": true } } }),
+        .mutate(
+            &mutation(json!({ "operation": "set-photoshop-plugin-enabled", "enabled": true })),
             &catalog,
         )
         .expect("repeated enable should be idempotent");
@@ -111,10 +112,7 @@ fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
         json!({ "plugins": { "illustrator": { "enabled": true } } }),
         json!({ "adobeBridge": { "enabled": true } }),
     ] {
-        assert!(matches!(
-            store.patch(&invalid, &catalog),
-            Err(GlobalSettingsError::Validation(_))
-        ));
+        assert!(serde_json::from_value::<GlobalSettingsMutation>(invalid).is_err());
     }
 
     fs::remove_dir_all(home).expect("temporary home should be removed");
@@ -127,19 +125,18 @@ fn canvas_text_appearance_is_one_complete_validated_global_setting() {
     let store = GlobalConfigStore::new(&home);
 
     let result = store
-        .patch(
-            &json!({
-                "canvas": {
-                    "textAppearance": {
+        .mutate(
+            &mutation(json!({
+                "operation": "set-canvas-text-appearance",
+                "textAppearance": {
                         "fontId": "jetbrains-mono",
                         "fontSizePx": 15.5,
                         "lineHeightRatio": 1.35,
                         "fontWeight": 600,
                         "letterSpacingPx": -0.2,
                         "ligatures": false
-                    }
                 }
-            }),
+            })),
             &catalog,
         )
         .expect("complete Canvas text appearance should persist");
@@ -169,10 +166,12 @@ fn canvas_text_appearance_is_one_complete_validated_global_setting() {
         canvas_text_appearance_patch_with("letterSpacingPx", json!(0.15)),
         canvas_text_appearance_patch_with("unexpectedField", json!(true)),
     ] {
-        assert!(matches!(
-            store.patch(&invalid, &catalog),
-            Err(GlobalSettingsError::Validation(_))
-        ));
+        if let Ok(mutation) = serde_json::from_value::<GlobalSettingsMutation>(invalid) {
+            assert!(matches!(
+                store.mutate(&mutation, &catalog),
+                Err(GlobalSettingsError::Validation(_))
+            ));
+        }
     }
 
     fs::remove_dir_all(home).expect("temporary home should be removed");
@@ -185,8 +184,8 @@ fn canvas_hierarchy_edge_visibility_is_one_global_boolean_setting() {
     let store = GlobalConfigStore::new(&home);
 
     let hidden = store
-        .patch(
-            &json!({ "canvas": { "hierarchyEdgesVisible": false } }),
+        .mutate(
+            &mutation(json!({ "operation": "set-hierarchy-edges-visible", "hierarchyEdgesVisible": false })),
             &catalog,
         )
         .expect("Canvas hierarchy edges should hide");
@@ -203,16 +202,16 @@ fn canvas_hierarchy_edge_visibility_is_one_global_boolean_setting() {
     );
 
     let repeated = store
-        .patch(
-            &json!({ "canvas": { "hierarchyEdgesVisible": false } }),
+        .mutate(
+            &mutation(json!({ "operation": "set-hierarchy-edges-visible", "hierarchyEdgesVisible": false })),
             &catalog,
         )
         .expect("repeating Canvas hierarchy edge visibility should be valid");
     assert!(!repeated.changed);
 
     let shown = store
-        .patch(
-            &json!({ "canvas": { "hierarchyEdgesVisible": true } }),
+        .mutate(
+            &mutation(json!({ "operation": "set-hierarchy-edges-visible", "hierarchyEdgesVisible": true })),
             &catalog,
         )
         .expect("Canvas hierarchy edges should show");
@@ -224,10 +223,7 @@ fn canvas_hierarchy_edge_visibility_is_one_global_boolean_setting() {
         json!({ "canvas": { "hierarchyEdgesVisible": "false" } }),
         json!({ "canvas": { "hierarchyEdgesVisible": false, "unexpectedField": true } }),
     ] {
-        assert!(matches!(
-            store.patch(&invalid, &catalog),
-            Err(GlobalSettingsError::Validation(_))
-        ));
+        assert!(serde_json::from_value::<GlobalSettingsMutation>(invalid).is_err());
     }
 
     fs::remove_dir_all(home).expect("temporary home should be removed");
@@ -235,18 +231,17 @@ fn canvas_hierarchy_edge_visibility_is_one_global_boolean_setting() {
 
 fn canvas_text_appearance_patch_with(field: &str, value: serde_json::Value) -> serde_json::Value {
     let mut patch = json!({
-        "canvas": {
-            "textAppearance": {
+        "operation": "set-canvas-text-appearance",
+        "textAppearance": {
                 "fontId": "lilex",
                 "fontSizePx": 12.0,
                 "lineHeightRatio": 1.4,
                 "fontWeight": 400,
                 "letterSpacingPx": 0.0,
                 "ligatures": true
-            }
         }
     });
-    patch["canvas"]["textAppearance"][field] = value;
+    patch["textAppearance"][field] = value;
     patch
 }
 
@@ -276,30 +271,37 @@ fn distinct_canonical_roots_are_independent_recent_projects() {
 }
 
 #[test]
-fn patch_persists_canonical_settings_and_redacts_model_secrets() {
+fn mutations_persist_canonical_settings_and_redact_model_secrets() {
     let home = temporary_home("patch");
     let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
-    let result = store
-        .patch(
-            &json!({
-                "workbench": {
-                    "locale": "zh-CN",
-                    "themePreference": "light"
-                },
-                "modelSetting": {
-                    "modelId": "gpt-image-2",
-                    "setting": {
-                        "baseUrlOverride": "https://images.example.test/v1",
-                        "requestModelIdOverride": null,
-                        "apiKey": "sk-image-123456fg"
-                    }
-                }
-            }),
+    store
+        .mutate(
+            &mutation(json!({ "operation": "set-locale", "locale": "zh-CN" })),
             &catalog,
         )
-        .expect("valid patch should persist");
+        .expect("locale mutation should persist");
+    store
+        .mutate(
+            &mutation(json!({ "operation": "set-theme-preference", "themePreference": "light" })),
+            &catalog,
+        )
+        .expect("theme mutation should persist");
+    let result = store
+        .mutate(
+            &mutation(json!({
+                "operation": "save-model-setting",
+                "modelId": "gpt-image-2",
+                "setting": {
+                    "baseUrlOverride": "https://images.example.test/v1",
+                    "requestModelIdOverride": null,
+                    "apiKey": "sk-image-123456fg"
+                }
+            })),
+            &catalog,
+        )
+        .expect("valid model mutation should persist");
     assert!(result.changed);
     assert_eq!(result.view.workbench.locale, "zh-CN");
     let model = result
@@ -342,7 +344,7 @@ fn patch_persists_canonical_settings_and_redacts_model_secrets() {
 }
 
 #[test]
-fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
+fn malformed_intents_and_unknown_models_are_rejected_without_partial_writes() {
     let home = temporary_home("invalid");
     let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
@@ -352,46 +354,49 @@ fn invalid_and_unknown_model_patches_are_rejected_without_partial_writes() {
         json!({ "workbench": {} }),
         json!({ "unexpectedField": true }),
         json!({ "workbench": { "unexpectedField": true } }),
+        json!({
+            "operation": "save-model-setting",
+            "modelId": "gpt-image-2",
+            "setting": { "baseUrlOverride": null }
+        }),
     ] {
-        assert!(matches!(
-            store.patch(&input, &catalog),
-            Err(GlobalSettingsError::Validation(_))
-        ));
+        assert!(serde_json::from_value::<GlobalSettingsMutation>(input).is_err());
     }
 
     let invalid = store
-        .patch(&json!({ "workbench": { "locale": "fr" } }), &catalog)
+        .mutate(
+            &mutation(json!({ "operation": "set-locale", "locale": "fr" })),
+            &catalog,
+        )
         .expect_err("invalid locale should fail");
     assert_eq!(
         invalid.to_string(),
         "Workbench locale must be \"en\" or \"zh-CN\"."
     );
     let unknown = store
-        .patch(
-            &json!({
-                "modelSetting": {
-                    "modelId": "missing-audio-model",
-                    "setting": {
-                        "baseUrlOverride": null,
-                        "requestModelIdOverride": null
-                    }
+        .mutate(
+            &mutation(json!({
+                "operation": "save-model-setting",
+                "modelId": "missing-audio-model",
+                "setting": {
+                    "baseUrlOverride": null,
+                    "requestModelIdOverride": null
                 }
-            }),
+            })),
             &catalog,
         )
         .expect_err("unknown model should fail");
     assert_eq!(unknown.to_string(), "Unknown model: missing-audio-model");
     let padded = store
-        .patch(
-            &json!({
-                "modelSetting": {
-                    "modelId": " gpt-image-2 ",
-                    "setting": {
-                        "baseUrlOverride": null,
-                        "requestModelIdOverride": null
-                    }
+        .mutate(
+            &mutation(json!({
+                "operation": "save-model-setting",
+                "modelId": " gpt-image-2 ",
+                "setting": {
+                    "baseUrlOverride": null,
+                    "requestModelIdOverride": null
                 }
-            }),
+            })),
             &catalog,
         )
         .expect_err("catalog validation must use the raw model id");
@@ -411,18 +416,16 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
     let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
     store
-        .patch(
-            &json!({
-                "workbench": { "locale": "zh-CN" },
-                "modelSetting": {
-                    "modelId": "gpt-image-2",
-                    "setting": {
-                        "baseUrlOverride": "https://images.example.test/v1",
-                        "requestModelIdOverride": null,
-                        "apiKey": "  sk-opaque  "
-                    }
+        .mutate(
+            &mutation(json!({
+                "operation": "save-model-setting",
+                "modelId": "gpt-image-2",
+                "setting": {
+                    "baseUrlOverride": "https://images.example.test/v1",
+                    "requestModelIdOverride": null,
+                    "apiKey": "  sk-opaque  "
                 }
-            }),
+            })),
             &catalog,
         )
         .expect("canonical model patch should persist");
@@ -502,10 +505,14 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     service.settings_get().expect("global settings should load");
     assert_eq!(service.revision(), 0);
     service
-        .settings_save(&json!({ "workbench": { "locale": "zh-CN" } }))
+        .settings_mutate(&mutation(
+            json!({ "operation": "set-locale", "locale": "zh-CN" }),
+        ))
         .expect("effective patch should save");
     service
-        .settings_save(&json!({ "workbench": { "locale": "zh-CN" } }))
+        .settings_mutate(&mutation(
+            json!({ "operation": "set-locale", "locale": "zh-CN" }),
+        ))
         .expect("no-op patch should succeed");
     service
         .remember_recent_project(&alpha)
@@ -553,16 +560,15 @@ fn model_api_key_reveal_returns_the_exact_secret_without_publishing_global_state
     })));
     let exact_api_key = "  密钥🔑 \n";
     service
-        .settings_save(&json!({
-            "modelSetting": {
-                "modelId": "gpt-image-2",
-                "setting": {
-                    "baseUrlOverride": null,
-                    "requestModelIdOverride": null,
-                    "apiKey": exact_api_key
-                }
+        .settings_mutate(&mutation(json!({
+            "operation": "save-model-setting",
+            "modelId": "gpt-image-2",
+            "setting": {
+                "baseUrlOverride": null,
+                "requestModelIdOverride": null,
+                "apiKey": exact_api_key
             }
-        }))
+        })))
         .expect("model API key should persist");
     events.lock().expect("event recorder should lock").clear();
     let revision = service.revision();
@@ -711,7 +717,9 @@ fn global_event_dispatch_stays_ordered_while_the_first_observer_call_is_blocked(
     let first_service = Arc::clone(&service);
     let first = thread::spawn(move || {
         first_service
-            .settings_save(&json!({ "workbench": { "locale": "zh-CN" } }))
+            .settings_mutate(&mutation(
+                json!({ "operation": "set-locale", "locale": "zh-CN" }),
+            ))
             .expect("first settings commit should succeed");
     });
     {
@@ -727,7 +735,9 @@ fn global_event_dispatch_stays_ordered_while_the_first_observer_call_is_blocked(
     let (second_done, second_completion) = mpsc::sync_channel(1);
     let second = thread::spawn(move || {
         second_service
-            .settings_save(&json!({ "workbench": { "themePreference": "dark" } }))
+            .settings_mutate(&mutation(
+                json!({ "operation": "set-theme-preference", "themePreference": "dark" }),
+            ))
             .expect("second settings commit should succeed");
         second_done
             .send(())
@@ -1009,4 +1019,8 @@ fn project_root(home: &Path, name: &str) -> String {
         .join(name)
         .to_string_lossy()
         .into_owned()
+}
+
+fn mutation(value: Value) -> GlobalSettingsMutation {
+    serde_json::from_value(value).expect("fixture should be a valid Global Settings intent")
 }

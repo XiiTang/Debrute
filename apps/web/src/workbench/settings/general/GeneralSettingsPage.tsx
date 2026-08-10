@@ -5,7 +5,7 @@ import type {
   DebruteProductState,
   ManagedCliDiagnostic,
   ProductUpdateState,
-  SaveDebruteGlobalSettingsInput,
+  MutateDebruteGlobalSettingsInput,
   WorkbenchLocale
 } from '@debrute/app-protocol';
 import type { EventProjection } from '../../../types.js';
@@ -26,12 +26,14 @@ export function GeneralSettingsPage({
   actions,
   product,
   settings,
-  onSettingsChange
+  onSettingsChange,
+  section = 'general'
 }: {
   actions: ProductActions;
   product: EventProjection<DebruteProductState | null>;
   settings: DebruteGlobalSettingsView;
-  onSettingsChange: (settings: SaveDebruteGlobalSettingsInput) => Promise<void>;
+  onSettingsChange: (settings: MutateDebruteGlobalSettingsInput) => Promise<void>;
+  section?: 'general' | 'about';
 }): React.ReactElement {
   const i18n = useI18n();
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
@@ -55,7 +57,7 @@ export function GeneralSettingsPage({
   const saveLocale = async (locale: WorkbenchLocale) => {
     setLocaleOperation({ status: 'loading' });
     try {
-      await onSettingsChange({ workbench: { locale } });
+      await onSettingsChange({ operation: 'set-locale', locale });
       setLocaleOperation({ status: 'idle' });
     } catch (error) {
       setLocaleOperation({ status: 'error', message: errorMessage(error) });
@@ -64,7 +66,7 @@ export function GeneralSettingsPage({
 
   return (
     <div className="general-settings-page">
-      <section className="settings-group">
+      {section === 'general' ? <section className="settings-group">
         <h3>{i18n.t('settings.general.language.label')}</h3>
         <Field label={i18n.t('settings.general.language.label')}>
           <Select
@@ -86,8 +88,8 @@ export function GeneralSettingsPage({
             {i18n.t('settings.general.language.saveFailed', { message: localeOperation.message })}
           </small>
         ) : null}
-      </section>
-      <section className="settings-group">
+      </section> : null}
+      {section === 'about' ? <section className="settings-group">
         <h3>{i18n.t('settings.general.application')}</h3>
         <div className="settings-property-grid">
           <small><span>{i18n.t('settings.general.name')}</span>Debrute</small>
@@ -100,8 +102,8 @@ export function GeneralSettingsPage({
             </>
           ) : null}
         </div>
-      </section>
-      {product.status === 'ready' && product.value ? (
+      </section> : null}
+      {section === 'about' && product.status === 'ready' && product.value ? (
         <ProductUpdateSection
           state={product.value.update}
           operation={operation}
@@ -109,7 +111,7 @@ export function GeneralSettingsPage({
           run={run}
           i18n={i18n}
         />
-      ) : product.status === 'loading' ? (
+      ) : section === 'about' && product.status === 'loading' ? (
         <section className="settings-group">
           <h3>{i18n.t('settings.general.updates')}</h3>
           <div className="settings-resource-state" aria-busy="true">

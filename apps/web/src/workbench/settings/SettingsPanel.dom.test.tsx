@@ -125,7 +125,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const saveGlobalSettings = vi.fn(async () => undefined);
+    const mutateGlobalSettings = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
@@ -133,7 +133,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings }}
+              actions={{ ...actions(), mutateGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -151,14 +151,13 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       });
 
-      expect(saveGlobalSettings).toHaveBeenCalledWith({
-        modelSetting: {
-          modelId: 'image/openai/gpt-image-1',
-          setting: {
-            baseUrlOverride: null,
-            requestModelIdOverride: null,
-            apiKey: ' sk-new '
-          }
+      expect(mutateGlobalSettings).toHaveBeenCalledWith({
+        operation: 'save-model-setting',
+        modelId: 'image/openai/gpt-image-1',
+        setting: {
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKey: ' sk-new '
         }
       });
     } finally {
@@ -170,7 +169,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const saveGlobalSettings = vi.fn(async () => undefined);
+    const mutateGlobalSettings = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
@@ -178,7 +177,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings }}
+              actions={{ ...actions(), mutateGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -189,14 +188,13 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      expect(saveGlobalSettings).toHaveBeenCalledWith({
-        modelSetting: {
-          modelId: 'image/openai/gpt-image-1',
-          setting: {
-            baseUrlOverride: null,
-            requestModelIdOverride: null,
-            apiKey: ''
-          }
+      expect(mutateGlobalSettings).toHaveBeenCalledWith({
+        operation: 'save-model-setting',
+        modelId: 'image/openai/gpt-image-1',
+        setting: {
+          baseUrlOverride: null,
+          requestModelIdOverride: null,
+          apiKey: ''
         }
       });
     } finally {
@@ -210,7 +208,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     const root = createRoot(container);
     const exactApiKey = '  密钥🔑  ';
     const revealModelApiKey = vi.fn(async () => exactApiKey);
-    const saveGlobalSettings = vi.fn(async () => undefined);
+    const mutateGlobalSettings = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
@@ -218,7 +216,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), revealModelApiKey, saveGlobalSettings }}
+              actions={{ ...actions(), revealModelApiKey, mutateGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -240,7 +238,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       await act(async () => {
         keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       });
-      expect(saveGlobalSettings).not.toHaveBeenCalled();
+      expect(mutateGlobalSettings).not.toHaveBeenCalled();
 
       await act(async () => {
         requireButton(container, 'Hide API key').click();
@@ -256,7 +254,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     document.body.append(container);
     const root = createRoot(container);
     const save = deferred<void>();
-    const saveGlobalSettings = vi.fn(() => save.promise);
+    const mutateGlobalSettings = vi.fn(() => save.promise);
 
     try {
       await act(async () => {
@@ -264,7 +262,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings }}
+              actions={{ ...actions(), mutateGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -279,7 +277,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         keyInput.dispatchEvent(new Event('input', { bubbles: true }));
         keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       });
-      expect(saveGlobalSettings).toHaveBeenCalledTimes(1);
+      expect(mutateGlobalSettings).toHaveBeenCalledTimes(1);
 
       await act(async () => {
         save.resolve(undefined);
@@ -290,7 +288,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       await act(async () => {
         keyInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       });
-      expect(saveGlobalSettings).toHaveBeenCalledTimes(1);
+      expect(mutateGlobalSettings).toHaveBeenCalledTimes(1);
     } finally {
       await unmount(root, container);
     }
@@ -398,14 +396,14 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     const root = createRoot(container);
     const reveal = deferred<string>();
     const revealModelApiKey = vi.fn(() => reveal.promise);
-    const saveGlobalSettings = vi.fn(async () => undefined);
+    const mutateGlobalSettings = vi.fn(async () => undefined);
 
     await act(async () => {
       root.render(
         <I18nProvider locale="en">
           <ImageModelSettings
             settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-            actions={{ ...actions(), revealModelApiKey, saveGlobalSettings }}
+            actions={{ ...actions(), revealModelApiKey, mutateGlobalSettings }}
           />
         </I18nProvider>
       );
@@ -421,14 +419,14 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     });
 
     expect(container.textContent).toBe('');
-    expect(saveGlobalSettings).not.toHaveBeenCalled();
+    expect(mutateGlobalSettings).not.toHaveBeenCalled();
   });
 
   it('preserves in-progress media model drafts when unchanged settings arrive as new objects', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const saveGlobalSettings = vi.fn(async () => undefined);
+    const mutateGlobalSettings = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
@@ -436,7 +434,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           <I18nProvider locale="en">
             <ImageModelSettings
               settings={readyResourceValue(stateWithSettings().globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings }}
+              actions={{ ...actions(), mutateGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -463,7 +461,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
                   })
                 }
               }).globalSettings).models.image}
-              actions={{ ...actions(), saveGlobalSettings }}
+              actions={{ ...actions(), mutateGlobalSettings }}
             />
           </I18nProvider>
         );
@@ -472,7 +470,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       const nextKeyInput = container.querySelector('input[aria-label="API Key"]');
       expect(nextKeyInput).toBeInstanceOf(HTMLInputElement);
       expect((nextKeyInput as HTMLInputElement).value).toBe('sk-draft');
-      expect(saveGlobalSettings).not.toHaveBeenCalled();
+      expect(mutateGlobalSettings).not.toHaveBeenCalled();
     } finally {
       await unmount(root, container);
     }
@@ -511,8 +509,8 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     expect(html).not.toContain('aria-label="Delete API key"');
   });
 
-  it('renders General settings as grouped sections', () => {
-    const html = renderToStaticMarkup(
+  it('keeps ordinary General settings separate from About and Updates', () => {
+    const general = renderToStaticMarkup(
       <I18nProvider locale="en">
         <GeneralSettingsPage
           actions={actions()}
@@ -523,7 +521,19 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
       </I18nProvider>
     );
 
-    expect((html.match(/class="settings-group"/g) ?? []).length).toBe(3);
+    const about = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <GeneralSettingsPage
+          actions={actions()}
+          product={{ status: 'ready', value: productState() }}
+          settings={readyResourceValue(stateWithSettings().globalSettings)}
+          section="about"
+          onSettingsChange={async () => undefined}
+        />
+      </I18nProvider>
+    );
+    expect((general.match(/class="settings-group"/g) ?? []).length).toBe(1);
+    expect((about.match(/class="settings-group"/g) ?? []).length).toBe(2);
   });
 
   it('renders Workbench Theme and the closed five-font catalog on Appearance', () => {
@@ -573,11 +583,10 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
 
       await changeSelect(requireSelectWithOption(container, 'JetBrains Mono'), 'lilex');
       expect(onSettingsChange).toHaveBeenLastCalledWith({
-        canvas: {
-          textAppearance: {
-            ...globalSettingsFixture().canvas.textAppearance,
-            fontId: 'lilex'
-          }
+        operation: 'set-canvas-text-appearance',
+        textAppearance: {
+          ...globalSettingsFixture().canvas.textAppearance,
+          fontId: 'lilex'
         }
       });
 
@@ -587,12 +596,11 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         weight.dispatchEvent(new Event('input', { bubbles: true }));
       });
       expect(onSettingsChange).toHaveBeenLastCalledWith({
-        canvas: {
-          textAppearance: {
-            ...globalSettingsFixture().canvas.textAppearance,
-            fontId: 'lilex',
-            fontWeight: 600
-          }
+        operation: 'set-canvas-text-appearance',
+        textAppearance: {
+          ...globalSettingsFixture().canvas.textAppearance,
+          fontId: 'lilex',
+          fontWeight: 600
         }
       });
 
@@ -604,12 +612,11 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         }));
       });
       expect(onSettingsChange).toHaveBeenLastCalledWith({
-        canvas: {
-          textAppearance: {
-            ...globalSettingsFixture().canvas.textAppearance,
-            fontId: 'lilex',
-            fontWeight: 610
-          }
+        operation: 'set-canvas-text-appearance',
+        textAppearance: {
+          ...globalSettingsFixture().canvas.textAppearance,
+          fontId: 'lilex',
+          fontWeight: 610
         }
       });
 
@@ -633,6 +640,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           actions={actions()}
           product={{ status: 'ready', value: productState() }}
           settings={readyResourceValue(stateWithSettings().globalSettings)}
+          section="about"
           onSettingsChange={async () => undefined}
         />
       </I18nProvider>
@@ -658,6 +666,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               }}
               product={{ status: 'ready', value: availableProductState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
+              section="about"
               onSettingsChange={async () => undefined}
             />
           </I18nProvider>
@@ -694,6 +703,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               }}
               product={{ status: 'ready', value: availableProductState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
+              section="about"
               onSettingsChange={async () => undefined}
             />
           </I18nProvider>
@@ -716,7 +726,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     }
   });
 
-  it('renders Workbench language and application preferences in General settings', () => {
+  it('renders only Workbench language preferences in General settings', () => {
     const saved: unknown[] = [];
     const html = renderToStaticMarkup(
       <I18nProvider locale="zh-CN">
@@ -731,6 +741,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
             },
             chrome: { recentProjectRoots: [] },
             plugins: { photoshop: { enabled: false } },
+    feedback: { catalog: [], actionBar: [] },
             models: { image: [], video: [], audio: [] }
           }}
           onSettingsChange={async (settings) => {
@@ -743,8 +754,8 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     expect(html).not.toContain('<h2');
     expect(html).toContain('语言');
     expect(html).toContain('简体中文');
-    expect(html).toContain('应用');
-    expect(html).toContain('Debrute');
+    expect(html).not.toContain('应用');
+    expect(html).not.toContain('Debrute');
     expect(saved).toEqual([]);
   });
 
@@ -970,7 +981,8 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
         apiKeySet: false
       }]
     },
-    ...overrides
+    ...overrides,
+    feedback: overrides.feedback ?? { catalog: [], actionBar: [] }
   };
 }
 
@@ -978,7 +990,7 @@ function actions(): WorkbenchSettingsActions {
   return {
     checkProductUpdate: vi.fn(async () => undefined),
     applyProductUpdate: vi.fn(async () => undefined),
-    saveGlobalSettings: vi.fn(async () => undefined),
+    mutateGlobalSettings: vi.fn(async () => undefined),
     revealModelApiKey: vi.fn(async () => ''),
     rescanIntegrations: vi.fn(async () => undefined),
     runIntegrationOperation: vi.fn(async (input) => ({

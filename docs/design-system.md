@@ -370,8 +370,8 @@ may use a local control background.
 close placement, continuous background, and body overflow. The shell renders
 each panel name once.
 
-Settings uses General, Appearance, Models, Plugins, and Integrations navigation,
-one title per selected page, explicit loading/error/ready content, ordinary
+Settings uses General, Appearance, Feedback, Models, Plugins, Integrations, and
+System navigation, one title per selected page, explicit loading/error/ready content, ordinary
 sections for General and Appearance settings, and cards only for independent
 repeated records. Plugins and Integrations remain separate groups. The Plugins
 page presents one row per Runtime-hosted professional-tool Integration with an
@@ -384,6 +384,12 @@ metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and
 emulator geometry. Project Open owns one focused entry rendered directly over
 the Canvas background. Canvas owns node geometry, media presentation,
 annotations, handles, feedback, and overlay placement.
+
+Debrute Cutout remains the sole icon family for functional Workbench controls.
+User-selected Feedback identity symbols are content decoration from the pinned
+Phosphor Fill family: they appear in the Feedback settings preview, Action Bar,
+and Feedback Panel, but do not replace Cutout buttons or navigation icons. An
+unknown or unmapped Feedback Name uses the standard question-mark symbol.
 
 Project Open, Project opening, and failed Project opening render centered status
 content directly over the Canvas background without a page, card, or

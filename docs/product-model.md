@@ -25,6 +25,14 @@ The only Debrute-owned Project state is Feedback:
 
 Feedback targets ordinary Project files outside `.debrute`.
 
+A Feedback Mark is identified in this Project document by its exact Unicode
+Feedback Name. Icon mapping and the ordered set of at most eight Action Bar
+names are local Global Settings in `~/.debrute/config/global_settings.json`;
+they never enter Project files. Consequently the same Feedback Name may have a
+different icon on another computer, and an unmapped Project name remains valid
+and appears with a question-mark icon. Debrute has no generic Project Settings
+store or Project-level preference page.
+
 ## Canvas
 
 Canvas is a visual file manager for one Project. Every Project Tree entry

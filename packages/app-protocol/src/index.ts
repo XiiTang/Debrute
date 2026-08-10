@@ -168,17 +168,7 @@ export interface CanvasSourceResolutionResponse {
   }>;
 }
 
-export const CANVAS_FEEDBACK_MARKS = [
-  'like',
-  'dislike',
-  'check',
-  'cross',
-  'pending',
-  'important',
-  'needs_revision'
-] as const;
-
-export type CanvasFeedbackMark = typeof CANVAS_FEEDBACK_MARKS[number];
+export type CanvasFeedbackMark = string;
 export type CanvasFeedbackGeometry =
   | { type: 'point'; x: number; y: number }
   | { type: 'rect'; x: number; y: number; width: number; height: number };
@@ -341,11 +331,22 @@ interface DebruteGlobalPluginSettings {
   };
 }
 
+export interface FeedbackCatalogEntry {
+  name: string;
+  icon: string;
+}
+
+export interface DebruteGlobalFeedbackSettings {
+  catalog: FeedbackCatalogEntry[];
+  actionBar: string[];
+}
+
 export interface DebruteGlobalSettingsView {
   workbench: DebruteGlobalWorkbenchSettings;
   canvas: DebruteGlobalCanvasSettings;
   chrome: DebruteGlobalChromeSettings;
   plugins: DebruteGlobalPluginSettings;
+  feedback: DebruteGlobalFeedbackSettings;
   models: {
     image: ModelSettingRecord[];
     video: ModelSettingRecord[];
@@ -353,12 +354,17 @@ export interface DebruteGlobalSettingsView {
   };
 }
 
-export interface SaveDebruteGlobalSettingsInput {
-  workbench?: Partial<DebruteGlobalWorkbenchSettings>;
-  canvas?: Partial<DebruteGlobalCanvasSettings>;
-  plugins?: { photoshop: { enabled: boolean } };
-  modelSetting?: { modelId: string; setting: SaveModelSettingInput };
-}
+export type MutateDebruteGlobalSettingsInput =
+  | { operation: 'set-locale'; locale: WorkbenchLocale }
+  | { operation: 'set-theme-preference'; themePreference: WorkbenchThemePreference }
+  | { operation: 'set-canvas-text-appearance'; textAppearance: CanvasTextAppearance }
+  | { operation: 'set-hierarchy-edges-visible'; hierarchyEdgesVisible: boolean }
+  | { operation: 'create-feedback-mark'; name: string; icon: string }
+  | { operation: 'set-feedback-mark-icon'; name: string; icon: string }
+  | { operation: 'delete-feedback-mark'; name: string }
+  | { operation: 'set-feedback-action-bar'; names: string[] }
+  | { operation: 'set-photoshop-plugin-enabled'; enabled: boolean }
+  | { operation: 'save-model-setting'; modelId: string; setting: SaveModelSettingInput };
 
 export interface WorkbenchProjectFileOperationResult extends ProjectPathEntry, RevisionedProjectResult {}
 
@@ -1645,13 +1651,7 @@ function isCanvasFeedbackItem(value: unknown): boolean {
 }
 
 function isCanvasFeedbackMark(value: unknown): boolean {
-  return value === 'like'
-    || value === 'dislike'
-    || value === 'check'
-    || value === 'cross'
-    || value === 'pending'
-    || value === 'important'
-    || value === 'needs_revision';
+  return typeof value === 'string' && value.length > 0;
 }
 
 function isCanvasFeedbackMoment(value: unknown): boolean {
@@ -1779,7 +1779,7 @@ export interface WorkbenchApiClient {
   clearRecentProjectRoots(): Promise<{ ok: true }>;
   checkProductUpdate(): Promise<{ ok: true }>;
   applyProductUpdate(): Promise<{ ok: true }>;
-  globalSettingsSave(input: SaveDebruteGlobalSettingsInput): Promise<{ ok: true }>;
+  mutateGlobalSettings(input: MutateDebruteGlobalSettingsInput): Promise<{ ok: true }>;
   revealModelApiKey(modelId: string): Promise<RevealModelApiKeyResponse>;
   subscribeTerminalSessions(
     listener: (sessions: TerminalSessionView[]) => void,

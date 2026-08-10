@@ -23,6 +23,7 @@ import {
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
   explorer: 'shell.panels.explorer',
   inspector: 'shell.panels.inspector',
+  feedback: 'shell.panels.feedback',
   settings: 'shell.panels.settings',
   terminal: 'shell.panels.terminal'
 };
@@ -99,12 +100,14 @@ export function FloatingPanelContent({
   panelId,
   explorerPanel,
   inspectorPanel,
+  feedbackPanel,
   settingsPanel,
   terminalPanel
 }: {
   panelId: FloatingPanelId;
   explorerPanel: React.ReactElement;
   inspectorPanel: React.ReactElement;
+  feedbackPanel: React.ReactElement;
   settingsPanel: React.ReactElement;
   terminalPanel: React.ReactElement;
 }): React.ReactElement {
@@ -113,6 +116,9 @@ export function FloatingPanelContent({
   }
   if (panelId === 'inspector') {
     return inspectorPanel;
+  }
+  if (panelId === 'feedback') {
+    return feedbackPanel;
   }
   if (panelId === 'terminal') {
     return terminalPanel;

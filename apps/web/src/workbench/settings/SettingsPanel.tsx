@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AudioLines, Cable, Eye, Image as ImageIcon, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
+import { AudioLines, Cable, Eye, Heart, Image as ImageIcon, Info, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
 import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
@@ -13,6 +13,7 @@ import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPag
 import { PluginsSettingsPage } from './plugins/PluginsSettingsPage.js';
 import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage.js';
 import { SettingsResourcePanel } from './SettingsResourcePanel.js';
+import { FeedbackSettingsPage } from './feedback/FeedbackSettingsPage.js';
 import { useI18n } from '../i18n/index.js';
 import type { WorkbenchResolvedTheme } from '../services/workbenchTheme.js';
 import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController.js';
@@ -22,7 +23,8 @@ const SETTINGS_NAV_GROUPS = [
     id: 'general',
     items: [
       { id: 'general', labelKey: 'settings.nav.general', icon: Settings },
-      { id: 'appearance', labelKey: 'settings.nav.appearance', icon: Eye }
+      { id: 'appearance', labelKey: 'settings.nav.appearance', icon: Eye },
+      { id: 'feedback', labelKey: 'settings.nav.feedback', icon: Heart }
     ]
   },
   {
@@ -45,6 +47,11 @@ const SETTINGS_NAV_GROUPS = [
     id: 'integrations',
     labelKey: 'settings.nav.integrationsGroup',
     items: [{ id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench }]
+  },
+  {
+    id: 'system',
+    labelKey: 'settings.nav.systemGroup',
+    items: [{ id: 'about-updates', labelKey: 'settings.nav.aboutUpdates', icon: Info }]
   }
 ] as const;
 
@@ -101,7 +108,7 @@ export function SettingsPanel({
                 actions={actions}
                 product={state.product}
                 settings={settings}
-                onSettingsChange={actions.saveGlobalSettings}
+                onSettingsChange={actions.mutateGlobalSettings}
               />
             )}
           </SettingsResourcePanel>
@@ -111,7 +118,16 @@ export function SettingsPanel({
               <AppearanceSettingsPage
                 settings={settings}
                 resolvedTheme={state.resolvedTheme}
-                onSettingsChange={actions.saveGlobalSettings}
+                onSettingsChange={actions.mutateGlobalSettings}
+              />
+            )}
+          </SettingsResourcePanel>
+        ) : activePage === 'feedback' ? (
+          <SettingsResourcePanel title={i18n.t('settings.feedback.title')} resource={state.globalSettings}>
+            {(settings) => (
+              <FeedbackSettingsPage
+                settings={settings.feedback}
+                mutate={actions.mutateGlobalSettings}
               />
             )}
           </SettingsResourcePanel>
@@ -159,7 +175,7 @@ export function SettingsPanel({
               <PluginsSettingsPage
                 settings={resource.settings.plugins}
                 photoshop={resource.photoshop}
-                onSettingsChange={actions.saveGlobalSettings}
+                onSettingsChange={actions.mutateGlobalSettings}
               />
             )}
           </SettingsResourcePanel>
@@ -170,6 +186,18 @@ export function SettingsPanel({
             {...(state.integrations.status === 'error' ? { onRetry: actions.rescanIntegrations } : {})}
           >
             {(settings) => <IntegrationsSettingsPage settings={settings} actions={actions} />}
+          </SettingsResourcePanel>
+        ) : activePage === 'about-updates' ? (
+          <SettingsResourcePanel title={i18n.t('settings.about.title')} resource={state.globalSettings}>
+            {(settings) => (
+              <GeneralSettingsPage
+                actions={actions}
+                product={state.product}
+                settings={settings}
+                section="about"
+                onSettingsChange={actions.mutateGlobalSettings}
+              />
+            )}
           </SettingsResourcePanel>
         ) : null}
       </div>

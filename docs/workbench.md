@@ -437,13 +437,15 @@ are documented in [`desktop-shell.md`](./desktop-shell.md).
 ## Settings, Theme, And Language
 
 Settings has one directory and one content surface. Its current pages are
-General; Appearance; Image, Video, TTS, Music, and SFX Models; Plugins; and
-Integrations. Plugins and Integrations are distinct navigation groups: Plugins
+General; Appearance; Feedback; Image, Video, TTS, Music, and SFX Models;
+Plugins; Integrations; and System. Plugins and Integrations are distinct
+navigation groups: Plugins
 controls Runtime-hosted professional-tool gateways, while Integrations manages
 catalog-defined command-line tools.
 Appearance composes the Workbench Theme mode with the separate
-global Canvas Text Appearance controls; General retains language, product
-information, and updates. Runtime-owned Global Settings is
+global Canvas Text Appearance controls; General retains language, while System
+owns product information and updates. Feedback configures the machine-local
+Feedback Mark Catalog and the ordered Action Bar subset. Runtime-owned Global Settings is
 ready before React mounts. Product and Integration projections retain their own
 loading and ready states because they arrive independently; connection failure
 still ends the Workbench. The Plugins page waits for both Global Settings and
@@ -457,19 +459,20 @@ not commit the switch locally; ordered settings and Photoshop events remain its
 only authority. Pairing, Project links, and a separate refresh request do not
 exist.
 
-Workbench sends closed partial settings mutations. Editable model text fields
+Workbench sends closed typed settings mutation intents. Editable model text fields
 are trimmed before submission; Runtime accepts only already-canonical values
 and does not repeat that normalization. Empty settings objects and unknown
 fields are errors, while submitting a valid value that is already current is an
 idempotent no-op. Settings resources and commands remain private to the
-Settings feature instead of being added to the shared Workbench state and
+Settings feature instead of being added to generic shared Workbench state and
 action bags.
 
 Canvas Text Appearance mutations always carry the complete font ID, font size,
 line-height ratio, requested weight, letter spacing, and ligature value. The
 Canvas hierarchy-edge control sends the independent
 `canvas.hierarchyEdgesVisible` boolean and has no duplicate Settings page
-control. Both use one always-mounted Canvas-global settings controller. Valid
+control. They use the same always-mounted Workbench Global Settings controller
+as Language, Theme, Feedback, Plugin enablement, and Model persistence. Valid
 changes update the local Canvas immediately; each Workbench window serializes
 its submissions and coalesces unsent fields to their newest values. A successful
 mutation response is not confirmation: the local values remain presented until

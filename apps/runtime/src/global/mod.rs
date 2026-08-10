@@ -13,8 +13,9 @@ pub use runtime::{
     GlobalRuntimeService,
 };
 pub use store::{
-    CanvasFontId, CanvasSettings, CanvasTextAppearance, ChromeSettings, GlobalConfigSnapshot,
-    GlobalConfigStore, GlobalMutationResult, GlobalSettingsConfig, GlobalSettingsError,
-    GlobalSettingsView, ModelConfig, PhotoshopPluginSettings, PluginSettings,
-    RecentProjectsMutationResult, SecretsConfig, WorkbenchSettings,
+    CanvasFontId, CanvasSettings, CanvasTextAppearance, ChromeSettings, FeedbackCatalogEntry,
+    FeedbackSettings, GlobalConfigSnapshot, GlobalConfigStore, GlobalMutationResult,
+    GlobalSettingsConfig, GlobalSettingsError, GlobalSettingsMutation, GlobalSettingsView,
+    ModelConfig, PhotoshopPluginSettings, PluginSettings, RecentProjectsMutationResult,
+    SaveModelSettingMutation, SecretsConfig, WorkbenchSettings,
 };

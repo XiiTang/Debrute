@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Map, Value};
+use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
 use crate::models::ModelCatalog;
@@ -103,6 +103,44 @@ pub struct PluginSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeedbackCatalogEntry {
+    pub name: String,
+    pub icon: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeedbackSettings {
+    pub catalog: Vec<FeedbackCatalogEntry>,
+    pub action_bar: Vec<String>,
+}
+
+impl Default for FeedbackSettings {
+    fn default() -> Self {
+        let catalog = [
+            ("like", "heart"),
+            ("dislike", "thumbs-down"),
+            ("check", "check-circle"),
+            ("cross", "x-circle"),
+            ("pending", "clock"),
+            ("important", "star"),
+            ("needs_revision", "warning-circle"),
+        ]
+        .into_iter()
+        .map(|(name, icon)| FeedbackCatalogEntry {
+            name: name.to_owned(),
+            icon: icon.to_owned(),
+        })
+        .collect::<Vec<_>>();
+        Self {
+            action_bar: catalog.iter().map(|entry| entry.name.clone()).collect(),
+            catalog,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelConfig {
     pub debrute_model_id: String,
     #[serde(deserialize_with = "deserialize_nullable_string")]
@@ -118,6 +156,7 @@ pub struct GlobalSettingsConfig {
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
     pub plugins: PluginSettings,
+    pub feedback: FeedbackSettings,
     pub models: Vec<ModelConfig>,
 }
 
@@ -140,7 +179,61 @@ pub struct GlobalSettingsView {
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
     pub plugins: PluginSettings,
+    pub feedback: FeedbackSettings,
     pub models: ModelSettingsView,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(
+    tag = "operation",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum GlobalSettingsMutation {
+    SetLocale {
+        locale: String,
+    },
+    SetThemePreference {
+        theme_preference: String,
+    },
+    SetCanvasTextAppearance {
+        text_appearance: CanvasTextAppearance,
+    },
+    SetHierarchyEdgesVisible {
+        hierarchy_edges_visible: bool,
+    },
+    CreateFeedbackMark {
+        name: String,
+        icon: String,
+    },
+    SetFeedbackMarkIcon {
+        name: String,
+        icon: String,
+    },
+    DeleteFeedbackMark {
+        name: String,
+    },
+    SetFeedbackActionBar {
+        names: Vec<String>,
+    },
+    SetPhotoshopPluginEnabled {
+        enabled: bool,
+    },
+    SaveModelSetting {
+        model_id: String,
+        setting: SaveModelSettingMutation,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveModelSettingMutation {
+    #[serde(deserialize_with = "deserialize_nullable_string")]
+    pub base_url_override: Option<String>,
+    #[serde(deserialize_with = "deserialize_nullable_string")]
+    pub request_model_id_override: Option<String>,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,21 +340,21 @@ impl GlobalConfigStore {
             })
     }
 
-    /// Applies one validated partial settings patch atomically per file.
+    /// Applies one validated settings intent atomically per file.
     ///
     /// # Errors
     ///
     /// Returns [`GlobalSettingsError`] without writing when input validation
     /// fails, or when current state cannot be read/persisted.
-    pub fn patch(
+    pub fn mutate(
         &self,
-        input: &Value,
+        input: &GlobalSettingsMutation,
         catalog: &ModelCatalog,
     ) -> Result<GlobalMutationResult, GlobalSettingsError> {
         let _guard = self.lock();
         let current = self.read_snapshot_unlocked()?;
         validate_snapshot(&current, catalog)?;
-        let next = apply_patch(current.clone(), input, catalog)?;
+        let next = apply_mutation(current.clone(), input, catalog)?;
         validate_snapshot(&next, catalog)?;
         let settings_changed = next.settings != current.settings;
         let secrets_changed = next.secrets != current.secrets;
@@ -370,128 +463,84 @@ fn project_view(snapshot: &GlobalConfigSnapshot, catalog: &ModelCatalog) -> Glob
         canvas: snapshot.settings.canvas.clone(),
         chrome: snapshot.settings.chrome.clone(),
         plugins: snapshot.settings.plugins.clone(),
+        feedback: snapshot.settings.feedback.clone(),
         models: settings_view(snapshot, catalog),
     }
 }
 
-fn apply_patch(
+fn apply_mutation(
     mut snapshot: GlobalConfigSnapshot,
-    input: &Value,
+    input: &GlobalSettingsMutation,
     catalog: &ModelCatalog,
 ) -> Result<GlobalConfigSnapshot, GlobalSettingsError> {
-    let patch = closed_patch_record(
-        input,
-        "Global settings patch",
-        &["workbench", "canvas", "plugins", "modelSetting"],
-    )?;
-    if let Some(value) = patch.get("workbench") {
-        let workbench = closed_patch_record(
-            value,
-            "Global settings workbench",
-            &["locale", "themePreference"],
-        )?;
-        if let Some(locale) = workbench.get("locale") {
-            string(locale, "Workbench locale")?.clone_into(&mut snapshot.settings.workbench.locale);
+    match input {
+        GlobalSettingsMutation::SetLocale { locale } => {
+            snapshot.settings.workbench.locale.clone_from(locale);
+            validate_workbench(&snapshot.settings.workbench)?;
         }
-        if let Some(theme) = workbench.get("themePreference") {
-            string(theme, "Workbench theme preference")?
-                .clone_into(&mut snapshot.settings.workbench.theme_preference);
+        GlobalSettingsMutation::SetThemePreference { theme_preference } => {
+            snapshot
+                .settings
+                .workbench
+                .theme_preference
+                .clone_from(theme_preference);
+            validate_workbench(&snapshot.settings.workbench)?;
         }
-        validate_workbench(&snapshot.settings.workbench)?;
-    }
-    if let Some(value) = patch.get("canvas") {
-        let canvas = closed_patch_record(
-            value,
-            "Global settings canvas",
-            &["textAppearance", "hierarchyEdgesVisible"],
-        )?;
-        if let Some(appearance) = canvas.get("textAppearance") {
-            let appearance: CanvasTextAppearance = serde_json::from_value(appearance.clone())
-                .map_err(|error| {
-                    GlobalSettingsError::Validation(format!(
-                        "Canvas text appearance must be one complete value: {error}"
-                    ))
-                })?;
-            validate_canvas_text_appearance(&appearance)?;
-            snapshot.settings.canvas.text_appearance = appearance;
+        GlobalSettingsMutation::SetCanvasTextAppearance { text_appearance } => {
+            validate_canvas_text_appearance(text_appearance)?;
+            snapshot.settings.canvas.text_appearance = text_appearance.clone();
         }
-        if let Some(visible) = canvas.get("hierarchyEdgesVisible") {
-            snapshot.settings.canvas.hierarchy_edges_visible =
-                visible.as_bool().ok_or_else(|| {
-                    GlobalSettingsError::Validation(
-                        "Canvas hierarchy edge visibility must be a boolean.".to_owned(),
-                    )
-                })?;
+        GlobalSettingsMutation::SetHierarchyEdgesVisible {
+            hierarchy_edges_visible,
+        } => snapshot.settings.canvas.hierarchy_edges_visible = *hierarchy_edges_visible,
+        GlobalSettingsMutation::CreateFeedbackMark { name, icon } => {
+            create_feedback_mark(&mut snapshot.settings.feedback, name, icon)?;
         }
-    }
-    if let Some(value) = patch.get("plugins") {
-        let plugins = closed_patch_record(value, "Global settings plugins", &["photoshop"])?;
-        let photoshop = closed_patch_record(
-            plugins.get("photoshop").ok_or_else(|| {
-                GlobalSettingsError::Validation(
-                    "Global settings plugins must contain photoshop.".to_owned(),
-                )
-            })?,
-            "Global settings Photoshop plugin",
-            &["enabled"],
-        )?;
-        snapshot.settings.plugins.photoshop.enabled = boolean(
-            photoshop.get("enabled").ok_or_else(|| {
-                GlobalSettingsError::Validation(
-                    "Global settings Photoshop plugin must contain enabled.".to_owned(),
-                )
-            })?,
-            "Photoshop Integration enabled",
-        )?;
-    }
-    if let Some(value) = patch.get("modelSetting") {
-        apply_model_patch(
-            value,
-            catalog,
-            &mut snapshot.settings.models,
-            &mut snapshot.secrets.model_api_keys,
-        )?;
+        GlobalSettingsMutation::SetFeedbackMarkIcon { name, icon } => {
+            set_feedback_mark_icon(&mut snapshot.settings.feedback, name, icon)?;
+        }
+        GlobalSettingsMutation::DeleteFeedbackMark { name } => {
+            delete_feedback_mark(&mut snapshot.settings.feedback, name)?;
+        }
+        GlobalSettingsMutation::SetFeedbackActionBar { names } => {
+            set_feedback_action_bar(&mut snapshot.settings.feedback, names)?;
+        }
+        GlobalSettingsMutation::SetPhotoshopPluginEnabled { enabled } => {
+            snapshot.settings.plugins.photoshop.enabled = *enabled;
+        }
+        GlobalSettingsMutation::SaveModelSetting { model_id, setting } => {
+            apply_model_mutation(
+                model_id,
+                setting,
+                catalog,
+                &mut snapshot.settings.models,
+                &mut snapshot.secrets.model_api_keys,
+            )?;
+        }
     }
     Ok(snapshot)
 }
 
-fn apply_model_patch(
-    value: &Value,
+fn apply_model_mutation(
+    model_id: &str,
+    setting: &SaveModelSettingMutation,
     catalog: &ModelCatalog,
     configs: &mut Vec<ModelConfig>,
     secrets: &mut BTreeMap<String, String>,
 ) -> Result<(), GlobalSettingsError> {
-    let patch = closed_patch_record(
-        value,
-        "Global settings modelSetting",
-        &["modelId", "setting"],
-    )?;
-    let raw_model_id = string(
-        patch.get("modelId").ok_or_else(|| {
-            GlobalSettingsError::Validation("Model id must be a string.".to_owned())
-        })?,
-        "Model id",
-    )?;
-    if raw_model_id.is_empty() || raw_model_id.trim() != raw_model_id {
+    if model_id.is_empty() || model_id.trim() != model_id {
         return validation("Model id must be a canonical non-empty string.");
     }
-    if catalog.find(raw_model_id).is_none() {
-        return validation(format!("Unknown model: {raw_model_id}"));
+    if catalog.find(model_id).is_none() {
+        return validation(format!("Unknown model: {model_id}"));
     }
-    let model_id = raw_model_id;
-    let setting = closed_patch_record(
-        patch.get("setting").ok_or_else(|| {
-            GlobalSettingsError::Validation("Model setting must be an object.".to_owned())
-        })?,
-        "Model setting",
-        &["baseUrlOverride", "requestModelIdOverride", "apiKey"],
+    validate_optional_override(setting.base_url_override.as_deref(), "baseUrlOverride")?;
+    validate_optional_override(
+        setting.request_model_id_override.as_deref(),
+        "requestModelIdOverride",
     )?;
-    let base_url_override =
-        nullable_non_empty_string(setting.get("baseUrlOverride"), "Model baseUrlOverride")?;
-    let request_model_id_override = nullable_non_empty_string(
-        setting.get("requestModelIdOverride"),
-        "Model requestModelIdOverride",
-    )?;
+    let base_url_override = setting.base_url_override.clone();
+    let request_model_id_override = setting.request_model_id_override.clone();
     configs.retain(|config| config.debrute_model_id != model_id);
     if base_url_override.is_some() || request_model_id_override.is_some() {
         configs.push(ModelConfig {
@@ -501,15 +550,133 @@ fn apply_model_patch(
         });
         configs.sort_by(|left, right| left.debrute_model_id.cmp(&right.debrute_model_id));
     }
-    if let Some(api_key) = setting.get("apiKey") {
-        let api_key = string(api_key, "Model apiKey")?;
+    if let Some(api_key) = &setting.api_key {
         if api_key.is_empty() {
             secrets.remove(model_id);
         } else {
-            secrets.insert(model_id.to_owned(), api_key.to_owned());
+            secrets.insert(model_id.to_owned(), api_key.clone());
         }
     }
     Ok(())
+}
+
+fn create_feedback_mark(
+    settings: &mut FeedbackSettings,
+    name: &str,
+    icon: &str,
+) -> Result<(), GlobalSettingsError> {
+    validate_configured_feedback_name(name)?;
+    validate_feedback_icon_for_write(icon)?;
+    if settings.catalog.iter().any(|entry| entry.name == name) {
+        return validation("Feedback catalog already contains this exact name.");
+    }
+    settings.catalog.push(FeedbackCatalogEntry {
+        name: name.to_owned(),
+        icon: icon.to_owned(),
+    });
+    Ok(())
+}
+
+fn set_feedback_mark_icon(
+    settings: &mut FeedbackSettings,
+    name: &str,
+    icon: &str,
+) -> Result<(), GlobalSettingsError> {
+    validate_feedback_icon_for_write(icon)?;
+    let entry = settings
+        .catalog
+        .iter_mut()
+        .find(|entry| entry.name == name)
+        .ok_or_else(|| {
+            GlobalSettingsError::Validation(
+                "Feedback catalog does not contain this exact name.".to_owned(),
+            )
+        })?;
+    icon.clone_into(&mut entry.icon);
+    Ok(())
+}
+
+fn delete_feedback_mark(
+    settings: &mut FeedbackSettings,
+    name: &str,
+) -> Result<(), GlobalSettingsError> {
+    let previous_len = settings.catalog.len();
+    settings.catalog.retain(|entry| entry.name != name);
+    if settings.catalog.len() == previous_len {
+        return validation("Feedback catalog does not contain this exact name.");
+    }
+    settings.action_bar.retain(|current| current != name);
+    Ok(())
+}
+
+fn set_feedback_action_bar(
+    settings: &mut FeedbackSettings,
+    names: &[String],
+) -> Result<(), GlobalSettingsError> {
+    validate_feedback_action_bar(settings, names)?;
+    settings.action_bar = names.to_vec();
+    Ok(())
+}
+
+fn validate_feedback_action_bar(
+    settings: &FeedbackSettings,
+    names: &[String],
+) -> Result<(), GlobalSettingsError> {
+    if names.len() > 8 {
+        return validation("Feedback Action Bar supports at most 8 names.");
+    }
+    for (index, name) in names.iter().enumerate() {
+        if names[..index].contains(name) {
+            return validation("Feedback Action Bar contains a duplicate exact name.");
+        }
+        if !settings.catalog.iter().any(|entry| entry.name == *name) {
+            return validation("Feedback Action Bar names must exist in the catalog.");
+        }
+    }
+    Ok(())
+}
+
+fn validate_feedback_settings(settings: &FeedbackSettings) -> Result<(), GlobalSettingsError> {
+    for (index, entry) in settings.catalog.iter().enumerate() {
+        validate_configured_feedback_name(&entry.name)?;
+        if settings.catalog[..index]
+            .iter()
+            .any(|current| current.name == entry.name)
+        {
+            return validation("Feedback catalog contains a duplicate exact name.");
+        }
+    }
+    validate_feedback_action_bar(settings, &settings.action_bar)
+}
+
+fn validate_configured_feedback_name(name: &str) -> Result<(), GlobalSettingsError> {
+    let grapheme_count = name.graphemes(true).count();
+    if !(1..=32).contains(&grapheme_count) {
+        return validation("Feedback name must contain 1–32 Unicode grapheme clusters.");
+    }
+    if name.chars().any(is_forbidden_feedback_name_character) {
+        return validation("Feedback name contains a forbidden control character.");
+    }
+    Ok(())
+}
+
+fn is_forbidden_feedback_name_character(character: char) -> bool {
+    matches!(character as u32, 0x0000..=0x001f | 0x007f..=0x009f | 0x061c | 0x200e..=0x200f | 0x202a..=0x202e | 0x2066..=0x2069)
+}
+
+fn validate_feedback_icon_for_write(icon: &str) -> Result<(), GlobalSettingsError> {
+    if include_str!("feedback_icon_names.txt")
+        .lines()
+        .any(|candidate| candidate == icon)
+    {
+        Ok(())
+    } else {
+        validation("Feedback icon is not part of the pinned Phosphor Fill catalog.")
+    }
+}
+
+fn validate_optional_override(value: Option<&str>, field: &str) -> Result<(), GlobalSettingsError> {
+    validate_persisted_override(value, field)
 }
 
 fn validate_snapshot(
@@ -519,6 +686,7 @@ fn validate_snapshot(
     validate_workbench(&snapshot.settings.workbench)?;
     validate_canvas_text_appearance(&snapshot.settings.canvas.text_appearance)?;
     validate_recent_projects(&snapshot.settings.chrome.recent_project_roots)?;
+    validate_feedback_settings(&snapshot.settings.feedback)?;
     validate_model_configs(&snapshot.settings.models, catalog)?;
     validate_secret_map(&snapshot.secrets.model_api_keys, catalog)?;
     Ok(())
@@ -661,64 +829,6 @@ fn validate_workbench(settings: &WorkbenchSettings) -> Result<(), GlobalSettings
         );
     }
     Ok(())
-}
-
-fn record<'a>(
-    value: &'a Value,
-    label: &str,
-) -> Result<&'a Map<String, Value>, GlobalSettingsError> {
-    value
-        .as_object()
-        .ok_or_else(|| GlobalSettingsError::Validation(format!("{label} must be an object.")))
-}
-
-fn closed_patch_record<'a>(
-    value: &'a Value,
-    label: &str,
-    allowed_fields: &[&str],
-) -> Result<&'a Map<String, Value>, GlobalSettingsError> {
-    let record = record(value, label)?;
-    if record.is_empty() {
-        return validation(format!("{label} must contain at least one mutation."));
-    }
-    if let Some(field) = record
-        .keys()
-        .find(|field| !allowed_fields.contains(&field.as_str()))
-    {
-        return validation(format!("{label} contains unexpected field: {field}"));
-    }
-    Ok(record)
-}
-
-fn string<'a>(value: &'a Value, label: &str) -> Result<&'a str, GlobalSettingsError> {
-    value
-        .as_str()
-        .ok_or_else(|| GlobalSettingsError::Validation(format!("{label} must be a string.")))
-}
-
-fn boolean(value: &Value, label: &str) -> Result<bool, GlobalSettingsError> {
-    value
-        .as_bool()
-        .ok_or_else(|| GlobalSettingsError::Validation(format!("{label} must be a boolean.")))
-}
-
-fn nullable_non_empty_string(
-    value: Option<&Value>,
-    label: &str,
-) -> Result<Option<String>, GlobalSettingsError> {
-    let Some(value) = value else {
-        return validation(format!("{label} must be a string or null."));
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    let value = string(value, label)?;
-    if value.is_empty() || value.trim() != value {
-        return validation(format!(
-            "{label} must be null or a canonical non-empty string."
-        ));
-    }
-    Ok(Some(value.to_owned()))
 }
 
 fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -889,5 +999,69 @@ mod tests {
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0], project_root);
         fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn feedback_catalog_uses_exact_unicode_names_and_strict_writes() {
+        let mut settings = FeedbackSettings::default();
+        let initial_action_bar = settings.action_bar.clone();
+        for entry in &settings.catalog {
+            validate_feedback_icon_for_write(&entry.icon).unwrap();
+        }
+        create_feedback_mark(&mut settings, "é", "heart").unwrap();
+        create_feedback_mark(&mut settings, "e\u{301}", "star").unwrap();
+        create_feedback_mark(&mut settings, " like ", "thumbs-up").unwrap();
+        assert!(settings.catalog.iter().any(|entry| entry.name == "é"));
+        assert!(
+            settings
+                .catalog
+                .iter()
+                .any(|entry| entry.name == "e\u{301}")
+        );
+        assert_eq!(settings.action_bar, initial_action_bar);
+        assert!(create_feedback_mark(&mut settings, "é", "heart").is_err());
+        assert!(create_feedback_mark(&mut settings, "bad\nname", "heart").is_err());
+        assert!(create_feedback_mark(&mut settings, "bad\u{202e}name", "heart").is_err());
+        assert!(create_feedback_mark(&mut settings, "new", "unknown-icon").is_err());
+    }
+
+    #[test]
+    fn feedback_action_bar_accepts_eight_and_rejects_invalid_membership() {
+        let mut settings = FeedbackSettings::default();
+        create_feedback_mark(&mut settings, "eighth", "question").unwrap();
+        let eight = settings
+            .catalog
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(eight.len(), 8);
+        set_feedback_action_bar(&mut settings, &eight).unwrap();
+        assert_eq!(settings.action_bar, eight);
+
+        create_feedback_mark(&mut settings, "ninth", "question").unwrap();
+        let nine = settings
+            .catalog
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(nine.len(), 9);
+        assert!(set_feedback_action_bar(&mut settings, &nine).is_err());
+        assert!(
+            set_feedback_action_bar(&mut settings, &[eight[0].clone(), eight[0].clone()]).is_err()
+        );
+        assert!(set_feedback_action_bar(&mut settings, &["unknown".to_owned()]).is_err());
+        assert_eq!(settings.action_bar, eight);
+    }
+
+    #[test]
+    fn persisted_unknown_feedback_icons_remain_readable() {
+        let settings = FeedbackSettings {
+            catalog: vec![FeedbackCatalogEntry {
+                name: "future".to_owned(),
+                icon: "future-phosphor-name".to_owned(),
+            }],
+            action_bar: vec!["future".to_owned()],
+        };
+        validate_feedback_settings(&settings).unwrap();
     }
 }

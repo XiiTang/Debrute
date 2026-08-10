@@ -276,10 +276,28 @@ is independent of interaction idle, and is shared across raster media.
 _Avoid_: Camera idle, resource debounce, preview publication
 
 **Feedback Mark**:
-A selected categorical review signal that applies to one Project Path target as a
-whole. One atomic Mark command may set or clear it across an exact path
-selection without expanding directories.
+A selected categorical review signal identified by its exact Feedback Name and
+applied to one Project Path target as a whole. One atomic Mark command may set
+or clear it across an exact path selection without expanding directories.
 _Avoid_: Reaction event, approval state
+
+**Feedback Mark Catalog**:
+The machine-local Global Settings collection that maps immutable Feedback Names
+to mutable presentation icons. It configures actions and presentation without
+changing a Project Feedback Document.
+_Avoid_: Project vocabulary, Feedback Document registry
+
+**Feedback Action Bar**:
+The ordered machine-local subset of the Feedback Mark Catalog offered as direct
+set-or-clear actions for the current Canvas selection. It is an action palette,
+not a complete status view.
+_Avoid_: Feedback legend, Feedback status panel
+
+**Feedback Panel**:
+The Project-scoped Workbench projection of every accepted Feedback Mark and
+Feedback Item in the current Feedback Document, including names absent from the
+local Catalog.
+_Avoid_: Feedback Action Bar, Feedback editor
 
 **Feedback Composition**:
 Transient Workbench state that combines a target, Feedback kind, scope, and any

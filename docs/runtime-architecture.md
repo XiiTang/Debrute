@@ -365,7 +365,8 @@ decisions are indexed under the
 
 Runtime's global store is the sole persistence boundary for Workbench
 preferences, Canvas-global settings, recent Project roots, model overrides,
-Plugin Integration enablement, and API keys. The Photoshop enable choice is a
+the Feedback Mark Catalog and Action Bar, Plugin Integration enablement, and API
+keys. The Photoshop enable choice is a
 Global Settings field; its gateway health, retry, sessions, Documents,
 credentials, commands, and transfer state remain live-only. Canvas Text
 Appearance persists as one complete `canvas.textAppearance` value: managed font
@@ -382,10 +383,10 @@ An absent global settings or secrets file uses the current first-launch
 defaults. An existing file must match the one closed current shape: unknown
 fields, unknown Model IDs, empty or duplicate entries, and non-canonical values
 fail the read. Runtime does not trim, filter, deduplicate, truncate, or rewrite
-persisted state while reading it. A settings patch may contain a declared
-subset, but every present object has a closed field set and the request must
-express at least one mutation. Repeating a valid current value succeeds without
-publishing a change; an empty or unknown-only patch fails without writing.
+persisted state while reading it. Global Settings commands use one closed typed
+mutation-intent union; each intent contains only the fields required by that
+operation. Repeating a valid current value succeeds without publishing a
+change; an empty object or unknown field fails without writing.
 
 The canonical absolute root is the complete Project identity. Runtime creates
 one loaded Project Session per canonical root, with one snapshot, monotonic

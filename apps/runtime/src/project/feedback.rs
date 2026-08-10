@@ -7,6 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
     ProjectCapabilityFs, ProjectDirectoryPath, ProjectError, ProjectRelativePath,
@@ -27,17 +28,7 @@ const MAX_CANVAS_FEEDBACK_PATH_BYTES: usize = 1_024;
 const MAX_CANVAS_FEEDBACK_ITEM_ID_BYTES: usize = 128;
 const MAX_CANVAS_FEEDBACK_COMMENT_BYTES: usize = 16 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CanvasFeedbackMark {
-    Like,
-    Dislike,
-    Check,
-    Cross,
-    Pending,
-    Important,
-    NeedsRevision,
-}
+pub type CanvasFeedbackMark = String;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
@@ -240,6 +231,17 @@ impl UpdateCanvasFeedbackInput {
     }
 
     #[must_use]
+    pub fn requires_existing_target(&self) -> bool {
+        !matches!(
+            self,
+            Self::SetMark {
+                selected: false,
+                ..
+            } | Self::DeleteItem { .. }
+        )
+    }
+
+    #[must_use]
     pub fn rendered_artifact_source_path(&self) -> Option<&str> {
         match self {
             Self::AddItem {
@@ -365,7 +367,7 @@ pub(crate) fn update_canvas_feedback_document(
         return update_canvas_feedback_marks(
             document,
             project_relative_paths,
-            *mark,
+            mark.clone(),
             *selected,
             updated_at,
         );
@@ -527,6 +529,11 @@ fn update_canvas_feedback_marks(
     selected: bool,
     updated_at: String,
 ) -> Result<CanvasFeedbackDocument, ProjectError> {
+    if selected {
+        validate_feedback_mark_name_for_write(&mark)?;
+    } else {
+        validate_persisted_feedback_mark_name(&mark)?;
+    }
     if project_relative_paths.is_empty() {
         return Err(ProjectError::Validation(
             "Canvas feedback set-mark requires at least one Project Path.".to_owned(),
@@ -563,10 +570,9 @@ fn update_canvas_feedback_marks(
         }
         changed = true;
         if selected {
-            entry.marks.push(mark);
-            entry.marks = normalized_marks(&entry.marks);
+            entry.marks.push(mark.clone());
         } else {
-            entry.marks.retain(|existing_mark| *existing_mark != mark);
+            entry.marks.retain(|existing_mark| existing_mark != &mark);
         }
         entry.updated_at.clone_from(&updated_at);
         if !entry.marks.is_empty() || !entry.items.is_empty() {
@@ -634,10 +640,13 @@ fn validate_entry(entry: &CanvasFeedbackEntry) -> Result<(), ProjectError> {
             "Canvas feedback next labels must be positive.".to_owned(),
         ));
     }
-    if normalized_marks(&entry.marks) != entry.marks {
-        return Err(ProjectError::Validation(
-            "Canvas feedback marks must be unique and ordered.".to_owned(),
-        ));
+    for (index, mark) in entry.marks.iter().enumerate() {
+        validate_persisted_feedback_mark_name(mark)?;
+        if entry.marks[..index].contains(mark) {
+            return Err(ProjectError::Validation(
+                "Canvas feedback marks must use unique exact names.".to_owned(),
+            ));
+        }
     }
     if entry.items.len() > MAX_CANVAS_FEEDBACK_ITEMS_PER_ENTRY {
         return Err(ProjectError::Validation(format!(
@@ -821,21 +830,32 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
-fn normalized_marks(marks: &[CanvasFeedbackMark]) -> Vec<CanvasFeedbackMark> {
-    const ORDER: [CanvasFeedbackMark; 7] = [
-        CanvasFeedbackMark::Like,
-        CanvasFeedbackMark::Dislike,
-        CanvasFeedbackMark::Check,
-        CanvasFeedbackMark::Cross,
-        CanvasFeedbackMark::Pending,
-        CanvasFeedbackMark::Important,
-        CanvasFeedbackMark::NeedsRevision,
-    ];
-    let selected = marks.iter().copied().collect::<BTreeSet<_>>();
-    ORDER
-        .into_iter()
-        .filter(|mark| selected.contains(mark))
-        .collect()
+fn validate_feedback_mark_name_for_write(mark: &str) -> Result<(), ProjectError> {
+    if !(1..=32).contains(&mark.graphemes(true).count()) {
+        Err(ProjectError::Validation(
+            "Canvas feedback mark name must contain 1–32 Unicode grapheme clusters.".to_owned(),
+        ))
+    } else if mark.chars().any(is_forbidden_feedback_name_character) {
+        Err(ProjectError::Validation(
+            "Canvas feedback mark name contains a forbidden control character.".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_persisted_feedback_mark_name(mark: &str) -> Result<(), ProjectError> {
+    if mark.is_empty() {
+        Err(ProjectError::Validation(
+            "Canvas feedback mark name must not be empty.".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn is_forbidden_feedback_name_character(character: char) -> bool {
+    matches!(character as u32, 0x0000..=0x001f | 0x007f..=0x009f | 0x061c | 0x200e..=0x200f | 0x202a..=0x202e | 0x2066..=0x2069)
 }
 
 fn normalized_comment(comment: &str) -> Result<String, ProjectError> {
@@ -1014,7 +1034,7 @@ mod tests {
     fn marked_entry(path: &str) -> CanvasFeedbackEntry {
         CanvasFeedbackEntry {
             project_relative_path: path.to_owned(),
-            marks: vec![CanvasFeedbackMark::Like],
+            marks: vec!["like".to_owned()],
             next_moment_label: 1,
             next_spatial_label: 1,
             items: Vec::new(),
@@ -1033,7 +1053,7 @@ mod tests {
             "images/mixed.png".to_owned(),
             CanvasFeedbackEntry {
                 project_relative_path: "images/mixed.png".to_owned(),
-                marks: vec![CanvasFeedbackMark::Important],
+                marks: vec!["important".to_owned()],
                 next_moment_label: 1,
                 next_spatial_label: 1,
                 items: Vec::new(),
@@ -1049,7 +1069,7 @@ mod tests {
                     "images/mixed.png".to_owned(),
                     "images/new.png".to_owned(),
                 ],
-                mark: CanvasFeedbackMark::Like,
+                mark: "like".to_owned(),
                 selected: true,
             },
             T1.to_owned(),
@@ -1059,12 +1079,12 @@ mod tests {
         assert_eq!(selected.entries["images/already.png"].updated_at, T0);
         assert_eq!(
             selected.entries["images/mixed.png"].marks,
-            vec![CanvasFeedbackMark::Like, CanvasFeedbackMark::Important]
+            vec!["important".to_owned(), "like".to_owned()]
         );
         assert_eq!(selected.entries["images/mixed.png"].updated_at, T1);
         assert_eq!(
             selected.entries["images/new.png"].marks,
-            vec![CanvasFeedbackMark::Like]
+            vec!["like".to_owned()]
         );
 
         let cleared = update_canvas_feedback_document(
@@ -1075,7 +1095,7 @@ mod tests {
                     "images/mixed.png".to_owned(),
                     "images/new.png".to_owned(),
                 ],
-                mark: CanvasFeedbackMark::Like,
+                mark: "like".to_owned(),
                 selected: false,
             },
             T2.to_owned(),
@@ -1086,14 +1106,14 @@ mod tests {
         assert!(!cleared.entries.contains_key("images/new.png"));
         assert_eq!(
             cleared.entries["images/mixed.png"].marks,
-            vec![CanvasFeedbackMark::Important]
+            vec!["important".to_owned()]
         );
 
         let no_op = update_canvas_feedback_document(
             &cleared,
             &UpdateCanvasFeedbackInput::SetMark {
                 project_relative_paths: vec!["images/mixed.png".to_owned()],
-                mark: CanvasFeedbackMark::Important,
+                mark: "important".to_owned(),
                 selected: true,
             },
             "2026-07-15T01:02:06.007Z".to_owned(),
@@ -1138,13 +1158,13 @@ mod tests {
     }
 
     #[test]
-    fn closed_updates_normalize_marks_moments_and_remove_empty_entries() {
+    fn closed_updates_preserve_mark_order_normalize_moments_and_remove_empty_entries() {
         let empty = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
         let marked = update_canvas_feedback_document(
             &empty,
             &UpdateCanvasFeedbackInput::SetMark {
                 project_relative_paths: vec!["images/a.png".to_owned()],
-                mark: CanvasFeedbackMark::Important,
+                mark: "important".to_owned(),
                 selected: true,
             },
             T1.to_owned(),
@@ -1154,7 +1174,7 @@ mod tests {
             &marked,
             &UpdateCanvasFeedbackInput::SetMark {
                 project_relative_paths: vec!["images/a.png".to_owned()],
-                mark: CanvasFeedbackMark::Like,
+                mark: "like".to_owned(),
                 selected: true,
             },
             T1.to_owned(),
@@ -1162,7 +1182,7 @@ mod tests {
         .expect("marks should update");
         assert_eq!(
             marked.entries["images/a.png"].marks,
-            vec![CanvasFeedbackMark::Like, CanvasFeedbackMark::Important]
+            vec!["important".to_owned(), "like".to_owned()]
         );
 
         let with_item = update_canvas_feedback_document(
@@ -1322,5 +1342,73 @@ mod tests {
         assert_eq!(error.code(), "project_document_too_large");
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persisted_feedback_marks_use_exact_tolerantly_read_unicode_names() {
+        let timestamp = "2026-07-15T01:02:03.004Z".to_owned();
+        let document = CanvasFeedbackDocument {
+            updated_at: timestamp.clone(),
+            entries: BTreeMap::from([(
+                "image.png".to_owned(),
+                CanvasFeedbackEntry {
+                    project_relative_path: "image.png".to_owned(),
+                    marks: vec![
+                        "é".to_owned(),
+                        "e\u{301}".to_owned(),
+                        "hidden\u{202e}name".to_owned(),
+                        "long".repeat(64),
+                    ],
+                    next_moment_label: 1,
+                    next_spatial_label: 1,
+                    items: Vec::new(),
+                    updated_at: timestamp,
+                },
+            )]),
+        };
+        validate_canvas_feedback_document(&document).unwrap();
+    }
+
+    #[test]
+    fn set_mark_uses_strict_feedback_name_validation() {
+        let document = CanvasFeedbackDocument::empty(T0.to_owned()).expect("valid fixture");
+        for mark in ["bad\nname", "bad\u{202e}name", &"x".repeat(33)] {
+            let result = update_canvas_feedback_document(
+                &document,
+                &UpdateCanvasFeedbackInput::SetMark {
+                    project_relative_paths: vec!["image.png".to_owned()],
+                    mark: mark.to_owned(),
+                    selected: true,
+                },
+                T1.to_owned(),
+            );
+            assert!(matches!(result, Err(ProjectError::Validation(_))));
+        }
+
+        let document_with_external_mark = CanvasFeedbackDocument {
+            updated_at: T0.to_owned(),
+            entries: BTreeMap::from([(
+                "image.png".to_owned(),
+                CanvasFeedbackEntry {
+                    project_relative_path: "image.png".to_owned(),
+                    marks: vec!["external\u{202e}name".to_owned()],
+                    next_moment_label: 1,
+                    next_spatial_label: 1,
+                    items: Vec::new(),
+                    updated_at: T0.to_owned(),
+                },
+            )]),
+        };
+        let cleared = update_canvas_feedback_document(
+            &document_with_external_mark,
+            &UpdateCanvasFeedbackInput::SetMark {
+                project_relative_paths: vec!["image.png".to_owned()],
+                mark: "external\u{202e}name".to_owned(),
+                selected: false,
+            },
+            T1.to_owned(),
+        )
+        .expect("a tolerantly read external name should remain ordinarily removable");
+        assert!(cleared.entries.is_empty());
     }
 }

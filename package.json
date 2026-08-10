@@ -31,6 +31,7 @@
     "predev:electron": "pnpm validate:canvas-text-font-subset",
     "dev:electron": "pnpm --filter @debrute/desktop dev:electron",
     "generate:control-protocol": "node scripts/run-cargo-with-native-raster.mjs -- test -p debrute-runtime --lib export_bindings",
+    "generate:feedback-icons": "node scripts/generate-feedback-icons.mjs",
     "preview": "pnpm --filter @debrute/web preview",
     "test": "pnpm test:layout && vitest run",
     "test:rust": "node scripts/test-rust.mjs",

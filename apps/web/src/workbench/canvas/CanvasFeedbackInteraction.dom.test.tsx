@@ -439,8 +439,8 @@ describe('CanvasFeedbackInteraction', () => {
     const probe = await renderInteraction(apiFixture({ updateCanvasFeedback }));
     await act(async () => probe.current.load());
 
-    let first!: Promise<void>;
-    let second!: Promise<void>;
+    let first!: Promise<boolean>;
+    let second!: Promise<boolean>;
     await act(async () => {
       first = probe.current.deleteCapsule('feedback-a');
       second = probe.current.deleteCapsule('feedback-a');
@@ -469,7 +469,7 @@ describe('CanvasFeedbackInteraction', () => {
     }));
     await act(async () => probe.current.load());
 
-    let mutation!: Promise<void>;
+    let mutation!: Promise<boolean>;
     await act(async () => {
       mutation = probe.current.setMark(['image.png'], 'important', true);
       probe.current.applyEvent({
@@ -511,8 +511,8 @@ describe('CanvasFeedbackInteraction', () => {
     expect(probe.current.marksForPaths(['image.png'])).toEqual(['like']);
     expect(probe.current.marksForPaths(['image.png', 'second.png'])).toEqual([]);
 
-    let first!: Promise<void>;
-    let second!: Promise<void>;
+    let first!: Promise<boolean>;
+    let second!: Promise<boolean>;
     const selectedPaths = ['image.png', 'second.png'];
     await act(async () => {
       first = probe.current.setMark(selectedPaths, 'like', true);
@@ -918,7 +918,11 @@ function PointInteractionProbe({
     .map((item) => ({ itemId: item.itemId, geometry: item.geometry }));
   return (
     <I18nProvider locale="en">
-      <CanvasFeedbackInteractionBar interaction={interaction} overlayRuntime={overlayRuntime} />
+      <CanvasFeedbackInteractionBar
+        interaction={interaction}
+        availableMarks={[{ name: 'like', icon: 'heart' }]}
+        overlayRuntime={overlayRuntime}
+      />
       <CanvasMediaFeedbackLayer
         items={[]}
         mode={interaction.localMode}

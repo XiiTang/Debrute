@@ -1,14 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore
-} from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DebruteGlobalSettingsView, WorkbenchLocale } from '@debrute/app-protocol';
 import { createI18n, type WorkbenchI18n } from '../i18n/index.js';
-import type { WorkbenchGlobalProjection } from './WorkbenchGlobalProjection.js';
 import {
   resolveWorkbenchThemePreference,
   setDocumentTheme,
@@ -24,16 +16,9 @@ export interface WorkbenchPresentationController {
 }
 
 export function useWorkbenchPresentationController(input: {
-  globalProjection: WorkbenchGlobalProjection;
+  settings: DebruteGlobalSettingsView;
 }): WorkbenchPresentationController {
-  const projection = useSyncExternalStore(
-    input.globalProjection.subscribe,
-    input.globalProjection.getState
-  );
-  if (projection.status === 'uninitialized') {
-    throw new Error('Workbench presentation requires the initial Global snapshot.');
-  }
-  const settings = projection.settings;
+  const settings = input.settings;
   const localeRef = useRef(settings.workbench.locale);
   localeRef.current = settings.workbench.locale;
   const [systemTheme, setSystemTheme] = useState<WorkbenchResolvedTheme>(() => (

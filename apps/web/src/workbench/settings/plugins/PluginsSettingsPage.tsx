@@ -12,7 +12,7 @@ export function PluginsSettingsPage({
 }: {
   settings: DebruteGlobalSettingsView['plugins'];
   photoshop: PhotoshopStateView;
-  onSettingsChange(input: { plugins: { photoshop: { enabled: boolean } } }): Promise<void>;
+  onSettingsChange(input: { operation: 'set-photoshop-plugin-enabled'; enabled: boolean }): Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
   const [saving, setSaving] = useState(false);
@@ -26,7 +26,7 @@ export function PluginsSettingsPage({
     setSaving(true);
     setError(undefined);
     try {
-      await onSettingsChange({ plugins: { photoshop: { enabled } } });
+      await onSettingsChange({ operation: 'set-photoshop-plugin-enabled', enabled });
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {

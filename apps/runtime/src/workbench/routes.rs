@@ -327,7 +327,7 @@ pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
         .route("/activities/{activity_id}", delete(dismiss_activity))
         .route("/activities/notices", post(report_global_activity_notice))
         .route("/workbench/recent-projects", delete(clear_recent_projects))
-        .route("/settings/global", patch(global_settings_patch))
+        .route("/settings/global/mutations", post(global_settings_mutate))
         .route(
             "/settings/models/api-key/reveal",
             post(model_api_key_reveal),
@@ -637,16 +637,16 @@ async fn clear_recent_projects(State(state): State<WorkbenchRouterState>) -> Res
     }
 }
 
-async fn global_settings_patch(
+async fn global_settings_mutate(
     State(state): State<WorkbenchRouterState>,
     request: Request,
 ) -> Response {
     let services = Arc::clone(&state.services);
-    let body: Value = match json_body(request).await {
+    let body: crate::global::GlobalSettingsMutation = match json_body(request).await {
         Ok(body) => body,
         Err(response) => return response,
     };
-    match services.settings_save(&body) {
+    match services.settings_mutate(&body) {
         Ok(_) => Json(json!({"ok": true})).into_response(),
         Err(error) => service_error_response(error),
     }

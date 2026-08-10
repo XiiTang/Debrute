@@ -54,7 +54,7 @@ On immediately attempts the first available loopback port from `32124` through
 choice on, publishes `unavailable`, and starts one non-overlapping complete-pool
 retry every five seconds. Runtime and Workbench otherwise continue normally.
 Disabling an idle Integration stops that retry and gateway, closes every
-session, and revokes its authority. Runtime rejects the complete settings patch
+session, and revokes its authority. Runtime rejects the settings intent
 with `photoshop_transfer_in_progress` while either transfer direction owns a
 reserved command, so an admitted transfer is not interrupted.
 

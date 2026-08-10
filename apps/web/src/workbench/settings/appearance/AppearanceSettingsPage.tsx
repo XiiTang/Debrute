@@ -3,7 +3,7 @@ import type {
   CanvasFontId,
   CanvasTextAppearance,
   DebruteGlobalSettingsView,
-  SaveDebruteGlobalSettingsInput,
+  MutateDebruteGlobalSettingsInput,
   WorkbenchThemePreference
 } from '@debrute/app-protocol';
 import { CANVAS_FONT_CATALOG } from '../../canvas/CanvasFontCatalog.js';
@@ -27,7 +27,7 @@ export function AppearanceSettingsPage({
 }: {
   settings: DebruteGlobalSettingsView;
   resolvedTheme: WorkbenchResolvedTheme;
-  onSettingsChange: (settings: SaveDebruteGlobalSettingsInput) => Promise<void>;
+  onSettingsChange: (settings: MutateDebruteGlobalSettingsInput) => Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
   const [themeDraft, setThemeDraft] = useState(settings.workbench.themePreference);
@@ -52,7 +52,7 @@ export function AppearanceSettingsPage({
 
   const saveTheme = async (themePreference: WorkbenchThemePreference) => {
     try {
-      await onSettingsChange({ workbench: { themePreference } });
+      await onSettingsChange({ operation: 'set-theme-preference', themePreference });
       setThemeError(undefined);
     } catch (error) {
       setThemeError(errorMessage(error));
@@ -64,7 +64,7 @@ export function AppearanceSettingsPage({
     setAppearanceDraft(appearance);
     const version = appearanceSaveVersionRef.current + 1;
     appearanceSaveVersionRef.current = version;
-    void onSettingsChange({ canvas: { textAppearance: appearance } }).then(() => {
+    void onSettingsChange({ operation: 'set-canvas-text-appearance', textAppearance: appearance }).then(() => {
       if (appearanceSaveVersionRef.current === version) {
         setAppearanceError(undefined);
       }

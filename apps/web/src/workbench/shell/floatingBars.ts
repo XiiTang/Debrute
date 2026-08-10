@@ -1,7 +1,4 @@
-import {
-  CANVAS_FEEDBACK_MARKS,
-  type CanvasFeedbackGeometry
-} from '@debrute/app-protocol';
+import type { CanvasFeedbackGeometry } from '@debrute/app-protocol';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { WORKBENCH_FLOATING_DOCK_EDGE_INSET } from './workbenchLayers';
 
@@ -146,6 +143,7 @@ export function feedbackBarPlacementForCanvasTarget(input: {
   camera: CanvasCamera;
   viewportRect: FloatingBarRect;
   reservedRects: readonly FloatingBarRect[];
+  actionCount: number;
 }): FloatingBarPlacement | undefined {
   return placeCanvasFeedbackBar({
     anchorViewportRect: canvasAnchorToViewportRect({
@@ -156,8 +154,8 @@ export function feedbackBarPlacementForCanvasTarget(input: {
     viewportRect: input.viewportRect,
     reservedRects: [...input.reservedRects],
     barSize: canvasFeedbackBarSizeForTarget(input.target.kind === 'selection'
-      ? { localToolset: 'none', marksOnly: true }
-      : { localToolset: input.target.localToolset })
+      ? { localToolset: 'none', marksOnly: true, actionCount: input.actionCount }
+      : { localToolset: input.target.localToolset, actionCount: input.actionCount })
   });
 }
 
@@ -195,10 +193,11 @@ export function placeCanvasFeedbackBar(input: {
 
 export function canvasFeedbackBarSizeForTarget(input: {
   localToolset: CanvasFeedbackLocalToolset;
+  actionCount: number;
   extraActionCount?: number | undefined;
   marksOnly?: boolean | undefined;
 }): Pick<FloatingBarRect, 'width' | 'height'> {
-  const baseActionCount = CANVAS_FEEDBACK_MARKS.length + Math.max(0, input.extraActionCount ?? 0);
+  const baseActionCount = Math.max(0, input.actionCount) + Math.max(0, input.extraActionCount ?? 0);
   const localActionCount = canvasFeedbackLocalActionCount(input.localToolset);
   const actionWidth = feedbackActionGroupWidth(baseActionCount, CANVAS_FEEDBACK_BAR_LAYOUT.actionGap)
     + (localActionCount > 0

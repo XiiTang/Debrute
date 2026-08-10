@@ -2,6 +2,7 @@ import React from 'react';
 import {
   CircleDot,
   FolderTree,
+  Heart,
   Settings,
   Terminal
 } from '../ui/index.js';
@@ -16,6 +17,7 @@ import { useI18n, type WorkbenchTranslationKey } from '../i18n';
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
   explorer: 'shell.panels.explorer',
   inspector: 'shell.panels.inspector',
+  feedback: 'shell.panels.feedback',
   settings: 'shell.panels.settings',
   terminal: 'shell.panels.terminal'
 };
@@ -34,6 +36,7 @@ export function FloatingDock({
   const icons: Record<FloatingPanelId, React.ReactElement> = {
     explorer: <FolderTree />,
     inspector: <CircleDot />,
+    feedback: <Heart />,
     settings: <Settings />,
     terminal: <Terminal />
   };

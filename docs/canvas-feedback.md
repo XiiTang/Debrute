@@ -24,8 +24,10 @@ Canvas and Explorer can disclose this document like any other visible file.
 Runtime validates the complete document on read, serializes overlapping writes
 per Project file, and commits against the content hash it read. Invalid JSON,
 unexpected fields, invalid paths, invalid item combinations, and concurrent
-external edits fail validation or concurrency checks. Accepted changes are
-broadcast as shared Project-state events.
+external edits fail validation or concurrency checks. Feedback Names are exact
+Unicode strings: Runtime does not trim, case-fold, or normalize them, and the
+Project reader retains names that strict local Settings creation would reject.
+Accepted changes are broadcast as shared Project-state events.
 The closed document limits remain 2 MiB, 1,000 entries, 500 Items per entry,
 5,000 Items total, and 200 Moments per entry. Multi-selection introduces no
 separate selection-size limit; the resulting document must satisfy those same
@@ -48,19 +50,36 @@ missing.
 
 ## Marks, Items, And Moments
 
-A Feedback Mark is one of the fixed selected-only values: like, dislike, check,
-cross, pending, important, or needs revision. Marks apply to the whole Node,
-are independent toggles, and normalize into fixed order. Workbench renders only
-the Marks in Runtime-accepted Feedback state. A Mark command snapshots one or
-more exact Project Paths and sets or clears one Mark for all of them in one
-Runtime transaction. Runtime first validates that every target is a current
-real file, directory, or Project root, then writes the document once and emits
-one change event. One invalid or missing target rejects the whole command. A
-semantic no-op writes nothing, changes no timestamp or Project revision, and
-emits no Feedback event. Only entries whose Mark value changes receive a new
-timestamp; clearing the final Mark from an Item-free entry removes that entry.
+A Feedback Mark is identified by its exact, directly intelligible Feedback
+Name. Names that differ by case or Unicode sequence are different identities.
+Marks apply to the whole Node, are independent toggles, and retain document
+order. They carry no Mark ID, icon, color, or display-label registry. A Mark
+command snapshots one or more exact Project Paths and sets or clears one Name
+for all of them in one Runtime transaction. Runtime first validates that every
+target is a current real file, directory, or Project root, then writes the
+document once and emits one change event. One invalid or missing target rejects
+the whole command. A semantic no-op writes nothing, changes no timestamp or
+Project revision, and emits no Feedback event. Only entries whose Mark value
+changes receive a new timestamp; clearing the final Mark from an Item-free entry
+removes that entry.
 
-The Feedback Bar has no optimistic Marks copy, Draft, or Working Copy. The
+The machine-local Global Feedback Mark Catalog maps immutable Names to mutable
+Phosphor Fill icon identifiers. Its separate ordered Action Bar list contains
+at most eight Catalog Names. Catalog size is not otherwise capped. Settings may
+create or delete mappings, change icons, and change Action Bar membership and
+order, but none of those actions reads or writes the Project Feedback Document.
+An unmapped Project Name remains accepted and uses the question-mark icon.
+The Settings UI edits membership directly: drag Catalog Feedback into the
+Floating Feedback Bar preview, drag within the preview to reorder, and remove
+from the preview to exclude it. It exposes no duplicate membership checkbox or
+picker. The same surface supports keyboard configuration: Enter or Space adds
+an available focused Catalog entry, and Left or Right reorders a focused
+preview entry. Catalog identities announce when they are already present or the
+eight-item bar is full.
+
+The Feedback Bar presents only the locally configured Action Bar Names. It is a
+set-or-clear action palette rather than a complete status view. It has no
+optimistic Marks copy, Draft, or Working Copy. The
 current accepted set remains displayed during a request; Runtime acceptance is
 installed by the ordinary ordered Project event, and failure changes nothing.
 At most one Marks mutation for the Project is in flight. All single- and
@@ -114,7 +133,7 @@ current single-node or multi-selection Bar, and clears its placement. Pointer re
 single reconciliation to derive a new target from current presented node
 geometry; it performs no manipulation-specific delay, second hit-test, or
 reopen path. Every Canvas Node, including directories and the Project root,
-gets the fixed Feedback Marks
+gets the locally configured Feedback Mark actions
 and a node-comment authoring affordance. Image files also get pin and rectangle
 tools. Video files get moment-comment, moment-pin, and moment-rectangle tools
 only while a mounted player can supply a real timestamp.
@@ -249,8 +268,16 @@ comment.
 
 Canvas renders no node-wide Feedback Frame or other persistent
 feedback-presence border. Feedback remains visible through its Feedback Bar,
-saved Capsules, marks, and the high-contrast numbered pin or rectangle overlays
-owned by image and video spatial items.
+Feedback Panel, saved Capsules, marks, and the high-contrast numbered pin or
+rectangle overlays owned by image and video spatial items.
+
+The fifth Workbench floating panel is the Project-scoped Feedback Panel. It
+renders every accepted Feedback Mark and Feedback Item, grouped by Project Path
+in Project Tree order with unresolved external paths last. It uses local Catalog
+icons where available and the question-mark icon otherwise. The panel can
+locate a target, clear an accepted Mark, or delete an Item; it does not add Marks
+that are absent from the local Action Bar and does not poll or maintain a second
+Feedback state.
 
 ## Video Moment Interaction
 
@@ -344,14 +371,15 @@ the module has no offline or retry subsystem.
 
 ## Executable Authorities
 
-- Shared feedback declarations and browser presentation values:
-  `packages/canvas-core/src/`.
+- Shared Feedback document and command declarations:
+  `packages/app-protocol/src/`.
 - Feedback normalization, mutation, labels, moments, geometry, artifact paths,
   persistence, media-scope validation, scheduling, rendering, diagnostics, and
   video-frame extraction:
   `apps/runtime/src/project/feedback/` and `apps/runtime/src/project/previews/`.
-- Feedback interaction, floating bar, frame, media overlays, and video moment
-  interaction: `apps/web/src/workbench/canvas/` and
+- Feedback interaction, floating bar, panel, icon presentation, media overlays,
+  and video moment interaction: `apps/web/src/workbench/canvas/`,
+  `apps/web/src/workbench/feedback/`, and
   `apps/web/src/workbench/shell/floatingBars.ts`.
 - Visibility policy: `apps/runtime/src/project/paths.rs`.
 - Agent-facing consumption contract: `skills/debrute-core/SKILL.md`.

@@ -12,7 +12,7 @@ import type {
   RunIntegrationOperationResult,
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
-  SaveDebruteGlobalSettingsInput,
+  MutateDebruteGlobalSettingsInput,
   SendProjectFileToPhotoshopResult,
   TerminalEventSubscription,
   TerminalSessionResult,
@@ -687,7 +687,7 @@ export function createHttpWorkbenchApiClient(options: {
     clearRecentProjectRoots: () => request<{ ok: true }>('DELETE', '/api/workbench/recent-projects'),
     checkProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/check'),
     applyProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/apply'),
-    globalSettingsSave: (input: SaveDebruteGlobalSettingsInput) => request<{ ok: true }>('PATCH', '/api/settings/global', input),
+    mutateGlobalSettings: (input: MutateDebruteGlobalSettingsInput) => request<{ ok: true }>('POST', '/api/settings/global/mutations', input),
     revealModelApiKey: (modelId: string) => request('POST', '/api/settings/models/api-key/reveal', { modelId }),
     subscribeTerminalSessions: (listener, onError) => deferTerminalHubSubscription(
       (hub) => hub.subscribeSessions(listener, onError),

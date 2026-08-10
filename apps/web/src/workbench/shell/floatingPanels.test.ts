@@ -16,8 +16,8 @@ const viewport = { x: 0, y: 0, width: 1000, height: 700 };
 
 describe('floating panel state', () => {
   it('does not include a standalone Problems panel', () => {
-    expect(FLOATING_PANEL_IDS).toEqual(['explorer', 'inspector', 'settings', 'terminal']);
-    expect(Object.keys(DEFAULT_FLOATING_PANEL_STATE.panels)).toEqual(['explorer', 'inspector', 'settings', 'terminal']);
+    expect(FLOATING_PANEL_IDS).toEqual(['explorer', 'inspector', 'feedback', 'settings', 'terminal']);
+    expect(Object.keys(DEFAULT_FLOATING_PANEL_STATE.panels)).toEqual(['explorer', 'inspector', 'feedback', 'settings', 'terminal']);
   });
 
   it('keeps panels closed by default while preserving the Explorer spawn position', () => {

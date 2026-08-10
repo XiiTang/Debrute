@@ -47,6 +47,11 @@ contracts that depend on those versions are executable:
   [`text-files.md`](./text-files.md);
 - Workbench applies its repository-owned Debrute Cutout icon policy and accessibility rules
   described in [`workbench.md`](./workbench.md);
+- Feedback identities use Phosphor Fill symbols generated from exact
+  `@phosphor-icons/core@2.1.1` metadata and SVG sources. `pnpm
+  generate:feedback-icons` deterministically refreshes the Workbench manifest,
+  SVG sprite, TypeScript name set, and Runtime name set; the packaged Web assets
+  include the upstream MIT notice at `licenses/phosphor-icons-MIT.txt`;
 - CLI and Photoshop packaging validate the generated payload or archive after
   writing it.
 
@@ -149,10 +154,14 @@ not preserve speculative design-system breadth.
 An absent internal settings file means the current state has not yet been
 created and may use the current first-launch defaults. Once a file exists, every
 object is closed and every value must already be canonical: readers do not trim,
-filter, deduplicate, truncate, repair, or discard unknown fields. Partial
-mutation inputs likewise accept only their declared fields and must express at
-least one mutation. Repeating a valid current value is an idempotent no-op;
-empty objects and unknown-only inputs are invalid requests.
+filter, deduplicate, truncate, repair, or discard unknown fields. Global
+Settings mutations use a closed domain-intent union whose variants accept only
+their declared fields. Repeating a valid current value is an idempotent no-op;
+empty objects and unknown fields are invalid requests.
+The Feedback Catalog's `icon` value is the one explicit tolerant-read exception:
+current writes accept only the pinned Phosphor manifest, while an unknown
+persisted identifier remains an opaque value and renders as the question-mark
+fallback. It does not activate compatibility or migration behavior.
 
 Internal Project documents and runtime state carry no generic `schemaVersion`.
 Explicitly exchanged or distributed contracts are versioned when the version is
@@ -198,7 +207,10 @@ temporary `bindingId` for Project-scoped HTTP authority; the canonical root is
 the durable identity. Commands return outcomes while ordered Project events
 carry monotonic `projectRevision` and authoritative state.
 
-Invalid Feedback state remains unchanged and fails the Project load or refresh.
+Invalid Feedback structure remains unchanged and fails the Project load or
+refresh. Feedback Name reading is intentionally tolerant of Unicode values that
+strict local Catalog creation rejects; Runtime preserves those exact names and
+does not repair, normalize, or migrate them.
 Invalid Canvas state remains unchanged and makes only Canvas unavailable; the
 Project Tree, editor, and terminal still open. Model outputs commit first;
 Runtime-global content-addressed provenance is recorded afterward and a

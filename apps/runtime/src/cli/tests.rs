@@ -643,16 +643,18 @@ impl CliFixture {
     fn configure_model(&self, model_id: &str) {
         self._services
             .global()
-            .settings_save(&json!({
-                "modelSetting": {
+            .settings_mutate(
+                &serde_json::from_value(json!({
+                    "operation": "save-model-setting",
                     "modelId": model_id,
                     "setting": {
                         "baseUrlOverride": null,
                         "requestModelIdOverride": null,
                         "apiKey": format!("test-key-{model_id}")
                     }
-                }
-            }))
+                }))
+                .expect("fixture should contain a valid Global Settings intent"),
+            )
             .expect("fixture Model should be configured");
     }
 }

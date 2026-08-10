@@ -36,7 +36,8 @@ describe('Plugins settings page', { tags: ['settings'] }, () => {
       });
 
       expect(save).toHaveBeenCalledWith({
-        plugins: { photoshop: { enabled: true } }
+        operation: 'set-photoshop-plugin-enabled',
+        enabled: true
       });
       expect(toggle.checked).toBe(false);
 
@@ -94,7 +95,7 @@ describe('Plugins settings page', { tags: ['settings'] }, () => {
 function page(
   enabled: boolean,
   photoshop: PhotoshopStateView,
-  save: (input: { plugins: { photoshop: { enabled: boolean } } }) => Promise<void>
+  save: (input: { operation: 'set-photoshop-plugin-enabled'; enabled: boolean }) => Promise<void>
 ): React.ReactElement {
   return (
     <I18nProvider locale="en">

@@ -664,6 +664,7 @@ dependencies = [
  "tokio",
  "tray-icon",
  "ts-rs",
+ "unicode-segmentation",
  "url",
  "uuid",
  "vt100",

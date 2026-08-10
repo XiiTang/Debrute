@@ -211,18 +211,20 @@ fn model_api_key_reveal_is_authenticated_non_cacheable_and_not_published() {
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     let exact_api_key = "  密钥🔑 \n";
     let save = client
-        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .post(format!(
+            "{}/api/settings/global/mutations",
+            runtime.origin()
+        ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
-            "modelSetting": {
-                "modelId": "gpt-image-2",
-                "setting": {
-                    "baseUrlOverride": null,
-                    "requestModelIdOverride": null,
-                    "apiKey": exact_api_key
-                }
+            "operation": "save-model-setting",
+            "modelId": "gpt-image-2",
+            "setting": {
+                "baseUrlOverride": null,
+                "requestModelIdOverride": null,
+                "apiKey": exact_api_key
             }
         }))
         .send()
@@ -285,11 +287,14 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
     open_project(&client, &runtime, &project, &cookie, &credential);
 
     let enable = client
-        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .post(format!(
+            "{}/api/settings/global/mutations",
+            runtime.origin()
+        ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({ "plugins": { "photoshop": { "enabled": true } } }))
+        .json(&json!({ "operation": "set-photoshop-plugin-enabled", "enabled": true }))
         .send()
         .expect("Photoshop enable should complete");
     assert_eq!(enable.status().as_u16(), 200);
@@ -344,24 +349,27 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
     assert!(runtime.services().photoshop().state().transfer_active);
 
     let unrelated = client
-        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .post(format!(
+            "{}/api/settings/global/mutations",
+            runtime.origin()
+        ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({ "workbench": { "themePreference": "dark" } }))
+        .json(&json!({ "operation": "set-theme-preference", "themePreference": "dark" }))
         .send()
         .expect("unrelated setting should remain mutable during a Photoshop transfer");
     assert_eq!(unrelated.status().as_u16(), 200);
 
     let rejected = client
-        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .post(format!(
+            "{}/api/settings/global/mutations",
+            runtime.origin()
+        ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({
-            "workbench": { "locale": "zh-CN" },
-            "plugins": { "photoshop": { "enabled": false } }
-        }))
+        .json(&json!({ "operation": "set-photoshop-plugin-enabled", "enabled": false }))
         .send()
         .expect("busy Photoshop disable should complete");
     assert_eq!(rejected.status().as_u16(), 409);
@@ -392,11 +400,14 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
         .photoshop()
         .disconnect(&admission.plugin_session_id);
     let disable = client
-        .patch(format!("{}/api/settings/global", runtime.origin()))
+        .post(format!(
+            "{}/api/settings/global/mutations",
+            runtime.origin()
+        ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({ "plugins": { "photoshop": { "enabled": false } } }))
+        .json(&json!({ "operation": "set-photoshop-plugin-enabled", "enabled": false }))
         .send()
         .expect("idle Photoshop disable should complete");
     assert_eq!(disable.status().as_u16(), 200);

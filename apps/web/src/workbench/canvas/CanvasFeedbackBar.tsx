@@ -1,13 +1,13 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import { Clock3, MapPin, Square } from '../ui/index.js';
-import { CANVAS_FEEDBACK_MARKS, type CanvasFeedbackMark } from '@debrute/app-protocol';
+import type { CanvasFeedbackMark, FeedbackCatalogEntry } from '@debrute/app-protocol';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackLocalToolset } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';
-import { CANVAS_FEEDBACK_MARK_PRESENTATION } from './canvasFeedbackPresentation';
 import { CloseButton, IconButton } from '../ui/index.js';
 import { useI18n } from '../i18n';
+import { FeedbackIcon } from '../feedback/FeedbackIcon.js';
 
 const MOMENT_PILL_COLORS = [
   'var(--db-canvas-moment-1)',
@@ -23,6 +23,7 @@ export interface CanvasFeedbackBarProps {
   focusedCapsuleId?: string | undefined;
   authoringItemId?: string | undefined;
   marks: readonly CanvasFeedbackMark[];
+  availableMarks: readonly FeedbackCatalogEntry[];
   marksMutationPending: boolean;
   onSetMark(mark: CanvasFeedbackMark, selected: boolean): void;
   overlayRuntime: CanvasOverlayRuntime;
@@ -46,6 +47,7 @@ export function CanvasFeedbackBar({
   focusedCapsuleId,
   authoringItemId,
   marks,
+  availableMarks,
   marksMutationPending,
   onSetMark,
   overlayRuntime,
@@ -93,6 +95,7 @@ export function CanvasFeedbackBar({
         <div className="canvas-feedback-actions">
           <CanvasFeedbackMarkActions
             marks={marks}
+            availableMarks={availableMarks}
             pending={marksMutationPending}
             onSetMark={onSetMark}
           />
@@ -184,11 +187,13 @@ export function CanvasFeedbackBar({
 
 export function CanvasFeedbackSelectionBar({
   marks,
+  availableMarks,
   marksMutationPending,
   onSetMark,
   overlayRuntime
 }: {
   marks: readonly CanvasFeedbackMark[];
+  availableMarks: readonly FeedbackCatalogEntry[];
   marksMutationPending: boolean;
   onSetMark(mark: CanvasFeedbackMark, selected: boolean): void;
   overlayRuntime: CanvasOverlayRuntime;
@@ -201,6 +206,7 @@ export function CanvasFeedbackSelectionBar({
       <div className="canvas-feedback-primary-row">
         <CanvasFeedbackMarkActions
           marks={marks}
+          availableMarks={availableMarks}
           pending={marksMutationPending}
           onSetMark={onSetMark}
         />
@@ -211,27 +217,28 @@ export function CanvasFeedbackSelectionBar({
 
 export function CanvasFeedbackMarkActions({
   marks,
+  availableMarks,
   pending,
   onSetMark
 }: {
   marks: readonly CanvasFeedbackMark[];
+  availableMarks: readonly FeedbackCatalogEntry[];
   pending: boolean;
   onSetMark(mark: CanvasFeedbackMark, selected: boolean): void;
 }): React.ReactElement {
   const i18n = useI18n();
   return (
     <div className="canvas-feedback-mark-actions" role="group" aria-label={i18n.t('canvas.feedback.actions')}>
-      {CANVAS_FEEDBACK_MARKS.map((mark) => {
-        const { labelKey, Icon } = CANVAS_FEEDBACK_MARK_PRESENTATION[mark];
+      {availableMarks.map(({ name: mark, icon }) => {
         const selected = marks.includes(mark);
         return (
           <IconButton
             key={mark}
             className="canvas-feedback-mark"
-            label={i18n.t(labelKey)}
+            label={mark}
             pressed={selected}
             disabled={pending}
-            icon={<Icon />}
+            icon={<FeedbackIcon icon={icon} size={18} />}
             onClick={() => onSetMark(mark, !selected)}
           />
         );

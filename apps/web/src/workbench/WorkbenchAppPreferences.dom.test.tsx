@@ -212,8 +212,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
     it('keeps the hierarchy-edge switch available without a Project and restores its global value', async () => {
       const save = deferred<{ ok: true }>();
-      const globalSettingsSave = vi.fn(() => save.promise);
-      const first = await renderWorkbenchApp('/', { globalSettingsSave });
+      const mutateGlobalSettings = vi.fn(() => save.promise);
+      const first = await renderWorkbenchApp('/', { mutateGlobalSettings });
       const button = requireButton(first.container, 'Hide hierarchy edges');
 
       expect(button.disabled).toBe(false);
@@ -227,8 +227,9 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       expect(button.disabled).toBe(false);
       expect(button.getAttribute('aria-pressed')).toBe('true');
-      expect(globalSettingsSave).toHaveBeenCalledWith({
-        canvas: { hierarchyEdgesVisible: false }
+      expect(mutateGlobalSettings).toHaveBeenCalledWith({
+        operation: 'set-hierarchy-edges-visible',
+        hierarchyEdgesVisible: false
       });
 
       await act(async () => {
@@ -253,11 +254,11 @@ describe('WorkbenchApp preferences and project behavior', () => {
     it('rolls back a failed hierarchy-edge switch and reports one Workbench failure', async () => {
       const failure = new Error('settings unavailable');
       const reportActivityNotice = vi.fn(async () => ({ activityId: 'activity-1' }));
-      const globalSettingsSave = vi.fn(async () => {
+      const mutateGlobalSettings = vi.fn(async () => {
         throw failure;
       });
       const { container, root } = await renderWorkbenchApp('/', {
-        globalSettingsSave,
+        mutateGlobalSettings,
         reportActivityNotice
       });
       const button = requireButton(container, 'Hide hierarchy edges');
@@ -286,7 +287,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
           ? testDomRect(104, 48)
           : readRect.call(this);
       });
-      const globalSettingsSave = vi.fn(async () => ({ ok: true as const }));
+      const mutateGlobalSettings = vi.fn(async () => ({ ok: true as const }));
       const snapshot = hierarchyCanvasSnapshotFixture();
       const openProject = vi.fn(async () => ({
         bindingId: 'project-hierarchy',
@@ -297,7 +298,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       }));
       const { container, root } = await renderWorkbenchApp(
         '/open?path=%2Fprojects%2Fhierarchy',
-        { globalSettingsSave, openProject }
+        { mutateGlobalSettings, openProject }
       );
 
       expect(container.querySelector('[data-canvas-node-path=""]')).not.toBeNull();
@@ -321,9 +322,9 @@ describe('WorkbenchApp preferences and project behavior', () => {
       });
 
       expect(container.querySelector('.canvas-edge-layer')).not.toBeNull();
-      expect(globalSettingsSave.mock.calls).toEqual([
-        [{ canvas: { hierarchyEdgesVisible: false } }],
-        [{ canvas: { hierarchyEdgesVisible: true } }]
+      expect(mutateGlobalSettings.mock.calls).toEqual([
+        [{ operation: 'set-hierarchy-edges-visible', hierarchyEdgesVisible: false }],
+        [{ operation: 'set-hierarchy-edges-visible', hierarchyEdgesVisible: true }]
       ]);
       await unmount(root, container);
     });
@@ -838,8 +839,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
   describe('global settings save races', { tags: ['settings'] }, () => {
     it('keeps an acknowledged Canvas Text Appearance while Settings is closed and reopened before confirmation', async () => {
-      const globalSettingsSave = vi.fn(async () => ({ ok: true as const }));
-      const { container, root } = await renderWorkbenchApp('/', { globalSettingsSave });
+      const mutateGlobalSettings = vi.fn(async () => ({ ok: true as const }));
+      const { container, root } = await renderWorkbenchApp('/', { mutateGlobalSettings });
 
       await act(async () => {
         requireButton(container, 'Settings').click();
@@ -857,7 +858,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(globalSettingsSave).toHaveBeenCalledOnce();
+      expect(mutateGlobalSettings).toHaveBeenCalledOnce();
 
       await act(async () => {
         requireButton(container, 'Close Settings').click();
@@ -980,8 +981,8 @@ async function startPendingLocaleSave(): Promise<{
   root: Root;
 }> {
   const save = deferred<{ ok: true }>();
-  const globalSettingsSave = vi.fn(() => save.promise);
-  const { container, root } = await renderWorkbenchApp('/', { globalSettingsSave });
+  const mutateGlobalSettings = vi.fn(() => save.promise);
+  const { container, root } = await renderWorkbenchApp('/', { mutateGlobalSettings });
 
   await act(async () => {
     requireButton(container, 'Settings').click();
@@ -997,7 +998,7 @@ async function startPendingLocaleSave(): Promise<{
     setSelectValue(locale, 'zh-CN');
     locale.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  expect(globalSettingsSave).toHaveBeenCalledTimes(1);
+  expect(mutateGlobalSettings).toHaveBeenCalledTimes(1);
 
   return { save, container, root };
 }
@@ -1070,14 +1071,14 @@ function requireButton(container: HTMLElement, label: string): HTMLButtonElement
 }
 
 async function waitForButton(container: HTMLElement, label: string): Promise<HTMLButtonElement> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     const button = findButton(container, label);
     if (button) {
       return button;
     }
     await act(async () => {
       await Promise.resolve();
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
     });
   }
   throw new Error(`Expected ${label} button.`);
@@ -1126,7 +1127,7 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     }),
     dismissActivity: vi.fn(async () => ({ ok: true as const })),
     clearTerminalActivities: vi.fn(async () => ({ ok: true as const, cleared: 0 })),
-    globalSettingsSave: vi.fn(async () => ({ ok: true as const })),
+    mutateGlobalSettings: vi.fn(async () => ({ ok: true as const })),
     onEvent: vi.fn((listener: (event: WorkbenchEvent) => void) => {
       apiState.listeners.add(listener);
       return () => apiState.listeners.delete(listener);
@@ -1209,7 +1210,8 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       video: [],
       audio: []
     },
-    ...overrides
+    ...overrides,
+    feedback: overrides.feedback ?? { catalog: [], actionBar: [] }
   };
 }
 

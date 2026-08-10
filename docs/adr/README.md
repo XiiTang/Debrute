@@ -22,6 +22,8 @@ glossaries instead.
 - [Tests Own Their External Resources](./0013-tests-own-their-external-resources.md)
 - [Project Source Resolution Is Demand-Driven](./0069-project-source-resolution-is-demand-driven.md)
 - [Canvas Source Settlement Is Path Local](./0070-canvas-source-settlement-is-path-local.md)
+- [Feedback Names Are Project Identity And The Catalog Is Global](./0071-feedback-names-are-project-identity-and-the-catalog-is-global.md)
+- [Global Settings Use Typed Mutation Intents](./0072-global-settings-use-typed-mutation-intents.md)
 
 ### Product Identity
 

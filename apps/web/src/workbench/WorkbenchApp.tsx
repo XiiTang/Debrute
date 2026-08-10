@@ -28,6 +28,7 @@ import {
   CanvasFeedbackInteractionBar,
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
+import { FeedbackPanel } from './feedback/FeedbackPanel.js';
 import type { CanvasEditorRuntime } from './canvas/runtime/CanvasEditorRuntime';
 import {
   canvasNodeSelection
@@ -142,9 +143,9 @@ import {
   type WorkbenchPresentationController
 } from './services/useWorkbenchPresentationController.js';
 import {
-  useCanvasGlobalSettingsController,
-  type CanvasGlobalSettingsController
-} from './services/useCanvasGlobalSettingsController.js';
+  useWorkbenchGlobalSettingsController,
+  type WorkbenchGlobalSettingsController
+} from './services/useWorkbenchGlobalSettingsController.js';
 import { canvasTextRenderProfileForAppearance } from './canvas/CanvasFontCatalog.js';
 import {
   CanvasTextRenderProfileGate,
@@ -295,14 +296,11 @@ function WorkbenchRuntimeApp({
   const [projectOpenPresentation, setProjectOpenPresentation] = useState<ProjectOpenPresentation>({});
   const initialProjectOpeningRef = useRef<ReturnType<ProjectBindingLifecycle['open']> | undefined>(undefined);
   const announcedProjectBindingsRef = useRef(new Set<number>());
-  const presentationController = useWorkbenchPresentationController({
-    globalProjection: api.globalProjection
-  });
-  const reportCanvasGlobalSettingsSaveError = useCallback((
+  const reportGlobalSettingsMutationError = useCallback((
     _error: unknown,
-    patch: Parameters<CanvasGlobalSettingsController['save']>[0]
+    mutation: Parameters<WorkbenchGlobalSettingsController['mutate']>[0]
   ) => {
-    if (patch.hierarchyEdgesVisible === undefined) {
+    if (mutation.operation !== 'set-hierarchy-edges-visible') {
       return;
     }
     void api.reportActivityNotice({
@@ -310,10 +308,13 @@ function WorkbenchRuntimeApp({
       operation: 'save-canvas-settings'
     }).catch(() => undefined);
   }, [api]);
-  const canvasGlobalSettingsController = useCanvasGlobalSettingsController({
+  const globalSettingsController = useWorkbenchGlobalSettingsController({
     api,
     globalProjection: api.globalProjection,
-    onSaveError: reportCanvasGlobalSettingsSaveError
+    onMutationError: reportGlobalSettingsMutationError
+  });
+  const presentationController = useWorkbenchPresentationController({
+    settings: globalSettingsController.settings
   });
   useLayoutEffect(() => {
     workbenchStartupTimeline.mark('react-committed');
@@ -324,7 +325,7 @@ function WorkbenchRuntimeApp({
   const requestSettingsFeature = useCallback(() => {
     setSettingsFeatureRequested(true);
   }, []);
-  const canvasTextAppearance = canvasGlobalSettingsController.settings.textAppearance;
+  const canvasTextAppearance = globalSettingsController.settings.canvas.textAppearance;
   const canvasTextRenderProfile = useMemo(
     () => canvasTextRenderProfileForAppearance(canvasTextAppearance),
     [
@@ -417,7 +418,7 @@ function WorkbenchRuntimeApp({
     connectionEnded,
     announceProjectBinding,
     presentationController,
-    canvasGlobalSettingsController,
+    globalSettingsController,
     settingsFeatureController,
     requestSettingsFeature,
     i18n,
@@ -447,7 +448,7 @@ function WorkbenchRuntimeApp({
         <React.Suspense fallback={null}>
           <WorkbenchSettingsFeatureHost
             api={api}
-            canvasGlobalSettings={canvasGlobalSettingsController}
+            globalSettingsController={globalSettingsController}
             onController={setSettingsFeatureController}
           />
         </React.Suspense>
@@ -464,7 +465,7 @@ function WorkbenchBoundProjectApp({
   connectionEnded,
   announceProjectBinding,
   presentationController,
-  canvasGlobalSettingsController,
+  globalSettingsController,
   settingsFeatureController,
   requestSettingsFeature,
   i18n,
@@ -481,7 +482,7 @@ function WorkbenchBoundProjectApp({
   connectionEnded: Error | undefined;
   announceProjectBinding(input: { bindingGeneration: number }): void;
   presentationController: WorkbenchPresentationController;
-  canvasGlobalSettingsController: CanvasGlobalSettingsController;
+  globalSettingsController: WorkbenchGlobalSettingsController;
   settingsFeatureController: WorkbenchSettingsController | undefined;
   requestSettingsFeature(): void;
   i18n: WorkbenchI18n;
@@ -580,6 +581,11 @@ function WorkbenchBoundProjectApp({
       requestSettingsFeature();
     }
   }, [floatingPanels.panels.settings.open, requestSettingsFeature]);
+  useEffect(() => {
+    if (!runtimeBindingId && floatingPanels.panels.feedback.open) {
+      setFloatingPanels((current) => closeFloatingPanel(current, 'feedback'));
+    }
+  }, [floatingPanels.panels.feedback.open, runtimeBindingId]);
   const [requestedTerminal, setRequestedTerminal] = useState<{
     cwdProjectRelativePath: string;
     scope: AcceptedProjectPathCommandScope;
@@ -642,7 +648,7 @@ function WorkbenchBoundProjectApp({
       canvasRuntime.endContentActivation();
     }
   }, [canvasRuntime]);
-  const hierarchyEdgesVisible = canvasGlobalSettingsController.settings.hierarchyEdgesVisible;
+  const hierarchyEdgesVisible = globalSettingsController.settings.canvas.hierarchyEdgesVisible;
   const canvasStateRef = useRef(canvasState);
   canvasStateRef.current = canvasState;
   const canvasProjectionSource = useMemo(() => (
@@ -1118,7 +1124,7 @@ function WorkbenchBoundProjectApp({
     recentProjects: presentationController.settings.chrome.recentProjectRoots.map((projectRoot) => ({ projectRoot }))
   }), [presentationController.locale, presentationController.settings.chrome.recentProjectRoots, snapshot?.health.projectName]);
   const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
-    runtimeBindingId ? [] : ['terminal']
+    runtimeBindingId ? [] : ['feedback', 'terminal']
   ), [runtimeBindingId]);
 
   const globalProjection = api.globalProjection.getState();
@@ -1288,10 +1294,11 @@ function WorkbenchBoundProjectApp({
     });
   }, [actions, projectActivities]);
   const setHierarchyEdgesVisible = useCallback((visible: boolean) => {
-    void canvasGlobalSettingsController.save({
+    void globalSettingsController.mutate({
+      operation: 'set-hierarchy-edges-visible',
       hierarchyEdgesVisible: visible
     }).catch(() => undefined);
-  }, [canvasGlobalSettingsController]);
+  }, [globalSettingsController]);
   const readyPhotoshop = globalProjection.photoshop.status === 'ready'
     ? globalProjection.photoshop.value
     : undefined;
@@ -1706,6 +1713,10 @@ function WorkbenchBoundProjectApp({
                 ) : null}
                 <CanvasFeedbackInteractionBar
                   interaction={feedbackInteraction}
+                  availableMarks={globalSettingsController.settings.feedback.actionBar.flatMap((name) => {
+                    const entry = globalSettingsController.settings.feedback.catalog.find((candidate) => candidate.name === name);
+                    return entry ? [entry] : [];
+                  })}
                   overlayRuntime={canvasOverlayRuntime}
                   canvasRuntime={canvasRuntime}
                   viewportRect={workbenchViewportRect}
@@ -1821,6 +1832,16 @@ function WorkbenchBoundProjectApp({
                           actions={actions}
                         />
                       </React.Suspense>
+                    )}
+                    feedbackPanel={(
+                      <FeedbackPanel
+                        feedback={feedbackInteraction.feedback}
+                        catalog={globalSettingsController.settings.feedback.catalog}
+                        projectTree={snapshot?.projectTree ?? []}
+                        onLocatePath={(path) => { void locateProjectFileInCanvas(path); }}
+                        onClearMark={(path, mark) => feedbackInteraction.setMark([path], mark, false)}
+                        onDeleteItem={feedbackInteraction.deleteCapsule}
+                      />
                     )}
                     settingsPanel={settingsFeatureController ? (
                       <React.Suspense fallback={<div className="settings-panel" aria-busy="true" />}>
