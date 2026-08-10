@@ -84,6 +84,12 @@ CodeMirror `EditorView`, reconfigurable language, read-only, and word-wrap
 compartments, external-value synchronization, search, save and wrap commands,
 and consumes the current resolved Canvas Text Render Profile.
 
+Interactive editors use CodeMirror's drawn cursor rather than the browser's
+native caret. Every drawn primary or secondary cursor uses `--db-text`, so it is
+dark against the light Workbench theme and light against the dark Workbench
+theme. The rule is shared by inline Canvas editors and floating text editor
+windows; preview-capture surfaces remain non-interactive and omit cursors.
+
 When a canonical preview source is missing, the hidden preview-capture surface
 loads the complete current text into its read-only editor so CodeMirror can
 reproduce the persisted pixel viewport and word wrapping exactly. This capture

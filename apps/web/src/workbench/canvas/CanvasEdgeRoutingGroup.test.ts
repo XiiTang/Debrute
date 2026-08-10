@@ -63,6 +63,7 @@ function edge(id: string, sourceProjectRelativePath: string, targetProjectRelati
 function node(projectRelativePath: string, x: number, y: number): ProjectedCanvasNode {
   return {
     nodeKind: 'directory',
+    folderDisclosure: projectRelativePath === '' ? 'disclosed' : 'collapsed',
     projectRelativePath,
     displayName: projectRelativePath,
     x,

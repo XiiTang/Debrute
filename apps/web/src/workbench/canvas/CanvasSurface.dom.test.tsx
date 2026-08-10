@@ -3470,6 +3470,7 @@ function directoryFixture(path: string, x: number, y: number): CanvasProjection[
     projectRelativePath: path,
     displayName: path,
     nodeKind: 'directory',
+    folderDisclosure: path === '' ? 'disclosed' : 'collapsed',
     x,
     y,
     width: 200,

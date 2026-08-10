@@ -134,7 +134,7 @@ function renderStaticWithI18n(element: React.ReactElement): string {
 
 // @ts-expect-error CanvasNodeContent requires the video target registry dependency.
 const canvasNodeContentPropsWithoutVideoRegistry: CanvasNodeContentProps = {
-  node: directoryNode('type-check'),
+  node: directoryNode('type-check', 'collapsed'),
   contentInteractionActive: false,
   actions: actionsFixture(),
   textBuffer: undefined,
@@ -145,7 +145,7 @@ describe('CanvasNodeContent', () => {
   it('renders the project root directory with a non-empty label', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent
-        node={directoryNode('')}
+        node={directoryNode('', 'disclosed')}
         contentInteractionActive
         actions={actionsFixture()}
         textBuffer={undefined}
@@ -158,12 +158,13 @@ describe('CanvasNodeContent', () => {
     );
 
     expect(html).toContain('ecommerce');
+    expect(html).toContain('data-debrute-icon="folder-open"');
   });
 
   it('renders a generic node label once in the normal state', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent
-        node={directoryNode('references/archive')}
+        node={directoryNode('references/archive', 'collapsed')}
         contentInteractionActive
         actions={actionsFixture()}
         textBuffer={undefined}
@@ -179,13 +180,33 @@ describe('CanvasNodeContent', () => {
     expect(html).toContain('db-canvas-node-generic');
     expect(html).not.toContain('db-canvas-node-generic--wrap');
     expect(html).not.toContain('<span>archive</span>');
+    expect(html).toContain('data-debrute-icon="folder"');
+    expect(html).not.toContain('data-debrute-icon="folder-open"');
+  });
+
+  it('renders a disclosed empty directory with the open folder glyph', () => {
+    const html = renderStaticWithI18n(
+      <CanvasNodeContent
+        node={directoryNode('empty', 'disclosed')}
+        contentInteractionActive
+        actions={actionsFixture()}
+        textBuffer={undefined}
+        onVideoPlayerMounted={() => undefined}
+        onVideoPlayingChange={() => undefined}
+        onRegisterVideoTarget={() => undefined}
+        onUpdateVideoPlaybackTime={() => undefined}
+        onUpdateTextViewport={() => undefined}
+      />
+    );
+
+    expect(html).toContain('data-debrute-icon="folder-open"');
   });
 
   it('marks manually taller generic nodes for bounded label wrapping', () => {
     const html = renderStaticWithI18n(
       <CanvasNodeContent
         node={{
-          ...directoryNode('references/very-long-directory-name-that-needs-wrapping'),
+          ...directoryNode('references/very-long-directory-name-that-needs-wrapping', 'collapsed'),
           width: 2200,
           height: 1000,
           layoutMode: 'manual'
@@ -1248,11 +1269,15 @@ function imageNode(path: string, revision: string): ProjectedCanvasNode {
   };
 }
 
-function directoryNode(path: string): ProjectedCanvasNode {
+function directoryNode(
+  path: string,
+  folderDisclosure: 'collapsed' | 'disclosed'
+): ProjectedCanvasNode {
   return {
     projectRelativePath: path,
     displayName: path ? path.split('/').at(-1)! : 'ecommerce',
     nodeKind: 'directory',
+    folderDisclosure,
     x: 0,
     y: 0,
     width: 240,
@@ -1264,7 +1289,7 @@ function directoryNode(path: string): ProjectedCanvasNode {
 
 function unavailableDirectoryNode(path: string, message: string): ProjectedCanvasNode {
   return {
-    ...directoryNode(path),
+    ...directoryNode(path, 'collapsed'),
     availability: {
       state: 'missing',
       message

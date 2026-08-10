@@ -54,6 +54,13 @@ derives:
 - overlap-only `occlusionOrder` reconciliation and z values;
 - Canvas Selection, camera, drag drafts, and pointer interaction.
 
+Directory-node identity reflects Folder Disclosure with the same folder-glyph
+semantics as Explorer: a collapsed directory uses the closed folder glyph and
+a disclosed directory uses the open folder glyph. The structurally disclosed
+Project root therefore always uses the open glyph. A disclosed empty directory
+also remains open, distinguishing "opened and empty" from "not opened" without
+depending on visible descendants.
+
 Generic root, folder, unknown, and image-without-dimensions nodes are 48 presentation pixels
 high. Automatic Layout derives their width from one rendering-matched DOM
 measurement of the stable icon-and-label identity row, rounds upward, and

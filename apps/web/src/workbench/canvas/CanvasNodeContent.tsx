@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Maximize2, RefreshCw, Save } from '../ui/index.js';
+import { AlertTriangle, File, FileText, Folder, FolderOpen, Image as ImageIcon, Maximize2, RefreshCw, Save } from '../ui/index.js';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type { TextFileBuffer } from '../../types';
@@ -324,10 +324,14 @@ function CanvasGenericNodeContent({
       </div>
     );
   }
+  let NodeIcon = File;
+  if (node.nodeKind === 'directory') {
+    NodeIcon = node.folderDisclosure === 'disclosed' ? FolderOpen : Folder;
+  }
 
   return (
     <div className={className}>
-      {node.nodeKind === 'directory' ? <Folder size={20} /> : <File size={20} />}
+      <NodeIcon size={20} />
       <strong className="db-canvas-node-generic__label">{label}</strong>
     </div>
   );

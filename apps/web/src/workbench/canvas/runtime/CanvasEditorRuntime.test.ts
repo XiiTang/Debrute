@@ -1262,6 +1262,7 @@ function createRuntime(input?: {
           projectRelativePath: 'assets',
           displayName: 'assets',
           nodeKind: 'directory' as const,
+          folderDisclosure: 'collapsed' as const,
           x: 10,
           y: 20,
           width: 1800,

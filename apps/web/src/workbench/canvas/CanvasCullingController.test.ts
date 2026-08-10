@@ -93,6 +93,7 @@ function scene(nodes: ProjectedCanvasNode[]): CanvasSceneSnapshot {
 function node(projectRelativePath: string): ProjectedCanvasNode {
   return {
     nodeKind: 'directory',
+    folderDisclosure: projectRelativePath === '' ? 'disclosed' : 'collapsed',
     projectRelativePath,
     displayName: projectRelativePath,
     x: 0,

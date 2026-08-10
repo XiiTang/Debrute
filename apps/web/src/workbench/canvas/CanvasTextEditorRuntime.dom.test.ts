@@ -13,6 +13,7 @@ import {
   canvasTextEditorExternalValueSyncAnnotation,
   canvasTextEditorKeymap,
   canvasTextEditorSyncExternalValue,
+  canvasTextEditorTheme,
   canvasTextEditorUpdateListener,
   type CanvasTextEditorCallbackRef
 } from './CanvasTextEditorRuntime';
@@ -25,6 +26,30 @@ describe('CanvasTextEditorRuntime', { tags: ['canvas-text'] }, () => {
     });
 
     expect(state.facet(EditorView.cursorScrollMargin)).toEqual({ x: 8, y: 34 });
+  });
+
+  it('binds CodeMirror drawn cursors to the Workbench text token', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc: 'Cursor',
+        extensions: [canvasTextEditorTheme()]
+      })
+    });
+
+    const cursorRules = Array.from(document.styleSheets).flatMap((sheet) => (
+      Array.from(sheet.cssRules).filter((rule): rule is CSSStyleRule => (
+        rule instanceof CSSStyleRule && rule.selectorText.includes('.cm-cursor')
+      ))
+    ));
+    expect(cursorRules.some((rule) => (
+      rule.style.getPropertyValue('border-left-color') === 'var(--db-text)'
+    ))).toBe(true);
+
+    view.destroy();
+    parent.remove();
   });
 
   it('binds Mod-s to save', () => {

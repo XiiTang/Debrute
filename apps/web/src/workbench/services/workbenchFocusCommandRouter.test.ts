@@ -178,5 +178,10 @@ function textNode(path: string) {
 
 function directoryNode(path: string) {
   const { mediaKind: _mediaKind, ...base } = node(path);
-  return { ...base, nodeKind: 'directory' as const };
+  return {
+    ...base,
+    nodeKind: 'directory' as const,
+    folderDisclosure: 'collapsed' as const,
+    availability: { state: 'directory' as const }
+  };
 }

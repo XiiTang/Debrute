@@ -23,6 +23,7 @@ describe('CanvasScene', () => {
         projectRelativePath: '',
         displayName: 'ecommerce',
         nodeKind: 'directory',
+        folderDisclosure: 'disclosed',
         width: 1_200,
         height: 480
       })
@@ -59,17 +60,37 @@ describe('CanvasScene', () => {
     expect(result.nodes.map((node) => [
       node.projectRelativePath,
       node.displayName,
+      node.nodeKind === 'directory' ? node.folderDisclosure : undefined,
       node.width,
       node.height
     ])).toEqual([
-      ['', 'ecommerce', 1_540, 480],
-      ['assets', 'assets', 1_200, 480],
-      ['assets/cover.png', 'cover.png', 800, 600]
+      ['', 'ecommerce', 'disclosed', 1_540, 480],
+      ['assets', 'assets', 'disclosed', 1_200, 480],
+      ['assets/cover.png', 'cover.png', undefined, 800, 600]
     ]);
     expect(projectCanvasHierarchyEdges(result.nodes)).toEqual([
       expect.objectContaining({ sourceProjectRelativePath: '', targetProjectRelativePath: 'assets' }),
       expect.objectContaining({ sourceProjectRelativePath: 'assets', targetProjectRelativePath: 'assets/cover.png' })
     ]);
+  });
+
+  it('projects a disclosed empty directory independently of visible descendants', () => {
+    const result = projectCanvasNodeScene({
+      canonicalRoot: '/Users/example/ecommerce',
+      resources: {
+        resources: [
+          { projectRelativePath: '', nodeKind: 'directory' },
+          { projectRelativePath: 'empty', nodeKind: 'directory' }
+        ]
+      },
+      state: { expandedDirectories: ['empty'], nodeStates: {}, occlusionOrder: [] },
+      measureGenericIdentityRows: measuredWidths(() => 100)
+    });
+
+    expect(result.nodes.find((node) => node.projectRelativePath === 'empty')).toMatchObject({
+      nodeKind: 'directory',
+      folderDisclosure: 'disclosed'
+    });
   });
 
   it('reserves a usable Content Region for unavailable video', () => {
@@ -292,15 +313,16 @@ describe('CanvasScene', () => {
 
     expect(result.nodes.map((node) => [
       node.projectRelativePath,
+      node.nodeKind === 'directory' ? node.folderDisclosure : undefined,
       node.x,
       node.y,
       node.width,
       node.height
     ])).toEqual([
-      ['', 0, 340, 1_200, 480],
-      ['folder', 1_300, 0, 1_200, 480],
-      ['wide.png', 1_300, 560, 800, 600],
-      ['small.png', 2_180, 760, 400, 200]
+      ['', 'disclosed', 0, 340, 1_200, 480],
+      ['folder', 'collapsed', 1_300, 0, 1_200, 480],
+      ['wide.png', undefined, 1_300, 560, 800, 600],
+      ['small.png', undefined, 2_180, 760, 400, 200]
     ]);
   });
 });

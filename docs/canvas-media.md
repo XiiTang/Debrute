@@ -39,8 +39,9 @@ the playback engine's residency.
 
 Content-inactive audio controls remain readable and continue to show live
 playback progress rather than appearing disabled. Selection is the node's
-orange outer outline and Content Activation is the player's teal inner ring;
-neither is encoded by dimming the controls. The control region is rectangular,
+orange outer outline. An inactive player retains a weak teal hover affordance,
+while Content Activation adds no persistent border or ring; neither state is
+encoded by dimming the controls. The control region is rectangular,
 uses Debrute design tokens, and does not retain the native browser audio pill or
 semicircular ends.
 

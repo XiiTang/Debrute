@@ -257,6 +257,9 @@ export function canvasTextEditorTheme(): Extension {
     '.cm-content': {
       caretColor: 'var(--db-text)'
     },
+    '.cm-cursor': {
+      borderLeftColor: 'var(--db-text)'
+    },
     '.cm-activeLineGutter': {
       backgroundColor: 'transparent'
     },

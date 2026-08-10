@@ -44,13 +44,24 @@ interface CanvasProjectedNodeGeometry extends CanvasProjectedRect {
   automaticLayout?: Readonly<LayoutRect>;
 }
 
-export interface ProjectedCanvasNode extends CanvasProjectedNodeGeometry {
+interface ProjectedCanvasNodeBase extends CanvasProjectedNodeGeometry {
   displayName: string;
   availability: CanvasFileResource['availability'] | { state: 'directory' };
   imageDimensions?: CanvasFileResource['imageDimensions'];
   textLanguage?: ProjectTextLanguageId;
   videoPresentation?: CanvasFileResource['videoPresentation'];
 }
+
+export type ProjectedCanvasNode = ProjectedCanvasNodeBase & (
+  | {
+      nodeKind: 'directory';
+      folderDisclosure: 'collapsed' | 'disclosed';
+    }
+  | {
+      nodeKind: 'file';
+      folderDisclosure?: never;
+    }
+);
 
 export interface CanvasStructureEdgeProjection {
   id: string;
@@ -115,6 +126,7 @@ export function projectCanvasSceneNodes(
     resource.projectRelativePath,
     resourceLabel(resource, input.canonicalRoot)
   ]));
+  const disclosedDirectories = new Set(input.state.expandedDirectories);
   const genericSizes = canvasGenericNodeSceneSizes(
     input.resources.resources.flatMap((resource) => (
       resourceUsesGenericGeometry(resource)
@@ -149,7 +161,6 @@ export function projectCanvasSceneNodes(
     const common = {
       projectRelativePath: resource.projectRelativePath,
       displayName: resourceLabel(resource, input.canonicalRoot),
-      nodeKind: resource.nodeKind,
       x: layout.x,
       y: layout.y,
       width: layout.width,
@@ -161,10 +172,19 @@ export function projectCanvasSceneNodes(
       ...(state?.textViewport ? { textViewport: state.textViewport } : {})
     };
     if (resource.nodeKind === 'directory') {
-      return { ...common, availability: { state: 'directory' } };
+      return {
+        ...common,
+        nodeKind: 'directory',
+        folderDisclosure: resource.projectRelativePath === ''
+          || disclosedDirectories.has(resource.projectRelativePath)
+          ? 'disclosed'
+          : 'collapsed',
+        availability: { state: 'directory' }
+      };
     }
     return {
       ...common,
+      nodeKind: 'file',
       mediaKind: resource.mediaKind,
       availability: resource.availability,
       ...(resource.imageDimensions ? { imageDimensions: resource.imageDimensions } : {}),

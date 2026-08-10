@@ -70,14 +70,14 @@ describe('Workbench Canvas foundation', () => {
     expect(canvasStyles).not.toContain('calc(-8px * var(--canvas-chrome-scale, 1))');
   });
 
-  it('paints node hover, Selection, and Content Activation without changing layout geometry', () => {
+  it('paints node hover, Selection, and inactive-content affordance without changing layout geometry', () => {
     const frameRule = cssRule(canvasStyles, '.db-canvas-node-frame');
     const framePaintRule = cssRule(canvasStyles, '.db-canvas-node-frame:not(.image)::before');
     const hoverRule = cssRule(canvasStyles, '.db-canvas-node-frame[data-canvas-hovered="true"]');
     const selectionRule = cssRule(canvasStyles, '.db-canvas-node-frame[data-canvas-selected="true"]');
-    const activationRule = cssRule(
+    const inactiveContentHoverRule = cssRule(
       canvasStyles,
-      '.canvas-node-element[data-canvas-content-active="true"] [data-canvas-node-zone="content"]::after'
+      '.canvas-node-element:not([data-canvas-content-active="true"]) [data-canvas-node-zone="content"]:hover::after'
     );
 
     expect(frameRule).toContain('border: 0;');
@@ -86,7 +86,10 @@ describe('Workbench Canvas foundation', () => {
     expect(framePaintRule).toContain('pointer-events: none;');
     expect(hoverRule).toContain('outline: calc(1px * var(--canvas-chrome-scale, 1))');
     expect(selectionRule).toContain('outline: calc(2px * var(--canvas-chrome-scale, 1))');
-    expect(activationRule).toContain('box-shadow: inset 0 0 0 calc(2px * var(--canvas-local-chrome-scale, 1))');
+    expect(inactiveContentHoverRule).toContain('box-shadow: inset 0 0 0 calc(1px * var(--canvas-local-chrome-scale, 1))');
+    expect(canvasStyles).not.toContain(
+      '.canvas-node-element[data-canvas-content-active="true"] [data-canvas-node-zone="content"]::after'
+    );
   });
 
   it('keeps Audio and Video Media Chrome rectangular and the shared presentation scale data-driven', () => {

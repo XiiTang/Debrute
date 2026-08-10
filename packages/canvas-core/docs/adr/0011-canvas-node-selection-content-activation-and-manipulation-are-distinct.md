@@ -114,8 +114,8 @@ keyboard behavior, but no parallel focus or key state machine is introduced.
 
 If the editor or player fails before it takes ownership of the Content Region,
 the node remains selected but Content Activation ends. The error presentation
-is therefore an activatable, content-inactive retry surface and does not show
-the active-content ring. Clicking it starts a new Content Activation Click;
+is therefore an activatable, content-inactive retry surface. Clicking it starts
+a new Content Activation Click;
 after a successful handoff, text places the caret from that new click and video
 applies exactly one playback toggle. The failed request is invalidated, as is
 any pending request whose node loses Activation, Selection, or Canvas
@@ -142,7 +142,7 @@ the ordinary Canvas additive-selection contract.
 Video playback remains distinct from Content Activation. Losing activation,
 changing Selection, or pressing Escape does not implicitly pause, seek, or
 persist a new Playback Position. A playing video may retain its live player
-while content-inactive, without the activation ring or Canvas video hotkeys;
+while content-inactive, without Canvas video hotkeys;
 explicit player, playback-boundary, and Feedback seek-or-pause actions continue
 to own playback changes. Audio playback likewise does not follow Selection or
 Activation. Its player remains mounted when Activation ends, preserving the
@@ -233,22 +233,23 @@ outlines. Feedback Bars, saved Capsules, marks, and spatial annotations retain
 their existing ownership; a future replacement for feedback-presence display
 must not overload Selection or Content Activation visuals.
 
-Presentation keeps the states visually independent. Hover uses a weak neutral
-node outline; Selection uses a persistent stronger orange outer outline; and
-Content Activation uses a teal inner focus ring only inside the Content Region.
-An activatable-content hover uses a weaker teal inner affordance. A Node
-Manipulation Region uses a highlighted title bar with `grab`, changing to
-`grabbing` only during movement, while resize retains its directional handles
-and cursors. A selected, content-active node displays both its orange outer
-outline and teal inner ring. Exact token values may be tuned without changing
-these visual responsibilities.
+Presentation keeps interaction responsibilities distinct without adding a
+persistent border for Content Activation. Hover uses a weak neutral node
+outline; Selection uses a persistent stronger orange outer outline; and an
+inactive activatable Content Region uses a weak teal inner hover affordance.
+Content Activation itself adds no border or ring. A Node Manipulation Region
+uses a highlighted title bar with `grab`, changing to `grabbing` only during
+movement, while resize retains its directional handles and cursors. A selected,
+content-active node therefore retains only its orange Selection outline; its
+active editor or player owns the content-specific interaction. Exact token
+values may be tuned without changing these visual responsibilities.
 
 Audio keeps its Media Chrome controls clear and readable while
 content-inactive; it does not reduce the complete player opacity or otherwise
-look disabled. Content hover supplies the weak teal affordance, Selection the
-orange outer outline, and Activation the teal inner ring. Playing audio
-continues to publish its live play state and progress while content-inactive,
-without acquiring an activation ring. Its rectangular control region uses
+look disabled. Content hover supplies the weak teal affordance and Selection
+the orange outer outline, while Activation adds no border or ring. Playing
+audio continues to publish its live play state and progress while
+content-inactive. Its rectangular control region uses
 Debrute surfaces, dividers, control hover, and focus tokens and removes the
 native browser control pill and semicircular ends.
 
