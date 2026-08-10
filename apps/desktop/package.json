@@ -73,6 +73,7 @@
     },
     "win": {
       "artifactName": "debrute-desktop-${version}-windows-${arch}.${ext}",
+      "signExecutable": false,
       "target": [
         "nsis"
       ]

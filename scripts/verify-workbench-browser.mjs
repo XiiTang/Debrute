@@ -242,7 +242,7 @@ function startWorkbenchRuntime() {
         if (process.platform === 'win32') {
           await terminateWindowsProcessTree(child, {
             label: 'browser-verification Workbench process',
-            gracePeriodMs: 2_000
+            gracePeriodMs: 10_000
           });
           await exited;
           return;
@@ -539,7 +539,9 @@ async function assertCanvasImageWorkflow(page, label) {
     `[data-canvas-node-kind="file"][data-canvas-media-kind="image"][data-project-relative-path="${fixtureImagePath}"]`
   );
   await imageNode.waitFor({ state: 'visible', timeout: 60000 });
-  const preview = imageNode.locator('img');
+  const preview = imageNode.locator(
+    'img[data-canvas-raster-preview-kind="image"][data-canvas-raster-preview-layer="visible"]'
+  );
   await waitForDecodedImage(preview, `${label} Canvas image preview`);
   if (await imageNode.getByRole('button', { name: 'Retry' }).count() > 0) {
     throw new Error(`[${label}] Canvas image preview exposed a retry error.`);

@@ -156,6 +156,71 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     )).toBe('true');
   });
 
+  it('publishes a text preview after each repeated inline editor exit', async () => {
+    const path = 'repeated-editor-exit.md';
+    const baseNode = textNode(path, 0, 0);
+    const readCanvasTextPreviewSources = vi.fn<WorkbenchActions['readCanvasTextPreviewSources']>(async (request) => ({
+      sources: Object.fromEntries(request.sources.map((source) => [
+        source.projectRelativePath,
+        { ...source, status: 'missing' as const }
+      ]))
+    }));
+    const saveCanvasTextPreviewSource = vi.fn<WorkbenchActions['saveCanvasTextPreviewSource']>(async (request) => ({
+      ok: true,
+      source: { projectRelativePath: request.projectRelativePath, targetIdentity: request.targetIdentity, status: 'available' }
+    }));
+    const actions = actionsFixture({ readCanvasTextPreviewSources, saveCanvasTextPreviewSource });
+    const previewResourceScheduler = immediateScheduler();
+    let setConsumerNode: React.Dispatch<React.SetStateAction<ProjectedCanvasNode>> | undefined;
+    const nodeAtScroll = (scrollTop: number): ProjectedCanvasNode => ({
+      ...baseNode,
+      textViewport: { scrollTop, scrollLeft: 0 }
+    });
+    const completeCurrentPreview = async (expectedSaveCount: number) => {
+      await waitFor(() => laneMock.props?.target?.projectRelativePath === path);
+      const target = laneMock.props!.target!;
+      await act(async () => laneMock.props!.onRasterized(target, rasterResult()));
+      await waitFor(() => saveCanvasTextPreviewSource.mock.calls.length === expectedSaveCount);
+      await waitFor(() => container.querySelector('[data-preview-presented]')?.getAttribute(
+        'data-preview-presented'
+      ) === 'true');
+    };
+
+    const initialNode = nodeAtScroll(0);
+    const renderWithActivePath = async (activeInlineTextPath: string | undefined) => {
+      await renderProvider({
+        nodes: [initialNode],
+        actions,
+        activeInlineTextPath,
+        previewResourceScheduler,
+        children: (
+          <RuntimeSnapshotController
+            initialNode={initialNode}
+            onController={(controller) => { setConsumerNode = controller; }}
+          />
+        )
+      });
+    };
+    await renderWithActivePath(undefined);
+    await completeCurrentPreview(1);
+
+    await renderWithActivePath(path);
+    const firstInactiveNode = nodeAtScroll(420);
+    await renderWithActivePath(undefined);
+    await act(async () => {
+      setConsumerNode?.(firstInactiveNode);
+    });
+    await completeCurrentPreview(2);
+
+    await renderWithActivePath(path);
+    await renderWithActivePath(undefined);
+    await flushWork();
+
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    )).toBe('true');
+  });
+
   it('discards an old availability result when the same target is hidden and shown before settlement', async () => {
     const node = textNode('availability-attempt.md', 0, 0);
     const requests: Array<{
@@ -648,6 +713,18 @@ function RuntimeSnapshotProbe({ node }: { node: ProjectedCanvasNode }): React.Re
       data-preview-error={previewError ?? ''}
     />
   );
+}
+
+function RuntimeSnapshotController({
+  initialNode,
+  onController
+}: {
+  initialNode: ProjectedCanvasNode;
+  onController: (controller: React.Dispatch<React.SetStateAction<ProjectedCanvasNode>>) => void;
+}): React.ReactElement {
+  const [node, setNode] = React.useState(initialNode);
+  React.useEffect(() => onController(setNode), [onController]);
+  return <RuntimeSnapshotProbe node={node} />;
 }
 
 function textNode(path: string, x: number, y: number): ProjectedCanvasNode {

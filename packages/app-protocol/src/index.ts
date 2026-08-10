@@ -54,7 +54,7 @@ export interface ProjectDiagnostic {
   entityId?: string;
 }
 
-export interface CanvasManualLayout {
+interface CanvasManualLayout {
   x: number;
   y: number;
   width: number;
@@ -82,7 +82,7 @@ export interface CanvasState {
   occlusionOrder: string[];
 }
 
-export interface CanvasNodeStateChange {
+interface CanvasNodeStateChange {
   projectRelativePath: string;
   state: CanvasNodeState | null;
 }

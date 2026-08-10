@@ -218,6 +218,7 @@ export function CanvasTextPreviewProvider({
   const currentTargetKeysRef = useRef(new Map<string, CanvasPreviewTargetKey>());
   const currentTargetsRef = useRef<Record<string, CanvasTextPreviewTarget>>({});
   const targetResolutionsRef = useRef(new Map<string, CanvasTextPreviewTargetResolution>());
+  const renderedTargetInputsByPathRef = useRef(new Map<string, CanvasTextPreviewTargetInput>());
   const tasksRef = useRef(tasks);
   const sourceAvailabilityRef = useRef(sourceAvailability);
   const previewErrorsRef = useRef(previewErrors);
@@ -528,6 +529,12 @@ export function CanvasTextPreviewProvider({
     if (!styleKeyState.key) {
       return;
     }
+    const projectedPaths = new Set(nodes.map((node) => node.projectRelativePath));
+    for (const path of renderedTargetInputsByPathRef.current.keys()) {
+      if (!projectedPaths.has(path)) {
+        renderedTargetInputsByPathRef.current.delete(path);
+      }
+    }
     const previous = targetResolutionsRef.current;
     const next = new Map<string, CanvasTextPreviewTargetResolution>();
     for (const projectedNode of nodes) {
@@ -544,11 +551,12 @@ export function CanvasTextPreviewProvider({
         }
         continue;
       }
-      const targetInput = canvasTextPreviewTargetInput({
-        node,
-        buffer: textFileBuffers[path],
-        styleKey: styleKeyState.key
-      });
+      const targetInput = renderedTargetInputsByPathRef.current.get(path)
+        ?? canvasTextPreviewTargetInput({
+          node,
+          buffer: textFileBuffers[path],
+          styleKey: styleKeyState.key
+        });
       if (!targetInput) {
         continue;
       }
@@ -1138,14 +1146,20 @@ export function CanvasTextPreviewProvider({
       return;
     }
     const path = node.projectRelativePath;
-    const input = path === activeInlineTextPathRef.current
-      ? undefined
-      : canvasTextPreviewTargetInput({
-        node,
-        buffer: textFileBuffersRef.current[path],
-        styleKey
-      });
+    const input = canvasTextPreviewTargetInput({
+      node,
+      buffer: textFileBuffersRef.current[path],
+      styleKey
+    });
+    if (input) {
+      renderedTargetInputsByPathRef.current.set(path, input);
+    } else {
+      renderedTargetInputsByPathRef.current.delete(path);
+    }
     const previous = targetResolutionsRef.current.get(path);
+    if (input && path === activeInlineTextPathRef.current) {
+      return;
+    }
     if (!input) {
       if (!previous) {
         return;

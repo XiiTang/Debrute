@@ -91,6 +91,22 @@ describe('GitHub release workflow contract', () => {
     expect(watcherProbeIndex).toBeLessThan(buildDesktopBlock.indexOf('- run: pnpm build'));
   });
 
+  it('blocks the Windows package on exhaustive Rust and real-browser verification', () => {
+    const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
+    const rustGateIndex = buildDesktopBlock.indexOf('Check exhaustive Windows Rust targets');
+    const browserGateIndex = buildDesktopBlock.indexOf('Verify Windows Workbench in a real browser');
+    const buildIndex = buildDesktopBlock.indexOf('- run: pnpm build');
+
+    expect(rustGateIndex).toBeGreaterThan(-1);
+    expect(browserGateIndex).toBeGreaterThan(-1);
+    expect(buildDesktopBlock.slice(rustGateIndex, browserGateIndex)).toContain("if: matrix.platform == 'win32'");
+    expect(buildDesktopBlock.slice(browserGateIndex, buildIndex)).toContain("if: matrix.platform == 'win32'");
+    expect(buildDesktopBlock).toContain('run: pnpm check:rust:all');
+    expect(buildDesktopBlock).toContain('run: pnpm verify:browser');
+    expect(rustGateIndex).toBeLessThan(buildIndex);
+    expect(browserGateIndex).toBeLessThan(buildIndex);
+  });
+
   it('smoke tests macOS and Windows packages through the public product surface', () => {
     const buildDesktopBlock = workflow.slice(workflow.indexOf('build-desktop:'), workflow.indexOf('publish-release:'));
 
@@ -100,6 +116,8 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).toContain('Debrute.app/Contents/MacOS/Debrute');
     expect(packagedDesktopSmoke).toContain('runtime_state=ready');
     expect(packagedDesktopSmoke).toContain('chromium.connectOverCDP');
+    expect(packagedDesktopSmoke).toContain("page.locator('#root > *').waitFor");
+    expect(packagedDesktopSmoke).toContain("page.locator('[data-testid=\"workbench-titlebar\"]').waitFor");
     expect(packagedDesktopSmoke).toContain('window.debruteShell');
     expect(packagedDesktopSmoke).toContain('workbench-connection-ended');
     expect(packagedDesktopSmoke).toContain("runCli(options.cli, ['runtime', 'stop'], Date.now() + 15_000)");
@@ -128,6 +146,15 @@ describe('GitHub release workflow contract', () => {
     expect(buildDesktopBlock).not.toContain('WINDOWS_CSC_LINK');
     expect(buildDesktopBlock).not.toContain('WINDOWS_CSC_KEY_PASSWORD');
     expect(buildDesktopBlock).not.toContain('signtool.exe');
+    expect(buildDesktopBlock).toContain('Verify Windows Product binaries are Authenticode-unsigned');
+    expect(buildDesktopBlock).toContain('Get-AuthenticodeSignature -LiteralPath $path');
+    expect(buildDesktopBlock).toContain('[System.Management.Automation.SignatureStatus]::NotSigned');
+    expect(buildDesktopBlock).toContain('target/release/debrute-runtime.exe');
+    expect(buildDesktopBlock).toContain('target/release/debrute.exe');
+    expect(buildDesktopBlock).toContain('debrute-desktop-$version-windows-x64.exe');
+    expect(desktopPackage.build.win).toMatchObject({
+      signExecutable: false
+    });
   });
 
   it('configures the final signed macOS Desktop identity', () => {

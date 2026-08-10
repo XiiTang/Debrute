@@ -283,20 +283,28 @@ fn safe_legacy_component(component: &str) -> bool {
     {
         return false;
     }
+    !is_windows_reserved_device_component(component)
+}
+
+/// Reports whether one path component names a reserved Windows device.
+///
+/// This predicate is platform-independent so portable Project paths and native
+/// Windows path projection share the exact same device-name vocabulary.
+#[must_use]
+pub fn is_windows_reserved_device_component(component: &str) -> bool {
     let stem = component
         .split_once('.')
         .map_or(component, |(stem, _)| stem)
         .trim_end_matches(['.', ' '])
         .to_ascii_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || stem
             .strip_prefix("COM")
             .or_else(|| stem.strip_prefix("LPT"))
             .is_some_and(|number| {
                 (number.len() == 1 && matches!(number.as_bytes()[0], b'1'..=b'9'))
                     || matches!(number, "¹" | "²" | "³")
-            });
-    !reserved
+            })
 }
 
 /// Opens one directory through the native Windows Shell.
@@ -721,6 +729,31 @@ mod tests {
         assert_eq!(fs::read(&backup).unwrap(), b"old");
         assert!(!source.exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_reserved_device_components_match_the_portable_vocabulary() {
+        for component in [
+            "CON",
+            "con.txt",
+            "AUX.json",
+            "COM1",
+            "LPT9.bin",
+            "COM¹",
+            "LPT³.txt",
+            "CON .txt",
+        ] {
+            assert!(
+                is_windows_reserved_device_component(component),
+                "{component:?}"
+            );
+        }
+        for component in ["CONSOLE", "COM0", "COM10", "LPT0", "AUXILIARY"] {
+            assert!(
+                !is_windows_reserved_device_component(component),
+                "{component:?}"
+            );
+        }
     }
 
     #[cfg(target_os = "windows")]

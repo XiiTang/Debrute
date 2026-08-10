@@ -204,19 +204,7 @@ pub(super) fn validate_portable_path_segment(segment: &str) -> Result<(), Projec
             "Project path segment is not portable across macOS and Windows: {segment:?}"
         )));
     }
-    let stem = segment
-        .split_once('.')
-        .map_or(segment, |(stem, _)| stem)
-        .to_ascii_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || stem
-            .strip_prefix("COM")
-            .or_else(|| stem.strip_prefix("LPT"))
-            .is_some_and(|number| {
-                (number.len() == 1 && matches!(number.as_bytes()[0], b'1'..=b'9'))
-                    || matches!(number, "¹" | "²" | "³")
-            });
-    if reserved {
+    if debrute_native_fs::is_windows_reserved_device_component(segment) {
         return Err(ProjectError::Validation(format!(
             "Project path segment is a reserved Windows device name: {segment}"
         )));
@@ -271,6 +259,8 @@ mod tests {
             "media//file.png",
             "media/../file.png",
             "media/CON.txt",
+            "media/CON .txt",
+            "media/LPT³.log",
             "media/trailing. ",
         ] {
             assert!(ProjectRelativePath::parse(invalid).is_err(), "{invalid:?}");

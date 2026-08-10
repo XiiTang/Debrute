@@ -37,6 +37,7 @@ try {
     const page = browser.contexts().flatMap((context) => context.pages())
       .find((candidate) => candidate.url() === target.url);
     if (!page) throw new Error('CDP did not expose the packaged Workbench page.');
+    await waitForPackagedWorkbenchRender(page);
     const state = await withDeadline(
       page.evaluate(async () => ({
         origin: location.origin,
@@ -142,6 +143,33 @@ async function waitForRuntimeStopped(cli) {
     await delay(100);
   }
   throw new Error(`Runtime remained live after Product Quit. Last status:\n${lastStatus}`);
+}
+
+async function waitForPackagedWorkbenchRender(page) {
+  const deadline = Date.now() + 10_000;
+  try {
+    await page.locator('#root > *').waitFor({
+      state: 'attached',
+      timeout: Math.max(1, deadline - Date.now())
+    });
+    await page.locator('[data-testid="workbench-titlebar"]').waitFor({
+      state: 'visible',
+      timeout: Math.max(1, deadline - Date.now())
+    });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => ({
+      url: location.href,
+      rootChildren: document.querySelector('#root')?.childElementCount ?? 0,
+      titlebar: document.querySelector('[data-testid="workbench-titlebar"]') !== null,
+      ended: document.querySelector('[data-testid="workbench-connection-ended"]') !== null,
+      shell: typeof window.debruteShell === 'object'
+        && typeof window.debruteShell.getNativeWindowState === 'function'
+    }));
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Packaged Workbench did not render before inspection: ${message}\n${JSON.stringify(diagnostics)}`
+    );
+  }
 }
 
 async function cleanupFailedLaunch(cli, child, exitPromise) {

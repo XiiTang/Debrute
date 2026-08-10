@@ -116,12 +116,12 @@ impl ProjectNativeShellService {
                     debrute_native_fs::open_directory_in_shell(&resolved.absolute)
                 }
             };
-            return result.map_err(|error| {
+            result.map_err(|error| {
                 ProjectError::service(
                     "native_shell_failed",
                     format!("Native Project reveal failed: {error}"),
                 )
-            });
+            })
         }
         #[cfg(target_os = "macos")]
         let action = reveal_action(&resolved.absolute, entry.kind);
