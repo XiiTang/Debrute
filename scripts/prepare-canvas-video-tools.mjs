@@ -59,6 +59,7 @@ export async function ensureCanvasVideoToolsPayload({
   await run('tar', ['-xf', sourceArchive, '-C', buildRoot]);
   const sourceRoot = join(buildRoot, `ffmpeg-${FFMPEG_VERSION}`);
   const target = canvasVideoToolsTarget(identity);
+  const executableNames = canvasVideoToolExecutableNames(identity);
   const configureArguments = [
     ...CANVAS_VIDEO_TOOLS_LOCK.configureArguments,
     ...targetConfigureArguments(identity)
@@ -68,13 +69,16 @@ export async function ensureCanvasVideoToolsPayload({
   } else {
     await run('./configure', configureArguments, { cwd: sourceRoot });
   }
-  await run('make', ['-j', String(Math.max(1, Number(process.env.NUMBER_OF_PROCESSORS) || 4)), 'ffmpeg', 'ffprobe'], {
+  await run('make', [
+    '-j',
+    String(Math.max(1, Number(process.env.NUMBER_OF_PROCESSORS) || 4)),
+    ...executableNames
+  ], {
     cwd: sourceRoot
   });
 
   await rm(payloadRoot, { recursive: true, force: true });
   await mkdir(payloadRoot, { recursive: true });
-  const executableNames = canvasVideoToolExecutableNames(identity);
   for (const executable of executableNames) {
     const sourceName = target.platform === 'windows' ? executable : executable.replace(/\.exe$/, '');
     const destination = join(payloadRoot, executable);

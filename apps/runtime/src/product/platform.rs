@@ -661,7 +661,7 @@ fn install_desktop_native(
 ) -> Result<(), NativeInstallError> {
     let pending = store
         .pending_unlocked()?
-        .ok_or_else(|| NativeInstallError::ProductUpdateTransactionMissing)?;
+        .ok_or(NativeInstallError::ProductUpdateTransactionMissing)?;
     let update_mode = format!("/DEBRUTE_PRODUCT_UPDATE={}", pending.transaction_id);
     command_success(path_text(installer.path())?, &["/S", &update_mode])
 }

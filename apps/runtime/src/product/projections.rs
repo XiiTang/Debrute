@@ -348,14 +348,14 @@ fn normalize_windows_path_entry(value: &str) -> String {
 fn verify_windows_command_resolution(
     layout: &super::InstalledProductLayout,
 ) -> Result<(), ProductProjectionError> {
-    use std::{ffi::OsStr, ffi::OsString};
+    use std::ffi::OsStr;
     use winreg::{RegKey, enums::HKEY_CURRENT_USER};
     let current_user = RegKey::predef(HKEY_CURRENT_USER);
     let environment = current_user.open_subkey("Environment")?;
     let user_path = environment.get_value::<String, _>("Path")?;
     let expanded_user_path =
         debrute_windows_product_fs::expand_environment_strings(OsStr::new(&user_path))?;
-    let mut fresh_path = OsString::from(expanded_user_path);
+    let mut fresh_path = expanded_user_path;
     fresh_path.push(";");
     fresh_path.push(std::env::var_os("PATH").unwrap_or_default());
     let output = Command::new("where.exe")

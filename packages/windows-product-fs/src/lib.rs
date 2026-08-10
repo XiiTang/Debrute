@@ -182,16 +182,31 @@ mod windows {
     }
 
     /// Resolves the current Windows account profile through the Known Folder API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when the Known Folder API cannot resolve
+    /// the current account profile.
     pub fn current_user_profile_directory() -> io::Result<PathBuf> {
         known_folder_path(&FOLDERID_Profile)
     }
 
-    /// Resolves the current Windows account Local AppData through the Known Folder API.
+    /// Resolves the current Windows account Local `AppData` through the Known Folder API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when the Known Folder API cannot resolve
+    /// the current account Local `AppData` directory.
     pub fn current_user_local_app_data_directory() -> io::Result<PathBuf> {
         known_folder_path(&FOLDERID_LocalAppData)
     }
 
     /// Resolves the current Windows account Start Menu Programs directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when the Known Folder API cannot resolve
+    /// the current account Start Menu Programs directory.
     pub fn current_user_programs_directory() -> io::Result<PathBuf> {
         known_folder_path(&FOLDERID_Programs)
     }
@@ -228,6 +243,7 @@ mod windows {
     }
 
     /// Returns whether `process_id` still identifies a live synchronizable process.
+    #[must_use]
     pub fn process_is_running(process_id: u32) -> bool {
         // SAFETY: the PID is a value, no borrowed memory crosses the call, and
         // every non-null owned handle is closed below.

@@ -44,7 +44,7 @@ describe('Canvas video tools payload', () => {
       .toThrow('FFmpeg source checksum does not match');
   });
 
-  it('defines the native Windows source-build prerequisites and Bash configure path', () => {
+  it('defines the native Windows source-build prerequisites and executable targets', () => {
     const prepareSource = readFileSync(
       join(process.cwd(), 'scripts/prepare-canvas-video-tools.mjs'),
       'utf8'
@@ -53,6 +53,8 @@ describe('Canvas video tools payload', () => {
 
     expect(prepareSource).toContain("process.platform === 'win32'");
     expect(prepareSource).toContain("await run('bash', ['./configure', ...configureArguments]");
+    expect(prepareSource).toContain('...executableNames');
+    expect(prepareSource).not.toContain("'ffmpeg', 'ffprobe'");
     expect(doctorSource).toContain("for (const command of ['bash', 'awk', 'sed'])");
     expect(doctorSource).toContain("output === 'x86_64-w64-mingw32'");
   });
