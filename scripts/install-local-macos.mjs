@@ -18,7 +18,7 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export async function installLocalMacos() {
   if (process.platform !== 'darwin') {
-    throw new Error(`Local Desktop installation requires macOS, received ${process.platform}.`);
+    throw new Error(`Local Product installation requires macOS, received ${process.platform}.`);
   }
   if (process.arch !== 'arm64' && process.arch !== 'x64') {
     throw new Error(`Unsupported local macOS architecture: ${process.arch}`);
@@ -26,7 +26,7 @@ export async function installLocalMacos() {
 
   const packageJson = JSON.parse(await readFile(join(workspaceRoot, 'package.json'), 'utf8'));
   const expectedVersion = packageJson.version;
-  const applicationsDirectory = '/Applications';
+  const applicationsDirectory = join(homedir(), 'Applications');
   const installedApplication = join(applicationsDirectory, 'Debrute.app');
   const sourceApplication = await findLocalMacosApplication(
     join(workspaceRoot, 'apps/desktop/release/local')
@@ -45,7 +45,7 @@ export async function installLocalMacos() {
   );
   const preflight = await execFileAsync(
     sourceRuntime,
-    localProductPreflightArguments(sourceSeed, productRoot)
+    localProductPreflightArguments(sourceSeed)
   );
   if (!preflight.stdout.includes(`product_version=${expectedVersion}`)) {
     throw new Error('Runtime Product seed preflight returned an unexpected version.');
@@ -60,19 +60,15 @@ export async function installLocalMacos() {
   });
 
   const installedSeed = join(installedApplication, 'Contents/Resources/product-seed');
-  const bootstrapRuntime = join(
+  const installationRuntime = join(
     installedSeed,
     'runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime'
   );
-  const desktopEntrypoint = join(installedApplication, 'Contents/MacOS/debrute');
-  await execFileAsync(bootstrapRuntime, [
-    'bootstrap',
+  const desktopEntrypoint = join(installedApplication, 'Contents/MacOS/Debrute');
+  await execFileAsync(installationRuntime, [
+    'install-product',
     '--seed',
     installedSeed,
-    '--product-root',
-    productRoot,
-    '--bin-directory',
-    binDirectory,
     '--desktop-entrypoint',
     desktopEntrypoint,
     '--desktop-arguments-json',
@@ -88,13 +84,10 @@ export async function installLocalMacos() {
   return { application: installedApplication, productVersion: expectedVersion, cli: stableCli };
 }
 
-export function localProductPreflightArguments(seed, productRoot) {
+export function localProductPreflightArguments(seed) {
   return [
     'preflight-desktop-seed',
-    '--seed',
-    posix.resolve(seed),
-    '--product-root',
-    posix.resolve(productRoot)
+    '--seed', posix.resolve(seed)
   ];
 }
 

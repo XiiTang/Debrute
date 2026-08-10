@@ -9,11 +9,14 @@ document connections or authorize commands without the matching live connection
 credential.
 
 The connection begins with complete Global and optional Project snapshots.
-Runtime closes it on browser loss, backpressure, revision gap, Product Quit, or
-replacement, immediately releasing its Workbench Project Use. Closing one tab
-removes only that connection; a shared browser session remains live while any
-of its other connections remain. After its final connection closes, a retained
-client cookie is stale and the next document creates a fresh browser session.
+Runtime closes it on browser loss, backpressure, revision gap, Product Quit,
+replacement, or removal, immediately releasing its Workbench Project Use.
+Whole-Product removal first keeps its initiating HTTP response body admitted so
+the confirmed Workbench can enter its terminal removal presentation, then
+closes the connection. Closing one tab removes only that connection; a shared
+browser session remains live while any of its other connections remain. After
+its final connection closes, a retained client cookie is stale and the next
+document creates a fresh browser session.
 There is no idle timer, unload release request, attachment anchor, reconnect
 reservation, heartbeat, recovery deadline, or Reconnect button. Refreshing
 creates an entirely new connection and snapshots.

@@ -388,6 +388,22 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('commits Product removal with one explicit preservation decision', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+
+    await expect(client.removeProduct({ confirmed: true, keepConfig: true })).resolves.toEqual({
+      accepted: true,
+      configPreserved: true
+    });
+
+    const call = harness.calls.at(-1);
+    expect(call?.path).toBe('/api/runtime/product/remove');
+    expect(call?.init?.method).toBe('POST');
+    expect(JSON.parse(String(call?.init?.body))).toEqual({ confirmed: true, keepConfig: true });
+    client.dispose();
+  });
+
   it('reveals a Model API key through the authenticated explicit command', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
@@ -637,6 +653,10 @@ function createHarness(globalRevision = 1, initialCanonicalRoot?: string) {
     }
     if (path === '/api/runtime/product/update/check') {
       return Response.json({ ok: true });
+    }
+    if (path === '/api/runtime/product/remove') {
+      const request = JSON.parse(String(init?.body)) as { keepConfig: boolean };
+      return Response.json({ accepted: true, configPreserved: request.keepConfig });
     }
     if (path.endsWith('/activities/notices')) {
       return Response.json({ activityId: 'reported-activity' });

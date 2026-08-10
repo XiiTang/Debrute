@@ -25,6 +25,7 @@ fn registry_exactly_matches_the_final_cli_matrix() {
         vec![
             "runtime.status",
             "runtime.stop",
+            "product.uninstall",
             "skills.status",
             "models.image.list",
             "models.image.describe",
@@ -74,7 +75,7 @@ fn command_inventory_includes_policy_transport_and_lifecycle_errors() {
                 "runtime_health_failed",
                 "product_update_failed",
             ][..],
-            CliCommandPolicy::Stop => &[
+            CliCommandPolicy::Stop | CliCommandPolicy::Remove => &[
                 "runtime_not_running",
                 "runtime_health_failed",
                 "product_update_failed",
@@ -104,6 +105,27 @@ fn command_inventory_includes_policy_transport_and_lifecycle_errors() {
         assert!(!errors.contains("project_invalid"));
         assert!(!errors.contains("project_root_invalid"));
     }
+}
+
+#[test]
+fn product_uninstall_requires_explicit_yes_and_accepts_only_the_config_preservation_flag() {
+    let missing = parse_cli_args(&["product".into(), "uninstall".into()]).unwrap_err();
+    assert_eq!(missing.code(), "missing_argument");
+
+    let parsed = parse_cli_args(&[
+        "product".into(),
+        "uninstall".into(),
+        "--yes".into(),
+        "--keep-config".into(),
+    ])
+    .unwrap();
+    assert_eq!(parsed.command, "product.uninstall");
+    assert_eq!(parsed.policy, CliCommandPolicy::Remove);
+    assert_eq!(parsed.options.get("yes").map(String::as_str), Some("true"));
+    assert_eq!(
+        parsed.options.get("keep-config").map(String::as_str),
+        Some("true")
+    );
 }
 
 #[test]

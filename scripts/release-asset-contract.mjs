@@ -1,20 +1,20 @@
 export const updateManifestName = 'debrute-update-manifest.json';
 export const updateManifestSignatureName = 'debrute-update-manifest.json.sig';
 
-export const desktopReleaseTargets = [
+export const productInstallerTargets = [
   { platform: 'macos', arch: 'arm64', extension: 'dmg' },
   { platform: 'macos', arch: 'x64', extension: 'dmg' },
   { platform: 'windows', arch: 'x64', extension: 'exe' }
 ];
 
-export const productReleaseTargets = desktopReleaseTargets;
+export const productReleaseTargets = productInstallerTargets;
 
-export function desktopReleaseAssetName(version, platform, arch, extension) {
-  return `debrute-desktop-${version}-${platform}-${arch}.${extension}`;
+export function productInstallerAssetName(version, platform, arch, extension) {
+  return `debrute-installer-${version}-${platform}-${arch}.${extension}`;
 }
 
-export function expectedDesktopReleaseAssets(version) {
-  return desktopReleaseTargets.map((target) => desktopReleaseAssetName(
+export function expectedProductInstallerAssets(version) {
+  return productInstallerTargets.map((target) => productInstallerAssetName(
     version,
     target.platform,
     target.arch,
@@ -36,7 +36,7 @@ export function expectedProductReleaseAssets(version) {
 
 export function expectedReleaseAssets(version) {
   return [
-    ...expectedDesktopReleaseAssets(version),
+    ...expectedProductInstallerAssets(version),
     ...expectedProductReleaseAssets(version),
     updateManifestName,
     updateManifestSignatureName

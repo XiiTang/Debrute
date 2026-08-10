@@ -50,12 +50,10 @@ describe('local source installation', () => {
   });
 
   it('delegates immutable Product preflight to the source Runtime', () => {
-    expect(localProductPreflightArguments('/tmp/debrute-seed', '/tmp/debrute-products')).toEqual([
+    expect(localProductPreflightArguments('/tmp/debrute-seed')).toEqual([
       'preflight-desktop-seed',
       '--seed',
-      '/tmp/debrute-seed',
-      '--product-root',
-      '/tmp/debrute-products'
+      '/tmp/debrute-seed'
     ]);
   });
 

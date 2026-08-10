@@ -34,6 +34,10 @@ describe('Debrute product naming contract', () => {
       const metadata = frontmatter.metadata as Record<string, unknown>;
       expect(metadata['debrute.managed']).toBe('true');
       expect(metadata['debrute.package']).toBe('debrute');
+      const contents = readFileSync(join(root, skillPath), 'utf8');
+      expect(contents).toContain('$HOME/.debrute/bin/debrute');
+      expect(contents).toContain('$env:USERPROFILE\\.debrute\\bin\\debrute.cmd');
+      expect(contents).toContain('%USERPROFILE%\\.debrute\\bin\\debrute.cmd');
     }
   });
 

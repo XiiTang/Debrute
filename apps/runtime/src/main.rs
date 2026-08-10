@@ -28,8 +28,9 @@ use debrute_runtime::{
     cli::RuntimeCliService,
     control::{
         ActivationIntent, ActivationOutcome, CONTROL_OUTBOUND_QUEUE_CAPACITY, ClientRole,
-        ControlErrorCode, ControlRequest, DesktopOpenError, NativeControlClient, ProjectFrontend,
-        RuntimeActionError, RuntimeActivationService, RuntimeControlState, WorkbenchRoute,
+        ControlErrorCode, ControlRequest, ControlResponse, DesktopOpenError, NativeControlClient,
+        ProjectFrontend, RuntimeActionError, RuntimeActivationService, RuntimeControlState,
+        WorkbenchRoute,
         endpoint::{
             ControlEndpointAdapter, ControlEndpointOwnerAdapter, EndpointClaim, EndpointError,
         },
@@ -37,10 +38,12 @@ use debrute_runtime::{
     },
     login::require_stable_runtime_entrypoint,
     product::{
-        CommitPhase, CommitPlatform, DesktopHostRegistration, NativeUpdatePlatform,
-        ProductBootstrap, ProductCommitCoordinator, ProductCommitError, ProductStore,
-        ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform, ResumeIntent,
-        RuntimeProductService, launch_product_update_failure, read_desktop_host_registration,
+        CommitPhase, CommitPlatform, DesktopHostRegistration, InstalledProductLayout,
+        NativeUpdatePlatform, ProductCommitCoordinator, ProductCommitError,
+        ProductInstallationCoordinator, ProductProjectionManager, ProductRemovalCoordinator,
+        ProductStore, ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform,
+        ResumeIntent, RuntimeProductService, finalize_product_removal,
+        launch_product_update_failure, read_desktop_host_registration,
     },
     project::{
         NATIVE_TRASH_WORKER_COMMAND, initialize_raster_preview_engine, run_native_trash_worker,
@@ -62,6 +65,8 @@ const STARTUP_WAIT: Duration = Duration::from_secs(5);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const RUNTIME_READY_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const PRODUCT_INSTALLATION_STOP_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const SUPERVISION_POLL_INTERVAL: Duration = Duration::from_millis(50);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -93,6 +98,16 @@ fn main() -> ExitCode {
             }
         };
     }
+    if command.as_deref() == Some(std::ffi::OsStr::new("finalize-product-removal")) {
+        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
+        return match run_finalize_product_removal(&arguments) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("Debrute Product removal failed: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     #[cfg(target_os = "windows")]
     if let Some(result) = debrute_runtime::terminal::run_windows_terminal_bootstrap() {
         match result {
@@ -103,9 +118,19 @@ fn main() -> ExitCode {
             }
         }
     }
-    let result = if command.as_deref() == Some(std::ffi::OsStr::new("bootstrap")) {
+    let result = if command.as_deref() == Some(std::ffi::OsStr::new("install-product")) {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
-        run_bootstrap(&arguments)
+        run_install_product(&arguments)
+    } else if command.as_deref() == Some(std::ffi::OsStr::new("preflight-product-version")) {
+        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
+        run_preflight_product_version(&arguments)
+    } else if command.as_deref() == Some(std::ffi::OsStr::new("preflight-product-update-installer"))
+    {
+        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
+        run_preflight_product_update_installer(&arguments)
+    } else if command.as_deref() == Some(std::ffi::OsStr::new("stop-product-for-installation")) {
+        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
+        run_stop_product_for_installation(&arguments)
     } else if command.as_deref() == Some(std::ffi::OsStr::new("preflight-desktop-seed")) {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
         run_preflight_desktop_seed(&arguments)
@@ -134,6 +159,22 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_finalize_product_removal(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    let [plan_flag, plan_path, pid_flag, runtime_pid] = arguments else {
+        return Err("Product removal finalizer requires --plan PATH --runtime-pid PID".into());
+    };
+    if plan_flag != "--plan" || pid_flag != "--runtime-pid" {
+        return Err("Product removal finalizer requires --plan PATH --runtime-pid PID".into());
+    }
+    let runtime_pid = runtime_pid
+        .to_str()
+        .ok_or("Product removal Runtime PID must be UTF-8")?
+        .parse::<u32>()?;
+    finalize_product_removal(&PathBuf::from(plan_path), runtime_pid)?;
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -200,14 +241,111 @@ fn persist_and_launch_product_update_failure(
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn run_preflight_desktop_seed(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
     let parsed = SeedPreflightArguments::parse(arguments)?;
+    let layout = InstalledProductLayout::for_current_user()?;
     let store = ProductStore::new(
-        parsed.product_root,
+        layout.product_root().to_owned(),
         current_commit_platform(),
         current_release_architecture()?,
     );
     let identity = store.preflight_desktop_seed(&parsed.seed)?;
     println!("product_version={}", identity.product_version());
     Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_preflight_product_version(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    let [flag, candidate] = arguments else {
+        return Err("Product version preflight requires --product-version VERSION".into());
+    };
+    if flag != "--product-version" {
+        return Err("Product version preflight requires --product-version VERSION".into());
+    }
+    let candidate = candidate
+        .to_str()
+        .ok_or("Product version preflight value must be UTF-8")?;
+    let candidate_version = semver::Version::parse(candidate)?;
+    let layout = InstalledProductLayout::for_current_user()?;
+    let store = ProductStore::new(
+        layout.product_root().to_owned(),
+        current_commit_platform(),
+        current_release_architecture()?,
+    );
+    if let Some(current) = store.current_version()? {
+        store.product_identity(&current)?;
+        let current_version = semver::Version::parse(&current)?;
+        if candidate_version < current_version {
+            return Err(format!(
+                "Product Installer version {candidate} is older than installed version {current}"
+            )
+            .into());
+        }
+    }
+    println!("product_version={candidate}");
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_preflight_product_update_installer(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    let [flag, transaction_id] = arguments else {
+        return Err("Product update installer preflight requires --transaction-id UUID".into());
+    };
+    if flag != "--transaction-id" {
+        return Err("Product update installer preflight requires --transaction-id UUID".into());
+    }
+    let transaction_id = transaction_id
+        .to_str()
+        .ok_or("Product update installer transaction ID must be UTF-8")?;
+    let layout = InstalledProductLayout::for_current_user()?;
+    let store = ProductStore::new(
+        layout.product_root().to_owned(),
+        current_commit_platform(),
+        current_release_architecture()?,
+    );
+    store.verify_pending_desktop_installer(transaction_id)?;
+    println!("transaction_id={transaction_id}");
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_stop_product_for_installation(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    if !arguments.is_empty() {
+        return Err("Product installation stop does not accept arguments".into());
+    }
+    let endpoint = platform_control_endpoint()?;
+    let connection = match endpoint.connect_existing(HANDSHAKE_TIMEOUT) {
+        Ok(connection) => connection,
+        Err(error) if error.is_absent() => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    match NativeControlClient::handshake_and_clear_timeouts(
+        connection,
+        ClientRole::Launcher,
+        Instant::now() + HANDSHAKE_TIMEOUT,
+    ) {
+        Ok(mut client) => match client.quit_product(Uuid::new_v4().to_string())? {
+            ControlResponse::Ok => {}
+            ControlResponse::Rejected { code } => {
+                return Err(format!("Product installation stop was rejected: {code:?}").into());
+            }
+            _ => return Err("Product installation stop received an unexpected response".into()),
+        },
+        Err(_error) => {
+            // A Product already draining can reject a new handshake. The exact
+            // endpoint disappearance below remains the authoritative stop cut.
+        }
+    }
+    let deadline = Instant::now() + PRODUCT_INSTALLATION_STOP_TIMEOUT;
+    loop {
+        match endpoint.connect_existing(Duration::from_millis(250)) {
+            Err(error) if error.is_absent() => return Ok(()),
+            Ok(connection) => drop(connection),
+            Err(error) => return Err(error.into()),
+        }
+        if Instant::now() >= deadline {
+            return Err("Debrute Runtime did not stop within two minutes".into());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -288,40 +426,33 @@ fn run(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
-    let parsed = BootstrapArguments::parse(arguments)?;
-    let debrute_home = parsed
-        .product_root
-        .parent()
-        .ok_or("Product root must have a parent")?
-        .to_owned();
-    let user_home = debrute_home
-        .parent()
-        .ok_or("Debrute home must have a parent")?;
+fn run_install_product(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
+    let parsed = ProductInstallationArguments::parse(arguments)?;
+    let layout = InstalledProductLayout::for_current_user()?;
+    if parsed.seed != layout.desktop_product_seed()
+        || parsed.desktop.executable != layout.desktop_executable()
+        || !parsed.desktop.arguments.is_empty()
+    {
+        return Err("Product installation requires the exact current-user Desktop layout".into());
+    }
     let store = Arc::new(ProductStore::new(
-        parsed.product_root,
+        layout.product_root().to_owned(),
         current_commit_platform(),
         current_release_architecture()?,
     ));
-    let bootstrap = ProductBootstrap::new(
-        Arc::clone(&store),
-        parsed.bin_directory,
-        user_home.join(".agents/skills"),
-        debrute_home,
-    );
-    let stable_runtime_entrypoint = bootstrap.stable_runtime_entrypoint();
-    let activated = bootstrap.activate(&parsed.seed, parsed.desktop.as_ref())?;
-    if let Some(pending) = store.pending()? {
+    let installation = ProductInstallationCoordinator::new(Arc::clone(&store), layout.clone());
+    let stable_runtime_entrypoint = installation.stable_runtime_entrypoint();
+    let pending = store.pending()?;
+    let activated = if let Some(pending) = pending {
+        let activated = installation.recover_pending(&parsed.seed)?;
         if pending.phase == CommitPhase::Staged && activated.product_version == pending.from_version
         {
             // The prior native install failed before its durable boundary.
             // Start the still-current Runtime and require an explicit update
-            // request to continue; bootstrap must not retry the operation.
+            // request to continue; Product installation must not retry the operation.
+            activated
         } else {
-            let desktop = parsed
-                .desktop
-                .clone()
-                .ok_or("Pending Product recovery requires the installed Desktop identity")?;
+            let desktop = parsed.desktop.clone();
             let failure_desktop = desktop.clone();
             let platform = NativeUpdatePlatform::for_desktop_seed(
                 Arc::clone(&store),
@@ -330,7 +461,7 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
                 stable_runtime_entrypoint.clone(),
                 Arc::new(|_, _| {
                     Err(debrute_runtime::product::ProductCommitError::Platform(
-                        "Bootstrap process cannot dispatch a Ready continuation".to_owned(),
+                        "Product Installer cannot dispatch a Ready continuation".to_owned(),
                     ))
                 }),
             )?;
@@ -345,22 +476,47 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
                     )?;
                     return Err(error.into());
                 }
-                return Ok(());
+            } else {
+                let coordinator = ProductCommitCoordinator::new(Arc::clone(&store), platform);
+                if let Err(error) = coordinator.continue_commit() {
+                    persist_and_launch_product_update_failure(
+                        &store,
+                        &failure_desktop,
+                        &pending.transaction_id,
+                        ProductUpdateFailureStage::Committing,
+                        format!("Pending Product recovery could not continue: {error}"),
+                    )?;
+                    return Err(error.into());
+                }
             }
-            let coordinator = ProductCommitCoordinator::new(Arc::clone(&store), platform);
-            if let Err(error) = coordinator.continue_commit() {
-                persist_and_launch_product_update_failure(
-                    &store,
-                    &failure_desktop,
-                    &pending.transaction_id,
-                    ProductUpdateFailureStage::Committing,
-                    format!("Pending Product recovery could not continue: {error}"),
-                )?;
-                return Err(error.into());
-            }
+            wait_for_product_installation_ready(&store, &pending.target_version)?;
             return Ok(());
         }
-    }
+    } else {
+        let target = store.preflight_desktop_seed(&parsed.seed)?;
+        let target_version = target.product_version().to_owned();
+        if store
+            .current_version()?
+            .as_deref()
+            .is_some_and(|current| current != target_version)
+        {
+            let materialized = store.materialize_desktop_seed(&parsed.seed)?;
+            let platform = NativeUpdatePlatform::for_desktop_seed(
+                Arc::clone(&store),
+                &parsed.seed,
+                parsed.desktop.clone(),
+                stable_runtime_entrypoint.clone(),
+                Arc::new(|_, _| Ok(())),
+            )?;
+            let coordinator = ProductCommitCoordinator::new(Arc::clone(&store), platform);
+            coordinator.begin_with_installed_desktop(&materialized, ResumeIntent::Desktop)?;
+            coordinator.continue_commit()?;
+            wait_for_product_installation_ready(&store, &target_version)?;
+            return Ok(());
+        }
+        installation.install_initial_or_repair(&parsed.seed, Some(&parsed.desktop))?
+    };
+    let target_version = activated.product_version.clone();
     let mut command = Command::new(&activated.runtime_entrypoint);
     #[cfg(target_os = "windows")]
     command
@@ -372,14 +528,61 @@ fn run_bootstrap(arguments: &[OsString]) -> Result<(), Box<dyn Error>> {
         .stderr(Stdio::null())
         .env(WEB_ASSETS_DIRECTORY_ENV, &activated.web_assets)
         .env("DEBRUTE_ACTIVE_PRODUCT_DIR", &activated.directory);
-    if let Some(desktop) = parsed.desktop {
-        command.env(DESKTOP_ENTRYPOINT_ENV, desktop.executable).env(
+    command
+        .env(DESKTOP_ENTRYPOINT_ENV, &parsed.desktop.executable)
+        .env(
             DESKTOP_ARGUMENTS_ENV,
-            serde_json::to_string(&desktop.arguments)?,
+            serde_json::to_string(&parsed.desktop.arguments)?,
         );
-    }
     command.spawn()?;
+    wait_for_product_installation_ready(&store, &target_version)?;
     Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn wait_for_product_installation_ready(
+    store: &ProductStore,
+    expected_version: &str,
+) -> Result<(), Box<dyn Error>> {
+    let deadline = Instant::now() + Duration::from_mins(2);
+    let endpoint = platform_control_endpoint()?;
+    loop {
+        match endpoint.connect_existing(HANDSHAKE_TIMEOUT) {
+            Ok(connection) => {
+                let mut client = NativeControlClient::handshake_and_clear_timeouts(
+                    connection,
+                    ClientRole::Launcher,
+                    deadline,
+                )?;
+                client.wait_ready_and_request_until(
+                    deadline,
+                    Uuid::new_v4().to_string(),
+                    ControlRequest::Inspect,
+                )?;
+                break;
+            }
+            Err(error) if error.is_absent() => {}
+            Err(error) => return Err(error.into()),
+        }
+        if Instant::now() >= deadline {
+            return Err("Timed out waiting for the installed Product Runtime".into());
+        }
+        thread::sleep(SUPERVISION_POLL_INTERVAL);
+    }
+    loop {
+        let current = store.current_version()?;
+        let pending = store.pending()?;
+        if current.as_deref() == Some(expected_version) && pending.is_none() {
+            ProductProjectionManager::verify_command_resolution(
+                &InstalledProductLayout::for_current_user()?,
+            )?;
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err("Installed Product did not finish its transaction".into());
+        }
+        thread::sleep(SUPERVISION_POLL_INTERVAL);
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -432,24 +635,20 @@ fn runtime_executable_identity() -> Option<String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-struct BootstrapArguments {
+struct ProductInstallationArguments {
     seed: PathBuf,
-    product_root: PathBuf,
-    bin_directory: PathBuf,
-    desktop: Option<DesktopHostRegistration>,
+    desktop: DesktopHostRegistration,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 struct SeedPreflightArguments {
     seed: PathBuf,
-    product_root: PathBuf,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl SeedPreflightArguments {
     fn parse(arguments: &[OsString]) -> Result<Self, Box<dyn Error>> {
         let mut seed = None;
-        let mut product_root = None;
         let mut index = 0;
         while index < arguments.len() {
             let flag = arguments[index]
@@ -460,7 +659,6 @@ impl SeedPreflightArguments {
                 .ok_or_else(|| format!("Product seed preflight option {flag} requires a value"))?;
             match flag {
                 "--seed" => seed = Some(PathBuf::from(value)),
-                "--product-root" => product_root = Some(PathBuf::from(value)),
                 _ => {
                     return Err(format!("Unsupported Product seed preflight option: {flag}").into());
                 }
@@ -468,34 +666,29 @@ impl SeedPreflightArguments {
             index += 2;
         }
         let seed = seed.ok_or("Product seed preflight requires --seed")?;
-        let product_root = product_root.ok_or("Product seed preflight requires --product-root")?;
-        if !seed.is_absolute() || !product_root.is_absolute() {
-            return Err("Product seed preflight paths must be absolute".into());
+        if !seed.is_absolute() {
+            return Err("Product seed preflight path must be absolute".into());
         }
-        Ok(Self { seed, product_root })
+        Ok(Self { seed })
     }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-impl BootstrapArguments {
+impl ProductInstallationArguments {
     fn parse(arguments: &[OsString]) -> Result<Self, Box<dyn Error>> {
         let mut seed = None;
-        let mut product_root = None;
-        let mut bin_directory = None;
         let mut desktop_entrypoint = None;
         let mut desktop_arguments = Vec::new();
         let mut index = 0;
         while index < arguments.len() {
             let flag = arguments[index]
                 .to_str()
-                .ok_or("Bootstrap option names must be UTF-8")?;
+                .ok_or("Product installation option names must be UTF-8")?;
             let value = arguments
                 .get(index + 1)
-                .ok_or_else(|| format!("Bootstrap option {flag} requires a value"))?;
+                .ok_or_else(|| format!("Product installation option {flag} requires a value"))?;
             match flag {
                 "--seed" => seed = Some(PathBuf::from(value)),
-                "--product-root" => product_root = Some(PathBuf::from(value)),
-                "--bin-directory" => bin_directory = Some(PathBuf::from(value)),
                 "--desktop-entrypoint" => desktop_entrypoint = Some(PathBuf::from(value)),
                 "--desktop-arguments-json" => {
                     desktop_arguments = serde_json::from_str(
@@ -504,29 +697,24 @@ impl BootstrapArguments {
                             .ok_or("Desktop arguments JSON must be UTF-8")?,
                     )?;
                 }
-                _ => return Err(format!("Unsupported Product bootstrap option: {flag}").into()),
+                _ => return Err(format!("Unsupported Product installation option: {flag}").into()),
             }
             index += 2;
         }
-        let seed = seed.ok_or("Product bootstrap requires --seed")?;
-        let product_root = product_root.ok_or("Product bootstrap requires --product-root")?;
-        let bin_directory = bin_directory.ok_or("Product bootstrap requires --bin-directory")?;
-        if !seed.is_absolute() || !product_root.is_absolute() || !bin_directory.is_absolute() {
-            return Err("Product bootstrap paths must be absolute".into());
+        let seed = seed.ok_or("Product installation requires --seed")?;
+        if !seed.is_absolute() {
+            return Err("Product installation seed must be absolute".into());
         }
         if desktop_entrypoint.is_none() && !desktop_arguments.is_empty() {
             return Err("Desktop arguments require --desktop-entrypoint".into());
         }
-        let desktop = desktop_entrypoint.map(|executable| DesktopHostRegistration {
-            executable,
-            arguments: desktop_arguments,
-        });
-        Ok(Self {
-            seed,
-            product_root,
-            bin_directory,
-            desktop,
-        })
+        let desktop = desktop_entrypoint
+            .map(|executable| DesktopHostRegistration {
+                executable,
+                arguments: desktop_arguments,
+            })
+            .ok_or("Product installation requires --desktop-entrypoint")?;
+        Ok(Self { seed, desktop })
     }
 }
 
@@ -699,6 +887,14 @@ fn run_runtime_services(
                 current_commit_platform(),
                 current_release_architecture()?,
             ));
+            let installed_layout = InstalledProductLayout::for_current_user()?;
+            if installed_layout.product_root() != store.root() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Installed Product layout does not match the active Product store",
+                )
+                .into());
+            }
             let current_version = store.current_version()?.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::NotFound,
@@ -752,6 +948,18 @@ fn run_runtime_services(
                     resume_product_surface(transaction_id, intent, &resume_state)
                 }),
             )?;
+            let removal = Arc::new(ProductRemovalCoordinator::new(
+                installed_layout.clone(),
+                Arc::clone(&store),
+                std::env::current_exe()?,
+            ));
+            if !state.install_product_removal_service(removal) {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Product removal service was already installed",
+                )
+                .into());
+            }
             let product_service = RuntimeProductService::official(
                 running_version,
                 current_release_platform(),
@@ -845,14 +1053,9 @@ fn run_runtime_services(
                 )
                 .into());
             }
-            let user_home = debrute_home.parent().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "Debrute home has no user home")
-            })?;
-            ProductBootstrap::new(
+            ProductInstallationCoordinator::new(
                 Arc::clone(store),
-                debrute_home.join("bin"),
-                user_home.join(".agents/skills"),
-                debrute_home.clone(),
+                InstalledProductLayout::for_current_user()?,
             )
             .finalize_current(None)?;
             if state.finish_startup() {

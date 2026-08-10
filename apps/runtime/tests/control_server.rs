@@ -9,11 +9,23 @@ use std::{
 
 use debrute_runtime::control::{
     ActivationIntent, ActivationOutcome, ClientMessage, ClientRole, ControlErrorCode, ControlEvent,
-    ControlRequest, ControlResponse, RuntimeActivationService, RuntimeControlState, RuntimeStatus,
-    ServerMessage, encode_frame, read_server_frame, request_handshake, serve_control_connection,
+    ControlRequest, ControlResponse, ProductRemovalCommit, RuntimeActivationService,
+    RuntimeControlState, RuntimeProductRemovalService, RuntimeStatus, ServerMessage, encode_frame,
+    read_server_frame, request_handshake, serve_control_connection,
 };
 
 struct BrowserActivation;
+
+struct RemovalService;
+
+impl RuntimeProductRemovalService for RemovalService {
+    fn prepare_removal(
+        &self,
+        _keep_config: bool,
+    ) -> Result<ProductRemovalCommit, ControlErrorCode> {
+        Ok(ProductRemovalCommit::new(|| Ok(()), || {}))
+    }
+}
 
 impl RuntimeActivationService for BrowserActivation {
     fn activate(
@@ -136,6 +148,42 @@ fn product_quit_responds_then_broadcasts_and_changes_lifecycle() {
         ServerMessage::event(ControlEvent::ProductExiting)
     );
     assert_eq!(state.status(), RuntimeStatus::Exiting);
+    drop(client);
+    server.join().expect("server should finish");
+}
+
+#[test]
+fn product_removal_acceptance_is_flushed_before_the_removing_event() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    assert!(state.finish_startup());
+    assert!(state.install_product_removal_service(Arc::new(RemovalService)));
+    let (mut client, server_stream) = UnixStream::pair().expect("stream pair should open");
+    client
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read should be bounded");
+    let server = serve_in_thread(server_stream, Arc::clone(&state));
+    request_handshake(&mut client, ClientRole::Cli).expect("handshake should succeed");
+
+    send_request(
+        &mut client,
+        "remove-1",
+        ControlRequest::RemoveProduct { keep_config: true },
+    );
+
+    assert_eq!(
+        read_server_frame(&mut client).expect("removal acceptance should arrive"),
+        ServerMessage::response(
+            "remove-1",
+            ControlResponse::ProductRemovalAccepted {
+                config_preserved: true,
+            },
+        )
+    );
+    assert_eq!(
+        read_server_frame(&mut client).expect("removing event should follow acceptance"),
+        ServerMessage::event(ControlEvent::ProductRemoving)
+    );
+    assert_eq!(state.status(), RuntimeStatus::Removing);
     drop(client);
     server.join().expect("server should finish");
 }

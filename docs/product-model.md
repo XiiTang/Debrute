@@ -99,10 +99,11 @@ See [Integrations](./integrations.md) and [Photoshop](./photoshop.md).
 
 ## Skills
 
-Official Skills and the stable `debrute` entrypoint are materialized from the
-selected Product version under `~/.agents/skills`. External Agents use their own
-filesystem tools for generic file access and the CLI for Runtime-backed
-capabilities.
+Official Skills are complete Product-owned projections under the direct-child
+`~/.agents/skills/debrute-*` namespace. The stable `debrute` entrypoint lives
+under `~/.debrute/bin` and resolves the Runtime-selected Product version.
+External Agents use their own filesystem tools for generic file access and the
+CLI for Runtime-backed capabilities.
 
 ## Storage Boundaries
 
@@ -112,10 +113,14 @@ capabilities.
 
 ~/.debrute/config/global_settings.json
 ~/.debrute/config/secrets.json
+~/.debrute/bin/**
+~/.debrute/products/**
+~/.debrute/desktop/**
 ~/.debrute/state/roots/<rootKey>/canvas.json
 ~/.debrute/state/roots/<rootKey>/working-copies.json
 ~/.debrute/cache/roots/<rootKey>/canvas/**
 ~/.debrute/model-artifacts/<hash>.json
+~/.agents/skills/debrute-*/**
 ```
 
 Renderer code does not read or write these files directly. Runtime is the

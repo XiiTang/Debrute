@@ -1,7 +1,7 @@
 import React from 'react';
 import { cx } from './cx';
 
-type ButtonVariant = 'default' | 'primary';
+type ButtonVariant = 'default' | 'primary' | 'danger';
 export type ButtonSize = 'xs' | 'sm' | 'md';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {

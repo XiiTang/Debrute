@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "private": true,
   "type": "commonjs",
-  "description": "Optional Debrute Electron shell.",
+  "description": "Debrute Product Desktop host and platform installer payload.",
   "author": "Debrute",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "check": "tsc -p tsconfig.json --pretty false",
     "pack:local": "pnpm build && node scripts/package-local-macos.mjs",
     "install:local": "pnpm pack:local && node ../../scripts/install-local-macos.mjs",
-    "dist": "pnpm build && electron-builder",
+    "dist": "pnpm build && node scripts/build-product-installer.mjs",
     "dev:electron": "tsx ../../scripts/dev-electron-workbench.ts"
   },
   "build": {
@@ -54,7 +54,6 @@
     "mac": {
       "category": "public.app-category.productivity",
       "executableName": "Debrute",
-      "artifactName": "debrute-desktop-${version}-macos-${arch}.${ext}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -65,18 +64,29 @@
       ],
       "notarize": false,
       "target": [
-        "dmg"
+        "dir"
       ]
     },
-    "dmg": {
-      "sign": true
-    },
     "win": {
-      "artifactName": "debrute-desktop-${version}-windows-${arch}.${ext}",
+      "executableName": "Debrute",
+      "artifactName": "debrute-installer-${version}-windows-${arch}.${ext}",
       "signExecutable": false,
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "guid": "708c37b7-2547-5a47-9bfa-42bb13156a66",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "shortcutName": "Debrute",
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "include": "build/product-installer.nsh",
+      "runAfterFinish": true,
+      "uninstallDisplayName": "Debrute Product"
     }
   },
   "dependencies": {

@@ -26,7 +26,7 @@ function main(argv) {
   if (arch !== 'arm64' && arch !== 'x64') {
     throw new Error(`Unsupported macOS release arch: ${arch}`);
   }
-  verifyDmg(join(releaseDir, `debrute-desktop-${version}-macos-${arch}.dmg`), bundleId);
+  verifyDmg(join(releaseDir, `debrute-installer-${version}-macos-${arch}.dmg`), bundleId);
 }
 
 function verifyDmg(dmgPath, expectedBundleId) {
@@ -37,32 +37,33 @@ function verifyDmg(dmgPath, expectedBundleId) {
   const mountDir = mkdtempSync(join(tmpdir(), 'debrute-dmg-'));
   try {
     run('hdiutil', ['attach', dmgPath, '-nobrowse', '-readonly', '-mountpoint', mountDir]);
-    const appPath = resolveMountedDesktopApp(mountDir, dmgPath);
-    verifyApp(appPath, expectedBundleId);
+    const setupPath = resolveMountedProductSetup(mountDir, dmgPath);
+    verifyApp(setupPath, `${expectedBundleId}.installer`, false);
+    verifyApp(join(setupPath, 'Contents', 'Resources', 'Debrute.app'), expectedBundleId, true);
   } finally {
     run('hdiutil', ['detach', mountDir], { allowFailure: true });
     rmSync(mountDir, { recursive: true, force: true });
   }
 }
 
-export function resolveMountedDesktopApp(mountDir, dmgPath) {
-  const appPath = join(mountDir, 'Debrute.app');
+export function resolveMountedProductSetup(mountDir, dmgPath) {
+  const appPath = join(mountDir, 'Install Debrute.app');
   let appStat;
   try {
     appStat = lstatSync(appPath);
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      throw new Error(`Expected Debrute.app inside ${dmgPath}`);
+      throw new Error(`Expected Install Debrute.app inside ${dmgPath}`);
     }
     throw error;
   }
   if (appStat.isSymbolicLink() || !appStat.isDirectory()) {
-    throw new Error(`Expected a real Debrute.app directory inside ${dmgPath}`);
+    throw new Error(`Expected a real Install Debrute.app directory inside ${dmgPath}`);
   }
   return appPath;
 }
 
-function verifyApp(appPath, expectedBundleId) {
+function verifyApp(appPath, expectedBundleId, requireStaple) {
   const plistPath = join(appPath, 'Contents', 'Info.plist');
   const actualBundleId = run(
     'plutil',
@@ -75,7 +76,9 @@ function verifyApp(appPath, expectedBundleId) {
 
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
   run('spctl', ['-a', '-t', 'exec', '-vv', appPath]);
-  run('xcrun', ['stapler', 'validate', appPath]);
+  if (requireStaple) {
+    run('xcrun', ['stapler', 'validate', appPath]);
+  }
 }
 
 function run(command, args, options = {}) {

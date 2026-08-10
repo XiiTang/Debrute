@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::{
     fs,
     io::{Read as _, Seek as _, SeekFrom, Write as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
@@ -12,7 +12,7 @@ use std::{
 use crate::control::{CONTROL_PROTOCOL, CONTROL_PROTOCOL_VERSION};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-use super::ProductBootstrap;
+use super::ProductInstallationCoordinator;
 use super::commit::{
     CommitPhase, InstalledDesktopIdentity, ProductCommitCoordinator, ProductCommitError,
     ProductIdentity, ProductUpdateFailureStage, ResumeIntent, RunningProductIdentity,
@@ -23,7 +23,9 @@ use super::manifest::{
     ReleaseAssetKind, ReleasePlatform, StagedDesktopAsset, TrustedReleaseManifest,
     verify_signed_release_manifest,
 };
+use super::removal::ProductRemovalExecutor;
 use super::store::{CommitPlatform, ProductStore};
+use super::{InstalledProductLayout, ProductProjectionManager, ProductRemovalCoordinator};
 
 fn desktop_resume() -> ResumeIntent {
     ResumeIntent::Desktop
@@ -36,6 +38,510 @@ use uuid::Uuid;
 
 const DESKTOP_ASSET_BYTES: &[u8] = b"desktop-installer";
 const PRODUCT_ASSET_BYTES: &[u8] = b"product-seed-archive";
+
+#[test]
+fn installed_product_layout_closes_every_macos_owned_path_under_the_current_user() {
+    let layout = InstalledProductLayout::for_roots(
+        CommitPlatform::Macos,
+        PathBuf::from("/Users/alice"),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        layout.debrute_home(),
+        PathBuf::from("/Users/alice/.debrute")
+    );
+    assert_eq!(
+        layout.product_root(),
+        PathBuf::from("/Users/alice/.debrute/products")
+    );
+    assert_eq!(
+        layout.bin_directory(),
+        PathBuf::from("/Users/alice/.debrute/bin")
+    );
+    assert_eq!(
+        layout.skills_directory(),
+        PathBuf::from("/Users/alice/.agents/skills")
+    );
+    assert_eq!(
+        layout.desktop_application(),
+        PathBuf::from("/Users/alice/Applications/Debrute.app")
+    );
+    assert_eq!(
+        layout.desktop_executable(),
+        PathBuf::from("/Users/alice/Applications/Debrute.app/Contents/MacOS/Debrute")
+    );
+}
+
+#[test]
+fn installed_product_layout_uses_the_current_account_record() {
+    use nix::unistd::{Uid, User};
+
+    let account = User::from_uid(Uid::current())
+        .unwrap()
+        .expect("the test account should exist");
+    let layout = InstalledProductLayout::for_current_user().unwrap();
+
+    assert_eq!(layout.user_home(), account.dir);
+}
+
+#[test]
+fn installed_product_layout_closes_every_windows_owned_path_under_local_app_data() {
+    let layout = InstalledProductLayout::for_roots(
+        CommitPlatform::Windows,
+        PathBuf::from(r"C:\Users\Alice"),
+        Some(PathBuf::from(r"C:\Users\Alice\AppData\Local")),
+    )
+    .unwrap();
+
+    assert_eq!(
+        layout.debrute_home(),
+        PathBuf::from(r"C:\Users\Alice/.debrute")
+    );
+    assert_eq!(
+        layout.desktop_application(),
+        PathBuf::from(r"C:\Users\Alice\AppData\Local/Programs/Debrute")
+    );
+    assert_eq!(
+        layout.desktop_executable(),
+        PathBuf::from(r"C:\Users\Alice\AppData\Local/Programs/Debrute/Debrute.exe")
+    );
+}
+
+#[test]
+fn official_skill_projection_replaces_the_reserved_namespace_and_preserves_other_skills() {
+    let root = std::env::temp_dir().join(format!("debrute-skills-test-{}", Uuid::new_v4()));
+    let source = root.join("product-skills");
+    let destination = root.join("home/.agents/skills");
+    fs::create_dir_all(source.join("debrute-core")).unwrap();
+    fs::create_dir_all(source.join("debrute-extra")).unwrap();
+    fs::write(source.join("debrute-core/SKILL.md"), "current-core").unwrap();
+    fs::write(source.join("debrute-extra/SKILL.md"), "current-extra").unwrap();
+    fs::create_dir_all(destination.join("debrute-core")).unwrap();
+    fs::create_dir_all(destination.join("unrelated-skill")).unwrap();
+    fs::write(destination.join("debrute-core/SKILL.md"), "user-change").unwrap();
+    fs::write(destination.join("unrelated-skill/SKILL.md"), "unrelated").unwrap();
+    std::os::unix::fs::symlink(
+        destination.join("unrelated-skill"),
+        destination.join("debrute-symlink"),
+    )
+    .unwrap();
+
+    ProductProjectionManager::publish_official_skills(&source, &destination).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(destination.join("debrute-core/SKILL.md")).unwrap(),
+        "current-core"
+    );
+    assert!(destination.join("debrute-extra/SKILL.md").is_file());
+    assert!(!destination.join("debrute-symlink").exists());
+    assert_eq!(
+        fs::read_to_string(destination.join("unrelated-skill/SKILL.md")).unwrap(),
+        "unrelated"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn invalid_official_skill_source_does_not_mutate_the_installed_namespace() {
+    let root = std::env::temp_dir().join(format!("debrute-skills-test-{}", Uuid::new_v4()));
+    let source = root.join("product-skills");
+    let destination = root.join("home/.agents/skills");
+    fs::create_dir_all(source.join("wrong-name")).unwrap();
+    fs::write(source.join("wrong-name/SKILL.md"), "invalid").unwrap();
+    fs::create_dir_all(destination.join("debrute-core")).unwrap();
+    fs::write(destination.join("debrute-core/SKILL.md"), "installed").unwrap();
+
+    assert!(ProductProjectionManager::publish_official_skills(&source, &destination).is_err());
+    assert_eq!(
+        fs::read_to_string(destination.join("debrute-core/SKILL.md")).unwrap(),
+        "installed"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn official_skill_projection_repairs_and_removes_only_exact_transaction_residue() {
+    let root = std::env::temp_dir().join(format!("debrute-skills-test-{}", Uuid::new_v4()));
+    let source = root.join("product-skills");
+    let destination = root.join("home/.agents/skills");
+    fs::create_dir_all(source.join("debrute-core")).unwrap();
+    fs::write(source.join("debrute-core/SKILL.md"), "current-core").unwrap();
+    let stale = destination.join(format!(".debrute-projection-{}", Uuid::new_v4()));
+    fs::create_dir_all(stale.join("retired/debrute-core")).unwrap();
+    fs::create_dir_all(destination.join(".debrute-projection-not-a-uuid")).unwrap();
+
+    ProductProjectionManager::publish_official_skills(&source, &destination).unwrap();
+
+    assert!(!stale.exists());
+    let removal_residue = destination.join(format!(".debrute-projection-{}", Uuid::new_v4()));
+    fs::create_dir_all(removal_residue.join("staged")).unwrap();
+    ProductProjectionManager::remove_official_skills(&destination).unwrap();
+
+    assert!(!destination.join("debrute-core").exists());
+    assert!(!removal_residue.exists());
+    assert!(destination.join(".debrute-projection-not-a-uuid").exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn macos_command_path_is_idempotent_and_removes_only_the_exact_debrute_blocks() {
+    let root = std::env::temp_dir().join(format!("debrute-path-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join(".zprofile"), "export KEEP=1\n").unwrap();
+    fs::write(home.join(".zshrc"), "alias keep=true").unwrap();
+    let stale = home.join(format!(".debrute-shell-{}", Uuid::new_v4()));
+    fs::write(&stale, "stale").unwrap();
+    fs::write(home.join(".debrute-shell-not-a-uuid"), "unowned").unwrap();
+    let bin = home.join(".debrute/bin");
+
+    ProductProjectionManager::configure_macos_command_path(
+        PathBuf::from("/bin/zsh").as_path(),
+        &home,
+        &bin,
+    )
+    .unwrap();
+
+    assert!(!stale.exists());
+    assert!(home.join(".debrute-shell-not-a-uuid").exists());
+    ProductProjectionManager::configure_macos_command_path(
+        PathBuf::from("/bin/zsh").as_path(),
+        &home,
+        &bin,
+    )
+    .unwrap();
+
+    for file in [home.join(".zprofile"), home.join(".zshrc")] {
+        let contents = fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            contents.matches("# >>> Debrute managed PATH >>>").count(),
+            1
+        );
+        assert!(contents.contains("case :\"$PATH\": in"));
+        assert!(contents.contains("export PATH='"));
+        assert!(contents.contains(".debrute/bin':\"$PATH\""));
+    }
+
+    let removal_residue = home.join(format!(".debrute-shell-{}", Uuid::new_v4()));
+    fs::write(&removal_residue, "stale").unwrap();
+    ProductProjectionManager::remove_macos_command_path(PathBuf::from("/bin/zsh").as_path(), &home)
+        .unwrap();
+    assert!(!removal_residue.exists());
+    assert_eq!(
+        fs::read_to_string(home.join(".zprofile")).unwrap(),
+        "export KEEP=1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(home.join(".zshrc")).unwrap(),
+        "alias keep=true"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn macos_product_removal_clears_managed_blocks_for_every_supported_shell() {
+    let root = std::env::temp_dir().join(format!("debrute-path-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    let layout =
+        InstalledProductLayout::for_roots(CommitPlatform::Macos, home.clone(), None).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join(".bash_login"), "export KEEP_BASH=1\n").unwrap();
+    let bin = home.join(".debrute/bin");
+
+    for shell in ["/bin/zsh", "/bin/bash", "/opt/homebrew/bin/fish"] {
+        ProductProjectionManager::configure_macos_command_path(Path::new(shell), &home, &bin)
+            .unwrap();
+    }
+
+    ProductProjectionManager::remove_command_path(&layout).unwrap();
+
+    for path in [
+        home.join(".zprofile"),
+        home.join(".zshrc"),
+        home.join(".bash_login"),
+        home.join(".bashrc"),
+        home.join(".config/fish/config.fish"),
+    ] {
+        assert!(
+            !fs::read_to_string(path)
+                .unwrap()
+                .contains("Debrute managed PATH")
+        );
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn bash_path_uses_the_first_login_startup_file_bash_will_read() {
+    let root = std::env::temp_dir().join(format!("debrute-path-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join(".bash_login"), "export KEEP=1\n").unwrap();
+
+    ProductProjectionManager::configure_macos_command_path(
+        Path::new("/bin/bash"),
+        &home,
+        &home.join(".debrute/bin"),
+    )
+    .unwrap();
+
+    assert!(
+        fs::read_to_string(home.join(".bash_login"))
+            .unwrap()
+            .contains("Debrute managed PATH")
+    );
+    assert!(!home.join(".profile").exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn fresh_macos_login_shell_resolves_the_managed_cli_exactly() {
+    let root = std::env::temp_dir().join(format!("debrute-path-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    let command = home.join(".debrute/bin/debrute");
+    fs::create_dir_all(command.parent().unwrap()).unwrap();
+    fs::write(&command, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut permissions = fs::metadata(&command).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&command, permissions).unwrap();
+
+    ProductProjectionManager::configure_macos_command_path(
+        PathBuf::from("/bin/zsh").as_path(),
+        &home,
+        command.parent().unwrap(),
+    )
+    .unwrap();
+
+    ProductProjectionManager::verify_macos_command_resolution(
+        PathBuf::from("/bin/zsh").as_path(),
+        &home,
+        &command,
+    )
+    .unwrap();
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn macos_command_projection_uses_the_account_login_shell() {
+    use nix::unistd::{Uid, User};
+
+    let expected = User::from_uid(Uid::current())
+        .unwrap()
+        .expect("the test account should exist")
+        .shell;
+
+    assert_eq!(
+        ProductProjectionManager::current_login_shell().unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn malformed_macos_command_path_markers_fail_without_rewriting_the_file() {
+    let root = std::env::temp_dir().join(format!("debrute-path-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let malformed = "export KEEP=1\n# >>> Debrute managed PATH >>>\n";
+    fs::write(home.join(".zprofile"), malformed).unwrap();
+
+    assert!(
+        ProductProjectionManager::configure_macos_command_path(
+            PathBuf::from("/bin/zsh").as_path(),
+            &home,
+            &home.join(".debrute/bin"),
+        )
+        .is_err()
+    );
+    assert_eq!(
+        fs::read_to_string(home.join(".zprofile")).unwrap(),
+        malformed
+    );
+    assert!(!home.join(".zshrc").exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn fish_command_path_uses_native_fish_syntax() {
+    let root = std::env::temp_dir().join(format!("debrute-path-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    ProductProjectionManager::configure_macos_command_path(
+        PathBuf::from("/opt/homebrew/bin/fish").as_path(),
+        &home,
+        &home.join(".debrute/bin"),
+    )
+    .unwrap();
+
+    let contents = fs::read_to_string(home.join(".config/fish/config.fish")).unwrap();
+    assert!(contents.contains("set -gx PATH '"));
+    assert!(!contents.contains("export PATH="));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn product_removal_executor_deletes_the_whole_product_and_preserves_unowned_content() {
+    let root = std::env::temp_dir().join(format!("debrute-removal-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    let layout =
+        InstalledProductLayout::for_roots(CommitPlatform::Macos, home.clone(), None).unwrap();
+    fs::create_dir_all(layout.debrute_home().join("config")).unwrap();
+    fs::write(
+        layout.debrute_home().join("config/global_settings.json"),
+        "settings",
+    )
+    .unwrap();
+    fs::write(layout.debrute_home().join("config/secrets.json"), "secrets").unwrap();
+    fs::write(layout.debrute_home().join("runtime.log"), "state").unwrap();
+    fs::create_dir_all(layout.desktop_application()).unwrap();
+    fs::create_dir_all(layout.skills_directory().join("debrute-core")).unwrap();
+    fs::create_dir_all(layout.skills_directory().join("unrelated-skill")).unwrap();
+    fs::write(
+        layout.skills_directory().join("debrute-core/SKILL.md"),
+        "owned",
+    )
+    .unwrap();
+    fs::write(
+        layout.skills_directory().join("unrelated-skill/SKILL.md"),
+        "keep",
+    )
+    .unwrap();
+    fs::create_dir_all(home.join("project/.debrute/feedback")).unwrap();
+    fs::write(home.join("project/.debrute/feedback/item.json"), "project").unwrap();
+    ProductProjectionManager::configure_macos_command_path(
+        PathBuf::from("/bin/zsh").as_path(),
+        &home,
+        layout.bin_directory(),
+    )
+    .unwrap();
+
+    ProductRemovalExecutor::new(layout.clone())
+        .execute(None)
+        .unwrap();
+
+    assert!(!layout.debrute_home().exists());
+    assert!(!layout.desktop_application().exists());
+    assert!(!layout.skills_directory().join("debrute-core").exists());
+    assert_eq!(
+        fs::read_to_string(layout.skills_directory().join("unrelated-skill/SKILL.md")).unwrap(),
+        "keep"
+    );
+    assert_eq!(
+        fs::read_to_string(home.join("project/.debrute/feedback/item.json")).unwrap(),
+        "project"
+    );
+    assert!(
+        !fs::read_to_string(home.join(".zprofile"))
+            .unwrap()
+            .contains("Debrute managed PATH")
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn product_removal_executor_restores_only_staged_settings_and_api_keys() {
+    let root = std::env::temp_dir().join(format!("debrute-removal-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    let staging = root.join("retained-config");
+    let layout =
+        InstalledProductLayout::for_roots(CommitPlatform::Macos, home.clone(), None).unwrap();
+    fs::create_dir_all(layout.debrute_home().join("config")).unwrap();
+    fs::write(layout.debrute_home().join("cache"), "delete").unwrap();
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("global_settings.json"), "settings").unwrap();
+    fs::write(staging.join("secrets.json"), "secrets").unwrap();
+
+    ProductRemovalExecutor::new(layout.clone())
+        .execute(Some(&staging))
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(layout.global_settings_file()).unwrap(),
+        "settings"
+    );
+    assert_eq!(
+        fs::read_to_string(layout.secrets_file()).unwrap(),
+        "secrets"
+    );
+    assert_eq!(fs::read_dir(layout.debrute_home()).unwrap().count(), 1);
+    assert!(!staging.exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn product_removal_does_not_recreate_debrute_home_when_no_config_existed() {
+    let root = std::env::temp_dir().join(format!("debrute-removal-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    let staging = root.join("retained-config");
+    let layout = InstalledProductLayout::for_roots(CommitPlatform::Macos, home, None).unwrap();
+    fs::create_dir_all(layout.debrute_home()).unwrap();
+    fs::write(layout.debrute_home().join("cache"), "delete").unwrap();
+    fs::create_dir_all(&staging).unwrap();
+
+    ProductRemovalExecutor::new(layout.clone())
+        .execute(Some(&staging))
+        .unwrap();
+
+    assert!(!layout.debrute_home().exists());
+    assert!(!staging.exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn product_removal_coordinator_prepares_one_validated_runtime_closure_and_exact_config_stage() {
+    let fixture = Fixture::new();
+    let home = fixture.root.join("removal-home");
+    let layout =
+        InstalledProductLayout::for_roots(CommitPlatform::Macos, home.clone(), None).unwrap();
+    let store = Arc::new(ProductStore::new(
+        layout.product_root().to_owned(),
+        CommitPlatform::Macos,
+        ReleaseArchitecture::Arm64,
+    ));
+    let seed = fixture.write_seed("0.0.3", ReleaseArchitecture::Arm64);
+    store.activate_desktop_seed(&seed).unwrap();
+    fs::create_dir_all(layout.debrute_home().join("config")).unwrap();
+    fs::write(layout.global_settings_file(), "settings").unwrap();
+    fs::write(layout.secrets_file(), "secrets").unwrap();
+    fs::write(
+        layout.debrute_home().join("desktop-host.json"),
+        serde_json::to_vec(&json!({
+            "schemaVersion": 1,
+            "executable": layout.desktop_executable(),
+            "arguments": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let runtime = layout
+        .product_root()
+        .join("current/runtime/Debrute Runtime.app/Contents/MacOS/debrute-runtime");
+
+    let prepared = ProductRemovalCoordinator::new(layout.clone(), Arc::clone(&store), runtime)
+        .prepare(true)
+        .unwrap();
+
+    assert!(prepared.plan_path().starts_with(layout.user_home()));
+    assert!(prepared.runtime_entrypoint().is_file());
+    assert_eq!(
+        fs::read_to_string(
+            prepared
+                .retained_config()
+                .unwrap()
+                .join("global_settings.json")
+        )
+        .unwrap(),
+        "settings"
+    );
+    assert_eq!(
+        fs::read_to_string(prepared.retained_config().unwrap().join("secrets.json")).unwrap(),
+        "secrets"
+    );
+    prepared.cancel().unwrap();
+}
 
 #[test]
 fn signed_release_manifest_authenticates_exact_bytes_and_closed_asset_contract() {
@@ -53,7 +559,7 @@ fn signed_release_manifest_authenticates_exact_bytes_and_closed_asset_contract()
             ReleaseArchitecture::Arm64,
         )
         .expect("the signed macOS arm64 asset should exist");
-    assert_eq!(asset.name(), "debrute-desktop-0.0.4-macos-arm64.dmg");
+    assert_eq!(asset.name(), "debrute-installer-0.0.4-macos-arm64.dmg");
 
     let mut changed = bytes.clone();
     changed.push(b' ');
@@ -151,6 +657,31 @@ fn current_never_advances_until_matching_desktop_is_installed() {
     assert_eq!(
         fixture.store.pending().unwrap().unwrap().phase,
         CommitPhase::Staged
+    );
+}
+
+#[test]
+fn product_installer_reuses_commit_after_exact_desktop_is_already_installed() {
+    let fixture = Fixture::new();
+    fixture.bootstrap_product("0.0.3");
+    let target = fixture.materialize_product("0.0.4");
+    let platform = RecordingPlatform::new(&fixture.root, "0.0.4").with_desktop_seed("0.0.4");
+    let coordinator = fixture.coordinator(platform.clone());
+
+    coordinator
+        .begin_with_installed_desktop(&target, desktop_resume())
+        .unwrap();
+    let pending = fixture.store.pending().unwrap().unwrap();
+    assert_eq!(pending.phase, CommitPhase::DesktopInstalled);
+    assert!(pending.staged_desktop_asset().is_none());
+
+    coordinator.continue_commit().unwrap();
+
+    assert_eq!(platform.install_calls(), 0);
+    assert_eq!(platform.launched_versions(), vec!["0.0.4"]);
+    assert_eq!(
+        fixture.store.current_version().unwrap().as_deref(),
+        Some("0.0.4")
     );
 }
 
@@ -604,8 +1135,8 @@ fn recovery_reverifies_signed_evidence_instead_of_trusting_pending_fields() {
     let mut pending: serde_json::Value =
         serde_json::from_slice(&fs::read(&pending_path).unwrap()).unwrap();
     let forged = b"forged-installer";
-    pending["desktopAsset"]["releaseAsset"]["sha256"] = json!(hex_sha256(forged));
-    pending["desktopAsset"]["releaseAsset"]["sizeBytes"] = json!(forged.len());
+    pending["entryCut"]["desktopAsset"]["releaseAsset"]["sha256"] = json!(hex_sha256(forged));
+    pending["entryCut"]["desktopAsset"]["releaseAsset"]["sizeBytes"] = json!(forged.len());
     fs::write(&pending_path, serde_json::to_vec(&pending).unwrap()).unwrap();
     fs::write(staged.path(), forged).unwrap();
 
@@ -732,7 +1263,7 @@ fn native_resume_claim_is_durable_and_intent_bound() {
 }
 
 #[test]
-fn staged_install_failure_bootstraps_the_old_runtime_for_explicit_continuation() {
+fn staged_install_failure_recovers_the_old_runtime_for_explicit_continuation() {
     let fixture = Fixture::new();
     fixture.bootstrap_product("0.0.3");
     let target = fixture.materialize_product("0.0.4");
@@ -740,25 +1271,43 @@ fn staged_install_failure_bootstraps_the_old_runtime_for_explicit_continuation()
         .coordinator(RecordingPlatform::new(&fixture.root, "0.0.3"))
         .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
         .unwrap();
-    let home = fixture.root.join("bootstrap-home");
-    let bootstrap = ProductBootstrap::new(
-        Arc::clone(&fixture.store),
-        home.join(".debrute/bin"),
-        home.join(".agents/skills"),
-        home.join(".debrute"),
-    );
+    let home = fixture.root.join("installation-home");
+    let layout = InstalledProductLayout::for_roots(CommitPlatform::Macos, home, None).unwrap();
+    let installation = ProductInstallationCoordinator::new(Arc::clone(&fixture.store), layout);
 
-    let activated = bootstrap
-        .activate(
-            &fixture.write_seed("0.0.3", ReleaseArchitecture::Arm64),
-            None,
-        )
+    let activated = installation
+        .recover_pending(&fixture.write_seed("0.0.3", ReleaseArchitecture::Arm64))
         .unwrap();
 
     assert_eq!(activated.product_version, "0.0.3");
     assert_eq!(
         fixture.store.pending().unwrap().unwrap().phase,
         CommitPhase::Staged
+    );
+}
+
+#[test]
+fn product_installer_preflight_accepts_only_the_exact_staged_transaction() {
+    let fixture = Fixture::new();
+    fixture.bootstrap_product("0.0.3");
+    let target = fixture.materialize_product("0.0.4");
+    let transaction_id = fixture
+        .coordinator(RecordingPlatform::new(&fixture.root, "0.0.4"))
+        .begin(&target, fixture.desktop_asset("0.0.4"), desktop_resume())
+        .unwrap();
+    let temporary = fixture.store.root().join("pending-commit/.tmp-in-flight");
+    fs::write(&temporary, "in flight").unwrap();
+
+    fixture
+        .store
+        .verify_pending_desktop_installer(&transaction_id)
+        .unwrap();
+    assert!(temporary.exists());
+    assert!(
+        fixture
+            .store
+            .verify_pending_desktop_installer(&Uuid::new_v4().to_string())
+            .is_err()
     );
 }
 
@@ -878,8 +1427,8 @@ fn release_manifest_bytes(version: &str, duplicate: bool) -> Vec<u8> {
         "kind": "desktop",
         "platform": "macos",
         "arch": "arm64",
-        "name": format!("debrute-desktop-{version}-macos-arm64.dmg"),
-        "url": format!("https://github.com/xiitang/debrute/releases/download/v{version}/debrute-desktop-{version}-macos-arm64.dmg"),
+        "name": format!("debrute-installer-{version}-macos-arm64.dmg"),
+        "url": format!("https://github.com/xiitang/debrute/releases/download/v{version}/debrute-installer-{version}-macos-arm64.dmg"),
         "sha256": hex_sha256(DESKTOP_ASSET_BYTES),
         "sizeBytes": DESKTOP_ASSET_BYTES.len()
     });

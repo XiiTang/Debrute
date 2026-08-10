@@ -60,6 +60,7 @@ debrute-windows-product-fs = { path = "../../packages/windows-product-fs" }
 tao.workspace = true
 tray-icon.workspace = true
 winreg.workspace = true
+windows-sys.workspace = true
 
 [lints]
 workspace = true

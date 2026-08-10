@@ -5,6 +5,7 @@ pub enum CliCommandPolicy {
     Activate,
     Resolve,
     Stop,
+    Remove,
     Run,
     Submit,
     Stream,
@@ -45,6 +46,10 @@ pub struct CliCommandSpec {
 }
 
 const NO_OPTIONS: &[CliOptionSpec] = &[];
+const PRODUCT_UNINSTALL_OPTIONS: &[CliOptionSpec] = &[
+    option("yes", CliOptionKind::Flag, true, false, &[]),
+    option("keep-config", CliOptionKind::Flag, false, false, &[]),
+];
 const WORKBENCH_OPTIONS: &[CliOptionSpec] = &[option(
     "frontend",
     CliOptionKind::Value,
@@ -185,6 +190,22 @@ const SPECS: &[CliCommandSpec] = &[
         None,
         NO_OPTIONS,
         &[],
+    ),
+    spec(
+        "product.uninstall",
+        &["product", "uninstall"],
+        CliCommandPolicy::Remove,
+        "product",
+        "destructive",
+        "explicit-yes",
+        "whole-installed-product",
+        "--yes [--keep-config]",
+        "accepted Product removal record; --keep-config retains settings and saved API keys",
+        0,
+        0,
+        None,
+        PRODUCT_UNINSTALL_OPTIONS,
+        &["product_removal_unavailable", "product_removal_in_progress"],
     ),
     spec(
         "skills.status",
@@ -663,7 +684,7 @@ const fn policy_errors(policy: CliCommandPolicy) -> &'static [&'static str] {
         CliCommandPolicy::Local => &[],
         CliCommandPolicy::Observe => OBSERVE_ERRORS,
         CliCommandPolicy::Activate | CliCommandPolicy::Resolve => RUNTIME_ACQUISITION_ERRORS,
-        CliCommandPolicy::Stop => STOP_ERRORS,
+        CliCommandPolicy::Stop | CliCommandPolicy::Remove => STOP_ERRORS,
         CliCommandPolicy::Run | CliCommandPolicy::Submit | CliCommandPolicy::Stream => {
             RUNTIME_COMMAND_ERRORS
         }

@@ -182,6 +182,74 @@
   gap: var(--db-space-4);
 }
 
+.settings-danger-zone {
+  margin-top: var(--db-space-2);
+  padding: var(--db-space-5);
+  border: 0;
+  border-radius: var(--db-radius-lg);
+  background: var(--db-danger-bg);
+}
+
+.settings-danger-zone__copy,
+.settings-removal-dialog__copy,
+.settings-removal-option span {
+  min-width: 0;
+  display: grid;
+  gap: var(--db-space-2);
+}
+
+.settings-danger-zone__copy small,
+.settings-removal-dialog p,
+.settings-removal-option small {
+  margin: 0;
+  color: var(--db-text-muted);
+  line-height: 1.5;
+}
+
+.settings-removal-dialog {
+  width: min(480px, 100%);
+}
+
+.settings-removal-dialog h3 {
+  margin: 0;
+  color: var(--db-text);
+  font-size: var(--db-font-lg);
+}
+
+.settings-removal-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--db-space-3);
+  padding: var(--db-space-4);
+  border-radius: var(--db-radius-md);
+  background: var(--db-surface-2);
+  cursor: pointer;
+}
+
+.settings-removal-option input {
+  margin: 2px 0 0;
+  accent-color: var(--db-danger);
+}
+
+.settings-removal-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--db-space-3);
+}
+
+@media (max-width: 720px) {
+  .settings-danger-zone .settings-group__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-removal-dialog__actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .db-form-grid {
   min-width: 0;
   display: grid;

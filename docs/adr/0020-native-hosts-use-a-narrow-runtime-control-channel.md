@@ -23,17 +23,21 @@ Control requests are limited to:
 - register the one source-development Vite origin;
 - create a one-use Desktop launch ticket for a known window key;
 - report a Desktop window closed; and
-- request Product Quit.
+- request Product Quit or the one whole-Product removal transaction.
 
 Product Quit requests from external product surfaces use this Control request.
 They are not duplicated as a Workbench HTTP business command; Runtime's own tray
-may invoke the same internal transition directly.
+may invoke the same internal transition directly. Product removal is available
+to the managed CLI on Control and to authenticated Desktop/browser Workbenches
+through the matching narrow HTTP route. Both invoke one Runtime removal
+capability; the Control acceptance is flushed before removal can close the
+transport.
 
 Its events are limited to Desktop recent-Project snapshots, Desktop window
-open/focus instructions, and Product exiting/replacing. Runtime internally
-promotes the Desktop launcher connection after Desktop activation. There is no
-public `desktop_host` role, generic business forwarding, Project snapshot,
-settings object, renderer credential, or unload protocol on Control.
+open/focus instructions, and Product exiting/replacing/removing. Runtime
+internally promotes the Desktop launcher connection after Desktop activation.
+There is no public `desktop_host` role, generic business forwarding, Project
+snapshot, settings object, renderer credential, or unload protocol on Control.
 
 Project, Canvas, settings, Model Request, file, and terminal traffic uses the
 role-partitioned loopback business surfaces. CLI authorization is bound to the

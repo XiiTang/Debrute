@@ -274,6 +274,7 @@ function WorkbenchRuntimeApp({
     [api]
   );
   const [connectionEnded, setConnectionEnded] = useState<Error>();
+  const [productRemovalAccepted, setProductRemovalAccepted] = useState(false);
   const [isLoading, setIsLoading] = useState(() => shouldShowInitialProjectLoader(initialRoute));
   const [projectOpenPresentation, setProjectOpenPresentation] = useState<ProjectOpenPresentation>({});
   const initialProjectOpeningRef = useRef<ReturnType<ProjectBindingLifecycle['open']> | undefined>(undefined);
@@ -304,6 +305,9 @@ function WorkbenchRuntimeApp({
   }, [onCommitted]);
   const [settingsFeatureRequested, setSettingsFeatureRequested] = useState(false);
   const [settingsFeatureController, setSettingsFeatureController] = useState<WorkbenchSettingsController>();
+  const acceptProductRemoval = useCallback(() => {
+    setProductRemovalAccepted(true);
+  }, []);
   const requestSettingsFeature = useCallback(() => {
     setSettingsFeatureRequested(true);
   }, []);
@@ -411,7 +415,19 @@ function WorkbenchRuntimeApp({
     isProjectOpening: projectBindingLifecycleState.opening
   };
   const boundProjectApp = <WorkbenchBoundProjectApp {...boundProjectAppProps} />;
-  const surface = projectProjection.status === 'unbound' ? (
+  const surface = productRemovalAccepted ? (
+    <I18nProvider locale={presentationController.locale}>
+      <main
+        className="boot-screen boot-screen--terminal"
+        data-theme={presentationController.resolvedTheme}
+        role="status"
+        data-testid="workbench-product-removed"
+      >
+        <strong>{i18n.t('shell.productRemoval.removed')}</strong>
+        <span>{i18n.t('shell.productRemoval.closePage')}</span>
+      </main>
+    </I18nProvider>
+  ) : projectProjection.status === 'unbound' ? (
     <CanvasTextProjectFontEnvironmentProvider profile={canvasTextRenderProfile}>
       {boundProjectApp}
     </CanvasTextProjectFontEnvironmentProvider>
@@ -426,11 +442,12 @@ function WorkbenchRuntimeApp({
   return (
     <>
       {surface}
-      {settingsFeatureRequested ? (
+      {!productRemovalAccepted && settingsFeatureRequested ? (
         <React.Suspense fallback={null}>
           <WorkbenchSettingsFeatureHost
             api={api}
             globalSettingsController={globalSettingsController}
+            onProductRemovalAccepted={acceptProductRemoval}
             onController={setSettingsFeatureController}
           />
         </React.Suspense>

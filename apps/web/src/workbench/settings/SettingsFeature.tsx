@@ -15,16 +15,19 @@ import type { WorkbenchGlobalSettingsController } from '../services/useWorkbench
 export function WorkbenchSettingsFeatureHost({
   api,
   globalSettingsController,
+  onProductRemovalAccepted,
   onController
 }: {
   api: HttpWorkbenchApiClient;
   globalSettingsController: WorkbenchGlobalSettingsController;
+  onProductRemovalAccepted(): void;
   onController(controller: WorkbenchSettingsController): void;
 }): null {
   const controller = useWorkbenchSettingsController({
     api,
     globalProjection: api.globalProjection,
-    globalSettingsController
+    globalSettingsController,
+    onProductRemovalAccepted
   });
   useLayoutEffect(() => {
     onController(controller);

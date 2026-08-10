@@ -85,6 +85,23 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
         self.send_request(&request_id, request)
     }
 
+    /// Requests whole-Product removal from the existing Runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NativeControlClientError`] when framing fails or the Runtime
+    /// connection is lost. The destructive request is never replayed.
+    pub fn remove_product(
+        &mut self,
+        request_id: impl Into<String>,
+        keep_config: bool,
+    ) -> Result<ControlResponse, NativeControlClientError> {
+        let request = ControlRequest::RemoveProduct { keep_config };
+        authorize_request(self.role, &request).map_err(NativeControlClientError::Role)?;
+        let request_id = request_id.into();
+        self.send_request(&request_id, request)
+    }
+
     fn send_request(
         &mut self,
         request_id: &str,
@@ -125,7 +142,8 @@ impl<Stream: Read + Write> NativeControlClient<Stream> {
                     | ControlEvent::DesktopRecentProjectsChanged { .. }
                     | ControlEvent::DesktopWindowFocusRequested { .. }
                     | ControlEvent::ProductExiting
-                    | ControlEvent::ProductReplacing,
+                    | ControlEvent::ProductReplacing
+                    | ControlEvent::ProductRemoving,
             }
             | ServerMessage::HandshakeAccepted { .. }
             | ServerMessage::HandshakeRejected { .. } => {
@@ -187,7 +205,10 @@ impl<Stream: super::ControlTransport> NativeControlClient<Stream> {
                     self.configure_io_timeout(None)?;
                     return Ok(());
                 }
-                RuntimeStatus::Exiting | RuntimeStatus::Replacing => {
+                RuntimeStatus::Exiting
+                | RuntimeStatus::Replacing
+                | RuntimeStatus::RemovalPreparing
+                | RuntimeStatus::Removing => {
                     return Err(NativeControlClientError::RuntimeStopping {
                         status: self.status,
                     });

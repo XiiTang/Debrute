@@ -262,6 +262,7 @@ async function renderController(
     integrationsRunOperation: options.integrationsRunOperation ?? vi.fn(),
     checkProductUpdate: vi.fn(),
     applyProductUpdate: vi.fn(),
+    removeProduct: vi.fn(),
     revealModelApiKey: vi.fn()
   } as unknown as WorkbenchApiClient;
   const container = document.createElement('div');
@@ -277,7 +278,8 @@ async function renderController(
     current = useWorkbenchSettingsController({
       api,
       globalProjection: projection,
-      globalSettingsController
+      globalSettingsController,
+      onProductRemovalAccepted: vi.fn()
     });
     return null;
   }

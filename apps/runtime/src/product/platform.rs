@@ -114,7 +114,7 @@ impl NativeUpdatePlatform {
 
     /// Launches the registered Desktop with the one native Product-update
     /// failure surface. The Desktop reads the persisted failure through the
-    /// bundled Runtime probe before showing it.
+    /// selected installed Runtime probe before showing it.
     ///
     /// # Errors
     ///
@@ -581,10 +581,16 @@ fn remove_macos_application(path: &Path) -> io::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn mounted_desktop_application(mount: &Path) -> Result<PathBuf, NativeInstallError> {
-    let application = mount.join("Debrute.app");
-    let metadata = fs::symlink_metadata(&application)
+    let setup = mount.join("Install Debrute.app");
+    let setup_metadata =
+        fs::symlink_metadata(&setup).map_err(|_| NativeInstallError::InvalidApplicationBundle)?;
+    if setup_metadata.file_type().is_symlink() || !setup_metadata.is_dir() {
+        return Err(NativeInstallError::InvalidApplicationBundle);
+    }
+    let application = setup.join("Contents/Resources/Debrute.app");
+    let application_metadata = fs::symlink_metadata(&application)
         .map_err(|_| NativeInstallError::InvalidApplicationBundle)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if application_metadata.file_type().is_symlink() || !application_metadata.is_dir() {
         return Err(NativeInstallError::InvalidApplicationBundle);
     }
     Ok(application)
@@ -649,11 +655,15 @@ fn finish_macos_install_step<T>(
 
 #[cfg(target_os = "windows")]
 fn install_desktop_native(
-    _store: &ProductStore,
+    store: &ProductStore,
     _desktop: &DesktopHostRegistration,
     installer: &VerifiedDesktopInstaller,
 ) -> Result<(), NativeInstallError> {
-    command_success(path_text(installer.path())?, &["/S"])
+    let pending = store
+        .pending_unlocked()?
+        .ok_or_else(|| NativeInstallError::ProductUpdateTransactionMissing)?;
+    let update_mode = format!("/DEBRUTE_PRODUCT_UPDATE={}", pending.transaction_id);
+    command_success(path_text(installer.path())?, &["/S", &update_mode])
 }
 
 fn command_success(executable: &str, arguments: &[&str]) -> Result<(), NativeInstallError> {
@@ -690,6 +700,8 @@ fn path_text(path: &Path) -> Result<&str, NativeInstallError> {
 enum NativeInstallError {
     Io(io::Error),
     Product(super::ProductStoreError),
+    #[cfg(target_os = "windows")]
+    ProductUpdateTransactionMissing,
     #[cfg(target_os = "macos")]
     InvalidDmgMount,
     #[cfg(target_os = "macos")]
@@ -729,12 +741,16 @@ impl NativeInstallError {
         match self {
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Product(error) => write!(formatter, "{error}"),
+            #[cfg(target_os = "windows")]
+            Self::ProductUpdateTransactionMissing => {
+                formatter.write_str("Product update transaction is missing")
+            }
             #[cfg(target_os = "macos")]
             Self::InvalidDmgMount => formatter.write_str("DMG mount point is invalid"),
             #[cfg(target_os = "macos")]
-            Self::InvalidApplicationBundle => {
-                formatter.write_str("DMG must contain a real Debrute.app directory at its root")
-            }
+            Self::InvalidApplicationBundle => formatter.write_str(
+                "DMG must contain one real Install Debrute.app with its nested Debrute.app",
+            ),
             #[cfg(target_os = "macos")]
             Self::InvalidInstalledApplication => {
                 formatter.write_str("installed Desktop application path is invalid")
@@ -818,17 +834,18 @@ mod tests {
     }
 
     #[test]
-    fn mounted_dmg_requires_the_fixed_real_debrute_application() {
+    fn mounted_dmg_requires_the_fixed_nested_debrute_application() {
         let root = std::env::temp_dir().join(format!("debrute-dmg-test-{}", Uuid::new_v4()));
         fs::create_dir_all(root.join("Other.app")).unwrap();
         assert!(matches!(
             mounted_desktop_application(&root),
             Err(NativeInstallError::InvalidApplicationBundle)
         ));
-        fs::create_dir(root.join("Debrute.app")).unwrap();
+        fs::create_dir_all(root.join("Install Debrute.app/Contents/Resources/Debrute.app"))
+            .unwrap();
         assert_eq!(
             mounted_desktop_application(&root).unwrap(),
-            root.join("Debrute.app")
+            root.join("Install Debrute.app/Contents/Resources/Debrute.app")
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -838,8 +855,12 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let root = std::env::temp_dir().join(format!("debrute-dmg-link-{}", Uuid::new_v4()));
-        fs::create_dir_all(root.join("actual.app")).unwrap();
-        symlink(root.join("actual.app"), root.join("Debrute.app")).unwrap();
+        fs::create_dir_all(root.join("Install Debrute.app/Contents/Resources/actual.app")).unwrap();
+        symlink(
+            root.join("Install Debrute.app/Contents/Resources/actual.app"),
+            root.join("Install Debrute.app/Contents/Resources/Debrute.app"),
+        )
+        .unwrap();
         assert!(matches!(
             mounted_desktop_application(&root),
             Err(NativeInstallError::InvalidApplicationBundle)

@@ -1,7 +1,7 @@
 # Product Supports macOS And Windows
 
 Debrute Product targets are macOS arm64, macOS x64, and Windows x64. Every
-published Desktop installer has a complete matching Runtime Product, participates
+published Product Installer has a complete matching Runtime Product, participates
 in the signed release contract, and passes packaged-product acceptance.
 
 Release-publishing infrastructure may run on another operating system without
@@ -15,6 +15,6 @@ Each native release matrix job builds its own Workbench assets together with
 the matching Runtime and Desktop. That build injects one closed `darwin` or
 `win32` Workbench constant, so the downloaded Product has already selected its
 platform semantics. Workbench does not infer the platform from browser APIs,
-receive it again through Runtime bootstrap, or carry Linux and unknown fallback
+receive it again through Product installation, or carry Linux and unknown fallback
 branches. Source development injects the matching supported host constant;
 another host fails the development or build entrypoint.

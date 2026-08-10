@@ -85,6 +85,7 @@ async fn run(parsed: ParsedCliCommand) -> Result<CliResult, CliRunError> {
         CliCommandPolicy::Activate => run_activate(&parsed),
         CliCommandPolicy::Resolve => run_resolve(&parsed),
         CliCommandPolicy::Stop => run_stop(&parsed),
+        CliCommandPolicy::Remove => run_remove(&parsed),
         CliCommandPolicy::Run => run_http(&parsed, false).await,
         CliCommandPolicy::Submit => run_submit(&parsed).await,
         CliCommandPolicy::Stream => run_http(&parsed, true).await,
@@ -237,6 +238,32 @@ fn run_stop(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
             parsed.command,
             "runtime_health_failed",
             "Runtime returned an unexpected Product Quit response.",
+        )),
+    }
+}
+
+fn run_remove(parsed: &ParsedCliCommand) -> Result<CliResult, CliRunError> {
+    let deadline = Instant::now() + RUNTIME_STARTUP_TIMEOUT;
+    let mut client = ensure_runtime(deadline)?;
+    let keep_config = parsed.options.contains_key("keep-config");
+    let response = client
+        .remove_product(Uuid::new_v4().to_string(), keep_config)
+        .map_err(|error| control_failure(parsed.command, &error))?;
+    drop(client);
+    match response {
+        ControlResponse::ProductRemovalAccepted { config_preserved } => Ok(closed_result(json!({
+            "status": "ok",
+            "command": parsed.command,
+            "fields": {
+                "accepted": true,
+                "configPreserved": config_preserved
+            }
+        }))),
+        ControlResponse::Rejected { code } => Err(rejected_failure(parsed.command, code)),
+        _ => Err(CliRunError::new(
+            parsed.command,
+            "runtime_health_failed",
+            "Runtime returned an unexpected Product removal response.",
         )),
     }
 }
@@ -771,6 +798,14 @@ fn rejected_failure(command: &str, code: ControlErrorCode) -> CliRunError {
             "product_update_failed",
             "Product update commit is already in progress.",
         ),
+        ControlErrorCode::RemovalInProgress => (
+            "product_removal_in_progress",
+            "Product removal is already in progress.",
+        ),
+        ControlErrorCode::ProductRemovalUnavailable => (
+            "product_removal_unavailable",
+            "Product removal could not be prepared.",
+        ),
         _ => (
             "runtime_health_failed",
             "Runtime rejected the Control request.",
@@ -840,6 +875,8 @@ const fn status_name(status: RuntimeStatus) -> &'static str {
         RuntimeStatus::Ready => "ready",
         RuntimeStatus::Exiting => "exiting",
         RuntimeStatus::Replacing => "replacing",
+        RuntimeStatus::RemovalPreparing => "removal_preparing",
+        RuntimeStatus::Removing => "removing",
     }
 }
 

@@ -397,6 +397,32 @@ describe('Runtime Control client', () => {
     });
   });
 
+  it('updates status and forwards the Product removal event', async () => {
+    const events: ControlEvent[] = [];
+    await withControlServer((socket) => {
+      readFrames(socket, (message) => {
+        if (message.type === 'handshake') {
+          acceptHandshake(socket, 'ready');
+          return;
+        }
+        writeFrame(socket, { type: 'event', event: { event: 'product_removing' } });
+        respond(socket, message.request_id, {
+          result: 'inspection',
+          instance_id: 'runtime-instance',
+          status: 'ready',
+          executable_identity: 'runtime-binary'
+        });
+      });
+    }, async (socketPath) => {
+      const client = await connectClient(socketPath, 'launcher');
+      client.onEvent((event) => events.push(event));
+      await client.inspect();
+      expect(client.status).toBe('removing');
+      expect(events).toEqual([{ event: 'product_removing' }]);
+      client.close();
+    });
+  });
+
   it('surfaces runtime_lost without reconnecting', async () => {
     let connectionCount = 0;
     await withControlServer((socket) => {

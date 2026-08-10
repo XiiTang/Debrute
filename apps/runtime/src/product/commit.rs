@@ -123,6 +123,17 @@ pub enum ResumeIntent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+enum CommitEntryCut {
+    Staged { desktop_asset: StagedDesktopAsset },
+    ProductInstallerDesktopInstalled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PendingCommit {
     pub schema_version: u32,
@@ -131,7 +142,7 @@ pub struct PendingCommit {
     pub target_version: String,
     pub control_protocol: String,
     pub control_protocol_version: u32,
-    pub desktop_asset: StagedDesktopAsset,
+    entry_cut: CommitEntryCut,
     pub resume_intent: ResumeIntent,
     pub phase: CommitPhase,
 }
@@ -145,7 +156,7 @@ struct PendingCommitWire {
     target_version: String,
     control_protocol: String,
     control_protocol_version: u32,
-    desktop_asset: StagedDesktopAssetWire,
+    entry_cut: CommitEntryCutWire,
     resume_intent: ResumeIntent,
     phase: CommitPhase,
 }
@@ -155,6 +166,20 @@ struct PendingCommitWire {
 struct StagedDesktopAssetWire {
     release_asset: PersistedReleaseAssetWire,
     path: std::path::PathBuf,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum CommitEntryCutWire {
+    Staged {
+        desktop_asset: StagedDesktopAssetWire,
+    },
+    ProductInstallerDesktopInstalled,
 }
 
 #[derive(Deserialize)]
@@ -183,18 +208,25 @@ impl<'de> Deserialize<'de> for PendingCommit {
             target_version: wire.target_version,
             control_protocol: wire.control_protocol,
             control_protocol_version: wire.control_protocol_version,
-            desktop_asset: StagedDesktopAsset::new(
-                TrustedReleaseAsset::restore(
-                    wire.desktop_asset.release_asset.kind,
-                    wire.desktop_asset.release_asset.platform,
-                    wire.desktop_asset.release_asset.architecture,
-                    wire.desktop_asset.release_asset.name,
-                    wire.desktop_asset.release_asset.url,
-                    wire.desktop_asset.release_asset.sha256,
-                    wire.desktop_asset.release_asset.size_bytes,
-                ),
-                wire.desktop_asset.path,
-            ),
+            entry_cut: match wire.entry_cut {
+                CommitEntryCutWire::Staged { desktop_asset } => CommitEntryCut::Staged {
+                    desktop_asset: StagedDesktopAsset::new(
+                        TrustedReleaseAsset::restore(
+                            desktop_asset.release_asset.kind,
+                            desktop_asset.release_asset.platform,
+                            desktop_asset.release_asset.architecture,
+                            desktop_asset.release_asset.name,
+                            desktop_asset.release_asset.url,
+                            desktop_asset.release_asset.sha256,
+                            desktop_asset.release_asset.size_bytes,
+                        ),
+                        desktop_asset.path,
+                    ),
+                },
+                CommitEntryCutWire::ProductInstallerDesktopInstalled => {
+                    CommitEntryCut::ProductInstallerDesktopInstalled
+                }
+            },
             resume_intent: wire.resume_intent,
             phase: wire.phase,
         })
@@ -223,14 +255,33 @@ impl PendingCommit {
         {
             return Err("Control protocol identity is incompatible".to_owned());
         }
-        if !self
-            .desktop_asset
-            .release_asset
-            .matches_product_version(&self.target_version)
-        {
+        if self.staged_desktop_asset().is_some_and(|desktop_asset| {
+            !desktop_asset
+                .release_asset
+                .matches_product_version(&self.target_version)
+        }) {
             return Err("Desktop asset does not match targetVersion".to_owned());
         }
+        if self.phase == CommitPhase::Staged
+            && !matches!(self.entry_cut, CommitEntryCut::Staged { .. })
+        {
+            return Err("staged phase requires the staged entry cut".to_owned());
+        }
         Ok(())
+    }
+
+    pub(crate) fn initial_phase(&self) -> CommitPhase {
+        match self.entry_cut {
+            CommitEntryCut::Staged { .. } => CommitPhase::Staged,
+            CommitEntryCut::ProductInstallerDesktopInstalled => CommitPhase::DesktopInstalled,
+        }
+    }
+
+    pub(crate) fn staged_desktop_asset(&self) -> Option<&StagedDesktopAsset> {
+        match &self.entry_cut {
+            CommitEntryCut::Staged { desktop_asset } => Some(desktop_asset),
+            CommitEntryCut::ProductInstallerDesktopInstalled => None,
+        }
     }
 
     pub(crate) fn same_transaction_as(&self, other: &Self) -> bool {
@@ -240,7 +291,7 @@ impl PendingCommit {
             && self.target_version == other.target_version
             && self.control_protocol == other.control_protocol
             && self.control_protocol_version == other.control_protocol_version
-            && self.desktop_asset == other.desktop_asset
+            && self.entry_cut == other.entry_cut
             && self.resume_intent == other.resume_intent
     }
 }
@@ -393,9 +444,78 @@ impl<P: UpdatePlatformAdapter> ProductCommitCoordinator<P> {
             target_version,
             control_protocol: CONTROL_PROTOCOL.to_owned(),
             control_protocol_version: CONTROL_PROTOCOL_VERSION,
-            desktop_asset,
+            entry_cut: CommitEntryCut::Staged { desktop_asset },
             resume_intent,
             phase: CommitPhase::Staged,
+        })?;
+        Ok(transaction_id)
+    }
+
+    /// Records the existing update transaction after the Product Installer has
+    /// installed and attested the exact target Desktop. This begins at the
+    /// existing `desktop_installed` durable cut; it is not a second installer
+    /// state machine.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductCommitError`] if the selected Product is not older than
+    /// the staged target, the installed Desktop does not exactly match that
+    /// target, or another Product transaction exists.
+    pub fn begin_with_installed_desktop(
+        &self,
+        staged_product: &Path,
+        resume_intent: ResumeIntent,
+    ) -> Result<String, ProductCommitError> {
+        let _transaction = self.store.lock_transaction()?;
+        if self.store.pending_unlocked()?.is_some() {
+            return Err(ProductCommitError::PendingCommitExists);
+        }
+        let from_version = self
+            .store
+            .current_version_unlocked()?
+            .ok_or(ProductCommitError::CurrentProductMissing)?;
+        let target_version = staged_product
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| ProductCommitError::InvalidStagedProduct(staged_product.to_path_buf()))?
+            .to_owned();
+        if self.store.version_path(&target_version) != staged_product {
+            return Err(ProductCommitError::InvalidStagedProduct(
+                staged_product.to_path_buf(),
+            ));
+        }
+        let manifest = self.store.validate_version_unlocked(&target_version)?;
+        let from = Version::parse(&from_version)
+            .map_err(|_| ProductCommitError::InvalidCurrentVersion(from_version.clone()))?;
+        let target = Version::parse(&target_version)
+            .map_err(|_| ProductCommitError::InvalidTargetVersion(target_version.clone()))?;
+        if target <= from
+            || manifest.product_version != target_version
+            || manifest.control_protocol != CONTROL_PROTOCOL
+            || manifest.control_protocol_version != CONTROL_PROTOCOL_VERSION
+            || manifest.architecture != self.store.architecture()
+        {
+            return Err(ProductCommitError::IncompatibleTargetProduct);
+        }
+        let expected = self.expected_identity(&target_version)?;
+        let installed = self.platform.installed_desktop_identity()?;
+        if installed.product() != &expected {
+            return Err(ProductCommitError::DesktopVersionMismatch {
+                expected: target_version,
+                actual: installed.product().product_version().to_owned(),
+            });
+        }
+        let transaction_id = Uuid::new_v4().to_string();
+        self.store.write_pending_unlocked(&PendingCommit {
+            schema_version: 1,
+            transaction_id: transaction_id.clone(),
+            from_version,
+            target_version,
+            control_protocol: CONTROL_PROTOCOL.to_owned(),
+            control_protocol_version: CONTROL_PROTOCOL_VERSION,
+            entry_cut: CommitEntryCut::ProductInstallerDesktopInstalled,
+            resume_intent,
+            phase: CommitPhase::DesktopInstalled,
         })?;
         Ok(transaction_id)
     }
@@ -419,10 +539,11 @@ impl<P: UpdatePlatformAdapter> ProductCommitCoordinator<P> {
         }
         let running = self.platform.running_product_identity()?;
         self.authorize_running_product(&pending, &running, CommitPhase::Staged)?;
-        self.store.validate_staged_desktop_asset_unlocked(
-            &pending.desktop_asset,
-            &pending.target_version,
-        )?;
+        let desktop_asset = pending
+            .staged_desktop_asset()
+            .ok_or(ProductCommitError::IncompatibleTargetProduct)?;
+        self.store
+            .validate_staged_desktop_asset_unlocked(desktop_asset, &pending.target_version)?;
         let mut installed = self.platform.installed_desktop_identity()?;
         if !desktop_identity_matches(
             &installed,
@@ -430,10 +551,9 @@ impl<P: UpdatePlatformAdapter> ProductCommitCoordinator<P> {
             &self.expected_identity(&pending.target_version)?,
         ) && matches!(running, RunningProductIdentity::Runtime(_))
         {
-            let verified_asset = self.store.open_verified_desktop_installer_unlocked(
-                &pending.desktop_asset,
-                &pending.target_version,
-            )?;
+            let verified_asset = self
+                .store
+                .open_verified_desktop_installer_unlocked(desktop_asset, &pending.target_version)?;
             self.platform.install_desktop(verified_asset)?;
             installed = self.platform.installed_desktop_identity()?;
         }

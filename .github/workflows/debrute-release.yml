@@ -44,7 +44,7 @@ jobs:
       - run: pnpm test
       - run: pnpm lint:arch
 
-  build-desktop:
+  build-product:
     needs: preflight
     strategy:
       fail-fast: false
@@ -170,23 +170,32 @@ jobs:
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           node scripts/archive-product-seed.mjs --platform "${{ matrix.publicPlatform }}" --arch "${{ matrix.arch }}" --version "$VERSION"
-      - name: Build signed macOS Desktop assets
+      - name: Build signed macOS Product Installer
         if: matrix.platform == 'darwin'
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --filter @debrute/desktop exec electron-builder --mac dmg --${{ matrix.arch }} --publish never
+          VERSION="$(node -p "require('./package.json').version")"
+          pnpm --filter @debrute/desktop exec electron-builder --mac dir --${{ matrix.arch }} --publish never
+          DESKTOP_APP="$(find apps/desktop/release -path '*/Debrute.app' -type d -print -quit)"
+          test -n "$DESKTOP_APP"
+          node apps/desktop/scripts/build-macos-product-installer.mjs \
+            --desktop-app "$DESKTOP_APP" \
+            --version "$VERSION" \
+            --arch "${{ matrix.arch }}" \
+            --identity "$CSC_NAME" \
+            --output-directory apps/desktop/release
       - name: Notarize macOS DMG
         if: matrix.platform == 'darwin'
         shell: bash
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
-          DMG_PATH="apps/desktop/release/debrute-desktop-${VERSION}-macos-${{ matrix.arch }}.dmg"
+          DMG_PATH="apps/desktop/release/debrute-installer-${VERSION}-macos-${{ matrix.arch }}.dmg"
           node scripts/notarize-macos-artifact.cjs \
             --path "$DMG_PATH" \
-            --label "debrute-desktop-${VERSION}-macos-${{ matrix.arch }}.dmg"
-      - name: Build unsigned Windows Desktop assets
+            --label "debrute-installer-${VERSION}-macos-${{ matrix.arch }}.dmg"
+      - name: Build unsigned Windows Product Installer
         if: matrix.platform == 'win32'
         shell: bash
         run: |
@@ -200,10 +209,10 @@ jobs:
           $paths = @(
             'target/release/debrute-runtime.exe',
             'target/release/debrute.exe',
-            'apps/desktop/release/win-unpacked/debrute.exe',
+            'apps/desktop/release/win-unpacked/Debrute.exe',
             'apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute-runtime.exe',
             'apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute.exe',
-            "apps/desktop/release/debrute-desktop-$version-windows-x64.exe"
+            "apps/desktop/release/debrute-installer-$version-windows-x64.exe"
           )
           foreach ($path in $paths) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -220,11 +229,19 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ matrix.platform }}" = "win32" ]; then
-            DESKTOP="apps/desktop/release/win-unpacked/debrute.exe"
-            CLI="apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute.exe"
+            VERSION="$(node -p "require('./package.json').version")"
+            INSTALLER="apps/desktop/release/debrute-installer-${VERSION}-windows-x64.exe"
+            node scripts/install-product-smoke.mjs --platform win32 --installer "$INSTALLER"
+            DESKTOP="$LOCALAPPDATA\Programs\Debrute\Debrute.exe"
+            DESKTOP_ROOT="$LOCALAPPDATA\Programs\Debrute"
+            CLI="$USERPROFILE\.debrute\bin\debrute.cmd"
           else
-            DESKTOP="$(find apps/desktop/release -path '*/Debrute.app/Contents/MacOS/Debrute' -type f -print -quit)"
-            CLI="$(find apps/desktop/release -path '*/Debrute.app/Contents/Resources/product-seed/runtime/debrute' -type f -print -quit)"
+            VERSION="$(node -p "require('./package.json').version")"
+            INSTALLER="apps/desktop/release/debrute-installer-${VERSION}-macos-${{ matrix.arch }}.dmg"
+            node scripts/install-product-smoke.mjs --platform darwin --installer "$INSTALLER"
+            DESKTOP="$HOME/Applications/Debrute.app/Contents/MacOS/Debrute"
+            DESKTOP_ROOT="$HOME/Applications/Debrute.app"
+            CLI="$HOME/.debrute/bin/debrute"
           fi
           test -n "$DESKTOP"
           test -n "$CLI"
@@ -232,11 +249,16 @@ jobs:
             --desktop "$DESKTOP" \
             --cli "$CLI" \
             --platform "${{ matrix.platform }}"
-      - name: Verify Desktop assets
+          node scripts/smoke-product-removal.mjs \
+            --platform "${{ matrix.platform }}" \
+            --cli "$CLI" \
+            --desktop "$DESKTOP" \
+            --desktop-root "$DESKTOP_ROOT"
+      - name: Verify Product Installer assets
         shell: bash
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          node scripts/desktop-release-assets.mjs --release-dir apps/desktop/release --version "$VERSION" --platform "${{ matrix.platform }}" --arch "${{ matrix.arch }}"
+          node scripts/product-installer-assets.mjs --release-dir apps/desktop/release --version "$VERSION" --platform "${{ matrix.platform }}" --arch "${{ matrix.arch }}"
       - name: Verify macOS signing
         if: matrix.platform == 'darwin'
         shell: bash
@@ -245,15 +267,15 @@ jobs:
           node scripts/verify-macos-desktop-signing.mjs --release-dir apps/desktop/release --version "$VERSION" --arch "${{ matrix.arch }}" --bundle-id io.github.xiitang.debrute
       - uses: actions/upload-artifact@v4
         with:
-          name: debrute-desktop-${{ matrix.publicPlatform }}-${{ matrix.arch }}
+          name: debrute-installer-${{ matrix.publicPlatform }}-${{ matrix.arch }}
           path: |
-            apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.dmg
-            apps/desktop/release/debrute-desktop-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.exe
+            apps/desktop/release/debrute-installer-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.dmg
+            apps/desktop/release/debrute-installer-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.exe
             apps/desktop/release/debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip
 
   publish-release:
     needs:
-      - build-desktop
+      - build-product
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -293,13 +315,13 @@ jobs:
           cat > release-notes.md <<EOF
           # Debrute ${VERSION}
 
-          Desktop assets:
+          Product Installer assets:
           - macOS: signed and notarized DMG installers for Apple Silicon and Intel Macs.
           - Windows: NSIS installer for x64. This release is not Authenticode-signed, so Windows may show an Unknown Publisher or SmartScreen warning.
 
           Runtime update payloads for macOS and Windows are complete Product seeds authenticated by the signed update manifest; they are consumed by Debrute Runtime and are not separate user installers.
 
-          Install Debrute by downloading the desktop installer for your platform. The runtime materializes the matching debrute CLI and official Skills on first launch, and product updates keep Desktop, runtime, CLI, and Skills on the same version.
+          Install Debrute with the Product Installer for your platform. Installation completes Desktop, Runtime, the debrute CLI, command exposure, and official Skills before success; first Desktop launch performs no installation work.
           EOF
       - uses: softprops/action-gh-release@v2
         with:

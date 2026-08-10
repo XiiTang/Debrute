@@ -1,29 +1,44 @@
-//! Narrow Windows filesystem primitives for Debrute product commits.
+//! Narrow Windows platform primitives for Debrute product transactions.
 //!
-//! This crate contains the only unsafe Windows API boundary. It owns no
+//! This crate contains the reviewed unsafe Windows API boundary. It owns no
 //! network, release selection, signature verification, product policy, or
 //! update transaction state.
 
 #[cfg(target_os = "windows")]
 mod windows {
     use std::{
+        ffi::{OsStr, OsString},
         fs::{self, File, OpenOptions},
         io,
         mem::size_of,
-        os::windows::{ffi::OsStrExt as _, fs::OpenOptionsExt as _, io::AsRawHandle as _},
+        os::windows::{
+            ffi::{OsStrExt as _, OsStringExt as _},
+            fs::OpenOptionsExt as _,
+            io::AsRawHandle as _,
+        },
         path::{Path, PathBuf},
         ptr,
     };
 
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_LocalAppData, FOLDERID_Profile, FOLDERID_Programs, SHGetKnownFolderPath,
+    };
     use windows_sys::Win32::{
-        Foundation::{GENERIC_WRITE, HANDLE},
+        Foundation::{CloseHandle, GENERIC_WRITE, HANDLE, WAIT_TIMEOUT},
         Storage::FileSystem::{
             BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FlushFileBuffers, GetFileInformationByHandle,
+            FlushFileBuffers, GetFileInformationByHandle, MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW,
         },
         System::{
-            IO::DeviceIoControl, Ioctl::FSCTL_SET_REPARSE_POINT,
+            Com::CoTaskMemFree,
+            Environment::ExpandEnvironmentStringsW,
+            IO::DeviceIoControl,
+            Ioctl::FSCTL_SET_REPARSE_POINT,
             SystemServices::IO_REPARSE_TAG_MOUNT_POINT,
+            Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+        },
+        UI::WindowsAndMessaging::{
+            HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
         },
     };
 
@@ -166,6 +181,150 @@ mod windows {
         flush_file(&file)
     }
 
+    /// Resolves the current Windows account profile through the Known Folder API.
+    pub fn current_user_profile_directory() -> io::Result<PathBuf> {
+        known_folder_path(&FOLDERID_Profile)
+    }
+
+    /// Resolves the current Windows account Local AppData through the Known Folder API.
+    pub fn current_user_local_app_data_directory() -> io::Result<PathBuf> {
+        known_folder_path(&FOLDERID_LocalAppData)
+    }
+
+    /// Resolves the current Windows account Start Menu Programs directory.
+    pub fn current_user_programs_directory() -> io::Result<PathBuf> {
+        known_folder_path(&FOLDERID_Programs)
+    }
+
+    /// Expands one Windows environment string with the current process block.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error when Windows cannot size or expand the
+    /// exact UTF-16 input.
+    pub fn expand_environment_strings(value: &OsStr) -> io::Result<OsString> {
+        let source = value.encode_wide().chain(Some(0)).collect::<Vec<_>>();
+        // SAFETY: `source` is a live, NUL-terminated UTF-16 buffer. A null
+        // destination with zero capacity is the documented sizing call.
+        let required = unsafe { ExpandEnvironmentStringsW(source.as_ptr(), ptr::null_mut(), 0) };
+        if required == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut expanded = vec![0_u16; required as usize];
+        // SAFETY: both buffers are live, `expanded` has the exact capacity
+        // returned by the sizing call, and the API writes at most that count.
+        let written =
+            unsafe { ExpandEnvironmentStringsW(source.as_ptr(), expanded.as_mut_ptr(), required) };
+        if written == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if written > required {
+            return Err(io::Error::other(
+                "Windows environment changed while PATH was expanded",
+            ));
+        }
+        expanded.truncate(written.saturating_sub(1) as usize);
+        Ok(OsString::from_wide(&expanded))
+    }
+
+    /// Returns whether `process_id` still identifies a live synchronizable process.
+    pub fn process_is_running(process_id: u32) -> bool {
+        // SAFETY: the PID is a value, no borrowed memory crosses the call, and
+        // every non-null owned handle is closed below.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, process_id) };
+        if handle.is_null() {
+            return false;
+        }
+        // SAFETY: `handle` is non-null and remains owned until CloseHandle.
+        let status = unsafe { WaitForSingleObject(handle, 0) };
+        // SAFETY: this is the one close of the owned process handle.
+        unsafe { CloseHandle(handle) };
+        status == WAIT_TIMEOUT
+    }
+
+    /// Schedules one exact path for deletion at the next Windows reboot.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating-system error when Windows rejects the exact path.
+    pub fn schedule_delete_on_reboot(path: &Path) -> io::Result<()> {
+        schedule_delete_on_reboot_with(path, |source, destination, flags| {
+            // SAFETY: the helper owns the live, NUL-terminated source buffer;
+            // the null destination and delayed-delete flag are fixed below.
+            unsafe { MoveFileExW(source, destination, flags) }
+        })
+    }
+
+    pub(super) fn schedule_delete_on_reboot_with(
+        path: &Path,
+        move_file: impl FnOnce(*const u16, *const u16, u32) -> i32,
+    ) -> io::Result<()> {
+        let wide = path
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        if move_file(wide.as_ptr(), ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Broadcasts the documented per-user environment-change notification.
+    pub fn broadcast_environment_change() {
+        let environment = "Environment\0".encode_utf16().collect::<Vec<_>>();
+        // SAFETY: the UTF-16 buffer remains live during this synchronous call;
+        // the timeout bounds unresponsive top-level windows.
+        unsafe {
+            SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                environment.as_ptr() as isize,
+                SMTO_ABORTIFHUNG,
+                5_000,
+                ptr::null_mut(),
+            );
+        }
+    }
+
+    fn known_folder_path(folder: &windows_sys::core::GUID) -> io::Result<PathBuf> {
+        let mut raw = ptr::null_mut();
+        // SAFETY: `folder` and `raw` are valid pointers for the synchronous call;
+        // a null token requests the current user. A successful allocation is
+        // copied and released exactly once below.
+        let result = unsafe { SHGetKnownFolderPath(folder, 0, ptr::null_mut(), &raw mut raw) };
+        if result < 0 {
+            return Err(io::Error::other(format!(
+                "SHGetKnownFolderPath failed with HRESULT {result:#x}"
+            )));
+        }
+        if raw.is_null() {
+            return Err(io::Error::other(
+                "SHGetKnownFolderPath returned a null path",
+            ));
+        }
+        // SAFETY: the API returned a live NUL-terminated UTF-16 allocation.
+        let length = unsafe {
+            let mut length = 0;
+            while *raw.add(length) != 0 {
+                length += 1;
+            }
+            length
+        };
+        // SAFETY: `length` was found within the returned NUL-terminated buffer.
+        let path = PathBuf::from(OsString::from_wide(unsafe {
+            std::slice::from_raw_parts(raw, length)
+        }));
+        // SAFETY: this is the one release of the API-owned allocation.
+        unsafe { CoTaskMemFree(raw.cast()) };
+        if path.as_os_str().is_empty() {
+            Err(io::Error::other("Known Folder path is empty"))
+        } else {
+            Ok(path)
+        }
+    }
+
     fn flush_reparse_point(path: &Path) -> io::Result<()> {
         let file = open_directory(path, true)?;
         flush_file(&file)
@@ -207,13 +366,18 @@ mod windows {
 
 #[cfg(target_os = "windows")]
 pub use windows::{
-    FileIdentity, create_junction, junction_identity, junction_target, retarget_junction,
+    FileIdentity, broadcast_environment_change, create_junction,
+    current_user_local_app_data_directory, current_user_profile_directory,
+    current_user_programs_directory, expand_environment_strings, junction_identity,
+    junction_target, process_is_running, retarget_junction, schedule_delete_on_reboot,
     sync_directory,
 };
 
 #[cfg(all(test, target_os = "windows"))]
 mod tests {
-    use std::{fs, process, time::SystemTime};
+    use std::{ffi::OsString, fs, os::windows::ffi::OsStringExt as _, process, time::SystemTime};
+
+    use windows_sys::Win32::Storage::FileSystem::MOVEFILE_DELAY_UNTIL_REBOOT;
 
     fn temporary_root(label: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()
@@ -255,5 +419,29 @@ mod tests {
         );
         fs::remove_dir(&current).unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reboot_deletion_uses_the_exact_path_and_delayed_delete_form() {
+        let path = temporary_root("reboot-delete").join("runtime capsule");
+        let mut observed = None;
+
+        super::windows::schedule_delete_on_reboot_with(&path, |source, destination, flags| {
+            assert!(destination.is_null());
+            assert_eq!(flags, MOVEFILE_DELAY_UNTIL_REBOOT);
+            let mut length = 0;
+            // SAFETY: the scheduling helper passes its live,
+            // NUL-terminated UTF-16 source buffer for this call.
+            while unsafe { *source.add(length) } != 0 {
+                length += 1;
+            }
+            // SAFETY: `length` was measured within that live buffer.
+            let units = unsafe { std::slice::from_raw_parts(source, length) };
+            observed = Some(OsString::from_wide(units));
+            1
+        })
+        .unwrap();
+
+        assert_eq!(observed.as_deref(), Some(path.as_os_str()));
     }
 }

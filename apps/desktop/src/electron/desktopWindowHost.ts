@@ -169,7 +169,11 @@ export class DesktopWindowHost<
   }
 
   private receiveEvent(event: ControlEvent): Promise<void> | void {
-    if (event.event === 'product_exiting' || event.event === 'product_replacing') {
+    if (
+      event.event === 'product_exiting'
+      || event.event === 'product_replacing'
+      || event.event === 'product_removing'
+    ) {
       return this.shutdown().catch((error: unknown) => this.onError(error));
     }
     if (event.event === 'desktop_window_open_requested') {

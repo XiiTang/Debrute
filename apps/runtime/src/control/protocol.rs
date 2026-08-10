@@ -3,7 +3,7 @@ use std::{error::Error, fmt};
 use ts_rs::TS;
 
 pub const CONTROL_PROTOCOL: &str = "debrute-control";
-pub const CONTROL_PROTOCOL_VERSION: u32 = 7;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 8;
 pub const CONTROL_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 pub const PRODUCT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -23,6 +23,8 @@ pub enum RuntimeStatus {
     Ready,
     Exiting,
     Replacing,
+    RemovalPreparing,
+    Removing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -84,6 +86,9 @@ pub enum ControlRequest {
         window_key: String,
     },
     QuitProduct,
+    RemoveProduct {
+        keep_config: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -171,6 +176,9 @@ pub enum ControlResponse {
         url: String,
         theme_preference: String,
     },
+    ProductRemovalAccepted {
+        config_preserved: bool,
+    },
     Rejected {
         code: ControlErrorCode,
     },
@@ -190,6 +198,8 @@ pub enum ControlErrorCode {
     DevWorkbenchOriginAlreadyRegistered,
     InvalidDesktopWindow,
     DesktopUnavailable,
+    RemovalInProgress,
+    ProductRemovalUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -214,6 +224,7 @@ pub enum ControlEvent {
     },
     ProductExiting,
     ProductReplacing,
+    ProductRemoving,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -320,6 +331,7 @@ pub fn authorize_request(role: ClientRole, request: &ControlRequest) -> Result<(
                 | ControlRequest::ResolveWorkbenchRootUrl
                 | ControlRequest::CreateCliAuthorization
                 | ControlRequest::QuitProduct
+                | ControlRequest::RemoveProduct { .. }
         ),
     };
     if allowed {
@@ -343,6 +355,7 @@ impl ControlRequest {
             Self::CreateDesktopLaunchTicket { .. } => "create_desktop_launch_ticket",
             Self::DesktopWindowClosed { .. } => "desktop_window_closed",
             Self::QuitProduct => "quit_product",
+            Self::RemoveProduct { .. } => "remove_product",
         }
     }
 }
@@ -363,14 +376,38 @@ impl Error for RoleViolation {}
 mod tests {
     use serde_json::json;
 
-    use super::{CONTROL_PROTOCOL_VERSION, ControlRequest, ControlResponse};
+    use super::{
+        CONTROL_PROTOCOL_VERSION, ClientRole, ControlRequest, ControlResponse, authorize_request,
+    };
 
     #[test]
-    fn protocol_v7_serializes_root_workbench_url_resolution() {
-        assert_eq!(CONTROL_PROTOCOL_VERSION, 7);
+    fn only_the_cli_role_can_request_product_removal() {
+        let request = ControlRequest::RemoveProduct { keep_config: false };
+
+        assert!(authorize_request(ClientRole::Cli, &request).is_ok());
+        assert!(authorize_request(ClientRole::Launcher, &request).is_err());
+    }
+
+    #[test]
+    fn protocol_v8_serializes_root_workbench_url_resolution_and_product_removal() {
+        assert_eq!(CONTROL_PROTOCOL_VERSION, 8);
         assert_eq!(
             serde_json::to_value(ControlRequest::ResolveWorkbenchRootUrl).unwrap(),
             json!({ "command": "resolve_workbench_root_url" })
+        );
+        assert_eq!(
+            serde_json::to_value(ControlRequest::RemoveProduct { keep_config: true }).unwrap(),
+            json!({ "command": "remove_product", "keep_config": true })
+        );
+        assert_eq!(
+            serde_json::to_value(ControlResponse::ProductRemovalAccepted {
+                config_preserved: true,
+            })
+            .unwrap(),
+            json!({
+                "result": "product_removal_accepted",
+                "config_preserved": true
+            })
         );
         assert_eq!(
             serde_json::to_value(ControlResponse::WorkbenchRootUrl {

@@ -19,7 +19,7 @@ describe('Desktop Product-update failure surface', () => {
     ])).toThrow(/canonical transaction ID/);
   });
 
-  it('reads only a matching closed failure record from the bundled Runtime', () => {
+  it('reads only a matching closed failure record from the selected installed Runtime', () => {
     const run = vi.fn(() => ({
       pid: 1,
       output: [],

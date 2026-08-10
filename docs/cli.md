@@ -65,8 +65,29 @@ relabeled as `runtime_ready_timeout`.
 
 The CLI adapter is a required part of every ready Runtime. The CLI can inspect
 its managed Product identity through diagnostics, but it cannot discover,
-install, continue, or retry a Product update. Product installation is a GUI
-action; Runtime owns discovery and the durable update transaction.
+install, continue, or retry a Product update. Product installation belongs to
+the platform Product Installer; Runtime owns installation, update discovery,
+and durable Product transactions.
+
+## Product Removal
+
+The non-interactive whole-Product removal command is:
+
+```sh
+debrute product uninstall --yes [--keep-config]
+```
+
+`--yes` is required; without it the parser returns `missing_argument` before
+Runtime is contacted. The command starts or connects to the installed Runtime,
+submits one removal request, and exits after Runtime accepts the transaction.
+Success reports `accepted=true` and the selected `configPreserved` value; it
+does not claim that asynchronous self-removal has already finished.
+
+Removal deletes Desktop, Runtime, the managed CLI, official `debrute-*` Skills,
+and all of `~/.debrute` by default. `--keep-config` retains only
+`config/global_settings.json` and `config/secrets.json`, including saved API
+keys. Project contents are never part of this command's removal scope.
+`debrute runtime stop` remains a non-destructive Product Quit command.
 
 ## Workbench URLs
 
@@ -205,6 +226,7 @@ Other common commands include:
 ```sh
 debrute runtime status
 debrute runtime stop
+debrute product uninstall --yes
 debrute skills status
 debrute project status /path/to/project
 debrute project validate /path/to/project

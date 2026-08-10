@@ -66,6 +66,7 @@ pub trait RuntimeProductHttpService: Send + Sync {
         input: &Value,
         initiator: ProductUpdateInitiator,
     ) -> Result<Value, RuntimeHttpServiceError>;
+    fn remove(self: Arc<Self>, keep_config: bool) -> Result<Value, RuntimeHttpServiceError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

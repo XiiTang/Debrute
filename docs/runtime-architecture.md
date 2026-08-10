@@ -8,7 +8,7 @@ clients; none owns a parallel backend or a copy of authoritative state.
 
 The downloaded Product has already selected macOS or Windows. Each native
 release job builds matching Workbench assets with one closed `darwin` or
-`win32` constant, so Runtime bootstrap does not transport a second platform
+`win32` constant, so Product installation does not transport a second platform
 value for renderer behavior. Workbench never infers the Product target from
 browser platform or User-Agent values.
 
@@ -35,7 +35,7 @@ it connects only to an existing owner and requests Product Quit without a
 `Ready` wait.
 Runtime has no idle exit and no dependency on a frontend remaining open.
 Closing the final Desktop window exits Electron but leaves Runtime and its tray
-running. Runtime exits only after Product Quit, product replacement,
+running. Runtime exits only after Product Quit, Product removal, product replacement,
 operating-system termination, or an unexpected process failure. An
 unrecoverable fault in a required in-process native component is such a process
 failure; it is not isolated in a helper process and does not trigger an
@@ -58,12 +58,13 @@ result while dropping its settled projection, return a degraded success, or
 continue with Workbenches observing different Global state.
 
 Control owns one internal lifecycle state: `Starting`, `Ready`, update
-preparation with its transaction id, `Exiting`, or replacement with its
-transaction id. The four public Runtime statuses are projections of that state;
-update preparation remains publicly `Ready`. The supervision loop observes the
-same state to begin controlled shutdown. A terminal state cannot be overwritten
-by later startup completion. Operating-system termination ends the process
-directly.
+preparation with its transaction id, `Exiting`, replacement with its transaction
+id, `RemovalPreparing`, or `Removing`. Six public Runtime statuses project that
+state; update preparation remains publicly `Ready`, while removal preparation
+is explicit and closes new Product-work admission. The supervision loop observes
+the same state to begin controlled shutdown. A terminal state cannot be
+overwritten by later startup completion. Operating-system termination ends the
+process directly.
 
 The update-admission state rejects new mutating Workbench and CLI requests and
 new Photoshop transfers while allowing observation and existing Photoshop
@@ -156,6 +157,15 @@ in-progress Control acquisition and submits the request once before opening a
 window; it does not reinterpret the action as frontend exit, cancel or restart
 Runtime startup, or establish a second connection.
 
+Whole-Product removal is a distinct irreversible transition. Before admission,
+Runtime validates current Product and Desktop identity, stages only the two
+explicitly retained configuration files when requested, and copies its verified
+execution closure outside Product-owned paths. Acceptance closes new Product
+work, drains admitted work, emits `ProductRemoving` so Desktop exits, and lets
+the detached Runtime remove Desktop, Runtime, CLI, official Skills, PATH and
+login-start projections, and local state. Workbench HTTP, native Control, CLI,
+and Windows NSIS are only initiating adapters for this one transaction.
+
 Source development runs the same Rust Runtime plus Vite. Vite proxies relative
 Workbench HTTP and WebSocket traffic to the exact Runtime origin; it does not
 host privileged services or persist a discovery credential. Packaged Runtime
@@ -189,21 +199,21 @@ Runtime finishes its in-process service composition before the Workbench HTTP
 listener starts. The immutable router state owns one required CLI adapter and,
 for a packaged Product, one Product adapter alongside the core Runtime
 authorities. Core services do not retain those adapters, and each adapter
-receives only the current authorities it calls. There are no late CLI/Product
-installers, temporarily empty service slots, adapter-to-container ownership
+receives only the current authorities it calls. There are no late CLI or
+Product-service adapter installations, temporarily empty service slots, adapter-to-container ownership
 cycles, or shutdown-time cycle breaking.
 
 Product capability is fixed by the process launch mode. A packaged Runtime
 starts with Product routes and Product state; a source-development Runtime
 starts without them and does not register Product HTTP routes. That absence is
 not a degraded or temporarily unavailable Product service. The required CLI is
-present in both modes, while its Product Update command reports the explicit
-source-development capability error rather than a service-availability error.
+present in both modes; Product update remains a packaged-Workbench capability,
+not a CLI command.
 
 Before publishing `Ready`, Runtime initializes and validates every required
 in-process native component, including the exact packaged Raster Preview
 libvips version. Required-component failure is a Runtime startup failure and is
-reported by the launcher or bootstrap; Runtime does not become ready with a
+reported by the launcher or Product Installer; Runtime does not become ready with a
 lazy first-use failure or an alternate backend. Such components initialize
 once for the Runtime process lifetime and are never stopped and reinitialized
 inside that process.
@@ -213,7 +223,7 @@ inside that process.
 Native Control is a narrow lifecycle and activation channel. Its request set is
 limited to activation, inspection, CLI authorization, source-development
 origin registration, one-use Desktop window tickets, non-final Desktop-window
-close, and Product Quit. Closing the Desktop host connection unregisters that
+close, Product Quit, and whole-Product removal. Closing the Desktop host connection unregisters that
 host and drains its complete remaining window topology; the final native window
 does not need a separate close request. Recent Projects and Desktop
 open/focus/exit instructions are Control's only events. Project, Canvas,
@@ -571,8 +581,9 @@ the error handler that owns actual transport failures.
 ## Product Version Ownership
 
 Desktop, Runtime, CLI, Web assets, official Skills, and model documentation
-share one Product version. Desktop embeds a complete seed for fresh install.
-Runtime validates and materializes immutable versions under
+share one Product version. The Product Installer carries Desktop with one
+complete seed and completes every installed projection before success. Runtime
+validates and materializes immutable versions under
 `~/.debrute/products/versions/<version>`, selects `current`, and publishes stable
 entrypoints. Acceptance of a title-bar or General Settings Install action wins
 over Product Quit, closes new mutating work, and drains admitted short work
@@ -598,7 +609,7 @@ or Project Uses. See
 - Desktop window host: `apps/desktop/src/electron/`.
 - Terminal Session, PTY, emulator, and process-tree ownership:
   `apps/runtime/src/terminal/`.
-- Product bootstrap and update: `apps/runtime/src/product/`.
+- Product installation, update, and removal: `apps/runtime/src/product/`.
 - Browser client connection: `apps/web/src/api/httpWorkbenchApiClient.ts` and
   `apps/web/src/workbench/WorkbenchApp.tsx`.
 

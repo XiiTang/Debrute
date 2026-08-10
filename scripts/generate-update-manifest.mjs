@@ -3,8 +3,8 @@ import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  desktopReleaseTargets,
-  expectedDesktopReleaseAssets,
+  productInstallerTargets,
+  expectedProductInstallerAssets,
   expectedProductReleaseAssets,
   productReleaseAssetName,
   productReleaseTargets,
@@ -22,11 +22,11 @@ export async function generateUpdateManifest(input) {
     publishedAt = new Date().toISOString()
   } = parseGeneratorOptions(input);
   const resolvedReleaseDir = resolve(releaseDir);
-  const expectedDesktopAssets = expectedDesktopReleaseAssets(version);
+  const expectedInstallerAssets = expectedProductInstallerAssets(version);
   const expectedProductAssets = expectedProductReleaseAssets(version);
   const releaseFiles = await readdir(resolvedReleaseDir);
   const allowedInputFiles = new Set([
-    ...expectedDesktopAssets,
+    ...expectedInstallerAssets,
     ...expectedProductAssets,
     updateManifestName,
     updateManifestSignatureName
@@ -36,7 +36,7 @@ export async function generateUpdateManifest(input) {
     throw new Error(`Unexpected release assets: ${unexpected.join(', ')}`);
   }
   const missing = [];
-  for (const assetName of [...expectedDesktopAssets, ...expectedProductAssets]) {
+  for (const assetName of [...expectedInstallerAssets, ...expectedProductAssets]) {
     try {
       await stat(join(resolvedReleaseDir, assetName));
     } catch {
@@ -50,8 +50,8 @@ export async function generateUpdateManifest(input) {
     throw new Error('DEBRUTE_UPDATE_SIGNING_PRIVATE_KEY_PEM is required.');
   }
   const releaseTag = `v${version}`;
-  const desktopAssets = await Promise.all(desktopReleaseTargets.map(async (target) => {
-    const name = `debrute-desktop-${version}-${target.platform}-${target.arch}.${target.extension}`;
+  const desktopAssets = await Promise.all(productInstallerTargets.map(async (target) => {
+    const name = `debrute-installer-${version}-${target.platform}-${target.arch}.${target.extension}`;
     const bytes = await readFile(join(resolvedReleaseDir, name));
     return {
       kind: 'desktop',

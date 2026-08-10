@@ -71,6 +71,7 @@ export { Card } from './Card.js';
 export { Panel, PanelBody, PanelHeader, PanelTitle } from './Panel.js';
 export { Toolbar } from './Toolbar.js';
 export { Menu } from './Menu.js';
+export { Modal } from './Modal.js';
 export { Tab, TabList } from './Tabs.js';
 export { StatusPill } from './StatusPill.js';
 export type { StatusTone } from './StatusPill.js';

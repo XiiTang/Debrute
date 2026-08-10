@@ -163,6 +163,16 @@ GitHub metadata alone. Signed size, SHA-256, URL, asset identity, and macOS
 platform checks are enforced before replacement. See
 [`releases.md`](./releases.md).
 
+Product installation and removal are current-user operations with closed
+layouts. The Product Installer supplies the only accepted installed Desktop
+path and a strict manifest-validated Product seed; Desktop first launch cannot
+choose an installation root or materialize missing components. Removal accepts
+only the fixed current-user layout, validates the selected Runtime and Desktop
+registration, and gives its detached Runtime closure a one-shot plan whose
+paths are recomputed and checked before deletion. Its optional retained inputs
+are fixed to the two configuration files and cannot expand the deletion or
+restore scope.
+
 The Photoshop plugin receives neither Workbench/CLI authority nor arbitrary
 filesystem access. Its fresh socket identity and bearer, exact Canonical Root
 plus Project-relative command targets, bounded gateway routes, and plugin-owned

@@ -1,7 +1,13 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use axum::{
     Json, Router,
+    body::{Body, BodyDataStream, Bytes},
     extract::{ConnectInfo, OriginalUri, Request, State},
     http::{
         HeaderMap, HeaderName, Method, StatusCode,
@@ -11,9 +17,14 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
+use futures_core::Stream;
 use serde::Serialize;
 
-use super::routes::{browser_api_router, cli_api_router, product_api_router};
+use crate::control::RuntimeWorkPermit;
+
+use super::routes::{
+    browser_api_router, cli_api_router, product_api_router, product_work_unavailable_response,
+};
 use super::{
     CliAuthorizationVerifier, ProjectBindingLease, RuntimeCliHttpService,
     RuntimeProductHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
@@ -78,13 +89,14 @@ pub(super) fn workbench_router(
             state.clone(),
             authorize_cli_api,
         ));
-    let mut browser_routes = browser_api_router().layer(middleware::from_fn_with_state(
-        state.clone(),
-        admit_runtime_product_work,
-    ));
+    let mut browser_routes = browser_api_router();
     if state.product.is_some() {
         browser_routes = browser_routes.merge(product_api_router());
     }
+    browser_routes = browser_routes.layer(middleware::from_fn_with_state(
+        state.clone(),
+        admit_runtime_product_work,
+    ));
     let workbench_api =
         browser_routes
             .fallback(route_not_found)
@@ -116,14 +128,36 @@ async fn admit_runtime_product_work(
     if matches!(*request.method(), Method::GET | Method::HEAD) {
         return next.run(request).await;
     }
-    let Some(_permit) = state.services.runtime_state().begin_product_work() else {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "product_update_preparing",
-            "Runtime is preparing a Product update and is not accepting new work.",
-        );
+    let runtime_state = state.services.runtime_state();
+    let Some(permit) = runtime_state.begin_product_work() else {
+        return product_work_unavailable_response(runtime_state.status());
     };
-    next.run(request).await
+    hold_runtime_work_until_response_body_completion(next.run(request).await, permit)
+}
+
+fn hold_runtime_work_until_response_body_completion(
+    response: Response,
+    permit: RuntimeWorkPermit,
+) -> Response {
+    let (parts, body) = response.into_parts();
+    let guarded = RuntimeWorkPermitBody {
+        inner: body.into_data_stream(),
+        _permit: permit,
+    };
+    Response::from_parts(parts, Body::from_stream(guarded))
+}
+
+struct RuntimeWorkPermitBody {
+    inner: BodyDataStream,
+    _permit: RuntimeWorkPermit,
+}
+
+impl Stream for RuntimeWorkPermitBody {
+    type Item = Result<Bytes, axum::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner).poll_next(context)
+    }
 }
 
 async fn serve_web_asset(State(state): State<WorkbenchRouterState>, request: Request) -> Response {
@@ -537,7 +571,38 @@ fn is_passive_project_media_route(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use crate::control::{ProductRemovalCommit, RuntimeControlState, RuntimeStatus};
+
     use super::*;
+
+    #[test]
+    fn removal_waits_for_the_http_response_body_to_finish() {
+        let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+        assert!(state.finish_startup());
+        let delivery = state.begin_product_work().unwrap();
+        state
+            .request_product_removal(ProductRemovalCommit::new(|| Ok(()), || {}))
+            .unwrap();
+        let response = hold_runtime_work_until_response_body_completion(
+            Response::new(Body::from("accepted")),
+            delivery,
+        );
+
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(state.status(), RuntimeStatus::RemovalPreparing);
+
+        drop(response);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while state.status() != RuntimeStatus::Removing && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(state.status(), RuntimeStatus::Removing);
+    }
 
     #[test]
     fn static_asset_cache_detection_requires_a_content_hash_segment() {

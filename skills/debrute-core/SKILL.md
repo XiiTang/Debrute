@@ -13,6 +13,11 @@ Use `debrute` as the Debrute execution interface. Debrute Skills describe how to
 
 ## Basic Rules
 
+- Resolve `debrute` normally. If the current Agent process predates Product
+  installation and cannot find it, use only the managed entrypoint:
+  `$HOME/.debrute/bin/debrute` on macOS,
+  `& "$env:USERPROFILE\.debrute\bin\debrute.cmd"` in Windows PowerShell, or
+  `"%USERPROFILE%\.debrute\bin\debrute.cmd"` in Windows `cmd.exe`.
 - Read Debrute CLI stdout as unversioned `debrute` Agent Records.
 - Treat Project Path values as project-relative. Root arguments may be absolute
   or relative to the CLI working directory. The CLI resolves relative roots

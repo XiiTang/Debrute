@@ -1,0 +1,779 @@
+use std::{
+    error::Error,
+    fmt, fs, io,
+    io::Write as _,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::control::{ControlErrorCode, ProductRemovalCommit, RuntimeProductRemovalService};
+
+#[cfg(target_os = "macos")]
+use crate::login::MacOsLoginItem;
+#[cfg(target_os = "windows")]
+use crate::login::WindowsLoginItem;
+
+#[cfg(target_os = "windows")]
+use super::layout::{
+    WINDOWS_INSTALLER_CACHE_DIRECTORY, WINDOWS_INSTALLER_GUID, WINDOWS_SHORTCUT_NAME,
+};
+use super::{
+    CommitPlatform, InstalledProductLayout, ProductInstallationError, ProductLayoutError,
+    ProductProjectionError, ProductProjectionManager, ProductStore, ProductStoreError,
+    read_desktop_host_registration,
+};
+
+const REMOVAL_PLAN_SCHEMA_VERSION: u32 = 1;
+const FINALIZER_WAIT_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(target_os = "windows")]
+const OWNED_ENTRY_REMOVE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Validates the installed Product and prepares its one detached removal execution.
+pub struct ProductRemovalCoordinator {
+    layout: InstalledProductLayout,
+    store: Arc<ProductStore>,
+    runtime_executable: PathBuf,
+}
+
+impl ProductRemovalCoordinator {
+    #[must_use]
+    pub fn new(
+        layout: InstalledProductLayout,
+        store: Arc<ProductStore>,
+        runtime_executable: PathBuf,
+    ) -> Self {
+        Self {
+            layout,
+            store,
+            runtime_executable,
+        }
+    }
+
+    /// Creates the private one-shot plan, retained configuration stage, and
+    /// manifest-validated Runtime execution closure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductRemovalError`] before the Runtime lifecycle changes when
+    /// the selected Product, Desktop registration, or any staging boundary is invalid.
+    pub(crate) fn prepare(
+        &self,
+        keep_config: bool,
+    ) -> Result<PreparedProductRemoval, ProductRemovalError> {
+        if self.store.pending()?.is_some() {
+            return Err(ProductRemovalError::UpdateInProgress);
+        }
+        let version = self
+            .store
+            .current_version()?
+            .ok_or(ProductRemovalError::CurrentProductMissing)?;
+        let manifest = self.store.validate_version(&version)?;
+        let expected_runtime = self
+            .store
+            .version_path(&version)
+            .join(&manifest.entrypoints.runtime);
+        if fs::canonicalize(&expected_runtime)? != fs::canonicalize(&self.runtime_executable)? {
+            return Err(ProductRemovalError::RuntimeIdentityMismatch);
+        }
+        let desktop = read_desktop_host_registration(self.layout.debrute_home())?
+            .ok_or(ProductRemovalError::DesktopRegistrationMissing)?;
+        if desktop.executable != self.layout.desktop_executable() || !desktop.arguments.is_empty() {
+            return Err(ProductRemovalError::DesktopRegistrationMismatch);
+        }
+
+        let transaction_id = Uuid::new_v4();
+        let transaction_directory = self
+            .layout
+            .user_home()
+            .join(format!(".debrute-removal-{transaction_id}"));
+        let capsule_directory =
+            std::env::temp_dir().join(format!("debrute-removal-runtime-{transaction_id}"));
+        let prepared = (|| {
+            create_private_directory(&transaction_directory)?;
+            create_private_directory(&capsule_directory)?;
+            let retained_config = if keep_config {
+                let retained = transaction_directory.join("retained-config");
+                create_private_directory(&retained)?;
+                copy_optional_plain_file_preserving_metadata(
+                    &self.layout.global_settings_file(),
+                    &retained.join("global_settings.json"),
+                )?;
+                copy_optional_plain_file_preserving_metadata(
+                    &self.layout.secrets_file(),
+                    &retained.join("secrets.json"),
+                )?;
+                Some(retained)
+            } else {
+                None
+            };
+            let runtime_entrypoint = copy_runtime_closure(
+                &expected_runtime,
+                &capsule_directory,
+                self.layout.platform(),
+            )?;
+            let plan_path = transaction_directory.join("plan.json");
+            let plan = ProductRemovalPlan {
+                schema_version: REMOVAL_PLAN_SCHEMA_VERSION,
+                transaction_id: transaction_id.to_string(),
+                platform: platform_name(self.layout.platform()).to_owned(),
+                user_home: self.layout.user_home().to_owned(),
+                local_app_data: windows_local_app_data(&self.layout),
+                transaction_directory: transaction_directory.clone(),
+                capsule_directory: capsule_directory.clone(),
+                retained_config: retained_config.clone(),
+            };
+            write_private_json(&plan_path, &plan)?;
+            Ok(PreparedProductRemoval {
+                plan_path,
+                runtime_entrypoint,
+                transaction_directory: transaction_directory.clone(),
+                capsule_directory: capsule_directory.clone(),
+                #[cfg(all(test, target_os = "macos"))]
+                retained_config,
+            })
+        })();
+        if prepared.is_err() {
+            let _ = fs::remove_dir_all(&transaction_directory);
+            let _ = fs::remove_dir_all(&capsule_directory);
+        }
+        prepared
+    }
+}
+
+impl RuntimeProductRemovalService for ProductRemovalCoordinator {
+    fn prepare_removal(&self, keep_config: bool) -> Result<ProductRemovalCommit, ControlErrorCode> {
+        let prepared = self
+            .prepare(keep_config)
+            .map_err(|_| ControlErrorCode::ProductRemovalUnavailable)?;
+        let shared = Arc::new(std::sync::Mutex::new(Some(prepared)));
+        let launch = Arc::clone(&shared);
+        Ok(ProductRemovalCommit::new(
+            move || {
+                launch
+                    .lock()
+                    .expect("prepared Product removal lock poisoned")
+                    .take()
+                    .expect("prepared Product removal is one-shot")
+                    .launch()
+                    .map_err(|error| error.to_string())
+            },
+            move || {
+                if let Some(prepared) = shared
+                    .lock()
+                    .expect("prepared Product removal lock poisoned")
+                    .take()
+                {
+                    let _ = prepared.cancel();
+                }
+            },
+        ))
+    }
+}
+
+pub(crate) struct PreparedProductRemoval {
+    plan_path: PathBuf,
+    runtime_entrypoint: PathBuf,
+    transaction_directory: PathBuf,
+    capsule_directory: PathBuf,
+    #[cfg(all(test, target_os = "macos"))]
+    retained_config: Option<PathBuf>,
+}
+
+impl PreparedProductRemoval {
+    #[cfg(all(test, target_os = "macos"))]
+    #[must_use]
+    pub(crate) fn plan_path(&self) -> &Path {
+        &self.plan_path
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    #[must_use]
+    pub(crate) fn runtime_entrypoint(&self) -> &Path {
+        &self.runtime_entrypoint
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    #[must_use]
+    pub(crate) fn retained_config(&self) -> Option<&Path> {
+        self.retained_config.as_deref()
+    }
+
+    /// Starts the copied Runtime closure in its private finalization mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductRemovalError`] if the detached finalizer cannot be spawned.
+    pub(crate) fn launch(self) -> Result<(), ProductRemovalError> {
+        let mut command = Command::new(&self.runtime_entrypoint);
+        command
+            .arg("finalize-product-removal")
+            .arg("--plan")
+            .arg(&self.plan_path)
+            .arg("--runtime-pid")
+            .arg(std::process::id().to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt as _;
+            use windows_sys::Win32::System::Threading::{
+                CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
+            };
+            command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+        }
+        match command.spawn() {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                let _ = remove_owned_entry(&self.transaction_directory);
+                let _ = remove_owned_entry(&self.capsule_directory);
+                Err(error.into())
+            }
+        }
+    }
+
+    /// Cancels a prepared transaction before lifecycle admission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductRemovalError`] if private staging cannot be removed.
+    pub(crate) fn cancel(self) -> Result<(), ProductRemovalError> {
+        remove_owned_entry(&self.transaction_directory)?;
+        remove_owned_entry(&self.capsule_directory)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProductRemovalPlan {
+    schema_version: u32,
+    transaction_id: String,
+    platform: String,
+    user_home: PathBuf,
+    local_app_data: Option<PathBuf>,
+    transaction_directory: PathBuf,
+    capsule_directory: PathBuf,
+    retained_config: Option<PathBuf>,
+}
+
+/// Runs the internal detached finalization mode.
+///
+/// # Errors
+///
+/// Returns [`ProductRemovalError`] when the plan is not the exact current-user
+/// transaction or Product removal cannot complete.
+pub fn finalize_product_removal(
+    plan_path: &Path,
+    runtime_pid: u32,
+) -> Result<(), ProductRemovalError> {
+    let bytes = fs::read(plan_path)?;
+    if bytes.len() > 64 * 1024 {
+        return Err(ProductRemovalError::InvalidPlan);
+    }
+    let plan: ProductRemovalPlan =
+        serde_json::from_slice(&bytes).map_err(|_| ProductRemovalError::InvalidPlan)?;
+    let layout = InstalledProductLayout::for_current_user()?;
+    validate_plan(plan_path, &plan, &layout)?;
+    wait_for_process_exit(runtime_pid)?;
+    ProductRemovalExecutor::new(layout).execute(plan.retained_config.as_deref())?;
+    dispose_runtime_capsule(&plan.capsule_directory)?;
+    remove_owned_entry(&plan.transaction_directory)?;
+    Ok(())
+}
+
+fn validate_plan(
+    plan_path: &Path,
+    plan: &ProductRemovalPlan,
+    layout: &InstalledProductLayout,
+) -> Result<(), ProductRemovalError> {
+    let transaction_id =
+        Uuid::parse_str(&plan.transaction_id).map_err(|_| ProductRemovalError::InvalidPlan)?;
+    let expected_transaction = layout
+        .user_home()
+        .join(format!(".debrute-removal-{transaction_id}"));
+    let expected_capsule =
+        std::env::temp_dir().join(format!("debrute-removal-runtime-{transaction_id}"));
+    if plan.schema_version != REMOVAL_PLAN_SCHEMA_VERSION
+        || plan.platform != platform_name(layout.platform())
+        || plan.user_home != layout.user_home()
+        || plan.local_app_data != windows_local_app_data(layout)
+        || plan.transaction_directory != expected_transaction
+        || plan.capsule_directory != expected_capsule
+        || plan_path != expected_transaction.join("plan.json")
+        || plan
+            .retained_config
+            .as_deref()
+            .is_some_and(|path| path != expected_transaction.join("retained-config"))
+    {
+        return Err(ProductRemovalError::InvalidPlan);
+    }
+    Ok(())
+}
+
+fn platform_name(platform: CommitPlatform) -> &'static str {
+    match platform {
+        CommitPlatform::Macos => "macos",
+        CommitPlatform::Windows => "windows",
+    }
+}
+
+fn windows_local_app_data(layout: &InstalledProductLayout) -> Option<PathBuf> {
+    match layout.platform() {
+        CommitPlatform::Macos => None,
+        CommitPlatform::Windows => layout
+            .desktop_application()
+            .parent()
+            .and_then(Path::parent)
+            .map(Path::to_owned),
+    }
+}
+
+fn write_private_json(path: &Path, value: &impl Serialize) -> Result<(), ProductRemovalError> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(
+        &serde_json::to_vec_pretty(value).map_err(|_| ProductRemovalError::InvalidPlan)?,
+    )?;
+    set_private_file_permissions(path)?;
+    file.sync_all()?;
+    sync_removal_directory(path.parent().ok_or(ProductRemovalError::InvalidPlan)?)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn sync_removal_directory(path: &Path) -> Result<(), ProductRemovalError> {
+    fs::File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn sync_removal_directory(path: &Path) -> Result<(), ProductRemovalError> {
+    debrute_windows_product_fs::sync_directory(path)?;
+    Ok(())
+}
+
+fn copy_optional_plain_file_preserving_metadata(
+    source: &Path,
+    destination: &Path,
+) -> Result<(), ProductRemovalError> {
+    let metadata = match fs::symlink_metadata(source) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            metadata
+        }
+        Ok(_) => {
+            return Err(ProductRemovalError::InvalidRetainedConfig(
+                source.to_owned(),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    fs::copy(source, destination)?;
+    fs::set_permissions(destination, metadata.permissions())?;
+    fs::File::open(destination)?.sync_all()?;
+    sync_removal_directory(destination.parent().ok_or(
+        ProductRemovalError::InvalidRetainedConfig(destination.to_owned()),
+    )?)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn copy_runtime_closure(
+    runtime: &Path,
+    capsule: &Path,
+    platform: CommitPlatform,
+) -> Result<PathBuf, ProductRemovalError> {
+    if platform != CommitPlatform::Macos {
+        return Err(ProductRemovalError::RuntimeIdentityMismatch);
+    }
+    let application = runtime
+        .ancestors()
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name == "Debrute Runtime.app")
+        })
+        .ok_or(ProductRemovalError::RuntimeIdentityMismatch)?;
+    let destination = capsule.join("Debrute Runtime.app");
+    let status = Command::new("/usr/bin/ditto")
+        .arg(application)
+        .arg(&destination)
+        .status()?;
+    if !status.success() {
+        return Err(ProductRemovalError::Platform(
+            "Could not copy the Runtime application closure".to_owned(),
+        ));
+    }
+    Ok(destination.join("Contents/MacOS/debrute-runtime"))
+}
+
+#[cfg(target_os = "windows")]
+fn copy_runtime_closure(
+    runtime: &Path,
+    capsule: &Path,
+    platform: CommitPlatform,
+) -> Result<PathBuf, ProductRemovalError> {
+    if platform != CommitPlatform::Windows {
+        return Err(ProductRemovalError::RuntimeIdentityMismatch);
+    }
+    let source = runtime
+        .parent()
+        .ok_or(ProductRemovalError::RuntimeIdentityMismatch)?;
+    let destination = capsule.join("runtime");
+    copy_directory(source, &destination)?;
+    Ok(destination.join("debrute-runtime.exe"))
+}
+
+#[cfg(target_os = "windows")]
+fn copy_directory(source: &Path, destination: &Path) -> Result<(), ProductRemovalError> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let target = destination.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() && !kind.is_symlink() {
+            copy_directory(&entry.path(), &target)?;
+        } else if kind.is_file() && !kind.is_symlink() {
+            fs::copy(entry.path(), target)?;
+        } else {
+            return Err(ProductRemovalError::RuntimeIdentityMismatch);
+        }
+    }
+    Ok(())
+}
+
+fn create_private_directory(path: &Path) -> Result<(), ProductRemovalError> {
+    fs::create_dir(path)?;
+    set_private_directory_permissions(path)?;
+    sync_removal_directory(path)?;
+    sync_removal_directory(path.parent().ok_or(ProductRemovalError::InvalidPlan)?)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn set_private_directory_permissions(path: &Path) -> Result<(), ProductRemovalError> {
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn set_private_directory_permissions(_path: &Path) -> Result<(), ProductRemovalError> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn set_private_file_permissions(path: &Path) -> Result<(), ProductRemovalError> {
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn set_private_file_permissions(_path: &Path) -> Result<(), ProductRemovalError> {
+    Ok(())
+}
+
+fn wait_for_process_exit(pid: u32) -> Result<(), ProductRemovalError> {
+    let deadline = Instant::now() + FINALIZER_WAIT_TIMEOUT;
+    while process_is_running(pid) {
+        if Instant::now() >= deadline {
+            return Err(ProductRemovalError::ProcessExitTimedOut(pid));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn process_is_running(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    match nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None) {
+        Ok(()) | Err(nix::errno::Errno::EPERM) => true,
+        Err(nix::errno::Errno::ESRCH) => false,
+        Err(_) => false,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn process_is_running(pid: u32) -> bool {
+    debrute_windows_product_fs::process_is_running(pid)
+}
+
+#[cfg(target_os = "macos")]
+fn dispose_runtime_capsule(capsule: &Path) -> Result<(), ProductRemovalError> {
+    remove_owned_entry(capsule)
+}
+
+#[cfg(target_os = "windows")]
+fn dispose_runtime_capsule(capsule: &Path) -> Result<(), ProductRemovalError> {
+    schedule_tree_for_reboot_deletion(capsule)
+}
+
+#[cfg(target_os = "windows")]
+fn schedule_tree_for_reboot_deletion(path: &Path) -> Result<(), ProductRemovalError> {
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            schedule_tree_for_reboot_deletion(&entry?.path())?;
+        }
+    }
+    debrute_windows_product_fs::schedule_delete_on_reboot(path)?;
+    Ok(())
+}
+
+/// Executes the one closed whole-Product removal plan from a detached Runtime.
+pub(crate) struct ProductRemovalExecutor {
+    layout: InstalledProductLayout,
+}
+
+impl ProductRemovalExecutor {
+    #[must_use]
+    pub(crate) fn new(layout: InstalledProductLayout) -> Self {
+        Self { layout }
+    }
+
+    /// Removes every Product-owned surface and optionally restores the two staged
+    /// configuration files.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductRemovalError`] when the retained directory is inside a
+    /// removal boundary, a platform registration cannot be removed, or any owned
+    /// filesystem mutation fails.
+    pub(crate) fn execute(
+        &self,
+        retained_config: Option<&Path>,
+    ) -> Result<(), ProductRemovalError> {
+        if let Some(staging) = retained_config {
+            self.validate_retained_config(staging)?;
+        }
+        ProductProjectionManager::remove_command_path(&self.layout)?;
+        self.remove_login_item()?;
+        ProductProjectionManager::remove_official_skills(self.layout.skills_directory())?;
+        #[cfg(target_os = "windows")]
+        self.remove_windows_installer_registration()?;
+        remove_owned_entry(self.layout.desktop_application())?;
+        remove_owned_entry(self.layout.debrute_home())?;
+        if let Some(staging) = retained_config {
+            self.restore_retained_config(staging)?;
+            remove_owned_entry(staging)?;
+        }
+        Ok(())
+    }
+
+    fn validate_retained_config(&self, staging: &Path) -> Result<(), ProductRemovalError> {
+        if staging.starts_with(self.layout.debrute_home())
+            || staging.starts_with(self.layout.desktop_application())
+            || staging.starts_with(self.layout.skills_directory())
+        {
+            return Err(ProductRemovalError::InvalidRetainedConfig(
+                staging.to_owned(),
+            ));
+        }
+        let metadata = fs::symlink_metadata(staging)
+            .map_err(|_| ProductRemovalError::InvalidRetainedConfig(staging.to_owned()))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(ProductRemovalError::InvalidRetainedConfig(
+                staging.to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn remove_login_item(&self) -> Result<(), ProductRemovalError> {
+        MacOsLoginItem::new(
+            self.layout.user_home(),
+            self.layout.bin_directory().join("debrute-runtime"),
+        )
+        .set_enabled(false)
+        .map_err(|error| ProductRemovalError::Platform(error.to_string()))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn remove_login_item(&self) -> Result<(), ProductRemovalError> {
+        WindowsLoginItem::new(
+            self.layout
+                .product_root()
+                .join("current/runtime/debrute-runtime.exe"),
+        )
+        .set_enabled(false)
+        .map_err(|error| ProductRemovalError::Platform(error.to_string()))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn remove_windows_installer_registration(&self) -> Result<(), ProductRemovalError> {
+        use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        for key in [
+            format!("Software\\{WINDOWS_INSTALLER_GUID}"),
+            format!(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{WINDOWS_INSTALLER_GUID}"
+            ),
+        ] {
+            match current_user.delete_subkey_all(&key) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let programs = debrute_windows_product_fs::current_user_programs_directory()?;
+        remove_owned_entry(&programs.join(WINDOWS_SHORTCUT_NAME))?;
+        if let Some(local_app_data) = windows_local_app_data(&self.layout) {
+            remove_owned_entry(&local_app_data.join(WINDOWS_INSTALLER_CACHE_DIRECTORY))?;
+        }
+        Ok(())
+    }
+
+    fn restore_retained_config(&self, staging: &Path) -> Result<(), ProductRemovalError> {
+        let global_settings = staging.join("global_settings.json");
+        let secrets = staging.join("secrets.json");
+        if !plain_file_exists(&global_settings)? && !plain_file_exists(&secrets)? {
+            return Ok(());
+        }
+        let config = self.layout.debrute_home().join("config");
+        fs::create_dir_all(&config)?;
+        set_private_directory_permissions(self.layout.debrute_home())?;
+        set_private_directory_permissions(&config)?;
+        sync_removal_directory(&config)?;
+        sync_removal_directory(self.layout.debrute_home())?;
+        sync_removal_directory(self.layout.user_home())?;
+        copy_optional_plain_file_preserving_metadata(
+            &global_settings,
+            &self.layout.global_settings_file(),
+        )?;
+        copy_optional_plain_file_preserving_metadata(&secrets, &self.layout.secrets_file())?;
+        Ok(())
+    }
+}
+
+fn plain_file_exists(path: &Path) -> Result<bool, ProductRemovalError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            Ok(true)
+        }
+        Ok(_) => Err(ProductRemovalError::InvalidRetainedConfig(path.to_owned())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn remove_owned_entry(path: &Path) -> Result<(), ProductRemovalError> {
+    #[cfg(target_os = "windows")]
+    {
+        let deadline = Instant::now() + OWNED_ENTRY_REMOVE_TIMEOUT;
+        loop {
+            match remove_owned_entry_once(path) {
+                Ok(()) => return Ok(()),
+                Err(_error) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        remove_owned_entry_once(path)
+    }
+}
+
+fn remove_owned_entry_once(path: &Path) -> Result<(), ProductRemovalError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path)?;
+    } else {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+pub enum ProductRemovalError {
+    Io(io::Error),
+    Installation(ProductInstallationError),
+    Projection(ProductProjectionError),
+    InvalidRetainedConfig(PathBuf),
+    Platform(String),
+    Product(ProductStoreError),
+    Layout(ProductLayoutError),
+    UpdateInProgress,
+    CurrentProductMissing,
+    RuntimeIdentityMismatch,
+    DesktopRegistrationMissing,
+    DesktopRegistrationMismatch,
+    InvalidPlan,
+    ProcessExitTimedOut(u32),
+}
+
+impl fmt::Display for ProductRemovalError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "Product removal failed: {self:?}")
+    }
+}
+
+impl Error for ProductRemovalError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Installation(error) => Some(error),
+            Self::Projection(error) => Some(error),
+            Self::Product(error) => Some(error),
+            Self::Layout(error) => Some(error),
+            Self::InvalidRetainedConfig(_)
+            | Self::Platform(_)
+            | Self::UpdateInProgress
+            | Self::CurrentProductMissing
+            | Self::RuntimeIdentityMismatch
+            | Self::DesktopRegistrationMissing
+            | Self::DesktopRegistrationMismatch
+            | Self::InvalidPlan
+            | Self::ProcessExitTimedOut(_) => None,
+        }
+    }
+}
+
+impl From<io::Error> for ProductRemovalError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<ProductInstallationError> for ProductRemovalError {
+    fn from(error: ProductInstallationError) -> Self {
+        Self::Installation(error)
+    }
+}
+
+impl From<ProductProjectionError> for ProductRemovalError {
+    fn from(error: ProductProjectionError) -> Self {
+        Self::Projection(error)
+    }
+}
+
+impl From<ProductStoreError> for ProductRemovalError {
+    fn from(error: ProductStoreError) -> Self {
+        Self::Product(error)
+    }
+}
+
+impl From<ProductLayoutError> for ProductRemovalError {
+    fn from(error: ProductLayoutError) -> Self {
+        Self::Layout(error)
+    }
+}

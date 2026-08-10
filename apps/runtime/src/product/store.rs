@@ -43,6 +43,12 @@ pub enum CommitPlatform {
     Windows,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingTemporaryPolicy {
+    Remove,
+    Preserve,
+}
+
 pub struct ProductStore {
     root: PathBuf,
     platform: CommitPlatform,
@@ -333,6 +339,23 @@ impl ProductStore {
         self.validate_desktop_seed_candidate_unlocked(seed)
     }
 
+    /// Materializes a validated Desktop-carried Product without selecting it.
+    /// Product Installers use this only for a newer Product, then advance the
+    /// existing update commit from its installer-attested Desktop cut.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductStoreError`] when another transaction exists or the
+    /// seed is invalid, older, incompatible, or conflicts with immutable bytes.
+    pub fn materialize_desktop_seed(&self, seed: &Path) -> Result<PathBuf, ProductStoreError> {
+        let _transaction = self.lock_transaction()?;
+        if self.pending_unlocked()?.is_some() {
+            return Err(ProductStoreError::ProductCommitInProgress);
+        }
+        self.validate_desktop_seed_candidate_unlocked(seed)?;
+        self.materialize_seed_unlocked(seed)
+    }
+
     fn validate_desktop_seed_candidate_unlocked(
         &self,
         seed: &Path,
@@ -390,6 +413,37 @@ impl ProductStore {
     pub fn pending(&self) -> Result<Option<PendingCommit>, ProductStoreError> {
         let _transaction = self.lock_transaction()?;
         self.pending_unlocked()
+    }
+
+    /// Verifies the exact staged update transaction for a Windows Product
+    /// Installer child without trying to acquire the lock held by its parent Runtime.
+    ///
+    /// This is a read-only snapshot check. It deliberately leaves in-flight
+    /// temporary files untouched while requiring the durable staged record to
+    /// name `transaction_id` exactly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductStoreError`] when pending state is absent, malformed,
+    /// past the installer phase, or belongs to another transaction.
+    pub fn verify_pending_desktop_installer(
+        &self,
+        transaction_id: &str,
+    ) -> Result<(), ProductStoreError> {
+        if !is_canonical_uuid(transaction_id) {
+            return Err(ProductStoreError::InvalidPendingCommit(
+                "Product Installer transaction ID must be a canonical UUID".to_owned(),
+            ));
+        }
+        let pending = self.pending_read_only_snapshot_unlocked()?.ok_or_else(|| {
+            ProductStoreError::InvalidPendingCommit("pending state is absent".to_owned())
+        })?;
+        if pending.phase != CommitPhase::Staged || pending.transaction_id != transaction_id {
+            return Err(ProductStoreError::InvalidPendingCommit(
+                "Product Installer transaction does not match the exact staged update".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     /// Returns the complete manifest-derived identity of one materialized
@@ -584,6 +638,19 @@ impl ProductStore {
     }
 
     pub(crate) fn pending_unlocked(&self) -> Result<Option<PendingCommit>, ProductStoreError> {
+        self.pending_snapshot_unlocked(PendingTemporaryPolicy::Remove)
+    }
+
+    fn pending_read_only_snapshot_unlocked(
+        &self,
+    ) -> Result<Option<PendingCommit>, ProductStoreError> {
+        self.pending_snapshot_unlocked(PendingTemporaryPolicy::Preserve)
+    }
+
+    fn pending_snapshot_unlocked(
+        &self,
+        temporary_policy: PendingTemporaryPolicy,
+    ) -> Result<Option<PendingCommit>, ProductStoreError> {
         let directory = self.root.join(PENDING_COMMIT_DIRECTORY);
         let entries = match require_managed_directory(&directory)
             .and_then(|()| fs::read_dir(&directory).map_err(ProductStoreError::from))
@@ -608,7 +675,9 @@ impl ProductStore {
                 ));
             };
             if name.starts_with(".tmp-") && entry.file_type()?.is_file() {
-                fs::remove_file(entry.path())?;
+                if temporary_policy == PendingTemporaryPolicy::Remove {
+                    fs::remove_file(entry.path())?;
+                }
                 continue;
             }
             if !allowed.contains(name) || !entry.file_type()?.is_file() {
@@ -624,7 +693,9 @@ impl ProductStore {
             let bytes = match read_file_with_limit(&path, PENDING_STATE_MAX_BYTES) {
                 Ok(bytes) => bytes,
                 Err(ProductStoreError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                    missing_phase_seen = true;
+                    if latest.is_some() {
+                        missing_phase_seen = true;
+                    }
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -644,6 +715,12 @@ impl ProductStore {
                     "pending phase does not match {name}"
                 )));
             }
+            if latest.is_none() && phase != pending.initial_phase() {
+                return Err(ProductStoreError::InvalidPendingCommit(
+                    "pending phase files must begin at staged or an installer-attested desktop_installed cut"
+                        .to_owned(),
+                ));
+            }
             if latest
                 .as_ref()
                 .is_some_and(|previous| !previous.same_transaction_as(&pending))
@@ -654,11 +731,12 @@ impl ProductStore {
             }
             latest = Some(pending);
         }
-        if let Some(pending) = &latest {
-            self.validate_staged_desktop_asset_unlocked(
-                &pending.desktop_asset,
-                &pending.target_version,
-            )?;
+        if let Some(desktop_asset) = latest
+            .as_ref()
+            .and_then(PendingCommit::staged_desktop_asset)
+        {
+            let pending = latest.as_ref().expect("pending exists with desktop asset");
+            self.validate_staged_desktop_asset_unlocked(desktop_asset, &pending.target_version)?;
         }
         Ok(latest)
     }

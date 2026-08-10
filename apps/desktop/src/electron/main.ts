@@ -32,7 +32,11 @@ import {
   type DesktopOpenIntent
 } from './nativeRecentProjects.js';
 import { connectOrLaunchDesktopRuntime } from './runtime/desktopRuntimeLauncher.js';
-import { desktopRuntimeLaunchConfiguration } from './runtime/desktopProductBootstrap.js';
+import {
+  desktopRuntimeLaunchConfiguration,
+  ensureInstalledDesktopStateDirectories,
+  installedDesktopStatePaths
+} from './runtime/desktopInstalledProduct.js';
 import {
   productUpdateFailureTransaction,
   readDesktopProductUpdateFailure
@@ -42,6 +46,16 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } = electron;
 const projectIconPath = join(__dirname, 'icon.png');
 const dockIconPath = join(__dirname, 'dock_icon.png');
 const desktopPlatform = requireDesktopPlatform(process.platform);
+
+if (app.isPackaged) {
+  const desktopState = installedDesktopStatePaths(app.getPath('home'), desktopPlatform);
+  ensureInstalledDesktopStateDirectories(desktopState);
+  app.setPath('userData', desktopState.userData);
+  app.setPath('cache', desktopState.cache);
+  app.setPath('sessionData', desktopState.sessionData);
+  app.setPath('crashDumps', desktopState.crashDumps);
+  app.setAppLogsPath(desktopState.logs);
+}
 
 if (desktopPlatform === 'win32') {
   app.setAppUserModelId('io.github.xiitang.debrute');
@@ -118,7 +132,13 @@ function registerDesktopLifecycle(): void {
   });
 
   void app.whenReady().then(startDesktop).catch((error: unknown) => {
-    dialog.showErrorBox('Debrute Desktop could not start', messageFromUnknown(error));
+    const guidance = app.isPackaged
+      ? '\n\nRun the Debrute Product Installer again to repair the complete installation.'
+      : '';
+    dialog.showErrorBox(
+      'Debrute Desktop could not start',
+      `${messageFromUnknown(error)}${guidance}`
+    );
     appQuitAllowed = true;
     app.quit();
   });
@@ -432,9 +452,7 @@ function runtimeLaunchConfiguration(): {
     ...(process.env.DEBRUTE_RUNTIME_WEB_ASSETS_DIR
       ? { configuredWebAssetsDirectory: process.env.DEBRUTE_RUNTIME_WEB_ASSETS_DIR }
       : {}),
-    resourcesPath: process.resourcesPath,
     homePath: app.getPath('home'),
-    executablePath: process.execPath,
     platform: desktopPlatform
   });
 }

@@ -6,12 +6,13 @@ import { dirname, join } from 'node:path';
 import process from 'node:process';
 
 import { chromium } from 'playwright';
+import { runManagedCli } from './run-managed-cli.mjs';
 import { terminateWindowsProcessTree } from './terminate-windows-process-tree.mjs';
 
 const options = parseArguments(process.argv.slice(2));
 await access(options.desktop);
 await access(options.cli);
-verifyPackagedRuntimeSubsystem(options);
+verifyInstalledRuntimeSubsystem(options);
 verifyMacosDesktopSignature(options);
 
 const port = await reserveLoopbackPort();
@@ -64,7 +65,7 @@ try {
 
   const stopped = await runCli(options.cli, ['runtime', 'stop'], Date.now() + 15_000);
   if (stopped.code !== 0 || !stopped.output.includes('accepted=true')) {
-    throw new Error(`Bundled CLI did not accept Product Quit:\n${stopped.output}`);
+    throw new Error(`Managed CLI did not accept Product Quit:\n${stopped.output}`);
   }
   const exit = await withDeadline(desktopExit, 15_000, 'Desktop did not exit after Product Quit.');
   if (exit.error) throw exit.error;
@@ -178,12 +179,12 @@ async function cleanupFailedLaunch(cli, child, exitPromise) {
     const cleanupDeadline = Date.now() + 15_000;
     const status = await runCli(cli, ['runtime', 'status'], cleanupDeadline);
     if (status.code !== 0) {
-      throw new Error(`Bundled CLI could not inspect Runtime during cleanup:\n${status.output}`);
+      throw new Error(`Managed CLI could not inspect Runtime during cleanup:\n${status.output}`);
     }
     if (!status.output.includes('runtime_state=stopped')) {
       const stopped = await runCli(cli, ['runtime', 'stop'], cleanupDeadline);
       if (stopped.code !== 0 || !stopped.output.includes('accepted=true')) {
-        throw new Error(`Bundled CLI could not stop Runtime during cleanup:\n${stopped.output}`);
+        throw new Error(`Managed CLI could not stop Runtime during cleanup:\n${stopped.output}`);
       }
       await waitForRuntimeStopped(cli);
     }
@@ -220,22 +221,22 @@ function verifyMacosDesktopSignature({ desktop, platform }) {
   if (result.status !== 0) throw new Error(`macOS signature is invalid:\n${result.stderr}`);
 }
 
-function verifyPackagedRuntimeSubsystem({ cli, platform }) {
+function verifyInstalledRuntimeSubsystem({ cli, platform }) {
   if (platform !== 'win32') return;
-  const runtime = join(dirname(cli), 'debrute-runtime.exe');
+  const runtime = join(dirname(cli), '..', 'products', 'current', 'runtime', 'debrute-runtime.exe');
   const executable = readFileSync(runtime);
   if (executable.length < 0x40 || executable.toString('ascii', 0, 2) !== 'MZ') {
-    throw new Error(`Bundled Runtime is not a valid Windows executable: ${runtime}`);
+    throw new Error(`Installed Runtime is not a valid Windows executable: ${runtime}`);
   }
   const peOffset = executable.readUInt32LE(0x3c);
   const optionalHeaderOffset = peOffset + 24;
   if (optionalHeaderOffset + 70 > executable.length
     || executable.toString('ascii', peOffset, peOffset + 4) !== 'PE\0\0') {
-    throw new Error(`Bundled Runtime has an invalid PE header: ${runtime}`);
+    throw new Error(`Installed Runtime has an invalid PE header: ${runtime}`);
   }
   const subsystem = executable.readUInt16LE(optionalHeaderOffset + 68);
   if (subsystem !== 2) {
-    throw new Error(`Bundled Runtime must use the Windows GUI subsystem; found ${subsystem}.`);
+    throw new Error(`Installed Runtime must use the Windows GUI subsystem; found ${subsystem}.`);
   }
 }
 
@@ -248,47 +249,14 @@ async function terminateExactChildTree(child) {
 }
 
 function runCli(cli, arguments_, deadline) {
-  return new Promise((resolve, reject) => {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      reject(new Error(`Bundled CLI deadline expired before ${arguments_.join(' ')}.`));
-      return;
-    }
-    const child = spawn(cli, arguments_, { windowsHide: true });
-    const output = [];
-    let settled = false;
-    const resolveOnce = (result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
-    const rejectOnce = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    };
-    const timer = setTimeout(() => {
-      const timeoutError = new Error(`Bundled CLI timed out: ${arguments_.join(' ')}.`);
-      try {
-        child.kill('SIGKILL');
-        rejectOnce(timeoutError);
-      } catch (killError) {
-        rejectOnce(new AggregateError(
-          [timeoutError, killError],
-          `Bundled CLI timed out and PID ${child.pid} could not be killed.`
-        ));
-      }
-    }, remaining);
-    child.stdout.on('data', (chunk) => output.push(chunk.toString()));
-    child.stderr.on('data', (chunk) => output.push(chunk.toString()));
-    child.once('error', (error) => {
-      rejectOnce(error);
-    });
-    child.once('exit', (code) => {
-      resolveOnce({ code, output: output.join('') });
-    });
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    return Promise.reject(new Error(`Managed CLI deadline expired before ${arguments_.join(' ')}.`));
+  }
+  return runManagedCli(cli, arguments_, {
+    platform: options.platform,
+    timeoutMs: remaining,
+    label: 'Managed CLI'
   });
 }
 

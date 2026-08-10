@@ -17,7 +17,7 @@ fn handshake_encodes_as_one_big_endian_length_prefixed_json_frame() {
     };
 
     let frame = encode_frame(&message).expect("handshake frame should encode");
-    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":7,"product_version":"0.0.4","role":"launcher"}"#;
+    let payload = br#"{"type":"handshake","protocol":"debrute-control","protocol_version":8,"product_version":"0.0.4","role":"launcher"}"#;
     let mut expected = u32::try_from(payload.len())
         .expect("test payload length fits in u32")
         .to_be_bytes()
@@ -171,7 +171,7 @@ fn handshake_requires_exact_protocol_and_product_versions() {
 fn runtime_encodes_and_decodes_closed_handshake_responses() {
     let accepted = ServerMessage::handshake_accepted("runtime-instance", RuntimeStatus::Ready);
     let accepted_frame = encode_server_frame(&accepted).expect("accepted handshake should encode");
-    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":7,"product_version":"0.0.4","status":"ready"}"#;
+    let accepted_payload = br#"{"type":"handshake_accepted","instance_id":"runtime-instance","protocol_version":8,"product_version":"0.0.4","status":"ready"}"#;
     assert_eq!(accepted_frame, frame(accepted_payload));
     assert_eq!(
         read_server_frame(&mut Cursor::new(accepted_frame))

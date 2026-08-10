@@ -40,10 +40,11 @@ still-live window clears any unconsumed ticket and is reported once, while the
 window record remains available for a later manual reload.
 
 Window close and Product exit preempt pending launch work. Close invalidates one
-record immediately and reports only a non-final key. Product exit or replacement
-invalidates all records, removes native listeners, destroys the windows, closes
-Control, and exits Desktop. Late ticket or load results from invalidated records
-have no authority to show windows, mutate topology, or surface another failure.
+record immediately and reports only a non-final key. Product exit, replacement,
+or removal invalidates all records, removes native listeners, destroys the
+windows, closes Control, and exits Desktop. Late ticket or load results from
+invalidated records have no authority to show windows, mutate topology, or
+surface another failure.
 
 Ordinary Desktop Project opens select one target in Electron before opening. A
 live source targets only itself. A source-free request targets the sole live

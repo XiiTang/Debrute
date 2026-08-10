@@ -37,7 +37,7 @@ fn rust_cli_local_commands_use_the_stable_agent_protocol() {
     assert!(stdout.contains("command name=request.single"));
     assert!(stdout.contains("command name=workbench.url"));
     assert!(stdout.contains("command name=operation.wait"));
-    assert!(stdout.ends_with("count=26\n"));
+    assert!(stdout.ends_with("count=27\n"));
 }
 
 #[test]

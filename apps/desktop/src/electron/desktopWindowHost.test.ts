@@ -165,6 +165,20 @@ describe('DesktopWindowHost', () => {
     expect(errors).toEqual([]);
   });
 
+  it('closes every Desktop window when whole-Product removal begins', async () => {
+    const control = new FakeControl();
+    const nativeWindow = new FakeWindow();
+    const quitDesktop = vi.fn();
+    createHost(control, [nativeWindow], { quitDesktop });
+    await control.emit(openEvent('window-1'));
+
+    await control.emit({ event: 'product_removing' });
+
+    expect(nativeWindow.destroyed).toBe(true);
+    expect(control.closed).toBe(true);
+    expect(quitDesktop).toHaveBeenCalledOnce();
+  });
+
   it('serializes explicit reloads and gives each one a fresh ticket', async () => {
     const control = new FakeControl();
     const nativeWindow = new FakeWindow();

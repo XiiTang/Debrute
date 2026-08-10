@@ -21,6 +21,7 @@ export interface WorkbenchSettingsActions {
   checkProductUpdate(): Promise<void>;
   applyProductUpdate(): Promise<void>;
   mutateGlobalSettings(input: MutateDebruteGlobalSettingsInput): Promise<void>;
+  removeProduct(keepConfig: boolean): Promise<void>;
   revealModelApiKey(modelId: string): Promise<string>;
   rescanIntegrations(): Promise<void>;
   runIntegrationOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
@@ -39,6 +40,7 @@ export interface WorkbenchSettingsControllerInput {
   api: WorkbenchApiClient;
   globalProjection: WorkbenchGlobalProjection;
   globalSettingsController: WorkbenchGlobalSettingsController;
+  onProductRemovalAccepted(): void;
 }
 
 export function useWorkbenchSettingsController(
@@ -76,6 +78,10 @@ export function useWorkbenchSettingsController(
     checkProductUpdate: async () => { await input.api.checkProductUpdate(); },
     applyProductUpdate: async () => { await input.api.applyProductUpdate(); },
     mutateGlobalSettings: input.globalSettingsController.mutate,
+    removeProduct: async (keepConfig) => {
+      await input.api.removeProduct({ confirmed: true, keepConfig });
+      input.onProductRemovalAccepted();
+    },
     revealModelApiKey: async (modelId) => (await input.api.revealModelApiKey(modelId)).apiKey,
     rescanIntegrations,
     runIntegrationOperation: async (operationInput) => (
@@ -84,6 +90,7 @@ export function useWorkbenchSettingsController(
   }), [
     input.api,
     input.globalSettingsController,
+    input.onProductRemovalAccepted,
     rescanIntegrations
   ]);
 

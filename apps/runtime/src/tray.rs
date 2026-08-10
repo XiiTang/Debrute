@@ -493,6 +493,8 @@ fn runtime_status_label(status: RuntimeStatus) -> &'static str {
         RuntimeStatus::Ready => "Ready",
         RuntimeStatus::Exiting => "Exiting",
         RuntimeStatus::Replacing => "Updating",
+        RuntimeStatus::RemovalPreparing => "Preparing removal",
+        RuntimeStatus::Removing => "Removing",
     }
 }
 

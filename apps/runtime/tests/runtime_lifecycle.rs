@@ -10,8 +10,8 @@ use std::{
 };
 
 use debrute_runtime::control::{
-    ActivationIntent, ActivationOutcome, ControlErrorCode, ProductUpdateTransitionFailure,
-    RuntimeActivationService, RuntimeControlState, RuntimeStatus,
+    ActivationIntent, ActivationOutcome, ControlErrorCode, ProductRemovalCommit,
+    ProductUpdateTransitionFailure, RuntimeActivationService, RuntimeControlState, RuntimeStatus,
 };
 use uuid::Uuid;
 
@@ -238,4 +238,54 @@ fn startup_completion_cannot_overwrite_product_quit() {
         .expect("Product Quit should be accepted during startup");
     assert!(!state.finish_startup());
     assert_eq!(state.status(), RuntimeStatus::Exiting);
+}
+
+#[test]
+fn accepted_product_removal_launches_once_closes_admission_and_enters_removing_after_drain() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    assert!(state.finish_startup());
+    let permit = state.begin_product_work().unwrap();
+    let launches = Arc::new(AtomicUsize::new(0));
+    let launch_count = Arc::clone(&launches);
+
+    state
+        .request_product_removal(ProductRemovalCommit::new(
+            move || {
+                launch_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            || {},
+        ))
+        .unwrap();
+
+    assert_eq!(state.status(), RuntimeStatus::RemovalPreparing);
+    assert!(state.begin_product_work().is_none());
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    drop(permit);
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while state.status() != RuntimeStatus::Removing && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(state.status(), RuntimeStatus::Removing);
+    assert_eq!(
+        state.request_product_quit(),
+        Err(ControlErrorCode::RemovalInProgress)
+    );
+}
+
+#[test]
+fn failed_product_removal_launch_keeps_ready_work_admission() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    assert!(state.finish_startup());
+
+    assert_eq!(
+        state.request_product_removal(ProductRemovalCommit::new(
+            || Err("finalizer did not start".to_owned()),
+            || {},
+        )),
+        Err(ControlErrorCode::ProductRemovalUnavailable)
+    );
+
+    assert_eq!(state.status(), RuntimeStatus::Ready);
+    assert!(state.begin_product_work().is_some());
 }

@@ -49,6 +49,11 @@
   box-shadow: var(--db-paper-edge-sm) var(--db-paper-edge);
 }
 
+.db-button--danger {
+  background: var(--db-danger-bg);
+  color: var(--db-danger);
+}
+
 .db-button--primary::before {
   content: "";
   position: absolute;
@@ -74,6 +79,11 @@
   --db-primary-surface-bg: color-mix(in srgb, var(--db-primary-bg) 88%, var(--db-brand-ink-deep));
   background: transparent;
   color: var(--db-primary-fg);
+}
+
+.db-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--db-danger) 22%, var(--db-bg));
+  color: var(--db-danger);
 }
 
 .db-button:disabled,

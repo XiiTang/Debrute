@@ -338,6 +338,7 @@ function createActions(overrides: Partial<WorkbenchSettingsActions> = {}): Workb
     checkProductUpdate: async () => undefined,
     applyProductUpdate: async () => undefined,
     mutateGlobalSettings: async () => undefined,
+    removeProduct: async () => undefined,
     revealModelApiKey: async () => '',
     rescanIntegrations: async () => undefined,
     runIntegrationOperation: async (input: Parameters<WorkbenchSettingsActions['runIntegrationOperation']>[0]) => ({

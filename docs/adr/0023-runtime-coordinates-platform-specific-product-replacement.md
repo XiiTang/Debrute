@@ -3,9 +3,11 @@
 The Rust Runtime owns update discovery, download, signed-manifest and platform
 verification, staging, the update commit race, Desktop shutdown, and the
 planned relaunch intent. macOS performs verified application replacement and
-Windows runs the held, manifest-authenticated NSIS installer through
-Runtime-owned platform adapters after Desktop exits. Neither platform needs a
-replacement helper:
+Windows runs the held, manifest-authenticated Product Installer in its internal
+update mode through Runtime-owned platform adapters after Desktop exits. The
+Runtime passes the exact pending transaction id, so NSIS replaces only Desktop
+and does not start a second whole-Product installation transaction. Neither
+platform needs another replacement helper:
 Runtime executes from an immutable versioned Product directory, so the old
 Runtime never replaces its own live executable. It selects the new `current`
 target and starts that target in a bounded Control-owner handoff mode. The
@@ -21,22 +23,26 @@ Debrute does not add a helper layer required only by a different installation
 layout. Update authenticity remains governed by
 [ADR 0008](./0008-signed-manifest-authenticates-product-updates.md).
 
-The macOS adapter performs one in-process application swap after validating the
-mounted bundle and a copied staged bundle. It retires the installed application,
-moves the staged application into place, and removes the retired copy. If the
-second move fails, it restores the retired copy before removing the staged copy;
-a failed restore retains and reports both recovery paths. One labeled error
-combiner preserves the primary failure together with staged or retired cleanup,
-installer-descriptor restoration, and DMG-detach failures. Once the mount point
-is known, detach is attempted exactly once. There is no retry, migration helper,
-or alternate installer path.
+The macOS adapter mounts the Product Installer DMG and accepts only the fixed
+`Install Debrute.app/Contents/Resources/Debrute.app` nested Desktop. It performs
+one in-process application swap after validating that bundle and a copied staged
+bundle. It retires the installed application, moves the staged application into
+place, and removes the retired copy. If the second move fails, it restores the
+retired copy before removing the staged copy; a failed restore retains and
+reports both recovery paths. One labeled error combiner preserves the primary
+failure together with staged or retired cleanup, installer-descriptor
+restoration, and DMG-detach failures. Once the mount point is known, detach is
+attempted exactly once. There is no retry, migration helper, or alternate
+installer path.
 
 The Windows filesystem boundary is the in-process
 `packages/windows-product-fs` safety capsule. It is the sole workspace crate
 permitted to contain reviewed `unsafe` Windows API calls, limited to junction
-creation and in-place retargeting, file identity, and durable directory/reparse
-flushes. The crate inherits the workspace's current Clippy policy explicitly;
-all release trust and transaction authority remain in the safe Runtime crate.
+creation and in-place retargeting, file identity, durable directory/reparse
+flushes, process-liveness checks, user-environment broadcasts, and scheduling
+the detached removal capsule for deletion after reboot. The crate inherits the
+workspace's current Clippy policy explicitly; all release trust and transaction
+authority remain in the safe Runtime crate.
 The Windows release job executes the Rust workspace tests on a Windows host so
 the junction and locked-handle contracts are exercised against real reparse
 points, not only cross-compiled. Every product transaction also reclaims only

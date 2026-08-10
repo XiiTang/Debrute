@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, RotateCw } from '../../ui/index.js';
+import { RefreshCw, RotateCw, Trash2 } from '../../ui/index.js';
 import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
@@ -10,7 +10,7 @@ import type {
 } from '@debrute/app-protocol';
 import type { EventProjection } from '../../../types.js';
 import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
-import { Button, Field, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index.js';
+import { Button, Field, Modal, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index.js';
 import type { WorkbenchSettingsActions } from '../useWorkbenchSettingsController.js';
 
 type OperationState =
@@ -20,7 +20,10 @@ type OperationState =
 
 type ProductUpdateAction = 'none' | 'check' | 'apply';
 
-type ProductActions = Pick<WorkbenchSettingsActions, 'checkProductUpdate' | 'applyProductUpdate'>;
+type ProductActions = Pick<
+  WorkbenchSettingsActions,
+  'checkProductUpdate' | 'applyProductUpdate' | 'removeProduct'
+>;
 
 export function GeneralSettingsPage({
   actions,
@@ -39,6 +42,9 @@ export function GeneralSettingsPage({
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
   const [localeDraft, setLocaleDraft] = useState(settings.workbench.locale);
   const [localeOperation, setLocaleOperation] = useState<OperationState>({ status: 'idle' });
+  const [removalOpen, setRemovalOpen] = useState(false);
+  const [keepConfig, setKeepConfig] = useState(false);
+  const [removalOperation, setRemovalOperation] = useState<OperationState>({ status: 'idle' });
 
   useEffect(() => {
     setLocaleDraft(settings.workbench.locale);
@@ -118,6 +124,85 @@ export function GeneralSettingsPage({
             <small>{i18n.t('settings.general.productState.loading')}</small>
           </div>
         </section>
+      ) : null}
+      {product.status === 'ready' && product.value ? (
+        <>
+          <section className="settings-group settings-danger-zone">
+            <div className="settings-group__header">
+              <div className="settings-danger-zone__copy">
+                <h3>{i18n.t('settings.general.removal.title')}</h3>
+                <small>{i18n.t('settings.general.removal.summary')}</small>
+              </div>
+              <Button
+                type="button"
+                variant="danger"
+                iconStart={<Trash2 size={14} />}
+                onClick={() => {
+                  setKeepConfig(false);
+                  setRemovalOperation({ status: 'idle' });
+                  setRemovalOpen(true);
+                }}
+              >
+                {i18n.t('settings.general.removal.action')}
+              </Button>
+            </div>
+          </section>
+          {removalOpen ? (
+            <Modal
+              className="settings-removal-dialog"
+              labelledBy="settings-removal-title"
+              onCancel={() => {
+                if (removalOperation.status !== 'loading') {
+                  setRemovalOpen(false);
+                }
+              }}
+            >
+              <div className="settings-removal-dialog__copy">
+                <h3 id="settings-removal-title">{i18n.t('settings.general.removal.confirmTitle')}</h3>
+                <p>{i18n.t('settings.general.removal.scope')}</p>
+                <p>{i18n.t('settings.general.removal.projects')}</p>
+              </div>
+              <label className="settings-removal-option">
+                <input
+                  type="checkbox"
+                  checked={keepConfig}
+                  disabled={removalOperation.status === 'loading'}
+                  onChange={(event) => setKeepConfig(event.currentTarget.checked)}
+                />
+                <span>
+                  <strong>{i18n.t('settings.general.removal.keepConfig')}</strong>
+                  <small>{i18n.t('settings.general.removal.keepConfigHelp')}</small>
+                </span>
+              </label>
+              {removalOperation.status === 'error' ? (
+                <small className="db-form-error">{removalOperation.message}</small>
+              ) : null}
+              <div className="settings-removal-dialog__actions">
+                <Button
+                  type="button"
+                  data-modal-initial-focus
+                  disabled={removalOperation.status === 'loading'}
+                  onClick={() => setRemovalOpen(false)}
+                >
+                  {i18n.t('common.cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  loading={removalOperation.status === 'loading'}
+                  onClick={() => {
+                    setRemovalOperation({ status: 'loading' });
+                    void actions.removeProduct(keepConfig).catch((error: unknown) => {
+                      setRemovalOperation({ status: 'error', message: errorMessage(error) });
+                    });
+                  }}
+                >
+                  {i18n.t('settings.general.removal.action')}
+                </Button>
+              </div>
+            </Modal>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

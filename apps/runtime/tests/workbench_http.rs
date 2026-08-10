@@ -21,7 +21,8 @@ use debrute_runtime::{
     control::RuntimeControlState,
     photoshop::{PhotoshopIntegrationStatus, PhotoshopMimeType, PluginPhotoshopMessage},
     workbench::{
-        RuntimeCliHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
+        ProductUpdateInitiator, RuntimeCliHttpService, RuntimeHttpServiceError,
+        RuntimeProductHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
         WorkbenchHttpServer, WorkbenchRuntimeServices,
     },
 };
@@ -202,6 +203,40 @@ fn source_runtime_has_no_product_http_routes() {
         .send()
         .expect("missing Product route should respond");
     assert_eq!(response.status().as_u16(), 404);
+}
+
+#[test]
+fn product_removal_requires_confirmation_and_forwards_the_exact_retention_choice() {
+    let product = Arc::new(RecordingProductService::default());
+    let runtime = TestRuntime::start_with_product(product.clone());
+    let client = test_client();
+    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+
+    let unconfirmed = client
+        .post(format!("{}/api/runtime/product/remove", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "confirmed": false, "keepConfig": true }))
+        .send()
+        .expect("unconfirmed removal should respond");
+    assert_eq!(unconfirmed.status().as_u16(), 400);
+    assert!(product.removals.lock().unwrap().is_empty());
+
+    let confirmed = client
+        .post(format!("{}/api/runtime/product/remove", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, credential)
+        .json(&json!({ "confirmed": true, "keepConfig": true }))
+        .send()
+        .expect("confirmed removal should respond");
+    assert_eq!(confirmed.status().as_u16(), 200);
+    assert_eq!(
+        confirmed.json::<Value>().unwrap(),
+        json!({ "accepted": true, "configPreserved": true })
+    );
+    assert_eq!(*product.removals.lock().unwrap(), vec![true]);
 }
 
 #[test]
@@ -1767,6 +1802,14 @@ struct TestRuntime {
 
 impl TestRuntime {
     fn start() -> Self {
+        Self::start_inner(None)
+    }
+
+    fn start_with_product(product: Arc<dyn RuntimeProductHttpService>) -> Self {
+        Self::start_inner(Some(product))
+    }
+
+    fn start_inner(product: Option<Arc<dyn RuntimeProductHttpService>>) -> Self {
         let root = std::env::temp_dir().join(format!("dbrt-http-{}", Uuid::new_v4()));
         let assets = root.join("assets");
         fs::create_dir_all(&assets).expect("assets should be created");
@@ -1791,7 +1834,7 @@ impl TestRuntime {
             Arc::clone(&state),
             Arc::clone(&services),
             cli,
-            None,
+            product,
         )
         .expect("Workbench HTTP server should start");
         state
@@ -1834,6 +1877,37 @@ impl TestRuntime {
             canonical_root,
             binding_id: Mutex::new(None),
         }
+    }
+}
+
+#[derive(Default)]
+struct RecordingProductService {
+    removals: Mutex<Vec<bool>>,
+}
+
+impl RuntimeProductHttpService for RecordingProductService {
+    fn state(&self) -> Result<Value, RuntimeHttpServiceError> {
+        Ok(json!({}))
+    }
+
+    fn check(&self) -> Result<Value, RuntimeHttpServiceError> {
+        Ok(json!({}))
+    }
+
+    fn apply(
+        self: Arc<Self>,
+        _input: &Value,
+        _initiator: ProductUpdateInitiator,
+    ) -> Result<Value, RuntimeHttpServiceError> {
+        Ok(json!({}))
+    }
+
+    fn remove(self: Arc<Self>, keep_config: bool) -> Result<Value, RuntimeHttpServiceError> {
+        self.removals.lock().unwrap().push(keep_config);
+        Ok(json!({
+            "accepted": true,
+            "configPreserved": keep_config
+        }))
     }
 }
 

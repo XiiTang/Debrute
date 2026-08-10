@@ -688,6 +688,7 @@ export function createHttpWorkbenchApiClient(options: {
     checkProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/check'),
     applyProductUpdate: () => request<{ ok: true }>('POST', '/api/runtime/product/update/apply'),
     mutateGlobalSettings: (input: MutateDebruteGlobalSettingsInput) => request<{ ok: true }>('POST', '/api/settings/global/mutations', input),
+    removeProduct: (input) => request('POST', '/api/runtime/product/remove', input),
     revealModelApiKey: (modelId: string) => request('POST', '/api/settings/models/api-key/reveal', { modelId }),
     subscribeTerminalSessions: (listener, onError) => deferTerminalHubSubscription(
       (hub) => hub.subscribeSessions(listener, onError),

@@ -326,7 +326,7 @@ impl TrustedReleaseAsset {
     pub(crate) fn matches_product_version(&self, version: &str) -> bool {
         let expected_name = match self.kind {
             ReleaseAssetKind::Desktop => format!(
-                "debrute-desktop-{version}-{}-{}.{}",
+                "debrute-installer-{version}-{}-{}.{}",
                 self.platform.as_str(),
                 self.architecture.as_str(),
                 self.platform.extension()
@@ -538,7 +538,7 @@ fn validate_release_asset(
     }
     let expected_name = match asset.kind {
         ReleaseAssetKind::Desktop => format!(
-            "debrute-desktop-{version}-{}-{}.{}",
+            "debrute-installer-{version}-{}-{}.{}",
             asset.platform.as_str(),
             asset.architecture.as_str(),
             asset.platform.extension()

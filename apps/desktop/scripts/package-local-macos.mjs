@@ -34,7 +34,7 @@ export function localElectronBuilderArguments(architecture) {
 
 export async function packageLocalMacos() {
   if (process.platform !== 'darwin') {
-    throw new Error(`Local Desktop installation requires macOS, received ${process.platform}.`);
+    throw new Error(`Local Desktop packaging requires macOS, received ${process.platform}.`);
   }
   const manifest = await validateProductSeed(seed);
   if (manifest.platform !== 'macos' || manifest.architecture !== process.arch) {

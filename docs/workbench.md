@@ -484,6 +484,16 @@ not commit the switch locally; ordered settings and Photoshop events remain its
 only authority. Pairing, Project links, and a separate refresh request do not
 exist.
 
+General ends with one destructive Product-removal action. It opens one modal
+whose preservation checkbox is off by default and names the only retained
+files as settings and saved API keys. The native modal owns the browser top
+layer, makes the rest of Workbench inert, initially focuses Cancel, restores
+the invoking action on cancellation, and treats Escape as Cancel until removal
+is committed. After Runtime accepts the request, the Workbench replaces its
+ordinary content with a terminal removal state; it does not present a second
+confirmation, continue normal work, or reinterpret a deliberate Runtime
+shutdown as a reconnectable error.
+
 Workbench sends closed typed settings mutation intents. Editable model text fields
 are trimmed before submission; Runtime accepts only already-canonical values
 and does not repeat that normalization. Empty settings objects and unknown

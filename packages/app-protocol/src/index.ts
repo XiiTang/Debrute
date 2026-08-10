@@ -743,6 +743,16 @@ export interface DebruteProductState {
   update: ProductUpdateState;
 }
 
+export interface ProductRemovalInput {
+  confirmed: true;
+  keepConfig: boolean;
+}
+
+export interface ProductRemovalAccepted {
+  accepted: true;
+  configPreserved: boolean;
+}
+
 interface ModelArtifactProvenanceRecord {
   operationId: string;
   itemIndex: number;
@@ -1780,6 +1790,7 @@ export interface WorkbenchApiClient {
   checkProductUpdate(): Promise<{ ok: true }>;
   applyProductUpdate(): Promise<{ ok: true }>;
   mutateGlobalSettings(input: MutateDebruteGlobalSettingsInput): Promise<{ ok: true }>;
+  removeProduct(input: ProductRemovalInput): Promise<ProductRemovalAccepted>;
   revealModelApiKey(modelId: string): Promise<RevealModelApiKeyResponse>;
   subscribeTerminalSessions(
     listener: (sessions: TerminalSessionView[]) => void,

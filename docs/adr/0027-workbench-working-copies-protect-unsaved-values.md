@@ -20,5 +20,6 @@ state, and arbitrary component memory are outside this boundary.
 
 Closing or crashing a Workbench therefore does not run an asynchronous
 save/discard protocol. Desktop window close, Desktop exit, Product Quit,
-Product update, reload, and Project preemption do not ask the renderer for a
-blocker decision. Runtime never assumes a Workbench exists during shutdown.
+Product update, Product removal, reload, and Project preemption do not ask the
+renderer for a blocker decision. Runtime never assumes a Workbench exists
+during shutdown.

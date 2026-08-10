@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DebruteGlobalSettingsView, DebruteProductState } from '@debrute/app-protocol';
 import type { SettingsResource } from '../../types.js';
 import { I18nProvider } from '../i18n/index.js';
+import { installDialogTestAdapter } from '../ui/Modal.test-support.js';
 import {
   SettingsPanel,
   type SettingsPanelState
@@ -662,7 +663,8 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
             <GeneralSettingsPage
               actions={{
                 checkProductUpdate: vi.fn(async () => undefined),
-                applyProductUpdate
+                applyProductUpdate,
+                removeProduct: vi.fn(async () => undefined)
               }}
               product={{ status: 'ready', value: availableProductState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
@@ -699,7 +701,8 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
             <GeneralSettingsPage
               actions={{
                 checkProductUpdate: vi.fn(async () => undefined),
-                applyProductUpdate
+                applyProductUpdate,
+                removeProduct: vi.fn(async () => undefined)
               }}
               product={{ status: 'ready', value: availableProductState() }}
               settings={readyResourceValue(stateWithSettings().globalSettings)}
@@ -726,7 +729,68 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     }
   });
 
-  it('renders only Workbench language preferences in General settings', () => {
+  it('uses one Product removal confirmation and keeps API keys only when explicitly selected', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const removeProduct = vi.fn(async (_keepConfig: boolean) => undefined);
+    const restoreDialog = installDialogTestAdapter();
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <GeneralSettingsPage
+              actions={{
+                checkProductUpdate: vi.fn(async () => undefined),
+                applyProductUpdate: vi.fn(async () => undefined),
+                removeProduct
+              }}
+              product={{ status: 'ready', value: productState() }}
+              settings={readyResourceValue(stateWithSettings().globalSettings)}
+              onSettingsChange={async () => undefined}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const openRemoval = requireButton(container, 'Remove Debrute');
+      openRemoval.focus();
+      await act(async () => openRemoval.click());
+      let dialog = document.querySelector<HTMLDialogElement>('[aria-labelledby="settings-removal-title"]');
+      expect(dialog?.open).toBe(true);
+      expect(container.inert).toBe(true);
+      expect(document.activeElement?.textContent).toContain('Cancel');
+      await act(async () => {
+        dialog?.dispatchEvent(new Event('cancel', { cancelable: true }));
+      });
+      expect(document.querySelector('[aria-labelledby="settings-removal-title"]')).toBeNull();
+      expect(container.inert).toBe(false);
+      expect(document.activeElement).toBe(openRemoval);
+
+      await act(async () => openRemoval.click());
+      dialog = document.querySelector<HTMLDialogElement>('[aria-labelledby="settings-removal-title"]');
+      expect(dialog?.textContent).toContain('Desktop, Runtime, CLI, official Skills, and local state');
+      expect(dialog?.textContent).toContain('Projects are not removed');
+      const keepConfig = dialog?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+      expect(keepConfig?.checked).toBe(false);
+      await act(async () => keepConfig?.click());
+      const confirm = [...(dialog?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.trim() === 'Remove Debrute');
+      await act(async () => {
+        confirm?.click();
+        await Promise.resolve();
+      });
+
+      expect(removeProduct).toHaveBeenCalledOnce();
+      expect(removeProduct).toHaveBeenCalledWith(true);
+    } finally {
+      await unmount(root, container);
+      restoreDialog();
+    }
+  });
+
+  it('renders Workbench language and Product removal in General settings', () => {
     const saved: unknown[] = [];
     const html = renderToStaticMarkup(
       <I18nProvider locale="zh-CN">
@@ -741,7 +805,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
             },
             chrome: { recentProjectRoots: [] },
             plugins: { photoshop: { enabled: false } },
-    feedback: { catalog: [], actionBar: [] },
+            feedback: { catalog: [], actionBar: [] },
             models: { image: [], video: [], audio: [] }
           }}
           onSettingsChange={async (settings) => {
@@ -755,7 +819,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     expect(html).toContain('语言');
     expect(html).toContain('简体中文');
     expect(html).not.toContain('应用');
-    expect(html).not.toContain('Debrute');
+    expect(html).toContain('移除 Debrute');
     expect(saved).toEqual([]);
   });
 
@@ -991,6 +1055,7 @@ function actions(): WorkbenchSettingsActions {
     checkProductUpdate: vi.fn(async () => undefined),
     applyProductUpdate: vi.fn(async () => undefined),
     mutateGlobalSettings: vi.fn(async () => undefined),
+    removeProduct: vi.fn(async () => undefined),
     revealModelApiKey: vi.fn(async () => ''),
     rescanIntegrations: vi.fn(async () => undefined),
     runIntegrationOperation: vi.fn(async (input) => ({

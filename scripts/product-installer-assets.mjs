@@ -1,41 +1,41 @@
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { desktopReleaseAssetName } from './release-asset-contract.mjs';
+import { productInstallerAssetName } from './release-asset-contract.mjs';
 
 export function electronBuilderPlatformName(platform) {
   if (platform === 'darwin') return 'macos';
   if (platform === 'win32') return 'windows';
-  throw new Error(`Unsupported Desktop release platform: ${platform}`);
+  throw new Error(`Unsupported Product Installer platform: ${platform}`);
 }
 
-export function requiredDesktopReleaseAssets(version, platform = process.platform, arch = process.arch) {
+export function requiredProductInstallerAssets(version, platform = process.platform, arch = process.arch) {
   const publicPlatform = electronBuilderPlatformName(platform);
   if (platform === 'darwin') {
     if (arch !== 'arm64' && arch !== 'x64') {
       throw new Error(`Unsupported macOS release arch: ${arch}`);
     }
-    return [desktopReleaseAssetName(version, publicPlatform, arch, 'dmg')];
+    return [productInstallerAssetName(version, publicPlatform, arch, 'dmg')];
   }
   if (platform === 'win32') {
     if (arch !== 'x64') {
       throw new Error(`Unsupported Windows release arch: ${arch}`);
     }
-    return [desktopReleaseAssetName(version, publicPlatform, arch, 'exe')];
+    return [productInstallerAssetName(version, publicPlatform, arch, 'exe')];
   }
-  throw new Error(`Unsupported Desktop release platform: ${platform}`);
+  throw new Error(`Unsupported Product Installer platform: ${platform}`);
 }
 
-export async function verifyDesktopReleaseAssets({
+export async function verifyProductInstallerAssets({
   releaseDir,
   version,
   platform = process.platform,
   arch = process.arch
 }) {
   const files = new Set(await readdir(releaseDir));
-  const expected = requiredDesktopReleaseAssets(version, platform, arch);
+  const expected = requiredProductInstallerAssets(version, platform, arch);
   const missing = expected.filter((name) => !files.has(name));
   if (missing.length > 0) {
-    throw new Error(`Missing Desktop release assets: ${missing.join(', ')}`);
+    throw new Error(`Missing Product Installer assets: ${missing.join(', ')}`);
   }
   return expected;
 }
@@ -58,9 +58,9 @@ if (isDirectCliInvocation(import.meta.url, process.argv[1])) {
     console.error('--version is required');
     process.exit(1);
   }
-  verifyDesktopReleaseAssets({ releaseDir, version, platform, arch })
+  verifyProductInstallerAssets({ releaseDir, version, platform, arch })
     .then((verified) => {
-      console.log(`Verified Desktop release assets: ${verified.join(', ')}`);
+      console.log(`Verified Product Installer assets: ${verified.join(', ')}`);
     })
     .catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));

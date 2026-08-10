@@ -164,7 +164,7 @@ Runtime's default watcher factory and `ProjectFileWatcher` worker, observe a
 real file change through each worker, and close. A deadline kills only that
 exact probe process and fails explicitly with the notify-rs/notify#942
 diagnostic on macOS; the command does not retry or select another backend. It
-remains outside ordinary `pnpm verify` and is required by every Desktop release
+remains outside ordinary `pnpm verify` and is required by every Product release
 matrix target. Ordinary Runtime integration composition always selects the
 deterministic backend; the separate probe is the sole test command for
 production native watcher wiring and host delivery.
@@ -359,17 +359,29 @@ an existing `Starting` owner without a readiness wait. Release
 acceptance additionally checks the icon and its menu visually because macOS
 does not expose every third-party status item through a stable test API.
 Required macOS arm64, macOS x64, and Windows x64 release jobs run one shared
-packaged-product smoke check against the signed unpacked Electron Builder
-application. It requires Runtime `Ready`, the native tray, a loopback-only CDP
-page target with the packaged Workbench shell and preload API, and no
+packaged-product smoke check after installing the Product. Windows runs the NSIS
+installer silently. macOS mounts the DMG, validates the Product Setup container
+and its nested Desktop payload, then invokes the published Setup executable in
+noninteractive mode. This skips only its confirmation and completion alerts;
+the smoke still exercises the same Setup preflight, Product stop, Desktop
+replacement, and whole-Product installation method. The check then launches the
+installed Desktop through its stable Product paths. It requires Runtime `Ready`, the native tray, a
+loopback-only CDP page target with the packaged Workbench shell and preload API, and no
 `workbench-connection-ended` state. The CDP launch switch belongs only to that
 CI process; the smoke check adds no public Runtime inspection field or product
-test hook. It then requires the bundled CLI's single Product Quit request to
+test hook. It then requires the managed CLI's single Product Quit request to
 succeed, Runtime to become stopped, and Desktop to exit on its own. An exact
 failure-cleanup kill of the spawned Desktop process tree cannot turn a failure
 into success; each CLI/CDP probe is bounded, and there is no ignored quit result
 or Runtime-wide process-name kill. These live checks remain explicit
-diagnostics rather than part of ordinary `pnpm verify`.
+diagnostics rather than part of ordinary `pnpm verify`. Each job finally issues
+the default `debrute product uninstall --yes` transaction and requires the
+installed Desktop, Product home, official Skills, home-level removal and
+projection transactions, shell-write transactions, command PATH projection,
+login item, and Windows registration, shortcut, and installer cache to be absent
+while an unrelated Skill remains. macOS also requires its detached Runtime
+capsule to disappear; Windows verifies the reboot-deletion scheduling primitive
+in native tests because the executing capsule may remain until reboot.
 
 Desktop lifecycle tests also issue Command-Q before Control acquisition
 finishes. They prove that Desktop opens no window, completes only the existing

@@ -724,6 +724,28 @@ impl RuntimeProductHttpService for RuntimeProductService {
             }),
         )
     }
+
+    fn remove(self: Arc<Self>, keep_config: bool) -> Result<Value, RuntimeHttpServiceError> {
+        self.runtime.remove_product(keep_config).map_err(|code| {
+            RuntimeHttpServiceError::new(
+                axum::http::StatusCode::CONFLICT,
+                match code {
+                    crate::control::ControlErrorCode::UpdateCommitInProgress => {
+                        "product_update_in_progress"
+                    }
+                    crate::control::ControlErrorCode::RemovalInProgress => {
+                        "product_removal_in_progress"
+                    }
+                    _ => "product_removal_unavailable",
+                },
+                format!("Product removal was rejected: {code:?}"),
+            )
+        })?;
+        Ok(json!({
+            "accepted": true,
+            "configPreserved": keep_config
+        }))
+    }
 }
 
 fn product_state_value(

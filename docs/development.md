@@ -456,24 +456,26 @@ local development application, not a distributable release.
 
 `pnpm install:local` runs that complete build and a Runtime-owned eligibility
 Product preflight, requests Product Quit, verifies a staged copy before
-atomically replacing `/Applications/Debrute.app`, and invokes the installed
-seed's Runtime bootstrap. Bootstrap selects the built Product,
-rewrites the stable Runtime and CLI entrypoints under `~/.debrute/bin`, installs
-the matching official Skills, and starts Runtime. The command waits for Runtime
-Ready and runs an image-model-list smoke check; it does not open a Workbench
-window. Product version directories remain immutable and are materialized only
-by Runtime bootstrap. A source build whose version already exists with different
+atomically replacing `~/Applications/Debrute.app`, and invokes the installed
+seed's Runtime-owned `install-product` capability. Product installation selects
+the built Product, rewrites the stable Runtime and CLI entrypoints under
+`~/.debrute/bin`, installs the matching official Skills, publishes PATH, and
+starts Runtime. The command waits for Runtime Ready, verifies the selected
+Product and command surface, and runs an image-model-list smoke check; it does
+not open a Workbench window. Product version directories remain immutable and
+are materialized only by Runtime-owned installation. A source build whose
+version already exists with different
 bytes must first update the repository's version contract. A higher installed
 version or an active Product update transaction fails explicitly.
 
-`pnpm dist` remains the strict release path for distributable Desktop artifacts.
+`pnpm dist` remains the strict release path for distributable Product Installers.
 On macOS it uses the Developer ID and notarization credentials documented in
 [`releases.md`](./releases.md); it never falls back to the local ad-hoc path.
 
-Packaged Desktop product assets are published from the public `XiiTang/Debrute` GitHub repository.
+Packaged Product assets are published from the public `XiiTang/Debrute` GitHub repository.
 
 macOS arm64, macOS x64, and Windows x64 are the complete Product targets. Each
-packaged Desktop contains its matching Runtime Product and participates in the
+Product Installer contains its matching Runtime Product and participates in the
 signed release and packaged-product acceptance contracts. The platform boundary
 is recorded in
 [`0030-product-supports-macos-and-windows.md`](./adr/0030-product-supports-macos-and-windows.md).

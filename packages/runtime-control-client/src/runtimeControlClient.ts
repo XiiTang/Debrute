@@ -387,6 +387,8 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
         this.status = 'exiting';
       } else if (message.event.event === 'product_replacing') {
         this.status = 'replacing';
+      } else if (message.event.event === 'product_removing') {
+        this.status = 'removing';
       }
       for (const listener of this.eventListeners) {
         listener(message.event);

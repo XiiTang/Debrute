@@ -12,7 +12,7 @@ with Workbench assets containing the same closed `darwin` or `win32` build
 constant. Desktop validates its native entrypoint once and continues only for
 that target. Runtime paths, native chrome, menus, and recent-Project integration
 consume the typed build target; renderer code does not infer it again from
-browser APIs or receive it through Runtime bootstrap.
+browser APIs or receive it dynamically from Runtime.
 
 ## Runtime And Window Ownership
 
@@ -31,6 +31,12 @@ entrypoint and argument list, the Workbench asset directory, the log path, and
 the inherited process environment before entering that connect-or-launch
 sequence. The internal launcher consumes those resolved values exactly; it
 does not synthesize missing argument arrays or an alternate environment.
+Packaged Desktop resolves only the already-installed current-user Product:
+`~/.debrute/bin/debrute-runtime` on macOS and the selected Runtime under
+`~/.debrute/products/current` on Windows. It never materializes a bundled seed,
+repairs an installation, or treats first launch as an installation trigger.
+Electron user data, logs, cache, session data, and crash dumps are rooted under
+`~/.debrute/desktop`, inside the whole-Product removal boundary.
 
 Runtime assigns every new BrowserWindow an opaque window key and a Root route.
 One `DesktopWindowHost` owns the complete local record for that window:
@@ -176,8 +182,8 @@ window record so a later manual reload can try again.
 A native close invalidates its Host record immediately, even if an initial load
 or reload is still pending. A non-final close reports its Runtime key exactly
 once; the final close closes Control and exits Electron without the redundant
-request. Product exit or replacement synchronously marks the Host as shutting
-down, removes close listeners, destroys every local window, closes Control, and
+request. Product exit, replacement, or removal synchronously marks the Host as
+shutting down, removes close listeners, destroys every local window, closes Control, and
 exits Electron. Results arriving from preempted ticket or load operations cannot
 show a window, perform topology cleanup, or report a late error.
 

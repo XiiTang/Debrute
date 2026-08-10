@@ -24,6 +24,7 @@ import {
   createWorkbenchActivities,
   type WorkbenchActivities
 } from './services/WorkbenchActivities.js';
+import { installDialogTestAdapter } from './ui/Modal.test-support.js';
 
 vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
   const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/CanvasTextRenderProfile.test-support.js');
@@ -974,6 +975,43 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(findButton(container, 'Hide hierarchy edges')).toBeUndefined();
     await unmount(root, container);
   });
+
+  it('enters the terminal removal state after the one Settings confirmation is accepted', async () => {
+    const removeProduct = vi.fn(async () => ({ accepted: true as const, configPreserved: false }));
+    const restoreDialog = installDialogTestAdapter();
+
+    try {
+      const { container, root } = await renderWorkbenchApp('/', { removeProduct });
+      try {
+        await act(async () => {
+          requireButton(container, 'Settings').click();
+          await Promise.resolve();
+        });
+        await waitForButton(container, 'Remove Debrute');
+        await act(async () => {
+          requireButton(container, 'Remove Debrute').click();
+          await Promise.resolve();
+        });
+        const dialog = document.querySelector<HTMLDialogElement>(
+          '[aria-labelledby="settings-removal-title"]'
+        );
+        const confirmation = Array.from(dialog?.querySelectorAll('button') ?? [])
+          .find((button) => button.textContent?.trim() === 'Remove Debrute');
+        await act(async () => {
+          confirmation?.click();
+          await Promise.resolve();
+        });
+
+        expect(removeProduct).toHaveBeenCalledWith({ confirmed: true, keepConfig: false });
+        expect(container.querySelector('[data-testid="workbench-product-removed"]')).not.toBeNull();
+        expect(container.textContent).toContain('Debrute removal is finishing.');
+      } finally {
+        await unmount(root, container);
+      }
+    } finally {
+      restoreDialog();
+    }
+  });
 });
 
 async function startPendingLocaleSave(): Promise<{
@@ -1139,6 +1177,7 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     }),
     checkProductUpdate: vi.fn(async () => ({ ok: true as const })),
     applyProductUpdate: vi.fn(async () => ({ ok: true as const })),
+    removeProduct: vi.fn(async () => ({ accepted: true, configPreserved: false })),
     integrationsRescan: vi.fn(async () => ({ ok: true as const })),
     integrationsRunOperation: vi.fn(async () => ({
       ok: true,

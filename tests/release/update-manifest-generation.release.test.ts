@@ -18,7 +18,7 @@ describe('update manifest generation', () => {
     }
   });
 
-  it('writes a signed manifest for supported Desktop and complete Product assets', async () => {
+  it('writes a signed manifest for supported Product Installer and complete Product assets', async () => {
     const root = join(tmpdir(), `debrute-update-manifest-${process.pid}-${Date.now()}`);
     roots.push(root);
     await mkdir(root, { recursive: true });
@@ -40,7 +40,7 @@ describe('update manifest generation', () => {
     expect(manifest.assets).toHaveLength(6);
     expect(manifest.assets[0]).toMatchObject({
       kind: 'desktop',
-      name: 'debrute-desktop-0.2.0-macos-arm64.dmg',
+      name: 'debrute-installer-0.2.0-macos-arm64.dmg',
       sha256: createHash('sha256').update('macos arm64').digest('hex'),
       sizeBytes: Buffer.byteLength('macos arm64')
     });
@@ -50,7 +50,7 @@ describe('update manifest generation', () => {
     }));
   });
 
-  it('fails when a required desktop asset is missing', async () => {
+  it('fails when a required Product Installer asset is missing', async () => {
     const root = join(tmpdir(), `debrute-update-manifest-missing-${process.pid}-${Date.now()}`);
     roots.push(root);
     await mkdir(root, { recursive: true });
@@ -96,9 +96,9 @@ describe('update manifest generation', () => {
 
 async function writeReleaseAssets(root: string, version: string): Promise<void> {
   await Promise.all([
-    writeFile(join(root, `debrute-desktop-${version}-macos-arm64.dmg`), 'macos arm64'),
-    writeFile(join(root, `debrute-desktop-${version}-macos-x64.dmg`), 'macos x64'),
-    writeFile(join(root, `debrute-desktop-${version}-windows-x64.exe`), 'windows x64'),
+    writeFile(join(root, `debrute-installer-${version}-macos-arm64.dmg`), 'macos arm64'),
+    writeFile(join(root, `debrute-installer-${version}-macos-x64.dmg`), 'macos x64'),
+    writeFile(join(root, `debrute-installer-${version}-windows-x64.exe`), 'windows x64'),
     writeFile(join(root, `debrute-product-${version}-macos-arm64.zip`), 'macos arm64 product'),
     writeFile(join(root, `debrute-product-${version}-macos-x64.zip`), 'macos x64 product'),
     writeFile(join(root, `debrute-product-${version}-windows-x64.zip`), 'windows x64 product')

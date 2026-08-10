@@ -46,14 +46,12 @@
   font-family: var(--db-font-display);
 }
 
-.db-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--db-z-overlays);
-  display: grid;
-  place-items: center;
-  padding: var(--db-space-5);
+.db-modal::backdrop {
   background: color-mix(in oklch, var(--db-bg) 58%, transparent);
+}
+
+dialog.db-modal:not([open]) {
+  display: none;
 }
 
 .db-modal {
@@ -66,5 +64,6 @@
   border-radius: var(--db-radius-lg);
   padding: var(--db-space-5);
   background: var(--db-surface-1);
+  color: var(--db-text);
   box-shadow: var(--db-shadow-floating);
 }

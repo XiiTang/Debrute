@@ -27,6 +27,7 @@ use crate::{
         ActivityChange, ActivityEvent, ActivityMessage, ActivityNoticeReport, ActivityProgress,
         ActivityTaskStatus,
     },
+    control::RuntimeStatus,
     global::{GlobalRuntimeChange, GlobalRuntimeEvent},
     project::{ProjectChange, ProjectStreamItem},
 };
@@ -620,6 +621,7 @@ pub(super) fn product_api_router() -> Router<WorkbenchRouterState> {
     Router::new()
         .route("/runtime/product/update/check", post(product_check))
         .route("/runtime/product/update/apply", post(product_apply))
+        .route("/runtime/product/remove", post(product_remove))
 }
 
 pub(super) fn cli_api_router() -> Router<WorkbenchRouterState> {
@@ -722,6 +724,40 @@ async fn product_apply(
 enum ProductCall {
     Check,
     Apply(ProductUpdateInitiator),
+    Remove { keep_config: bool },
+}
+
+enum ProductCallResult {
+    Acknowledged,
+    JsonBody(Value),
+}
+
+async fn product_remove(State(state): State<WorkbenchRouterState>, request: Request) -> Response {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Input {
+        confirmed: bool,
+        keep_config: bool,
+    }
+    let input: Input = match json_body(request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    if !input.confirmed {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "product_removal_confirmation_required",
+            "Product removal requires one explicit confirmation.",
+        );
+    }
+    product_call(
+        &state,
+        ProductCall::Remove {
+            keep_config: input.keep_config,
+        },
+        Value::Null,
+    )
+    .await
 }
 
 async fn product_call(state: &WorkbenchRouterState, call: ProductCall, input: Value) -> Response {
@@ -732,13 +768,19 @@ async fn product_call(state: &WorkbenchRouterState, call: ProductCall, input: Va
             .expect("Product routes are registered only with a Product service"),
     );
     let result = tokio::task::spawn_blocking(move || match call {
-        ProductCall::Check => product.check(),
-        ProductCall::Apply(initiator) => product.apply(&input, initiator),
+        ProductCall::Check => product.check().map(|_| ProductCallResult::Acknowledged),
+        ProductCall::Apply(initiator) => product
+            .apply(&input, initiator)
+            .map(|_| ProductCallResult::Acknowledged),
+        ProductCall::Remove { keep_config } => {
+            product.remove(keep_config).map(ProductCallResult::JsonBody)
+        }
     })
     .await
     .expect("Product worker must complete");
     match result {
-        Ok(_) => Json(json!({"ok": true})).into_response(),
+        Ok(ProductCallResult::Acknowledged) => Json(json!({"ok": true})).into_response(),
+        Ok(ProductCallResult::JsonBody(value)) => Json(value).into_response(),
         Err(error) => service_error_response(error),
     }
 }
@@ -921,8 +963,9 @@ async fn cli_run(State(state): State<WorkbenchRouterState>, request: Request) ->
         Err(response) => return response,
     };
     let _permit = if cli_request_requires_product_work(&body) {
-        let Some(permit) = state.services.runtime_state().begin_product_work() else {
-            return product_work_unavailable_response();
+        let runtime_state = state.services.runtime_state();
+        let Some(permit) = runtime_state.begin_product_work() else {
+            return product_work_unavailable_response(runtime_state.status());
         };
         Some(permit)
     } else {
@@ -938,8 +981,9 @@ async fn cli_model_operation_submit(
     State(state): State<WorkbenchRouterState>,
     request: Request,
 ) -> Response {
-    let Some(_permit) = state.services.runtime_state().begin_product_work() else {
-        return product_work_unavailable_response();
+    let runtime_state = state.services.runtime_state();
+    let Some(_permit) = runtime_state.begin_product_work() else {
+        return product_work_unavailable_response(runtime_state.status());
     };
     const INPUT_LIMIT: u64 = crate::model_operation::MAX_MODEL_OPERATION_INPUT_BYTES as u64;
     let mut parts = match read_multipart_limited(
@@ -1013,12 +1057,30 @@ fn cli_request_requires_product_work(request: &Value) -> bool {
         .is_some_and(|spec| spec.writes != "none")
 }
 
-fn product_work_unavailable_response() -> Response {
-    error_response(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "product_update_preparing",
-        "Runtime is preparing a Product update and is not accepting new work.",
-    )
+pub(super) fn product_work_unavailable_response(status: RuntimeStatus) -> Response {
+    let (code, message) = product_work_unavailable_details(status);
+    error_response(StatusCode::SERVICE_UNAVAILABLE, code, message)
+}
+
+fn product_work_unavailable_details(status: RuntimeStatus) -> (&'static str, &'static str) {
+    match status {
+        RuntimeStatus::RemovalPreparing | RuntimeStatus::Removing => (
+            "product_removal_in_progress",
+            "Runtime is removing the Product and is not accepting new work.",
+        ),
+        RuntimeStatus::Starting => (
+            "runtime_starting",
+            "Runtime is starting and is not accepting new work.",
+        ),
+        RuntimeStatus::Exiting => (
+            "runtime_exiting",
+            "Runtime is exiting and is not accepting new work.",
+        ),
+        RuntimeStatus::Ready | RuntimeStatus::Replacing => (
+            "product_update_preparing",
+            "Runtime is preparing a Product update and is not accepting new work.",
+        ),
+    }
 }
 
 async fn cli_run_stream(
@@ -1300,6 +1362,30 @@ mod tests {
             "command": "unknown.command"
         })));
         assert!(!cli_request_requires_product_work(&json!({})));
+    }
+
+    #[test]
+    fn product_work_rejection_names_the_authoritative_lifecycle() {
+        assert_eq!(
+            product_work_unavailable_details(RuntimeStatus::RemovalPreparing).0,
+            "product_removal_in_progress"
+        );
+        assert_eq!(
+            product_work_unavailable_details(RuntimeStatus::Removing).0,
+            "product_removal_in_progress"
+        );
+        assert_eq!(
+            product_work_unavailable_details(RuntimeStatus::Starting).0,
+            "runtime_starting"
+        );
+        assert_eq!(
+            product_work_unavailable_details(RuntimeStatus::Exiting).0,
+            "runtime_exiting"
+        );
+        assert_eq!(
+            product_work_unavailable_details(RuntimeStatus::Replacing).0,
+            "product_update_preparing"
+        );
     }
 
     #[test]

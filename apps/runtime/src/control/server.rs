@@ -40,6 +40,7 @@ pub struct RuntimeControlState {
     active_product_work: Mutex<usize>,
     product_work_drained: Condvar,
     activation_service: Mutex<Option<Arc<dyn RuntimeActivationService>>>,
+    removal_service: Mutex<Option<Arc<dyn RuntimeProductRemovalService>>>,
 }
 
 pub struct RuntimeWorkPermit {
@@ -49,6 +50,45 @@ pub struct RuntimeWorkPermit {
 pub struct ProductUpdateTransitionFailure {
     pub message: String,
     pub reversible: bool,
+}
+
+pub struct ProductRemovalCommit {
+    launch: Option<Box<dyn FnOnce() -> Result<(), String> + Send>>,
+    cancel: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl ProductRemovalCommit {
+    #[must_use]
+    pub fn new(
+        launch: impl FnOnce() -> Result<(), String> + Send + 'static,
+        cancel: impl FnOnce() + Send + 'static,
+    ) -> Self {
+        Self {
+            launch: Some(Box::new(launch)),
+            cancel: Some(Box::new(cancel)),
+        }
+    }
+
+    fn launch(mut self) -> Result<(), String> {
+        self.cancel.take();
+        self.launch.take().expect("removal launch is one-shot")()
+    }
+
+    fn cancel(mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            cancel();
+        }
+    }
+}
+
+pub trait RuntimeProductRemovalService: Send + Sync {
+    /// Prepares one exact Product removal without changing Runtime lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed rejection when the installed Product cannot be validated
+    /// and staged for detached removal.
+    fn prepare_removal(&self, keep_config: bool) -> Result<ProductRemovalCommit, ControlErrorCode>;
 }
 
 impl ProductUpdateTransitionFailure {
@@ -89,6 +129,8 @@ enum RuntimeLifecycle {
     UpdatePreparing(String),
     Exiting,
     Replacing(String),
+    RemovalPreparing,
+    Removing,
 }
 
 struct RuntimeControlInner {
@@ -150,6 +192,7 @@ impl RuntimeControlState {
             active_product_work: Mutex::new(0),
             product_work_drained: Condvar::new(),
             activation_service: Mutex::new(None),
+            removal_service: Mutex::new(None),
         }
     }
 
@@ -176,7 +219,7 @@ impl RuntimeControlState {
     pub fn is_stopping(&self) -> bool {
         matches!(
             *self.lock_lifecycle(),
-            RuntimeLifecycle::Exiting | RuntimeLifecycle::Replacing(_)
+            RuntimeLifecycle::Exiting | RuntimeLifecycle::Replacing(_) | RuntimeLifecycle::Removing
         )
     }
 
@@ -445,7 +488,117 @@ impl RuntimeControlState {
             }
             QuitAdmission::AlreadyAccepted => Ok(()),
             QuitAdmission::UpdateWon => Err(ControlErrorCode::UpdateCommitInProgress),
+            QuitAdmission::RemovalWon => Err(ControlErrorCode::RemovalInProgress),
         }
+    }
+
+    /// Commits one prepared whole-Product removal and drains existing work before exit.
+    ///
+    /// # Errors
+    ///
+    /// Returns `update_commit_in_progress` or `removal_in_progress` when another
+    /// irreversible Product transition owns the lifecycle, or
+    /// `product_removal_unavailable` when the drain executor or detached finalizer cannot start.
+    pub fn request_product_removal(
+        self: &Arc<Self>,
+        commit: ProductRemovalCommit,
+    ) -> Result<(), ControlErrorCode> {
+        let transition = self.lock_product_transition();
+        let mut lifecycle = self.lock_lifecycle();
+        match &*lifecycle {
+            RuntimeLifecycle::Ready => {}
+            RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
+                drop(lifecycle);
+                drop(transition);
+                commit.cancel();
+                return Err(ControlErrorCode::UpdateCommitInProgress);
+            }
+            RuntimeLifecycle::RemovalPreparing | RuntimeLifecycle::Removing => {
+                drop(lifecycle);
+                drop(transition);
+                commit.cancel();
+                return Err(ControlErrorCode::RemovalInProgress);
+            }
+            RuntimeLifecycle::Starting | RuntimeLifecycle::Exiting => {
+                drop(lifecycle);
+                drop(transition);
+                commit.cancel();
+                return Err(ControlErrorCode::RuntimeExiting);
+            }
+        }
+        let (drain_sender, drain_receiver) = std::sync::mpsc::channel();
+        let state = Arc::clone(self);
+        if thread::Builder::new()
+            .name("debrute-product-removal".to_owned())
+            .spawn(move || {
+                if drain_receiver.recv().is_err() {
+                    return;
+                }
+                let _transition = state.lock_product_transition();
+                state.wait_for_product_work_to_drain();
+                let mut lifecycle = state.lock_lifecycle();
+                if *lifecycle != RuntimeLifecycle::RemovalPreparing {
+                    return;
+                }
+                *lifecycle = RuntimeLifecycle::Removing;
+                drop(lifecycle);
+                state.broadcast_event_with_flush_budget(
+                    &ControlEvent::ProductRemoving,
+                    Duration::from_millis(250),
+                );
+            })
+            .is_err()
+        {
+            drop(lifecycle);
+            drop(transition);
+            commit.cancel();
+            return Err(ControlErrorCode::ProductRemovalUnavailable);
+        }
+        if commit.launch().is_err() {
+            drop(lifecycle);
+            drop(transition);
+            return Err(ControlErrorCode::ProductRemovalUnavailable);
+        }
+        *lifecycle = RuntimeLifecycle::RemovalPreparing;
+        drop(lifecycle);
+        drop(transition);
+        drain_sender
+            .send(())
+            .expect("prepared Product-removal drain thread must await its commit signal");
+        Ok(())
+    }
+
+    /// Installs the one Product-removal preparation service.
+    #[must_use]
+    pub fn install_product_removal_service(
+        &self,
+        service: Arc<dyn RuntimeProductRemovalService>,
+    ) -> bool {
+        let mut current = self
+            .removal_service
+            .lock()
+            .expect("Runtime removal-service lock poisoned");
+        if current.is_some() {
+            return false;
+        }
+        *current = Some(service);
+        true
+    }
+
+    /// Prepares and commits removal through the installed Runtime service.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed Product transition rejection.
+    pub fn remove_product(self: &Arc<Self>, keep_config: bool) -> Result<(), ControlErrorCode> {
+        let service = self
+            .removal_service
+            .lock()
+            .expect("Runtime removal-service lock poisoned")
+            .clone()
+            .ok_or(ControlErrorCode::ProductRemovalUnavailable)?;
+        let commit = service.prepare_removal(keep_config)?;
+        self.request_product_removal(commit)
     }
 
     /// Executes one Ready activation through the installed platform adapter.
@@ -467,6 +620,9 @@ impl RuntimeControlState {
             RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
                 return Err(ControlErrorCode::UpdateCommitInProgress);
             }
+            RuntimeLifecycle::RemovalPreparing | RuntimeLifecycle::Removing => {
+                return Err(ControlErrorCode::RemovalInProgress);
+            }
             RuntimeLifecycle::Ready => {}
         }
         if matches!(intent, ActivationIntent::EnsureRuntime) {
@@ -485,6 +641,9 @@ impl RuntimeControlState {
             RuntimeLifecycle::Exiting => return QuitAdmission::AlreadyAccepted,
             RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
                 return QuitAdmission::UpdateWon;
+            }
+            RuntimeLifecycle::RemovalPreparing | RuntimeLifecycle::Removing => {
+                return QuitAdmission::RemovalWon;
             }
             RuntimeLifecycle::Starting | RuntimeLifecycle::Ready => {}
         }
@@ -506,7 +665,10 @@ impl RuntimeControlState {
     ) -> Result<ConnectionLease, ControlServerError> {
         let lifecycle = self.lock_lifecycle();
         let status = lifecycle.status();
-        if matches!(status, RuntimeStatus::Exiting | RuntimeStatus::Replacing) {
+        if matches!(
+            status,
+            RuntimeStatus::Exiting | RuntimeStatus::Replacing | RuntimeStatus::Removing
+        ) {
             sender
                 .send(ServerMessage::handshake_rejected(
                     HandshakeRejection::RuntimeStopping,
@@ -541,7 +703,7 @@ impl RuntimeControlState {
     }
 
     fn response_for(
-        &self,
+        self: &Arc<Self>,
         connection_id: &ConnectionId,
         request: &ControlRequest,
     ) -> ControlResponse {
@@ -576,6 +738,9 @@ impl RuntimeControlState {
                     RuntimeStatus::Starting => ControlErrorCode::RuntimeStarting,
                     RuntimeStatus::Exiting => ControlErrorCode::RuntimeExiting,
                     RuntimeStatus::Replacing => ControlErrorCode::UpdateCommitInProgress,
+                    RuntimeStatus::RemovalPreparing | RuntimeStatus::Removing => {
+                        ControlErrorCode::RemovalInProgress
+                    }
                     RuntimeStatus::Ready => unreachable!("Ready was checked"),
                 },
             };
@@ -584,7 +749,7 @@ impl RuntimeControlState {
     }
 
     fn ready_response_for(
-        &self,
+        self: &Arc<Self>,
         connection_id: &ConnectionId,
         request: &ControlRequest,
     ) -> ControlResponse {
@@ -668,6 +833,14 @@ impl RuntimeControlState {
                     ControlResponse::Rejected {
                         code: ControlErrorCode::InvalidDesktopWindow,
                     }
+                }
+            }
+            ControlRequest::RemoveProduct { keep_config } => {
+                match self.remove_product(*keep_config) {
+                    Ok(()) => ControlResponse::ProductRemovalAccepted {
+                        config_preserved: *keep_config,
+                    },
+                    Err(code) => ControlResponse::Rejected { code },
                 }
             }
             ControlRequest::Inspect | ControlRequest::QuitProduct => {
@@ -924,6 +1097,8 @@ impl RuntimeLifecycle {
             Self::Ready | Self::UpdatePreparing(_) => RuntimeStatus::Ready,
             Self::Exiting => RuntimeStatus::Exiting,
             Self::Replacing(_) => RuntimeStatus::Replacing,
+            Self::RemovalPreparing => RuntimeStatus::RemovalPreparing,
+            Self::Removing => RuntimeStatus::Removing,
         }
     }
 }
@@ -944,6 +1119,7 @@ enum QuitAdmission {
     Started,
     AlreadyAccepted,
     UpdateWon,
+    RemovalWon,
 }
 
 struct ConnectionLease {
@@ -1121,6 +1297,9 @@ pub fn serve_control_connection<Stream: ControlTransport>(
                     QuitAdmission::UpdateWon => ControlResponse::Rejected {
                         code: ControlErrorCode::UpdateCommitInProgress,
                     },
+                    QuitAdmission::RemovalWon => ControlResponse::Rejected {
+                        code: ControlErrorCode::RemovalInProgress,
+                    },
                 };
                 sender
                     .send(ServerMessage::response(request_id, response))
@@ -1128,6 +1307,34 @@ pub fn serve_control_connection<Stream: ControlTransport>(
                 if admission == QuitAdmission::Started {
                     state.finish_product_quit();
                 }
+            }
+            Ok(ClientMessage::Request {
+                request_id,
+                request: ControlRequest::RemoveProduct { keep_config },
+            }) => {
+                // Keep one admitted unit alive until the terminal acceptance is
+                // physically flushed. Removal drain cannot reach `Removing`
+                // and close this transport before the initiating CLI receives it.
+                let delivery = state.begin_product_work();
+                let response = state.response_for(
+                    &connection.connection_id,
+                    &ControlRequest::RemoveProduct { keep_config },
+                );
+                if matches!(response, ControlResponse::ProductRemovalAccepted { .. }) {
+                    let receipt = sender
+                        .send_with_flush_receipt(ServerMessage::response(request_id, response))
+                        .map_err(ControlServerError::Outbound)?;
+                    if receipt.recv_timeout(Duration::from_secs(5)).is_err() {
+                        sender.close();
+                        drop(delivery);
+                        return Err(ControlServerError::Outbound(OutboundError::Closed));
+                    }
+                } else {
+                    sender
+                        .send(ServerMessage::response(request_id, response))
+                        .map_err(ControlServerError::Outbound)?;
+                }
+                drop(delivery);
             }
             Ok(ClientMessage::Request {
                 request_id,

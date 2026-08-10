@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::{
-    control::{RuntimeControlState, RuntimeWorkPermit},
+    control::{RuntimeControlState, RuntimeStatus, RuntimeWorkPermit},
     project::{
         CanonicalProjectRoot, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath,
         ProjectError, ProjectPathKind, ProjectSessionRegistry, ProjectSessionSummary,
@@ -825,12 +825,9 @@ impl PhotoshopIntegration {
     }
 
     fn begin_product_transfer(&self) -> Result<RuntimeWorkPermit, PhotoshopError> {
-        self.runtime_state.begin_product_work().ok_or_else(|| {
-            PhotoshopError::new(
-                PhotoshopErrorCode::Unavailable,
-                "Runtime is preparing a Product update and is not accepting new Photoshop transfers.",
-            )
-        })
+        self.runtime_state
+            .begin_product_work()
+            .ok_or_else(|| product_work_unavailable(self.runtime_state.status()))
     }
 
     fn reserve_export_session(
@@ -1391,6 +1388,24 @@ fn file_too_large() -> PhotoshopError {
     )
 }
 
+fn product_work_unavailable(status: RuntimeStatus) -> PhotoshopError {
+    let message = match status {
+        RuntimeStatus::RemovalPreparing | RuntimeStatus::Removing => {
+            "Runtime is completing Product removal and is not accepting new Photoshop transfers."
+        }
+        RuntimeStatus::Starting => {
+            "Runtime is completing startup and is not accepting new Photoshop transfers."
+        }
+        RuntimeStatus::Exiting => {
+            "Runtime is completing Product exit and is not accepting new Photoshop transfers."
+        }
+        RuntimeStatus::Ready | RuntimeStatus::Replacing => {
+            "Runtime is completing Product update and is not accepting new Photoshop transfers."
+        }
+    };
+    PhotoshopError::new(PhotoshopErrorCode::Unavailable, message)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1415,6 +1430,16 @@ mod tests {
     use super::*;
 
     struct TemporaryDirectory(PathBuf);
+
+    #[test]
+    fn product_work_rejection_names_product_removal() {
+        for status in [RuntimeStatus::RemovalPreparing, RuntimeStatus::Removing] {
+            let error = product_work_unavailable(status);
+            assert_eq!(error.code(), PhotoshopErrorCode::Unavailable);
+            assert!(error.to_string().contains("Product removal"));
+            assert!(!error.to_string().contains("Product update"));
+        }
+    }
 
     impl TemporaryDirectory {
         fn new(label: &str) -> Self {
