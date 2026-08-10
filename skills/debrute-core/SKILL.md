@@ -114,10 +114,12 @@ Canvas feedback is stored as current state in:
 Missing file means there is no Canvas feedback. Entries are keyed by exact
 Project Paths; the Project root uses `""`. Files, directories, and root may each
 have independent entries, but `.debrute/**` cannot be a Feedback target.
-Directory feedback does not apply to descendants, and feedback does not follow
-a rename or move. The `marks` array contains only selected marks; unselected
-marks are absent. The mark set is `like`, `dislike`, `check`, `cross`, `pending`,
-`important`, and `needs_revision`.
+Directory feedback does not apply to descendants. Delete removes Feedback for
+that path subtree. Rename and Move rewrite the source path or directory prefix;
+overwrite prunes the destination before rewriting the source. The `marks` array
+contains only selected marks; unselected marks are absent. The mark set is
+`like`, `dislike`, `check`, `cross`, `pending`, `important`, and
+`needs_revision`.
 
 Entries use one unified `items` array for node comments, image spatial items, and video moment items. Node comments are valid for every Project Path target; node-scoped spatial items require image files, and moment-scoped items require video files:
 

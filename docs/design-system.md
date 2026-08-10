@@ -11,7 +11,7 @@ implementationStatus: implemented
 
 ## Overview
 
-Debrute is a browser-first local creative production workbench for browser and Electron pointer-and-keyboard environments. The UI is compact, theme-aware, expressive, and built for repeated daily use. Phone and touch-first layouts are outside the product contract.
+Debrute is a browser-first, project-scale local visual workbench for working with AI Agents in browser and Electron pointer-and-keyboard environments. The UI is compact, theme-aware, expressive, and built for repeated daily use. Phone and touch-first layouts are outside the product contract.
 
 This document defines the current implemented visual system. Executable tokens,
 shared primitives, generated brand assets, and the source-owned platform styles

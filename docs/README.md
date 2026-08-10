@@ -1,8 +1,17 @@
 # Documentation
 
-This index points to Debrute's current public technical documentation. Source,
-tests, generated command help, and executable contracts remain authoritative
-when prose and implementation differ.
+This index points to Debrute's user guides and current public technical
+documentation. Source, tests, generated command help, and executable contracts
+remain authoritative when prose and implementation differ.
+
+## Start Here
+
+- [Getting started](./getting-started.md) — open a real Project, work with an
+  external Agent, review mixed files on Canvas, and use structured Feedback.
+- [快速开始](./getting-started.zh-CN.md) — 中文用户上手指南。
+- [Project README](../README.md) — concise product overview and development
+  quick start.
+- [中文 README](../README.zh-CN.md) — 中文产品概览和开发版本快速开始。
 
 ## Product And Domain Model
 
