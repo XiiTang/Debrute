@@ -10,20 +10,12 @@ describe('FloatingPanel', () => {
       <I18nProvider locale="en">
         <WorkbenchFloatingPanelShell
           panelId="explorer"
-          state={{
-            panels: {
-              ...DEFAULT_FLOATING_PANEL_STATE.panels,
-              explorer: {
-                ...DEFAULT_FLOATING_PANEL_STATE.panels.explorer,
-                open: true
-              }
-            }
-          }}
-          orderState={{ orderBackToFront: [] }}
+          layout={{ ...DEFAULT_FLOATING_PANEL_STATE.panels.explorer, open: true }}
+          zIndex={1}
           onClose={() => undefined}
-          onBringToFront={() => undefined}
-          onDrag={() => undefined}
-          onResize={() => undefined}
+          onFocus={() => undefined}
+          resolveRect={(rect) => rect}
+          onCommitRect={() => undefined}
         >
           <div>Explorer content</div>
         </WorkbenchFloatingPanelShell>

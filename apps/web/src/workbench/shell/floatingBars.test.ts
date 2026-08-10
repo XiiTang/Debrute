@@ -19,7 +19,7 @@ import {
 } from './floatingBars';
 import {
   TITLE_BAR_RESERVED_RECT,
-  WORKBENCH_FLOATING_DOCK_EDGE_INSET,
+  WORKBENCH_CHROME_EDGE_INSET,
   WORKBENCH_TITLE_BAR_HEIGHT
 } from './workbenchLayers';
 
@@ -259,7 +259,7 @@ describe('floating bar placement', () => {
       width: 1000,
       height: 700
     })).toEqual({
-      x: WORKBENCH_FLOATING_DOCK_EDGE_INSET.horizontal,
+      x: WORKBENCH_CHROME_EDGE_INSET.horizontal,
       y: 658,
       width: CANVAS_MINIMAP_BUTTON_SIZE.width,
       height: CANVAS_MINIMAP_BUTTON_SIZE.height

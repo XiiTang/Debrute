@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   closeTextEditorWindowState,
+  commitTextEditorWindowRect,
   constrainOpenTextEditorWindowsToViewport,
-  dragTextEditorWindowState,
   openTextEditorWindowState,
-  resizeTextEditorWindowState,
+  resolveTextEditorWindowGestureRect,
   textBufferStatus
 } from './textEditorWindows';
 
@@ -50,7 +50,7 @@ describe('text editor window state', () => {
     });
   });
 
-  it('closes and drags existing windows without inventing missing entries', () => {
+  it('closes and commits moved windows without inventing missing entries', () => {
     const windows = {
       'notes/brief.md': {
         projectRelativePath: 'notes/brief.md',
@@ -64,7 +64,12 @@ describe('text editor window state', () => {
 
     expect(closeTextEditorWindowState(windows, 'missing.md')).toBe(windows);
     expect(closeTextEditorWindowState(windows, 'notes/brief.md')['notes/brief.md']!.open).toBe(false);
-    expect(dragTextEditorWindowState(windows, 'notes/brief.md', { dx: -20, dy: 7 }, viewport)['notes/brief.md']).toMatchObject({
+    const preview = resolveTextEditorWindowGestureRect({
+      ...windows['notes/brief.md'],
+      x: -8,
+      y: 27
+    }, { kind: 'move' }, viewport);
+    expect(commitTextEditorWindowRect(windows, 'notes/brief.md', preview)['notes/brief.md']).toMatchObject({
       x: 0,
       y: 27
     });
@@ -115,39 +120,59 @@ describe('text editor window state', () => {
       }
     };
 
-    expect(resizeTextEditorWindowState(windows, 'missing.md', {
-      direction: 'se',
+    const expanded = resolveTextEditorWindowGestureRect({
       x: 100,
       y: 120,
       width: 720,
       height: 500
-    }, viewport)).toBe(windows);
+    }, { kind: 'resize', direction: 'se' }, viewport);
 
-    expect(resizeTextEditorWindowState(windows, 'notes/brief.md', {
-      direction: 'se',
-      x: 100,
-      y: 120,
-      width: 720,
-      height: 500
-    }, viewport)['notes/brief.md']).toMatchObject({
+    expect(commitTextEditorWindowRect(windows, 'missing.md', expanded)).toBe(windows);
+    expect(commitTextEditorWindowRect(windows, 'notes/brief.md', expanded)['notes/brief.md']).toMatchObject({
       x: 100,
       y: 120,
       width: 720,
       height: 500
     });
 
-    expect(resizeTextEditorWindowState(windows, 'notes/brief.md', {
-      direction: 'w',
+    const clamped = resolveTextEditorWindowGestureRect({
       x: 660,
       y: 120,
       width: 40,
       height: 420
-    }, viewport)['notes/brief.md']).toMatchObject({
+    }, { kind: 'resize', direction: 'w' }, viewport);
+    expect(commitTextEditorWindowRect(windows, 'notes/brief.md', clamped)['notes/brief.md']).toMatchObject({
       x: 280,
       y: 120,
       width: 420,
       height: 420
     });
+  });
+
+  it('resolves preview geometry without changing text editor state until commit', () => {
+    const windows = {
+      'notes/brief.md': {
+        projectRelativePath: 'notes/brief.md',
+        open: true,
+        x: 100,
+        y: 120,
+        width: 600,
+        height: 420
+      }
+    };
+    const preview = resolveTextEditorWindowGestureRect({
+      x: 660,
+      y: 120,
+      width: 40,
+      height: 420
+    }, { kind: 'resize', direction: 'w' }, viewport);
+
+    expect(preview).toEqual({ x: 280, y: 120, width: 420, height: 420 });
+    expect(commitTextEditorWindowRect(windows, 'notes/brief.md', preview)['notes/brief.md']).toEqual({
+      ...windows['notes/brief.md'],
+      ...preview
+    });
+    expect(windows['notes/brief.md'].x).toBe(100);
   });
 
   it('does not surface the default saved text buffer state', () => {

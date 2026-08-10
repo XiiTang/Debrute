@@ -366,9 +366,20 @@ dragging, menus, the title, and window controls. Resting title-bar chrome uses
 only local text and icon contrast treatment; hover, focus, and expanded controls
 may use a local control background.
 
-`WorkbenchFloatingPanelShell` owns drag and resize geometry, placement, z-order,
-close placement, continuous background, and body overflow. The shell renders
-each panel name once.
+`WorkbenchWindowHost` owns the Workbench panel dock, committed panel geometry,
+Project layout persistence, and one z-order for panels and floating text
+editors. `WorkbenchFloatingPanelShell` owns the shared panel frame, drag and
+resize surfaces, close placement, continuous background, and body overflow. The
+shell renders each panel name once.
+
+Persistent Canvas controls occupy the lower Workbench region; upper
+panel-launch controls belong to Workbench chrome. This is both an ownership
+boundary and a stable placement convention. Mini Map, Reset Canvas Layout, and
+Hierarchy Edge Visibility use the lower part of `canvas-chrome-layer`;
+contextual Canvas Feedback actions remain beside their Canvas target. Explorer,
+Inspector, Feedback Panel, Settings, and Terminal launch from
+`workbench-dock-layer`. Moving a control for collision avoidance does not permit
+crossing this semantic boundary.
 
 Settings uses General, Appearance, Feedback, Models, Plugins, Integrations, and
 System navigation, one title per selected page, explicit loading/error/ready content, ordinary
@@ -396,8 +407,8 @@ content directly over the Canvas background without a page, card, or
 full-viewport surface. Content is centered within the main viewport below the
 title-bar hit area. A Project whose command authority was removed by preemption
 or an ended Runtime connection keeps its last confirmed Canvas visible but
-frozen. A solid, non-dismissible dialog blocks the Canvas, floating bars,
-panels, title bar, and Activity surfaces without dimming or covering the Canvas.
+frozen. A solid, non-dismissible dialog blocks the Canvas, Canvas chrome,
+Workbench dock and windows, title bar, and Activity surfaces without dimming or covering the Canvas.
 The blocker is the highest shell layer and freezes every surface beneath it.
 
 ## Surface Application Matrix
@@ -406,6 +417,7 @@ The blocker is the highest shell layer and freezes every surface beneath it.
 | --- | --- | --- |
 | Title bar and shell | One exact Canvas background continues behind a transparent title bar; no separate fill, texture, gradient, or edge | The title-bar hit area owns drag, menus, title, and window controls while Canvas content remains visible beneath it |
 | Floating panels | Flat paper blocks with fixed cut edges and 4px hard underlayer | Drag, resize, z-order, overflow, and dimensions |
+| Workbench panel dock | Compact upper-region Cutout controls with no enclosing rail | Opens Explorer, Inspector, Feedback Panel, Settings, and Terminal; never owns Canvas presentation commands |
 | Menus and overlays | Opaque paper surface and 4px hard underlayer; no perimeter line | Commands, placement, keyboard behavior, and item density |
 | Buttons, fields, tabs | Solid block or small fixed cut mask with 2px offset underlayer; no perimeter or active underline | Control height, label wrapping, and hit target |
 | Tags, chips, status labels | Cut-paper label or rectangular underlayer; no capsule | Text, state meaning, and footprint |
@@ -415,7 +427,7 @@ The blocker is the highest shell layer and freezes every surface beneath it.
 | Explorer, Settings, Inspector | Restrained grain and geometry at row scale | Information architecture and row geometry |
 | Project Open | Centered title, status, error context, and action directly over the Canvas background | Opening replaces the entry with progress; content contains no page, card, or mascot |
 | Canvas viewport | Neutral audited field and exact grid; no grain | Content judgment, Canvas semantics, handles, feedback colors |
-| Canvas chrome | Brand panels, bars, menus, and cut controls | Canvas geometry and media presentation |
+| Canvas chrome | Lower-region brand panels, bars, menus, and cut controls | Canvas geometry and media presentation; never opens Workbench panels |
 | Terminal viewport | Warm-neutral field, coordinated high-contrast ANSI semantics, and precise mono typography | ANSI role distinctions; no texture, rough masks, ornament, or geometry changes |
 | Terminal chrome | Panel-colored tab bar with the active tab exactly matching the Terminal viewport | Sessions, status, emulator geometry, and motion |
 
@@ -462,7 +474,7 @@ Features do not use another feature's CSS classes. Reuse moves into `ui` only wh
 
 Canvas may own zoom-scaled handles and hit targets, media preview sizing, editor geometry, annotation colors, node layout, and overlay placement. The terminal emulator may own emulator theme colors. These exceptions do not create alternate buttons, fields, cards, menus, status components, Activity cards, or panel shells.
 
-Canvas feedback bars use the shared floating-bar container and shared controls. Their size is derived from the visible fixed-size actions, creator, and saved-item row rather than media-specific width buckets. The creator is a compact cut-paper field; saved feedback items use the shared cut-paper label geometry rather than capsules. Canvas has no persistent node-wide feedback border; feedback kinds remain visible in the editing bar and media annotations.
+Canvas feedback bars use the Canvas chrome layer and shared controls. Their size is derived from the visible fixed-size actions, creator, and saved-item row rather than media-specific width buckets. The creator is a compact cut-paper field; saved feedback items use the shared cut-paper label geometry rather than capsules. Canvas has no persistent node-wide feedback border; feedback kinds remain visible in the editing bar and media annotations.
 
 ## Enforcement
 

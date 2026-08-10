@@ -3,8 +3,9 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { WorkbenchFloatingTextEditorWindowFeature } from './FloatingTextEditorWindowFeature.js';
-import { textEditorWindowIdentity } from '../shell/workbenchWindowOrder';
 import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from '../shell/windowBounds';
+import { WorkbenchWindowHost } from '../shell/WorkbenchWindowHost.js';
+import { I18nProvider } from '../i18n/index.js';
 
 vi.mock('./CanvasTextEditor.js', () => {
   return {
@@ -55,27 +56,32 @@ async function renderFeature() {
   const root = createRoot(container);
   await act(async () => {
     root.render(
-      <WorkbenchFloatingTextEditorWindowFeature
-        locale="en"
-        windowState={{
-          projectRelativePath: 'notes/readme.md',
-          open: true,
-          x: 20,
-          y: 30,
-          width: 640,
-          height: 420
-        }}
-        orderState={{
-          orderBackToFront: [textEditorWindowIdentity('notes/readme.md')],
-          focusedWindow: textEditorWindowIdentity('notes/readme.md')
-        }}
-        buffer={textBuffer()}
-        actions={actionsFixture()}
-        onBringToFront={() => undefined}
-        onClose={() => undefined}
-        onDrag={() => undefined}
-        onResize={() => undefined}
-      />
+      <I18nProvider locale="en">
+        <WorkbenchWindowHost
+          viewportRect={{ x: 0, y: 0, width: 1280, height: 720 }}
+          interactionBlocked={false}
+          disabledPanelIds={[]}
+          onPanelIntent={() => undefined}
+          renderPanelBody={(panelId) => <div>{panelId}</div>}
+        >
+          <WorkbenchFloatingTextEditorWindowFeature
+            locale="en"
+            windowState={{
+              projectRelativePath: 'notes/readme.md',
+              open: true,
+              x: 20,
+              y: 30,
+              width: 640,
+              height: 420
+            }}
+            viewportRect={{ x: 0, y: 0, width: 1280, height: 720 }}
+            buffer={textBuffer()}
+            actions={actionsFixture()}
+            onClose={() => undefined}
+            onCommitRect={() => undefined}
+          />
+        </WorkbenchWindowHost>
+      </I18nProvider>
     );
     await Promise.resolve();
   });

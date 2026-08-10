@@ -1,34 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { FloatingTextEditorWindowState } from '../../types';
 import {
-  DEFAULT_FLOATING_PANEL_STATE,
-  type FloatingPanelState
-} from '../shell/floatingPanels';
-import {
   reconcileWorkbenchViewportLayout,
   type WorkbenchViewportLayoutController
 } from './workbenchViewportLayout';
 
 describe('workbench viewport layout', () => {
-  it('constrains open floating layouts whenever the viewport is reconciled', () => {
+  it('constrains open text editor windows whenever the viewport is reconciled', () => {
     let viewportState = { x: 0, y: 0, width: 1440, height: 900 };
-    let floatingPanels: FloatingPanelState = {
-      panels: {
-        ...DEFAULT_FLOATING_PANEL_STATE.panels,
-        explorer: {
-          ...DEFAULT_FLOATING_PANEL_STATE.panels.explorer,
-          open: true,
-          x: -500,
-          y: -100
-        },
-        settings: {
-          ...DEFAULT_FLOATING_PANEL_STATE.panels.settings,
-          open: false,
-          x: 2000,
-          y: 2000
-        }
-      }
-    };
     let textEditorWindows: Record<string, FloatingTextEditorWindowState> = {
       'notes/open.md': {
         projectRelativePath: 'notes/open.md',
@@ -53,9 +32,6 @@ describe('workbench viewport layout', () => {
       setViewportRect: (value) => {
         viewportState = typeof value === 'function' ? value(viewportState) : value;
       },
-      setFloatingPanels: (value) => {
-        floatingPanels = typeof value === 'function' ? value(floatingPanels) : value;
-      },
       setTextEditorWindows: (value) => {
         textEditorWindows = typeof value === 'function' ? value(textEditorWindows) : value;
       }
@@ -65,16 +41,6 @@ describe('workbench viewport layout', () => {
 
     expect(viewportRef.current).toEqual({ x: 0, y: 0, width: 1000, height: 700 });
     expect(viewportState).toEqual({ x: 0, y: 0, width: 1000, height: 700 });
-    expect(floatingPanels.panels.explorer).toMatchObject({
-      open: true,
-      x: -301,
-      y: -1
-    });
-    expect(floatingPanels.panels.settings).toMatchObject({
-      open: false,
-      x: 2000,
-      y: 2000
-    });
     expect(textEditorWindows['notes/open.md']).toMatchObject({
       open: true,
       x: 500,

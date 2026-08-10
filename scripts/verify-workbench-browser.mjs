@@ -19,6 +19,7 @@ const browserScreenshotDirectory = process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR?.t
   ? resolve(process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR)
   : undefined;
 const activityOnly = process.argv.slice(2).includes('--activity-only');
+const windowGesturesOnly = process.argv.slice(2).includes('--window-gestures-only');
 const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
 const fixtureHome = join(fixtureRoot, '.home');
 const fixtureTemporaryDirectory = join(
@@ -54,13 +55,23 @@ async function main() {
     browser = await chromium.launch();
     context = await browser.newContext({ deviceScaleFactor: 2 });
     page = await context.newPage();
-    const verifyViewport = activityOnly
-      ? runActivityViewportVerification
-      : runViewportVerification;
-    await verifyViewport(context, page, { launchUrl, projectOpenUrl }, { width: 1440, height: 900 }, 'desktop', 420, true);
-    await page.close();
-    page = await context.newPage();
-    await verifyViewport(context, page, { projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
+    if (windowGesturesOnly) {
+      await runWindowGestureViewportVerification(
+        context,
+        page,
+        { launchUrl, projectOpenUrl },
+        { width: 1440, height: 900 },
+        'desktop'
+      );
+    } else {
+      const verifyViewport = activityOnly
+        ? runActivityViewportVerification
+        : runViewportVerification;
+      await verifyViewport(context, page, { launchUrl, projectOpenUrl }, { width: 1440, height: 900 }, 'desktop', 420, true);
+      await page.close();
+      page = await context.newPage();
+      await verifyViewport(context, page, { projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
+    }
   } catch (error) {
     verificationError = error;
     console.error(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -357,6 +368,17 @@ async function runActivityViewportVerification(context, page, urls, viewport, la
   console.log(`[${label}] Focused Activity browser verification passed.`);
 }
 
+async function runWindowGestureViewportVerification(context, page, urls, viewport, label) {
+  await page.setViewportSize(viewport);
+  await waitForWorkbenchOrigin(context, urls.launchUrl);
+  await page.goto(urls.projectOpenUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.getByTestId('workbench-shell').waitFor({ state: 'visible', timeout: 60000 });
+  await page.getByTestId('workbench-titlebar').waitFor({ state: 'visible', timeout: 60000 });
+  await page.getByTestId('floating-dock').waitFor({ state: 'visible', timeout: 60000 });
+  await assertWorkbenchWindowGestures(page, label);
+  console.log(`[${label}] Focused Workbench window gesture browser verification passed.`);
+}
+
 async function runViewportVerification(context, page, urls, viewport, label, targetScrollTop, fullCanvasWorkflow) {
   await page.setViewportSize(viewport);
   const failures = [];
@@ -423,6 +445,9 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
     }
     await page.getByTestId('workbench-shell').waitFor({ state: 'visible', timeout: 60000 });
     await assertWorkbenchChrome(page, label);
+    if (fullCanvasWorkflow) {
+      await assertWorkbenchWindowGestures(page, label);
+    }
     await assertIconButtonsHaveNames(page, label);
     await assertCanvasImageWorkflow(page, label);
     await assertCanvasVideoWorkflow(page, label);
@@ -1153,6 +1178,149 @@ async function assertWorkbenchChrome(page, label) {
   await dock.getByRole('button', { name: 'Feedback', exact: true }).click();
   await dock.getByRole('button', { name: 'Inspector', exact: true }).click();
   console.log(`[${label}] Workbench launch, title bar, five FloatingDock panels, Feedback settings, and minimap rendered.`);
+}
+
+const workbenchResizeDirections = [
+  { direction: 'n', dx: 0, dy: -12, cursor: 'ns-resize' },
+  { direction: 's', dx: 0, dy: 12, cursor: 'ns-resize' },
+  { direction: 'e', dx: 12, dy: 0, cursor: 'ew-resize' },
+  { direction: 'w', dx: -12, dy: 0, cursor: 'ew-resize' },
+  { direction: 'ne', dx: 12, dy: -12, cursor: 'nesw-resize' },
+  { direction: 'nw', dx: -12, dy: -12, cursor: 'nwse-resize' },
+  { direction: 'se', dx: 12, dy: 12, cursor: 'nwse-resize' },
+  { direction: 'sw', dx: -12, dy: 12, cursor: 'nesw-resize' }
+];
+
+async function assertWorkbenchWindowGestures(page, label) {
+  const dock = page.getByTestId('floating-dock');
+  const windowLayer = page.getByTestId('workbench-window-layer');
+  const settingsPanel = page.getByTestId('floating-panel-settings');
+  await dock.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settingsPanel.waitFor({ state: 'visible', timeout: 10000 });
+  if (await windowLayer.locator('[data-testid="floating-panel-settings"]').count() !== 1) {
+    throw new Error(`[${label}] Settings did not render in the shared Workbench window layer.`);
+  }
+
+  const settingsBefore = await visibleBoundingBox(settingsPanel, label, 'Settings panel');
+  const settingsDragHandle = settingsPanel.locator('.floating-panel-drag-hit-area');
+  const dragHandleBox = await visibleBoundingBox(settingsDragHandle, label, 'Settings drag handle');
+  await page.mouse.move(dragHandleBox.x + dragHandleBox.width / 2, dragHandleBox.y + dragHandleBox.height / 2);
+  await page.mouse.down();
+  await assertActiveWorkbenchGesture(page, 'move', 'grabbing', settingsPanel.locator('.floating-panel-body'), label);
+  await page.mouse.move(dragHandleBox.x + dragHandleBox.width / 2 + 36, dragHandleBox.y + dragHandleBox.height / 2 + 24, { steps: 4 });
+  await page.mouse.up();
+  await assertWorkbenchGestureCleared(page, settingsPanel, label);
+  const settingsAfter = await visibleBoundingBox(settingsPanel, label, 'dragged Settings panel');
+  assertApproximateChange(settingsAfter.x - settingsBefore.x, 36, label, 'Settings drag x');
+  assertApproximateChange(settingsAfter.y - settingsBefore.y, 24, label, 'Settings drag y');
+  await dock.getByRole('button', { name: 'Settings', exact: true }).click();
+
+  const terminalPanel = page.getByTestId('floating-panel-terminal');
+  await dock.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await terminalPanel.waitFor({ state: 'visible', timeout: 10000 });
+  if (await windowLayer.locator('[data-testid="floating-panel-terminal"]').count() !== 1) {
+    throw new Error(`[${label}] Terminal did not render in the shared Workbench window layer.`);
+  }
+
+  for (const resize of workbenchResizeDirections) {
+    const handle = terminalPanel.locator(`.floating-panel-resize-handle--${resize.direction}`);
+    const handleBox = await visibleBoundingBox(handle, label, `Terminal ${resize.direction} resize handle`);
+    const before = await visibleBoundingBox(terminalPanel, label, `Terminal before ${resize.direction} resize`);
+    const start = {
+      x: handleBox.x + handleBox.width / 2,
+      y: handleBox.y + handleBox.height / 2
+    };
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await assertActiveWorkbenchGesture(page, resize.direction, resize.cursor, terminalPanel.locator('.floating-panel-body'), label);
+    await page.mouse.move(start.x + resize.dx, start.y + resize.dy, { steps: 3 });
+    await page.mouse.up();
+    await assertWorkbenchGestureCleared(page, terminalPanel, label);
+    const after = await visibleBoundingBox(terminalPanel, label, `Terminal after ${resize.direction} resize`);
+    assertDirectionalResize(before, after, resize, label);
+  }
+
+  const cancelBefore = await visibleBoundingBox(terminalPanel, label, 'Terminal before cancelled resize');
+  const westHandle = terminalPanel.locator('.floating-panel-resize-handle--w');
+  const westHandleBox = await visibleBoundingBox(westHandle, label, 'Terminal west resize handle');
+  const terminalBodyBox = await visibleBoundingBox(terminalPanel.locator('.floating-panel-body'), label, 'Terminal content');
+  await page.mouse.move(westHandleBox.x + westHandleBox.width / 2, westHandleBox.y + westHandleBox.height / 2);
+  await page.mouse.down();
+  for (const x of [terminalBodyBox.x + 24, terminalBodyBox.x + terminalBodyBox.width / 2, terminalBodyBox.x + terminalBodyBox.width - 24]) {
+    await page.mouse.move(x, terminalBodyBox.y + terminalBodyBox.height / 2, { steps: 2 });
+    await assertActiveWorkbenchGesture(page, 'w', 'ew-resize', terminalPanel.locator('.floating-panel-body'), label);
+  }
+  await page.keyboard.press('Escape');
+  await assertWorkbenchGestureCleared(page, terminalPanel, label);
+  const cancelAfter = await visibleBoundingBox(terminalPanel, label, 'Terminal after cancelled resize');
+  assertSameBoundingBox(cancelAfter, cancelBefore, label, 'cancelled Terminal resize');
+  await dock.getByRole('button', { name: 'Terminal', exact: true }).click();
+
+  console.log(`[${label}] Workbench Settings drag, Terminal eight-direction resize, cross-content cursor lock, and cancellation cleanup passed.`);
+}
+
+async function assertActiveWorkbenchGesture(page, gesture, cursor, content, label) {
+  await page.waitForFunction(
+    (expectedGesture) => document.documentElement.dataset.workbenchWindowGesture === expectedGesture,
+    gesture,
+    { timeout: 5000 }
+  );
+  const observedCursor = await content.evaluate((element) => getComputedStyle(element).cursor);
+  if (observedCursor !== cursor) {
+    throw new Error(`[${label}] Workbench ${gesture} gesture expected ${cursor} over panel content, received ${observedCursor}.`);
+  }
+}
+
+async function assertWorkbenchGestureCleared(page, panel, label) {
+  await page.waitForFunction(
+    () => !document.documentElement.hasAttribute('data-workbench-window-gesture'),
+    undefined,
+    { timeout: 5000 }
+  );
+  const previewProperties = await panel.evaluate((element) => [
+    '--db-workbench-window-preview-x',
+    '--db-workbench-window-preview-y',
+    '--db-workbench-window-preview-width',
+    '--db-workbench-window-preview-height'
+  ].map((property) => element.style.getPropertyValue(property)));
+  if (previewProperties.some(Boolean)) {
+    throw new Error(`[${label}] Workbench gesture left preview geometry behind: ${JSON.stringify(previewProperties)}.`);
+  }
+}
+
+async function visibleBoundingBox(locator, label, description) {
+  const box = await locator.boundingBox();
+  if (!box || box.width <= 0 || box.height <= 0) {
+    throw new Error(`[${label}] ${description} has no visible geometry.`);
+  }
+  return box;
+}
+
+function assertDirectionalResize(before, after, resize, label) {
+  if (resize.direction.includes('w')) {
+    assertApproximateChange(after.x - before.x, resize.dx, label, `${resize.direction} resize left edge`);
+    assertApproximateChange((after.x + after.width) - (before.x + before.width), 0, label, `${resize.direction} resize right anchor`);
+  } else if (resize.direction.includes('e')) {
+    assertApproximateChange(after.width - before.width, resize.dx, label, `${resize.direction} resize width`);
+  }
+  if (resize.direction.includes('n')) {
+    assertApproximateChange(after.y - before.y, resize.dy, label, `${resize.direction} resize top edge`);
+    assertApproximateChange((after.y + after.height) - (before.y + before.height), 0, label, `${resize.direction} resize bottom anchor`);
+  } else if (resize.direction.includes('s')) {
+    assertApproximateChange(after.height - before.height, resize.dy, label, `${resize.direction} resize height`);
+  }
+}
+
+function assertSameBoundingBox(actual, expected, label, description) {
+  for (const property of ['x', 'y', 'width', 'height']) {
+    assertApproximateChange(actual[property], expected[property], label, `${description} ${property}`);
+  }
+}
+
+function assertApproximateChange(actual, expected, label, description) {
+  if (Math.abs(actual - expected) > 1) {
+    throw new Error(`[${label}] ${description} expected ${expected}, received ${actual}.`);
+  }
 }
 
 async function assertActivitySurfaces(page, label, readConnectionCredential) {

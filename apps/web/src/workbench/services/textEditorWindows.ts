@@ -1,5 +1,8 @@
 import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types';
-import type { FloatingPanelResizeInput } from '../shell/floatingPanels';
+import {
+  anchorResizedFloatingWindowRect,
+  type FloatingWindowGesture
+} from '../shell/floatingWindowGesture.js';
 import {
   constrainContainedRect,
   sameWindowRect,
@@ -51,47 +54,34 @@ export function closeTextEditorWindowState(
   };
 }
 
-export function dragTextEditorWindowState(
-  windows: Record<string, FloatingTextEditorWindowState>,
-  projectRelativePath: string,
-  delta: { dx: number; dy: number },
+export function resolveTextEditorWindowGestureRect(
+  candidate: WorkbenchWindowRect,
+  gesture: FloatingWindowGesture,
   viewport: WorkbenchWindowRect
-): Record<string, FloatingTextEditorWindowState> {
-  const existing = windows[projectRelativePath];
-  if (!existing) {
-    return windows;
+): WorkbenchWindowRect {
+  if (gesture.kind === 'move') {
+    return constrainContainedRect(candidate, viewport);
   }
-  return {
-    ...windows,
-    [projectRelativePath]: constrainTextEditorWindowState({
-      ...existing,
-      x: existing.x + delta.dx,
-      y: existing.y + delta.dy
-    }, viewport)
-  };
+  const width = Math.max(TEXT_EDITOR_WINDOW_MIN_WIDTH, Math.round(candidate.width));
+  const height = Math.max(TEXT_EDITOR_WINDOW_MIN_HEIGHT, Math.round(candidate.height));
+  return constrainContainedRect(
+    anchorResizedFloatingWindowRect(candidate, gesture.direction, { width, height }),
+    viewport
+  );
 }
 
-export function resizeTextEditorWindowState(
+export function commitTextEditorWindowRect(
   windows: Record<string, FloatingTextEditorWindowState>,
   projectRelativePath: string,
-  input: FloatingPanelResizeInput,
-  viewport: WorkbenchWindowRect
+  rect: WorkbenchWindowRect
 ): Record<string, FloatingTextEditorWindowState> {
   const existing = windows[projectRelativePath];
-  if (!existing) {
+  if (!existing || sameWindowRect(existing, rect)) {
     return windows;
   }
-  const width = Math.max(TEXT_EDITOR_WINDOW_MIN_WIDTH, Math.round(input.width));
-  const height = Math.max(TEXT_EDITOR_WINDOW_MIN_HEIGHT, Math.round(input.height));
   return {
     ...windows,
-    [projectRelativePath]: constrainTextEditorWindowState({
-      ...existing,
-      x: input.direction.includes('w') ? input.x + input.width - width : input.x,
-      y: input.direction.includes('n') ? input.y + input.height - height : input.y,
-      width,
-      height
-    }, viewport)
+    [projectRelativePath]: { ...existing, ...rect }
   };
 }
 

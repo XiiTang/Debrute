@@ -64,7 +64,7 @@ export function normalizeCanvasWheelDelta(
 
 const CANVAS_LOCAL_WHEEL_SELECTOR = '[data-canvas-local-wheel="true"]';
 const CANVAS_FOCUS_LOCAL_WHEEL_SELECTOR = '[data-canvas-local-wheel="focus"]';
-const CANVAS_FLOATING_BAR_LAYER_SELECTOR = '.floating-bar-layer';
+const CANVAS_CHROME_LAYER_SELECTOR = '.canvas-chrome-layer';
 const CANVAS_WORKBENCH_SHELL_SELECTOR = '.workbench-shell';
 
 export function shouldCanvasHandleWheelTarget(
@@ -92,7 +92,7 @@ export function shouldCanvasHandleGlobalWheelTarget(
   if (containsTarget(surfaceElement, target)) {
     return true;
   }
-  if (closestElement(target, CANVAS_FLOATING_BAR_LAYER_SELECTOR) === null) {
+  if (closestElement(target, CANVAS_CHROME_LAYER_SELECTOR) === null) {
     return false;
   }
   const surfaceShell = closestElement(surfaceElement, CANVAS_WORKBENCH_SHELL_SELECTOR);

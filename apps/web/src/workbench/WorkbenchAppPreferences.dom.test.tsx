@@ -614,8 +614,9 @@ describe('WorkbenchApp preferences and project behavior', () => {
     expect(dialogLayer?.getAttribute('role')).toBe('presentation');
     expect(container.querySelector('[data-testid="canvas-surface"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="canvas-layer"]')?.hasAttribute('inert')).toBe(true);
-    expect(container.querySelector('[data-testid="floating-bar-layer"]')?.hasAttribute('inert')).toBe(true);
-    expect(container.querySelector('[data-testid="panel-layer"]')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('[data-testid="canvas-chrome-layer"]')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('[data-testid="workbench-dock-layer"]')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('[data-testid="workbench-window-layer"]')?.hasAttribute('inert')).toBe(true);
     expect(container.querySelector('[data-testid="workbench-titlebar"]')?.hasAttribute('inert')).toBe(false);
     expect(container.textContent).toContain('Demo');
     await unmount(root, container);

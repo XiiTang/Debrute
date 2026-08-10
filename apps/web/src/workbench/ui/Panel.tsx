@@ -1,9 +1,12 @@
 import React from 'react';
 import { cx } from './cx';
 
-export function Panel({ className, ...props }: React.HTMLAttributes<HTMLElement>): React.ReactElement {
-  return <section {...props} className={cx('db-panel', className)} />;
-}
+export const Panel = React.forwardRef<HTMLElement, React.HTMLAttributes<HTMLElement>>(function Panel(
+  { className, ...props },
+  ref
+): React.ReactElement {
+  return <section ref={ref} {...props} className={cx('db-panel', className)} />;
+});
 
 export function PanelHeader({ className, ...props }: React.HTMLAttributes<HTMLElement>): React.ReactElement {
   return <header {...props} className={cx('db-panel__header', className)} />;

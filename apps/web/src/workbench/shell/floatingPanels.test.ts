@@ -2,15 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
   FLOATING_PANEL_IDS,
-  type FloatingPanelResizeDirection,
-  type FloatingPanelState,
   closeFloatingPanel,
   constrainOpenFloatingPanelsToViewport,
-  dragFloatingPanel,
+  commitFloatingPanelRect,
   openFloatingPanel,
-  resizeFloatingPanel,
+  resolveFloatingPanelGestureRect,
   toggleFloatingPanel
 } from './floatingPanels';
+import type { FloatingWindowResizeDirection } from './floatingWindowGesture.js';
 
 const viewport = { x: 0, y: 0, width: 1000, height: 700 };
 
@@ -92,23 +91,50 @@ describe('floating panel state', () => {
   it('closes a panel without changing its position', () => {
     const next = closeFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'explorer');
 
+    expect(next).toBe(DEFAULT_FLOATING_PANEL_STATE);
     expect(next.panels.explorer.open).toBe(false);
     expect(next.panels.explorer.x).toBe(DEFAULT_FLOATING_PANEL_STATE.panels.explorer.x);
     expect(next.panels.explorer.y).toBe(DEFAULT_FLOATING_PANEL_STATE.panels.explorer.y);
   });
 
   it('allows panel drag past all viewport edges while keeping the drag hit area reachable', () => {
-    const leftTop = dragFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'settings', { dx: -1200, dy: -600 }, viewport);
-    expect(leftTop.panels.settings).toMatchObject({
+    const start = DEFAULT_FLOATING_PANEL_STATE.panels.settings;
+    const leftTop = resolveFloatingPanelGestureRect('settings', {
+      ...start,
+      x: start.x - 1200,
+      y: start.y - 600
+    }, { kind: 'move' }, viewport);
+    expect(leftTop).toMatchObject({
       x: -741,
       y: -1
     });
 
-    const farEdges = dragFloatingPanel(DEFAULT_FLOATING_PANEL_STATE, 'settings', { dx: 2000, dy: 2000 }, viewport);
-    expect(farEdges.panels.settings).toMatchObject({
+    const farEdges = resolveFloatingPanelGestureRect('settings', {
+      ...start,
+      x: start.x + 2000,
+      y: start.y + 2000
+    }, { kind: 'move' }, viewport);
+    expect(farEdges).toMatchObject({
       x: 981,
       y: 681
     });
+  });
+
+  it('resolves gesture previews independently and commits the final rectangle once', () => {
+    const preview = resolveFloatingPanelGestureRect('settings', {
+      x: -1200,
+      y: -600,
+      width: 760,
+      height: 580
+    }, { kind: 'move' }, viewport);
+
+    expect(preview).toEqual({ x: -741, y: -1, width: 760, height: 580 });
+    const committed = commitFloatingPanelRect(DEFAULT_FLOATING_PANEL_STATE, 'settings', preview);
+    expect(committed.panels.settings).toEqual({
+      ...DEFAULT_FLOATING_PANEL_STATE.panels.settings,
+      ...preview
+    });
+    expect(DEFAULT_FLOATING_PANEL_STATE.panels.settings.x).toBe(360);
   });
 
   it('updates panel size after resize and clamps to definition limits', () => {
@@ -162,21 +188,15 @@ describe('floating panel state', () => {
   });
 
   it('uses the active resize direction instead of inferring moved edges from the current panel rect', () => {
-    const partiallyResizedFromLeft = {
-      panels: {
-        ...DEFAULT_FLOATING_PANEL_STATE.panels,
-        terminal: {
-          ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-          x: 196,
-          width: 820
-        }
-      }
-    };
-
-    const next = resizeTerminal('se', { width: 960, height: 380 }, partiallyResizedFromLeft);
+    const next = resolveFloatingPanelGestureRect('terminal', {
+      ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
+      x: 196,
+      width: 960,
+      height: 380
+    }, { kind: 'resize', direction: 'se' }, viewport);
 
     expect(next).toMatchObject({
-      x: 96,
+      x: 196,
       y: 420,
       width: 960,
       height: 380
@@ -218,13 +238,11 @@ describe('floating panel state', () => {
 });
 
 function resizeTerminal(
-  direction: FloatingPanelResizeDirection,
-  rect: Partial<typeof DEFAULT_FLOATING_PANEL_STATE.panels.terminal>,
-  state: FloatingPanelState = DEFAULT_FLOATING_PANEL_STATE
-): FloatingPanelState['panels']['terminal'] {
-  return resizeFloatingPanel(state, 'terminal', {
+  direction: FloatingWindowResizeDirection,
+  rect: Partial<typeof DEFAULT_FLOATING_PANEL_STATE.panels.terminal>
+) {
+  return resolveFloatingPanelGestureRect('terminal', {
     ...DEFAULT_FLOATING_PANEL_STATE.panels.terminal,
-    ...rect,
-    direction
-  }, viewport).panels.terminal;
+    ...rect
+  }, { kind: 'resize', direction }, viewport);
 }

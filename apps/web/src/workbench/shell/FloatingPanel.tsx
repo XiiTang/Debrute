@@ -2,23 +2,20 @@ import React from 'react';
 import { CloseButton, Panel, PanelBody } from '../ui/index.js';
 import {
   type FloatingPanelId,
-  type FloatingPanelResizeInput,
-  type FloatingPanelState
+  type FloatingPanelLayout
 } from './floatingPanels';
-import {
-  panelWindowIdentity,
-  workbenchWindowZIndex,
-  type WorkbenchWindowOrderState
-} from './workbenchWindowOrder';
 import {
   FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY,
   FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE
 } from './windowBounds';
+import type { WorkbenchWindowRect } from './windowBounds.js';
 import { useI18n, type WorkbenchI18n, type WorkbenchTranslationKey } from '../i18n';
 import {
-  FloatingPanelResizeHandles,
-  floatingPanelDragHandleProps
-} from './floatingPanelInteractions.js';
+  FloatingWindowResizeHandles,
+  floatingWindowRectStyle,
+  useFloatingWindowGesture,
+  type FloatingWindowGesture
+} from './floatingWindowGesture.js';
 
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
   explorer: 'shell.panels.explorer',
@@ -30,48 +27,47 @@ const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> =
 
 export function WorkbenchFloatingPanelShell({
   panelId,
-  state,
-  orderState,
+  layout,
+  zIndex,
   children,
   onClose,
-  onBringToFront,
-  onDrag,
-  onResize
+  onFocus,
+  resolveRect,
+  onCommitRect
 }: {
   panelId: FloatingPanelId;
-  state: FloatingPanelState;
-  orderState: WorkbenchWindowOrderState;
+  layout: FloatingPanelLayout;
+  zIndex: number;
   children: React.ReactElement;
   onClose: () => void;
-  onBringToFront: () => void;
-  onDrag: (dx: number, dy: number) => void;
-  onResize: (input: FloatingPanelResizeInput) => void;
+  onFocus: () => void;
+  resolveRect(candidate: WorkbenchWindowRect, gesture: FloatingWindowGesture): WorkbenchWindowRect;
+  onCommitRect(rect: WorkbenchWindowRect): void;
 }): React.ReactElement {
   const i18n = useI18n();
   const title = floatingPanelTitle(panelId, i18n);
-  const layout = state.panels[panelId];
-  const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
-  const dragHandleProps = floatingPanelDragHandleProps({
-    dragStart,
-    onBringToFront,
-    onDrag
+  const windowRef = React.useRef<HTMLElement>(null);
+  const gesture = useFloatingWindowGesture({
+    windowRef,
+    rect: layout,
+    onFocus,
+    resolveRect,
+    onCommit: onCommitRect
   });
   return (
     <Panel
+      ref={windowRef}
       className={`floating-panel floating-panel-${panelId}`}
       data-testid={`floating-panel-${panelId}`}
       style={{
+        ...floatingWindowRectStyle(layout),
         [FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY]: FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE,
-        left: layout.x,
-        top: layout.y,
-        width: layout.width,
-        height: layout.height,
-        zIndex: workbenchWindowZIndex(orderState, panelWindowIdentity(panelId))
+        zIndex
       } as React.CSSProperties}
-      onPointerDown={onBringToFront}
+      onPointerDown={onFocus}
     >
       <div className="floating-panel-interaction-row">
-        <div className="floating-panel-drag-hit-area" role="presentation" {...dragHandleProps} />
+        <div className="floating-panel-drag-hit-area" role="presentation" {...gesture.dragHandleProps} />
         <div className="floating-panel-title" aria-hidden="true">{title}</div>
         <CloseButton
           className="floating-panel-close-button"
@@ -83,11 +79,7 @@ export function WorkbenchFloatingPanelShell({
       <PanelBody className="floating-panel-body">
         {children}
       </PanelBody>
-      <FloatingPanelResizeHandles
-        layout={layout}
-        onBringToFront={onBringToFront}
-        onResize={onResize}
-      />
+      <FloatingWindowResizeHandles resizeHandleProps={gesture.resizeHandleProps} />
     </Panel>
   );
 }

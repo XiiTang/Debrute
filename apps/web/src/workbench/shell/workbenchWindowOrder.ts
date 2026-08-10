@@ -39,6 +39,12 @@ export function focusWorkbenchWindow(
   state: WorkbenchWindowOrderState,
   identity: WorkbenchWindowIdentity
 ): WorkbenchWindowOrderState {
+  if (
+    sameWorkbenchWindow(state.focusedWindow, identity)
+    && sameWorkbenchWindow(state.orderBackToFront.at(-1), identity)
+  ) {
+    return state;
+  }
   return {
     orderBackToFront: [
       ...state.orderBackToFront.filter((item) => !sameWorkbenchWindow(item, identity)),
@@ -52,6 +58,9 @@ export function closeWorkbenchWindow(
   state: WorkbenchWindowOrderState,
   identity: WorkbenchWindowIdentity
 ): WorkbenchWindowOrderState {
+  if (!state.orderBackToFront.some((item) => sameWorkbenchWindow(item, identity))) {
+    return state;
+  }
   const orderBackToFront = state.orderBackToFront.filter((item) => !sameWorkbenchWindow(item, identity));
   const focusedWindow = orderBackToFront.at(-1);
   return {

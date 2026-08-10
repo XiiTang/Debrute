@@ -153,7 +153,9 @@ Focused units own cohesive state:
   commands, and invalidation when the project changes.
 - Canvas controllers own Canvas feedback, overlays, and runtime interaction.
 - Text services own editor buffers and floating editor windows.
-- Shell modules own panel geometry, viewport reconciliation, and window order.
+- `WorkbenchWindowHost` owns Workbench panel geometry, the panel dock,
+  Project-scoped panel layout, and one window order shared by panels and
+  floating text editors. Canvas controllers do not participate in that state.
 
 Resources that may load or fail use explicit loading, ready, and error states.
 The owner of an asynchronous operation applies request-version or
@@ -225,13 +227,27 @@ opaque temporary `bindingId` so they never accept arbitrary roots.
 
 ## Shell, Layers, And Floating Windows
 
-The shell is Canvas-first. The layer token order is Canvas, floating bars,
-floating panels, title bar, Activity, overlays, title-bar menus, and the
-blocking surface. The blocking surface is the one highest layer and freezes all
+The shell is Canvas-first in background, not in chrome ownership. Its layer
+token order is Canvas, Canvas chrome and the Workbench panel dock, Workbench
+windows, title bar, Activity, overlays, title-bar menus, and the blocking
+surface. The blocking surface is the one highest layer and freezes all
 interaction beneath it without mutating the Runtime Activity ledger.
-Ordinary panel stacking inside the panel layer is controlled by
-`workbenchWindowOrder.ts`; floating text editors participate in the same
-back-to-front ordering.
+
+Control placement communicates that boundary. Persistent Canvas-level controls
+are placed in the lower region of the Workbench and remain in
+`canvas-chrome-layer`: Mini Map, Reset Canvas Layout, and Hierarchy Edge
+Visibility. Contextual Canvas Feedback actions remain beside their selected
+Canvas target in the same layer. The upper panel-launch controls belong to the
+Workbench and remain in `workbench-dock-layer`: Explorer, Inspector, Feedback
+Panel, Settings, and Terminal. Position does not create ownership, but this
+upper-Workbench and lower-Canvas placement is the required product convention.
+A panel-launch control must not be added to Canvas chrome, and a Canvas
+presentation control must not be added to the Workbench panel dock.
+
+`WorkbenchWindowHost` renders ordinary panels and floating text editors in one
+`workbench-window-layer`. `workbenchWindowOrder.ts` therefore produces real
+cross-window stacking rather than z-index values trapped in separate stacking
+contexts.
 
 Every valid Workbench shell paints one Canvas background from the top of the
 window through the main viewport. The actual Canvas surface uses the same field
@@ -256,7 +272,7 @@ Workbench shell and keeps its independent error presentation.
 
 When a bound Project is preempted or its Runtime connection ends, the last
 accepted Canvas remains visible. A solid, non-dismissible dialog sits on the
-transparent highest blocking layer. The Canvas, floating bars, panels, title
+transparent highest blocking layer. The Canvas, Canvas chrome, Workbench dock and windows, title
 bar, Activity surfaces, and their global input are frozen beneath it; transient
 Canvas menus are closed. The blocker does not dismiss Activity records. New
 Activity events still enter the Runtime ledger but do not float beneath the
@@ -264,11 +280,20 @@ blocker and are never replayed after it leaves. If detached **Open Here** fails,
 the Workbench remains detached and
 presents the failure beside that dialog action.
 
-The floating dock controls exactly four panel kinds: Explorer, Inspector,
-Settings, and Terminal. `WorkbenchFloatingPanelShell` is their single frame. It
-renders the panel name once, owns drag and eight-direction resize interaction,
-close placement, body overflow, and z-order, while each feature supplies only
-its body.
+The Workbench dock controls exactly five panel kinds: Explorer, Inspector,
+Feedback Panel, Settings, and Terminal. `WorkbenchWindowHost` owns open/close,
+focus, committed geometry, Project view-state persistence, and disabled-panel
+enforcement. `WorkbenchFloatingPanelShell` is their single frame and renders
+the panel name, close action, body, drag surface, and eight resize handles once,
+while each feature supplies only its body.
+
+Move and resize use one document-owned gesture lifecycle shared with floating
+text editors. Pointer movement is coalesced to one animation-frame preview and
+writes only the active window's CSS geometry. React state and Project view
+state are committed once on pointer release. Pointer cancellation, Escape,
+window blur, and unmount restore the starting rectangle and write nothing. A
+gesture-wide cursor lock and transparent interaction shield keep the cursor
+stable after the pointer leaves a six-pixel edge or twelve-pixel corner handle.
 
 Panel definitions own initial and minimum/maximum dimensions. Dragging and
 viewport resize keep a usable drag area visible rather than forcing the entire
@@ -281,7 +306,7 @@ try/catch fallback. If a present value is malformed, the parse error is exposed
 as an implementation/runtime failure. Runtime owns the single persisted Canvas
 state for the canonical Project root.
 
-Canvas floating bars use separate placement helpers because they are attached
+Canvas chrome uses separate placement helpers because its controls are attached
 to Canvas objects or reserved screen edges. Their collision and viewport rules
 do not replace floating-panel geometry.
 

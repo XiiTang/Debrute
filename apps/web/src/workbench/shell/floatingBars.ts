@@ -1,6 +1,6 @@
 import type { CanvasFeedbackGeometry } from '@debrute/app-protocol';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
-import { WORKBENCH_FLOATING_DOCK_EDGE_INSET } from './workbenchLayers';
+import { WORKBENCH_CHROME_EDGE_INSET } from './workbenchLayers';
 
 export interface FloatingBarRect {
   x: number;
@@ -96,7 +96,7 @@ export const CANVAS_MINIMAP_BUTTON_SIZE = {
 } as const;
 
 const CANVAS_LOWER_LEFT_CONTROL_INSET = {
-  left: WORKBENCH_FLOATING_DOCK_EDGE_INSET.horizontal,
+  left: WORKBENCH_CHROME_EDGE_INSET.horizontal,
   bottom: 14
 } as const;
 const CANVAS_LOWER_LEFT_CONTROL_GAP_PX = 4;

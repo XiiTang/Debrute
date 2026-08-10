@@ -5,8 +5,7 @@ import type {
   WorkbenchActions
 } from '../../types.js';
 import { I18nProvider } from '../i18n/index.js';
-import type { FloatingPanelResizeInput } from '../shell/floatingPanels.js';
-import type { WorkbenchWindowOrderState } from '../shell/workbenchWindowOrder.js';
+import type { WorkbenchWindowRect } from '../shell/windowBounds.js';
 import React from 'react';
 import { FloatingTextEditorWindowShell } from './FloatingTextEditorWindowShell.js';
 import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
@@ -21,29 +20,25 @@ const CanvasTextEditor = React.lazy(async () => {
 export function WorkbenchFloatingTextEditorWindowFeature({
   locale,
   windowState,
-  orderState,
+  viewportRect,
   buffer,
   actions,
-  onBringToFront,
   onClose,
-  onDrag,
-  onResize
+  onCommitRect
 }: {
   locale: WorkbenchLocale;
   windowState: FloatingTextEditorWindowState;
-  orderState: WorkbenchWindowOrderState;
+  viewportRect: WorkbenchWindowRect;
   buffer: TextFileBuffer | undefined;
   actions: WorkbenchActions;
-  onBringToFront(): void;
   onClose(): void;
-  onDrag(dx: number, dy: number): void;
-  onResize(input: FloatingPanelResizeInput): void;
+  onCommitRect(rect: WorkbenchWindowRect): void;
 }): React.ReactElement {
   return (
     <I18nProvider locale={locale}>
       <FloatingTextEditorWindowShell
         windowState={windowState}
-        orderState={orderState}
+        viewportRect={viewportRect}
         buffer={buffer}
         actions={actions}
         editor={buffer ? (
@@ -58,10 +53,8 @@ export function WorkbenchFloatingTextEditorWindowFeature({
             />
           </React.Suspense>
         ) : <></>}
-        onBringToFront={onBringToFront}
         onClose={onClose}
-        onDrag={onDrag}
-        onResize={onResize}
+        onCommitRect={onCommitRect}
       />
     </I18nProvider>
   );

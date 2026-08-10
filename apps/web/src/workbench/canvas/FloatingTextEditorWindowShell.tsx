@@ -1,17 +1,19 @@
 import React, { useEffect } from 'react';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types.js';
 import { useI18n } from '../i18n/index.js';
-import { basenameFromProjectPath, textBufferStatus } from '../services/textEditorWindows.js';
 import {
-  FloatingPanelResizeHandles,
-  floatingPanelDragHandleProps
-} from '../shell/floatingPanelInteractions.js';
-import type { FloatingPanelResizeInput } from '../shell/floatingPanels.js';
+  basenameFromProjectPath,
+  resolveTextEditorWindowGestureRect,
+  textBufferStatus
+} from '../services/textEditorWindows.js';
 import {
-  textEditorWindowIdentity,
-  workbenchWindowZIndex,
-  type WorkbenchWindowOrderState
-} from '../shell/workbenchWindowOrder.js';
+  FloatingWindowResizeHandles,
+  floatingWindowRectStyle,
+  useFloatingWindowGesture
+} from '../shell/floatingWindowGesture.js';
+import { textEditorWindowIdentity } from '../shell/workbenchWindowOrder.js';
+import { useWorkbenchWindow } from '../shell/WorkbenchWindowHost.js';
+import type { WorkbenchWindowRect } from '../shell/windowBounds.js';
 import {
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE
@@ -33,28 +35,37 @@ import {
 
 export function FloatingTextEditorWindowShell({
   windowState,
-  orderState,
+  viewportRect,
   buffer,
   actions,
   editor,
-  onBringToFront,
   onClose,
-  onDrag,
-  onResize
+  onCommitRect
 }: {
   windowState: FloatingTextEditorWindowState;
-  orderState: WorkbenchWindowOrderState;
+  viewportRect: WorkbenchWindowRect;
   buffer: TextFileBuffer | undefined;
   actions: WorkbenchActions;
   editor: React.ReactElement;
-  onBringToFront(): void;
   onClose(): void;
-  onDrag(dx: number, dy: number): void;
-  onResize(input: FloatingPanelResizeInput): void;
+  onCommitRect(rect: WorkbenchWindowRect): void;
 }): React.ReactElement {
   const i18n = useI18n();
-  const dragStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
-  const dragHandleProps = floatingPanelDragHandleProps({ dragStart, onBringToFront, onDrag });
+  const identity = React.useMemo(
+    () => textEditorWindowIdentity(windowState.projectRelativePath),
+    [windowState.projectRelativePath]
+  );
+  const workbenchWindow = useWorkbenchWindow(identity);
+  const windowRef = React.useRef<HTMLElement>(null);
+  const gesture = useFloatingWindowGesture({
+    windowRef,
+    rect: windowState,
+    onFocus: workbenchWindow.onFocus,
+    resolveRect: (candidate, activeGesture) => (
+      resolveTextEditorWindowGestureRect(candidate, activeGesture, viewportRect)
+    ),
+    onCommit: onCommitRect
+  });
   const status = textBufferStatus(buffer, {
     loading: i18n.t('canvas.node.loading'),
     error: i18n.t('canvas.node.error'),
@@ -68,20 +79,18 @@ export function FloatingTextEditorWindowShell({
 
   return (
     <Panel
+      ref={windowRef}
       className="floating-panel floating-text-editor-window"
       data-testid="floating-text-editor-window"
       data-canvas-local-wheel="true"
       style={{
+        ...floatingWindowRectStyle(windowState),
         [FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY]: FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE,
-        left: windowState.x,
-        top: windowState.y,
-        width: windowState.width,
-        height: windowState.height,
-        zIndex: workbenchWindowZIndex(orderState, textEditorWindowIdentity(windowState.projectRelativePath))
+        zIndex: workbenchWindow.zIndex
       } as React.CSSProperties}
-      onPointerDown={onBringToFront}
+      onPointerDown={workbenchWindow.onFocus}
     >
-      <PanelHeader className="floating-text-editor-header" {...dragHandleProps}>
+      <PanelHeader className="floating-text-editor-header" {...gesture.dragHandleProps}>
         <FileText size={15} />
         <PanelTitle>{basenameFromProjectPath(windowState.projectRelativePath)}</PanelTitle>
         <small>{windowState.projectRelativePath}</small>
@@ -131,11 +140,7 @@ export function FloatingTextEditorWindowShell({
           </div>
         )}
       </PanelBody>
-      <FloatingPanelResizeHandles
-        layout={windowState}
-        onBringToFront={onBringToFront}
-        onResize={onResize}
-      />
+      <FloatingWindowResizeHandles resizeHandleProps={gesture.resizeHandleProps} />
     </Panel>
   );
 }

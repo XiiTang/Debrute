@@ -3,11 +3,12 @@ import {
   sameWindowRect,
   type WorkbenchWindowRect
 } from './windowBounds';
+import {
+  anchorResizedFloatingWindowRect,
+  type FloatingWindowGesture
+} from './floatingWindowGesture.js';
 
 export type FloatingPanelId = 'explorer' | 'inspector' | 'feedback' | 'settings' | 'terminal';
-export const FLOATING_PANEL_RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
-export type FloatingPanelResizeDirection = typeof FLOATING_PANEL_RESIZE_DIRECTIONS[number];
-
 export interface FloatingPanelDefinition {
   id: FloatingPanelId;
   title: string;
@@ -31,10 +32,6 @@ export interface FloatingPanelLayout {
 
 export interface FloatingPanelState {
   panels: Record<FloatingPanelId, FloatingPanelLayout>;
-}
-
-export interface FloatingPanelResizeInput extends WorkbenchWindowRect {
-  direction: FloatingPanelResizeDirection;
 }
 
 export const FLOATING_PANEL_DEFINITIONS: Record<FloatingPanelId, FloatingPanelDefinition> = {
@@ -120,6 +117,9 @@ export function toggleFloatingPanel(
 }
 
 export function closeFloatingPanel(state: FloatingPanelState, panelId: FloatingPanelId): FloatingPanelState {
+  if (!state.panels[panelId].open) {
+    return state;
+  }
   return {
     ...state,
     panels: {
@@ -129,49 +129,38 @@ export function closeFloatingPanel(state: FloatingPanelState, panelId: FloatingP
   };
 }
 
-export function dragFloatingPanel(
-  state: FloatingPanelState,
+export function resolveFloatingPanelGestureRect(
   panelId: FloatingPanelId,
-  delta: { dx: number; dy: number },
+  candidate: WorkbenchWindowRect,
+  gesture: FloatingWindowGesture,
   viewport: WorkbenchWindowRect
-): FloatingPanelState {
-  const panel = state.panels[panelId];
-  const nextPanel = constrainFloatingPanelLayout({
-    ...panel,
-    x: panel.x + delta.dx,
-    y: panel.y + delta.dy
-  }, viewport);
-  return {
-    ...state,
-    panels: {
-      ...state.panels,
-      [panelId]: nextPanel
-    }
-  };
+): WorkbenchWindowRect {
+  if (gesture.kind === 'move') {
+    return constrainDragHitAreaVisible(candidate, viewport);
+  }
+  const definition = FLOATING_PANEL_DEFINITIONS[panelId];
+  const width = clamp(Math.round(candidate.width), definition.minWidth, definition.maxWidth);
+  const height = clamp(Math.round(candidate.height), definition.minHeight, definition.maxHeight);
+  return constrainDragHitAreaVisible(
+    anchorResizedFloatingWindowRect(candidate, gesture.direction, { width, height }),
+    viewport
+  );
 }
 
-export function resizeFloatingPanel(
+export function commitFloatingPanelRect(
   state: FloatingPanelState,
   panelId: FloatingPanelId,
-  input: FloatingPanelResizeInput,
-  viewport: WorkbenchWindowRect
+  rect: WorkbenchWindowRect
 ): FloatingPanelState {
-  const panel = state.panels[panelId];
-  const definition = FLOATING_PANEL_DEFINITIONS[panelId];
-  const width = clamp(Math.round(input.width), definition.minWidth, definition.maxWidth);
-  const height = clamp(Math.round(input.height), definition.minHeight, definition.maxHeight);
-  const nextPanel = constrainFloatingPanelLayout({
-    ...panel,
-    x: input.direction.includes('w') ? input.x + input.width - width : input.x,
-    y: input.direction.includes('n') ? input.y + input.height - height : input.y,
-    width,
-    height
-  }, viewport);
+  const current = state.panels[panelId];
+  if (sameWindowRect(current, rect)) {
+    return state;
+  }
   return {
     ...state,
     panels: {
       ...state.panels,
-      [panelId]: nextPanel
+      [panelId]: { ...current, ...rect }
     }
   };
 }

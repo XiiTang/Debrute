@@ -117,18 +117,20 @@ describe('canvas interaction', () => {
     expect(shouldCanvasHandleWheelTarget(textContent as unknown as EventTarget)).toBe(false);
   });
 
-  it('lets canvas-owned floating bars keep wheel gestures on the canvas', () => {
+  it('lets Canvas chrome keep wheel gestures on the Canvas without claiming Workbench chrome', () => {
     const shell = mockElement('workbench-shell');
     const surface = mockElement('canvas-surface', shell);
-    const floatingLayer = mockElement('floating-bar-layer', shell);
+    const floatingLayer = mockElement('canvas-chrome-layer', shell);
     const floatingActionButton = mockElement('floating-action-button', floatingLayer);
     const localWheelInput = mockElement('canvas-feedback-comment-input', floatingLayer, true);
     const unfocusedFocusLocalInput = mockElement('canvas-feedback-comment-input', floatingLayer, 'focus', false);
     const focusedFocusLocalInput = mockElement('canvas-feedback-comment-input', floatingLayer, 'focus', true);
-    const panelLayer = mockElement('panel-layer', shell);
+    const panelLayer = mockElement('workbench-window-layer', shell);
     const panelButton = mockElement('floating-panel-button', panelLayer);
+    const workbenchDockLayer = mockElement('workbench-dock-layer', shell);
+    const workbenchDockButton = mockElement('floating-dock-button', workbenchDockLayer);
     const otherShell = mockElement('workbench-shell');
-    const otherFloatingLayer = mockElement('floating-bar-layer', otherShell);
+    const otherFloatingLayer = mockElement('canvas-chrome-layer', otherShell);
     const otherFloatingActionButton = mockElement('floating-action-button', otherFloatingLayer);
 
     expect(shouldCanvasHandleGlobalWheelTarget(surface as unknown as EventTarget, surface as unknown as EventTarget)).toBe(true);
@@ -142,6 +144,7 @@ describe('canvas interaction', () => {
       true
     )).toBe(true);
     expect(shouldCanvasHandleGlobalWheelTarget(panelButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
+    expect(shouldCanvasHandleGlobalWheelTarget(workbenchDockButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
     expect(shouldCanvasHandleGlobalWheelTarget(otherFloatingActionButton as unknown as EventTarget, surface as unknown as EventTarget)).toBe(false);
   });
 

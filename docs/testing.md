@@ -216,6 +216,14 @@ clear, empty hit area, and inert outside-pointer close at a wide light viewport
 and a narrow dark viewport. It is the focused live diagnostic when unrelated
 Canvas media acceptance is outside the requested change.
 
+`pnpm verify:browser:window-gestures` reuses the isolated Runtime and Project at
+a wide real-browser viewport but runs only the Workbench window gesture path.
+It verifies that Settings and Terminal render in the shared Workbench window
+layer, Settings dragging, every Terminal resize direction, the locked cursor
+while the pointer crosses panel content, and Escape cancellation with no stale
+gesture attribute or preview geometry. It is the focused live diagnostic for
+Workbench panel drag, resize, hit-area, or cursor regressions.
+
 The Runtime HTTP integration suite also opens two ordinary-browser Workbench
 connections under one cookie, binds them to different Projects, and proves that
 each connection can still issue commands and read its own passive media after
@@ -325,6 +333,7 @@ connection.
 | `pnpm test:coverage` | merged local V8 coverage for contributing projects |
 | `pnpm test:canvas-text` | native `canvas-text` tag selection |
 | `pnpm verify:browser:activity` | focused light/dark real-browser Activity surface acceptance |
+| `pnpm verify:browser:window-gestures` | focused real-browser Workbench drag, eight-direction resize, cursor-lock, and cancellation acceptance |
 | `pnpm verify` | timed daily repository gate with product-target Clippy |
 | `pnpm verify:all` | timed final repository gate with all-target Clippy |
 
@@ -334,8 +343,9 @@ files and cases, and exceeded diagnostic thresholds. Profile output is written a
 under `.test-results/coverage`; it is a local diagnostic. Generated reports and
 temporary homes are not committed.
 
-`pnpm verify:browser` remains an explicit live-browser diagnostic outside
-`pnpm verify` and the normal local test suite.
+`pnpm verify:browser` and its focused Activity and Workbench window gesture
+variants remain explicit live-browser diagnostics outside `pnpm verify`,
+`pnpm verify:all`, and the normal local test suite.
 
 ## Executable Authorities
 

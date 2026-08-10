@@ -47,6 +47,7 @@
     "test:layout": "tsx scripts/check-test-layout.ts",
     "verify:browser": "node scripts/verify-workbench-browser.mjs",
     "verify:browser:activity": "node scripts/verify-workbench-browser.mjs --activity-only",
+    "verify:browser:window-gestures": "node scripts/verify-workbench-browser.mjs --window-gestures-only",
     "lint:arch": "node scripts/check-architecture.mjs",
     "native:raster:prepare": "node scripts/prepare-native-raster.mjs",
     "build:canvas-text-font-subset": "node scripts/build-canvas-text-font-subset-wasm.mjs",

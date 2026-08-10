@@ -38,6 +38,16 @@ describe('workbench window order', () => {
     expect(next.focusedWindow).toEqual(panelWindowIdentity('explorer'));
   });
 
+  it('keeps the same state when the frontmost window is already focused', () => {
+    const identity = textEditorWindowIdentity('drafts/page.md');
+    const state: WorkbenchWindowOrderState = {
+      orderBackToFront: [panelWindowIdentity('explorer'), identity],
+      focusedWindow: identity
+    };
+
+    expect(focusWorkbenchWindow(state, identity)).toBe(state);
+  });
+
   it('closes a focused window and focuses the next frontmost window', () => {
     const next = closeWorkbenchWindow({
       orderBackToFront: [
@@ -49,6 +59,15 @@ describe('workbench window order', () => {
 
     expect(next.orderBackToFront).toEqual([panelWindowIdentity('explorer')]);
     expect(next.focusedWindow).toEqual(panelWindowIdentity('explorer'));
+  });
+
+  it('keeps the same state when closing an unknown window', () => {
+    const state: WorkbenchWindowOrderState = {
+      orderBackToFront: [panelWindowIdentity('explorer')],
+      focusedWindow: panelWindowIdentity('explorer')
+    };
+
+    expect(closeWorkbenchWindow(state, panelWindowIdentity('terminal'))).toBe(state);
   });
 
   it('syncs the order to the current open windows while preserving known relative order', () => {

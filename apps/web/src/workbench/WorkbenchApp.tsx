@@ -45,13 +45,11 @@ import {
   type ProjectBindingLifecycle,
   type ProjectBindingLifecycleOutcome
 } from './services/projectBindingLifecycle.js';
-import { restoreProjectViewState, saveProjectViewState } from './services/projectViewState';
 import { reconcileWorkbenchViewportLayout } from './services/workbenchViewportLayout';
 import {
   closeTextEditorWindowState,
-  dragTextEditorWindowState,
-  openTextEditorWindowState,
-  resizeTextEditorWindowState
+  commitTextEditorWindowRect,
+  openTextEditorWindowState
 } from './services/textEditorWindows';
 import { useTextFileBufferActions } from './services/textFileBufferActions';
 import {
@@ -104,36 +102,20 @@ import {
   placeCanvasMinimapPanel
 } from './shell/floatingBars';
 import {
-  DEFAULT_FLOATING_PANEL_STATE,
-  FLOATING_PANEL_IDS,
-  closeFloatingPanel,
-  constrainOpenFloatingPanelsToViewport,
-  dragFloatingPanel,
-  openFloatingPanel,
-  resizeFloatingPanel,
-  toggleFloatingPanel,
-  type FloatingPanelId,
-  type FloatingPanelState
+  type FloatingPanelId
 } from './shell/floatingPanels';
-import { FloatingDock } from './shell/FloatingDock';
-import { FloatingPanelContent, WorkbenchFloatingPanelShell } from './shell/FloatingPanel';
+import { FloatingPanelContent } from './shell/FloatingPanel.js';
+import {
+  WorkbenchWindowHost,
+  type WorkbenchWindowHostHandle
+} from './shell/WorkbenchWindowHost.js';
 import { WorkbenchActivitySurfaces } from './shell/WorkbenchActivitySurfaces.js';
 import {
   scopeWorkbenchActivityNoticeReporter,
   type WorkbenchActivityNoticeReporter
 } from './services/WorkbenchActivities.js';
 import { Button, WorkbenchIconProvider } from './ui/index.js';
-import { FIXED_TOP_FLOATING_BAR_RECTS, TITLE_BAR_RESERVED_RECT } from './shell/workbenchLayers';
-import {
-  DEFAULT_WORKBENCH_WINDOW_ORDER,
-  closeWorkbenchWindow,
-  focusWorkbenchWindow,
-  panelWindowIdentity,
-  syncOpenWorkbenchWindows,
-  textEditorWindowIdentity,
-  type WorkbenchWindowIdentity,
-  type WorkbenchWindowOrderState
-} from './shell/workbenchWindowOrder';
+import { TITLE_BAR_RESERVED_RECT, WORKBENCH_TOP_CHROME_RESERVED_RECTS } from './shell/workbenchLayers';
 import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
 import { I18nProvider, createI18n, type WorkbenchI18n } from './i18n';
@@ -573,19 +555,7 @@ function WorkbenchBoundProjectApp({
     canvasStateChangeIntake.setRuntime(runtime);
     setMountedCanvasRuntime(runtime);
   }, [canvasStateChangeIntake]);
-  const [floatingPanels, setFloatingPanels] = useState<FloatingPanelState>(
-    initialProjectPresentation.floatingPanels
-  );
-  useEffect(() => {
-    if (floatingPanels.panels.settings.open) {
-      requestSettingsFeature();
-    }
-  }, [floatingPanels.panels.settings.open, requestSettingsFeature]);
-  useEffect(() => {
-    if (!runtimeBindingId && floatingPanels.panels.feedback.open) {
-      setFloatingPanels((current) => closeFloatingPanel(current, 'feedback'));
-    }
-  }, [floatingPanels.panels.feedback.open, runtimeBindingId]);
+  const windowHostRef = useRef<WorkbenchWindowHostHandle>(null);
   const [requestedTerminal, setRequestedTerminal] = useState<{
     cwdProjectRelativePath: string;
     scope: AcceptedProjectPathCommandScope;
@@ -601,7 +571,6 @@ function WorkbenchBoundProjectApp({
     initialProjectPresentation.textFileBuffers
   );
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
-  const [windowOrder, setWindowOrder] = useState<WorkbenchWindowOrderState>(DEFAULT_WORKBENCH_WINDOW_ORDER);
   const [canvasMinimapOpen, setCanvasMinimapOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     target: WorkbenchContextMenuTarget;
@@ -772,11 +741,6 @@ function WorkbenchBoundProjectApp({
   const requestExplorerFeature = useCallback(() => {
     setExplorerFeatureRequested(true);
   }, []);
-  useEffect(() => {
-    if (floatingPanels.panels.explorer.open) {
-      requestExplorerFeature();
-    }
-  }, [floatingPanels.panels.explorer.open, requestExplorerFeature]);
   const fileClipboard = explorerController?.fileClipboard;
   const canvasCutPaths = useMemo(() => (
     fileClipboard?.operation === 'cut'
@@ -844,7 +808,6 @@ function WorkbenchBoundProjectApp({
     reconcileWorkbenchViewportLayout({
       viewportRef: workbenchViewportRectRef,
       setViewportRect: setWorkbenchViewportRect,
-      setFloatingPanels,
       setTextEditorWindows
     }, readWorkbenchViewportRect());
   }, []);
@@ -879,17 +842,6 @@ function WorkbenchBoundProjectApp({
       reconcileCurrentWorkbenchViewportLayout();
     });
   }, [globalActivities, reconcileCurrentWorkbenchViewportLayout]);
-
-  useEffect(() => {
-    if (!canonicalRoot) {
-      return;
-    }
-    saveProjectViewState({
-      storage: window.sessionStorage,
-      canonicalRoot,
-      state: { floatingPanels }
-    });
-  }, [canonicalRoot, floatingPanels]);
 
   const {
     ensureTextFileBuffer,
@@ -947,7 +899,6 @@ function WorkbenchBoundProjectApp({
 
   const openTextEditorWindow = useCallback((projectRelativePath: string) => {
     setTextEditorWindows((windows) => openTextEditorWindowState(windows, projectRelativePath, workbenchViewportRectRef.current));
-    setWindowOrder((current) => focusWorkbenchWindow(current, textEditorWindowIdentity(projectRelativePath)));
     void ensureTextFileBuffer(projectRelativePath);
   }, [ensureTextFileBuffer]);
 
@@ -1112,8 +1063,7 @@ function WorkbenchBoundProjectApp({
   }, [closeWorkbenchContextMenu, explorerController, isProjectOpening, projectPresentationBlocked]);
 
   const openInspectorPanel = useCallback(() => {
-    setFloatingPanels((current) => openFloatingPanel(current, 'inspector', workbenchViewportRectRef.current));
-    setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity('inspector')));
+    windowHostRef.current?.openPanel('inspector');
   }, []);
 
   const effectiveTitleBarState = useMemo(() => buildWorkbenchTitleBarState({
@@ -1126,6 +1076,14 @@ function WorkbenchBoundProjectApp({
   const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
     runtimeBindingId ? [] : ['feedback', 'terminal']
   ), [runtimeBindingId]);
+  const handlePanelIntent = useCallback((panelId: FloatingPanelId) => {
+    if (panelId === 'settings') {
+      requestSettingsFeature();
+    }
+    if (panelId === 'explorer') {
+      requestExplorerFeature();
+    }
+  }, [requestExplorerFeature, requestSettingsFeature]);
 
   const globalProjection = api.globalProjection.getState();
   if (globalProjection.status === 'uninitialized') {
@@ -1164,8 +1122,7 @@ function WorkbenchBoundProjectApp({
       return;
     }
     setRequestedTerminal({ cwdProjectRelativePath, scope });
-    setFloatingPanels((current) => openFloatingPanel(current, 'terminal', workbenchViewportRectRef.current));
-    setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity('terminal')));
+    windowHostRef.current?.openPanel('terminal');
   }, []);
 
   const actions: WorkbenchActions = useMemo(() => ({
@@ -1207,19 +1164,6 @@ function WorkbenchBoundProjectApp({
     raiseCanvasSelection,
     openProject
   ]);
-  const openWorkbenchWindows = useMemo<WorkbenchWindowIdentity[]>(() => [
-    ...FLOATING_PANEL_IDS
-      .filter((panelId) => floatingPanels.panels[panelId].open)
-      .map(panelWindowIdentity),
-    ...Object.values(textEditorWindows)
-      .filter((windowState) => windowState.open)
-      .map((windowState) => textEditorWindowIdentity(windowState.projectRelativePath))
-  ], [floatingPanels, textEditorWindows]);
-
-  const renderWindowOrder = useMemo(
-    () => syncOpenWorkbenchWindows(windowOrder, openWorkbenchWindows),
-    [openWorkbenchWindows, windowOrder]
-  );
   const handleTitleBarCommand = useCallback((
     item: Extract<WorkbenchMenuItem, { kind: 'command' }>,
     owner?: WorkbenchBehaviorOwner
@@ -1276,7 +1220,7 @@ function WorkbenchBoundProjectApp({
   );
   const floatingBarReservedRects = [
     TITLE_BAR_RESERVED_RECT(workbenchViewportRect.width),
-    ...FIXED_TOP_FLOATING_BAR_RECTS,
+    ...WORKBENCH_TOP_CHROME_RESERVED_RECTS,
     minimapButtonRect,
     ...(resetLayoutButtonRect ? [resetLayoutButtonRect] : []),
     hierarchyEdgeVisibilityButtonRect,
@@ -1672,29 +1616,7 @@ function WorkbenchBoundProjectApp({
               </div>
             ) : profiledCanvasEditor}
           </div>
-          <div className="floating-bar-layer" data-testid="floating-bar-layer" inert={projectPresentationBlocked}>
-            <FloatingDock
-              panelState={floatingPanels}
-              disabledPanelIds={disabledFloatingPanelIds}
-              onToggle={(panelId) => {
-                if (disabledFloatingPanelIds.includes(panelId)) {
-                  return;
-                }
-                const isOpen = floatingPanels.panels[panelId].open;
-                if (panelId === 'settings' && !isOpen) {
-                  requestSettingsFeature();
-                }
-                if (panelId === 'explorer' && !isOpen) {
-                  requestExplorerFeature();
-                }
-                setFloatingPanels((current) => toggleFloatingPanel(current, panelId, workbenchViewportRect));
-                setWindowOrder((current) => (
-                  isOpen
-                    ? closeWorkbenchWindow(current, panelWindowIdentity(panelId))
-                    : focusWorkbenchWindow(current, panelWindowIdentity(panelId))
-                ));
-              }}
-            />
+          <div className="canvas-chrome-layer" data-testid="canvas-chrome-layer" inert={projectPresentationBlocked}>
             {availableCanvasWorkspace ? (
               <>
                 <CanvasMinimapBar
@@ -1728,51 +1650,16 @@ function WorkbenchBoundProjectApp({
               hierarchyEdgesVisible={hierarchyEdgesVisible}
               onHierarchyEdgesVisibleChange={setHierarchyEdgesVisible}
             />
-            {Object.values(textEditorWindows).some((windowState) => windowState.open) ? (
-              <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
-                {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
-                  <React.Suspense
-                    key={windowState.projectRelativePath}
-                    fallback={null}
-                  >
-                    <WorkbenchFloatingTextEditorWindowFeature
-                      locale={presentationController.locale}
-                      windowState={windowState}
-                      orderState={renderWindowOrder}
-                      buffer={textFileBuffers[windowState.projectRelativePath]}
-                      actions={actions}
-                      onBringToFront={() => setWindowOrder((current) => (
-                        focusWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath))
-                      ))}
-                      onClose={() => {
-                        setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
-                        setWindowOrder((current) => closeWorkbenchWindow(current, textEditorWindowIdentity(windowState.projectRelativePath)));
-                      }}
-                      onDrag={(dx, dy) => setTextEditorWindows((windows) => dragTextEditorWindowState(windows, windowState.projectRelativePath, { dx, dy }, workbenchViewportRect))}
-                      onResize={(rect) => setTextEditorWindows((windows) => resizeTextEditorWindowState(windows, windowState.projectRelativePath, rect, workbenchViewportRect))}
-                    />
-                  </React.Suspense>
-                ))}
-              </CanvasTextRenderProfileGate>
-            ) : null}
           </div>
-          <div className="panel-layer" data-testid="panel-layer" inert={projectPresentationBlocked}>
-            {FLOATING_PANEL_IDS.map((panelId) => (
-              floatingPanels.panels[panelId].open ? (
-                <WorkbenchFloatingPanelShell
-                  key={panelId}
-                  panelId={panelId}
-                  state={floatingPanels}
-                  orderState={renderWindowOrder}
-                  onClose={() => {
-                    setFloatingPanels((current) => closeFloatingPanel(current, panelId));
-                    setWindowOrder((current) => closeWorkbenchWindow(current, panelWindowIdentity(panelId)));
-                  }}
-                  onBringToFront={() => setWindowOrder((current) => focusWorkbenchWindow(current, panelWindowIdentity(panelId)))}
-                  onDrag={(dx, dy) => setFloatingPanels((current) => dragFloatingPanel(current, panelId, { dx, dy }, workbenchViewportRect))}
-                  onResize={(rect) => setFloatingPanels((current) => resizeFloatingPanel(current, panelId, rect, workbenchViewportRect))}
-                >
-                  <FloatingPanelContent
+          <WorkbenchWindowHost
+            ref={windowHostRef}
+            canonicalRoot={canonicalRoot}
+            viewportRect={workbenchViewportRect}
+            interactionBlocked={projectPresentationBlocked}
+            disabledPanelIds={disabledFloatingPanelIds}
+            onPanelIntent={handlePanelIntent}
+            renderPanelBody={(panelId) => (
+              <FloatingPanelContent
                     panelId={panelId}
                     explorerPanel={explorerController ? (
                       <React.Suspense fallback={<div className="project-tree" aria-busy="true" />}>
@@ -1864,11 +1751,38 @@ function WorkbenchBoundProjectApp({
                         />
                       </React.Suspense>
                     )}
-                  />
-                </WorkbenchFloatingPanelShell>
-              ) : null
-            ))}
-          </div>
+              />
+            )}
+          >
+            {Object.values(textEditorWindows).some((windowState) => windowState.open) ? (
+              <CanvasTextRenderProfileGate profile={canvasTextRenderProfile} pending={null}>
+                {Object.values(textEditorWindows).filter((windowState) => windowState.open).map((windowState) => (
+                  <React.Suspense
+                    key={windowState.projectRelativePath}
+                    fallback={null}
+                  >
+                    <WorkbenchFloatingTextEditorWindowFeature
+                      locale={presentationController.locale}
+                      windowState={windowState}
+                      viewportRect={workbenchViewportRect}
+                      buffer={textFileBuffers[windowState.projectRelativePath]}
+                      actions={actions}
+                      onClose={() => {
+                        setTextEditorWindows((windows) => closeTextEditorWindowState(windows, windowState.projectRelativePath));
+                      }}
+                      onCommitRect={(rect) => {
+                        setTextEditorWindows((windows) => commitTextEditorWindowRect(
+                          windows,
+                          windowState.projectRelativePath,
+                          rect
+                        ));
+                      }}
+                    />
+                  </React.Suspense>
+                ))}
+              </CanvasTextRenderProfileGate>
+            ) : null}
+          </WorkbenchWindowHost>
           {!projectPresentationBlocked && contextMenu ? (
             <ProjectPathContextMenuHost
               contextMenu={contextMenu}
@@ -1948,28 +1862,17 @@ function createInitialProjectPresentation(
   project: Exclude<WorkbenchProjectProjectionState, { status: 'unbound' }> | undefined
 ): {
   viewportRect: ReturnType<typeof readWorkbenchViewportRect>;
-  floatingPanels: FloatingPanelState;
   textFileBuffers: Record<string, TextFileBuffer>;
 } {
   const viewportRect = readWorkbenchViewportRect();
   if (!project) {
     return {
       viewportRect,
-      floatingPanels: DEFAULT_FLOATING_PANEL_STATE,
       textFileBuffers: {}
     };
   }
-  const restoredViewState = restoreProjectViewState({
-    storage: window.sessionStorage,
-    canonicalRoot: project.canonicalRoot
-  });
-  const viewState = restoredViewState ?? { floatingPanels: DEFAULT_FLOATING_PANEL_STATE };
   return {
     viewportRect,
-    floatingPanels: constrainOpenFloatingPanelsToViewport(
-      viewState.floatingPanels,
-      viewportRect
-    ),
     textFileBuffers: Object.fromEntries(
       Object.values(project.workingCopies.text).map((workingCopy) => [
         workingCopy.projectRelativePath,
