@@ -31,7 +31,7 @@ fn fixture() -> (
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new_with_home(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
         &home,
     ));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
@@ -347,7 +347,7 @@ fn reset_canvas_returns_the_exact_persistence_failure() {
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new_with_home(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
         &home,
     ));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
@@ -904,7 +904,7 @@ fn rename_rewrites_accepted_feedback_and_both_working_copy_kinds() {
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new_with_home(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
         &home,
     ));
     let feedback_artifacts = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
@@ -1044,7 +1044,7 @@ fn watcher_confirmed_deletion_prunes_both_working_copy_kinds() {
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new_with_home(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
         &home,
     ));
     let feedback_artifacts = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
@@ -1113,7 +1113,7 @@ fn watcher_deletion_prunes_working_copies_when_secondary_persistence_fails() {
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new_with_home(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
         &home,
     ));
     let feedback_artifacts = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
@@ -1269,7 +1269,7 @@ fn watcher_path_state_failure_is_reported_on_the_watcher_revision() {
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new_with_home(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
         &home,
     ));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
@@ -1312,7 +1312,7 @@ fn committed_path_operation_survives_working_copy_reconcile_failure() {
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new_with_home(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
         &home,
     ));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());

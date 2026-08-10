@@ -10,8 +10,8 @@ replacement, or bounded by a record-capacity policy.
 
 An Activity record is either a terminal notice or a task updated in place.
 Activity is a presentation and observation layer rather than a second work
-authority: Model Operations, Photoshop transfers, and Integration operations
-retain their existing ownership, cancellation, diagnostics, and result
+authority: Model Operations and Photoshop transfers retain their existing
+ownership, cancellation, diagnostics, and result
 contracts. Activity projects only their reviewed status, true determinate
 progress where available, and closed structured message arguments. It cannot
 accept arbitrary frontend prose, raw errors, logs, commands, stdout, or stderr.

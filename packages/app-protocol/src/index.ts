@@ -585,94 +585,6 @@ export type AudioModelSettingRecord = ModelSettingRecord & {
   kind: AudioModelKind;
 };
 
-type IntegrationId = 'ffmpeg' | 'imagemagick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
-type IntegrationBinaryId = 'ffmpeg' | 'ffprobe' | 'magick' | 'mediainfo' | 'exiftool' | 'remove-ai-watermarks';
-type IntegrationStatusKind = 'ready' | 'not_found' | 'probe_failed';
-type IntegrationProbeErrorKind = 'spawn_error' | 'timeout' | 'nonzero_exit' | 'parse_error';
-type IntegrationOperationFailureKind =
-  | IntegrationProbeErrorKind
-  | 'operation_already_running'
-  | 'backend_unavailable'
-  | 'integration_not_found'
-  | 'operation_unavailable'
-  | 'command_unavailable';
-type SystemPackageManagerId = 'brew' | 'winget';
-type PythonCliInstallerId = 'uv' | 'pipx';
-export type IntegrationBackendId = SystemPackageManagerId | PythonCliInstallerId;
-type IntegrationInstallBackendKind = 'system-package-manager' | 'python-cli-installer';
-export type IntegrationOperationKind = 'install' | 'update' | 'uninstall';
-
-export interface IntegrationOperationDiagnostic {
-  exitCode?: number;
-  errorKind?: IntegrationOperationFailureKind;
-  stdoutTail?: string;
-  stderrTail?: string;
-}
-
-export interface IntegrationOperationInFlight {
-  integrationId: IntegrationId;
-  operation: IntegrationOperationKind;
-}
-
-export interface RunIntegrationOperationInput {
-  integrationId: IntegrationId;
-  operation: IntegrationOperationKind;
-}
-
-export interface RunIntegrationOperationResult {
-  ok: boolean;
-  integrationId: IntegrationId;
-  operation: IntegrationOperationKind;
-  diagnostic?: IntegrationOperationDiagnostic;
-}
-
-export interface IntegrationBackendStatus {
-  kind: IntegrationInstallBackendKind;
-  backend?: IntegrationBackendId;
-  available: boolean;
-  unavailableReason?: string;
-}
-
-interface IntegrationOperationStatus {
-  backendKind: IntegrationInstallBackendKind;
-  backend?: IntegrationBackendId;
-  packageName?: string;
-  availableOperations: IntegrationOperationKind[];
-  installedVersion?: string;
-  latestVersion?: string;
-  unavailableReason?: string;
-  queryDiagnostic?: IntegrationOperationDiagnostic;
-}
-
-interface IntegrationBinaryStatus {
-  binaryId: IntegrationBinaryId;
-  displayName: string;
-  status: IntegrationStatusKind;
-  version?: string;
-  probe?: {
-    exitCode?: number;
-    errorKind?: IntegrationProbeErrorKind;
-    stderrTail?: string;
-  };
-}
-
-export interface IntegrationStatus {
-  integrationId: IntegrationId;
-  displayName: string;
-  description: string;
-  category: 'media' | 'image-cleanup';
-  status: IntegrationStatusKind;
-  summary: string;
-  binaries: IntegrationBinaryStatus[];
-  operationStatus?: IntegrationOperationStatus;
-}
-
-export interface IntegrationSettingsView {
-  integrations: IntegrationStatus[];
-  backends: IntegrationBackendStatus[];
-  runningOperation?: IntegrationOperationInFlight;
-}
-
 export type ManagedCliDiagnostic =
   | {
       status: 'ready';
@@ -936,8 +848,7 @@ export type ActivitySource =
   | 'model-request'
   | 'photoshop'
   | 'workbench'
-  | 'update'
-  | 'integration';
+  | 'update';
 
 export interface ActivityProjectContext {
   canonicalRoot: string;
@@ -972,8 +883,6 @@ export type WorkbenchActivityOperation =
   | 'window-command'
   | 'menu-command'
   | 'save-canvas-settings';
-export type IntegrationActivityOperation = 'install' | 'update' | 'uninstall';
-
 export type WorkbenchActivityNoticeInput =
   | { kind: 'project-opened' }
   | { kind: 'project-operation-failed'; operation: ProjectActivityOperation }
@@ -985,8 +894,7 @@ export type WorkbenchActivityNoticeInput =
 export type ActivityMessage =
   | WorkbenchActivityNoticeInput
   | { kind: 'model-request'; modelKind: 'image' | 'video' | 'tts' | 'music' | 'sound-effect'; itemCount: number }
-  | { kind: 'photoshop-send'; projectRelativePath: string; documentTitle?: string }
-  | { kind: 'integration-operation'; integrationId: string; operation: IntegrationActivityOperation };
+  | { kind: 'photoshop-send'; projectRelativePath: string; documentTitle?: string };
 
 export type ActivityProgress =
   | { type: 'indeterminate' }
@@ -1038,9 +946,6 @@ const EXPLORER_ACTIVITY_OPERATIONS = new Set<ExplorerActivityOperation>([
 const WORKBENCH_ACTIVITY_OPERATIONS = new Set<WorkbenchActivityOperation>([
   'window-state', 'window-command', 'menu-command', 'save-canvas-settings'
 ]);
-const INTEGRATION_ACTIVITY_OPERATIONS = new Set<IntegrationActivityOperation>([
-  'install', 'update', 'uninstall'
-]);
 const ACTIVITY_TASK_STATUSES = new Set<ActivityTaskStatus>([
   'running', 'cancelling', 'succeeded', 'failed', 'cancelled'
 ]);
@@ -1081,11 +986,6 @@ function isActivityMessage(value: unknown): value is ActivityMessage {
       return hasExactKeys(value, ['kind', 'projectRelativePath'], ['documentTitle'])
         && typeof value.projectRelativePath === 'string'
         && (value.documentTitle === undefined || typeof value.documentTitle === 'string');
-    case 'integration-operation':
-      return hasExactKeys(value, ['kind', 'integrationId', 'operation'])
-        && typeof value.integrationId === 'string'
-        && value.integrationId.length > 0
-        && INTEGRATION_ACTIVITY_OPERATIONS.has(value.operation as IntegrationActivityOperation);
     default:
       return false;
   }
@@ -1112,7 +1012,6 @@ function activitySourceForMessage(message: ActivityMessage): ActivitySource {
     case 'update-install-failed': return 'update';
     case 'model-request': return 'model-request';
     case 'photoshop-send': return 'photoshop';
-    case 'integration-operation': return 'integration';
   }
 }
 
@@ -1133,11 +1032,11 @@ function isActivityRecord(value: unknown): value is ActivityRecord {
     .includes(value.source);
   if (projectRequired !== (value.project !== undefined)) return false;
   if (value.type === 'notice') {
-    return !['model-request', 'photoshop-send', 'integration-operation'].includes(value.message.kind)
+    return !['model-request', 'photoshop-send'].includes(value.message.kind)
       && hasExactKeys(value, ['id', 'source', 'createdAt', 'updatedAt', 'type', 'message'], ['project']);
   }
   return value.type === 'task'
-    && ['model-request', 'photoshop-send', 'integration-operation'].includes(value.message.kind)
+    && ['model-request', 'photoshop-send'].includes(value.message.kind)
     && ACTIVITY_TASK_STATUSES.has(value.status as ActivityTaskStatus)
     && isActivityProgress(value.progress)
     && hasExactKeys(
@@ -1191,7 +1090,6 @@ export type WorkbenchEvent =
   | { type: 'canvas.feedback.changed'; bindingId: string; projectRevision: number; feedback: CanvasFeedbackDocument }
   | { type: 'recentProjects.changed'; revision: number; recentProjectRoots: string[] }
   | { type: 'globalSettings.changed'; revision: number; settings: DebruteGlobalSettingsView }
-  | { type: 'integrations.changed'; revision: number; integrations: IntegrationSettingsView }
   | { type: 'photoshop.state.changed'; revision: number; state: PhotoshopStateView }
   | { type: 'product.changed'; revision: number; product: DebruteProductState | null };
 
@@ -1262,8 +1160,6 @@ const workbenchEventValidators = {
     && value.recentProjectRoots.every((root) => typeof root === 'string'),
   'globalSettings.changed': (value) => isNonNegativeInteger(value.revision)
     && isProtocolObject(value.settings),
-  'integrations.changed': (value) => isNonNegativeInteger(value.revision)
-    && isProtocolObject(value.integrations),
   'photoshop.state.changed': (value) => isNonNegativeInteger(value.revision)
     && isPhotoshopStateView(value.state),
   'product.changed': (value) => isNonNegativeInteger(value.revision)
@@ -1833,8 +1729,6 @@ export interface WorkbenchApiClient {
   updateCanvasFeedback(input: UpdateCanvasFeedbackInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
   resetCanvas(): Promise<RevisionedProjectResult>;
   patchCanvasState(input: PatchCanvasStateInput): Promise<WorkbenchCanvasStateMutationResult>;
-  integrationsRescan(): Promise<{ ok: true }>;
-  integrationsRunOperation(input: RunIntegrationOperationInput): Promise<RunIntegrationOperationResult>;
   onEvent(listener: (event: WorkbenchEvent) => void): () => void;
   onConnectionEnded(listener: (error: Error) => void): () => void;
   dispose(): void;

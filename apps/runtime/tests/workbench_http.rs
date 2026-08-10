@@ -20,6 +20,7 @@ use debrute_runtime::{
     cli::RuntimeCliService,
     control::RuntimeControlState,
     photoshop::{PhotoshopIntegrationStatus, PhotoshopMimeType, PluginPhotoshopMessage},
+    project::CanvasVideoToolPaths,
     workbench::{
         ProductUpdateInitiator, RuntimeCliHttpService, RuntimeHttpServiceError,
         RuntimeProductHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
@@ -1819,6 +1820,7 @@ impl TestRuntime {
         let services = WorkbenchRuntimeServices::compose_for_integration_tests(
             root.join("home"),
             Arc::clone(&state),
+            CanvasVideoToolPaths::for_tests(),
         )
         .expect("Runtime services should compose");
         let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(

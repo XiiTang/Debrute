@@ -19,9 +19,9 @@ use super::commit::{
     UpdatePlatformAdapter,
 };
 use super::manifest::{
-    ProductEntrypoints, ProductManifest, ProductManifestFile, ProductPlatform, ReleaseArchitecture,
-    ReleaseAssetKind, ReleasePlatform, StagedDesktopAsset, TrustedReleaseManifest,
-    verify_signed_release_manifest,
+    ProductEntrypoints, ProductManifest, ProductManifestFile, ProductPlatform,
+    ProductRuntimeDependencies, ReleaseArchitecture, ReleaseAssetKind, ReleasePlatform,
+    StagedDesktopAsset, TrustedReleaseManifest, verify_signed_release_manifest,
 };
 use super::removal::ProductRemovalExecutor;
 use super::store::{CommitPlatform, ProductStore};
@@ -627,12 +627,51 @@ fn complete_product_is_validated_and_materialized_before_it_can_be_selected() {
     assert!(fixture.store.validate_version("0.0.4").is_err());
     fs::write(&manifest_path, original_manifest).unwrap();
 
+    let ffmpeg =
+        target.join("runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffmpeg");
+    let mut permissions = fs::metadata(&ffmpeg).unwrap().permissions();
+    permissions.set_mode(0o644);
+    fs::set_permissions(&ffmpeg, permissions).unwrap();
+    assert!(fixture.store.validate_version("0.0.4").is_err());
+    let mut permissions = fs::metadata(&ffmpeg).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&ffmpeg, permissions).unwrap();
+    assert!(fixture.store.validate_version("0.0.4").is_ok());
+
     fs::write(target.join("web/index.html"), "tampered").unwrap();
     assert!(fixture.store.validate_version("0.0.4").is_err());
     assert_eq!(
         fixture.store.current_version().unwrap().as_deref(),
         Some("0.0.3")
     );
+}
+
+#[test]
+fn running_product_validation_returns_the_one_authorized_manifest_derived_layout() {
+    let fixture = Fixture::new();
+    let active = fixture.bootstrap_product("0.0.3");
+    let canonical_active = fs::canonicalize(&active).unwrap();
+    let running = fixture.store.validate_running_product(&active).unwrap();
+
+    assert_eq!(running.directory(), canonical_active);
+    assert_eq!(running.version(), "0.0.3");
+    let [ffmpeg, ffprobe] = running.canvas_video_executables();
+    assert_eq!(
+        ffmpeg,
+        canonical_active
+            .join("runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffmpeg")
+    );
+    assert_eq!(
+        ffprobe,
+        canonical_active
+            .join("runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffprobe")
+    );
+
+    let inactive = fixture.materialize_product("0.0.4");
+    assert!(fixture.store.validate_running_product(&inactive).is_err());
+    let external = fixture.root.join("external/0.0.3");
+    fs::create_dir_all(&external).unwrap();
+    assert!(fixture.store.validate_running_product(&external).is_err());
 }
 
 #[test]
@@ -1507,13 +1546,41 @@ impl Fixture {
             ("runtime/debrute", "cli"),
             ("skills/debrute-core/SKILL.md", "skills"),
             ("native-workers/manifest.json", "worker"),
+            (
+                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffmpeg",
+                "ffmpeg",
+            ),
+            (
+                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffprobe",
+                "ffprobe",
+            ),
+            (
+                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/LICENSE",
+                "license",
+            ),
+            (
+                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/THIRD-PARTY-NOTICES.md",
+                "notices",
+            ),
+            (
+                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/BUILD-CONFIG.txt",
+                "config",
+            ),
+            (
+                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/SOURCE.md",
+                "source",
+            ),
         ];
         let mut manifest_files = Vec::new();
         for (path, contents) in files {
             let destination = seed.join(path);
             fs::create_dir_all(destination.parent().unwrap()).unwrap();
             fs::write(&destination, contents).unwrap();
-            if path.ends_with("/debrute-runtime") || path == "runtime/debrute" {
+            if path.ends_with("/debrute-runtime")
+                || path.ends_with("/ffmpeg")
+                || path.ends_with("/ffprobe")
+                || path == "runtime/debrute"
+            {
                 let mut permissions = fs::metadata(&destination).unwrap().permissions();
                 permissions.set_mode(0o755);
                 fs::set_permissions(&destination, permissions).unwrap();
@@ -1525,7 +1592,7 @@ impl Fixture {
             });
         }
         let manifest = ProductManifest {
-            schema_version: 1,
+            schema_version: 2,
             product: "debrute".to_owned(),
             product_version: version.to_owned(),
             control_protocol: CONTROL_PROTOCOL.to_owned(),
@@ -1539,6 +1606,7 @@ impl Fixture {
                 skills: "skills/debrute-core/SKILL.md".to_owned(),
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
+            runtime_dependencies: ProductRuntimeDependencies::for_platform(ProductPlatform::Macos),
             files: manifest_files,
         };
         fs::write(

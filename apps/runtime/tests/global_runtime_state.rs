@@ -10,10 +10,6 @@ use debrute_runtime::global::{
     GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService, GlobalSettingsError,
     GlobalSettingsMutation,
 };
-use debrute_runtime::integrations::{
-    CommandResult, IntegrationCommand, IntegrationOperation, IntegrationProcessAdapter,
-    IntegrationService, Platform, ProbeResult,
-};
 use debrute_runtime::models::ModelCatalog;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -485,11 +481,7 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
 #[test]
 fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     let home = temporary_home("runtime-events");
-    let service = GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
-    );
+    let service = GlobalRuntimeService::new(GlobalConfigStore::new(&home), ModelCatalog::bundled());
     let alpha = project_root(&home, "alpha");
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
@@ -516,10 +508,8 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     service
         .remember_recent_project(&alpha)
         .expect("recent Project should persist");
-    service.integrations_rescan();
-
     let events = events.lock().expect("event recorder should lock");
-    assert_eq!(events.len(), 3);
+    assert_eq!(events.len(), 2);
     assert_eq!(events[0].revision, 1);
     assert!(matches!(
         events[0].change,
@@ -531,12 +521,6 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
         GlobalRuntimeChange::RecentProjectsChanged(ref entries)
             if entries == &[alpha]
     ));
-    assert_eq!(events[2].revision, 3);
-    assert!(matches!(
-        events[2].change,
-        GlobalRuntimeChange::IntegrationsChanged(_)
-    ));
-
     drop(events);
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
@@ -544,11 +528,7 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
 #[test]
 fn model_api_key_reveal_returns_the_exact_secret_without_publishing_global_state() {
     let home = temporary_home("api-key-reveal");
-    let service = GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
-    );
+    let service = GlobalRuntimeService::new(GlobalConfigStore::new(&home), ModelCatalog::bundled());
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
     assert!(service.install_observer(Arc::new(move |event| {
@@ -594,11 +574,7 @@ fn model_api_key_reveal_returns_the_exact_secret_without_publishing_global_state
 #[test]
 fn global_snapshot_captures_product_projection_at_its_revision_barrier() {
     let home = temporary_home("product-snapshot-barrier");
-    let service = GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
-    );
+    let service = GlobalRuntimeService::new(GlobalConfigStore::new(&home), ModelCatalog::bundled());
 
     service.publish_product_changed(json!({ "update": { "type": "checking" } }));
     let (snapshot_revision, _, product) = service
@@ -614,77 +590,11 @@ fn global_snapshot_captures_product_projection_at_its_revision_barrier() {
 }
 
 #[test]
-fn desktop_presentation_startup_snapshot_does_not_probe_integrations() {
-    let home = temporary_home("startup-recents");
-    let adapter = Arc::new(BlockingScanAdapter::default());
-    let service = GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
-    );
-
-    let (recent, theme) = service
-        .desktop_presentation_snapshot()
-        .expect("startup Desktop presentation should load");
-
-    assert!(recent.is_empty());
-    assert_eq!(theme, "system");
-    assert!(!adapter.started());
-    fs::remove_dir_all(home).expect("temporary home should be removed");
-}
-
-#[test]
-fn workbench_global_settings_snapshot_does_not_probe_integrations() {
-    let home = temporary_home("workbench-global-snapshot");
-    let adapter = Arc::new(BlockingScanAdapter::default());
-    let service = Arc::new(GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
-    ));
-    let (finished_tx, finished_rx) = mpsc::channel();
-    let snapshot_service = Arc::clone(&service);
-    let snapshot = thread::spawn(move || {
-        let result = snapshot_service.sync_snapshot();
-        finished_tx
-            .send(())
-            .expect("snapshot completion should be observed");
-        result
-    });
-
-    let completed_without_probe = finished_rx.recv_timeout(Duration::from_millis(100)).is_ok();
-    let integration_probe_started = adapter.started();
-    adapter.release();
-    let (_, settings, _) = snapshot
-        .join()
-        .expect("snapshot thread should join")
-        .expect("global settings snapshot should load");
-
-    assert!(
-        completed_without_probe,
-        "Global settings must not wait for Integration discovery"
-    );
-    assert!(
-        !integration_probe_started,
-        "Global settings must not start Integration discovery"
-    );
-    assert!(
-        serde_json::to_value(settings)
-            .expect("Global settings should serialize")
-            .get("integrations")
-            .is_none(),
-        "Integration discovery is an independent Runtime projection"
-    );
-    fs::remove_dir_all(home).expect("temporary home should be removed");
-}
-
-#[test]
 fn global_event_dispatch_stays_ordered_while_the_first_observer_call_is_blocked() {
     let home = temporary_home("ordered-dispatch");
     let service = Arc::new(GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
         ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     ));
     let events = Arc::new(Mutex::new(Vec::new()));
     let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
@@ -781,7 +691,6 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     let service = Arc::new(GlobalRuntimeService::new(
         GlobalConfigStore::new(&home),
         ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
     ));
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
@@ -832,178 +741,6 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     assert_eq!(event_projects, &disk_projects);
     drop(events);
     fs::remove_dir_all(home).expect("temporary home should be removed");
-}
-
-#[test]
-fn rejected_integration_operations_do_not_publish_transition_events() {
-    let home = temporary_home("rejected-integration");
-    let service = GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", Arc::new(MissingAdapter)),
-    );
-    service.integrations_rescan();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let observer_events = Arc::clone(&events);
-    assert!(service.install_observer(Arc::new(move |event| {
-        observer_events
-            .lock()
-            .expect("event recorder should lock")
-            .push(event);
-    })));
-    let unknown = service.integrations_run_operation("missing", IntegrationOperation::Install);
-    assert_eq!(
-        unknown
-            .diagnostic
-            .as_ref()
-            .and_then(|diagnostic| diagnostic.error_kind.as_deref()),
-        Some("integration_not_found")
-    );
-    let unavailable = service.integrations_run_operation("ffmpeg", IntegrationOperation::Install);
-    assert_eq!(
-        unavailable
-            .diagnostic
-            .as_ref()
-            .and_then(|diagnostic| diagnostic.stderr_tail.as_deref()),
-        Some("Homebrew was not found on PATH.")
-    );
-    assert!(
-        events
-            .lock()
-            .expect("event recorder should lock")
-            .is_empty()
-    );
-
-    fs::remove_dir_all(home).expect("temporary home should be removed");
-}
-
-#[test]
-fn an_external_integration_scan_does_not_block_recent_project_commits() {
-    let home = temporary_home("scan-outside-commit");
-    let adapter = Arc::new(BlockingScanAdapter::default());
-    let service = Arc::new(GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-        IntegrationService::new(Platform::MacOs, "", "", adapter.clone()),
-    ));
-    let scan_service = Arc::clone(&service);
-    let scan = thread::spawn(move || scan_service.integrations_rescan());
-    adapter.wait_until_started();
-
-    let alpha = project_root(&home, "alpha");
-    let expected_alpha = alpha.clone();
-    let recent_service = Arc::clone(&service);
-    let (recent_done, recent_completion) = mpsc::sync_channel(1);
-    let recent = thread::spawn(move || {
-        let result = recent_service.remember_recent_project(&alpha);
-        recent_done
-            .send(result)
-            .expect("recent mutation result should be observable");
-    });
-    assert!(
-        recent_completion
-            .recv_timeout(Duration::from_millis(250))
-            .expect("recent mutation must not wait for external scan")
-            .expect("recent mutation should succeed")
-    );
-
-    adapter.release();
-    recent.join().expect("recent thread should join");
-    scan.join().expect("scan thread should join");
-    let view = service
-        .settings_get()
-        .expect("settings should remain readable after Integration discovery");
-    assert_eq!(view.chrome.recent_project_roots, [expected_alpha]);
-    fs::remove_dir_all(home).expect("temporary home should be removed");
-}
-
-struct MissingAdapter;
-
-impl IntegrationProcessAdapter for MissingAdapter {
-    fn resolve_executable(
-        &self,
-        _name: &str,
-        _env_path: &std::ffi::OsStr,
-        _platform: Platform,
-        _path_ext: &std::ffi::OsStr,
-    ) -> Option<PathBuf> {
-        None
-    }
-
-    fn run_probe(
-        &self,
-        _file: &std::path::Path,
-        _args: &[String],
-        _timeout_ms: u64,
-    ) -> ProbeResult {
-        panic!("missing executables must not be probed")
-    }
-
-    fn run_command(&self, _command: &IntegrationCommand) -> CommandResult {
-        panic!("no integration operation was requested")
-    }
-}
-
-#[derive(Default)]
-struct BlockingScanAdapter {
-    state: Mutex<(bool, bool)>,
-    changed: Condvar,
-}
-
-impl BlockingScanAdapter {
-    fn started(&self) -> bool {
-        self.state.lock().expect("scan state should lock").0
-    }
-
-    fn wait_until_started(&self) {
-        let mut state = self.state.lock().expect("scan state should lock");
-        while !state.0 {
-            state = self
-                .changed
-                .wait(state)
-                .expect("scan state should remain available");
-        }
-    }
-
-    fn release(&self) {
-        let mut state = self.state.lock().expect("scan state should lock");
-        state.1 = true;
-        self.changed.notify_all();
-    }
-}
-
-impl IntegrationProcessAdapter for BlockingScanAdapter {
-    fn resolve_executable(
-        &self,
-        _name: &str,
-        _env_path: &std::ffi::OsStr,
-        _platform: Platform,
-        _path_ext: &std::ffi::OsStr,
-    ) -> Option<PathBuf> {
-        let mut state = self.state.lock().expect("scan state should lock");
-        state.0 = true;
-        self.changed.notify_all();
-        while !state.1 {
-            state = self
-                .changed
-                .wait(state)
-                .expect("scan state should remain available");
-        }
-        None
-    }
-
-    fn run_probe(
-        &self,
-        _file: &std::path::Path,
-        _args: &[String],
-        _timeout_ms: u64,
-    ) -> ProbeResult {
-        panic!("missing executables must not be probed")
-    }
-
-    fn run_command(&self, _command: &IntegrationCommand) -> CommandResult {
-        panic!("missing backends must not run commands")
-    }
 }
 
 fn temporary_home(label: &str) -> PathBuf {

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { packageManagerCommand } from './package-manager-command.mjs';
 import { validateNativeRasterLock } from './native-raster-payload.mjs';
+import { validateCanvasVideoToolsLock } from './canvas-video-tools-payload.mjs';
 import { validateCanvasTextFontSubsetWasm } from './validate-canvas-text-font-subset-wasm.mjs';
 
 const root = process.cwd();
@@ -125,6 +126,46 @@ try {
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   failures.push(`Native raster payload lock is invalid. ${message}`);
+}
+
+try {
+  validateCanvasVideoToolsLock();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  failures.push(`Canvas video tools lock is invalid. ${message}`);
+}
+
+function requireCanvasVideoBuildCommand(command, args, validate = () => true) {
+  try {
+    const output = execFileSync(command, args, { encoding: 'utf8' }).trim();
+    if (!validate(output)) {
+      failures.push(`Canvas video build command has an incompatible target: ${command} (${output})`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failures.push(`Canvas video source builds require ${command}. ${message}`);
+  }
+}
+
+for (const [command, args] of [
+  ['gpg', ['--version']],
+  ['tar', ['--version']],
+  ['make', ['--version']]
+]) {
+  requireCanvasVideoBuildCommand(command, args);
+}
+if (process.platform === 'darwin') {
+  requireCanvasVideoBuildCommand('clang', ['--version']);
+}
+if (process.platform === 'win32') {
+  for (const command of ['bash', 'awk', 'sed']) {
+    requireCanvasVideoBuildCommand(command, ['--version']);
+  }
+  requireCanvasVideoBuildCommand(
+    'cc',
+    ['-dumpmachine'],
+    (output) => output === 'x86_64-w64-mingw32'
+  );
 }
 
 try {

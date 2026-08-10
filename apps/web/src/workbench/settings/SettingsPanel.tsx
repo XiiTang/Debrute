@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { AudioLines, Cable, Eye, Heart, Image as ImageIcon, Info, Music, Settings, Video, WandSparkles, Wrench } from '../ui/index.js';
+import { AudioLines, Cable, Eye, Heart, Image as ImageIcon, Info, Music, Settings, Video, WandSparkles } from '../ui/index.js';
 import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
-  IntegrationSettingsView,
   PhotoshopStateView
 } from '@debrute/app-protocol';
-import type { EventProjection, SettingsResource } from '../../types.js';
+import type { EventProjection } from '../../types.js';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
-import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage.js';
 import { PluginsSettingsPage } from './plugins/PluginsSettingsPage.js';
 import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage.js';
 import { SettingsResourcePanel } from './SettingsResourcePanel.js';
@@ -44,11 +42,6 @@ const SETTINGS_NAV_GROUPS = [
     items: [{ id: 'plugins', labelKey: 'settings.nav.plugins', icon: Cable }]
   },
   {
-    id: 'integrations',
-    labelKey: 'settings.nav.integrationsGroup',
-    items: [{ id: 'integrations', labelKey: 'settings.nav.integrations', icon: Wrench }]
-  },
-  {
     id: 'system',
     labelKey: 'settings.nav.systemGroup',
     items: [{ id: 'about-updates', labelKey: 'settings.nav.aboutUpdates', icon: Info }]
@@ -59,7 +52,6 @@ type SettingsPageId = typeof SETTINGS_NAV_GROUPS[number]['items'][number]['id'];
 
 export interface SettingsPanelState {
   globalSettings: EventProjection<DebruteGlobalSettingsView>;
-  integrations: SettingsResource<IntegrationSettingsView>;
   photoshop: EventProjection<PhotoshopStateView>;
   product: EventProjection<DebruteProductState | null>;
   resolvedTheme: WorkbenchResolvedTheme;
@@ -178,14 +170,6 @@ export function SettingsPanel({
                 onSettingsChange={actions.mutateGlobalSettings}
               />
             )}
-          </SettingsResourcePanel>
-        ) : activePage === 'integrations' ? (
-          <SettingsResourcePanel
-            title={i18n.t('settings.integrations.title')}
-            resource={state.integrations}
-            {...(state.integrations.status === 'error' ? { onRetry: actions.rescanIntegrations } : {})}
-          >
-            {(settings) => <IntegrationsSettingsPage settings={settings} actions={actions} />}
           </SettingsResourcePanel>
         ) : activePage === 'about-updates' ? (
           <SettingsResourcePanel title={i18n.t('settings.about.title')} resource={state.globalSettings}>

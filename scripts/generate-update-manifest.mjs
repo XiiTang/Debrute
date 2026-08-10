@@ -6,6 +6,7 @@ import {
   productInstallerTargets,
   expectedProductInstallerAssets,
   expectedProductReleaseAssets,
+  ffmpegSourceReleaseAssetName,
   productReleaseAssetName,
   productReleaseTargets,
   updateManifestName,
@@ -28,6 +29,7 @@ export async function generateUpdateManifest(input) {
   const allowedInputFiles = new Set([
     ...expectedInstallerAssets,
     ...expectedProductAssets,
+    ffmpegSourceReleaseAssetName,
     updateManifestName,
     updateManifestSignatureName
   ]);
@@ -36,7 +38,11 @@ export async function generateUpdateManifest(input) {
     throw new Error(`Unexpected release assets: ${unexpected.join(', ')}`);
   }
   const missing = [];
-  for (const assetName of [...expectedInstallerAssets, ...expectedProductAssets]) {
+  for (const assetName of [
+    ...expectedInstallerAssets,
+    ...expectedProductAssets,
+    ffmpegSourceReleaseAssetName
+  ]) {
     try {
       await stat(join(resolvedReleaseDir, assetName));
     } catch {

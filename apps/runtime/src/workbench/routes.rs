@@ -189,13 +189,6 @@ pub(super) async fn workbench_connection(
         "revision": global_revision,
         "product": product
     }));
-    if let Some(integrations) = services.global().integration_snapshot() {
-        let _ = sender.try_send(json!({
-            "type": "integrations.changed",
-            "revision": global_revision,
-            "integrations": integrations
-        }));
-    }
     let _ = sender.try_send(json!({
         "type": "photoshop.state.changed",
         "revision": global_revision,
@@ -332,11 +325,6 @@ pub(super) fn browser_api_router() -> Router<WorkbenchRouterState> {
         .route(
             "/settings/models/api-key/reveal",
             post(model_api_key_reveal),
-        )
-        .route("/integrations/rescan", post(integrations_rescan))
-        .route(
-            "/integrations/{integration_id}/{operation}",
-            post(integration_operation),
         )
         .route("/projects/open", post(project_open))
         .route("/projects/choose", post(project_choose))
@@ -680,23 +668,6 @@ async fn model_api_key_reveal(
         )
             .into_response(),
         Err(error) => service_error_response(RuntimeHttpServiceError::from_global(error)),
-    }
-}
-
-async fn integrations_rescan(State(state): State<WorkbenchRouterState>) -> Response {
-    let services = Arc::clone(&state.services);
-    services.global().integrations_rescan();
-    Json(json!({"ok": true})).into_response()
-}
-
-async fn integration_operation(
-    State(state): State<WorkbenchRouterState>,
-    Path((integration_id, operation)): Path<(String, String)>,
-) -> Response {
-    let services = Arc::clone(&state.services);
-    match services.integration_operation(&integration_id, &operation) {
-        Ok(value) => Json(value).into_response(),
-        Err(error) => service_error_response(error),
     }
 }
 
@@ -1142,11 +1113,6 @@ fn global_event_value(event: GlobalRuntimeEvent) -> Value {
             "type": "recentProjects.changed",
             "revision": event.revision,
             "recentProjectRoots": recent_projects
-        }),
-        GlobalRuntimeChange::IntegrationsChanged(integrations) => json!({
-            "type": "integrations.changed",
-            "revision": event.revision,
-            "integrations": integrations
         }),
         GlobalRuntimeChange::PhotoshopChanged(state) => json!({
             "type": "photoshop.state.changed",

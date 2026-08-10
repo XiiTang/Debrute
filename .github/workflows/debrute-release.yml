@@ -28,8 +28,8 @@ jobs:
         with:
           tool: nextest@0.9.140
           fallback: none
-      - name: Install architecture scanner dependency
-        run: brew install ripgrep
+      - name: Install source verification and architecture scanner dependencies
+        run: brew install gnupg ripgrep
       - run: pnpm install --frozen-lockfile
       - name: Prepare pinned native raster payload
         run: pnpm native:raster:prepare
@@ -44,8 +44,54 @@ jobs:
       - run: pnpm test
       - run: pnpm lint:arch
 
+  build-canvas-video-tools:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            identity: macos-arm64
+          - os: macos-15-intel
+            identity: macos-x64
+          - os: ubuntu-latest
+            identity: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install source-signature verifier
+        if: startsWith(matrix.identity, 'macos-')
+        run: brew install gnupg
+      - name: Install Windows cross compiler
+        if: matrix.identity == 'windows-x64'
+        run: sudo apt-get update && sudo apt-get install --yes gnupg mingw-w64
+      - name: Build pinned Canvas video tools
+        run: node scripts/prepare-canvas-video-tools.mjs --identity "${{ matrix.identity }}" --profile release
+      - name: Stage matching FFmpeg source archive
+        if: matrix.identity == 'macos-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_NAME="$(node -e "import('./scripts/canvas-video-tools-payload.mjs').then(({FFMPEG_SOURCE_ARCHIVE_NAME}) => process.stdout.write(FFMPEG_SOURCE_ARCHIVE_NAME))")"
+          mkdir -p release-source
+          cp ".scratch/canvas-video-tools-downloads/$SOURCE_NAME" "release-source/$SOURCE_NAME"
+          node -e "Promise.all([import('node:fs/promises'), import('./scripts/canvas-video-tools-payload.mjs')]).then(async ([fs, payload]) => payload.validateCanvasVideoToolsSource(await fs.readFile(process.argv[1])))" "release-source/$SOURCE_NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canvas-video-tools-${{ matrix.identity }}
+          path: target/release/canvas-video-tools
+      - uses: actions/upload-artifact@v4
+        if: matrix.identity == 'macos-arm64'
+        with:
+          name: debrute-source-ffmpeg
+          path: release-source/*
+
   build-product:
-    needs: preflight
+    needs:
+      - preflight
+      - build-canvas-video-tools
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +126,17 @@ jobs:
           tool: nextest@0.9.140
           fallback: none
       - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: canvas-video-tools-${{ matrix.publicPlatform }}-${{ matrix.arch }}
+          path: target/release/canvas-video-tools
+      - name: Validate pinned Canvas video tools
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "darwin" ]; then
+            chmod +x target/release/canvas-video-tools/ffmpeg target/release/canvas-video-tools/ffprobe
+          fi
+          node scripts/prepare-canvas-video-tools.mjs --identity "${{ matrix.publicPlatform }}-${{ matrix.arch }}" --profile release
       - name: Prepare pinned native raster payload
         run: pnpm native:raster:prepare
       - name: Check exhaustive Windows Rust targets
@@ -156,10 +213,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for binary in target/release/debrute-runtime target/release/debrute target/release/native-raster/*.dylib; do
+          for binary in \
+            target/release/debrute-runtime \
+            target/release/debrute \
+            target/release/native-raster/*.dylib \
+            target/release/canvas-video-tools/ffmpeg \
+            target/release/canvas-video-tools/ffprobe; do
             codesign --force --options runtime --timestamp --sign "$CSC_NAME" "$binary"
             codesign --verify --strict --verbose=2 "$binary"
           done
+          node scripts/refresh-canvas-video-tools-manifest.mjs --identity "macos-${{ matrix.arch }}"
           node scripts/assemble-product-seed.mjs
           RUNTIME_APP="apps/desktop/dist-electron/product-seed/runtime/Debrute Runtime.app"
           codesign --force --options runtime --timestamp --sign "$CSC_NAME" "$RUNTIME_APP"
@@ -209,9 +272,13 @@ jobs:
           $paths = @(
             'target/release/debrute-runtime.exe',
             'target/release/debrute.exe',
+            'target/release/canvas-video-tools/ffmpeg.exe',
+            'target/release/canvas-video-tools/ffprobe.exe',
             'apps/desktop/release/win-unpacked/Debrute.exe',
             'apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute-runtime.exe',
             'apps/desktop/release/win-unpacked/resources/product-seed/runtime/debrute.exe',
+            'apps/desktop/release/win-unpacked/resources/product-seed/runtime/canvas-video-tools/ffmpeg.exe',
+            'apps/desktop/release/win-unpacked/resources/product-seed/runtime/canvas-video-tools/ffprobe.exe',
             "apps/desktop/release/debrute-installer-$version-windows-x64.exe"
           )
           foreach ($path in $paths) {
@@ -282,9 +349,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: actions/download-artifact@v4
+      - name: Download Product Installer and Product release assets
+        uses: actions/download-artifact@v4
         with:
+          pattern: debrute-installer-*
           path: release-assets
+      - name: Download matching FFmpeg source archive
+        uses: actions/download-artifact@v4
+        with:
+          name: debrute-source-ffmpeg
+          path: release-assets/debrute-source-ffmpeg
       - name: Flatten assets
         run: |
           set -euo pipefail
@@ -309,9 +383,12 @@ jobs:
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           node -e "import('./scripts/release-asset-contract.mjs').then(({expectedReleaseAssets}) => { const fs = require('fs'); const actual = fs.readdirSync('release-upload').sort(); const expected = expectedReleaseAssets(process.argv[1]).sort(); const missingAssets = expected.filter((name) => !actual.includes(name)); const unexpectedAssets = actual.filter((name) => !expected.includes(name)); if (missingAssets.length) { console.error('Missing release assets:', missingAssets.join(', ')); process.exit(1); } if (unexpectedAssets.length) { console.error('Unexpected release assets:', unexpectedAssets.join(', ')); process.exit(1); } })" "$VERSION"
+          SOURCE_NAME="$(node -e "import('./scripts/canvas-video-tools-payload.mjs').then(({FFMPEG_SOURCE_ARCHIVE_NAME}) => process.stdout.write(FFMPEG_SOURCE_ARCHIVE_NAME))")"
+          node -e "Promise.all([import('node:fs/promises'), import('./scripts/canvas-video-tools-payload.mjs')]).then(async ([fs, payload]) => payload.validateCanvasVideoToolsSource(await fs.readFile(process.argv[1])))" "release-upload/$SOURCE_NAME"
       - name: Write release notes
         run: |
           VERSION="$(node -p "require('./package.json').version")"
+          FFMPEG_SOURCE_NAME="$(node -e "import('./scripts/canvas-video-tools-payload.mjs').then(({FFMPEG_SOURCE_ARCHIVE_NAME}) => process.stdout.write(FFMPEG_SOURCE_ARCHIVE_NAME))")"
           cat > release-notes.md <<EOF
           # Debrute ${VERSION}
 
@@ -320,6 +397,8 @@ jobs:
           - Windows: NSIS installer for x64. This release is not Authenticode-signed, so Windows may show an Unknown Publisher or SmartScreen warning.
 
           Runtime update payloads for macOS and Windows are complete Product seeds authenticated by the signed update manifest; they are consumed by Debrute Runtime and are not separate user installers.
+
+          This software uses FFmpeg under LGPL-2.1-or-later. The exact source corresponding to the distributed binaries is attached as [${FFMPEG_SOURCE_NAME}](https://github.com/xiitang/debrute/releases/download/v${VERSION}/${FFMPEG_SOURCE_NAME}).
 
           Install Debrute with the Product Installer for your platform. Installation completes Desktop, Runtime, the debrute CLI, command exposure, and official Skills before success; first Desktop launch performs no installation work.
           EOF

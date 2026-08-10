@@ -17,7 +17,6 @@ pub enum ActivitySource {
     Photoshop,
     Workbench,
     Update,
-    Integration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -73,14 +72,6 @@ pub enum WorkbenchActivityOperation {
     WindowCommand,
     MenuCommand,
     SaveCanvasSettings,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum IntegrationActivityOperation {
-    Install,
-    Update,
-    Uninstall,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -185,10 +176,6 @@ pub enum ActivityMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         document_title: Option<String>,
     },
-    IntegrationOperation {
-        integration_id: String,
-        operation: IntegrationActivityOperation,
-    },
 }
 
 impl ActivityMessage {
@@ -204,18 +191,12 @@ impl ActivityMessage {
             Self::UpdateInstallFailed => ActivitySource::Update,
             Self::ModelRequest { .. } => ActivitySource::ModelRequest,
             Self::PhotoshopSend { .. } => ActivitySource::Photoshop,
-            Self::IntegrationOperation { .. } => ActivitySource::Integration,
         }
     }
 
     #[must_use]
     pub const fn is_task(&self) -> bool {
-        matches!(
-            self,
-            Self::ModelRequest { .. }
-                | Self::PhotoshopSend { .. }
-                | Self::IntegrationOperation { .. }
-        )
+        matches!(self, Self::ModelRequest { .. } | Self::PhotoshopSend { .. })
     }
 }
 

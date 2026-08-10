@@ -57,6 +57,37 @@ pub struct ProductStore {
     transaction: Mutex<()>,
 }
 
+/// One fully revalidated Product directory that is authorized to back the
+/// currently running Runtime process.
+#[derive(Debug, Clone)]
+pub struct ValidatedRunningProduct {
+    directory: PathBuf,
+    version: String,
+    manifest: ProductManifest,
+}
+
+impl ValidatedRunningProduct {
+    #[must_use]
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    #[must_use]
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    #[must_use]
+    pub fn canvas_video_executables(&self) -> [PathBuf; 2] {
+        [
+            self.directory
+                .join(&self.manifest.runtime_dependencies.canvas_video.ffmpeg),
+            self.directory
+                .join(&self.manifest.runtime_dependencies.canvas_video.ffprobe),
+        ]
+    }
+}
+
 pub(crate) struct ProductTransactionGuard<'a> {
     _process_guard: MutexGuard<'a, ()>,
     lock_file: File,
@@ -297,6 +328,59 @@ impl ProductStore {
     ) -> Result<ProductManifest, ProductStoreError> {
         let _transaction = self.lock_transaction()?;
         self.validate_version_unlocked(product_version)
+    }
+
+    /// Revalidates the exact materialized Product containing the running
+    /// Runtime and confirms that it is authorized by current Product state.
+    ///
+    /// During forward recovery, the old Runtime may continue only while
+    /// `current` selects the pending target and the pending record still names
+    /// this Product as its source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProductStoreError`] when the directory is not one of this
+    /// store's immutable versions, its complete manifest is invalid, or its
+    /// version does not match current or the one allowed recovery state.
+    pub fn validate_running_product(
+        &self,
+        directory: &Path,
+    ) -> Result<ValidatedRunningProduct, ProductStoreError> {
+        let _transaction = self.lock_transaction()?;
+        let directory = fs::canonicalize(directory)?;
+        let version = directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| ProductStoreError::InvalidVersionPath(directory.clone()))?
+            .to_owned();
+        let expected_directory = fs::canonicalize(self.version_path(&version))?;
+        if directory != expected_directory {
+            return Err(ProductStoreError::InvalidVersionPath(directory));
+        }
+        let current = self
+            .current_version_unlocked()?
+            .ok_or_else(|| ProductStoreError::InvalidCurrentPointer(self.root.join("current")))?;
+        let pending = self.pending_unlocked()?;
+        let identity_is_authorized = current == version
+            || pending.as_ref().is_some_and(|pending| {
+                matches!(
+                    pending.phase,
+                    CommitPhase::CurrentSelected | CommitPhase::RuntimeReady
+                ) && pending.from_version == version
+                    && pending.target_version == current
+            });
+        if !identity_is_authorized {
+            return Err(ProductStoreError::RunningProductIdentityMismatch {
+                running: version,
+                current,
+            });
+        }
+        let manifest = self.validate_version_unlocked(&version)?;
+        Ok(ValidatedRunningProduct {
+            directory,
+            version,
+            manifest,
+        })
     }
 
     /// Materializes the exact seed carried by an already installed Desktop and
@@ -1164,9 +1248,14 @@ fn validate_product_directory(
     if manifest.platform == ProductPlatform::Macos {
         use std::os::unix::fs::PermissionsExt as _;
 
-        for executable in [&manifest.entrypoints.runtime, &manifest.entrypoints.cli] {
+        for executable in [
+            &manifest.entrypoints.runtime,
+            &manifest.entrypoints.cli,
+            &manifest.runtime_dependencies.canvas_video.ffmpeg,
+            &manifest.runtime_dependencies.canvas_video.ffprobe,
+        ] {
             if fs::metadata(root.join(executable))?.permissions().mode() & 0o111 == 0 {
-                return Err(ProductStoreError::ProductEntrypointNotExecutable(
+                return Err(ProductStoreError::ProductExecutableNotExecutable(
                     executable.clone(),
                 ));
             }
@@ -1786,7 +1875,8 @@ pub enum ProductStoreError {
     UnsupportedPointerPlatform(CommitPlatform),
     ManagedPathType(PathBuf),
     ProductPlatformMismatch,
-    ProductEntrypointNotExecutable(String),
+    ProductExecutableNotExecutable(String),
+    RunningProductIdentityMismatch { running: String, current: String },
     ProductCommitInProgress,
     InvalidPendingCommit(String),
     InvalidResumeReceipt(String),

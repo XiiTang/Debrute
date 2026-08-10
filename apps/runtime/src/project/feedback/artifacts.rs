@@ -1440,7 +1440,7 @@ mod tests {
     use image::{DynamicImage, RgbaImage};
 
     use crate::{
-        project::{MediaToolPaths, initialize_raster_preview_engine},
+        project::{CanvasVideoToolPaths, initialize_raster_preview_engine},
         workers::RuntimeWorkerServices,
     };
 
@@ -1465,7 +1465,7 @@ mod tests {
         let workers = RuntimeWorkerServices::new();
         let previews = Arc::new(ProjectPreviewService::new(
             &workers,
-            MediaToolPaths::unavailable(),
+            CanvasVideoToolPaths::for_tests(),
         ));
         let (sender, receiver) = mpsc::sync_channel(8);
         let scheduler = CanvasFeedbackArtifactScheduler::new(

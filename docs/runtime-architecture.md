@@ -2,7 +2,7 @@
 
 Debrute runs one shared Rust Runtime per operating-system user. Runtime is the
 authority for Project files, global settings and secrets, Model Request execution,
-integrations, product updates, Workbench connections, Photoshop transfers, and
+product updates, Workbench connections, Photoshop transfers, and
 terminal processes. Web Workbench, Desktop, plugins, and the `debrute` CLI are
 clients; none owns a parallel backend or a copy of authoritative state.
 
@@ -50,9 +50,9 @@ normal work failure, recover the inner value of a poisoned authoritative lock,
 advertise a degraded status, or run a panic-specific graceful-shutdown path.
 The ordinary Product Quit path remains only for controlled shutdown.
 
-The monotonic Global event revision and integration-projection generation remain
-ordering counters, not recoverable capacity budgets. Exhausting either counter
-means Runtime can no longer publish one authoritative ordered state, so it is a
+The monotonic Global event revision is an ordering counter, not a recoverable
+capacity budget. Exhausting it means Runtime can no longer publish one
+authoritative ordered state, so it is a
 process-fatal invariant failure. Runtime does not preserve a successful command
 result while dropping its settled projection, return a degraded success, or
 continue with Workbenches observing different Global state.
@@ -268,11 +268,10 @@ credential together. There are no split Global/Project connections, reconnect
 window, heartbeat, unload release, or automatic request replay. Unexpected
 connection end is a terminal page state; refreshing creates a new connection.
 
-Global Settings, Integration discovery, live Photoshop state, and packaged Product
-state are independent resources carried by the initial stream and subsequent
-ordered Global events. The settings snapshot never synchronously probes
-integrations or Photoshop. Settings activation explicitly starts Integration
-discovery. Runtime applies the persisted Photoshop Integration enable choice at
+Global Settings, live Photoshop state, and packaged Product state are
+independent resources carried by the initial stream and subsequent ordered
+Global events. The settings snapshot never synchronously probes Photoshop.
+Runtime applies the persisted Photoshop Integration enable choice at
 composition, then Photoshop sessions publish complete live state through the
 initial stream and ordered Global events. There is no settings-owned refresh or
 second frontend truth. Mutating and action commands return
@@ -302,8 +301,8 @@ The current Operation subsystem is deliberately narrow. It covers only CLI-
 submitted Model Requests for the five Model Kinds: image, video, TTS, music,
 and sound effect. Single and Batch are two execution shapes of one Model
 Operation; a Batch Item is a settled result inside its parent Operation rather
-than a child Operation. Integration install/update/uninstall, Product Update,
-terminal processes, Canvas preview work, and professional-tool transfers keep
+than a child Operation. Product Update, terminal processes, Canvas preview
+work, and professional-tool transfers keep
 their own domain lifetimes and do not enter the Model Operation registry.
 
 Before acceptance, Runtime validates the live CLI credential, invocation

@@ -75,6 +75,43 @@ describe('local source installation', () => {
     }
   });
 
+  it('rejects the obsolete Product schema instead of migrating it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'debrute-local-product-schema-'));
+    try {
+      const seed = join(root, 'seed');
+      writeProduct(seed, '0.0.3', 'source');
+      const manifestPath = join(seed, 'product-manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      manifest.schemaVersion = 1;
+      delete manifest.runtimeDependencies;
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+      await expect(validateProductSeed(seed)).rejects.toThrow(
+        'Product seed manifest is invalid (root fields)'
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects runtime dependencies outside the closed Canvas video contract', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'debrute-local-product-dependency-'));
+    try {
+      const seed = join(root, 'seed');
+      writeProduct(seed, '0.0.3', 'source');
+      const manifestPath = join(seed, 'product-manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      manifest.runtimeDependencies.canvasVideo.unexpected = 'runtime/tool';
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+      await expect(validateProductSeed(seed)).rejects.toThrow(
+        'Product seed manifest is invalid (Canvas video dependency)'
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects an unexpected Product entrypoint', async () => {
     const root = mkdtempSync(join(tmpdir(), 'debrute-local-product-entrypoint-'));
     try {
@@ -161,12 +198,28 @@ function writeProduct(directory: string, version: string, payload: string): void
     skills: 'skills/debrute-core/SKILL.md',
     nativeWorkers: 'native-workers/manifest.json'
   };
+  const runtimeDependencies = {
+    canvasVideo: {
+      ffmpeg: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffmpeg',
+      ffprobe: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffprobe',
+      license: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/LICENSE',
+      notices: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/THIRD-PARTY-NOTICES.md',
+      buildConfig: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/BUILD-CONFIG.txt',
+      sourceNotice: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/SOURCE.md'
+    }
+  };
   const contents = new Map([
     [entrypoints.runtime, `runtime-${payload}`],
     [entrypoints.web, `web-${payload}`],
     [entrypoints.cli, `cli-${payload}`],
     [entrypoints.skills, `skills-${payload}`],
     [entrypoints.nativeWorkers, `workers-${payload}`],
+    [runtimeDependencies.canvasVideo.ffmpeg, `ffmpeg-${payload}`],
+    [runtimeDependencies.canvasVideo.ffprobe, `ffprobe-${payload}`],
+    [runtimeDependencies.canvasVideo.license, `license-${payload}`],
+    [runtimeDependencies.canvasVideo.notices, `notices-${payload}`],
+    [runtimeDependencies.canvasVideo.buildConfig, `config-${payload}`],
+    [runtimeDependencies.canvasVideo.sourceNotice, `source-${payload}`],
     ['payload.txt', payload]
   ]);
   for (const [path, content] of contents) {
@@ -176,6 +229,8 @@ function writeProduct(directory: string, version: string, payload: string): void
   }
   chmodSync(join(directory, entrypoints.runtime), 0o755);
   chmodSync(join(directory, entrypoints.cli), 0o755);
+  chmodSync(join(directory, runtimeDependencies.canvasVideo.ffmpeg), 0o755);
+  chmodSync(join(directory, runtimeDependencies.canvasVideo.ffprobe), 0o755);
   const files = [...contents.entries()].map(([path, content]) => {
     const bytes = Buffer.from(content);
     return {
@@ -185,7 +240,7 @@ function writeProduct(directory: string, version: string, payload: string): void
     };
   }).sort((left, right) => left.path.localeCompare(right.path));
   writeFileSync(join(directory, 'product-manifest.json'), `${JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     product: 'debrute',
     productVersion: version,
     controlProtocol: 'debrute-control',
@@ -193,6 +248,7 @@ function writeProduct(directory: string, version: string, payload: string): void
     platform: 'macos',
     architecture: process.arch,
     entrypoints,
+    runtimeDependencies,
     files
   }, null, 2)}\n`);
 }

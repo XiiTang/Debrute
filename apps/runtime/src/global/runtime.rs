@@ -3,9 +3,6 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::integrations::{
-    IntegrationOperation, IntegrationOperationResult, IntegrationService, IntegrationSettingsView,
-};
 use crate::models::ModelCatalog;
 use crate::photoshop::PhotoshopStateView;
 
@@ -38,9 +35,8 @@ pub struct GlobalRuntimeEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GlobalRuntimeChange {
-    GlobalSettingsChanged(DebruteGlobalSettingsView),
+    GlobalSettingsChanged(Box<DebruteGlobalSettingsView>),
     RecentProjectsChanged(Vec<String>),
-    IntegrationsChanged(IntegrationSettingsView),
     PhotoshopChanged(PhotoshopStateView),
     ProductChanged(Value),
 }
@@ -48,8 +44,6 @@ pub enum GlobalRuntimeChange {
 pub struct GlobalRuntimeService {
     store: Arc<GlobalConfigStore>,
     catalog: Arc<ModelCatalog>,
-    integrations: IntegrationService,
-    integration_projection: Mutex<IntegrationProjectionState>,
     commit: Mutex<()>,
     delivery: Mutex<()>,
     events: Mutex<GlobalEventState>,
@@ -62,24 +56,15 @@ struct GlobalEventState {
     product: Option<Value>,
 }
 
-#[derive(Default)]
-struct IntegrationProjectionState {
-    generation: u64,
-    view: Option<IntegrationSettingsView>,
-}
-
 impl GlobalRuntimeService {
     #[must_use]
     pub fn new(
         store: impl Into<Arc<GlobalConfigStore>>,
         catalog: impl Into<Arc<ModelCatalog>>,
-        integrations: IntegrationService,
     ) -> Self {
         Self {
             store: store.into(),
             catalog: catalog.into(),
-            integrations,
-            integration_projection: Mutex::new(IntegrationProjectionState::default()),
             commit: Mutex::new(()),
             delivery: Mutex::new(()),
             events: Mutex::new(GlobalEventState::default()),
@@ -87,7 +72,7 @@ impl GlobalRuntimeService {
     }
 
     /// Publishes the Runtime-owned Product projection through the same ordered
-    /// Global stream as settings and integration changes.
+    /// Global stream as settings and other Runtime-owned projections.
     ///
     pub fn publish_product_changed(&self, product: Value) {
         let _delivery = self.lock_delivery();
@@ -108,8 +93,7 @@ impl GlobalRuntimeService {
         self.lock_events().revision
     }
 
-    /// Reads the native Desktop presentation without probing optional
-    /// integration tools.
+    /// Reads the native Desktop presentation.
     ///
     /// # Errors
     ///
@@ -148,7 +132,7 @@ impl GlobalRuntimeService {
     }
 
     /// Returns the complete persisted Global Settings view without probing
-    /// optional integrations.
+    /// optional Photoshop plugin support.
     ///
     /// # Errors
     ///
@@ -187,7 +171,7 @@ impl GlobalRuntimeService {
             let view = complete_view(result.view);
             let change = result
                 .changed
-                .then(|| GlobalRuntimeChange::GlobalSettingsChanged(view.clone()));
+                .then(|| GlobalRuntimeChange::GlobalSettingsChanged(Box::new(view.clone())));
             (view, change)
         };
         if let Some(change) = change {
@@ -245,107 +229,6 @@ impl GlobalRuntimeService {
             self.publish(change);
         }
         Ok(changed)
-    }
-
-    /// Forces one integration rescan and publishes its complete projection.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a monotonic Runtime ordering counter is exhausted.
-    pub fn integrations_rescan(&self) {
-        let candidate = self.integration_candidate(true);
-        let _delivery = self.lock_delivery();
-        let view = {
-            let _commit = self.lock_commit();
-            self.adopt_integration_candidate(candidate)
-        };
-        self.publish(GlobalRuntimeChange::IntegrationsChanged(view));
-    }
-
-    /// Returns the cached integration projection without probing the host.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the integration projection lock is poisoned.
-    #[must_use]
-    pub fn integration_snapshot(&self) -> Option<IntegrationSettingsView> {
-        self.integration_projection
-            .lock()
-            .expect("integration projection lock poisoned")
-            .view
-            .clone()
-    }
-
-    /// Runs one closed integration operation with start and settled revisions.
-    ///
-    #[must_use]
-    pub fn integrations_run_operation(
-        &self,
-        integration_id: &str,
-        operation: IntegrationOperation,
-    ) -> IntegrationOperationResult {
-        self.integrations.run_operation_observed(
-            integration_id,
-            operation,
-            |started| self.commit_integration_view(started.clone()),
-            |settled| self.commit_integration_view(settled.clone()),
-        )
-    }
-
-    fn integration_candidate(&self, force: bool) -> (u64, IntegrationSettingsView) {
-        let generation = self
-            .integration_projection
-            .lock()
-            .expect("integration projection lock poisoned")
-            .generation;
-        let view = if force {
-            self.integrations.rescan()
-        } else {
-            self.integrations.list_status()
-        };
-        (generation, view)
-    }
-
-    fn adopt_integration_candidate(
-        &self,
-        candidate: (u64, IntegrationSettingsView),
-    ) -> IntegrationSettingsView {
-        let (generation, view) = candidate;
-        let mut projection = self
-            .integration_projection
-            .lock()
-            .expect("integration projection lock poisoned");
-        if projection.generation == generation || projection.view.is_none() {
-            projection.generation = projection
-                .generation
-                .checked_add(1)
-                .expect("Global integration projection generation exhausted");
-            projection.view = Some(view.clone());
-            return view;
-        }
-        projection
-            .view
-            .clone()
-            .expect("integration projection must exist after adoption")
-    }
-
-    fn commit_integration_view(&self, view: IntegrationSettingsView) {
-        let _delivery = self.lock_delivery();
-        let change = {
-            let _commit = self.lock_commit();
-            let mut projection = self
-                .integration_projection
-                .lock()
-                .expect("integration projection lock poisoned");
-            projection.generation = projection
-                .generation
-                .checked_add(1)
-                .expect("Global integration projection generation exhausted");
-            projection.view = Some(view.clone());
-            drop(projection);
-            GlobalRuntimeChange::IntegrationsChanged(view)
-        };
-        self.publish(change);
     }
 
     fn lock_commit(&self) -> std::sync::MutexGuard<'_, ()> {

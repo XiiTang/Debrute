@@ -42,11 +42,12 @@ use debrute_runtime::{
         NativeUpdatePlatform, ProductCommitCoordinator, ProductCommitError,
         ProductInstallationCoordinator, ProductProjectionManager, ProductRemovalCoordinator,
         ProductStore, ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform,
-        ResumeIntent, RuntimeProductService, finalize_product_removal,
+        ResumeIntent, RuntimeProductService, ValidatedRunningProduct, finalize_product_removal,
         launch_product_update_failure, read_desktop_host_registration,
     },
     project::{
-        NATIVE_TRASH_WORKER_COMMAND, initialize_raster_preview_engine, run_native_trash_worker,
+        CanvasVideoToolPaths, NATIVE_TRASH_WORKER_COMMAND, initialize_raster_preview_engine,
+        run_native_trash_worker,
     },
     workbench::{
         RuntimeCliHttpService, RuntimeProductHttpService, WorkbenchHttpServer,
@@ -865,13 +866,36 @@ fn run_runtime_services(
     let service_result = (|| {
         initialize_raster_preview_engine().map_err(io::Error::other)?;
         let debrute_home = debrute_home()?;
-        let active_product = active_product_directory(&debrute_home);
-        let runtime_services = WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state))
-            .map_err(|error| io::Error::other(error.message))?;
+        let active_product_directory = active_product_directory(&debrute_home);
+        let product_store = active_product_directory
+            .as_ref()
+            .map(|_| {
+                current_release_architecture().map(|architecture| {
+                    Arc::new(ProductStore::new(
+                        debrute_home.join("products"),
+                        current_commit_platform(),
+                        architecture,
+                    ))
+                })
+            })
+            .transpose()?;
+        let active_product = match (product_store.as_ref(), active_product_directory.as_ref()) {
+            (Some(store), Some(directory)) => Some(store.validate_running_product(directory)?),
+            (None, None) => None,
+            _ => unreachable!("Product store and active Product directory are created together"),
+        };
+        let canvas_video_tools = canvas_video_tool_paths(active_product.as_ref())?;
+        let runtime_services =
+            WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state), canvas_video_tools)
+                .map_err(|error| io::Error::other(error.message))?;
         shutdown_services = Some(Arc::clone(&runtime_services));
         let assets_directory = std::env::var_os(WEB_ASSETS_DIRECTORY_ENV)
             .map(PathBuf::from)
-            .or_else(|| active_product.as_ref().map(|product| product.join("web")))
+            .or_else(|| {
+                active_product
+                    .as_ref()
+                    .map(|product| product.directory().join("web"))
+            })
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::NotFound,
@@ -881,12 +905,9 @@ fn run_runtime_services(
         let mut product: Option<Arc<dyn RuntimeProductHttpService>> = None;
         let mut product_scheduler: Option<Arc<RuntimeProductService>> = None;
         let mut update_platform = None;
-        if let Some(active_product) = active_product.as_ref() {
-            let store = Arc::new(ProductStore::new(
-                debrute_home.join("products"),
-                current_commit_platform(),
-                current_release_architecture()?,
-            ));
+        if let (Some(active_product), Some(store)) =
+            (active_product.as_ref(), product_store.as_ref())
+        {
             let installed_layout = InstalledProductLayout::for_current_user()?;
             if installed_layout.product_root() != store.root() {
                 return Err(io::Error::new(
@@ -895,39 +916,7 @@ fn run_runtime_services(
                 )
                 .into());
             }
-            let current_version = store.current_version()?.ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "Active Product has no current version",
-                )
-            })?;
-            let running_product = fs::canonicalize(active_product)?;
-            let running_version = running_product
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Active Product version directory is invalid",
-                    )
-                })?
-                .to_owned();
-            let pending = store.pending()?;
-            let running_identity_is_valid = current_version == running_version
-                || pending.as_ref().is_some_and(|pending| {
-                    matches!(
-                        pending.phase,
-                        CommitPhase::CurrentSelected | CommitPhase::RuntimeReady
-                    ) && pending.from_version == running_version
-                        && pending.target_version == current_version
-                });
-            if !running_identity_is_valid {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Running Product identity does not match current or its pending recovery",
-                )
-                .into());
-            }
+            let running_version = active_product.version().to_owned();
             let desktop = match desktop_host_from_environment()? {
                 Some(desktop) => Some(desktop),
                 None => read_desktop_host_registration(&debrute_home)?,
@@ -940,7 +929,7 @@ fn run_runtime_services(
             })?;
             let resume_state = Arc::clone(state);
             let native = NativeUpdatePlatform::for_runtime(
-                Arc::clone(&store),
+                Arc::clone(store),
                 &running_version,
                 desktop,
                 stable_runtime_entrypoint.to_owned(),
@@ -950,7 +939,7 @@ fn run_runtime_services(
             )?;
             let removal = Arc::new(ProductRemovalCoordinator::new(
                 installed_layout.clone(),
-                Arc::clone(&store),
+                Arc::clone(store),
                 std::env::current_exe()?,
             ));
             if !state.install_product_removal_service(removal) {
@@ -965,7 +954,7 @@ fn run_runtime_services(
                 current_release_platform(),
                 current_release_architecture()?,
                 debrute_home.clone(),
-                Arc::clone(&store),
+                Arc::clone(store),
                 native.clone(),
                 Arc::clone(state),
                 Arc::clone(runtime_services.global()),
@@ -973,7 +962,7 @@ fn run_runtime_services(
             .map_err(|error| io::Error::other(error.message))?;
             product_scheduler = Some(Arc::clone(&product_service));
             product = Some(product_service);
-            update_platform = Some((store, native));
+            update_platform = Some((Arc::clone(store), native));
         }
         let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(
             Arc::clone(runtime_services.models()),
@@ -981,7 +970,9 @@ fn run_runtime_services(
             runtime_services.projects().clone(),
             Arc::clone(runtime_services.provenance()),
             Arc::clone(runtime_services.model_operations()),
-            active_product.clone(),
+            active_product
+                .as_ref()
+                .map(|product| product.directory().to_owned()),
         ));
         shutdown_workbench = Some(WorkbenchHttpServer::start(
             assets_directory,
@@ -1142,6 +1133,76 @@ fn run_runtime_services(
         .join()
         .expect("Debrute Control accept worker panicked");
     service_result
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn canvas_video_tool_paths(
+    active_product: Option<&ValidatedRunningProduct>,
+) -> Result<CanvasVideoToolPaths, io::Error> {
+    let paths = if let Some(active_product) = active_product {
+        let [ffmpeg, ffprobe] = active_product.canvas_video_executables();
+        CanvasVideoToolPaths { ffmpeg, ffprobe }
+    } else {
+        let executable = std::env::current_exe()?;
+        #[cfg(target_os = "macos")]
+        let root = executable
+            .parent()
+            .and_then(std::path::Path::parent)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Source Runtime app layout is invalid",
+                )
+            })?
+            .join("Resources/canvas-video-tools");
+        #[cfg(target_os = "windows")]
+        let root = executable
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Source Runtime layout is invalid",
+                )
+            })?
+            .join("canvas-video-tools");
+        CanvasVideoToolPaths {
+            ffmpeg: root.join(if cfg!(target_os = "windows") {
+                "ffmpeg.exe"
+            } else {
+                "ffmpeg"
+            }),
+            ffprobe: root.join(if cfg!(target_os = "windows") {
+                "ffprobe.exe"
+            } else {
+                "ffprobe"
+            }),
+        }
+    };
+    for path in [&paths.ffmpeg, &paths.ffprobe] {
+        if !fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "Required Canvas video tool is unavailable: {}",
+                    path.display()
+                ),
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            if fs::metadata(path)?.permissions().mode() & 0o111 == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Required Canvas video tool is not executable: {}",
+                        path.display()
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(paths)
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

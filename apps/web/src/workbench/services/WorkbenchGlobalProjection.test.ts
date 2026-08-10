@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type {
   DebruteGlobalSettingsView,
-  IntegrationSettingsView,
   PhotoshopStateView
 } from '@debrute/app-protocol';
 import { createWorkbenchGlobalProjection } from './WorkbenchGlobalProjection.js';
@@ -22,17 +21,10 @@ describe('WorkbenchGlobalProjection', () => {
       revision: 4,
       state: photoshopFixture()
     });
-    projection.acceptEvent({
-      type: 'integrations.changed',
-      revision: 4,
-      integrations: integrationsFixture()
-    });
-
     expect(projection.getState()).toEqual({
       status: 'active',
       revision: 4,
       settings,
-      integrations: { status: 'ready', value: integrationsFixture() },
       photoshop: { status: 'ready', value: photoshopFixture() },
       product: { status: 'ready', value: null }
     });
@@ -125,8 +117,4 @@ function photoshopFixture(): PhotoshopStateView {
     transferActive: false,
     sessions: []
   };
-}
-
-function integrationsFixture(): IntegrationSettingsView {
-  return { backends: [], integrations: [] };
 }

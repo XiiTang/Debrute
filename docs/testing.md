@@ -251,6 +251,14 @@ current Source Identity, Source Version, Raster Preview Engine Version, and
 Variant Key, plus structural reconciliation within the exact current engine
 path.
 
+Canvas video-tools release tests validate the pinned official source identity,
+LGPL-only configure contract, complete per-target inventory, file hashes, and
+rejection of undeclared baggage. Product assembly tests require schema 2 and
+the exact `runtimeDependencies.canvasVideo` paths. Runtime Product tests reject
+missing, changed, or non-executable video tools through the same immutable
+Product validation used before activation; source-development assembly tests
+prove that a payload change invalidates the assembled Runtime layout.
+
 Native-payload contract and release tests verify the repository lock's URL,
 SHA-256, target, enabled format surface, and libvips 8.18.4 identity. Missing,
 altered, wrong-target, and wrong-version payloads fail preparation or Product

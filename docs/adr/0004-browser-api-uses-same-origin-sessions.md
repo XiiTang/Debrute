@@ -38,8 +38,8 @@ is never placed in a URL, cookie, Web Storage, file, environment variable, or
 log.
 
 `global.snapshot` and subsequent ordered Global change events are the sole
-Workbench projections of Global settings, Integration settings, and packaged
-Product state. The Workbench neither follows connection establishment with
+Workbench projections of Global settings and packaged Product state. The
+Workbench neither follows connection establishment with
 duplicate state GETs nor applies complete state returned by an action command.
 Such commands return only their closed outcome and any action-specific
 diagnostic. UI command progress may settle before the corresponding event is

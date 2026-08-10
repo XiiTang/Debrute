@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0078
+---
+
 # Integration Operations Are Catalog-Defined
 
 The Integrations Settings surface submits only an integration id and operation;

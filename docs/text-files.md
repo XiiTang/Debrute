@@ -429,5 +429,5 @@ resource scheduler and diagnostic capture surface.
 - Uploaded source storage: `apps/runtime/src/project/previews/mod.rs`.
 - Shared image, text, and video width-variant derivation:
   `apps/runtime/src/project/previews/raster_variants.rs`.
-- Integration coverage: `apps/runtime/src/project/tests.rs` and
+- Cross-layer coverage: `apps/runtime/src/project/tests.rs` and
   `apps/runtime/tests/runtime_lifecycle.rs`.

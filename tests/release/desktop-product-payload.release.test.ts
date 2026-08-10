@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import AdmZip from 'adm-zip';
 import { archiveProductSeed } from '../../scripts/archive-product-seed.mjs';
 import { assembleProductSeed } from '../../scripts/assemble-product-seed.mjs';
+import { CANVAS_VIDEO_TOOLS_LOCK } from '../../scripts/canvas-video-tools-payload.mjs';
 
 describe('desktop fresh install product payload', () => {
   it('requires an explicit Web root before changing the destination', async () => {
@@ -77,6 +79,7 @@ describe('desktop fresh install product payload', () => {
     try {
       mkdirSync(join(root, 'target/release'), { recursive: true });
       mkdirSync(join(root, 'target/release/native-raster'), { recursive: true });
+      mkdirSync(join(root, 'target/release/canvas-video-tools'), { recursive: true });
       mkdirSync(join(root, 'apps/web/dist'), { recursive: true });
       mkdirSync(join(root, 'apps/desktop/dist-electron/product-seed/web/assets'), { recursive: true });
       mkdirSync(join(root, 'apps/desktop/build'), { recursive: true });
@@ -90,6 +93,9 @@ describe('desktop fresh install product payload', () => {
       writeFileSync(join(root, 'target/release/native-raster/LICENSE'), 'license');
       writeFileSync(join(root, 'target/release/native-raster/THIRD-PARTY-NOTICES.md'), 'notices');
       writeFileSync(join(root, 'target/release/native-raster/versions.json'), '{"vips":"8.18.4"}');
+      writeCanvasVideoToolsFixture(join(root, 'target/release/canvas-video-tools'));
+      chmodSync(join(root, 'target/release/canvas-video-tools/ffmpeg'), 0o755);
+      chmodSync(join(root, 'target/release/canvas-video-tools/ffprobe'), 0o755);
       chmodSync(join(root, 'target/release/debrute-runtime'), 0o755);
       chmodSync(join(root, 'target/release/debrute'), 0o755);
       writeFileSync(join(root, 'apps/web/dist/index.html'), '<!doctype html>');
@@ -113,6 +119,17 @@ describe('desktop fresh install product payload', () => {
         web: 'web/index.html',
         skills: 'skills/debrute-core/SKILL.md',
         nativeWorkers: 'native-workers/manifest.json'
+      });
+      expect(assembled.manifest?.schemaVersion).toBe(2);
+      expect(assembled.manifest?.runtimeDependencies).toEqual({
+        canvasVideo: {
+          ffmpeg: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffmpeg',
+          ffprobe: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffprobe',
+          license: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/LICENSE',
+          notices: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/THIRD-PARTY-NOTICES.md',
+          buildConfig: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/BUILD-CONFIG.txt',
+          sourceNotice: 'runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/SOURCE.md'
+        }
       });
       expect(assembled.manifest?.files.every((file) => /^[a-f0-9]{64}$/.test(file.sha256))).toBe(true);
       expect(assembled.manifest?.files.map((file) => file.path)).not.toContain('product-manifest.json');
@@ -149,3 +166,30 @@ describe('desktop fresh install product payload', () => {
     }
   });
 });
+
+function writeCanvasVideoToolsFixture(root: string): void {
+  const contents = new Map([
+    ['ffmpeg', 'ffmpeg'],
+    ['ffprobe', 'ffprobe'],
+    ['LICENSE', 'license'],
+    ['THIRD-PARTY-NOTICES.md', 'notices'],
+    ['SOURCE.md', 'source'],
+    ['BUILD-CONFIG.txt', 'config']
+  ]);
+  for (const [name, value] of contents) writeFileSync(join(root, name), value);
+  const files = [...contents].map(([path, value]) => ({
+    path,
+    sizeBytes: Buffer.byteLength(value),
+    sha256: createHash('sha256').update(value).digest('hex')
+  })).sort((left, right) => left.path.localeCompare(right.path));
+  writeFileSync(join(root, 'versions.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    payloadRevision: CANVAS_VIDEO_TOOLS_LOCK.payloadRevision,
+    ffmpegVersion: CANVAS_VIDEO_TOOLS_LOCK.ffmpegVersion,
+    platform: 'macos',
+    architecture: 'arm64',
+    sourceSha256: CANVAS_VIDEO_TOOLS_LOCK.source.sha256,
+    configureArguments: CANVAS_VIDEO_TOOLS_LOCK.configureArguments,
+    files
+  }, null, 2)}\n`);
+}

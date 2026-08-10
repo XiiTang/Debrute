@@ -24,8 +24,6 @@ const MAX_PROCESS_ADMISSION_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkerKind {
-    IntegrationProbe,
-    IntegrationCommand,
     MediaProbe,
     VideoFrame,
     NativeShell,
@@ -68,20 +66,6 @@ pub(crate) enum ProcessErrorKind {
     CleanupError,
     NonzeroExit,
     Backpressure,
-}
-
-impl ProcessErrorKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Timeout => "timeout",
-            Self::Cancelled => "cancelled",
-            Self::SpawnError => "spawn_error",
-            Self::OutputError => "output_error",
-            Self::CleanupError => "cleanup_error",
-            Self::NonzeroExit => "nonzero_exit",
-            Self::Backpressure => "backpressure",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -691,7 +675,7 @@ mod tests {
     fn worker_output_is_bounded_to_its_tail() {
         let supervisor = BoundedProcessSupervisor::new(1);
         let mut request = ProcessRequest::new(
-            WorkerKind::IntegrationProbe,
+            WorkerKind::MediaProbe,
             "/bin/sh",
             vec!["-c".to_owned(), "printf 0123456789".to_owned()],
             Duration::from_secs(2),
@@ -842,7 +826,7 @@ mod windows_tests {
 
     fn windows_wait_request(timeout: Duration) -> ProcessRequest {
         ProcessRequest::new(
-            WorkerKind::IntegrationProbe,
+            WorkerKind::MediaProbe,
             "cmd.exe",
             vec![
                 "/D".to_owned(),
@@ -861,7 +845,7 @@ mod failure_tests {
 
     fn successful_output() -> ProcessOutput {
         ProcessOutput {
-            kind: WorkerKind::IntegrationProbe,
+            kind: WorkerKind::MediaProbe,
             ok: true,
             exit_code: Some(0),
             error_kind: None,

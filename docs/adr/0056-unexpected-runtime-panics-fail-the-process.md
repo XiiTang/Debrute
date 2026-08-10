@@ -23,13 +23,12 @@ race and is omitted from that projection. Any other failure to publish
 committed Photoshop state is process-fatal; an invalid session or unavailable
 outbound queue makes the socket stale.
 
-The same process-fatal rule applies when a monotonic Global event revision,
-integration-projection generation, or current-Runtime Model Operation issued
-sequence is exhausted. Those counters preserve authoritative ordering or cursor
-position; they are not recoverable resource budgets. Impossible Model Operation
+The same process-fatal rule applies when a monotonic Global event revision or
+current-Runtime Model Operation issued sequence is exhausted. Those counters
+preserve authoritative ordering or cursor position; they are not recoverable
+resource budgets. Impossible Model Operation
 Batch accounting, such as settling an Item when no Item is active, is likewise
 an internal invariant failure rather than a value to clamp at zero. Runtime does
 not keep a successful side-effect result while suppressing its settled state
 event or publish a plausible-looking Operation snapshot after its accounting is
-inconsistent. A later explicit launch observes external integration state
-through the ordinary fresh scan and starts a new in-memory Operation registry.
+inconsistent. A later explicit launch starts a new in-memory Operation registry.

@@ -1,5 +1,4 @@
 use std::{
-    env,
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex, Weak},
@@ -16,16 +15,14 @@ use tokio::sync::{broadcast, mpsc};
 use crate::{
     activity::{
         ActivityEvent, ActivityMessage, ActivityProgress, ActivityProjectContext, ActivityService,
-        ActivityTaskStatus, IntegrationActivityOperation, ModelRequestKind,
+        ActivityTaskStatus, ModelRequestKind,
     },
     cli::{CliResult, CliStreamEvent},
     control::RuntimeControlState,
-    executable_path::resolve_executable,
     global::{
         DebruteGlobalSettingsView, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent,
         GlobalRuntimeService,
     },
-    integrations::{IntegrationOperation, Platform},
     model_operation::{
         ModelKind, ModelOperationExecution, ModelOperationService, ModelOperationSnapshot,
         OperationState,
@@ -34,8 +31,8 @@ use crate::{
     models::ModelCatalog,
     photoshop::{PhotoshopEnableMutationError, PhotoshopGatewayLifecycle, PhotoshopIntegration},
     project::{
-        CanvasFeedbackArtifacts, MediaToolPaths, NativeProjectNodeAdapter, OpenProjectSession,
-        ProjectNativeShellService, ProjectPathStateReconciler, ProjectSession,
+        CanvasFeedbackArtifacts, CanvasVideoToolPaths, NativeProjectNodeAdapter,
+        OpenProjectSession, ProjectNativeShellService, ProjectPathStateReconciler, ProjectSession,
         ProjectSessionRegistry, ProjectStreamItem, ProjectSubscription, ProjectSyncSnapshot,
         ProjectUse, ProjectUseKind,
     },
@@ -178,8 +175,9 @@ impl WorkbenchRuntimeServices {
     ///
     /// # Errors
     ///
-    /// Returns a typed startup error when a catalog, Photoshop integration, feedback
-    /// scheduler, or initial global projection cannot start.
+    /// Returns a typed startup error when the Model catalog, Photoshop
+    /// integration, feedback scheduler, or initial global projection cannot
+    /// start.
     ///
     /// # Panics
     ///
@@ -187,10 +185,12 @@ impl WorkbenchRuntimeServices {
     pub fn compose(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
+        canvas_video_tools: CanvasVideoToolPaths,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         Self::compose_with_project_watcher(
             debrute_home,
             runtime_state,
+            canvas_video_tools,
             ProjectWatcherComposition::Production,
         )
     }
@@ -206,10 +206,12 @@ impl WorkbenchRuntimeServices {
     pub fn compose_for_integration_tests(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
+        canvas_video_tools: CanvasVideoToolPaths,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         Self::compose_with_project_watcher(
             debrute_home,
             runtime_state,
+            canvas_video_tools,
             ProjectWatcherComposition::Deterministic,
         )
     }
@@ -217,20 +219,14 @@ impl WorkbenchRuntimeServices {
     fn compose_with_project_watcher(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
+        canvas_video_tools: CanvasVideoToolPaths,
         project_watcher: ProjectWatcherComposition,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         let debrute_home = debrute_home.as_ref().to_path_buf();
         let workers = RuntimeWorkerServices::new();
-        let platform = current_platform();
-        let env_path = env::var_os("PATH").unwrap_or_default();
-        let path_ext = env::var_os("PATHEXT").unwrap_or_default();
-        let media_tools = MediaToolPaths {
-            ffmpeg: resolve_executable("ffmpeg", &env_path, platform, &path_ext),
-            ffprobe: resolve_executable("ffprobe", &env_path, platform, &path_ext),
-        };
         let previews = Arc::new(crate::project::ProjectPreviewService::new_with_home(
             &workers,
-            media_tools,
+            canvas_video_tools,
             &debrute_home,
         ));
         let feedback = Arc::new(
@@ -274,11 +270,9 @@ impl WorkbenchRuntimeServices {
         let native_shell = Arc::new(ProjectNativeShellService::new(&workers));
         let catalog = Arc::new(ModelCatalog::bundled());
         let global_store = Arc::new(GlobalConfigStore::new(&debrute_home));
-        let integrations = workers.integration_service(platform, env_path, path_ext);
         let global = Arc::new(GlobalRuntimeService::new(
             Arc::clone(&global_store),
             Arc::clone(&catalog),
-            integrations,
         ));
         let provenance = Arc::new(ModelArtifactProvenanceStore::new(&debrute_home));
         let model_request = Arc::new(ModelRequestExecutor::new(
@@ -350,8 +344,7 @@ impl WorkbenchRuntimeServices {
                 GlobalRuntimeChange::GlobalSettingsChanged(settings) => {
                     presentation_state.set_theme_preference(&settings.workbench.theme_preference);
                 }
-                GlobalRuntimeChange::IntegrationsChanged(_)
-                | GlobalRuntimeChange::PhotoshopChanged(_)
+                GlobalRuntimeChange::PhotoshopChanged(_)
                 | GlobalRuntimeChange::ProductChanged(_) => {}
             }
             let _ = event_sender.send(event);
@@ -1005,54 +998,6 @@ impl WorkbenchRuntimeServices {
     pub fn subscribe_activity(&self) -> broadcast::Receiver<ActivityEvent> {
         self.activity_events.subscribe()
     }
-
-    pub fn integration_operation(
-        &self,
-        integration_id: &str,
-        operation: &str,
-    ) -> Result<Value, RuntimeHttpServiceError> {
-        let (operation, activity_operation) = match operation {
-            "install" => (
-                IntegrationOperation::Install,
-                IntegrationActivityOperation::Install,
-            ),
-            "update" => (
-                IntegrationOperation::Update,
-                IntegrationActivityOperation::Update,
-            ),
-            "uninstall" => (
-                IntegrationOperation::Uninstall,
-                IntegrationActivityOperation::Uninstall,
-            ),
-            _ => {
-                return Err(RuntimeHttpServiceError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_integration_operation",
-                    "Integration operation is not registered.",
-                ));
-            }
-        };
-        let activity = self.activity.start_task(
-            None,
-            ActivityMessage::IntegrationOperation {
-                integration_id: integration_id.to_owned(),
-                operation: activity_operation,
-            },
-            ActivityProgress::Indeterminate,
-        );
-        let result = self
-            .global
-            .integrations_run_operation(integration_id, operation);
-        let status = if result.ok {
-            ActivityTaskStatus::Succeeded
-        } else {
-            ActivityTaskStatus::Failed
-        };
-        let _ = self
-            .activity
-            .update_task(&activity.id, status, ActivityProgress::Indeterminate);
-        serde_json::to_value(result).map_err(|error| RuntimeHttpServiceError::serialization(&error))
-    }
 }
 
 fn publish_model_operation_activity(activity: &ActivityService, snapshot: &ModelOperationSnapshot) {
@@ -1352,17 +1297,6 @@ pub fn encode_project_path(path: &str) -> String {
         .map(percent_encode_segment)
         .collect::<Vec<_>>()
         .join("/")
-}
-
-fn current_platform() -> Platform {
-    #[cfg(target_os = "macos")]
-    {
-        Platform::MacOs
-    }
-    #[cfg(target_os = "windows")]
-    {
-        Platform::Windows
-    }
 }
 
 #[cfg(test)]

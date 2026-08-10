@@ -1,6 +1,5 @@
 import { useLayoutEffect } from 'react';
 import '../styles/settings.css';
-import '../styles/integrations.css';
 import type { HttpWorkbenchApiClient } from '../../api/httpWorkbenchApiClient.js';
 import type { WorkbenchResolvedTheme } from '../services/workbenchTheme.js';
 import type { WorkbenchLocale } from '@debrute/app-protocol';
@@ -46,7 +45,6 @@ export function WorkbenchSettingsPanelFeature({
 }): React.ReactElement {
   const state = {
     globalSettings: controller.globalSettings,
-    integrations: controller.integrations,
     photoshop: controller.photoshop,
     product: controller.product,
     resolvedTheme

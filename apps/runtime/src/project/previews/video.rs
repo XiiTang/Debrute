@@ -42,17 +42,18 @@ const VIDEO_FRAME_SCALE_FILTER: &str = "scale=w='min(4096,iw)':h='min(4096,ih)':
 pub const CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MediaToolPaths {
-    pub ffmpeg: Option<PathBuf>,
-    pub ffprobe: Option<PathBuf>,
+pub struct CanvasVideoToolPaths {
+    pub ffmpeg: PathBuf,
+    pub ffprobe: PathBuf,
 }
 
-impl MediaToolPaths {
+impl CanvasVideoToolPaths {
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
-    pub fn unavailable() -> Self {
+    pub fn for_tests() -> Self {
         Self {
-            ffmpeg: None,
-            ffprobe: None,
+            ffmpeg: PathBuf::from("__debrute_test_ffmpeg__"),
+            ffprobe: PathBuf::from("__debrute_test_ffprobe__"),
         }
     }
 }
@@ -106,7 +107,7 @@ pub enum CanvasVideoPreviewEnsureStatus {
 pub struct CanvasVideoPreviewService {
     debrute_home: PathBuf,
     supervisor: Arc<BoundedProcessSupervisor>,
-    tools: MediaToolPaths,
+    tools: CanvasVideoToolPaths,
     raster_variants: Arc<RasterPreviewVariantService>,
     stable_input_copy_admission: Semaphore,
     source_locks: KeyedLocks,
@@ -115,7 +116,7 @@ pub struct CanvasVideoPreviewService {
 impl CanvasVideoPreviewService {
     pub(super) fn new(
         supervisor: Arc<BoundedProcessSupervisor>,
-        tools: MediaToolPaths,
+        tools: CanvasVideoToolPaths,
         raster_variants: Arc<RasterPreviewVariantService>,
         debrute_home: PathBuf,
     ) -> Self {
@@ -448,15 +449,9 @@ impl CanvasVideoPreviewService {
         source: &Path,
         cancellation: &PreviewCancellation,
     ) -> Result<CanvasVideoMetadata, ProjectError> {
-        let ffprobe = self.tools.ffprobe.as_ref().ok_or_else(|| {
-            ProjectError::service(
-                "ffprobe_unavailable",
-                "FFprobe is required to inspect Canvas video metadata.",
-            )
-        })?;
         let mut request = ProcessRequest::new(
             WorkerKind::MediaProbe,
-            ffprobe,
+            &self.tools.ffprobe,
             vec![
                 "-v".to_owned(),
                 "error".to_owned(),
@@ -487,12 +482,6 @@ impl CanvasVideoPreviewService {
         time: f64,
         cancellation: &PreviewCancellation,
     ) -> Result<TemporaryFrame, ProjectError> {
-        let ffmpeg = self.tools.ffmpeg.as_ref().ok_or_else(|| {
-            ProjectError::service(
-                "ffmpeg_unavailable",
-                "FFmpeg is required to create Canvas video previews.",
-            )
-        })?;
         let directory =
             std::env::temp_dir().join(format!(".debrute-runtime-frame-{}", Uuid::new_v4()));
         fs::create_dir(&directory)?;
@@ -502,7 +491,7 @@ impl CanvasVideoPreviewService {
         };
         let mut request = ProcessRequest::new(
             WorkerKind::VideoFrame,
-            ffmpeg,
+            &self.tools.ffmpeg,
             vec![
                 "-hide_banner".to_owned(),
                 "-loglevel".to_owned(),
@@ -1048,7 +1037,7 @@ mod tests {
         let raster_pool = Arc::new(Semaphore::new(3));
         let service = CanvasVideoPreviewService::new(
             workers.supervisor(),
-            MediaToolPaths::unavailable(),
+            CanvasVideoToolPaths::for_tests(),
             Arc::new(RasterPreviewVariantService::new(raster_pool)),
             root.join("home"),
         );

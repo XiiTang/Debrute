@@ -3,10 +3,7 @@
 pub mod activity;
 pub mod cli;
 pub mod control;
-mod executable_path;
 pub mod global;
-mod integration_process;
-pub mod integrations;
 pub mod login;
 pub mod model_operation;
 pub mod model_request;

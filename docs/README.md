@@ -45,12 +45,11 @@ remain authoritative when prose and implementation differ.
 - [Canvas feedback](./canvas-feedback.md)
 - [Text files, editing, and Canvas previews](./text-files.md)
 
-## Capabilities And Integrations
+## Capabilities And Professional Tools
 
 - [CLI and official Skills](./cli.md)
 - [Model Requests](./model-requests.md)
 - [Model Artifacts and provenance](./model-artifacts.md)
-- [Local integrations](./integrations.md)
 - [Photoshop file transfer](./photoshop.md)
 
 ## Engineering

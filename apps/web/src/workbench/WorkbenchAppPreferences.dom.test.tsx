@@ -125,11 +125,6 @@ describe('WorkbenchApp preferences and project behavior', () => {
     apiState.globalProjection = createWorkbenchGlobalProjection();
     apiState.globalProjection.acceptSnapshot({ revision: 0, settings: globalSettingsFixture() });
     apiState.globalProjection.acceptEvent({
-      type: 'integrations.changed',
-      revision: 0,
-      integrations: { integrations: [], backends: [] }
-    });
-    apiState.globalProjection.acceptEvent({
       type: 'product.changed',
       revision: 0,
       product: productStateFixture()
@@ -1178,12 +1173,6 @@ function apiFixture(overrides: Partial<WorkbenchApiClient> = {}): WorkbenchApiCl
     checkProductUpdate: vi.fn(async () => ({ ok: true as const })),
     applyProductUpdate: vi.fn(async () => ({ ok: true as const })),
     removeProduct: vi.fn(async () => ({ accepted: true, configPreserved: false })),
-    integrationsRescan: vi.fn(async () => ({ ok: true as const })),
-    integrationsRunOperation: vi.fn(async () => ({
-      ok: true,
-      integrationId: 'imagemagick',
-      operation: 'install'
-    })),
     openProject: vi.fn(async () => ({
       bindingId: 'project-1',
       canonicalRoot: '/projects/project-1',

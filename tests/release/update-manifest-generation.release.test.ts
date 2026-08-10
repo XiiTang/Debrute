@@ -8,6 +8,7 @@ import {
   updateManifestName,
   updateManifestSignatureName
 } from '../../scripts/generate-update-manifest.mjs';
+import { expectedReleaseAssets } from '../../scripts/release-asset-contract.mjs';
 
 describe('update manifest generation', () => {
   const roots: string[] = [];
@@ -48,6 +49,8 @@ describe('update manifest generation', () => {
       kind: 'product',
       name: 'debrute-product-0.2.0-windows-x64.zip'
     }));
+    expect(expectedReleaseAssets('0.2.0')).toHaveLength(9);
+    expect(expectedReleaseAssets('0.2.0')).toContain('ffmpeg-8.1.2.tar.xz');
   });
 
   it('fails when a required Product Installer asset is missing', async () => {
@@ -63,7 +66,7 @@ describe('update manifest generation', () => {
     })).rejects.toThrow(/Missing release assets/);
   });
 
-  it('fails when release upload contains files outside the signed update contract', async () => {
+  it('fails when release upload contains files outside the closed public contract', async () => {
     const root = join(tmpdir(), `debrute-update-manifest-extra-${process.pid}-${Date.now()}`);
     roots.push(root);
     await mkdir(root, { recursive: true });
@@ -101,6 +104,7 @@ async function writeReleaseAssets(root: string, version: string): Promise<void> 
     writeFile(join(root, `debrute-installer-${version}-windows-x64.exe`), 'windows x64'),
     writeFile(join(root, `debrute-product-${version}-macos-arm64.zip`), 'macos arm64 product'),
     writeFile(join(root, `debrute-product-${version}-macos-x64.zip`), 'macos x64 product'),
-    writeFile(join(root, `debrute-product-${version}-windows-x64.zip`), 'windows x64 product')
+    writeFile(join(root, `debrute-product-${version}-windows-x64.zip`), 'windows x64 product'),
+    writeFile(join(root, 'ffmpeg-8.1.2.tar.xz'), 'matching ffmpeg source')
   ]);
 }

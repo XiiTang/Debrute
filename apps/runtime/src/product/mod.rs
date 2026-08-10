@@ -17,9 +17,10 @@ pub use commit::{
 };
 pub use layout::{InstalledProductLayout, ProductLayoutError};
 pub use manifest::{
-    ProductEntrypoints, ProductManifest, ProductManifestError, ProductManifestFile,
-    ProductPlatform, ReleaseArchitecture, ReleaseAssetKind, ReleasePlatform, SignedManifestError,
-    StagedDesktopAsset, StagedProductArchive, TrustedReleaseAsset, TrustedReleaseManifest,
+    CanvasVideoRuntimeDependency, ProductEntrypoints, ProductManifest, ProductManifestError,
+    ProductManifestFile, ProductPlatform, ProductRuntimeDependencies, ReleaseArchitecture,
+    ReleaseAssetKind, ReleasePlatform, SignedManifestError, StagedDesktopAsset,
+    StagedProductArchive, TrustedReleaseAsset, TrustedReleaseManifest,
     verify_official_signed_release_manifest,
 };
 pub use platform::{NativeUpdatePlatform, launch_product_update_failure};
@@ -28,8 +29,8 @@ pub use release::{GitHubProductReleaseSource, ProductReleaseError, ProductReleas
 pub use removal::{ProductRemovalCoordinator, ProductRemovalError, finalize_product_removal};
 pub use service::RuntimeProductService;
 pub use store::{
-    CommitPlatform, ProductStore, ProductStoreError, VerifiedDesktopInstaller,
-    VerifiedRuntimeEntrypoint,
+    CommitPlatform, ProductStore, ProductStoreError, ValidatedRunningProduct,
+    VerifiedDesktopInstaller, VerifiedRuntimeEntrypoint,
 };
 
 #[cfg(test)]

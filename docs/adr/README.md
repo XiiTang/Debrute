@@ -16,7 +16,6 @@ glossaries instead.
 - [Product Version Is Runtime Owned](./0006-product-version-is-runtime-owned.md)
 - [Workbench Owns Its Visual Primitive Layer](./0007-workbench-owns-its-visual-primitive-layer.md)
 - [Signed Manifest Authenticates Product Updates](./0008-signed-manifest-authenticates-product-updates.md)
-- [Integration Operations Are Catalog-Defined](./0010-integration-operations-are-catalog-defined.md)
 - [Remote Media Fetches Bind Validated DNS](./0011-remote-media-fetches-bind-validated-dns.md)
 - [Project Paths Are Realpath-Bound](./0012-project-paths-are-realpath-bound.md)
 - [Tests Own Their External Resources](./0013-tests-own-their-external-resources.md)
@@ -24,6 +23,11 @@ glossaries instead.
 - [Canvas Source Settlement Is Path Local](./0070-canvas-source-settlement-is-path-local.md)
 - [Feedback Names Are Project Identity And The Catalog Is Global](./0071-feedback-names-are-project-identity-and-the-catalog-is-global.md)
 - [Global Settings Use Typed Mutation Intents](./0072-global-settings-use-typed-mutation-intents.md)
+- [Canvas Video Production Uses Product-Owned FFmpeg](./0078-canvas-video-production-uses-product-owned-ffmpeg.md)
+
+### Superseded Decisions
+
+- [Integration Operations Are Catalog-Defined](./0010-integration-operations-are-catalog-defined.md) (superseded by ADR-0078)
 
 ### Product Identity
 
@@ -83,9 +87,8 @@ boundary. Exact request, result, and command-record shapes belong to Rust source
 `docs/cli.md`, and their contract tests rather than these ADRs.
 
 The Operation subsystem currently covers only the five Model Kinds, with both
-Single and Batch execution. The existing Integration service retains
-its domain-specific install, update, or uninstall boundary; Product Update and
-professional-tool transfers also retain their own lifecycle contracts. Those
+Single and Batch execution. Product Update and professional-tool transfers
+retain their own lifecycle contracts. Those
 subsystems intentionally remain outside the Operation registry. The
 lifecycle refactor adds no interim generic registry or detached-job protocol.
 

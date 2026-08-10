@@ -3,8 +3,8 @@
 Debrute Desktop is a trayless Electron window host for the same Web Workbench
 and shared local Runtime used by browser clients. Runtime alone owns the
 persistent macOS or Windows tray. Desktop owns native windows, menus, folder
-picking, and Product packaging. Project sessions, global settings, integrations,
-Photoshop file transfer, file mutation, terminals, and process lifecycle remain
+picking, and Product packaging. Project sessions, global settings, Photoshop
+file transfer, file mutation, terminals, and process lifecycle remain
 Runtime-owned.
 
 Each Desktop artifact is built on its matching native release target together
@@ -68,8 +68,9 @@ default background. Runtime does not persist window bounds, focus, recovery
 topology, or renderer acknowledgements. The renderer document remains
 transparent while its Workbench connection waits for the authoritative Global
 Settings snapshot, leaving this native background visible. It begins normal
-painting only after applying the snapshot's resolved theme, so a slow Project or
-Integration resource cannot produce an intermediate default-theme frame.
+painting only after applying the snapshot's resolved theme, so slow Project
+preparation or live Photoshop state cannot produce an intermediate
+default-theme frame.
 
 Electron Main owns the native Project selector and determines exactly one
 target for every ordinary Desktop Project open. This includes startup arguments,

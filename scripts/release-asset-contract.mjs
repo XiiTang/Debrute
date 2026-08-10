@@ -1,5 +1,8 @@
+import { FFMPEG_SOURCE_ARCHIVE_NAME } from './canvas-video-tools-payload.mjs';
+
 export const updateManifestName = 'debrute-update-manifest.json';
 export const updateManifestSignatureName = 'debrute-update-manifest.json.sig';
+export const ffmpegSourceReleaseAssetName = FFMPEG_SOURCE_ARCHIVE_NAME;
 
 export const productInstallerTargets = [
   { platform: 'macos', arch: 'arm64', extension: 'dmg' },
@@ -38,6 +41,7 @@ export function expectedReleaseAssets(version) {
   return [
     ...expectedProductInstallerAssets(version),
     ...expectedProductReleaseAssets(version),
+    ffmpegSourceReleaseAssetName,
     updateManifestName,
     updateManifestSignatureName
   ];

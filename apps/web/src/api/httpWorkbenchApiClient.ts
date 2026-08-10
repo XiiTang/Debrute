@@ -8,8 +8,6 @@ import type {
   DebruteHttpErrorBody,
   RuntimeProjectUploadImportPlan,
   ModelArtifactProvenanceLookup,
-  RunIntegrationOperationInput,
-  RunIntegrationOperationResult,
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
   MutateDebruteGlobalSettingsInput,
@@ -816,12 +814,6 @@ export function createHttpWorkbenchApiClient(options: {
       'PATCH',
       projectPath('/canvas/state'),
       input
-    ),
-    integrationsRescan: () => request<{ ok: true }>('POST', '/api/integrations/rescan', {}),
-    integrationsRunOperation: (input: RunIntegrationOperationInput) => request<RunIntegrationOperationResult>(
-      'POST',
-      `/api/integrations/${encodeURIComponent(input.integrationId)}/${encodeURIComponent(input.operation)}`,
-      {}
     ),
     onEvent: (listener: (event: WorkbenchEvent) => void) => {
       eventListeners.add(listener);

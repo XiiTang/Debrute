@@ -381,11 +381,11 @@ Inspector, Feedback Panel, Settings, and Terminal launch from
 `workbench-dock-layer`. Moving a control for collision avoidance does not permit
 crossing this semantic boundary.
 
-Settings uses General, Appearance, Feedback, Models, Plugins, Integrations, and
-System navigation, one title per selected page, explicit loading/error/ready content, ordinary
+Settings uses General, Appearance, Feedback, Models, Plugins, and System
+navigation, one title per selected page, explicit loading/error/ready content, ordinary
 sections for General and Appearance settings, and cards only for independent
-repeated records. Plugins and Integrations remain separate groups. The Plugins
-page presents one row per Runtime-hosted professional-tool Integration with an
+repeated records. The Plugins page presents one row per Runtime-hosted
+professional-tool Integration with an
 aggregate status and controlled switch; it does not present a platform master,
 connection list, or manual Connect action. Photoshop transfer activity disables
 only its row switch and uses one inline `Transfer in progress.` message.

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "payloadRevision": 2,
+  "ffmpegVersion": "8.1.2",
+  "source": {
+    "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+    "signatureUrl": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz.asc",
+    "signatureSha256": "0a0963fccd70597838073f3e31b20f4a4d8cc2b5e577472c9a5a1f22624246f8",
+    "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+    "signingKeyUrl": "https://ffmpeg.org/ffmpeg-devel.asc",
+    "signingKeySha256": "397b3becedcd5a98769967ff1ff8501ddc89f8368b8f766e4701377d7dbaabe5",
+    "signingKeyFingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8"
+  },
+  "configureArguments": [
+    "--disable-autodetect",
+    "--disable-debug",
+    "--disable-doc",
+    "--disable-network",
+    "--disable-ffplay",
+    "--disable-sdl2",
+    "--enable-ffmpeg",
+    "--enable-ffprobe",
+    "--enable-static",
+    "--disable-shared",
+    "--disable-devices",
+    "--disable-encoders",
+    "--enable-encoder=mjpeg",
+    "--disable-muxers",
+    "--enable-muxer=image2",
+    "--disable-filters",
+    "--enable-filter=scale",
+    "--disable-protocols",
+    "--enable-protocol=file"
+  ],
+  "targets": {
+    "macos-arm64": {
+      "platform": "macos",
+      "architecture": "arm64"
+    },
+    "macos-x64": {
+      "platform": "macos",
+      "architecture": "x64"
+    },
+    "windows-x64": {
+      "platform": "windows",
+      "architecture": "x64"
+    }
+  }
+}

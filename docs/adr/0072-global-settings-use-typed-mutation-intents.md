@@ -22,9 +22,10 @@ accepted value without overwriting a newer event.
 
 Settings pages submit domain intent and do not own accepted-state caches,
 persistence queues, or rollback logic. Runtime retains the one serialized
-authority; Workbench does not introduce a second accepted store. Integration
-status and operations, Product Update operations, and transient secret reveal
-commands remain outside this settings mutation module.
+authority; Workbench does not introduce a second accepted store. Plugin
+Integration status, Photoshop transfer operations, Product Update operations,
+and transient secret reveal commands remain outside this settings mutation
+module.
 
 This deepens the Workbench side of system ADR-0005 while preserving Plugin
 Integration lifecycle authority from ADR-0068 and explicit transient Model API

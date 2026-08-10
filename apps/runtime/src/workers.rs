@@ -1,11 +1,8 @@
 //! Runtime-wide owner of the one bounded native helper-process supervisor.
 
-use std::{ffi::OsString, sync::Arc};
+use std::sync::Arc;
 
-use crate::integrations::{IntegrationService, Platform};
-use crate::{
-    integration_process::NativeIntegrationProcessAdapter, process::BoundedProcessSupervisor,
-};
+use crate::process::BoundedProcessSupervisor;
 
 #[derive(Clone)]
 pub struct RuntimeWorkerServices {
@@ -24,24 +21,6 @@ impl RuntimeWorkerServices {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Creates the closed integration service backed by this Runtime's one supervisor.
-    #[must_use]
-    pub fn integration_service(
-        &self,
-        platform: Platform,
-        env_path: impl Into<OsString>,
-        path_ext: impl Into<OsString>,
-    ) -> IntegrationService {
-        IntegrationService::new(
-            platform,
-            env_path,
-            path_ext,
-            Arc::new(NativeIntegrationProcessAdapter::from_supervisor(
-                Arc::clone(&self.supervisor),
-            )),
-        )
     }
 
     pub(crate) fn supervisor(&self) -> Arc<BoundedProcessSupervisor> {

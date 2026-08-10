@@ -645,8 +645,12 @@ impl CliFixture {
         let root = std::env::temp_dir().join(format!("debrute-cli-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).expect("fixture root should exist");
         let state = Arc::new(RuntimeControlState::new("cli-fixture"));
-        let services = WorkbenchRuntimeServices::compose(root.join("home"), state)
-            .expect("Runtime services should compose");
+        let services = WorkbenchRuntimeServices::compose(
+            root.join("home"),
+            state,
+            crate::project::CanvasVideoToolPaths::for_tests(),
+        )
+        .expect("Runtime services should compose");
         let service = RuntimeCliService::new(
             Arc::clone(services.models()),
             Arc::clone(services.global()),

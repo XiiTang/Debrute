@@ -90,12 +90,12 @@ Pointers record the actual absolute output path. For each actual extension,
 one output uses `name.ext` and multiple outputs use `name_1.ext`,
 `name_2.ext`, and so on.
 
-## Integrations And Professional Tools
+## Professional Tools
 
-Integrations are optional Runtime-detected local capabilities managed through
-Settings. Photoshop transfer is a separate live-session protocol. Both consume
-canonical Project roots and Project Paths; neither defines Project identity.
-See [Integrations](./integrations.md) and [Photoshop](./photoshop.md).
+Photoshop transfer is an explicit Runtime-owned live-session protocol. It
+consumes canonical Project roots and Project Paths but does not define Project
+identity. Debrute has no catalog of recommended command-line projects and no
+generic install, update, or uninstall surface. See [Photoshop](./photoshop.md).
 
 ## Skills
 

@@ -2078,7 +2078,7 @@ fn actor_unavailable(terminal_id: &str) -> TerminalError {
 fn terminal_test_project_service() -> (PathBuf, ProjectSessionRegistry, String, ProjectUse) {
     use crate::{
         project::{
-            CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, MediaToolPaths,
+            CanvasFeedbackArtifacts, CanvasVideoToolPaths, DefaultProjectNodeAdapter,
             ProjectPreviewService,
         },
         workers::RuntimeWorkerServices,
@@ -2089,7 +2089,7 @@ fn terminal_test_project_service() -> (PathBuf, ProjectSessionRegistry, String, 
     let workers = RuntimeWorkerServices::new();
     let previews = Arc::new(ProjectPreviewService::new(
         &workers,
-        MediaToolPaths::unavailable(),
+        CanvasVideoToolPaths::for_tests(),
     ));
     let feedback =
         Arc::new(CanvasFeedbackArtifacts::new(previews).expect("feedback scheduler should start"));

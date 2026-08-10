@@ -176,9 +176,12 @@ quota, LRU, TTL, or compatibility cleanup path.
 
 ## Player Metadata And Raw Media
 
-Video dimensions and duration come from the configured media integration
-runtime. A missing duration does not make a video unavailable when dimensions
-are readable; missing required dimensions do. Same-directory, same-basename
+Video dimensions and duration come from Runtime's Product-owned `ffprobe`.
+Inactive preview frames and video Feedback pixels come from the matching
+Product-owned `ffmpeg`. Runtime receives both as validated absolute paths and
+never searches `PATH` or a user installation. A missing duration does not make
+a video unavailable when dimensions are readable; missing required dimensions
+do. Same-directory, same-basename
 `.vtt` companions are projected as subtitles, captions, chapters, or thumbnail
 metadata. A single subtitle or caption track is the default; multiple language
 tracks are not auto-selected.

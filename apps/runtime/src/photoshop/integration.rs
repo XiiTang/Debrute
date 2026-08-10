@@ -1421,7 +1421,7 @@ mod tests {
 
     use crate::{
         project::{
-            CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, MediaToolPaths,
+            CanvasFeedbackArtifacts, CanvasVideoToolPaths, DefaultProjectNodeAdapter,
             ProjectPreviewService, ProjectUseKind,
         },
         workers::RuntimeWorkerServices,
@@ -1466,7 +1466,7 @@ mod tests {
         let workers = RuntimeWorkerServices::new();
         let previews = Arc::new(ProjectPreviewService::new(
             &workers,
-            MediaToolPaths::unavailable(),
+            CanvasVideoToolPaths::for_tests(),
         ));
         let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
         ProjectSessionRegistry::new(home, Arc::new(DefaultProjectNodeAdapter), feedback)

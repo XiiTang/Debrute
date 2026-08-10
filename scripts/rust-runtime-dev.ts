@@ -21,6 +21,8 @@ import {
   assembleMacosRuntimeApplication
 } from './macos-runtime-app.mjs';
 import { ensureNativeRasterPayload } from './prepare-native-raster.mjs';
+import { ensureCanvasVideoToolsPayload } from './prepare-canvas-video-tools.mjs';
+import { validateCanvasVideoToolsPayload } from './canvas-video-tools-payload.mjs';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const developmentDirectory = join(workspaceRoot, '.scratch/rust-runtime-dev');
@@ -70,11 +72,14 @@ interface RuntimeExecutableAssemblyInput {
 }
 
 interface WindowsRuntimeAssemblyIdentity {
-  schemaVersion: 1;
+  schemaVersion: 2;
   compiledRuntimeIdentity: string;
   compiledRuntimeSha256: string;
   nativeRasterManifestSha256: string;
   nativeRasterRuntimeInventorySha256: string;
+  canvasVideoToolsManifestSha256: string;
+  canvasVideoToolsInventorySha256: string;
+  runtimePayloadInventorySha256: string;
 }
 
 interface WindowsRuntimeAssemblyExpectation {
@@ -82,11 +87,15 @@ interface WindowsRuntimeAssemblyExpectation {
   compiledRuntimeSha256: string;
   nativeRasterManifestSha256: string;
   nativeRasterRuntimeInventorySha256: string;
+  canvasVideoToolsManifestSha256: string;
+  canvasVideoToolsInventorySha256: string;
+  runtimePayloadInventorySha256: string;
 }
 
 export async function buildRustRuntime(): Promise<boolean> {
   await stopLegacyWindowsRuntimeBeforeBuild();
   const previousCompiledRuntime = fileIdentity(runtimeBinary);
+  await ensureCanvasVideoToolsPayload({ profile: 'debug' });
   await ensureNativeRasterPayload();
   const env = await prepareNativeRasterPayload({ profile: 'debug' });
   const child = spawn('cargo', [
@@ -110,8 +119,19 @@ export async function buildRustRuntime(): Promise<boolean> {
     throw new Error('Debrute Runtime build did not produce its development binary.');
   }
   const rebuilt = compiledRuntimeIdentity !== previousCompiledRuntime;
-  if (process.platform === 'darwin' && macosRuntimeApplicationNeedsAssembly({
+  const canvasVideoToolsIdentity = await directoryInventorySha256(
+    join(workspaceRoot, 'target/debug/canvas-video-tools')
+  );
+  const nativeRasterIdentity = await directoryInventorySha256(
+    join(workspaceRoot, 'target/debug/native-raster')
+  );
+  const runtimeAssemblyIdentity = [
     compiledRuntimeIdentity,
+    nativeRasterIdentity,
+    canvasVideoToolsIdentity
+  ].join(':');
+  if (process.platform === 'darwin' && macosRuntimeApplicationNeedsAssembly({
+    compiledRuntimeIdentity: runtimeAssemblyIdentity,
     installedRuntimeIdentity: optionalFileText(runtimeApplicationBinaryIdentityPath),
     runtimeExecutableExists: fileIdentity(runtimeExecutable) !== undefined
   })) {
@@ -119,6 +139,7 @@ export async function buildRustRuntime(): Promise<boolean> {
       destination: runtimeApplication,
       runtimeBinary,
       nativeRasterRoot: join(workspaceRoot, 'target/debug/native-raster'),
+      canvasVideoToolsRoot: join(workspaceRoot, 'target/debug/canvas-video-tools'),
       icon: join(workspaceRoot, 'apps/desktop/build/icon.icns'),
       version: productVersion()
     });
@@ -134,7 +155,7 @@ export async function buildRustRuntime(): Promise<boolean> {
       'utf8'
     );
     await chmod(runtimeEntrypoint, 0o755);
-    await writeFile(runtimeApplicationBinaryIdentityPath, `${compiledRuntimeIdentity}\n`, 'utf8');
+    await writeFile(runtimeApplicationBinaryIdentityPath, `${runtimeAssemblyIdentity}\n`, 'utf8');
   }
   return rebuilt;
 }
@@ -163,15 +184,21 @@ export function windowsRuntimeDirectoryNeedsAssembly(input: {
     installedRuntimeIdentity: input.installedIdentity?.compiledRuntimeIdentity,
     runtimeExecutableExists: input.installedRuntimeSha256 !== undefined
   })
-    || input.installedIdentity?.schemaVersion !== 1
+    || input.installedIdentity?.schemaVersion !== 2
     || input.installedIdentity.compiledRuntimeSha256 !== input.expectation.compiledRuntimeSha256
     || input.installedRuntimeSha256 !== input.expectation.compiledRuntimeSha256
     || input.installedIdentity.nativeRasterManifestSha256
       !== input.expectation.nativeRasterManifestSha256
     || input.installedIdentity.nativeRasterRuntimeInventorySha256
       !== input.expectation.nativeRasterRuntimeInventorySha256
+    || input.installedIdentity.canvasVideoToolsManifestSha256
+      !== input.expectation.canvasVideoToolsManifestSha256
+    || input.installedIdentity.canvasVideoToolsInventorySha256
+      !== input.expectation.canvasVideoToolsInventorySha256
+    || input.installedIdentity.runtimePayloadInventorySha256
+      !== input.expectation.runtimePayloadInventorySha256
     || input.installedRuntimeInventorySha256
-      !== input.expectation.nativeRasterRuntimeInventorySha256;
+      !== input.expectation.runtimePayloadInventorySha256;
 }
 
 export async function ensureRustRuntime(
@@ -283,20 +310,26 @@ export function parseWindowsRuntimeAssemblyIdentity(
   const expectedKeys = [
     'compiledRuntimeIdentity',
     'compiledRuntimeSha256',
+    'canvasVideoToolsInventorySha256',
+    'canvasVideoToolsManifestSha256',
     'nativeRasterManifestSha256',
     'nativeRasterRuntimeInventorySha256',
+    'runtimePayloadInventorySha256',
     'schemaVersion'
   ].sort();
   if (keys.length !== expectedKeys.length
     || keys.some((key, index) => key !== expectedKeys[index])) {
     return undefined;
   }
-  return record.schemaVersion === 1
+  return record.schemaVersion === 2
     && typeof record.compiledRuntimeIdentity === 'string'
     && record.compiledRuntimeIdentity.length > 0
     && isSha256(record.compiledRuntimeSha256)
     && isSha256(record.nativeRasterManifestSha256)
     && isSha256(record.nativeRasterRuntimeInventorySha256)
+    && isSha256(record.canvasVideoToolsManifestSha256)
+    && isSha256(record.canvasVideoToolsInventorySha256)
+    && isSha256(record.runtimePayloadInventorySha256)
     ? record as unknown as WindowsRuntimeAssemblyIdentity
     : undefined;
 }
@@ -318,22 +351,7 @@ export async function windowsRuntimeDirectoryInventorySha256(
   directory: string
 ): Promise<string | undefined> {
   try {
-    const entries = await readdir(directory, { withFileTypes: true });
-    const inventory = [];
-    for (const entry of entries) {
-      if (entry.name === 'debrute-runtime.exe') {
-        continue;
-      }
-      if (!entry.isFile()) {
-        return undefined;
-      }
-      const bytes = await readFile(join(directory, entry.name));
-      inventory.push({
-        name: entry.name,
-        sizeBytes: bytes.byteLength,
-        sha256: sha256(bytes)
-      });
-    }
+    const inventory = await directoryInventory(directory, '', new Set(['debrute-runtime.exe']));
     inventory.sort((left, right) => compareFileNames(left.name, right.name));
     return sha256(JSON.stringify(inventory));
   } catch {
@@ -496,6 +514,7 @@ async function prepareWindowsRuntimeDirectory(): Promise<void> {
   }
 
   const nativeRasterRoot = join(workspaceRoot, 'target/debug/native-raster');
+  const canvasVideoToolsRoot = join(workspaceRoot, 'target/debug/canvas-video-tools');
   const nativeRasterFiles = await readdir(nativeRasterRoot, { withFileTypes: true });
   if (nativeRasterFiles.length === 0
     || nativeRasterFiles.some((entry) => !entry.isFile())
@@ -515,6 +534,10 @@ async function prepareWindowsRuntimeDirectory(): Promise<void> {
         { dereference: true }
       );
     }
+    await cp(canvasVideoToolsRoot, join(stagingDirectory, 'canvas-video-tools'), {
+      recursive: true,
+      dereference: true
+    });
     const stagedRuntimeSha256 = await optionalFileSha256(
       join(stagingDirectory, 'debrute-runtime.exe')
     );
@@ -522,7 +545,7 @@ async function prepareWindowsRuntimeDirectory(): Promise<void> {
       stagingDirectory
     );
     if (stagedRuntimeSha256 !== expectation.compiledRuntimeSha256
-      || stagedRuntimeInventorySha256 !== expectation.nativeRasterRuntimeInventorySha256) {
+      || stagedRuntimeInventorySha256 !== expectation.runtimePayloadInventorySha256) {
       throw new Error('Windows Runtime development assembly failed closed inventory validation.');
     }
     const replacementDeadlineMs = Date.now() + WINDOWS_RUNTIME_REPLACEMENT_TIMEOUT_MS;
@@ -538,7 +561,7 @@ async function prepareWindowsRuntimeDirectory(): Promise<void> {
     );
     await writeFile(
       windowsRuntimeAssemblyIdentityPath,
-      `${JSON.stringify({ schemaVersion: 1, ...expectation }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 2, ...expectation }, null, 2)}\n`,
       'utf8'
     );
   } catch (error) {
@@ -566,12 +589,53 @@ async function windowsRuntimeAssemblyExpectation(): Promise<
     .sort((left: { name: string }, right: { name: string }) => (
       compareFileNames(left.name, right.name)
     ));
+  const canvasVideoTools = await validateCanvasVideoToolsPayload();
+  const canvasVideoToolsManifest = await readFile(join(canvasVideoTools.root, 'versions.json'));
+  const canvasInventory = await directoryInventory(canvasVideoTools.root, 'canvas-video-tools');
+  const runtimePayloadInventory = [...inventory, ...canvasInventory]
+    .sort((left: { name: string }, right: { name: string }) => compareFileNames(left.name, right.name));
   return {
     compiledRuntimeIdentity,
     compiledRuntimeSha256,
     nativeRasterManifestSha256: sha256(manifestBytes),
-    nativeRasterRuntimeInventorySha256: sha256(JSON.stringify(inventory))
+    nativeRasterRuntimeInventorySha256: sha256(JSON.stringify(inventory)),
+    canvasVideoToolsManifestSha256: sha256(canvasVideoToolsManifest),
+    canvasVideoToolsInventorySha256: sha256(JSON.stringify(canvasInventory)),
+    runtimePayloadInventorySha256: sha256(JSON.stringify(runtimePayloadInventory))
   };
+}
+
+async function directoryInventorySha256(directory: string): Promise<string> {
+  return sha256(JSON.stringify(await directoryInventory(directory)));
+}
+
+async function directoryInventory(
+  directory: string,
+  prefix = '',
+  excludedRootNames = new Set<string>()
+): Promise<Array<{ name: string; sizeBytes: number; sha256: string }>> {
+  const inventory: Array<{ name: string; sizeBytes: number; sha256: string }> = [];
+  async function collect(current: string, relative: string): Promise<void> {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const name = relative ? `${relative}/${entry.name}` : entry.name;
+      if (!relative && excludedRootNames.has(entry.name)) continue;
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) {
+        await collect(path, name);
+      } else if (entry.isFile()) {
+        const bytes = await readFile(path);
+        inventory.push({
+          name: prefix ? `${prefix}/${name}` : name,
+          sizeBytes: bytes.byteLength,
+          sha256: sha256(bytes)
+        });
+      } else {
+        throw new Error(`Runtime development payload contains an unsupported entry: ${path}`);
+      }
+    }
+  }
+  await collect(directory, '');
+  return inventory.sort((left, right) => compareFileNames(left.name, right.name));
 }
 
 function sha256(value: NodeJS.ArrayBufferView | string): string {

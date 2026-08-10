@@ -12,7 +12,6 @@ import type {
   ActivityTaskStatus,
   CanvasActivityOperation,
   ExplorerActivityOperation,
-  IntegrationActivityOperation,
   WorkbenchActivityOperation
 } from '@debrute/app-protocol';
 import { Button, Card, IconButton, X } from '../ui/index.js';
@@ -496,7 +495,6 @@ function sourceLabel(i18n: WorkbenchI18n, source: ActivitySource): string {
     case 'photoshop': return i18n.t('shell.activities.source.photoshop');
     case 'workbench': return i18n.t('shell.activities.source.workbench');
     case 'update': return i18n.t('shell.activities.source.update');
-    case 'integration': return i18n.t('shell.activities.source.integration');
   }
 }
 
@@ -521,11 +519,6 @@ function activityMessage(i18n: WorkbenchI18n, record: ActivityRecord): string {
       return modelRequestMessage(i18n, record, message);
     case 'photoshop-send':
       return taskMessage(i18n, record, 'photoshop', { path: message.projectRelativePath });
-    case 'integration-operation':
-      return taskMessage(i18n, record, 'integration', {
-        integration: message.integrationId,
-        operation: integrationOperationLabel(i18n, message.operation)
-      });
   }
 }
 
@@ -582,7 +575,7 @@ function modelRequestMessage(
 function taskMessage(
   i18n: WorkbenchI18n,
   record: ActivityRecord,
-  family: 'modelRequest' | 'photoshop' | 'integration',
+  family: 'modelRequest' | 'photoshop',
   params: Record<string, string | number>
 ): string {
   if (record.type !== 'task') return '';
@@ -600,17 +593,6 @@ function modelKindLabel(
     case 'tts': return i18n.t('shell.activities.modelKind.tts');
     case 'music': return i18n.t('shell.activities.modelKind.music');
     case 'sound-effect': return i18n.t('shell.activities.modelKind.soundEffect');
-  }
-}
-
-function integrationOperationLabel(
-  i18n: WorkbenchI18n,
-  operation: IntegrationActivityOperation
-): string {
-  switch (operation) {
-    case 'install': return i18n.t('shell.activities.integrationOperation.install');
-    case 'update': return i18n.t('shell.activities.integrationOperation.update');
-    case 'uninstall': return i18n.t('shell.activities.integrationOperation.uninstall');
   }
 }
 

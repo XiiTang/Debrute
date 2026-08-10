@@ -1,7 +1,6 @@
 import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
-  IntegrationSettingsView,
   PhotoshopStateView,
   WorkbenchEvent
 } from '@debrute/app-protocol';
@@ -13,7 +12,6 @@ type PhotoshopResource = LoadingResource | ReadyResource<PhotoshopStateView>;
 interface WorkbenchGlobalProjectionData {
   revision: number;
   settings: DebruteGlobalSettingsView;
-  integrations: LoadingResource | ReadyResource<IntegrationSettingsView>;
   photoshop: PhotoshopResource;
   product: LoadingResource | ReadyResource<DebruteProductState | null>;
 }
@@ -74,7 +72,6 @@ export function createWorkbenchGlobalProjection(): WorkbenchGlobalProjectionWrit
         status: 'active',
         revision: input.revision,
         settings: input.settings,
-        integrations: { status: 'loading' },
         photoshop: { status: 'loading' },
         product: { status: 'loading' }
       });
@@ -107,13 +104,6 @@ export function createWorkbenchGlobalProjection(): WorkbenchGlobalProjectionWrit
             }
           });
           return;
-        case 'integrations.changed':
-          transition({
-            ...current,
-            revision,
-            integrations: { status: 'ready', value: event.integrations }
-          });
-          return;
         case 'photoshop.state.changed':
           transition({
             ...current,
@@ -144,9 +134,6 @@ function canHydrateInitialResource(
   state: WorkbenchGlobalProjectionData,
   event: WorkbenchGlobalEvent
 ): boolean {
-  if (event.type === 'integrations.changed') {
-    return state.integrations.status === 'loading';
-  }
   if (event.type === 'product.changed') {
     return state.product.status === 'loading';
   }

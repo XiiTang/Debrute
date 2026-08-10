@@ -181,37 +181,6 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     await rendered.unmount();
   });
 
-  it('returns Integration diagnostics while Runtime owns Activity reporting', async () => {
-    const integrationsRunOperation = vi.fn(async () => ({
-      ok: false,
-      integrationId: 'imagemagick' as const,
-      operation: 'install' as const,
-      diagnostic: {
-        errorKind: 'nonzero_exit' as const,
-        stderrTail: 'secret raw command output'
-      }
-    }));
-    const rendered = await renderController(
-      vi.fn(async () => ({ ok: true as const })),
-      { integrationsRunOperation }
-    );
-
-    let result;
-    await act(async () => {
-      result = await rendered.current.actions.runIntegrationOperation({
-        integrationId: 'imagemagick',
-        operation: 'install'
-      });
-    });
-
-    expect(result).toEqual(expect.objectContaining({
-      ok: false,
-      integrationId: 'imagemagick',
-      operation: 'install'
-    }));
-    await rendered.unmount();
-  });
-
   it('exposes the ordered Photoshop resource to Settings without local connection state', async () => {
     const rendered = await renderController(vi.fn(async () => ({ ok: true as const })));
 
@@ -235,10 +204,7 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
 });
 
 async function renderController(
-  mutateGlobalSettings: WorkbenchApiClient['mutateGlobalSettings'],
-  options: {
-    integrationsRunOperation?: WorkbenchApiClient['integrationsRunOperation'];
-  } = {}
+  mutateGlobalSettings: WorkbenchApiClient['mutateGlobalSettings']
 ): Promise<{
   readonly current: WorkbenchSettingsController;
   projection: ReturnType<typeof createWorkbenchGlobalProjection>;
@@ -247,19 +213,12 @@ async function renderController(
   const projection = createWorkbenchGlobalProjection();
   projection.acceptSnapshot({ revision: 0, settings: settingsFixture() });
   projection.acceptEvent({
-    type: 'integrations.changed',
-    revision: 0,
-    integrations: { integrations: [], backends: [] }
-  });
-  projection.acceptEvent({
     type: 'photoshop.state.changed',
     revision: 0,
     state: { status: 'off', transferActive: false, sessions: [] }
   });
   const api = {
     mutateGlobalSettings,
-    integrationsRescan: vi.fn(async () => ({ ok: true as const })),
-    integrationsRunOperation: options.integrationsRunOperation ?? vi.fn(),
     checkProductUpdate: vi.fn(),
     applyProductUpdate: vi.fn(),
     removeProduct: vi.fn(),

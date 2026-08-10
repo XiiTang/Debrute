@@ -2,7 +2,7 @@
 
 Debrute Runtime is one Rust operating-system process containing native
 single-instance Control, the macOS or Windows tray event loop, Workbench
-services, Project sessions, operations, terminals, file watching, integrations,
+services, Project sessions, operations, terminals, file watching, professional-tool connectivity,
 and product update coordination. The native event loop remains on the
 platform-required main thread while asynchronous and worker execution stays in
 the same process.

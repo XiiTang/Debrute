@@ -2,7 +2,7 @@
 
 Debrute Web Workbench is one React application used in browsers and Electron.
 It targets pointer-and-keyboard desktop-class environments and presents the
-Project, Canvas, Capability, settings, and integration surfaces through one
+Project, Canvas, Capability, settings, and professional-tool surfaces through one
 compact creative-tool interface.
 
 ## Design And Source Authority
@@ -57,13 +57,12 @@ and accepts that frame into `WorkbenchGlobalProjection` before it imports and
 mounts the Workbench composition root. Bootstrap keeps following ordered theme
 events and remains transparent until the presentation controller commits the
 current projection, then hands document-theme ownership to that controller.
-Theme, locale, recent Projects, Canvas
-Text Appearance, Plugin enablement, Product, Integration, and Photoshop presentation read that same
+Theme, locale, recent Projects, Canvas Text Appearance, Plugin enablement,
+Product, and Photoshop presentation read that same
 ordered in-memory projection rather than receiving copied bootstrap props or
 maintaining a second frontend settings store. During that wait the renderer is transparent, so
-Electron's authoritative native launch background remains visible. Product,
-Integration discovery, and live Photoshop state are separate Global resources;
-Integration work starts only when Settings is activated. The initial stream and
+Electron's authoritative native launch background remains visible. Product and
+live Photoshop state are separate Global resources. The initial stream and
 subsequent events always project complete live Photoshop sessions and Documents. Accepted results enter
 the projection through ordered Global events. Their slower work
 cannot delay settings or the first Workbench shell. A
@@ -142,8 +141,8 @@ Focused units own cohesive state:
   deriving theme and locale from that projection.
 - `useWorkbenchSettingsController` exists only after the first Settings
   activation and then remains alive until that Workbench ends, independently
-  of the open Settings panel. It owns Settings commands, Integration retry
-  errors, and the Canvas Text Appearance save lifecycle while reconciling
+  of the open Settings panel. It owns Settings commands and the Canvas Text
+  Appearance save lifecycle while reconciling
   accepted values from `WorkbenchGlobalProjection`; it also exposes the
   existing live Photoshop resource to the Plugins page without inventing
   connection state. It does not own theme, locale, or another accepted Global
@@ -355,7 +354,7 @@ updated in place from start to terminal result. Runtime's internal Model
 Operation `queued` handoff is presented as running rather than creating a
 user-visible queue state. Structured closed message kinds and typed arguments
 identify the fixed sources Project, Canvas, Explorer, Model Request, Photoshop,
-Workbench, Update, and Integration. Runtime is the authority but is not a
+Workbench, and Update. Runtime is the authority but is not a
 displayed source. Project-scoped records capture canonical root plus a name
 snapshot and never capture an originating Workbench. Arbitrary frontend text,
 raw errors, logs, HTTP bodies, commands, and stdout/stderr cannot enter the
@@ -430,8 +429,8 @@ files, logs, Project state, or another owning feature's result.
 There is no severity, read/unread state, red dot, deduplication, separate Toast
 model, operating-system notification, or Project-change reset. Starting a
 Model Operation from the CLI creates a Model Request task;
-Debrute-to-Photoshop transfer and Integration install/update/uninstall create
-their own tasks. Project, Canvas, Explorer, Workbench, and Update failures use
+Debrute-to-Photoshop transfer creates its own task. Project, Canvas, Explorer,
+Workbench, and Update failures use
 terminal notices. Product Update itself is not an Activity task because a
 successful update replaces the owning Runtime.
 
@@ -463,17 +462,14 @@ are documented in [`desktop-shell.md`](./desktop-shell.md).
 
 Settings has one directory and one content surface. Its current pages are
 General; Appearance; Feedback; Image, Video, TTS, Music, and SFX Models;
-Plugins; Integrations; and System. Plugins and Integrations are distinct
-navigation groups: Plugins
-controls Runtime-hosted professional-tool gateways, while Integrations manages
-catalog-defined command-line tools.
+Plugins; and System. Plugins controls Runtime-hosted professional-tool
+gateways; there is no recommended-project catalog or generic tool manager.
 Appearance composes the Workbench Theme mode with the separate
 global Canvas Text Appearance controls; General retains language, while System
 owns product information and updates. Feedback configures the machine-local
 Feedback Mark Catalog and the ordered Action Bar subset. Runtime-owned Global Settings is
-ready before React mounts. Product and Integration projections retain their own
-loading and ready states because they arrive independently; connection failure
-still ends the Workbench. The Plugins page waits for both Global Settings and
+ready before React mounts. Product retains its own loading and ready state;
+connection failure still ends the Workbench. The Plugins page waits for both Global Settings and
 the live Photoshop resource. Its one **Photoshop Integration** row combines the
 default-off `plugins.photoshop.enabled` choice with `Off`, `Waiting for
 Photoshop`, `Connected · N instances`, or the exact port-pool Unavailable
@@ -666,8 +662,7 @@ Workbench HTTP runtime likewise gives graceful connection drain at most 500 ms
 before dropping remaining request futures; neither deadline hard-kills a
 Project transaction or changes an accepted modification.
 
-Integrations Settings behavior and the Photoshop transfer boundary are
-documented in [`integrations.md`](./integrations.md) and
+The Photoshop transfer boundary is documented in
 [`photoshop.md`](./photoshop.md).
 
 ## Executable Authorities

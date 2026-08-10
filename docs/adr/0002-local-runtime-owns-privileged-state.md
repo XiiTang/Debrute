@@ -1,7 +1,7 @@
 # Local Runtime Owns Privileged Application State
 
 Debrute uses one shared loopback Workbench runtime as the authority for project
-sessions, global configuration, credentials, integrations, Model Artifacts,
+sessions, global configuration, credentials, professional-tool connectivity, Model Artifacts,
 terminals, managed CLI and Skills, and product updates. Browser Workbench,
 Electron Desktop, and CLI are clients: trusted entry points may ensure that the
 Runtime is running, but no frontend owns or supervises its lifetime and none
