@@ -181,6 +181,17 @@ so reopening the Project produces the same sequence. Deleting one Capsule does
 not reorder the others. Starting authoring therefore inserts nothing in the
 primary row and never copies or moves a comment between rows.
 
+The trailing creator and every editable Capsule use one square technical frame,
+not a second offset paper layer inside the Feedback Bar. The idle frame is a
+muted one-pixel line; focus replaces that same frame with the shared two-pixel
+focus color without changing geometry. Video-moment Capsules retain their
+moment-colored idle frame and tint. Creator hover strengthens only its frame,
+while Capsule hover changes no frame and continues to reveal only the delete
+control. The one-line Bar remains 74 pixels high across creator and focused
+input states; multiline comment content may still increase its height. Width
+continues to follow visible content and may change when the creator becomes an
+editable Capsule.
+
 Every comment remains freely editable for its complete lifetime. Input changes
 are visible immediately and are the Feedback value shown by Workbench; there is
 no Draft state, submit action, or saved/read-only mode. Losing focus writes the

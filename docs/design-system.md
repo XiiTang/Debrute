@@ -474,7 +474,7 @@ Features do not use another feature's CSS classes. Reuse moves into `ui` only wh
 
 Canvas may own zoom-scaled handles and hit targets, media preview sizing, editor geometry, annotation colors, node layout, and overlay placement. The terminal emulator may own emulator theme colors. These exceptions do not create alternate buttons, fields, cards, menus, status components, Activity cards, or panel shells.
 
-Canvas feedback bars use the Canvas chrome layer and shared controls. Their size is derived from the visible fixed-size actions, creator, and saved-item row rather than media-specific width buckets. The creator is a compact cut-paper field; saved feedback items use the shared cut-paper label geometry rather than capsules. Canvas has no persistent node-wide feedback border; feedback kinds remain visible in the editing bar and media annotations.
+Canvas feedback bars use the Canvas chrome layer and shared controls. Their size is derived from the visible fixed-size actions, creator, and saved-item row rather than media-specific width buckets. Inside the Bar, the creator and editable Feedback Capsules use one Canvas-owned square technical frame rather than an offset control underlayer: a muted one-pixel idle frame becomes the shared two-pixel focus frame without changing geometry, and video-moment idle frames retain their semantic moment color. Canvas has no persistent node-wide feedback border; feedback kinds remain visible in the editing bar and media annotations.
 
 ## Enforcement
 

@@ -155,7 +155,7 @@ describe('CanvasFeedbackBar', () => {
     );
 
     expect(rowRule).toContain('top: -2px;');
-    expect(stripRule).toContain('padding: 5px 5px 3px 0;');
+    expect(stripRule).toContain('padding: 5px 5px 1px 0;');
     expect(addCommentRule).toContain('margin-top: 5px;');
     expect(addCommentRule).toContain('line-height: 18px;');
     expect(authoringTextareaRule).toContain('transform: none;');
@@ -173,18 +173,21 @@ describe('CanvasFeedbackBar', () => {
     await view.unmount();
   });
 
-  it('uses the Capsule surface instead of a rectangular textarea focus outline', () => {
+  it('uses the Capsule frame instead of a separate textarea focus outline', () => {
     expect(canvasStyles).not.toContain('.canvas-feedback-comment-textarea:focus');
   });
 
-  it('keeps the complete comment Capsule surface stable while editing', () => {
+  it('replaces the offset Capsule underlayer with one size-stable technical frame', () => {
     const capsuleRule = cssRule('.canvas-feedback-comment-pill');
-    const editingRule = cssRule('.canvas-feedback-comment-pill:focus-within');
+    const frameRule = cssRule('.canvas-feedback-comment-pill::before');
+    const editingRule = cssRule('.canvas-feedback-comment-pill:focus-within::before');
 
-    expect(capsuleRule).toContain(
-      'box-shadow: var(--canvas-feedback-comment-underlayer);'
-    );
-    expect(editingRule).toBe('');
+    expect(canvasStyles).not.toContain('--canvas-feedback-comment-underlayer');
+    expect(capsuleRule).toContain('--canvas-feedback-comment-border: var(--db-border-muted);');
+    expect(capsuleRule).toContain('box-shadow: none;');
+    expect(frameRule).toContain('border: 1px solid var(--canvas-feedback-comment-border);');
+    expect(editingRule).toContain('border-width: 2px;');
+    expect(editingRule).toContain('border-color: var(--db-focus);');
   });
 
   it('lets the comment row use its content height instead of the maximum reserved height', () => {
@@ -297,7 +300,7 @@ describe('CanvasFeedbackBar', () => {
 
     expect(badge?.textContent).toBe('7');
     expect(badge?.querySelector('.canvas-feedback-label-number')).not.toBeNull();
-    expect(stripRule).toContain('padding: 5px 5px 3px 0;');
+    expect(stripRule).toContain('padding: 5px 5px 1px 0;');
     expect(mediaLabelRule).not.toContain('--canvas-feedback-label-number-offset');
     expect(numberRule).toContain('display: block;');
     expect(numberRule).toContain('text-box: trim-both cap alphabetic;');
@@ -321,6 +324,27 @@ describe('CanvasFeedbackBar', () => {
     expect(stripRule).toContain('overflow-x: auto;');
     expect(stripRule).toContain('flex: 0 1 auto;');
     await view.unmount();
+  });
+
+  it('uses the same single-frame language for the Comment creator', () => {
+    const creatorRule = cssRule('.canvas-feedback-add-comment');
+    const frameRule = cssRule('.canvas-feedback-add-comment::before');
+    const hoverRule = cssRule('.canvas-feedback-add-comment:hover::before');
+    const focusRule = cssRule('.canvas-feedback-add-comment:focus-visible::before');
+
+    expect(creatorRule).toContain('--canvas-feedback-comment-border: var(--db-border-muted);');
+    expect(creatorRule).toContain('box-shadow: none;');
+    expect(frameRule).toContain('border: 1px solid var(--canvas-feedback-comment-border);');
+    expect(hoverRule).toContain('border-color: var(--db-border);');
+    expect(focusRule).toContain('border-width: 2px;');
+    expect(focusRule).toContain('border-color: var(--db-focus);');
+  });
+
+  it('keeps video moment identity in the idle single frame', () => {
+    const momentRule = cssRule('.canvas-feedback-comment-pill--moment');
+
+    expect(momentRule).toContain('--canvas-feedback-comment-border: color-mix(');
+    expect(momentRule).toContain('var(--canvas-feedback-moment-color');
   });
 
   it('renders image and video toolsets in the action row', async () => {

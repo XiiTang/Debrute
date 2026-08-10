@@ -96,7 +96,7 @@ describe('brand visual language', () => {
     expect(uxp).not.toContain('Smiley Sans');
   });
 
-  it('uses solid blocks and hard underlayers instead of decorative line borders', () => {
+  it('uses deliberate surface edges and the Canvas Feedback single-frame exception', () => {
     const tokens = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/tokens.css'), 'utf8');
     const controls = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/controls.css'), 'utf8');
     const fields = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/fields.css'), 'utf8');
@@ -112,8 +112,15 @@ describe('brand visual language', () => {
       .toContain('background: var(--db-selection)');
     expect(menus.match(/\.db-menu__separator\s*\{[\s\S]*?\}/)?.[0])
       .toContain('background: transparent');
-    expect(canvas.match(/\.canvas-feedback-add-comment\s*\{[\s\S]*?\}/)?.[0])
-      .toContain('border: 0');
+    const feedbackCreatorRule = canvas.match(/\.canvas-feedback-add-comment\s*\{[\s\S]*?\}/)?.[0];
+    const feedbackCreatorFrameRule = canvas.match(/\.canvas-feedback-add-comment::before\s*\{[\s\S]*?\}/)?.[0];
+    const feedbackCapsuleRule = canvas.match(/\.canvas-feedback-comment-pill\s*\{[\s\S]*?\}/)?.[0];
+    const feedbackCapsuleFrameRule = canvas.match(/\.canvas-feedback-comment-pill::before\s*\{[\s\S]*?\}/)?.[0];
+    expect(feedbackCreatorRule).toContain('border: 0');
+    expect(feedbackCreatorRule).toContain('box-shadow: none');
+    expect(feedbackCreatorFrameRule).toContain('border: 1px solid var(--canvas-feedback-comment-border)');
+    expect(feedbackCapsuleRule).toContain('box-shadow: none');
+    expect(feedbackCapsuleFrameRule).toContain('border: 1px solid var(--canvas-feedback-comment-border)');
 
     for (const path of globSync('apps/web/src/workbench/**/*.css', { cwd: root }).map(portablePath)) {
       if (path.endsWith('/ui/styles/base.css') || path.endsWith('/styles/canvas.css')) {
