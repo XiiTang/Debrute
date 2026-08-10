@@ -6,85 +6,73 @@
 
 <p align="center"><a href="./README.md">English</a></p>
 
-Debrute 是一个本地创意生产工作台，面向 AI agent 生成的图片、视频、音频、文档和设计参考文件。
+Debrute 是一个面向你和 AI Agent 的项目级本地视觉工作台。
 
-Debrute 基于一个简单判断：最好的 agent 已经存在，最好的专业创意软件也已经存在。Debrute 不试图替代任何一边。它要做的是给 agent、设计师和创意团队一个共享空间，用来生成、查看、组织、对比、标注、挑选和交接生产资源。
+打开真实项目文件夹，在一个流畅的 Canvas 上同时查看图片、视频、音频和文本。排列和比较大量项目文件，在上下文中编辑文字、留下精确 Feedback，再让 Agent 使用它已有的任何工具继续工作。
 
-## Debrute 为什么存在
+## 看见整个项目
 
-现代 agent 已经很擅长规划、写提示词、调用工具、生成资产和编辑文件。真正不顺畅的地方，是 agent 的文件系统操作和人的视觉判断之间的空间。
+一个 Debrute Project 就是一个现有的本地文件夹。文件仍然是普通文件，文件夹层级会成为 Canvas 层级；无论改动来自 Agent、脚本、创意软件还是用户，都会出现在同一个项目视图中。
 
-生成资产通常是二进制的、视觉化的、带版本的，而且很容易变得混乱。它们需要被看见、比较、否定、标注、挑选，并交给专业工具继续处理。终端记录不够，文件夹树不够，聊天里的单个附件也不够。
+每个普通文件和目录都属于 Canvas。支持的媒体与文本格式会获得丰富的预览和控件；其他文件也会继续作为项目上下文的一部分保持可见。
 
-Debrute 把一个本地项目文件夹变成 agent 能读、人也能看的生产空间。
+## 在项目规模下流畅工作
 
-## Debrute 是什么
+在 Canvas 上同时铺开参考资料、提示词、草稿、候选方案和最终资产。在项目整体形状与单个细节之间快速切换，不必逐个打开文件。
 
-- 一个用于生成生产资产的本地工作台。
-- 一个用于查看项目文件、资产变体、文件夹结构和反馈的可视化 Canvas。
-- 一个基于真实本地文件夹的项目模型，而不是需要导入的云端工作区。
-- 一个连接外部 agent、生成文件和专业设计工具的桥梁。
-- 一个命令和 Skills 接口，让 agent 能调用 Debrute，但不必变成 Debrute 专属 agent。
+Canvas 渲染系统面向大型工作集设计。空间索引、视口裁剪、增量呈现更新和感知交互状态的预览调度，使平移、缩放、排列与比较在项目不断增长时仍然保持响应。
 
-Debrute 适合那些文件系统结构很重要的项目。你可以指挥 agent 创建文件夹、提示词、参考资料、输出结果、替代方案和最终选择。文件夹层级本身会成为项目逻辑的一部分：一种轻量表达分组、顺序、对比和意图的方式。
+## 让各种项目上下文同时可见
 
-## Debrute 不是什么
+- **图片**：查看和比较常见的位图与矢量格式。
+- **视频**：预览、播放、跳转，并将选定画面保留在 Canvas 上。
+- **音频**：在相关项目文件旁直接播放音频。
+- **文本**：预览和编辑需求、提示词、Markdown、结构化数据、配置、日志、代码、脚本、补丁、表格、字幕及其他面向文档的文本格式。
 
-Debrute 不是 agent。
+文字会留在它所描述的视觉工作旁边。Debrute 支持内联与浮动编辑、语言感知呈现、大型文本文件、自动换行，以及受管理的拉丁文字与中日韩字体。
 
-市场上已经有很多强大的 agent，而且它们会继续快速进化。Debrute 不实现自己的规划器、代码助手、创意总监或自动化工作流引擎。你可以使用自己喜欢的 agent，安装需要的 Skills，然后让这个 agent 把 Debrute 当作项目和资产工作台。
+## 留下 Agent 可以使用的 Feedback
 
-Debrute 不是工作流系统。
+标记整个文件、添加评论、指出精确图片区域，并批注精确视频时刻。Feedback 会作为结构化、可直接理解的数据留在 Project 中，外部 Agent 可以使用普通文件工具读取。
 
-它不强迫你使用固定的生产流程，也不规定你应该如何构思、生成、排序、编辑、批准或发布。agent 和人可以通过文件、文件夹、提示词和正常的项目约定来表达这些选择。
+例如，在 Canvas 上把多个结果标记为**喜欢**，然后告诉 Agent：
 
-Debrute 也不是 Photoshop、Blender、Premiere、Figma 或其他专业创意软件的替代品。
+> 查看项目 Feedback，把所有标记为“喜欢”的图片合成一张九宫格。
 
-AI 生成无法替代专业编辑工具的精度、控制力和专业经验。凡是这些专业工具已经擅长的能力，Debrute 都会刻意避免重复实现。对于专业设计师来说，Debrute 是用来生成、收集、查看、对比和挑选资源的地方，然后再把选中的资产带入专业软件继续处理。当前仓库包含用于在 Debrute 和 Photoshop 之间移动资产的 Photoshop 插件。
+Agent 可以读取对应的 Project 路径，使用它已有的任何图像工具，并把新结果保存回同一个文件夹以便立即查看。
 
-## 与 Agent 配合
+## 使用你自己的 Agent 和工具
 
-Debrute 不限制 agent。外部 agent 通过命令接口和官方 Skills 使用本地
-Project、查看视觉状态、提交模型请求和查询模型资产来源。Debrute 不依赖
-某一款特定的 agent harness。
+Agent 使用自己已有的文件、终端、浏览器、生成和编辑工具完成普通 Project 工作。Debrute 不依赖某一款特定的 Agent harness。
 
-## 与设计师配合
+随产品提供的 `debrute` CLI 和官方 Skills 是可选能力，用于补充 Project 语义、图片、视频和音频 Model Requests、Workbench 访问与生成文件来源记录。其他工具创建的文件也会以同样方式出现在 Canvas 上。
 
-Debrute 应该位于专业编辑软件之前和旁边，而不是位于它们之上。
+## 继续使用专业工具完成工作
 
-设计师可以把 Debrute 当作资源台：生成大量候选项，把参考资料放在旁边，标记有价值的结果，否定不合适的结果，给精确视觉区域添加批注，对比不同变体，然后把选中的资产带入 Photoshop 或其他专业编辑器。
+Debrute 位于完成工作所需的专业工具旁边。随项目提供的 Photoshop UXP 和 CEP 插件可以在 Debrute 与 Photoshop 之间移动 Project 资产，同时保留同一份文件和 Project 身份。
 
-当前仓库包含 UXP 和 CEP Photoshop 插件，它们共用同一套 Debrute Bridge 协议。
+## 开发版本快速开始
 
-## 项目模型
+Debrute 源码开发目前支持 macOS 和 Windows。在已经检出的仓库中运行：
 
-一个 Debrute 项目就是由规范化绝对路径标识的本地文件夹。项目内的
-`.debrute/` 只包含可共享的 Feedback 状态；Canvas 状态和缓存由 Runtime
-全局保存。
+```sh
+pnpm install
+pnpm doctor
+pnpm dev
+```
 
-本地文件夹仍然是事实来源。agent 可以使用普通文件系统工具创建项目结构、提示词、参考资料、生成输出和最终资产。Debrute 在这个文件夹之上增加可视化层，让人和 agent 能看到同一个项目形状。
+`pnpm dev` 会启动或复用本地 Runtime，并打印准确的 Workbench URL。打开该地址，选择**打开项目**，然后选择一个现有文件夹。
 
-唯一的 Canvas 呈现完整项目树。用户可以展开或折叠文件夹，再对当前可见文件进行排列、对比、挑选和反馈。
+完整的首次 Agent 与 Feedback 工作流见[快速开始](./docs/getting-started.zh-CN.md)。打包产品和发布细节见[发布](./docs/releases.md)。
 
-## 官方 Skills
+## 文档
 
-Debrute 提供面向外部 agent 的标准 Skills：
-
-- `debrute-core`：项目语义、Workbench 访问、生成资产和基于模型的生成。
-- `debrute-image-director`：通过 `debrute` 命令进行图片生成和编辑。
-- `debrute-video-director`：通过 `debrute` 命令进行视频生成和编辑。
-- `debrute-audio-director`：通过 `debrute` 命令进行 TTS、音乐生成和音效生成。
-
-这些 Skills 说明如何调用 Debrute。它们不是隐藏 API，也不会替代 agent 自己的工具能力。
-
-## 技术文档
-
-README 会刻意保持简短。技术细节在这里：
-
+- [快速开始](./docs/getting-started.zh-CN.md)
 - [技术文档索引](./docs/README.md)
-- [领域上下文图](./CONTEXT-MAP.md)
-- [开发](./docs/development.md)
 - [产品模型](./docs/product-model.md)
+- [Canvas 渲染](./docs/canvas-rendering.md)
+- [Canvas Feedback](./docs/canvas-feedback.md)
+- [开发](./docs/development.md)
 
 ## License
 

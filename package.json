@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
-  "description": "Debrute browser-first local creative production workbench.",
+  "description": "Browser-first, project-scale local visual workbench for working with AI agents.",
   "packageManager": "pnpm@11.2.2",
   "engines": {
     "node": ">=24 <25",

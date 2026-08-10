@@ -6,83 +6,72 @@
 
 <p align="center"><a href="./README.zh-CN.md">中文版</a></p>
 
-Debrute is a local creative production workbench for the files that AI agents generate: images, videos, audio, documents, and design references.
+Debrute is a project-scale local visual workbench for you and your AI agent.
 
-It is built around a simple belief: the best agents already exist, and the best professional creative tools already exist. Debrute does not try to replace either side. Instead, it gives agents, designers, and creative teams a shared place to generate, inspect, organize, compare, annotate, and hand off production assets.
+Open a real project folder and see its images, video, audio, and text together on one responsive Canvas. Arrange and compare large working sets, edit text in context, leave precise Feedback, and let your agent continue with any tools it already has.
 
-## Why Debrute Exists
+## See The Whole Project
 
-Modern agents are already good at planning, writing prompts, calling tools, generating assets, and editing files. What is still awkward is the space between an agent's filesystem operations and a human's visual judgment.
+A Debrute Project is an existing local folder. Its files remain ordinary files, its folder hierarchy becomes the Canvas hierarchy, and changes made by agents, scripts, creative software, or the user appear in the same project view.
 
-Model outputs are often binary, visual, versioned, and messy. They need to be seen, compared, rejected, annotated, selected, and passed into professional tools. A terminal transcript is not enough. A folder tree is not enough. A single chat attachment is not enough.
+Every regular file and directory belongs to the Canvas. Supported media and text formats receive rich previews and controls; other files remain visible as part of the project rather than disappearing from its context.
 
-Debrute turns a local project folder into an agent-readable and human-readable production space.
+## Work At Project Scale
 
-## What Debrute Is
+Use the Canvas to spread out references, prompts, drafts, alternatives, and final assets. Move between the shape of the whole project and individual details without opening files one by one.
 
-- A local workbench for generated production assets.
-- A visual Canvas for reviewing project files, asset variants, folder structure, and feedback.
-- A project model based on your real local folder, not an imported cloud workspace.
-- A bridge between external agents, generated files, and professional design tools.
-- A command and Skills surface that lets agents call Debrute without becoming dependent on a Debrute-specific agent.
+The rendering system is designed for large working sets. Spatial indexes, viewport culling, incremental presentation updates, and interaction-aware preview scheduling keep pan, zoom, layout, and comparison responsive as the project grows.
 
-Debrute is designed for projects where filesystem structure matters. You can ask an agent to create folders, prompts, references, outputs, alternatives, and final picks. The folder hierarchy itself becomes part of the project logic: a lightweight way to express grouping, sequencing, comparison, and intent.
+## Keep Every Kind Of Context Visible
 
-## What Debrute Is Not
+- **Images** — view and compare common raster and vector formats.
+- **Video** — preview, play, seek, and keep the selected frame with the Canvas.
+- **Audio** — play project audio directly beside its related files.
+- **Text** — preview and edit briefs, prompts, Markdown, structured data, configuration, logs, code, scripts, patches, tables, subtitles, and other document-oriented text formats.
 
-Debrute is not an agent.
+Text stays beside the visual work it describes. Debrute supports inline and floating editing, language-aware presentation, large text files, word wrapping, and managed Latin and CJK typography.
 
-The market already has strong agents, and they keep improving quickly. Debrute does not implement its own planner, coding assistant, creative director, or autonomous workflow engine. You bring the agent you like, install the Skills you need, and let that agent use Debrute as a project and asset workbench.
+## Give Feedback Your Agent Can Use
 
-Debrute is not a workflow system.
+Mark whole files, write comments, point to exact image regions, and annotate exact video moments. Feedback stays with the Project as structured, human-readable data that external agents can inspect with ordinary filesystem tools.
 
-It does not force a fixed production pipeline. It does not prescribe how you should brainstorm, generate, rank, edit, approve, or publish. Agents and humans can express those choices through files, folders, prompts, and normal project conventions.
+For example, mark several outputs as **Like**, then ask your agent:
 
-Debrute is not a replacement for Photoshop, Blender, Premiere, Figma, or other professional creative software.
+> Read the project Feedback and combine all liked images into a 3 x 3 grid.
 
-AI generation does not replace the precision, control, and expertise of professional editing tools. Debrute intentionally avoids features that those tools already do well. For professional designers, Debrute is the place to generate, gather, review, compare, and select resources before taking them into specialized software. The repository includes Photoshop plugins for moving assets between Debrute and Photoshop.
+The agent can read the selected Project paths, use any image tool it already has, and save the new result back into the same folder for immediate review.
 
-## Working With Agents
+## Use Your Own Agent And Tools
 
-Debrute is agent-agnostic. External agents use its command surface and official
-Skills to work with local Projects, inspect visual state, submit Model Requests,
-and inspect Model Artifact provenance. Debrute does not depend on a specific
-agent harness.
+Agents use their existing filesystem, terminal, browser, generation, and editing tools for ordinary Project work. Debrute does not require a particular agent harness.
 
-## Working With Designers
+The bundled `debrute` CLI and official Skills are optional capabilities for Project semantics, image, video, and audio Model Requests, Workbench access, and generated-file provenance. Files created by other tools work the same way on the Canvas.
 
-Debrute is meant to sit before and beside professional editing software, not above it.
+## Continue In Professional Tools
 
-A designer can use Debrute as a resource table: generate many candidates, keep references nearby, mark what works, reject what does not, annotate exact visual regions, compare variations, and then move selected assets into tools like Photoshop or other specialized editors.
+Debrute sits alongside the tools that finish the work. The included Photoshop UXP and CEP plugins move Project assets between Debrute and Photoshop while keeping the same files and Project identity.
 
-This repository includes UXP and CEP Photoshop plugins that share one Debrute bridge protocol.
+## Development Quick Start
 
-## Project Model
+Debrute source development currently supports macOS and Windows. From a checked-out repository:
 
-A Debrute Project is a local folder identified by its canonical absolute path. Project-local `.debrute/` contains shareable Feedback state; Canvas state and caches are Runtime-global.
+```sh
+pnpm install
+pnpm doctor
+pnpm dev
+```
 
-The local folder remains the source of truth. Agents can use normal filesystem tools to create project structure, prompts, references, generated outputs, and final assets. Debrute adds a visual layer over that folder so humans and agents can see the same project shape.
+`pnpm dev` starts or reuses the local Runtime and prints the exact Workbench URL. Open that URL, choose **Open Project**, and select an existing folder.
 
-The Canvas presents the Project tree. Users disclose or collapse folders, then arrange, compare, select, and review the visible files.
+See [Getting started](./docs/getting-started.md) for the first complete Agent-and-Feedback workflow. Packaged-product and release details live in [Releases](./docs/releases.md).
 
-## Official Skills
+## Documentation
 
-Debrute ships standard Skills for external agents:
-
-- `debrute-core` for Project semantics, Workbench access, Model Artifacts, and Model Requests.
-- `debrute-image-director` for image generation and editing through the `debrute` command.
-- `debrute-video-director` for video generation and editing through the `debrute` command.
-- `debrute-audio-director` for TTS, music generation, and sound effect generation through the `debrute` command.
-
-The Skills explain how to call Debrute. They are not hidden APIs and they do not replace the agent's own tools.
-
-## Technical Docs
-
-The README is intentionally short. Technical details live here:
-
+- [Getting started](./docs/getting-started.md)
 - [Documentation index](./docs/README.md)
 - [Product model](./docs/product-model.md)
-- [Domain context map](./CONTEXT-MAP.md)
+- [Canvas rendering](./docs/canvas-rendering.md)
+- [Canvas Feedback](./docs/canvas-feedback.md)
 - [Development](./docs/development.md)
 
 ## License
