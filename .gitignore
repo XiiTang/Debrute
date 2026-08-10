@@ -67,5 +67,5 @@ Thumbs.db
 # Private documentation repository
 /debrute-docs-private/
 
-# Local agent issue tracker
+# Local development state
 /.scratch/

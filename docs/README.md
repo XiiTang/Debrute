@@ -59,6 +59,4 @@ remain authoritative when prose and implementation differ.
 
 - [Development and architecture governance](./development.md)
 - [Local test system](./testing.md)
-- [Agent issue tracker](./agents/issue-tracker.md)
-- [Agent triage labels](./agents/triage-labels.md)
 - [Domain-documentation rules](./agents/domain.md)
