@@ -254,7 +254,7 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
-  it('sends Video Preview Probe and Ensure as separate Project-scoped commands', async () => {
+  it('reads and saves browser-captured Video Preview sources as Project-scoped commands', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
     await client.openProject({ projectRoot: '/tmp/project' });
@@ -264,22 +264,23 @@ describe('Runtime Workbench connection', () => {
       frameTimeMs: 1_500
     };
 
-    await expect(client.probeCanvasVideoPreviewSources({
+    await expect(client.readCanvasVideoPreviewSources({
       targets: [target]
-    })).resolves.toEqual({ sources: {} });
-    await expect(client.ensureCanvasVideoPreviewSource({
-      target,
-      canonicalSourceIdentity: 'frame-key'
-    })).resolves.toEqual({ status: 'source-changed' });
-
-    const [probe, ensure] = harness.calls.slice(-2);
-    expect(probe?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/probe');
-    expect(ensure?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/ensure');
-    expect(JSON.parse(String(probe?.init?.body))).toEqual({ targets: [target] });
-    expect(JSON.parse(String(ensure?.init?.body))).toEqual({
-      target,
-      canonicalSourceIdentity: 'frame-key'
+    })).resolves.toEqual({ sources: [] });
+    await expect(client.saveCanvasVideoPreviewSource({
+      ...target,
+      metadata: { width: 1920, height: 1080, durationSeconds: 4 },
+      sourcePng: new Blob(['png'], { type: 'image/png' })
+    })).resolves.toEqual({
+      ok: true,
+      source: { ...target, status: 'available', sourceWidth: 1920, metadata: { width: 1920, height: 1080 } }
     });
+
+    const [read, save] = harness.calls.slice(-2);
+    expect(read?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/sources');
+    expect(save?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/source');
+    expect(JSON.parse(String(read?.init?.body))).toEqual({ targets: [target] });
+    expect(save?.init?.body).toBeInstanceOf(FormData);
     client.dispose();
   });
 
@@ -685,14 +686,24 @@ function createHarness(globalRevision = 1, initialCanonicalRoot?: string) {
         projectRevision: 2
       });
     }
-    if (path === '/api/workbench/bindings/project-1/canvas-video-previews/probe') {
-      return Response.json({ sources: {} });
+    if (path === '/api/workbench/bindings/project-1/canvas-video-previews/sources') {
+      return Response.json({ sources: [] });
     }
     if (path === '/api/workbench/bindings/project-1/canvas-sources/resolve') {
       return Response.json({ sources: [] });
     }
-    if (path === '/api/workbench/bindings/project-1/canvas-video-previews/ensure') {
-      return Response.json({ status: 'source-changed' });
+    if (path === '/api/workbench/bindings/project-1/canvas-video-previews/source') {
+      return Response.json({
+        ok: true,
+        source: {
+          projectRelativePath: 'media/clip.mp4',
+          sourceRevision: 'sha256:video',
+          frameTimeMs: 1_500,
+          status: 'available',
+          sourceWidth: 1920,
+          metadata: { width: 1920, height: 1080 }
+        }
+      });
     }
     if (path === '/api/workbench/bindings/project-1/files/import/uploads') {
       return Response.json({
@@ -756,7 +767,8 @@ function snapshotFixture(canonicalRoot: string, projectName: string) {
         nodeStates: {},
         occlusionOrder: []
       },
-      canvasResources: { resources: [] }
+      canvasResources: { resources: [] },
+      feedbackVideoResources: { resources: [] }
     },
     projectTree: [],
     diagnostics: [],

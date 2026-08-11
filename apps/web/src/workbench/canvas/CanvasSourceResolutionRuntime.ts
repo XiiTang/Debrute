@@ -1,4 +1,5 @@
 import type {
+  CanvasFeedbackVideoResource,
   CanvasSourceResolutionResponse
 } from '@debrute/app-protocol';
 import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
@@ -11,6 +12,7 @@ import type {
 } from './runtime/CanvasEditorRuntime.js';
 
 type CanvasResolvedSource = CanvasSourceResolutionResponse['sources'][number];
+type CanvasSourceCandidate = ProjectedCanvasNode | CanvasFeedbackVideoResource;
 
 type CanvasSourceResult = {
   readonly sourceToken: string;
@@ -25,9 +27,15 @@ type CanvasSourceInteractionRuntime = Pick<
 
 export interface CanvasSourceResolutionRuntime {
   attach(): () => void;
-  acceptProjection(projection: CanvasProjection): void;
+  acceptProjection(
+    projection: CanvasProjection,
+    feedbackVideoResources?: readonly CanvasFeedbackVideoResource[]
+  ): void;
   getNodeSnapshot(node: ProjectedCanvasNode): ProjectedCanvasNode;
   getNode(projectRelativePath: string): ProjectedCanvasNode | undefined;
+  getResolvedSource(projectRelativePath: string): CanvasResolvedSource | undefined;
+  getSourceVersion(): number;
+  subscribeSources(listener: () => void): () => void;
   subscribeNode(node: ProjectedCanvasNode, listener: () => void): () => void;
 }
 
@@ -37,21 +45,33 @@ export function createCanvasSourceResolutionRuntime(input: {
   distanceSquaredForNode(projectRelativePath: string): number;
 }): CanvasSourceResolutionRuntime {
   let nodesByPath = new Map<string, ProjectedCanvasNode>();
+  let feedbackVideoResourcesByPath = new Map<string, CanvasFeedbackVideoResource>();
   let resultsByPath = new Map<string, CanvasSourceResult>();
   let attemptedSources = new Set<string>();
-  let queue: readonly ProjectedCanvasNode[] = [];
+  let queue: readonly CanvasSourceCandidate[] = [];
   let queueIndex = 0;
   let requestInFlight = false;
   let active = false;
   let attached = false;
   let unsubscribeCameraState: () => void = () => undefined;
   let unsubscribePointerInteraction: () => void = () => undefined;
+  let sourceVersion = 0;
+  const sourceListeners = new Set<() => void>();
   const snapshotCache = new WeakMap<ProjectedCanvasNode, {
     result: CanvasSourceResult | undefined;
     snapshot: ProjectedCanvasNode;
   }>();
 
-  const resultForNode = (node: ProjectedCanvasNode): CanvasSourceResult | undefined => {
+  const currentCandidate = (projectRelativePath: string): CanvasSourceCandidate | undefined => (
+    nodesByPath.get(projectRelativePath) ?? feedbackVideoResourcesByPath.get(projectRelativePath)
+  );
+  const currentCandidates = (): readonly CanvasSourceCandidate[] => [
+    ...nodesByPath.values(),
+    ...[...feedbackVideoResourcesByPath].flatMap(([path, resource]) => (
+      nodesByPath.has(path) ? [] : [resource]
+    ))
+  ];
+  const resultForCandidate = (node: CanvasSourceCandidate): CanvasSourceResult | undefined => {
     if (node.availability.state !== 'resolving') {
       return undefined;
     }
@@ -59,7 +79,7 @@ export function createCanvasSourceResolutionRuntime(input: {
     return result?.sourceToken === node.availability.sourceToken ? result : undefined;
   };
   const deriveNodeSnapshot = (node: ProjectedCanvasNode): ProjectedCanvasNode => {
-    const result = resultForNode(node);
+    const result = resultForCandidate(node);
     const cached = snapshotCache.get(node);
     if (cached && cached.result === result) {
       return cached.snapshot;
@@ -71,13 +91,10 @@ export function createCanvasSourceResolutionRuntime(input: {
         availability: { state: 'unreadable', message: result.error }
       };
     } else if (result?.source) {
-      const videoPresentation = result.source.videoTextTracks && node.videoPresentation
-        ? { ...node.videoPresentation, textTracks: result.source.videoTextTracks }
-        : node.videoPresentation;
       snapshot = {
         ...node,
         availability: result.source.availability,
-        ...(videoPresentation ? { videoPresentation } : {})
+        ...(result.source.videoTextTracks ? { videoTextTracks: result.source.videoTextTracks } : {})
       };
     }
     snapshotCache.set(node, { result, snapshot });
@@ -94,9 +111,13 @@ export function createCanvasSourceResolutionRuntime(input: {
     }
     nodeSnapshotStore.flush(paths);
   };
+  const publishSources = () => {
+    sourceVersion += 1;
+    for (const listener of sourceListeners) listener();
+  };
 
   const publishFailure = (projectRelativePath: string, sourceToken: string, error: unknown) => {
-    const current = nodesByPath.get(projectRelativePath);
+    const current = currentCandidate(projectRelativePath);
     if (current?.availability.state !== 'resolving'
       || current.availability.sourceToken !== sourceToken) {
       return;
@@ -106,16 +127,17 @@ export function createCanvasSourceResolutionRuntime(input: {
       error: error instanceof Error ? error.message : String(error)
     });
     publishPaths(new Set([projectRelativePath]));
+    publishSources();
   };
 
-  const sourceKey = (node: ProjectedCanvasNode): string | undefined => (
+  const sourceKey = (node: CanvasSourceCandidate): string | undefined => (
     node.availability.state === 'resolving'
       ? `${node.projectRelativePath}\u001f${node.availability.sourceToken}`
       : undefined
   );
 
   const rebuildQueue = () => {
-    queue = [...nodesByPath.values()]
+    queue = currentCandidates()
       .filter((node) => node.availability.state === 'resolving' && node.mediaKind !== 'unknown')
       .sort((left, right) => (
         input.distanceSquaredForNode(left.projectRelativePath)
@@ -137,20 +159,20 @@ export function createCanvasSourceResolutionRuntime(input: {
     if (!canDispatch()) {
       return;
     }
-    let candidate: ProjectedCanvasNode | undefined;
+    let candidate: CanvasSourceCandidate | undefined;
     while (queueIndex < queue.length) {
       const queued = queue[queueIndex];
       queueIndex += 1;
       if (!queued || queued.availability.state !== 'resolving') {
         continue;
       }
-      const current = nodesByPath.get(queued.projectRelativePath);
+      const current = currentCandidate(queued.projectRelativePath);
       if (current?.availability.state !== 'resolving'
         || current.availability.sourceToken !== queued.availability.sourceToken) {
         continue;
       }
       const key = sourceKey(queued);
-      if (!key || attemptedSources.has(key) || resultForNode(queued)) {
+      if (!key || attemptedSources.has(key) || resultForCandidate(queued)) {
         continue;
       }
       candidate = queued;
@@ -170,7 +192,7 @@ export function createCanvasSourceResolutionRuntime(input: {
         candidate.projectRelativePath === projectRelativePath
         && candidate.sourceToken === sourceToken
       ));
-      const current = nodesByPath.get(projectRelativePath);
+      const current = currentCandidate(projectRelativePath);
       if (!source
         || current?.availability.state !== 'resolving'
         || current.availability.sourceToken !== sourceToken) {
@@ -183,6 +205,7 @@ export function createCanvasSourceResolutionRuntime(input: {
       }
       resultsByPath.set(projectRelativePath, { sourceToken, source });
       publishPaths(new Set([projectRelativePath]));
+      publishSources();
     }).catch((error: unknown) => {
       publishFailure(projectRelativePath, sourceToken, error);
     }).finally(() => {
@@ -230,26 +253,41 @@ export function createCanvasSourceResolutionRuntime(input: {
 
   return {
     attach,
-    acceptProjection(projection) {
+    acceptProjection(projection, feedbackVideoResources = []) {
       const previousResults = resultsByPath;
       nodesByPath = new Map(projection.nodes.map((node) => [node.projectRelativePath, node]));
-      const currentKeys = new Set(projection.nodes.flatMap((node) => {
+      feedbackVideoResourcesByPath = new Map(feedbackVideoResources.flatMap((resource) => (
+        resource.nodeKind === 'file' && resource.mediaKind === 'video'
+          ? [[resource.projectRelativePath, resource] as const]
+          : []
+      )));
+      const currentKeys = new Set(currentCandidates().flatMap((node) => {
         const key = sourceKey(node);
         return key ? [key] : [];
       }));
       attemptedSources = new Set([...attemptedSources].filter((key) => currentKeys.has(key)));
       resultsByPath = new Map([...resultsByPath].filter(([path, result]) => {
-        const node = nodesByPath.get(path);
+        const node = currentCandidate(path);
         return node?.availability.state === 'resolving'
           && node.availability.sourceToken === result.sourceToken;
       }));
       publishPaths(new Set([...previousResults.keys()].filter((path) => !resultsByPath.has(path))));
+      publishSources();
       schedule();
     },
     getNodeSnapshot: nodeSnapshotStore.getSnapshot,
     getNode(projectRelativePath) {
       const node = nodesByPath.get(projectRelativePath);
       return node ? deriveNodeSnapshot(node) : undefined;
+    },
+    getResolvedSource(projectRelativePath) {
+      const candidate = currentCandidate(projectRelativePath);
+      return candidate ? resultForCandidate(candidate)?.source : undefined;
+    },
+    getSourceVersion: () => sourceVersion,
+    subscribeSources(listener) {
+      sourceListeners.add(listener);
+      return () => sourceListeners.delete(listener);
     },
     subscribeNode: nodeSnapshotStore.subscribe
   };

@@ -2076,21 +2076,13 @@ fn actor_unavailable(terminal_id: &str) -> TerminalError {
 
 #[cfg(test)]
 fn terminal_test_project_service() -> (PathBuf, ProjectSessionRegistry, String, ProjectUse) {
-    use crate::{
-        project::{
-            CanvasFeedbackArtifacts, CanvasVideoToolPaths, DefaultProjectNodeAdapter,
-            ProjectPreviewService,
-        },
-        workers::RuntimeWorkerServices,
+    use crate::project::{
+        CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, ProjectPreviewService,
     };
 
     let root = std::env::temp_dir().join(format!("debrute-terminal-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&root).expect("fixture should exist");
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-    ));
+    let previews = Arc::new(ProjectPreviewService::new());
     let feedback =
         Arc::new(CanvasFeedbackArtifacts::new(previews).expect("feedback scheduler should start"));
     let registry = ProjectSessionRegistry::new(

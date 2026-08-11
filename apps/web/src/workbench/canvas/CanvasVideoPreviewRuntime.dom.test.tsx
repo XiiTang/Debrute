@@ -1,11 +1,15 @@
-import React from 'react';
-import { act } from 'react';
+import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CanvasVideoPreviewProbeRequest } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type {
+  CanvasFeedbackDocument,
+  CanvasFeedbackVideoResource,
+  CanvasVideoPreviewSourceRequest,
+  CanvasVideoPreviewSourceResponse
+} from '@debrute/app-protocol';
 import type { WorkbenchActions } from '../../types.js';
+import type { ProjectedCanvasNode } from './CanvasScene.js';
 import type {
   CanvasPreviewResourceRequest,
   CanvasPreviewResourceScheduler
@@ -21,387 +25,292 @@ import {
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
-const sourceNodeReader = { getNode: () => undefined };
+const sourceNodeReader = {
+  getNode: () => undefined,
+  getResolvedSource: () => undefined,
+  getSourceVersion: () => 0,
+  subscribeSources: () => () => undefined
+};
 
 afterEach(() => {
-  if (root) {
-    act(() => root?.unmount());
-  }
+  if (root) act(() => root?.unmount());
   root = undefined;
   container?.remove();
   container = undefined;
+  vi.restoreAllMocks();
 });
 
 describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
-  it('requires CanvasVideoPreviewProvider', () => {
-    expect(() => renderToStaticMarkup(<VideoRuntimeConsumer />)).toThrow('CanvasVideoPreviewProvider is required.');
+  it('requires its provider', () => {
+    expect(() => renderToStaticMarkup(<Consumer />)).toThrow('CanvasVideoPreviewProvider is required.');
   });
 
-  it('targets available videos with integer millisecond frame identity', () => {
-    expect(canvasVideoPreviewTargetsForNodes([
-        videoNode('media/a.mp4', 'rev-a', 4_250),
-        videoNode('media/b.mp4', 'rev-b'),
-        { ...videoNode('media/c.mp4', 'rev-c'), availability: { state: 'missing', message: 'missing' } }
-      ])).toEqual([{
-      bindingId: 'p',
-      projectRelativePath: 'media/a.mp4',
+  it('targets playback and every persisted Feedback Moment independently', () => {
+    const feedback: CanvasFeedbackDocument = {
+      updatedAt: '2026-08-11T00:00:00.000Z',
+      entries: {
+        'media/a.mkv': {
+          projectRelativePath: 'media/a.mkv',
+          marks: [],
+          nextMomentLabel: 2,
+          nextSpatialLabel: 1,
+          updatedAt: '2026-08-11T00:00:00.000Z',
+          items: [{
+            id: 'comment-1',
+            kind: 'comment',
+            scope: 'moment',
+            comment: 'frame',
+            createdAt: '2026-08-11T00:00:00.000Z',
+            updatedAt: '2026-08-11T00:00:00.000Z',
+            moment: { label: 'M1', currentTimeSeconds: 2.5 }
+          }]
+        }
+      }
+    };
+    expect(canvasVideoPreviewTargetsForNodes([videoNode()], feedback.entries)).toEqual([{
+      bindingId: 'project-1',
+      projectRelativePath: 'media/a.mkv',
       sourceRevision: 'rev-a',
-      frameTimeMs: 4_250
+      sourceUrl: '/api/workbench/bindings/project-1/files/raw/media/a.mkv?v=rev-a',
+      frameTimeMs: 1_000
     }, {
-      bindingId: 'p',
-      projectRelativePath: 'media/b.mp4',
-      sourceRevision: 'rev-b',
-      frameTimeMs: 0
+      bindingId: 'project-1',
+      projectRelativePath: 'media/a.mkv',
+      sourceRevision: 'rev-a',
+      sourceUrl: '/api/workbench/bindings/project-1/files/raw/media/a.mkv?v=rev-a',
+      frameTimeMs: 2_500
     }]);
   });
 
-  it('rejects a video target whose raw-file URL is outside the Runtime contract', () => {
-    expect(() => canvasVideoPreviewTargetsForNodes([videoNode(
-        'media/a.mp4',
-        'rev-a',
-        0,
-        'http://127.0.0.1:17321/api/workbench/bindings/p/files/raw/media/a.mp4?v=rev-a'
-      )])).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
+  it('rejects a raw-file URL outside the Runtime contract', () => {
+    expect(() => canvasVideoPreviewTargetsForNodes([videoNode({
+      fileUrl: 'http://127.0.0.1:17321/api/workbench/bindings/project-1/files/raw/media/a.mkv?v=rev-a'
+    })])).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
   });
 
-  it('keeps pending Probe work paused during interaction and resumes it afterward', async () => {
-    const node = videoNode('media/a.mp4', 'rev-a');
-    const probe = vi.fn(async (input: CanvasVideoPreviewProbeRequest) => readyProbeResponse(input));
+  it('reads persisted Feedback Moments for a video outside the disclosed Canvas resources', async () => {
+    const projectRelativePath = 'archive/clip.mkv';
+    const feedback = feedbackMomentDocument(projectRelativePath, 3.25);
+    const read = vi.fn<WorkbenchActions['readCanvasVideoPreviewSources']>(async (input) => (
+      availableResponse(input)
+    ));
+    await renderProvider({
+      nodes: [],
+      feedbackEntries: feedback.entries,
+      feedbackVideoResources: [feedbackVideoResource(projectRelativePath)],
+      actions: actionsWith({ readCanvasVideoPreviewSources: read }),
+      children: <div />
+    });
+    await flushEffects();
+
+    expect(read).toHaveBeenCalledWith({
+      targets: [{
+        projectRelativePath,
+        sourceRevision: 'rev-hidden',
+        frameTimeMs: 3_250
+      }]
+    }, expect.any(AbortSignal));
+  });
+
+  it('retries a hidden Feedback preview failure when the video is disclosed', async () => {
+    const projectRelativePath = 'archive/clip.mkv';
+    const feedback = feedbackMomentDocument(projectRelativePath, 3.25);
+    let readCount = 0;
+    const read = vi.fn<WorkbenchActions['readCanvasVideoPreviewSources']>(async (input) => {
+      const attempt = readCount;
+      readCount += 1;
+      return {
+        sources: input.targets.map((target) => (attempt === 0
+          ? { ...target, status: 'error' as const, message: 'hidden decode failed' }
+          : {
+              ...target,
+              status: 'available' as const,
+              sourceWidth: 1_920,
+              metadata: { width: 1_920, height: 1_080, durationSeconds: 4 }
+            }))
+      };
+    });
+    const rendered = await renderProvider({
+      nodes: [],
+      feedbackEntries: feedback.entries,
+      feedbackVideoResources: [feedbackVideoResource(projectRelativePath)],
+      actions: actionsWith({ readCanvasVideoPreviewSources: read }),
+      children: <div />
+    });
+    await flushEffects();
+    expect(read).toHaveBeenCalledTimes(1);
+
+    const disclosed = videoNode({ projectRelativePath, revision: 'rev-hidden' });
+    await rendered.rerender([disclosed], <PreviewProbe node={disclosed} />);
+    await flushEffects();
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read.mock.calls[1]?.[0].targets.map((target) => target.frameTimeMs)).toEqual([
+      1_000,
+      3_250
+    ]);
+  });
+
+  it('keeps pending reads paused during interaction and resumes afterward', async () => {
+    const node = videoNode();
+    const read = vi.fn(async (input: CanvasVideoPreviewSourceRequest) => availableResponse(input));
     const scheduler = createImmediateScheduler();
-    await renderVideoPreviewProvider({
+    await renderProvider({
       nodes: [node],
-      actions: actionsWith({ probeCanvasVideoPreviewSources: probe }),
+      actions: actionsWith({ readCanvasVideoPreviewSources: read }),
       interactionActive: true,
-      previewResourceScheduler: scheduler,
+      scheduler,
       children: <PreviewProbe node={node} />
     });
 
     await flushEffects();
-    expect(probe).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
 
     await act(async () => scheduler.setInteractionState({
       cameraState: 'idle',
       pointerInteractionActive: false
     }));
     await flushEffects();
-    expect(probe).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(previewSrc()).toContain('sourceRevision=rev-a');
   });
 
-  it('dispatches only the latest target when identity changes as interaction ends', async () => {
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>(async (input) => (
-      readyProbeResponse(input)
+  it('ignores a stale read result and publishes only the replacement revision', async () => {
+    const firstRead = deferred<CanvasVideoPreviewSourceResponse>();
+    let readCount = 0;
+    const read = vi.fn<WorkbenchActions['readCanvasVideoPreviewSources']>(async (input) => (
+      (readCount += 1) === 1 ? firstRead.promise : availableResponse(input)
     ));
-    const scheduler = createImmediateScheduler();
-    const rendered = await renderVideoPreviewProvider({
-      nodes: [videoNode('media/a.mp4', 'rev-a')],
-      actions: actionsWith({ probeCanvasVideoPreviewSources: probe }),
-      interactionActive: true,
-      previewResourceScheduler: scheduler,
-      children: <PreviewProbe node={videoNode('media/a.mp4', 'rev-a')} />
+    const first = videoNode();
+    const rendered = await renderProvider({
+      nodes: [first],
+      actions: actionsWith({ readCanvasVideoPreviewSources: read }),
+      children: <PreviewProbe node={first} />
     });
+    const firstRequest = read.mock.calls[0]![0];
 
-    await rendered.rerender([videoNode('media/a.mp4', 'rev-a2')], false);
+    const replacement = videoNode({ revision: 'rev-b' });
+    await rendered.rerender([replacement], <PreviewProbe node={replacement} />);
+    await act(async () => firstRead.resolve(availableResponse(firstRequest)));
     await flushEffects();
 
-    expect(probe).toHaveBeenCalledTimes(1);
-    expect(probe.mock.calls[0]?.[0].targets).toEqual([{
-      projectRelativePath: 'media/a.mp4',
-      sourceRevision: 'rev-a2',
-      frameTimeMs: 0
-    }]);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read.mock.calls[1]?.[0].targets[0]?.sourceRevision).toBe('rev-b');
+    expect(previewSrc()).toContain('sourceRevision=rev-b');
+    expect(previewSrc()).not.toContain('sourceRevision=rev-a');
   });
 
-  it('publishes a Probe-ready canonical source without an Ensure call', async () => {
-    const node = videoNode('media/a.mp4', 'rev-a');
-    const ensure = vi.fn<WorkbenchActions['ensureCanvasVideoPreviewSource']>();
-    await renderVideoPreviewProvider({
-      nodes: [node],
-      actions: actionsWith({ ensureCanvasVideoPreviewSource: ensure }),
-      children: <PreviewProbe node={node} />
-    });
-
-    await flushEffects();
-
-    expect(ensure).not.toHaveBeenCalled();
-    expect(previewSrc()).toBe(
-      '/api/workbench/bindings/p/canvas-video-preview?path=media%2Fa.mp4&sourceRevision=rev-a&frameTimeMs=0&canonicalSourceIdentity=frame-v1--ms-0&w=300'
-    );
-  });
-
-  it('Ensures one target after Probe reports needs-source', async () => {
-    const node = videoNode('media/a.mp4', 'rev-a', 2_500);
-    const ensure = vi.fn<WorkbenchActions['ensureCanvasVideoPreviewSource']>(async () => ({
-      status: 'ready' as const,
-      canonicalSourceIdentity: 'frame-v1--ms-2500',
-      sourceWidth: 1920
-    }));
-    await renderVideoPreviewProvider({
+  it('cancels hidden capture when playback takes ownership of the path', async () => {
+    const node = videoNode();
+    let captureVideo: HTMLVideoElement | undefined;
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const element = createElement(tagName, options);
+      if (tagName === 'video') captureVideo = element as HTMLVideoElement;
+      return element;
+    }) as typeof document.createElement);
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const save = vi.fn<WorkbenchActions['saveCanvasVideoPreviewSource']>();
+    const rendered = await renderProvider({
       nodes: [node],
       actions: actionsWith({
-        probeCanvasVideoPreviewSources: async (input) => needsSourceProbeResponse(input),
-        ensureCanvasVideoPreviewSource: ensure
+        readCanvasVideoPreviewSources: async (input) => ({
+          sources: input.targets.map((target) => ({ ...target, status: 'missing' as const }))
+        }),
+        saveCanvasVideoPreviewSource: save
       }),
       children: <PreviewProbe node={node} />
     });
+    await flushEffects();
+    expect(captureVideo).toBeDefined();
+    expect(load).toHaveBeenCalledTimes(1);
 
+    await rendered.rerender([node], undefined, new Set([node.projectRelativePath]));
     await flushEffects();
 
-    expect(ensure).toHaveBeenCalledTimes(1);
-    expect(ensure.mock.calls[0]?.[0]).toEqual({
-      target: {
-        projectRelativePath: 'media/a.mp4',
-        sourceRevision: 'rev-a',
-        frameTimeMs: 2_500
-      },
-      canonicalSourceIdentity: 'frame-v1--ms-2500'
-    });
-    expect(previewSrc()).toContain('frameTimeMs=2500');
-    expect(previewSrc()).toContain('canonicalSourceIdentity=frame-v1--ms-2500');
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(captureVideo?.hasAttribute('src')).toBe(false);
+    expect(save).not.toHaveBeenCalled();
   });
 
-  it('allows the next Probe window to overlap the single in-flight Ensure', async () => {
-    const nodes = Array.from({ length: 11 }, (_, index) => videoNode(`media/${index}.mp4`, `rev-${index}`));
-    const secondProbe = deferred<ReturnType<typeof readyProbeResponse>>();
-    const ensureResult = deferred<{ status: 'ready'; canonicalSourceIdentity: string; sourceWidth: number }>();
-    let probeCount = 0;
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>(async (input) => (
-      (probeCount += 1) === 1 ? needsSourceProbeResponse(input) : secondProbe.promise
-    ));
-    const ensure = vi.fn<WorkbenchActions['ensureCanvasVideoPreviewSource']>(() => ensureResult.promise);
-    await renderVideoPreviewProvider({
-      nodes,
-      actions: actionsWith({
-        probeCanvasVideoPreviewSources: probe,
-        ensureCanvasVideoPreviewSource: ensure
-      }),
-      children: <PreviewProbe node={nodes[0]!} />
-    });
-
-    await flushEffects();
-
-    expect(probe).toHaveBeenCalledTimes(2);
-    expect(probe.mock.calls[0]?.[0].targets).toHaveLength(10);
-    expect(probe.mock.calls[1]?.[0].targets).toHaveLength(1);
-    expect(ensure).toHaveBeenCalledTimes(1);
-    expect(secondProbe.settled).toBe(false);
-    expect(ensureResult.settled).toBe(false);
-
-    await act(async () => secondProbe.resolve(readyProbeResponse(probe.mock.calls[1]![0])));
-    await act(async () => ensureResult.resolve({
-      status: 'ready',
-      canonicalSourceIdentity: ensure.mock.calls[0]![0].canonicalSourceIdentity,
-      sourceWidth: 1920
-    }));
-  });
-
-  it('does not cancel a Probe when one requested target becomes stale', async () => {
-    const first = videoNode('media/a.mp4', 'rev-a');
-    const second = videoNode('media/b.mp4', 'rev-b');
-    const firstProbe = deferred<ReturnType<typeof readyProbeResponse>>();
-    const probeSignals: AbortSignal[] = [];
-    let probeCount = 0;
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>((input, signal) => {
-      if (signal) {
-        probeSignals.push(signal);
+  it('does not auto-retry a failed read and retries explicitly', async () => {
+    const node = videoNode();
+    let readCount = 0;
+    const read = vi.fn<WorkbenchActions['readCanvasVideoPreviewSources']>(async (input) => {
+      if ((readCount += 1) === 1) {
+        return {
+          sources: input.targets.map((target) => ({
+            ...target,
+            status: 'error' as const,
+            message: 'browser source read failed'
+          }))
+        };
       }
-      return (probeCount += 1) === 1 ? firstProbe.promise : Promise.resolve(readyProbeResponse(input));
+      return availableResponse(input);
     });
-    const rendered = await renderVideoPreviewProvider({
-      nodes: [first, second],
-      actions: actionsWith({ probeCanvasVideoPreviewSources: probe }),
-      children: <><PreviewProbe node={first} /><PreviewProbe node={second} /></>
-    });
-    const firstRequest = probe.mock.calls[0]![0];
-
-    await rendered.rerender([videoNode('media/a.mp4', 'rev-a2'), second]);
-    expect(probeSignals[0]?.aborted).toBe(false);
-
-    await act(async () => firstProbe.resolve(readyProbeResponse(firstRequest)));
-    await flushEffects();
-
-    expect(container?.querySelectorAll('[data-preview-src]')).toHaveLength(2);
-    expect(probe).toHaveBeenCalledTimes(2);
-    expect(probe.mock.calls[1]?.[0].targets).toEqual([{
-      projectRelativePath: 'media/a.mp4',
-      sourceRevision: 'rev-a2',
-      frameTimeMs: 0
-    }]);
-  });
-
-  it('dispatches a replacement target after an entirely stale Probe batch settles', async () => {
-    const firstProbe = deferred<ReturnType<typeof readyProbeResponse>>();
-    let probeCount = 0;
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>((input) => (
-      (probeCount += 1) === 1 ? firstProbe.promise : Promise.resolve(readyProbeResponse(input))
-    ));
-    const rendered = await renderVideoPreviewProvider({
-      nodes: [videoNode('media/a.mp4', 'rev-a')],
-      actions: actionsWith({ probeCanvasVideoPreviewSources: probe }),
-      children: <PreviewProbe node={videoNode('media/a.mp4', 'rev-a')} />
-    });
-    const firstRequest = probe.mock.calls[0]![0];
-
-    await rendered.rerender([videoNode('media/a.mp4', 'rev-a2')]);
-    await act(async () => firstProbe.resolve(readyProbeResponse(firstRequest)));
-    await flushEffects();
-
-    expect(probe).toHaveBeenCalledTimes(2);
-    expect(probe.mock.calls[1]?.[0].targets).toEqual([{
-      projectRelativePath: 'media/a.mp4',
-      sourceRevision: 'rev-a2',
-      frameTimeMs: 0
-    }]);
-    expect(previewSrc()).toContain('sourceRevision=rev-a2');
-  });
-
-  it('cancels Ensure when its exact target identity becomes stale', async () => {
-    const firstEnsure = deferred<{ status: 'ready'; canonicalSourceIdentity: string; sourceWidth: number }>();
-    let ensureSignal: AbortSignal | undefined;
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>(async (input) => (
-      input.targets[0]?.sourceRevision === 'rev-a'
-        ? needsSourceProbeResponse(input)
-        : readyProbeResponse(input)
-    ));
-    const ensure = vi.fn<WorkbenchActions['ensureCanvasVideoPreviewSource']>((_input, signal) => {
-      ensureSignal = signal;
-      return firstEnsure.promise;
-    });
-    const rendered = await renderVideoPreviewProvider({
-      nodes: [videoNode('media/a.mp4', 'rev-a')],
-      actions: actionsWith({
-        probeCanvasVideoPreviewSources: probe,
-        ensureCanvasVideoPreviewSource: ensure
-      }),
-      children: <PreviewProbe node={videoNode('media/a.mp4', 'rev-a')} />
-    });
-    await flushEffects();
-    expect(ensure).toHaveBeenCalledTimes(1);
-
-    await rendered.rerender([videoNode('media/a.mp4', 'rev-a2')]);
-
-    expect(ensureSignal?.aborted).toBe(true);
-    await flushEffects();
-    expect(previewSrc()).toContain('sourceRevision=rev-a2');
-  });
-
-  it('does not dispatch stale needs-source work when identity changes as interaction ends', async () => {
-    const firstProbe = deferred<ReturnType<typeof needsSourceProbeResponse>>();
-    let probeCount = 0;
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>((input) => (
-      (probeCount += 1) === 1 ? firstProbe.promise : Promise.resolve(readyProbeResponse(input))
-    ));
-    const ensure = vi.fn<WorkbenchActions['ensureCanvasVideoPreviewSource']>();
-    const scheduler = createImmediateScheduler();
-    const rendered = await renderVideoPreviewProvider({
-      nodes: [videoNode('media/a.mp4', 'rev-a')],
-      actions: actionsWith({
-        probeCanvasVideoPreviewSources: probe,
-        ensureCanvasVideoPreviewSource: ensure
-      }),
-      previewResourceScheduler: scheduler,
-      children: <PreviewProbe node={videoNode('media/a.mp4', 'rev-a')} />
-    });
-    const firstRequest = probe.mock.calls[0]![0];
-
-    await rendered.rerender([videoNode('media/a.mp4', 'rev-a')], true);
-    await act(async () => firstProbe.resolve(needsSourceProbeResponse(firstRequest)));
-    await flushEffects();
-    expect(ensure).not.toHaveBeenCalled();
-
-    await rendered.rerender([videoNode('media/a.mp4', 'rev-a2')], false);
-    await flushEffects();
-
-    expect(ensure).not.toHaveBeenCalled();
-    expect(probe).toHaveBeenCalledTimes(2);
-    expect(probe.mock.calls[1]?.[0].targets[0]?.sourceRevision).toBe('rev-a2');
-  });
-
-  it('returns source-changed Ensure results to needs-probe', async () => {
-    let probeCount = 0;
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>(async (input) => (
-      (probeCount += 1) === 1 ? needsSourceProbeResponse(input) : readyProbeResponse(input)
-    ));
-    await renderVideoPreviewProvider({
-      nodes: [videoNode('media/a.mp4', 'rev-a')],
-      actions: actionsWith({
-        probeCanvasVideoPreviewSources: probe,
-        ensureCanvasVideoPreviewSource: async () => ({ status: 'source-changed' })
-      }),
-      children: <PreviewProbe node={videoNode('media/a.mp4', 'rev-a')} />
-    });
-
-    await flushEffects();
-
-    expect(probe).toHaveBeenCalledTimes(2);
-    expect(previewSrc()).toContain('canonicalSourceIdentity=frame-v1--ms-0');
-  });
-
-  it('does not auto-retry a failed Probe and explicit node Retry restarts needs-probe', async () => {
-    const node = videoNode('media/a.mp4', 'rev-a');
-    let probeCount = 0;
-    const probe = vi.fn<WorkbenchActions['probeCanvasVideoPreviewSources']>(async (input) => (
-      (probeCount += 1) === 1
-        ? {
-            sources: Object.fromEntries(input.targets.map((target) => [target.projectRelativePath, {
-              ...target,
-              status: 'failed' as const,
-              message: 'probe failed'
-            }]))
-          }
-        : readyProbeResponse(input)
-    ));
     let runtime: CanvasVideoPreviewRuntimeValue | undefined;
-    const rendered = await renderVideoPreviewProvider({
+    const rendered = await renderProvider({
       nodes: [node],
-      actions: actionsWith({ probeCanvasVideoPreviewSources: probe }),
-      children: <><PreviewProbe node={node} /><VideoRuntimeCapture onRuntime={(value) => { runtime = value; }} /></>
+      actions: actionsWith({ readCanvasVideoPreviewSources: read }),
+      children: <><PreviewProbe node={node} /><RuntimeCapture onRuntime={(value) => { runtime = value; }} /></>
     });
     await flushEffects();
-    expect(previewError()).toBe('probe failed');
+    expect(previewError()).toBe('browser source read failed');
 
     await rendered.rerender([{ ...node }]);
     await flushEffects();
-    expect(probe).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
 
     await act(async () => runtime?.retryPreview(node.projectRelativePath));
     await flushEffects();
-    expect(probe).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(2);
     expect(previewError()).toBeUndefined();
-    expect(previewSrc()).toContain('canonicalSourceIdentity=frame-v1--ms-0');
+    expect(previewSrc()).toContain('frameTimeMs=1000');
   });
 
-  it('publishes an accepted source target only to the matching video path', async () => {
-    const [a, b] = [videoNode('media/a.mp4', 'rev-a'), videoNode('media/b.mp4', 'rev-b')];
+  it('publishes source and metadata only for the matching path', async () => {
+    const first = videoNode();
+    const second = videoNode({
+      projectRelativePath: 'media/b.webm',
+      revision: 'rev-b',
+      fileUrl: '/api/workbench/bindings/project-1/files/raw/media/b.webm?v=rev-b'
+    });
+    const onMetadata = vi.fn();
     let runtime: CanvasVideoPreviewRuntimeValue | undefined;
-    await renderVideoPreviewProvider({
-      nodes: [a, b],
+    await renderProvider({
+      nodes: [first, second],
       actions: actionsWith(),
-      children: <VideoRuntimeCapture onRuntime={(value) => { runtime = value; }} />
+      onMetadata,
+      children: <RuntimeCapture onRuntime={(value) => { runtime = value; }} />
     });
     await flushEffects();
-    expect(runtime!.getNodeSnapshot(a).request.continuityKey).toBeTruthy();
-    expect(runtime!.getNodeSnapshot(b).request.continuityKey).toBeTruthy();
-    const aListener = vi.fn();
-    const bListener = vi.fn();
-    const unsubscribeA = runtime!.subscribeNode(a, aListener);
-    const unsubscribeB = runtime!.subscribeNode(b, bListener);
+    expect(runtime!.getNodeSnapshot(first).request.continuityKey).toBeTruthy();
+    expect(runtime!.getNodeSnapshot(second).request.continuityKey).toBeTruthy();
+    const firstListener = vi.fn();
+    const secondListener = vi.fn();
+    const unsubscribeFirst = runtime!.subscribeNode(first, firstListener);
+    const unsubscribeSecond = runtime!.subscribeNode(second, secondListener);
 
-    await act(async () => runtime!.acceptNode(videoNode('media/a.mp4', 'rev-a2')));
+    await act(async () => runtime!.acceptNode(videoNode({ revision: 'rev-c' })));
 
-    expect(aListener).toHaveBeenCalled();
-    expect(bListener).not.toHaveBeenCalled();
-    unsubscribeA();
-    unsubscribeB();
+    expect(firstListener).toHaveBeenCalled();
+    expect(secondListener).not.toHaveBeenCalled();
+    expect(onMetadata).toHaveBeenCalledWith({
+      projectRelativePath: first.projectRelativePath,
+      sourceRevision: 'rev-a',
+      metadata: { width: 1_920, height: 1_080, durationSeconds: 4 }
+    });
+    unsubscribeFirst();
+    unsubscribeSecond();
   });
-
 });
 
-function VideoRuntimeConsumer(): React.ReactElement {
+function Consumer(): React.ReactElement {
   useCanvasVideoPreviewRuntime();
   return <div />;
 }
 
-function VideoRuntimeCapture({
+function RuntimeCapture({
   onRuntime
 }: {
   onRuntime: (runtime: CanvasVideoPreviewRuntimeValue) => void;
@@ -411,19 +320,44 @@ function VideoRuntimeCapture({
   return <div />;
 }
 
-async function renderVideoPreviewProvider(input: {
+function PreviewProbe({ node }: { node: ProjectedCanvasNode }): React.ReactElement {
+  const { request, previewError } = useCanvasVideoPreviewNode(node);
+  const src = request.variantTarget?.srcForWidth(300);
+  return (
+    <div>
+      {src ? <span data-preview-src={src} /> : null}
+      {previewError ? <span data-preview-error={previewError} /> : null}
+    </div>
+  );
+}
+
+async function renderProvider(input: {
   nodes: ProjectedCanvasNode[];
   actions: WorkbenchActions;
   children: React.ReactNode;
-  interactionActive?: boolean | undefined;
-  previewResourceScheduler?: CanvasPreviewResourceScheduler | undefined;
+  interactionActive?: boolean;
+  scheduler?: CanvasPreviewResourceScheduler;
+  onMetadata?: (update: {
+    projectRelativePath: string;
+    sourceRevision: string;
+    metadata: { width: number; height: number; durationSeconds?: number };
+  }) => void;
+  activeVideoPaths?: ReadonlySet<string>;
+  feedbackEntries?: CanvasFeedbackDocument['entries'];
+  feedbackVideoResources?: Parameters<typeof CanvasVideoPreviewProvider>[0]['feedbackVideoResources'];
 }): Promise<{
-  rerender(nodes: ProjectedCanvasNode[], interactionActive?: boolean): Promise<void>;
+  rerender(
+    nodes: ProjectedCanvasNode[],
+    children?: React.ReactNode,
+    activeVideoPaths?: ReadonlySet<string>
+  ): Promise<void>;
 }> {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  const scheduler = input.previewResourceScheduler ?? createImmediateScheduler();
+  const scheduler = input.scheduler ?? createImmediateScheduler();
+  let currentChildren = input.children;
+  let currentActiveVideoPaths = input.activeVideoPaths ?? new Set<string>();
   const render = (nodes: ProjectedCanvasNode[], interactionActive = input.interactionActive ?? false) => {
     scheduler.setInteractionState({
       cameraState: interactionActive ? 'moving' : 'idle',
@@ -432,65 +366,55 @@ async function renderVideoPreviewProvider(input: {
     root?.render(
       <CanvasVideoPreviewProvider
         nodes={nodes}
+        feedbackVideoResources={input.feedbackVideoResources}
         sourceResolutionRuntime={sourceNodeReader}
-        activeVideoPaths={new Set()}
+        activeVideoPaths={currentActiveVideoPaths}
+        feedbackEntries={input.feedbackEntries}
         actions={input.actions}
         previewOrder={previewOrderSource()}
         previewResourceScheduler={scheduler}
+        onMetadata={input.onMetadata}
       >
-        {input.children}
+        {currentChildren}
       </CanvasVideoPreviewProvider>
     );
   };
   await act(async () => render(input.nodes));
   return {
-    rerender: async (nodes, interactionActive) => {
-      await act(async () => render(nodes, interactionActive));
+    rerender: async (nodes, children, activeVideoPaths) => {
+      if (children !== undefined) currentChildren = children;
+      if (activeVideoPaths !== undefined) currentActiveVideoPaths = activeVideoPaths;
+      await act(async () => render(nodes, false));
     }
   };
 }
 
-function PreviewProbe({ node }: { node: ProjectedCanvasNode }): React.ReactElement {
-  const { request, previewError: error } = useCanvasVideoPreviewNode(node);
-  const previewSrc = request.variantTarget?.srcForWidth(300);
-  return (
-    <div data-preview-path={node.projectRelativePath}>
-      {previewSrc ? <span data-preview-src={previewSrc} /> : null}
-      {error ? <span data-preview-error={error} /> : null}
-    </div>
-  );
-}
-
 function actionsWith(overrides: Partial<WorkbenchActions> = {}): WorkbenchActions {
   return {
-    probeCanvasVideoPreviewSources: async (input) => readyProbeResponse(input),
-    ensureCanvasVideoPreviewSource: async (input) => ({
-      status: 'ready',
-      canonicalSourceIdentity: input.canonicalSourceIdentity,
-      sourceWidth: 1920
+    readCanvasVideoPreviewSources: async (input) => availableResponse(input),
+    saveCanvasVideoPreviewSource: async (input) => ({
+      ok: true,
+      source: {
+        projectRelativePath: input.projectRelativePath,
+        sourceRevision: input.sourceRevision,
+        frameTimeMs: input.frameTimeMs,
+        status: 'available',
+        sourceWidth: input.metadata.width,
+        metadata: input.metadata
+      }
     }),
     ...overrides
   } as WorkbenchActions;
 }
 
-function readyProbeResponse(input: CanvasVideoPreviewProbeRequest) {
+function availableResponse(input: CanvasVideoPreviewSourceRequest): CanvasVideoPreviewSourceResponse {
   return {
-    sources: Object.fromEntries(input.targets.map((target) => [target.projectRelativePath, {
+    sources: input.targets.map((target) => ({
       ...target,
-      status: 'ready' as const,
-      canonicalSourceIdentity: `frame-v1--ms-${target.frameTimeMs}`,
-      sourceWidth: 1200
-    }]))
-  };
-}
-
-function needsSourceProbeResponse(input: CanvasVideoPreviewProbeRequest) {
-  return {
-    sources: Object.fromEntries(input.targets.map((target) => [target.projectRelativePath, {
-      ...target,
-      status: 'needs-source' as const,
-      canonicalSourceIdentity: `frame-v1--ms-${target.frameTimeMs}`
-    }]))
+      status: 'available',
+      sourceWidth: 1_920,
+      metadata: { width: 1_920, height: 1_080, durationSeconds: 4 }
+    }))
   };
 }
 
@@ -506,9 +430,7 @@ function createImmediateScheduler(): CanvasPreviewResourceScheduler {
     cancel: () => undefined,
     setInteractionState: (next) => {
       interaction = { ...next };
-      for (const listener of listeners) {
-        listener(interaction);
-      }
+      for (const listener of listeners) listener(interaction);
     },
     getInteractionState: () => interaction,
     subscribeInteraction: (listener) => {
@@ -520,49 +442,85 @@ function createImmediateScheduler(): CanvasPreviewResourceScheduler {
 }
 
 function runImmediately(request: CanvasPreviewResourceRequest): void {
-  if (request.isCurrent()) {
-    request.run();
-  }
+  if (request.isCurrent()) request.run();
 }
 
 function previewOrderSource(): CanvasPreviewOrderSource {
-  const snapshot = { x: 0, y: 0, width: 1000, height: 1000 };
+  const snapshot = { x: 0, y: 0, width: 1_000, height: 1_000 };
   return {
     getPreviewOrderSnapshot: () => snapshot,
     subscribePreviewOrder: () => () => undefined
   };
 }
 
-function videoNode(
+function feedbackMomentDocument(
   projectRelativePath: string,
-  revision: string,
-  currentTimeMs = 0,
-  fileUrl = `/api/workbench/bindings/p/files/raw/${projectRelativePath}?v=${revision}`
-): ProjectedCanvasNode {
+  currentTimeSeconds: number
+): CanvasFeedbackDocument {
+  return {
+    updatedAt: '2026-08-11T00:00:00.000Z',
+    entries: {
+      [projectRelativePath]: {
+        projectRelativePath,
+        marks: [],
+        nextMomentLabel: 2,
+        nextSpatialLabel: 1,
+        updatedAt: '2026-08-11T00:00:00.000Z',
+        items: [{
+          id: 'hidden-moment',
+          kind: 'comment',
+          scope: 'moment',
+          comment: 'hidden frame',
+          createdAt: '2026-08-11T00:00:00.000Z',
+          updatedAt: '2026-08-11T00:00:00.000Z',
+          moment: { label: 'M1', currentTimeSeconds }
+        }]
+      }
+    }
+  };
+}
+
+function feedbackVideoResource(projectRelativePath: string): CanvasFeedbackVideoResource {
   return {
     projectRelativePath,
-    displayName: projectRelativePath,
     nodeKind: 'file',
     mediaKind: 'video',
-    x: 0,
-    y: 0,
-    width: 1200,
-    height: 675,
-    z: 0,
     availability: {
       state: 'available',
-      size: 100,
-      mimeType: 'video/mp4',
-      fileUrl,
+      size: 1,
+      mimeType: 'video/x-matroska',
+      fileUrl: `/api/workbench/bindings/project-1/files/raw/${projectRelativePath}?v=rev-hidden`,
+      revision: 'rev-hidden'
+    }
+  };
+}
+
+function videoNode(overrides: {
+  projectRelativePath?: string;
+  revision?: string;
+  fileUrl?: string;
+} = {}): ProjectedCanvasNode {
+  const projectRelativePath = overrides.projectRelativePath ?? 'media/a.mkv';
+  const revision = overrides.revision ?? 'rev-a';
+  return {
+    nodeKind: 'file',
+    mediaKind: 'video',
+    projectRelativePath,
+    displayName: projectRelativePath,
+    x: 0,
+    y: 0,
+    width: 3_200,
+    height: 1_800,
+    z: 0,
+    videoPlayback: { currentTimeMs: 1_000 },
+    availability: {
+      state: 'available',
+      size: 1,
+      mimeType: 'video/x-matroska',
+      fileUrl: overrides.fileUrl
+        ?? `/api/workbench/bindings/project-1/files/raw/${projectRelativePath}?v=${revision}`,
       revision
-    },
-    videoPresentation: {
-      kind: 'video',
-      width: 640,
-      height: 360,
-      textTracks: []
-    },
-    ...(currentTimeMs === 0 ? {} : { videoPlayback: { currentTimeMs } })
+    }
   };
 }
 
@@ -584,24 +542,8 @@ function previewError(): string | undefined {
 
 function deferred<T>() {
   let resolvePromise!: (value: T | PromiseLike<T>) => void;
-  let rejectPromise!: (reason?: unknown) => void;
-  let settled = false;
-  const promise = new Promise<T>((resolve, reject) => {
-    resolvePromise = (value) => {
-      settled = true;
-      resolve(value);
-    };
-    rejectPromise = (reason) => {
-      settled = true;
-      reject(reason);
-    };
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
   });
-  return {
-    promise,
-    resolve: resolvePromise,
-    reject: rejectPromise,
-    get settled() {
-      return settled;
-    }
-  };
+  return { promise, resolve: resolvePromise };
 }

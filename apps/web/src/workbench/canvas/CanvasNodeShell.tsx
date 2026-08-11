@@ -10,6 +10,7 @@ import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentati
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import {
   CANVAS_NODE_PRESENTATION_SCALE,
+  CANVAS_NODE_TITLEBAR_CSS_HEIGHT,
   canvasTextPresentationGeometry
 } from './CanvasNodePresentationGeometry.js';
 import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
@@ -154,7 +155,8 @@ function CanvasNodeShellComponent({
         left: 0,
         top: 0,
         '--canvas-node-presentation-scale': CANVAS_NODE_PRESENTATION_SCALE,
-        '--canvas-node-presentation-scale-inverse': 1 / CANVAS_NODE_PRESENTATION_SCALE
+        '--canvas-node-presentation-scale-inverse': 1 / CANVAS_NODE_PRESENTATION_SCALE,
+        '--canvas-node-titlebar-height': `${CANVAS_NODE_TITLEBAR_CSS_HEIGHT}px`
       } as React.CSSProperties}
     >
       {usesFixedNodePresentation(node)
@@ -230,5 +232,5 @@ function usesFixedNodePresentation(node: ProjectedCanvasNode): boolean {
     || node.mediaKind === 'unknown'
     || !node.mediaKind
     || (node.mediaKind === 'image' && !node.imageDimensions)
-    || (node.mediaKind === 'video' && !node.videoPresentation);
+    || node.mediaKind === 'video';
 }

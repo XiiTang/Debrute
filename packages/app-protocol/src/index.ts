@@ -123,14 +123,6 @@ interface CanvasVideoTextTrack {
   default: boolean;
 }
 
-interface CanvasVideoPresentation {
-  kind: 'video';
-  width: number;
-  height: number;
-  durationSeconds?: number;
-  textTracks: CanvasVideoTextTrack[];
-}
-
 interface CanvasImageDimensions {
   width: number;
   height: number;
@@ -145,11 +137,18 @@ type CanvasResource =
       availability: CanvasNodeAvailability;
       imageDimensions?: CanvasImageDimensions;
       textLanguage?: ProjectTextLanguageId;
-      videoPresentation?: CanvasVideoPresentation;
     };
 
 export interface CanvasResourceView {
   resources: CanvasResource[];
+}
+
+export type CanvasFeedbackVideoResource = Extract<CanvasResource, { nodeKind: 'file' }> & {
+  mediaKind: 'video';
+};
+
+export interface CanvasFeedbackVideoResourceView {
+  resources: CanvasFeedbackVideoResource[];
 }
 
 export interface CanvasSourceResolutionRequest {
@@ -262,6 +261,7 @@ type CanvasWorkspaceSnapshot =
       status: 'available';
       workspace: CanvasWorkspaceDocument;
       canvasResources: CanvasResourceView;
+      feedbackVideoResources: CanvasFeedbackVideoResourceView;
     }
   | {
       status: 'unavailable';
@@ -525,39 +525,49 @@ export interface CanvasVideoPreviewTarget {
   frameTimeMs: number;
 }
 
-export type CanvasVideoPreviewProbeView = CanvasVideoPreviewTarget & (
+export interface CanvasVideoMetadata {
+  width: number;
+  height: number;
+  durationSeconds?: number;
+}
+
+export type CanvasVideoPreviewSourceView = CanvasVideoPreviewTarget & (
   | {
-      status: 'ready';
-      canonicalSourceIdentity: string;
+      status: 'available';
       sourceWidth: number;
+      metadata: CanvasVideoMetadata;
     }
   | {
-      status: 'needs-source';
-      canonicalSourceIdentity: string;
+      status: 'missing';
+      metadata?: CanvasVideoMetadata;
     }
   | {
-      status: 'failed';
+      status: 'error';
       message: string;
     }
 );
 
-export interface CanvasVideoPreviewProbeRequest {
+export interface CanvasVideoPreviewSourceRequest {
   targets: CanvasVideoPreviewTarget[];
 }
 
-export interface CanvasVideoPreviewProbeResponse {
-  sources: Record<string, CanvasVideoPreviewProbeView>;
+export interface CanvasVideoPreviewSourceResponse {
+  sources: CanvasVideoPreviewSourceView[];
 }
 
-export interface CanvasVideoPreviewEnsureRequest {
-  target: CanvasVideoPreviewTarget;
-  canonicalSourceIdentity: string;
+export interface SaveCanvasVideoPreviewSourceInput extends CanvasVideoPreviewTarget {
+  metadata: CanvasVideoMetadata;
+  sourcePng: Blob;
 }
 
-export type CanvasVideoPreviewEnsureResponse =
-  | { status: 'ready'; canonicalSourceIdentity: string; sourceWidth: number }
-  | { status: 'source-changed' }
-  | { status: 'failed'; message: string };
+export interface SaveCanvasVideoPreviewSourceResult {
+  ok: true;
+  source: CanvasVideoPreviewTarget & {
+    status: 'available';
+    sourceWidth: number;
+    metadata: CanvasVideoMetadata;
+  };
+}
 
 export type ModelSettingRecord = {
   debruteModelId: string;
@@ -1300,9 +1310,10 @@ function isCanvasWorkspaceSnapshot(
     return false;
   }
   if (value.status === 'available') {
-    if (!hasExactKeys(value, ['status', 'workspace', 'canvasResources'])
+    if (!hasExactKeys(value, ['status', 'workspace', 'canvasResources', 'feedbackVideoResources'])
       || !isCanvasWorkspaceDocument(value.workspace, canonicalRoot)
       || !isCanvasResourceView(value.canvasResources)
+      || !isCanvasFeedbackVideoResourceView(value.feedbackVideoResources)
     ) {
       return false;
     }
@@ -1384,6 +1395,17 @@ function isCanvasResourceView(value: unknown): boolean {
     && value.resources.every(isCanvasResource);
 }
 
+function isCanvasFeedbackVideoResourceView(value: unknown): boolean {
+  return isProtocolObject(value)
+    && hasExactKeys(value, ['resources'])
+    && Array.isArray(value.resources)
+    && value.resources.every((resource) => (
+      isCanvasResource(resource)
+      && resource.nodeKind === 'file'
+      && resource.mediaKind === 'video'
+    ));
+}
+
 function isCanvasResource(value: unknown): boolean {
   if (!isProtocolObject(value)
     || typeof value.projectRelativePath !== 'string'
@@ -1393,14 +1415,11 @@ function isCanvasResource(value: unknown): boolean {
   if (value.nodeKind === 'directory') {
     return hasExactKeys(value, ['projectRelativePath', 'nodeKind']);
   }
-  if (!hasExactKeys(value, ['projectRelativePath', 'nodeKind', 'mediaKind', 'availability'], ['imageDimensions', 'textLanguage', 'videoPresentation'])
+  if (!hasExactKeys(value, ['projectRelativePath', 'nodeKind', 'mediaKind', 'availability'], ['imageDimensions', 'textLanguage'])
     || !isCanvasMediaKind(value.mediaKind)
     || !isCanvasNodeAvailability(value.availability)
     || !isProtocolObject(value.availability)) return false;
   const availability = value.availability;
-  if (value.videoPresentation !== undefined && !isCanvasVideoPresentation(value.videoPresentation)) {
-    return false;
-  }
   if (value.imageDimensions !== undefined && (
     !isProtocolObject(value.imageDimensions)
     || !hasExactKeys(value.imageDimensions, ['width', 'height'])
@@ -1416,10 +1435,7 @@ function isCanvasResource(value: unknown): boolean {
       || !(PROJECT_TEXT_LANGUAGE_IDS as readonly string[]).includes(value.textLanguage))) {
     return false;
   }
-  return (value.mediaKind !== 'video'
-      || availability.state !== 'available'
-      || isCanvasVideoPresentation(value.videoPresentation))
-    && (value.mediaKind !== 'text'
+  return (value.mediaKind !== 'text'
       || availability.state !== 'available'
       || typeof value.textLanguage === 'string');
 }
@@ -1464,38 +1480,6 @@ function isCanvasNodeAvailability(value: unknown): boolean {
     && typeof value.revision === 'string'
     && (value.canvasImagePreviewable === undefined || typeof value.canvasImagePreviewable === 'boolean')
     && (value.canvasImagePreviewSourceWidth === undefined || isFiniteNumber(value.canvasImagePreviewSourceWidth));
-}
-
-function isCanvasVideoPresentation(value: unknown): boolean {
-  return isProtocolObject(value)
-    && hasExactKeys(value, ['kind', 'width', 'height', 'textTracks'], ['durationSeconds'])
-    && value.kind === 'video'
-    && isFiniteNumber(value.width)
-    && isFiniteNumber(value.height)
-    && (value.durationSeconds === undefined || isFiniteNumber(value.durationSeconds))
-    && Array.isArray(value.textTracks)
-    && value.textTracks.every(isCanvasVideoTextTrack);
-}
-
-function isCanvasVideoTextTrack(value: unknown): boolean {
-  return isProtocolObject(value)
-    && hasExactKeys(
-      value,
-      ['projectRelativePath', 'revision', 'kind', 'label', 'default'],
-      ['fileUrl', 'srclang']
-    )
-    && typeof value.projectRelativePath === 'string'
-    && (value.fileUrl === undefined || typeof value.fileUrl === 'string')
-    && typeof value.revision === 'string'
-    && (
-      value.kind === 'subtitles'
-      || value.kind === 'captions'
-      || value.kind === 'chapters'
-      || value.kind === 'metadata'
-    )
-    && typeof value.label === 'string'
-    && (value.srclang === undefined || typeof value.srclang === 'string')
-    && typeof value.default === 'boolean';
 }
 
 function isProjectDiagnostic(value: unknown): boolean {
@@ -1711,8 +1695,8 @@ export interface WorkbenchApiClient {
   clearFeedbackWorkingCopy(bindingId: string, itemId: string): Promise<void>;
   saveCanvasTextPreviewSource(input: SaveCanvasTextPreviewSourceInput): Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources(input: CanvasTextPreviewSourceAvailabilityRequest): Promise<CanvasTextPreviewSourceAvailabilityResponse>;
-  probeCanvasVideoPreviewSources(input: CanvasVideoPreviewProbeRequest, signal?: AbortSignal): Promise<CanvasVideoPreviewProbeResponse>;
-  ensureCanvasVideoPreviewSource(input: CanvasVideoPreviewEnsureRequest, signal?: AbortSignal): Promise<CanvasVideoPreviewEnsureResponse>;
+  readCanvasVideoPreviewSources(input: CanvasVideoPreviewSourceRequest, signal?: AbortSignal): Promise<CanvasVideoPreviewSourceResponse>;
+  saveCanvasVideoPreviewSource(input: SaveCanvasVideoPreviewSourceInput, signal?: AbortSignal): Promise<SaveCanvasVideoPreviewSourceResult>;
   createProjectFile(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;

@@ -49,8 +49,7 @@ describe('update manifest generation', () => {
       kind: 'product',
       name: 'debrute-product-0.2.0-windows-x64.zip'
     }));
-    expect(expectedReleaseAssets('0.2.0')).toHaveLength(9);
-    expect(expectedReleaseAssets('0.2.0')).toContain('ffmpeg-8.1.2.tar.xz');
+    expect(expectedReleaseAssets('0.2.0')).toHaveLength(8);
   });
 
   it('fails when a required Product Installer asset is missing', async () => {
@@ -104,7 +103,6 @@ async function writeReleaseAssets(root: string, version: string): Promise<void> 
     writeFile(join(root, `debrute-installer-${version}-windows-x64.exe`), 'windows x64'),
     writeFile(join(root, `debrute-product-${version}-macos-arm64.zip`), 'macos arm64 product'),
     writeFile(join(root, `debrute-product-${version}-macos-x64.zip`), 'macos x64 product'),
-    writeFile(join(root, `debrute-product-${version}-windows-x64.zip`), 'windows x64 product'),
-    writeFile(join(root, 'ffmpeg-8.1.2.tar.xz'), 'matching ffmpeg source')
+    writeFile(join(root, `debrute-product-${version}-windows-x64.zip`), 'windows x64 product')
   ]);
 }

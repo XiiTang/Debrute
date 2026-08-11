@@ -617,7 +617,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
   });
 
   it('keeps the Canvas title bar when a video file is unavailable', () => {
-    const { videoPresentation: _videoPresentation, ...node } = videoNode();
+    const node = videoNode();
 
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
@@ -643,10 +643,10 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     expect(html).toContain('clip.mp4');
   });
 
-  it('throws when an available video node is missing projected video presentation', () => {
-    const { videoPresentation: _videoPresentation, ...node } = videoNode();
+  it('can start decoding an available video before browser metadata is known', () => {
+    const { videoMetadata: _videoMetadata, ...node } = videoNode();
 
-    expect(() => renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <CanvasVideoNodeContent
           node={node}
@@ -656,7 +656,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
           onUpdatePlaybackTime={() => undefined}
         />
       </I18nProvider>
-    )).toThrow('Projected video node is missing videoPresentation: media/clip.mp4');
+    );
+    expect(html).toContain('canvas-video-node');
   });
 
   it('clears playback errors when the projected video source changes', async () => {
@@ -968,12 +969,12 @@ function videoNode(options: {
       fileUrl: `/api/workbench/bindings/p/files/raw/media/clip.mp4?v=${revision}`,
       revision
     },
-    videoPresentation: {
-      kind: 'video',
+    videoMetadata: {
       width: 640,
       height: 360,
-      durationSeconds: 5,
-      textTracks: [{
+      durationSeconds: 5
+    },
+    videoTextTracks: [{
         projectRelativePath: 'media/clip.en.vtt',
         fileUrl: '/api/workbench/bindings/p/files/raw/media/clip.en.vtt?v=track-rev',
         revision: 'track-rev',
@@ -982,7 +983,6 @@ function videoNode(options: {
         srclang: 'en',
         default: true
       }]
-    }
   };
   return options.currentTimeMs === undefined
     ? node

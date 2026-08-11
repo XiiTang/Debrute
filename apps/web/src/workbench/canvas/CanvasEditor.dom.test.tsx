@@ -90,8 +90,8 @@ const actions: CanvasEditorActions = {
     throw new Error('not used');
   },
   readCanvasTextPreviewSources: async () => ({ sources: {} }),
-  probeCanvasVideoPreviewSources: async () => ({ sources: {} }),
-  ensureCanvasVideoPreviewSource: async () => ({ status: 'failed', message: 'not used' }),
+  readCanvasVideoPreviewSources: async () => ({ sources: [] }),
+  saveCanvasVideoPreviewSource: async () => { throw new Error('not used'); },
   ensureTextFileBuffer: async () => undefined,
   updateTextFileBuffer: () => undefined,
   saveTextFileBuffer: async () => undefined,

@@ -17,10 +17,9 @@ pub use commit::{
 };
 pub use layout::{InstalledProductLayout, ProductLayoutError};
 pub use manifest::{
-    CanvasVideoRuntimeDependency, ProductEntrypoints, ProductManifest, ProductManifestError,
-    ProductManifestFile, ProductPlatform, ProductRuntimeDependencies, ReleaseArchitecture,
-    ReleaseAssetKind, ReleasePlatform, SignedManifestError, StagedDesktopAsset,
-    StagedProductArchive, TrustedReleaseAsset, TrustedReleaseManifest,
+    ProductEntrypoints, ProductManifest, ProductManifestError, ProductManifestFile,
+    ProductPlatform, ReleaseArchitecture, ReleaseAssetKind, ReleasePlatform, SignedManifestError,
+    StagedDesktopAsset, StagedProductArchive, TrustedReleaseAsset, TrustedReleaseManifest,
     verify_official_signed_release_manifest,
 };
 pub use platform::{NativeUpdatePlatform, launch_product_update_failure};

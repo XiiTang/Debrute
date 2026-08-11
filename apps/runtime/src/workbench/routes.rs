@@ -435,12 +435,12 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             get(super::project_routes::text_preview).head(super::project_routes::text_preview),
         )
         .route(
-            "/workbench/bindings/{binding_id}/canvas-video-previews/probe",
-            post(super::project_routes::video_preview_probe),
+            "/workbench/bindings/{binding_id}/canvas-video-previews/sources",
+            post(super::project_routes::video_preview_sources),
         )
         .route(
-            "/workbench/bindings/{binding_id}/canvas-video-previews/ensure",
-            post(super::project_routes::video_preview_ensure),
+            "/workbench/bindings/{binding_id}/canvas-video-previews/source",
+            post(super::project_routes::video_preview_source_save),
         )
         .route(
             "/workbench/bindings/{binding_id}/canvas-video-preview",

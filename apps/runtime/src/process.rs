@@ -24,8 +24,6 @@ const MAX_PROCESS_ADMISSION_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkerKind {
-    MediaProbe,
-    VideoFrame,
     NativeShell,
 }
 
@@ -675,7 +673,7 @@ mod tests {
     fn worker_output_is_bounded_to_its_tail() {
         let supervisor = BoundedProcessSupervisor::new(1);
         let mut request = ProcessRequest::new(
-            WorkerKind::MediaProbe,
+            WorkerKind::NativeShell,
             "/bin/sh",
             vec!["-c".to_owned(), "printf 0123456789".to_owned()],
             Duration::from_secs(2),
@@ -691,7 +689,7 @@ mod tests {
     fn timeout_terminates_the_owned_worker_tree() {
         let supervisor = BoundedProcessSupervisor::new(1);
         let request = ProcessRequest::new(
-            WorkerKind::MediaProbe,
+            WorkerKind::NativeShell,
             "/bin/sh",
             vec!["-c".to_owned(), "sleep 30 & wait".to_owned()],
             Duration::from_millis(30),
@@ -710,7 +708,7 @@ mod tests {
             request_cancellation.cancel();
         });
         let request = ProcessRequest::new(
-            WorkerKind::MediaProbe,
+            WorkerKind::NativeShell,
             "/bin/sh",
             vec!["-c".to_owned(), "sleep 30 & wait".to_owned()],
             Duration::from_secs(2),
@@ -826,7 +824,7 @@ mod windows_tests {
 
     fn windows_wait_request(timeout: Duration) -> ProcessRequest {
         ProcessRequest::new(
-            WorkerKind::MediaProbe,
+            WorkerKind::NativeShell,
             "cmd.exe",
             vec![
                 "/D".to_owned(),
@@ -845,7 +843,7 @@ mod failure_tests {
 
     fn successful_output() -> ProcessOutput {
         ProcessOutput {
-            kind: WorkerKind::MediaProbe,
+            kind: WorkerKind::NativeShell,
             ok: true,
             exit_code: Some(0),
             error_kind: None,

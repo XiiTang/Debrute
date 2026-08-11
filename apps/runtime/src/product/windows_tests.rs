@@ -9,7 +9,7 @@ use crate::control::{CONTROL_PROTOCOL, CONTROL_PROTOCOL_VERSION};
 
 use super::{
     CommitPlatform, ProductEntrypoints, ProductManifest, ProductManifestFile, ProductPlatform,
-    ProductRuntimeDependencies, ProductStore, ReleaseArchitecture,
+    ProductStore, ReleaseArchitecture,
 };
 
 #[test]
@@ -99,15 +99,6 @@ impl WindowsFixture {
             ("runtime/debrute.exe", "cli"),
             ("skills/debrute-core/SKILL.md", "skills"),
             ("native-workers/manifest.json", "worker"),
-            ("runtime/canvas-video-tools/ffmpeg.exe", "ffmpeg"),
-            ("runtime/canvas-video-tools/ffprobe.exe", "ffprobe"),
-            ("runtime/canvas-video-tools/LICENSE", "license"),
-            (
-                "runtime/canvas-video-tools/THIRD-PARTY-NOTICES.md",
-                "notices",
-            ),
-            ("runtime/canvas-video-tools/BUILD-CONFIG.txt", "config"),
-            ("runtime/canvas-video-tools/SOURCE.md", "source"),
         ];
         let mut manifest_files = Vec::new();
         for (path, contents) in files {
@@ -121,7 +112,7 @@ impl WindowsFixture {
             });
         }
         let manifest = ProductManifest {
-            schema_version: 2,
+            schema_version: 3,
             product: "debrute".to_owned(),
             product_version: version.to_owned(),
             control_protocol: CONTROL_PROTOCOL.to_owned(),
@@ -135,9 +126,6 @@ impl WindowsFixture {
                 skills: "skills/debrute-core/SKILL.md".to_owned(),
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
-            runtime_dependencies: ProductRuntimeDependencies::for_platform(
-                ProductPlatform::Windows,
-            ),
             files: manifest_files,
         };
         fs::write(

@@ -50,7 +50,6 @@
     "verify:browser:window-gestures": "node scripts/verify-workbench-browser.mjs --window-gestures-only",
     "lint:arch": "node scripts/check-architecture.mjs",
     "native:raster:prepare": "node scripts/prepare-native-raster.mjs",
-    "canvas:video-tools:prepare": "node scripts/prepare-canvas-video-tools.mjs",
     "build:canvas-text-font-subset": "node scripts/build-canvas-text-font-subset-wasm.mjs",
     "validate:canvas-text-font-subset": "node scripts/validate-canvas-text-font-subset-wasm.mjs",
     "doctor": "node scripts/doctor.mjs",

@@ -11,7 +11,7 @@
     "build": "pnpm --filter @debrute/web build && pnpm build:runtime && pnpm check && pnpm bundle",
     "build:artifacts": "pnpm --filter @debrute/web build:artifacts && pnpm build:runtime && pnpm bundle",
     "build:electron:dev": "node scripts/bundle-electron.mjs --skip-product-seed",
-    "build:runtime": "node ../../scripts/prepare-canvas-video-tools.mjs --profile release && node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins",
+    "build:runtime": "node ../../scripts/run-cargo-with-native-raster.mjs -- build -p debrute-runtime --release --bins",
     "bundle": "node scripts/bundle-electron.mjs",
     "check": "tsc -p tsconfig.json --pretty false",
     "pack:local": "pnpm build && node scripts/package-local-macos.mjs",

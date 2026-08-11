@@ -159,4 +159,56 @@ describe('CanvasSourceResolutionRuntime', () => {
     detach();
     editor.dispose();
   });
+
+  it('resolves a hidden Feedback video through the same source lane', async () => {
+    const projection: CanvasProjection = { nodes: [], edges: [] };
+    const projectRelativePath = 'archive/clip.mkv';
+    const resource = {
+      projectRelativePath,
+      nodeKind: 'file' as const,
+      mediaKind: 'video' as const,
+      availability: {
+        state: 'resolving' as const,
+        size: 8,
+        mimeType: 'video/x-matroska',
+        sourceToken: 'source-hidden-video'
+      }
+    };
+    const editor = createCanvasEditorRuntime({
+      initialProjection: projection,
+      submitManualLayout: async () => undefined
+    });
+    const resolveCanvasSources = vi.fn(async () => ({
+      sources: [{
+        sourceToken: 'source-hidden-video',
+        projectRelativePath,
+        availability: {
+          state: 'available' as const,
+          size: 8,
+          mimeType: 'video/x-matroska',
+          fileUrl: `/raw/${projectRelativePath}`,
+          revision: 'sha256:hidden-video'
+        }
+      }]
+    }));
+    const runtime = createCanvasSourceResolutionRuntime({
+      runtime: editor,
+      resolveCanvasSources,
+      distanceSquaredForNode: () => Number.POSITIVE_INFINITY
+    });
+    const sourceListener = vi.fn();
+    const unsubscribe = runtime.subscribeSources(sourceListener);
+    const detach = runtime.attach();
+
+    runtime.acceptProjection(projection, [resource]);
+
+    await vi.waitFor(() => expect(resolveCanvasSources).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(runtime.getResolvedSource(projectRelativePath)).toMatchObject({
+      availability: { state: 'available', revision: 'sha256:hidden-video' }
+    }));
+    expect(sourceListener).toHaveBeenCalled();
+    unsubscribe();
+    detach();
+    editor.dispose();
+  });
 });

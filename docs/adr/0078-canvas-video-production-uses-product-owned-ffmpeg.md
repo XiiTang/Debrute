@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0079
 ---
 
 # Canvas Video Production Uses Product-Owned FFmpeg

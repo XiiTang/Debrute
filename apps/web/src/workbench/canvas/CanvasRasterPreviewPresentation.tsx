@@ -12,7 +12,6 @@ import React, {
 import {
   canvasPreviewVariantKey,
   canvasRasterPreviewWidth,
-  type CanvasPreviewCanonicalSourceIdentity,
   type CanvasPreviewContinuityKey,
   type CanvasPreviewTargetIdentity,
   type CanvasPreviewVariantKey
@@ -40,7 +39,6 @@ export interface CanvasRasterPreviewVariantTarget {
   bindingId: string;
   projectRelativePath: string;
   targetIdentity: CanvasPreviewTargetIdentity;
-  canonicalSourceIdentity?: CanvasPreviewCanonicalSourceIdentity | undefined;
   sourceWidth: number;
   srcForWidth(width: number): string;
 }
@@ -77,7 +75,6 @@ export function sameCanvasRasterPreviewRequest(
     && leftTarget?.bindingId === rightTarget?.bindingId
     && leftTarget?.projectRelativePath === rightTarget?.projectRelativePath
     && leftTarget?.targetIdentity === rightTarget?.targetIdentity
-    && leftTarget?.canonicalSourceIdentity === rightTarget?.canonicalSourceIdentity
     && leftTarget?.sourceWidth === rightTarget?.sourceWidth;
 }
 
@@ -513,7 +510,6 @@ function canvasRasterPreviewDesiredSource(input: {
     bindingId: target.bindingId,
     projectRelativePath: target.projectRelativePath,
     targetIdentity: target.targetIdentity,
-    canonicalSourceIdentity: target.canonicalSourceIdentity,
     width: previewWidth
   });
   return {

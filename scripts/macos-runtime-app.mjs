@@ -9,25 +9,16 @@ export async function assembleMacosRuntimeApplication(input) {
   const contents = join(destination, 'Contents');
   const executable = join(contents, 'MacOS/debrute-runtime');
   const nativeRasterFiles = await readdir(input.nativeRasterRoot, { withFileTypes: true });
-  const canvasVideoToolFiles = await readdir(input.canvasVideoToolsRoot, { withFileTypes: true });
   if (nativeRasterFiles.some((entry) => !entry.isFile())) {
     throw new Error(`macOS Runtime native raster payload must be flat: ${input.nativeRasterRoot}`);
   }
   if (!nativeRasterFiles.some((entry) => entry.name.endsWith('.dylib'))) {
     throw new Error(`macOS Runtime app has no libvips dynamic library: ${input.nativeRasterRoot}`);
   }
-  if (
-    canvasVideoToolFiles.some((entry) => !entry.isFile())
-    || !canvasVideoToolFiles.some((entry) => entry.name === 'ffmpeg')
-    || !canvasVideoToolFiles.some((entry) => entry.name === 'ffprobe')
-  ) {
-    throw new Error(`macOS Runtime Canvas video tools payload is invalid: ${input.canvasVideoToolsRoot}`);
-  }
 
   await rm(destination, { recursive: true, force: true });
   await mkdir(join(contents, 'MacOS'), { recursive: true });
   await mkdir(join(contents, 'Resources'), { recursive: true });
-  await mkdir(join(contents, 'Resources/canvas-video-tools'), { recursive: true });
   await mkdir(join(contents, 'libvips'), { recursive: true });
   await cp(input.runtimeBinary, executable, { dereference: true });
   await cp(input.icon, join(contents, 'Resources/DebruteRuntime.icns'), { dereference: true });
@@ -38,17 +29,8 @@ export async function assembleMacosRuntimeApplication(input) {
       { dereference: true }
     );
   }
-  for (const entry of canvasVideoToolFiles) {
-    await cp(
-      join(input.canvasVideoToolsRoot, entry.name),
-      join(contents, 'Resources/canvas-video-tools', entry.name),
-      { dereference: true }
-    );
-  }
   await writeFile(join(contents, 'Info.plist'), macosRuntimeInfoPlist(input.version), 'utf8');
   await chmod(executable, 0o755);
-  await chmod(join(contents, 'Resources/canvas-video-tools/ffmpeg'), 0o755);
-  await chmod(join(contents, 'Resources/canvas-video-tools/ffprobe'), 0o755);
   return { destination, executable };
 }
 

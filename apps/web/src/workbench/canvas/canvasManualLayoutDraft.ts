@@ -2,6 +2,10 @@ import type { ProjectedCanvasNode } from './CanvasScene.js';
 import { buildResizeGeometry } from '../services/canvasInteraction.js';
 import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime.js';
 import type { CanvasPoint } from './runtime/canvasGeometry.js';
+import {
+  canvasVideoContentSizeForNode,
+  canvasVideoNodeSizeForContent
+} from './CanvasNodePresentationGeometry.js';
 
 export interface CanvasLayoutOverride {
   projectRelativePath: string;
@@ -42,19 +46,30 @@ export function canvasManualLayoutDraftFromResizeInteraction(input: {
     x: input.point.x - input.interaction.start.x,
     y: input.point.y - input.interaction.start.y
   };
+  const preservesVideoContentAspect = input.interaction.preserveAspect
+    && input.interaction.node.mediaKind === 'video';
+  const resizeOrigin = preservesVideoContentAspect
+    ? {
+        ...input.interaction.origin,
+        ...canvasVideoContentSizeForNode(input.interaction.origin)
+      }
+    : input.interaction.origin;
   const next = buildResizeGeometry(
     input.interaction.handle,
-    input.interaction.origin,
+    resizeOrigin,
     delta,
     input.interaction.preserveAspect
   );
+  const nextSize = preservesVideoContentAspect
+    ? canvasVideoNodeSizeForContent(next)
+    : next;
   return {
     nodeLayouts: [{
       projectRelativePath: input.interaction.node.projectRelativePath,
       x: next.x,
       y: next.y,
-      width: next.width,
-      height: next.height
+      width: nextSize.width,
+      height: nextSize.height
     }]
   };
 }

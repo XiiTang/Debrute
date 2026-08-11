@@ -30,6 +30,7 @@ import {
 } from './canvas/CanvasFeedbackInteraction';
 import { FeedbackPanel } from './feedback/FeedbackPanel.js';
 import type { CanvasEditorRuntime } from './canvas/runtime/CanvasEditorRuntime';
+import type { CanvasVideoMetadataUpdate } from './canvas/CanvasVideoPreviewRuntime.js';
 import {
   canvasNodeSelection
 } from './canvas/runtime/canvasSelection.js';
@@ -589,6 +590,29 @@ function WorkbenchBoundProjectApp({
   );
   const [textEditorWindows, setTextEditorWindows] = useState<Record<string, FloatingTextEditorWindowState>>({});
   const [canvasMinimapOpen, setCanvasMinimapOpen] = useState(false);
+  const [canvasVideoMetadataByPath, setCanvasVideoMetadataByPath] = useState<Record<string, {
+    sourceRevision: string;
+    metadata: CanvasVideoMetadataUpdate['metadata'];
+  }>>({});
+  useEffect(() => setCanvasVideoMetadataByPath({}), [canvasRuntimeScopeKey]);
+  const handleCanvasVideoMetadata = useCallback((update: CanvasVideoMetadataUpdate) => {
+    setCanvasVideoMetadataByPath((current) => {
+      const previous = current[update.projectRelativePath];
+      if (previous?.sourceRevision === update.sourceRevision
+        && previous.metadata.width === update.metadata.width
+        && previous.metadata.height === update.metadata.height
+        && previous.metadata.durationSeconds === update.metadata.durationSeconds) {
+        return current;
+      }
+      return {
+        ...current,
+        [update.projectRelativePath]: {
+          sourceRevision: update.sourceRevision,
+          metadata: update.metadata
+        }
+      };
+    });
+  }, []);
   const [contextMenu, setContextMenu] = useState<{
     target: WorkbenchContextMenuTarget;
     position: WorkbenchContextMenuPosition;
@@ -642,11 +666,12 @@ function WorkbenchBoundProjectApp({
       ? {
           canonicalRoot,
           resources: availableCanvasWorkspace.canvasResources,
-          state: canvasStateRef.current
+          state: canvasStateRef.current,
+          videoMetadataByPath: canvasVideoMetadataByPath
         }
       : undefined
   // Canvas State events preserve membership; the mounted Runtime accepts their deltas directly.
-  ), [availableCanvasWorkspace?.canvasResources, canonicalRoot]);
+  ), [availableCanvasWorkspace?.canvasResources, canonicalRoot, canvasVideoMetadataByPath]);
   const canvasNodeScene = useMemo(() => (
     canvasProjectionSource ? projectCanvasNodeScene(canvasProjectionSource) : undefined
   ), [canvasProjectionSource]);
@@ -665,10 +690,11 @@ function WorkbenchBoundProjectApp({
     canvasProjectionSource && canvasProjection
       ? {
           expandedDirectories: canvasProjectionSource.state.expandedDirectories,
-          projection: canvasProjection
+          projection: canvasProjection,
+          feedbackVideoResources: availableCanvasWorkspace?.feedbackVideoResources.resources ?? []
         }
       : undefined
-  ), [canvasProjection, canvasProjectionSource]);
+  ), [availableCanvasWorkspace?.feedbackVideoResources, canvasProjection, canvasProjectionSource]);
   const visibleCanvasPathsRef = useRef<Set<string> | undefined>(undefined);
   useEffect(() => {
     if (!canvasProjectionSource || !canvasNodeScene) {
@@ -1153,8 +1179,8 @@ function WorkbenchBoundProjectApp({
     writeProjectTextFile: api.writeProjectTextFile,
     saveCanvasTextPreviewSource: api.saveCanvasTextPreviewSource,
     readCanvasTextPreviewSources: api.readCanvasTextPreviewSources,
-    probeCanvasVideoPreviewSources: api.probeCanvasVideoPreviewSources,
-    ensureCanvasVideoPreviewSource: api.ensureCanvasVideoPreviewSource,
+    readCanvasVideoPreviewSources: api.readCanvasVideoPreviewSources,
+    saveCanvasVideoPreviewSource: api.saveCanvasVideoPreviewSource,
     ensureTextFileBuffer,
     updateTextFileBuffer,
     saveTextFileBuffer,
@@ -1499,6 +1525,7 @@ function WorkbenchBoundProjectApp({
       actions={actions}
       textFileBuffers={textFileBuffers}
       canvasFeedback={feedbackInteraction.feedback}
+      onVideoMetadata={handleCanvasVideoMetadata}
       textPreviewStyleDependencyKey={presentationController.resolvedTheme}
       runtimeScopeKey={canvasRuntimeScopeKey}
       minimapOpen={canvasMinimapOpen}

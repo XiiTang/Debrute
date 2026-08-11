@@ -40,7 +40,7 @@ struct SessionRoute {
 pub(crate) struct CanvasFeedbackDispatchError {
     root: PathBuf,
     epoch: Uuid,
-    error: ProjectError,
+    pub(crate) error: ProjectError,
 }
 
 /// Project-session router around the one feedback artifact scheduler.
@@ -136,6 +136,24 @@ impl CanvasFeedbackArtifacts {
                 project_relative_path,
                 document,
             )
+            .map_err(|error| CanvasFeedbackDispatchError {
+                root: root.to_path_buf(),
+                epoch,
+                error,
+            })
+    }
+
+    pub(crate) fn resume_video_frame(
+        &self,
+        root: &Path,
+        project_relative_path: &str,
+        frame_time_ms: u64,
+    ) -> Result<(), CanvasFeedbackDispatchError> {
+        let Some(epoch) = self.epoch(root) else {
+            return Ok(());
+        };
+        self.scheduler
+            .resume_video_frame(root, epoch, project_relative_path, frame_time_ms)
             .map_err(|error| CanvasFeedbackDispatchError {
                 root: root.to_path_buf(),
                 epoch,
@@ -393,6 +411,25 @@ impl CanvasFeedbackArtifactScheduler {
         })
     }
 
+    /// Resumes only waiting artifacts whose exact browser-decoded video frame is now cached.
+    ///
+    /// # Errors
+    /// Returns an error when the scheduler has stopped.
+    pub fn resume_video_frame(
+        &self,
+        project_root: impl Into<PathBuf>,
+        session_epoch: Uuid,
+        project_relative_path: impl Into<String>,
+        frame_time_ms: u64,
+    ) -> Result<(), ProjectError> {
+        self.send(SchedulerCommand::ResumeVideoFrame {
+            project_root: project_root.into(),
+            session_epoch,
+            project_relative_path: project_relative_path.into(),
+            frame_time_ms,
+        })
+    }
+
     /// Removes queued work and marks active derived work stale without waiting for it.
     ///
     /// # Errors
@@ -506,6 +543,12 @@ enum SchedulerCommand {
         project_relative_path: String,
         document: CanvasFeedbackDocument,
     },
+    ResumeVideoFrame {
+        project_root: PathBuf,
+        session_epoch: Uuid,
+        project_relative_path: String,
+        frame_time_ms: u64,
+    },
     CancelProject {
         project_root: PathBuf,
         session_epoch: Uuid,
@@ -514,9 +557,14 @@ enum SchedulerCommand {
         key: String,
         epoch: u64,
         job_id: Uuid,
-        result: Result<Vec<u8>, String>,
+        result: Result<Vec<u8>, RenderFailure>,
     },
     Shutdown,
+}
+
+struct RenderFailure {
+    message: String,
+    pending_browser_capture: bool,
 }
 
 struct SchedulerState {
@@ -603,6 +651,18 @@ fn handle_scheduler_command(
                 );
             }
         }
+        SchedulerCommand::ResumeVideoFrame {
+            project_root,
+            session_epoch,
+            project_relative_path,
+            frame_time_ms,
+        } if !state.shutting_down => resume_video_frame_state(
+            state,
+            &project_root,
+            session_epoch,
+            &project_relative_path,
+            frame_time_ms,
+        ),
         SchedulerCommand::CancelProject {
             project_root,
             session_epoch,
@@ -625,7 +685,9 @@ fn handle_scheduler_command(
             }
             state.ready.clear();
         }
-        SchedulerCommand::EnqueueDocument { .. } | SchedulerCommand::EnqueueSource { .. } => {}
+        SchedulerCommand::EnqueueDocument { .. }
+        | SchedulerCommand::EnqueueSource { .. }
+        | SchedulerCommand::ResumeVideoFrame { .. } => {}
     }
 }
 
@@ -900,6 +962,64 @@ fn enqueue_descriptor(
     }
 }
 
+fn resume_video_frame_state(
+    state: &mut SchedulerState,
+    project_root: &Path,
+    session_epoch: Uuid,
+    project_relative_path: &str,
+    frame_time_ms: u64,
+) {
+    let keys = state
+        .states
+        .iter()
+        .filter(|(_, render)| {
+            render.project_root == project_root
+                && render.session_epoch == session_epoch
+                && artifact_matches_video_frame(
+                    &render.descriptor.artifact,
+                    project_relative_path,
+                    frame_time_ms,
+                )
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    for key in keys {
+        let Some(render) = state.states.get_mut(&key) else {
+            continue;
+        };
+        render.epoch = render
+            .epoch
+            .checked_add(1)
+            .expect("Canvas feedback render epoch exhausted");
+        render.queued = Some(QueuedEpoch {
+            epoch: render.epoch,
+            job_id: Uuid::new_v4(),
+            artifact: render.descriptor.artifact.clone(),
+        });
+        if let Some(active) = &render.active {
+            active.cancellation.cancel();
+        } else {
+            queue_for_start(state, key);
+        }
+    }
+}
+
+fn artifact_matches_video_frame(
+    artifact: &CanvasFeedbackArtifact,
+    project_relative_path: &str,
+    frame_time_ms: u64,
+) -> bool {
+    matches!(
+        artifact,
+        CanvasFeedbackArtifact::VideoMoment {
+            project_relative_path: path,
+            moment,
+            ..
+        } if path == project_relative_path
+            && (moment.current_time_seconds * 1_000.0).round() == frame_time_ms as f64
+    )
+}
+
 fn queue_for_start(state: &mut SchedulerState, key: String) {
     let Some(render) = state.states.get_mut(&key) else {
         return;
@@ -952,7 +1072,11 @@ fn start_ready(
             .spawn(move || {
                 let result = renderer
                     .render(&root, &artifact, &cancellation)
-                    .map_err(|error| error.to_string());
+                    .map_err(|error| RenderFailure {
+                        pending_browser_capture: error.code()
+                            == "canvas_feedback_video_source_pending",
+                        message: error.to_string(),
+                    });
                 let _ = sender_for_worker.send(SchedulerCommand::Completed {
                     key: key_for_worker,
                     epoch: queued.epoch,
@@ -966,7 +1090,10 @@ fn start_ready(
                 &key,
                 queued.epoch,
                 queued.job_id,
-                Err(error.to_string()),
+                Err(RenderFailure {
+                    message: error.to_string(),
+                    pending_browser_capture: false,
+                }),
                 on_diagnostic,
             );
         }
@@ -978,7 +1105,7 @@ fn complete_epoch(
     key: &str,
     epoch: u64,
     job_id: Uuid,
-    result: Result<Vec<u8>, String>,
+    result: Result<Vec<u8>, RenderFailure>,
     on_diagnostic: &FeedbackDiagnosticSink,
 ) {
     let Some(render) = state.states.get_mut(key) else {
@@ -996,18 +1123,36 @@ fn complete_epoch(
         .checked_sub(1)
         .expect("active Canvas feedback render count underflow");
     let latest = render.epoch == epoch && !active.cancellation_is_cancelled();
-    if latest {
+    let waiting_for_browser_capture = if latest {
         match result {
             Ok(bytes) => match ProjectRelativePath::parse(&render.descriptor.artifact_project_path)
                 .and_then(|artifact_path| {
                     ProjectCapabilityFs::open(&render.project_root)
                         .and_then(|project| project.atomic_write(&artifact_path, &bytes))
                 }) {
-                Ok(()) => publish_render_success(on_diagnostic, render),
-                Err(error) => publish_render_failure(on_diagnostic, render, &error.to_string()),
+                Ok(()) => {
+                    publish_render_success(on_diagnostic, render);
+                    false
+                }
+                Err(error) => {
+                    publish_render_failure(on_diagnostic, render, &error.to_string());
+                    false
+                }
             },
-            Err(message) => publish_render_failure(on_diagnostic, render, &message),
+            Err(failure) if failure.pending_browser_capture => true,
+            Err(failure) => {
+                publish_render_failure(on_diagnostic, render, &failure.message);
+                false
+            }
         }
+    } else {
+        false
+    };
+    if waiting_for_browser_capture {
+        if render.queued.is_some() {
+            queue_for_start(state, key.to_owned());
+        }
+        return;
     }
     if render.queued.is_some() {
         queue_for_start(state, key.to_owned());
@@ -1439,10 +1584,7 @@ mod tests {
 
     use image::{DynamicImage, RgbaImage};
 
-    use crate::{
-        project::{CanvasVideoToolPaths, initialize_raster_preview_engine},
-        workers::RuntimeWorkerServices,
-    };
+    use crate::project::initialize_raster_preview_engine;
 
     use super::*;
     use crate::project::{
@@ -1462,11 +1604,7 @@ mod tests {
         ))
         .save(root.join("images/cover.png"))
         .expect("fixture image should save");
-        let workers = RuntimeWorkerServices::new();
-        let previews = Arc::new(ProjectPreviewService::new(
-            &workers,
-            CanvasVideoToolPaths::for_tests(),
-        ));
+        let previews = Arc::new(ProjectPreviewService::new());
         let (sender, receiver) = mpsc::sync_channel(8);
         let scheduler = CanvasFeedbackArtifactScheduler::new(
             CanvasFeedbackArtifactRenderer::new(previews),
@@ -1675,6 +1813,107 @@ mod tests {
     }
 
     #[test]
+    fn pending_video_artifact_waits_and_resumes_only_for_its_exact_browser_frame() {
+        let root = PathBuf::from("/tmp/debrute-feedback-browser-frame");
+        let session_epoch = Uuid::new_v4();
+        let descriptor = video_descriptor("media/clip.mkv", 1.25);
+        let key = render_key(&root, session_epoch, &descriptor.artifact_project_path);
+        let job_id = Uuid::new_v4();
+        let mut state = SchedulerState {
+            states: [(
+                key.clone(),
+                RenderState {
+                    project_root: root.clone(),
+                    session_epoch,
+                    project_revision: 1,
+                    descriptor,
+                    epoch: 1,
+                    queued: None,
+                    active: Some(ActiveEpoch {
+                        epoch: 1,
+                        job_id,
+                        cancellation: PreviewCancellation::default(),
+                    }),
+                    queued_for_start: false,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            latest_document_revisions: HashMap::new(),
+            latest_source_revisions: HashMap::new(),
+            ready: VecDeque::new(),
+            active_count: 1,
+            max_concurrent: 1,
+            shutting_down: false,
+        };
+        let diagnostics: FeedbackDiagnosticSink = Arc::new(|_, _, _| {});
+
+        complete_epoch(
+            &mut state,
+            &key,
+            1,
+            job_id,
+            Err(RenderFailure {
+                message: "waiting".to_owned(),
+                pending_browser_capture: true,
+            }),
+            &diagnostics,
+        );
+        assert!(state.states.contains_key(&key));
+        assert_eq!(state.active_count, 0);
+        assert!(state.ready.is_empty());
+
+        resume_video_frame_state(&mut state, &root, session_epoch, "media/clip.mkv", 1_249);
+        assert!(state.ready.is_empty());
+        resume_video_frame_state(&mut state, &root, session_epoch, "media/clip.mkv", 1_250);
+        assert_eq!(state.ready, VecDeque::from([key.clone()]));
+        assert!(state.states[&key].queued.is_some());
+    }
+
+    #[test]
+    fn a_saved_browser_frame_supersedes_the_matching_active_attempt() {
+        let root = PathBuf::from("/tmp/debrute-feedback-browser-frame-race");
+        let session_epoch = Uuid::new_v4();
+        let descriptor = video_descriptor("media/clip.webm", 2.5);
+        let key = render_key(&root, session_epoch, &descriptor.artifact_project_path);
+        let cancellation = PreviewCancellation::default();
+        let mut state = SchedulerState {
+            states: [(
+                key.clone(),
+                RenderState {
+                    project_root: root.clone(),
+                    session_epoch,
+                    project_revision: 1,
+                    descriptor,
+                    epoch: 1,
+                    queued: None,
+                    active: Some(ActiveEpoch {
+                        epoch: 1,
+                        job_id: Uuid::new_v4(),
+                        cancellation: cancellation.clone(),
+                    }),
+                    queued_for_start: false,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            latest_document_revisions: HashMap::new(),
+            latest_source_revisions: HashMap::new(),
+            ready: VecDeque::new(),
+            active_count: 1,
+            max_concurrent: 1,
+            shutting_down: false,
+        };
+
+        resume_video_frame_state(&mut state, &root, session_epoch, "media/clip.webm", 2_500);
+
+        assert!(cancellation.check().is_err());
+        assert_eq!(state.states[&key].epoch, 2);
+        assert!(state.states[&key].queued.is_some());
+        assert!(state.ready.is_empty());
+    }
+
+    #[test]
     fn accepting_a_new_session_epoch_cancels_and_forgets_the_old_session() {
         let root = PathBuf::from("/tmp/debrute-feedback-session-epoch");
         let old_epoch = Uuid::new_v4();
@@ -1751,6 +1990,34 @@ mod tests {
             state.latest_document_revisions.get(&(root, new_epoch)),
             Some(&1)
         );
+    }
+
+    fn video_descriptor(
+        project_relative_path: &str,
+        current_time_seconds: f64,
+    ) -> ArtifactDescriptor {
+        let entry = Arc::new(CanvasFeedbackEntry {
+            project_relative_path: project_relative_path.to_owned(),
+            marks: Vec::new(),
+            next_moment_label: 2,
+            next_spatial_label: 1,
+            items: Vec::new(),
+            updated_at: "2026-08-11T00:00:00.000Z".to_owned(),
+        });
+        ArtifactDescriptor {
+            artifact_project_path: format!(
+                ".debrute/feedback/artifacts/{project_relative_path}/M1.png"
+            ),
+            diagnostic_project_relative_path: format!("{project_relative_path}#M1"),
+            artifact: CanvasFeedbackArtifact::VideoMoment {
+                project_relative_path: project_relative_path.to_owned(),
+                moment: CanvasFeedbackMomentRef {
+                    label: "M1".to_owned(),
+                    current_time_seconds,
+                },
+                entry,
+            },
+        }
     }
 
     #[cfg(target_os = "macos")]

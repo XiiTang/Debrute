@@ -23,11 +23,12 @@ glossaries instead.
 - [Canvas Source Settlement Is Path Local](./0070-canvas-source-settlement-is-path-local.md)
 - [Feedback Names Are Project Identity And The Catalog Is Global](./0071-feedback-names-are-project-identity-and-the-catalog-is-global.md)
 - [Global Settings Use Typed Mutation Intents](./0072-global-settings-use-typed-mutation-intents.md)
-- [Canvas Video Production Uses Product-Owned FFmpeg](./0078-canvas-video-production-uses-product-owned-ffmpeg.md)
+- [Workbench Browser Owns Canvas Video Decoding And Frame Capture](./0079-workbench-browser-owns-canvas-video-decoding-and-frame-capture.md)
 
 ### Superseded Decisions
 
 - [Integration Operations Are Catalog-Defined](./0010-integration-operations-are-catalog-defined.md) (superseded by ADR-0078)
+- [Canvas Video Production Uses Product-Owned FFmpeg](./0078-canvas-video-production-uses-product-owned-ffmpeg.md) (superseded by ADR-0079)
 
 ### Product Identity
 

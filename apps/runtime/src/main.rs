@@ -42,12 +42,11 @@ use debrute_runtime::{
         NativeUpdatePlatform, ProductCommitCoordinator, ProductCommitError,
         ProductInstallationCoordinator, ProductProjectionManager, ProductRemovalCoordinator,
         ProductStore, ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform,
-        ResumeIntent, RuntimeProductService, ValidatedRunningProduct, finalize_product_removal,
+        ResumeIntent, RuntimeProductService, finalize_product_removal,
         launch_product_update_failure, read_desktop_host_registration,
     },
     project::{
-        CanvasVideoToolPaths, NATIVE_TRASH_WORKER_COMMAND, initialize_raster_preview_engine,
-        run_native_trash_worker,
+        NATIVE_TRASH_WORKER_COMMAND, initialize_raster_preview_engine, run_native_trash_worker,
     },
     workbench::{
         RuntimeCliHttpService, RuntimeProductHttpService, WorkbenchHttpServer,
@@ -884,10 +883,8 @@ fn run_runtime_services(
             (None, None) => None,
             _ => unreachable!("Product store and active Product directory are created together"),
         };
-        let canvas_video_tools = canvas_video_tool_paths(active_product.as_ref())?;
-        let runtime_services =
-            WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state), canvas_video_tools)
-                .map_err(|error| io::Error::other(error.message))?;
+        let runtime_services = WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state))
+            .map_err(|error| io::Error::other(error.message))?;
         shutdown_services = Some(Arc::clone(&runtime_services));
         let assets_directory = std::env::var_os(WEB_ASSETS_DIRECTORY_ENV)
             .map(PathBuf::from)
@@ -1133,76 +1130,6 @@ fn run_runtime_services(
         .join()
         .expect("Debrute Control accept worker panicked");
     service_result
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn canvas_video_tool_paths(
-    active_product: Option<&ValidatedRunningProduct>,
-) -> Result<CanvasVideoToolPaths, io::Error> {
-    let paths = if let Some(active_product) = active_product {
-        let [ffmpeg, ffprobe] = active_product.canvas_video_executables();
-        CanvasVideoToolPaths { ffmpeg, ffprobe }
-    } else {
-        let executable = std::env::current_exe()?;
-        #[cfg(target_os = "macos")]
-        let root = executable
-            .parent()
-            .and_then(std::path::Path::parent)
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Source Runtime app layout is invalid",
-                )
-            })?
-            .join("Resources/canvas-video-tools");
-        #[cfg(target_os = "windows")]
-        let root = executable
-            .parent()
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Source Runtime layout is invalid",
-                )
-            })?
-            .join("canvas-video-tools");
-        CanvasVideoToolPaths {
-            ffmpeg: root.join(if cfg!(target_os = "windows") {
-                "ffmpeg.exe"
-            } else {
-                "ffmpeg"
-            }),
-            ffprobe: root.join(if cfg!(target_os = "windows") {
-                "ffprobe.exe"
-            } else {
-                "ffprobe"
-            }),
-        }
-    };
-    for path in [&paths.ffmpeg, &paths.ffprobe] {
-        if !fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!(
-                    "Required Canvas video tool is unavailable: {}",
-                    path.display()
-                ),
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            if fs::metadata(path)?.permissions().mode() & 0o111 == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    format!(
-                        "Required Canvas video tool is not executable: {}",
-                        path.display()
-                    ),
-                ));
-            }
-        }
-    }
-    Ok(paths)
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

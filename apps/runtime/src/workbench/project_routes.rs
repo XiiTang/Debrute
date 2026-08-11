@@ -1,7 +1,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::HashMap,
     fs::File,
     io::{Read as _, Seek as _, SeekFrom},
     pin::Pin,
@@ -23,19 +23,20 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::project::{
-    CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS, CANVAS_VIDEO_TIME_MAX_MS, CanvasSourceTarget,
-    CanvasStatePatch, CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget,
-    CanvasVideoPreviewEnsureStatus, CanvasVideoPreviewProbeStatus, CanvasVideoPreviewTarget,
-    PreviewCancellation, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath, ProjectError,
-    ProjectPathClipboardFormat, ProjectPathEntry, ProjectPathKind, ProjectRelativePath,
-    ProjectRevisionResult, ProjectSession, ProjectUploadEntry, RevisionedFilePlan,
-    RevisionedFileResponse, UpdateCanvasFeedbackInput, admit_project_path_entries,
-    open_leased_project_file, read_project_text_file, resolve_existing_project_path,
+    CANVAS_VIDEO_PREVIEW_READ_MAX_TARGETS, CANVAS_VIDEO_PREVIEW_SOURCE_MAX_BYTES,
+    CANVAS_VIDEO_TIME_MAX_MS, CanvasMediaKind, CanvasSourceTarget, CanvasStatePatch,
+    CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget, CanvasVideoMetadata,
+    CanvasVideoPreviewSourceStatus, CanvasVideoPreviewTarget, PreviewCancellation, ProjectCommand,
+    ProjectCommandResult, ProjectDirectoryPath, ProjectError, ProjectPathClipboardFormat,
+    ProjectPathEntry, ProjectPathKind, ProjectRelativePath, ProjectRevisionResult, ProjectSession,
+    ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
+    admit_project_path_entries, canvas_media_kind_from_path, open_leased_project_file,
+    read_project_text_file, resolve_existing_project_path,
 };
 
 use super::{
     RuntimeHttpServiceError, WorkbenchConnectionContext, WorkbenchRuntimeServices,
-    multipart::read_multipart,
+    multipart::{MultipartLimits, read_multipart, read_multipart_limited},
     routes::{json_body, json_body_with_limit, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
     services::{make_canvas_resolved_source_public, project_response},
@@ -44,6 +45,12 @@ use super::{
 };
 
 const FILE_STREAM_CHUNK: usize = 64 * 1024;
+const VIDEO_PREVIEW_SOURCE_MULTIPART_LIMITS: MultipartLimits = MultipartLimits {
+    total_bytes: CANVAS_VIDEO_PREVIEW_SOURCE_MAX_BYTES + 128 * 1024,
+    file_bytes: CANVAS_VIDEO_PREVIEW_SOURCE_MAX_BYTES,
+    fields_bytes: 64 * 1024,
+    parts: 2,
+};
 
 pub(super) async fn text_file(
     State(state): State<WorkbenchRouterState>,
@@ -859,7 +866,7 @@ pub(super) async fn text_preview(
     .await
 }
 
-pub(super) async fn video_preview_probe(
+pub(super) async fn video_preview_sources(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
@@ -880,25 +887,10 @@ pub(super) async fn video_preview_probe(
         Ok(input) => input,
         Err(response) => return response,
     };
-    if input.targets.is_empty() || input.targets.len() > CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS {
+    if input.targets.is_empty() || input.targets.len() > CANVAS_VIDEO_PREVIEW_READ_MAX_TARGETS {
         return invalid_input(format!(
-            "Canvas video preview Probe requires between 1 and {CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS} targets."
+            "Canvas video preview source read requires between 1 and {CANVAS_VIDEO_PREVIEW_READ_MAX_TARGETS} targets."
         ));
-    }
-    if input
-        .targets
-        .iter()
-        .any(|target| target.frame_time_ms > CANVAS_VIDEO_TIME_MAX_MS)
-    {
-        return invalid_input("frameTimeMs must be a non-negative safe integer in milliseconds.");
-    }
-    let unique_paths = input
-        .targets
-        .iter()
-        .map(|target| target.project_relative_path.as_str())
-        .collect::<BTreeSet<_>>();
-    if unique_paths.len() != input.targets.len() {
-        return invalid_input("Canvas video preview Probe targets must use unique Project paths.");
     }
     let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
@@ -909,28 +901,24 @@ pub(super) async fn video_preview_probe(
         .targets
         .into_iter()
         .map(|target| {
-            Ok(CanvasVideoPreviewTarget {
-                project_relative_path: ProjectRelativePath::parse(&target.project_relative_path)?,
-                source_revision: target.source_revision,
-                frame_time_ms: target.frame_time_ms,
-            })
+            canvas_video_preview_target(
+                &target.project_relative_path,
+                target.source_revision,
+                target.frame_time_ms,
+            )
         })
-        .collect::<Result<Vec<_>, ProjectError>>()
+        .collect::<Result<Vec<_>, Response>>()
     {
         Ok(targets) => targets,
-        Err(error) => return project_error(error),
+        Err(response) => return response,
     };
     let previews = Arc::clone(runtime.previews());
     let sources = match blocking_preview_task(move |cancellation| {
-        let leases = targets
-            .iter()
-            .map(|target| {
-                session.canvas_source_lease(&target.project_relative_path, &target.source_revision)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         previews
             .video()
-            .probe_sources(&leases, &targets, cancellation)
+            .read_sources(&targets, cancellation, |target| {
+                session.canvas_source_lease(&target.project_relative_path, &target.source_revision)
+            })
     })
     .await
     {
@@ -940,116 +928,120 @@ pub(super) async fn video_preview_probe(
     let sources = sources
         .into_iter()
         .map(|source| {
-            (
-                source.target.project_relative_path.as_str().to_owned(),
-                source,
-            )
-        })
-        .map(|(path, source)| {
             let mut value = json!({
                 "projectRelativePath": source.target.project_relative_path.as_str(),
                 "sourceRevision": source.target.source_revision,
                 "frameTimeMs": source.target.frame_time_ms,
             });
             match source.status {
-                CanvasVideoPreviewProbeStatus::Ready {
-                    canonical_source_identity,
+                CanvasVideoPreviewSourceStatus::Available {
                     source_width,
+                    metadata,
                 } => {
-                    value["status"] = json!("ready");
-                    value["canonicalSourceIdentity"] = json!(canonical_source_identity);
+                    value["status"] = json!("available");
                     value["sourceWidth"] = json!(source_width);
+                    value["metadata"] = json!(metadata);
                 }
-                CanvasVideoPreviewProbeStatus::NeedsSource {
-                    canonical_source_identity,
-                } => {
-                    value["status"] = json!("needs-source");
-                    value["canonicalSourceIdentity"] = json!(canonical_source_identity);
+                CanvasVideoPreviewSourceStatus::Missing { metadata } => {
+                    value["status"] = json!("missing");
+                    if let Some(metadata) = metadata {
+                        value["metadata"] = json!(metadata);
+                    }
                 }
-                CanvasVideoPreviewProbeStatus::Failed { message } => {
-                    value["status"] = json!("failed");
+                CanvasVideoPreviewSourceStatus::Error { message } => {
+                    value["status"] = json!("error");
                     value["message"] = json!(message);
                 }
             }
-            (path, value)
+            value
         })
-        .collect::<serde_json::Map<String, Value>>();
+        .collect::<Vec<_>>();
     Json(json!({"sources": sources})).into_response()
 }
 
-pub(super) async fn video_preview_ensure(
+pub(super) async fn video_preview_source_save(
     State(state): State<WorkbenchRouterState>,
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
 ) -> Response {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Target {
+    struct Metadata {
         project_relative_path: String,
         source_revision: String,
         frame_time_ms: u64,
+        metadata: CanvasVideoMetadata,
     }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        target: Target,
-        canonical_source_identity: String,
-    }
-    let input: Input = match json_body(request).await {
-        Ok(input) => input,
-        Err(response) => return response,
+    let parts = match read_multipart_limited(request, VIDEO_PREVIEW_SOURCE_MULTIPART_LIMITS).await {
+        Ok(parts) => parts,
+        Err(error) => return service_error_response(error),
     };
-    if input.target.frame_time_ms > CANVAS_VIDEO_TIME_MAX_MS {
-        return invalid_input("frameTimeMs must be a non-negative safe integer in milliseconds.");
+    if parts.fields.len() != 1 || parts.files.len() != 1 {
+        return invalid_input("Video preview upload requires exactly metadata and source parts.");
     }
+    let Some(metadata) = parts.fields.get("metadata") else {
+        return invalid_input("Canvas video preview metadata is required.");
+    };
+    let input: Metadata = match serde_json::from_str(metadata) {
+        Ok(input) => input,
+        Err(error) => return invalid_input(error.to_string()),
+    };
+    let Some(source) = parts.files.get("source") else {
+        return invalid_input("Canvas video preview source PNG is required.");
+    };
     let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
         Err(response) => return response,
     };
-    let project_relative_path =
-        match ProjectRelativePath::parse(&input.target.project_relative_path) {
-            Ok(path) => path,
-            Err(error) => return project_error(error),
-        };
-    let target = CanvasVideoPreviewTarget {
-        project_relative_path,
-        source_revision: input.target.source_revision,
-        frame_time_ms: input.target.frame_time_ms,
+    let target = match canvas_video_preview_target(
+        &input.project_relative_path,
+        input.source_revision,
+        input.frame_time_ms,
+    ) {
+        Ok(target) => target,
+        Err(response) => return response,
     };
+    let uploaded_source = source.temporary_path.clone();
+    let metadata = input.metadata;
     let previews = Arc::clone(runtime.previews());
+    let save_session = Arc::clone(&session);
     let result = match blocking_preview_task(move |cancellation| {
-        let lease =
-            session.canvas_source_lease(&target.project_relative_path, &target.source_revision)?;
-        previews.video().ensure_source(
-            &lease,
-            &target,
-            &input.canonical_source_identity,
-            cancellation,
-        )
+        let lease = save_session
+            .canvas_source_lease(&target.project_relative_path, &target.source_revision)?;
+        previews
+            .video()
+            .save_source(&lease, &target, metadata, &uploaded_source, cancellation)
     })
     .await
     {
         Ok(result) => result,
         Err(error) => return project_error(error),
     };
-    Json(match result {
-        CanvasVideoPreviewEnsureStatus::Ready {
-            canonical_source_identity,
-            source_width,
-        } => json!({
-            "status": "ready",
-            "canonicalSourceIdentity": canonical_source_identity,
+    let CanvasVideoPreviewSourceStatus::Available {
+        source_width,
+        metadata,
+    } = result.status
+    else {
+        unreachable!("a saved Canvas video preview source is available");
+    };
+    if let Err(error) = session.canvas_video_preview_source_saved(
+        result.target.project_relative_path.as_str(),
+        result.target.frame_time_ms,
+    ) {
+        return project_error(error);
+    }
+    Json(json!({
+        "ok": true,
+        "source": {
+            "projectRelativePath": result.target.project_relative_path.as_str(),
+            "sourceRevision": result.target.source_revision,
+            "frameTimeMs": result.target.frame_time_ms,
+            "status": "available",
             "sourceWidth": source_width,
-        }),
-        CanvasVideoPreviewEnsureStatus::SourceChanged => json!({
-            "status": "source-changed",
-        }),
-        CanvasVideoPreviewEnsureStatus::Failed { message } => json!({
-            "status": "failed",
-            "message": message,
-        }),
-    })
+            "metadata": metadata,
+        }
+    }))
     .into_response()
 }
 
@@ -1066,7 +1058,6 @@ pub(super) async fn video_preview(
     let frame_time_ms = match query
         .get("frameTimeMs")
         .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value <= CANVAS_VIDEO_TIME_MAX_MS)
     {
         Some(value) => value,
         None => {
@@ -1076,25 +1067,18 @@ pub(super) async fn video_preview(
         }
     };
     let project_relative_path = match required_query_value(&query, "path") {
-        Ok(path) => match ProjectRelativePath::parse(path) {
-            Ok(path) => path,
-            Err(error) => return project_error(error),
-        },
+        Ok(path) => path,
         Err(response) => return response,
     };
     let source_revision = match required_query_value(&query, "sourceRevision") {
         Ok(revision) => revision.to_owned(),
         Err(response) => return response,
     };
-    let canonical_source_identity = match required_query_value(&query, "canonicalSourceIdentity") {
-        Ok(canonical_source_identity) => canonical_source_identity.to_owned(),
-        Err(response) => return response,
-    };
-    let target = CanvasVideoPreviewTarget {
-        project_relative_path,
-        source_revision,
-        frame_time_ms,
-    };
+    let target =
+        match canvas_video_preview_target(project_relative_path, source_revision, frame_time_ms) {
+            Ok(target) => target,
+            Err(response) => return response,
+        };
     let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {
         Ok(session) => session,
@@ -1107,13 +1091,9 @@ pub(super) async fn video_preview(
         move |cancellation| {
             let lease = session
                 .canvas_source_lease(&target.project_relative_path, &target.source_revision)?;
-            previews.video().resolve_variant(
-                &lease,
-                &target,
-                &canonical_source_identity,
-                width,
-                cancellation,
-            )
+            previews
+                .video()
+                .resolve_variant(&lease, &target, width, cancellation)
         },
     )
     .await
@@ -1449,6 +1429,36 @@ fn positive_u32(query: &HashMap<String, String>, key: &str) -> Result<u32, Respo
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|value| *value > 0)
         .ok_or_else(|| invalid_input(format!("{key} must be a positive integer.")))
+}
+
+fn canvas_video_preview_target(
+    project_relative_path: &str,
+    source_revision: String,
+    frame_time_ms: u64,
+) -> Result<CanvasVideoPreviewTarget, Response> {
+    if frame_time_ms > CANVAS_VIDEO_TIME_MAX_MS {
+        return Err(invalid_input(
+            "frameTimeMs must be a non-negative safe integer in milliseconds.",
+        ));
+    }
+    let project_relative_path = ProjectRelativePath::parse(project_relative_path)
+        .map_err(|error| invalid_input(error.to_string()))?;
+    if source_revision.is_empty() {
+        return Err(invalid_input(
+            "Canvas video source revision must be non-empty.",
+        ));
+    }
+    if canvas_media_kind_from_path(project_relative_path.as_str()) != CanvasMediaKind::Video {
+        return Err(invalid_input(format!(
+            "Canvas video preview path is not a video candidate: {}",
+            project_relative_path.as_str()
+        )));
+    }
+    Ok(CanvasVideoPreviewTarget {
+        project_relative_path,
+        source_revision,
+        frame_time_ms,
+    })
 }
 
 fn required_query_value<'a>(

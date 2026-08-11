@@ -26,12 +26,28 @@ Content-owned chrome inside a fixed presentation transform first applies the
 inverse presentation scale and then the inverse camera scale, so its screen
 thickness matches chrome on native-size media instead of being multiplied by
 the presentation transform.
+Every video uses that fixed content-presentation transform whether or not
+browser metadata is available, so its title bar and Media Chrome controls keep
+the same presentation scale before, during, and after Content Activation.
+Browser metadata still owns intrinsic scene geometry and video aspect; it does
+not select the CSS presentation scale. The initial contract adds no adaptive
+scale or minimum-resolution branch for small videos: those sources may crowd
+their content presentation until real product evidence justifies a separate
+geometry rule.
+Video dimensions describe the Content Region rather than the complete Canvas
+Node. Automatic video width equals content width, while automatic node height
+adds the fixed `32` presentation-pixel title bar (`320` scene units at the
+fixed presentation scale) above content height. Default aspect-preserving
+corner resize likewise scales only the Content Region and then adds the same
+unscaled title-bar height, so the video aspect remains stable while the complete
+node aspect changes.
 The same intrinsic-width path covers every generic node presentation, including
 Project roots, directories, unknown resources, and images without intrinsic
 dimensions. Content-capable resources retain an explicit presentation policy:
-text and audio keep their fixed sizes, available video uses its intrinsic size,
-and unavailable video uses a `3200 × 1800` scene-unit fallback so the title bar
-does not consume its Content Region.
+text and audio keep their fixed sizes, available video uses its intrinsic size
+for the Content Region, and unavailable video uses a `3200 × 1800` scene-unit
+Content Region fallback. In both video cases the title bar is additional node
+geometry rather than content consumed from those dimensions.
 
 The Workbench completes generic-node measurement synchronously before the first
 scene projection, after its required fonts are ready. Mounted node content does

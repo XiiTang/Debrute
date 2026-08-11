@@ -2,14 +2,15 @@ import type {
   WorkbenchActivityNoticeInput,
   CanvasSourceResolutionResponse,
   CanvasTextPreviewSourceAvailabilityResponse,
-  CanvasVideoPreviewEnsureResponse,
-  CanvasVideoPreviewProbeResponse,
+  CanvasVideoPreviewSourceResponse,
   DebruteGlobalSettingsView,
   DebruteHttpErrorBody,
   RuntimeProjectUploadImportPlan,
   ModelArtifactProvenanceLookup,
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
+  SaveCanvasVideoPreviewSourceInput,
+  SaveCanvasVideoPreviewSourceResult,
   MutateDebruteGlobalSettingsInput,
   SendProjectFileToPhotoshopResult,
   TerminalEventSubscription,
@@ -762,18 +763,20 @@ export function createHttpWorkbenchApiClient(options: {
         signal
       )
     )),
-    probeCanvasVideoPreviewSources: (input, signal) => requestForCurrentProject<CanvasVideoPreviewProbeResponse>(
+    readCanvasVideoPreviewSources: (input, signal) => requestForCurrentProject<CanvasVideoPreviewSourceResponse>(
       'POST',
-      '/canvas-video-previews/probe',
+      '/canvas-video-previews/sources',
       input,
       signal
     ),
-    ensureCanvasVideoPreviewSource: (input, signal) => requestForCurrentProject<CanvasVideoPreviewEnsureResponse>(
-      'POST',
-      '/canvas-video-previews/ensure',
-      input,
-      signal
-    ),
+    saveCanvasVideoPreviewSource: (input, signal) => runProjectRequest((scope, projectSignal) => (
+      requestFormData<SaveCanvasVideoPreviewSourceResult>(
+        'POST',
+        projectPathFor(scope.bindingId, '/canvas-video-previews/source'),
+        canvasVideoPreviewSourceFormData(input),
+        signal ?? projectSignal
+      )
+    )),
     createProjectFile: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'file' }),
     createProjectDirectory: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('POST', projectPath('/files'), { ...input, kind: 'directory' }),
     renameProjectPath: (input) => requestProjectMutation<WorkbenchProjectFileOperationResult>('PATCH', projectPath(`/files/path/${encodeProjectPath(input.projectRelativePath)}`), {
@@ -957,6 +960,18 @@ function canvasTextPreviewSourceFormData(input: SaveCanvasTextPreviewSourceInput
     targetIdentity: input.targetIdentity
   }));
   formData.append('source', input.sourcePng, 'source.png');
+  return formData;
+}
+
+function canvasVideoPreviewSourceFormData(input: SaveCanvasVideoPreviewSourceInput): FormData {
+  const formData = new FormData();
+  formData.set('metadata', JSON.stringify({
+    projectRelativePath: input.projectRelativePath,
+    sourceRevision: input.sourceRevision,
+    frameTimeMs: input.frameTimeMs,
+    metadata: input.metadata
+  }));
+  formData.set('source', input.sourcePng, 'source.png');
   return formData;
 }
 

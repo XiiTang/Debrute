@@ -13,19 +13,11 @@ install scripts. `pnpm-lock.yaml` is the only dependency lockfile.
 
 `pnpm doctor` checks the current development environment: exact Node major,
 supported pnpm range, workspace install, Desktop source files, required Desktop
-build dependencies, the pinned Canvas video-tools lock, and the host commands
-needed to reproduce that payload from source. It reports missing prerequisites
+build dependencies, the pinned native Raster Preview payload, and the checked-in
+Canvas text font-subset payload. It reports missing prerequisites
 but never installs or manages them. macOS and Windows pass the closed
 host-platform check; Linux and other hosts fail explicitly because they have no
 current source-development or Product build contract.
-
-Canvas video source builds require GnuPG, tar, and Make on both hosts and Clang
-on macOS. Native Windows development runs from an MSYS2 MinGW x64 environment
-whose `PATH` supplies Bash, awk, sed, Make, GnuPG, and an
-`x86_64-w64-mingw32` C compiler. `pnpm doctor` validates these commands before
-development; the payload builder invokes FFmpeg's configure script through
-Bash on Windows and never substitutes a downloaded third-party binary or a
-system `ffmpeg`.
 
 Exact dependency versions live in package manifests and the lockfile. The build
 contracts that depend on those versions are executable:
@@ -41,11 +33,10 @@ contracts that depend on those versions are executable:
   metadata through the Runtime-owned Raster Preview Engine; product packaging
   copies and validates the checksum-pinned `rs-vips` 0.7.0/libvips 8.18.4
   native payload for each supported macOS and Windows target.
-- Canvas video production uses the Product-owned FFmpeg 8.1.2 payload pinned by
-  `assets/canvas-video-tools-lock.json`. `pnpm canvas:video-tools:prepare`
-  verifies or builds the current host payload from that exact official source;
-  Runtime development and Product assembly consume only the staged absolute
-  `ffmpeg` and `ffprobe` paths.
+- Canvas video decoding, metadata, playback, and canonical still-frame capture
+  use the Workbench browser engine. Runtime supplies the exact revisioned
+  Project URL and persists validated PNG captures; source development and
+  Product assembly carry no separate video decoder payload.
 - Canvas text preview font subsetting uses the checked-in
   `assets/wasm/canvas-text-font-subset-v1.wasm`. Install, development, build,
   doctor, and verification validate its locked sources, wrapper, licenses,

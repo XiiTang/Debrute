@@ -60,11 +60,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   const displayReadinessFailedRef = useRef(false);
   const pendingInitialSeekRef = useRef(false);
   const source = node.availability.state === 'available' ? node.availability.fileUrl : '';
-  const presentation = node.videoPresentation;
-  if (!presentation) {
-    throw new Error(`Projected video node is missing videoPresentation: ${node.projectRelativePath}`);
-  }
-  const textTracks = presentation.textTracks.map((track) => ({
+  const textTracks = (node.videoTextTracks ?? []).map((track) => ({
     ...track,
     fileUrl: requiredVideoCompanionFileUrl(node, track.projectRelativePath, track.fileUrl)
   }));
@@ -102,7 +98,10 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     }
     const initialTimeSeconds = initialTimeMs / 1000;
     const message = formatSeekError(node.projectRelativePath, initialTimeSeconds);
-    if (presentation.durationSeconds !== undefined && initialTimeSeconds > presentation.durationSeconds) {
+    const duration = Number.isFinite(event.currentTarget.duration)
+      ? event.currentTarget.duration
+      : node.videoMetadata?.durationSeconds;
+    if (duration !== undefined && initialTimeSeconds > duration) {
       reportInitialSeekError(message);
       return;
     }
@@ -112,7 +111,7 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     } catch {
       reportInitialSeekError(message);
     }
-  }, [formatSeekError, initialTimeMs, node.projectRelativePath, presentation.durationSeconds, reportInitialSeekError]);
+  }, [formatSeekError, initialTimeMs, node.projectRelativePath, reportInitialSeekError]);
 
   const handleDisplayDataReady = useCallback(() => {
     if (!pendingInitialSeekRef.current) {

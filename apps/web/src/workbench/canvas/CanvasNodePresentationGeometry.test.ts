@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { canvasTextPresentationGeometry } from './CanvasNodePresentationGeometry.js';
+import {
+  canvasTextPresentationGeometry,
+  canvasVideoContentSizeForNode,
+  canvasVideoNodeSizeForContent
+} from './CanvasNodePresentationGeometry.js';
 
 describe('CanvasNodePresentationGeometry', { tags: ['canvas-text'] }, () => {
   it('derives one camera-independent editor and capture geometry from the node', () => {
@@ -28,6 +32,19 @@ describe('CanvasNodePresentationGeometry', { tags: ['canvas-text'] }, () => {
       frameCssHeight: 33,
       contentCssWidth: 1,
       contentCssHeight: 1
+    });
+  });
+});
+
+describe('Canvas video presentation geometry', { tags: ['canvas-video'] }, () => {
+  it('adds and removes the fixed title bar outside video Content Region geometry', () => {
+    expect(canvasVideoNodeSizeForContent({ width: 1_920, height: 1_080 })).toEqual({
+      width: 1_920,
+      height: 1_400
+    });
+    expect(canvasVideoContentSizeForNode({ width: 1_920, height: 1_400 })).toEqual({
+      width: 1_920,
+      height: 1_080
     });
   });
 });

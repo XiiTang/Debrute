@@ -426,7 +426,8 @@ function boundProject(
           canonicalRoot: '/project',
           ...state
         },
-        canvasResources: RESOURCES
+        canvasResources: RESOURCES,
+        feedbackVideoResources: { resources: [] }
       },
       diagnostics: [],
       health: {

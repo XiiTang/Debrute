@@ -20,7 +20,6 @@ use debrute_runtime::{
     cli::RuntimeCliService,
     control::RuntimeControlState,
     photoshop::{PhotoshopIntegrationStatus, PhotoshopMimeType, PluginPhotoshopMessage},
-    project::CanvasVideoToolPaths,
     workbench::{
         ProductUpdateInitiator, RuntimeCliHttpService, RuntimeHttpServiceError,
         RuntimeProductHttpService, WORKBENCH_CONNECTION_HEADER, WORKBENCH_SESSION_COOKIE,
@@ -28,8 +27,11 @@ use debrute_runtime::{
     },
 };
 use reqwest::{
-    blocking::{Client, Response},
-    header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, COOKIE, ORIGIN, SET_COOKIE},
+    blocking::{
+        Client, Response,
+        multipart::{Form, Part},
+    },
+    header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, COOKIE, ORIGIN, SET_COOKIE},
 };
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -1560,13 +1562,13 @@ fn read_canvas_feedback(
 }
 
 #[test]
-fn video_preview_probe_and_ensure_use_frame_source_identity() {
+fn video_preview_source_read_preserves_multiple_moments_for_one_video() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("video-preview-sources");
     let project_root = Path::new(&project.root);
-    let video = project_root.join("clip.png");
+    let video = project_root.join("clip.mp4");
     image::RgbaImage::new(2, 2)
-        .save(&video)
+        .save_with_format(&video, image::ImageFormat::Png)
         .expect("source fixture should be written");
     let client = test_client();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
@@ -1579,12 +1581,12 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
         &cookie,
         &credential,
         &bound,
-        "clip.png",
+        "clip.mp4",
     );
 
     let response = client
         .post(format!(
-            "{}/api/workbench/bindings/{}/canvas-video-previews/probe",
+            "{}/api/workbench/bindings/{}/canvas-video-previews/sources",
             runtime.origin(),
             project.binding_id()
         ))
@@ -1593,9 +1595,17 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
         .json(&json!({
             "targets": [{
-                "projectRelativePath": "clip.png",
+                "projectRelativePath": "clip.mp4",
                 "sourceRevision": source_revision,
                 "frameTimeMs": 0
+            }, {
+                "projectRelativePath": "clip.mp4",
+                "sourceRevision": source_revision,
+                "frameTimeMs": 1250
+            }, {
+                "projectRelativePath": "clip.mp4",
+                "sourceRevision": "sha256:stale",
+                "frameTimeMs": 2500
             }]
         }))
         .send()
@@ -1605,42 +1615,102 @@ fn video_preview_probe_and_ensure_use_frame_source_identity() {
     let body: Value = response
         .json()
         .expect("video preview source response should be JSON");
-    assert!(body["sources"].is_object());
-    assert_eq!(
-        body["sources"]["clip.png"]["projectRelativePath"],
-        "clip.png"
+    assert_eq!(body["sources"].as_array().map(Vec::len), Some(3));
+    assert_eq!(body["sources"][0]["projectRelativePath"], "clip.mp4");
+    assert_eq!(body["sources"][0]["status"], "missing");
+    assert_eq!(body["sources"][0]["frameTimeMs"], 0);
+    assert_eq!(body["sources"][1]["status"], "missing");
+    assert_eq!(body["sources"][1]["frameTimeMs"], 1250);
+    assert_eq!(body["sources"][2]["status"], "error");
+    assert_eq!(body["sources"][2]["frameTimeMs"], 2500);
+
+    let feedback_response = patch_canvas_feedback(
+        &client,
+        &runtime,
+        &format!(
+            "{}/api/workbench/bindings/{}/canvas-feedback",
+            runtime.origin(),
+            project.binding_id()
+        ),
+        (&cookie, &credential),
+        &json!({
+            "operation": "add-item",
+            "projectRelativePath": "clip.mp4",
+            "item": {
+                "id": "video-moment",
+                "createdAt": "2026-08-11T00:00:00.000Z",
+                "kind": "comment",
+                "scope": "moment",
+                "momentTimeSeconds": 0.0,
+                "comment": "browser frame"
+            }
+        }),
     );
-    assert_eq!(body["sources"]["clip.png"]["status"], "needs-source");
-    assert_eq!(
-        body["sources"]["clip.png"]["canonicalSourceIdentity"],
-        "frame-v1--ms-0"
-    );
+    assert_eq!(feedback_response.status().as_u16(), 200);
 
     let response = client
         .post(format!(
-            "{}/api/workbench/bindings/{}/canvas-video-previews/ensure",
+            "{}/api/workbench/bindings/{}/canvas-video-previews/source",
             runtime.origin(),
             project.binding_id()
         ))
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({
-            "target": {
-                "projectRelativePath": "clip.png",
-                "sourceRevision": source_revision,
-                "frameTimeMs": 0
-            },
-            "canonicalSourceIdentity": "stale-source-key"
-        }))
+        .multipart(
+            Form::new()
+                .text(
+                    "metadata",
+                    json!({
+                        "projectRelativePath": "clip.mp4",
+                        "sourceRevision": source_revision.clone(),
+                        "frameTimeMs": 0,
+                        "metadata": { "width": 2, "height": 2, "durationSeconds": 4.0 }
+                    })
+                    .to_string(),
+                )
+                .part(
+                    "source",
+                    Part::bytes(fs::read(&video).unwrap())
+                        .file_name("source.png")
+                        .mime_str("image/png")
+                        .unwrap(),
+                ),
+        )
         .send()
-        .expect("video preview Ensure request should complete");
-
+        .expect("video preview source save should complete");
     assert_eq!(response.status().as_u16(), 200);
     let body: Value = response
         .json()
-        .expect("video preview Ensure response should be JSON");
-    assert_eq!(body["status"], "source-changed");
+        .expect("video preview source save should return JSON");
+    assert_eq!(body["source"]["status"], "available");
+    assert_eq!(body["source"]["sourceWidth"], 2);
+
+    let artifact =
+        project_root.join(".debrute/feedback/artifacts/clip.mp4.moment-M1.annotated.png");
+    for _ in 0..100 {
+        if artifact.is_file() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        artifact.is_file(),
+        "saved browser frame should resume the exact pending Feedback artifact"
+    );
+
+    let response = client
+        .get(format!(
+            "{}/api/workbench/bindings/{}/canvas-video-preview?w=2&frameTimeMs=0&path=clip.mp4&sourceRevision={}",
+            runtime.origin(),
+            project.binding_id(),
+            source_revision,
+        ))
+        .header(COOKIE, &cookie)
+        .send()
+        .expect("saved video preview should resolve");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
 }
 
 fn open_unbound_connection(client: &Client, runtime: &TestRuntime) -> (String, String, SseEvents) {
@@ -1820,7 +1890,6 @@ impl TestRuntime {
         let services = WorkbenchRuntimeServices::compose_for_integration_tests(
             root.join("home"),
             Arc::clone(&state),
-            CanvasVideoToolPaths::for_tests(),
         )
         .expect("Runtime services should compose");
         let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(

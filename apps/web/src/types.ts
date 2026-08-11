@@ -3,14 +3,14 @@ import type {
   CanvasTextPreviewSourceAvailabilityResponse,
   CanvasSourceResolutionRequest,
   CanvasSourceResolutionResponse,
-  CanvasVideoPreviewEnsureRequest,
-  CanvasVideoPreviewEnsureResponse,
-  CanvasVideoPreviewProbeRequest,
-  CanvasVideoPreviewProbeResponse,
+  CanvasVideoPreviewSourceRequest,
+  CanvasVideoPreviewSourceResponse,
   ModelArtifactProvenanceLookup,
   PhotoshopStateView,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
+  SaveCanvasVideoPreviewSourceInput,
+  SaveCanvasVideoPreviewSourceResult,
   WorkbenchProjectSessionSnapshot,
   WorkbenchProjectTextFile,
   WorkbenchProjectTextFileWriteResult,
@@ -79,8 +79,8 @@ export interface WorkbenchActions {
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;
   saveCanvasTextPreviewSource: (input: SaveCanvasTextPreviewSourceInput) => Promise<SaveCanvasTextPreviewSourceResult>;
   readCanvasTextPreviewSources: (input: CanvasTextPreviewSourceAvailabilityRequest) => Promise<CanvasTextPreviewSourceAvailabilityResponse>;
-  probeCanvasVideoPreviewSources: (input: CanvasVideoPreviewProbeRequest, signal?: AbortSignal) => Promise<CanvasVideoPreviewProbeResponse>;
-  ensureCanvasVideoPreviewSource: (input: CanvasVideoPreviewEnsureRequest, signal?: AbortSignal) => Promise<CanvasVideoPreviewEnsureResponse>;
+  readCanvasVideoPreviewSources: (input: CanvasVideoPreviewSourceRequest, signal?: AbortSignal) => Promise<CanvasVideoPreviewSourceResponse>;
+  saveCanvasVideoPreviewSource: (input: SaveCanvasVideoPreviewSourceInput, signal?: AbortSignal) => Promise<SaveCanvasVideoPreviewSourceResult>;
   ensureTextFileBuffer: (projectRelativePath: string) => Promise<void>;
   updateTextFileBuffer: (projectRelativePath: string, content: string) => void;
   saveTextFileBuffer: (projectRelativePath: string) => Promise<void>;

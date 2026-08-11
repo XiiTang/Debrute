@@ -1,17 +1,8 @@
-use std::{
-    collections::BTreeMap,
-    fs,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
+use std::{collections::BTreeMap, fs, sync::Arc, time::Duration};
 
 use uuid::Uuid;
 
 use super::*;
-use crate::workers::RuntimeWorkerServices;
 
 fn relative(path: &str) -> ProjectRelativePath {
     ProjectRelativePath::parse(path).expect("test Project path must be valid")
@@ -28,12 +19,7 @@ fn fixture() -> (
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("visible.txt"), "hello").unwrap();
     fs::create_dir_all(root.join(".debrute/feedback/artifacts")).unwrap();
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new_with_home(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-        &home,
-    ));
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
     let registry = ProjectSessionRegistry::new(
         &home,
@@ -53,28 +39,9 @@ fn available_canvas_workspace(snapshot: &ProjectSnapshot) -> &CanvasWorkspaceDoc
 }
 
 #[derive(Default)]
-struct VideoTextTrackNodeAdapter {
-    video_presentation_calls: AtomicUsize,
-}
+struct VideoTextTrackNodeAdapter;
 
 impl ProjectNodeAdapter for VideoTextTrackNodeAdapter {
-    fn video_presentation(
-        &self,
-        _project_root: &std::path::Path,
-        project_relative_path: &str,
-    ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
-        self.video_presentation_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(
-            (project_relative_path == "clip.mp4").then_some(CanvasVideoPresentation {
-                kind: CanvasVideoPresentationKind::Video,
-                width: 1280,
-                height: 720,
-                duration_seconds: Some(1.0),
-                text_tracks: Vec::new(),
-            }),
-        )
-    }
-
     fn video_text_tracks(
         &self,
         _project_root: &std::path::Path,
@@ -103,7 +70,14 @@ fn resolving_source_target(snapshot: &ProjectSnapshot, path: &str) -> CanvasSour
     else {
         panic!("expected an available Canvas workspace");
     };
-    let resource = canvas_resources
+    resolving_source_target_in_view(canvas_resources, path)
+}
+
+fn resolving_source_target_in_view(
+    resources: &CanvasResourceView,
+    path: &str,
+) -> CanvasSourceTarget {
+    let resource = resources
         .resources
         .iter()
         .find(|resource| resource.project_relative_path() == path)
@@ -140,9 +114,15 @@ fn canvas_resource_media_facts_use_exact_shared_classification() {
         ("image.svg", CanvasMediaKind::Image, "image/svg+xml"),
         ("image.svgz", CanvasMediaKind::Image, "image/svg+xml"),
         ("video.mp4", CanvasMediaKind::Video, "video/mp4"),
+        ("video.mkv", CanvasMediaKind::Video, "video/x-matroska"),
+        ("video.ogv", CanvasMediaKind::Video, "video/ogg"),
+        ("video.avi", CanvasMediaKind::Video, "video/x-msvideo"),
+        ("video.m2ts", CanvasMediaKind::Video, "video/mp2t"),
+        ("video.wmv", CanvasMediaKind::Video, "video/x-ms-wmv"),
+        ("video.3gp", CanvasMediaKind::Video, "video/3gpp"),
         ("video.webm", CanvasMediaKind::Video, "video/webm"),
         ("video.mov", CanvasMediaKind::Video, "video/quicktime"),
-        ("clip.m4v", CanvasMediaKind::Video, "video/x-m4v"),
+        ("clip.m4v", CanvasMediaKind::Video, "video/mp4"),
         ("audio.mp3", CanvasMediaKind::Audio, "audio/mpeg"),
         ("audio.wav", CanvasMediaKind::Audio, "audio/wav"),
         ("audio.wave", CanvasMediaKind::Audio, "audio/wav"),
@@ -211,7 +191,6 @@ fn resolving_a_video_resolves_its_text_track_through_the_shared_source_cache() {
 
     let adapter = Arc::new(VideoTextTrackNodeAdapter::default());
     let mut service = ProjectService::open(&root, &home, adapter.clone()).unwrap();
-    assert_eq!(adapter.video_presentation_calls.load(Ordering::SeqCst), 1);
     let snapshot = service.snapshot();
     let video_target = resolving_source_target(snapshot, "clip.mp4");
     let track_target = resolving_source_target(snapshot, "clip.en.vtt");
@@ -220,7 +199,6 @@ fn resolving_a_video_resolves_its_text_track_through_the_shared_source_cache() {
     let resolved = service
         .resolve_canvas_sources(&[video_target], &source_digests)
         .unwrap();
-    assert_eq!(adapter.video_presentation_calls.load(Ordering::SeqCst), 1);
     assert_eq!(resolved.sources.len(), 1);
     let video = &resolved.sources[0];
     assert_eq!(video.project_relative_path, "clip.mp4");
@@ -344,12 +322,7 @@ fn reset_canvas_returns_the_exact_persistence_failure() {
         crate::global::root_state_directory(&home, &canonical_root).join("canvas.json");
     fs::create_dir_all(&canvas_path).unwrap();
 
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new_with_home(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-        &home,
-    ));
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
     let registry = ProjectSessionRegistry::new(
         &home,
@@ -662,6 +635,115 @@ fn folder_disclosure_canvas_patch_still_publishes_a_complete_project_snapshot() 
 }
 
 #[test]
+fn collapsed_video_with_a_feedback_moment_remains_a_preview_maintenance_resource() {
+    let (base, root, _) = fixture();
+    let home = base.join("feedback-video-maintenance-home");
+    fs::create_dir(root.join("archive")).unwrap();
+    fs::write(root.join("archive/clip.mkv"), b"video").unwrap();
+    let mut service =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    let expand = serde_json::from_value(serde_json::json!({
+        "expandedDirectories": ["archive"]
+    }))
+    .unwrap();
+    service.patch_canvas_state(&expand).unwrap();
+    let feedback = serde_json::from_value(serde_json::json!({
+        "operation": "add-item",
+        "projectRelativePath": "archive/clip.mkv",
+        "item": {
+            "id": "hidden-video-moment",
+            "createdAt": "2026-08-11T00:00:00.000Z",
+            "kind": "comment",
+            "scope": "moment",
+            "momentTimeSeconds": 3.25,
+            "comment": "Keep the exact browser frame."
+        }
+    }))
+    .unwrap();
+    service.update_canvas_feedback(&feedback).unwrap();
+    let collapse = serde_json::from_value(serde_json::json!({
+        "expandedDirectories": []
+    }))
+    .unwrap();
+    service.patch_canvas_state(&collapse).unwrap();
+    let assert_snapshot = |snapshot: &ProjectSnapshot| {
+        let CanvasWorkspaceSnapshot::Available {
+            canvas_resources,
+            feedback_video_resources,
+            ..
+        } = &snapshot.canvas_workspace
+        else {
+            panic!("Canvas Workspace must remain available");
+        };
+        assert!(
+            canvas_resources
+                .resources
+                .iter()
+                .all(|resource| resource.project_relative_path() != "archive/clip.mkv")
+        );
+        let resource = feedback_video_resources
+            .resources
+            .iter()
+            .find(|resource| resource.project_relative_path() == "archive/clip.mkv")
+            .expect("collapsed Feedback video must remain available for exact frame maintenance");
+        assert!(matches!(
+            resource,
+            CanvasResource::File {
+                media_kind: CanvasMediaKind::Video,
+                availability,
+                ..
+            } if matches!(availability.as_ref(), CanvasNodeAvailability::Resolving { .. })
+        ));
+    };
+    assert_snapshot(service.snapshot());
+    drop(service);
+    let mut reopened =
+        ProjectService::open(&root, &home, Arc::new(DefaultProjectNodeAdapter)).unwrap();
+    assert_snapshot(reopened.snapshot());
+    let CanvasWorkspaceSnapshot::Available {
+        feedback_video_resources,
+        ..
+    } = &reopened.snapshot().canvas_workspace
+    else {
+        panic!("Canvas Workspace must remain available");
+    };
+    let hidden_target =
+        resolving_source_target_in_view(feedback_video_resources, "archive/clip.mkv");
+    let source_digests = ProjectSourceDigestResolver::default();
+    let hidden_source = reopened
+        .resolve_canvas_sources(&[hidden_target], &source_digests)
+        .unwrap();
+    assert!(matches!(
+        hidden_source.sources.as_slice(),
+        [CanvasResolvedSource {
+            availability: CanvasNodeAvailability::Available { .. },
+            video_text_tracks: None,
+            ..
+        }]
+    ));
+
+    let expand = serde_json::from_value(serde_json::json!({
+        "expandedDirectories": ["archive"]
+    }))
+    .unwrap();
+    reopened.patch_canvas_state(&expand).unwrap();
+    let visible_target = resolving_source_target(reopened.snapshot(), "archive/clip.mkv");
+    let visible_source = reopened
+        .resolve_canvas_sources(&[visible_target], &source_digests)
+        .unwrap();
+    assert!(matches!(
+        visible_source.sources.as_slice(),
+        [CanvasResolvedSource {
+            availability: CanvasNodeAvailability::Available { .. },
+            video_text_tracks: Some(tracks),
+            ..
+        }] if tracks.is_empty()
+    ));
+    drop(reopened);
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn confirmed_external_replacement_prunes_sparse_canvas_state() {
     let base = std::env::temp_dir().join(format!("debrute-project-{}", Uuid::new_v4()));
     let home = base.join("home");
@@ -901,12 +983,7 @@ fn text_files_larger_than_two_mib_are_read_and_written_in_full() {
 fn rename_rewrites_accepted_feedback_and_both_working_copy_kinds() {
     let (base, root, _) = fixture();
     let home = base.join("home-path-identity");
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new_with_home(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-        &home,
-    ));
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
     let feedback_artifacts = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
     let working_copies = Arc::new(crate::workbench::WorkingCopyStore::new(&home));
     let registry = ProjectSessionRegistry::with_change_callback_and_path_state(
@@ -1041,12 +1118,7 @@ fn runtime_path_reconciliation_prunes_a_concurrently_missing_sibling() {
 fn watcher_confirmed_deletion_prunes_both_working_copy_kinds() {
     let (base, root, _) = fixture();
     let home = base.join("home-watcher-path-identity");
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new_with_home(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-        &home,
-    ));
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
     let feedback_artifacts = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
     let working_copies = Arc::new(crate::workbench::WorkingCopyStore::new(&home));
     let registry = ProjectSessionRegistry::with_change_callback_and_path_state(
@@ -1110,12 +1182,7 @@ fn watcher_confirmed_deletion_prunes_both_working_copy_kinds() {
 fn watcher_deletion_prunes_working_copies_when_secondary_persistence_fails() {
     let (base, root, _) = fixture();
     let home = base.join("home-watcher-canvas-persistence-failure");
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new_with_home(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-        &home,
-    ));
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
     let feedback_artifacts = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
     let working_copies = Arc::new(crate::workbench::WorkingCopyStore::new(&home));
     let registry = ProjectSessionRegistry::with_change_callback_and_path_state(
@@ -1266,12 +1333,7 @@ impl ProjectPathStateReconciler for FailingPathStateReconciler {
 fn watcher_path_state_failure_is_reported_on_the_watcher_revision() {
     let (base, root, _) = fixture();
     let home = base.join("home-watcher-reconcile-failure");
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new_with_home(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-        &home,
-    ));
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
     let registry = ProjectSessionRegistry::with_change_callback_and_path_state(
         &home,
@@ -1309,12 +1371,7 @@ fn watcher_path_state_failure_is_reported_on_the_watcher_revision() {
 fn committed_path_operation_survives_working_copy_reconcile_failure() {
     let (base, root, _) = fixture();
     let home = base.join("home-reconcile-failure");
-    let workers = RuntimeWorkerServices::new();
-    let previews = Arc::new(ProjectPreviewService::new_with_home(
-        &workers,
-        CanvasVideoToolPaths::for_tests(),
-        &home,
-    ));
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
     let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
     let registry = ProjectSessionRegistry::with_change_callback_and_path_state(
         &home,

@@ -63,7 +63,6 @@ pub struct ProductStore {
 pub struct ValidatedRunningProduct {
     directory: PathBuf,
     version: String,
-    manifest: ProductManifest,
 }
 
 impl ValidatedRunningProduct {
@@ -75,16 +74,6 @@ impl ValidatedRunningProduct {
     #[must_use]
     pub fn version(&self) -> &str {
         &self.version
-    }
-
-    #[must_use]
-    pub fn canvas_video_executables(&self) -> [PathBuf; 2] {
-        [
-            self.directory
-                .join(&self.manifest.runtime_dependencies.canvas_video.ffmpeg),
-            self.directory
-                .join(&self.manifest.runtime_dependencies.canvas_video.ffprobe),
-        ]
     }
 }
 
@@ -375,12 +364,8 @@ impl ProductStore {
                 current,
             });
         }
-        let manifest = self.validate_version_unlocked(&version)?;
-        Ok(ValidatedRunningProduct {
-            directory,
-            version,
-            manifest,
-        })
+        self.validate_version_unlocked(&version)?;
+        Ok(ValidatedRunningProduct { directory, version })
     }
 
     /// Materializes the exact seed carried by an already installed Desktop and
@@ -1248,12 +1233,7 @@ fn validate_product_directory(
     if manifest.platform == ProductPlatform::Macos {
         use std::os::unix::fs::PermissionsExt as _;
 
-        for executable in [
-            &manifest.entrypoints.runtime,
-            &manifest.entrypoints.cli,
-            &manifest.runtime_dependencies.canvas_video.ffmpeg,
-            &manifest.runtime_dependencies.canvas_video.ffprobe,
-        ] {
+        for executable in [&manifest.entrypoints.runtime, &manifest.entrypoints.cli] {
             if fs::metadata(root.join(executable))?.permissions().mode() & 0o111 == 0 {
                 return Err(ProductStoreError::ProductExecutableNotExecutable(
                     executable.clone(),

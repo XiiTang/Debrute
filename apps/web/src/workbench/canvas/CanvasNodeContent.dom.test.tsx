@@ -68,7 +68,12 @@ const previewOrder: CanvasPreviewOrderSource = {
   getPreviewOrderSnapshot: () => previewOrderSnapshot,
   subscribePreviewOrder: () => () => undefined
 };
-const sourceNodeReader = { getNode: () => undefined };
+const sourceNodeReader = {
+  getNode: () => undefined,
+  getResolvedSource: () => undefined,
+  getSourceVersion: () => 0,
+  subscribeSources: () => () => undefined
+};
 
 function CanvasNodeContent(
   props: Omit<CanvasNodeContentProps, 'onContentError'> & {
@@ -1077,12 +1082,10 @@ function videoNode(path: string, revision: string): ProjectedCanvasNode {
       fileUrl: `/api/workbench/bindings/p/files/raw/${path}?v=${revision}`,
       revision
     },
-    videoPresentation: {
-      kind: 'video',
+    videoMetadata: {
       width: 640,
       height: 360,
-      durationSeconds: 12,
-      textTracks: []
+      durationSeconds: 12
     }
   };
 }

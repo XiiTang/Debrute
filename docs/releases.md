@@ -11,8 +11,8 @@ x64.
 
 The Product Installer contains one versioned Product seed: Rust Runtime and
 `debrute` CLI binaries, official Skills, Web workbench resources, declared
-native workers, the target's pinned Raster Preview native libraries, the
-Product-owned Canvas video tools, and a strict Product manifest. Runtime-owned
+native workers, the target's pinned Raster Preview native libraries, and a
+strict Product manifest. Runtime-owned
 installation validates the seed,
 installs it under the current user's Product root, publishes stable Runtime and
 CLI entrypoints, exposes the CLI in the user's command environment, replaces
@@ -54,15 +54,14 @@ Clippy to product libraries and binaries. Developers and agents run
 `pnpm verify:all` once after review before starting release work.
 
 Product assembly creates one strict Product seed containing Runtime and CLI,
-declared native workers, the target's checksum-pinned libvips and Canvas video
-payloads, official Skills, Web assets, and their hashes. Model definitions and
+declared native workers, the target's checksum-pinned libvips payload, official
+Skills, Web assets, and their hashes. Model definitions and
 manuals are compiled
 into Runtime rather than copied into a separate packaged documentation tree. On
-macOS, the Runtime executable, libvips payload, and Canvas video tools live
+macOS, the Runtime executable and libvips payload live
 inside an `LSUIElement` Runtime application bundle; both Runtime and the
 adjacent CLI load the signed libvips library. Windows keeps its libvips DLLs
-beside the Runtime and CLI and its Canvas video tools in a private Runtime
-subdirectory. Product installation materializes an exact validated version under
+beside the Runtime and CLI. Product installation materializes an exact validated version under
 `~/.debrute/products/versions/<version>` and selects it through `current`;
 macOS Runtime and CLI wrappers live under `~/.debrute/bin/`. Windows keeps the
 stable Runtime at `~/.debrute/products/current/runtime/debrute-runtime.exe` and
@@ -74,26 +73,11 @@ also removes stale exact `.debrute-projection-<canonical-uuid>` transaction
 directories before publication; all other Skill names are preserved. Runtime
 exposes any validation or materialization failure through Product status.
 
-The Product manifest schema is version 2. Its closed `runtimeDependencies`
-object names the exact Product-relative `ffmpeg`, `ffprobe`, license, notices,
-build configuration, and source notice paths. Assembly hashes all seven payload
-files, including `versions.json`; Product validation rejects a missing,
-undeclared, changed, or non-executable tool before selection. Runtime converts
-the manifest paths to absolute paths and never searches `PATH`, a package
-manager, or a user installation.
-
-`assets/canvas-video-tools-lock.json` pins one official FFmpeg 8.1.2 source
-archive, SHA-256, signing-key identity, LGPL-only configuration, and the macOS
-arm64, macOS x64, and Windows x64 target matrix. The release workflow builds one
-payload per target from that source, validates its closed inventory and
-executable version output on its native target, and supplies it to the matching
-Desktop job. macOS signs `ffmpeg` and `ffprobe` before rebuilding and signing the
-Runtime application. Windows release checks include both executables in the
-intentional Authenticode-unsigned assertion. These binaries are private Product
-dependencies, not public release assets or user-managed tools. Each Debrute
-release separately attaches the exact verified upstream FFmpeg source archive
-used for all three builds; that compliance asset is public but is not part of
-the signed Runtime update manifest.
+The Product manifest schema is version 3. Its closed root declares Product
+identity, platform, architecture, entrypoints, and the complete hashed file
+inventory. It has no runtime-dependency object: browser video decoding is part
+of the packaged Workbench engine, while libvips remains an inventoried native
+Product file rather than an executable dependency declaration.
 
 The Product seed is the only packaged owner of Workbench Web assets. Desktop
 assembly consumes the complete current `apps/web/dist` output directly and
@@ -253,7 +237,6 @@ debrute-installer-X.Y.Z-windows-x64.exe
 debrute-product-X.Y.Z-macos-arm64.zip
 debrute-product-X.Y.Z-macos-x64.zip
 debrute-product-X.Y.Z-windows-x64.zip
-ffmpeg-8.1.2.tar.xz
 debrute-update-manifest.json
 debrute-update-manifest.json.sig
 ```
@@ -332,9 +315,8 @@ shasum -a 256 debrute-installer-X.Y.Z-macos-arm64.dmg
 ## Release Workflow
 
 The tag-triggered workflow first validates versions and runs doctor, type
-checking, tests, and architecture lint. Separate required jobs build the pinned
-Canvas video payload for each supported target; required Desktop matrix jobs
-then build both macOS architectures and Windows x64. macOS jobs require signing and
+checking, tests, and architecture lint. Required Desktop matrix jobs build both
+macOS architectures and Windows x64. macOS jobs require signing and
 notarization credentials and must pass the repository signing verifier before
 their artifacts can reach the publish job.
 
@@ -391,10 +373,8 @@ watcher backend, while this native release gate retains explicit
 production-wiring evidence on both macOS architectures and Windows.
 
 The publish job requires three Product Installers, three complete Product
-archives, the exact checksum-verified FFmpeg source archive, and the signed
-manifest pair. It downloads only those release-artifact namespaces and rejects
-any unexpected or duplicate name. A missing required nine-file contract
-prevents publication. The expected nine-file list is also the complete allowed
-list; release publication has no separate permissive asset set. The source
-archive is intentionally outside the six-asset signed updater payload because
-it is a public compliance artifact, not a Runtime installation input.
+archives, and the signed manifest pair. It downloads only those release-artifact
+namespaces and rejects any unexpected or duplicate name. A missing required eight-file
+contract prevents publication. The expected eight-file list is also
+the complete allowed list; release publication has no separate permissive asset
+set.

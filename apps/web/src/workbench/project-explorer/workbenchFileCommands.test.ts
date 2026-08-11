@@ -171,7 +171,8 @@ function snapshotWithFiles(paths: string[]): WorkbenchProjectSessionSnapshot {
         nodeStates: {},
         occlusionOrder: []
       },
-      canvasResources: { resources: [] }
+      canvasResources: { resources: [] },
+      feedbackVideoResources: { resources: [] }
     },
     projectTree: paths.map((projectRelativePath) => ({
       projectRelativePath,

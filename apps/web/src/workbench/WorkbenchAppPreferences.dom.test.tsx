@@ -1375,7 +1375,8 @@ function snapshotFixture(
         nodeStates: {},
         occlusionOrder: []
       },
-      canvasResources: { resources: [] }
+      canvasResources: { resources: [] },
+      feedbackVideoResources: { resources: [] }
     },
     projectTree: [],
     diagnostics: [],
@@ -1404,6 +1405,9 @@ function hierarchyCanvasSnapshotFixture(): WorkbenchProjectSessionSnapshot {
           { projectRelativePath: '', nodeKind: 'directory' },
           { projectRelativePath: 'folder', nodeKind: 'directory' }
         ]
+      },
+      feedbackVideoResources: {
+        resources: []
       }
     }
   };

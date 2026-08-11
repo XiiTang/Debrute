@@ -22,11 +22,10 @@ use std::fs;
 pub use raster::{RasterMetadata, RasterOutputFormat};
 pub use video::*;
 
-use crate::{process::ProcessCancellation, workers::RuntimeWorkerServices};
+use crate::process::ProcessCancellation;
 
 use super::{
-    CanvasImageDimensions, CanvasImagePreviewInfo, CanvasVideoPresentation,
-    CanvasVideoPresentationKind, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
+    CanvasImageDimensions, CanvasImagePreviewInfo, CanvasVideoTextTrack, CanvasVideoTextTrackKind,
     ProjectCapabilityFs, ProjectDirectoryPath, ProjectError, ProjectNodeAdapter,
     ProjectRelativePath, ProjectSourceLease, assert_project_tree_visible_path,
     open_no_symlink_existing_project_file, resolve_no_symlink_existing_project_path,
@@ -123,26 +122,6 @@ impl NativeProjectNodeAdapter {
 }
 
 impl ProjectNodeAdapter for NativeProjectNodeAdapter {
-    fn video_presentation(
-        &self,
-        project_root: &Path,
-        project_relative_path: &str,
-    ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
-        let project_relative_path = ProjectRelativePath::parse(project_relative_path)?;
-        let metadata = self.previews.video.read_project_metadata(
-            project_root,
-            &project_relative_path,
-            &PreviewCancellation::default(),
-        )?;
-        Ok(Some(CanvasVideoPresentation {
-            kind: CanvasVideoPresentationKind::Video,
-            width: metadata.width,
-            height: metadata.height,
-            duration_seconds: metadata.duration_seconds,
-            text_tracks: Vec::new(),
-        }))
-    }
-
     fn video_text_tracks(
         &self,
         project_root: &Path,
@@ -175,20 +154,14 @@ impl ProjectNodeAdapter for NativeProjectNodeAdapter {
 impl ProjectPreviewService {
     #[cfg(test)]
     #[must_use]
-    pub fn new(workers: &RuntimeWorkerServices, media_tools: CanvasVideoToolPaths) -> Self {
+    pub fn new() -> Self {
         Self::new_with_home(
-            workers,
-            media_tools,
             std::env::temp_dir().join(format!("debrute-preview-home-{}", uuid::Uuid::new_v4())),
         )
     }
 
     #[must_use]
-    pub fn new_with_home(
-        workers: &RuntimeWorkerServices,
-        media_tools: CanvasVideoToolPaths,
-        debrute_home: impl Into<PathBuf>,
-    ) -> Self {
+    pub fn new_with_home(debrute_home: impl Into<PathBuf>) -> Self {
         let debrute_home = debrute_home.into();
         let raster_pool = Arc::new(Semaphore::new(3));
         let raster_variants = Arc::new(RasterPreviewVariantService::new(Arc::clone(&raster_pool)));
@@ -196,12 +169,7 @@ impl ProjectPreviewService {
             debrute_home: debrute_home.clone(),
             raster_variants: Arc::clone(&raster_variants),
             raster_pool: Arc::clone(&raster_pool),
-            video: CanvasVideoPreviewService::new(
-                workers.supervisor(),
-                media_tools,
-                raster_variants,
-                debrute_home,
-            ),
+            video: CanvasVideoPreviewService::new(raster_variants, debrute_home),
         }
     }
 
@@ -786,10 +754,7 @@ mod tests {
 
     #[test]
     fn raster_preview_pool_admits_three_jobs_and_holds_the_fourth() {
-        let service = Arc::new(ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        ));
+        let service = Arc::new(ProjectPreviewService::new());
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
         let (entered_sender, entered_receiver) = mpsc::channel();
         let mut workers = Vec::new();
@@ -864,10 +829,7 @@ mod tests {
     fn image_preview_is_revision_bound_and_deterministic() {
         let root = fixture();
         let lease = source_lease(&root, "assets/source.png");
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        );
+        let service = ProjectPreviewService::new();
         let result = service
             .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
             .unwrap();
@@ -896,10 +858,7 @@ mod tests {
         let root = fixture();
         let source_path = root.join("assets/source.png");
         let lease = source_lease(&root, "assets/source.png");
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        );
+        let service = ProjectPreviewService::new();
 
         let mut result = service
             .resolve_image_preview_lease(&lease, 8, &PreviewCancellation::default())
@@ -921,10 +880,7 @@ mod tests {
             .save_with_format(&source_path, image::ImageFormat::Tiff)
             .unwrap();
         let lease = source_lease(&root, "assets/source.tiff");
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        );
+        let service = ProjectPreviewService::new();
 
         let result = service
             .resolve_image_preview_lease(&lease, 8, &PreviewCancellation::default())
@@ -952,10 +908,7 @@ mod tests {
             .save(&source_path)
             .unwrap();
         let lease = source_lease(&root, "assets/panorama.png");
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        );
+        let service = ProjectPreviewService::new();
 
         let result = service
             .resolve_image_preview_lease(&lease, 8_500, &PreviewCancellation::default())
@@ -971,10 +924,7 @@ mod tests {
         let source_path = root.join("assets/large.jpg");
         write_solid_jpeg(&source_path, 5_000, 4_000);
         let lease = source_lease(&root, "assets/large.jpg");
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        );
+        let service = ProjectPreviewService::new();
         assert_eq!(
             service
                 .image_source_info(&root, "assets/large.jpg")
@@ -1032,10 +982,7 @@ mod tests {
     #[test]
     fn text_preview_source_and_variant_use_complete_identity() {
         let root = fixture();
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        );
+        let service = ProjectPreviewService::new();
         let target = CanvasTextPreviewSourceTarget {
             project_relative_path: "notes/title.md".to_owned(),
             target_identity: "style:one".to_owned(),
@@ -1063,10 +1010,7 @@ mod tests {
     #[test]
     fn intrinsic_text_preview_width_returns_the_canonical_source() {
         let root = fixture();
-        let service = ProjectPreviewService::new(
-            &RuntimeWorkerServices::new(),
-            CanvasVideoToolPaths::for_tests(),
-        );
+        let service = ProjectPreviewService::new();
         let target = CanvasTextPreviewSourceTarget {
             project_relative_path: "notes/title.md".to_owned(),
             target_identity: "style:direct".to_owned(),
@@ -1096,12 +1040,7 @@ mod tests {
         let root = fixture();
         let home = std::env::temp_dir().join(format!("debrute-preview-home-{}", Uuid::new_v4()));
         let source_path = root.join("assets/source.png");
-        let workers = RuntimeWorkerServices::new();
-        let service = ProjectPreviewService::new_with_home(
-            &workers,
-            CanvasVideoToolPaths::for_tests(),
-            &home,
-        );
+        let service = ProjectPreviewService::new_with_home(&home);
         let lease = source_lease(&root, "assets/source.png");
         let first_revision = lease.revision().to_owned();
         let preview = service
@@ -1137,8 +1076,7 @@ mod tests {
     fn image_cache_hit_still_validates_the_current_source_snapshot() {
         let root = fixture();
         let source_path = root.join("assets/source.png");
-        let workers = RuntimeWorkerServices::new();
-        let service = ProjectPreviewService::new(&workers, CanvasVideoToolPaths::for_tests());
+        let service = ProjectPreviewService::new();
         let lease = source_lease(&root, "assets/source.png");
         drop(
             service
@@ -1174,12 +1112,7 @@ mod tests {
         }
         fs::create_dir_all(cache.parent().unwrap()).unwrap();
         symlink(&external, &cache).unwrap();
-        let workers = RuntimeWorkerServices::new();
-        let service = ProjectPreviewService::new_with_home(
-            &workers,
-            CanvasVideoToolPaths::for_tests(),
-            &home,
-        );
+        let service = ProjectPreviewService::new_with_home(&home);
         assert!(service.clear_image_cache(&root).is_ok());
         assert!(external.join("must-survive").is_file());
         assert!(!cache.exists());

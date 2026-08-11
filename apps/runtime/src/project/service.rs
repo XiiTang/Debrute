@@ -11,10 +11,10 @@ use std::{
 
 use super::{
     CanonicalProjectRoot, CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument,
-    CanvasImageDimensions, CanvasMediaKind, CanvasNodeAvailability, CanvasNodeStateChange,
-    CanvasResolvedSource, CanvasResource, CanvasResourceView, CanvasSourceResolutionView,
-    CanvasSourceTarget, CanvasState, CanvasStateChange, CanvasStatePatch, CanvasStatePatchOutcome,
-    CanvasVideoPresentation, CanvasVideoTextTrack, CanvasWorkspaceDocument,
+    CanvasFeedbackEntry, CanvasImageDimensions, CanvasMediaKind, CanvasNodeAvailability,
+    CanvasNodeStateChange, CanvasResolvedSource, CanvasResource, CanvasResourceView,
+    CanvasSourceResolutionView, CanvasSourceTarget, CanvasState, CanvasStateChange,
+    CanvasStatePatch, CanvasStatePatchOutcome, CanvasVideoTextTrack, CanvasWorkspaceDocument,
     CanvasWorkspaceSnapshot, CanvasWorkspaceStore, CanvasWorkspaceUnavailable, ProjectCapabilityFs,
     ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectDirectoryPath,
     ProjectError, ProjectHealthSummary, ProjectPathKind, ProjectRelativePath, ProjectSnapshot,
@@ -27,16 +27,16 @@ use super::{
     update_canvas_feedback_document, visible_canvas_entries, write_canvas_feedback_document,
 };
 
-type CanvasNodeAdapterData = (
-    Option<CanvasImagePreviewInfo>,
-    Option<CanvasVideoPresentation>,
-);
+type CanvasNodeAdapterData = Option<CanvasImagePreviewInfo>;
 
-fn resolved_canvas_source(source_token: String, resource: &CanvasResource) -> CanvasResolvedSource {
+fn resolved_canvas_source(
+    source_token: String,
+    resource: &CanvasResource,
+    video_text_tracks: Option<Vec<CanvasVideoTextTrack>>,
+) -> CanvasResolvedSource {
     let CanvasResource::File {
         project_relative_path,
         availability,
-        video_presentation,
         ..
     } = resource
     else {
@@ -46,9 +46,7 @@ fn resolved_canvas_source(source_token: String, resource: &CanvasResource) -> Ca
         source_token,
         project_relative_path: project_relative_path.clone(),
         availability: availability.as_ref().clone(),
-        video_text_tracks: video_presentation
-            .as_ref()
-            .map(|presentation| presentation.text_tracks.clone()),
+        video_text_tracks,
     }
 }
 
@@ -65,6 +63,7 @@ struct CachedCanvasFileInspection {
     modified: SystemTime,
     source_token: String,
     resource: CanvasResource,
+    video_text_tracks: Option<Vec<CanvasVideoTextTrack>>,
 }
 
 #[derive(Debug)]
@@ -150,17 +149,6 @@ pub(crate) struct SnapshotLoadCheckpoint {
 }
 
 pub trait ProjectNodeAdapter: Send + Sync {
-    /// # Errors
-    ///
-    /// Returns an error when video metadata cannot be inspected.
-    fn video_presentation(
-        &self,
-        _project_root: &Path,
-        _project_relative_path: &str,
-    ) -> Result<Option<CanvasVideoPresentation>, ProjectError> {
-        Ok(None)
-    }
-
     /// Discovers text tracks only after the exact saved-file video source has been resolved.
     ///
     /// # Errors
@@ -244,6 +232,9 @@ impl ProjectService {
             Ok(workspace) => CanvasWorkspaceSnapshot::Available {
                 workspace: workspace.clone(),
                 canvas_resources: CanvasResourceView {
+                    resources: Vec::new(),
+                },
+                feedback_video_resources: CanvasResourceView {
                     resources: Vec::new(),
                 },
             },
@@ -844,17 +835,21 @@ impl ProjectService {
         invalidated_paths: &HashSet<String>,
         refresh_feedback: bool,
     ) -> Result<ProjectSnapshot, ProjectError> {
-        let mut diagnostics = Vec::new();
         if refresh_feedback {
             let state = read_canvas_feedback_state(&self.root, crate::now_rfc3339())?;
             self.feedback_document = state.document;
             self.feedback_hash = state.content_hash;
         }
+        let feedback_directories = feedback_video_directory_closure(&self.feedback_document);
+        let feedback_tree_change = self.project_tree.load_directories(&feedback_directories)?;
+        let mut snapshot_invalidated_paths = invalidated_paths.clone();
+        snapshot_invalidated_paths.extend(self.apply_project_tree_change(&feedback_tree_change)?);
+        let mut diagnostics = Vec::new();
         diagnostics.extend(self.feedback_render_diagnostics.values().cloned());
         diagnostics.extend(self.path_state_diagnostic.iter().cloned());
         let project_tree = self.project_tree.ordered_entries();
         self.inspection_cache.retain(|path, _| {
-            !invalidated_paths
+            !snapshot_invalidated_paths
                 .iter()
                 .any(|invalidated| super::project_path_is_same_or_descendant(path, invalidated))
                 && project_tree
@@ -863,13 +858,50 @@ impl ProjectService {
         });
         let canvas_workspace = match self.canvas_workspace.clone() {
             Ok(workspace) => {
-                let resources = visible_canvas_entries(&project_tree, &workspace.state)
+                let visible_entries = visible_canvas_entries(&project_tree, &workspace.state);
+                let visible_videos_needing_player_resolution = visible_entries
                     .iter()
+                    .filter_map(|entry| {
+                        let cached = self.inspection_cache.get(&entry.project_relative_path)?;
+                        (cached.video_text_tracks.is_none()
+                            && matches!(
+                                &cached.resource,
+                                CanvasResource::File {
+                                    media_kind: CanvasMediaKind::Video,
+                                    availability,
+                                    ..
+                                } if matches!(
+                                    availability.as_ref(),
+                                    CanvasNodeAvailability::Available { .. }
+                                )
+                            ))
+                        .then_some(entry.project_relative_path.clone())
+                    })
+                    .collect::<Vec<_>>();
+                for path in visible_videos_needing_player_resolution {
+                    self.inspection_cache.remove(&path);
+                }
+                let resources = visible_entries
+                    .iter()
+                    .map(|entry| self.canvas_resource(entry))
+                    .collect();
+                let feedback_video_paths = feedback_video_paths(&self.feedback_document);
+                let feedback_video_resources = project_tree
+                    .iter()
+                    .filter(|entry| {
+                        entry.kind == ProjectPathKind::File
+                            && feedback_video_paths.contains(&entry.project_relative_path)
+                            && canvas_media_kind_from_path(&entry.project_relative_path)
+                                == CanvasMediaKind::Video
+                    })
                     .map(|entry| self.canvas_resource(entry))
                     .collect();
                 CanvasWorkspaceSnapshot::Available {
                     workspace,
                     canvas_resources: CanvasResourceView { resources },
+                    feedback_video_resources: CanvasResourceView {
+                        resources: feedback_video_resources,
+                    },
                 }
             }
             Err(unavailable) => CanvasWorkspaceSnapshot::Unavailable {
@@ -978,6 +1010,7 @@ impl ProjectService {
                 modified,
                 source_token,
                 resource: resource.clone(),
+                video_text_tracks: None,
             },
         );
         resource
@@ -1015,7 +1048,7 @@ impl ProjectService {
                 );
             }
         };
-        let (preview, presentation) = match self.inspect_node_adapter_data(&relative, media_kind) {
+        let preview = match self.inspect_node_adapter_data(&relative, media_kind) {
             Ok(adapter) => adapter,
             Err(availability) => {
                 return unavailable_canvas_file_resource(entry, media_kind, availability);
@@ -1034,14 +1067,12 @@ impl ProjectService {
             }),
             image_dimensions: preview.and_then(|preview| preview.dimensions),
             text_language,
-            video_presentation: presentation,
         }
     }
 
     fn resolve_canvas_file_descriptor(
         &self,
         entry: &ProjectTreeEntry,
-        project_relative_path: &ProjectRelativePath,
         descriptor: &CanvasResource,
         revision: String,
     ) -> CanvasResource {
@@ -1050,7 +1081,6 @@ impl ProjectService {
             availability,
             image_dimensions,
             text_language,
-            video_presentation,
             ..
         } = descriptor
         else {
@@ -1066,24 +1096,6 @@ impl ProjectService {
         else {
             return descriptor.clone();
         };
-        let mut video_presentation = video_presentation.clone();
-        if let Some(presentation) = &mut video_presentation {
-            presentation.text_tracks = match self
-                .node_adapter
-                .video_text_tracks(&self.root, project_relative_path)
-            {
-                Ok(tracks) => tracks,
-                Err(error) => {
-                    return unavailable_canvas_file_resource(
-                        entry,
-                        *media_kind,
-                        CanvasNodeAvailability::Unreadable {
-                            message: error.to_string(),
-                        },
-                    );
-                }
-            };
-        }
         CanvasResource::File {
             project_relative_path: entry.project_relative_path.clone(),
             media_kind: *media_kind,
@@ -1097,7 +1109,6 @@ impl ProjectService {
             }),
             image_dimensions: *image_dimensions,
             text_language: text_language.clone(),
-            video_presentation,
         }
     }
 
@@ -1112,19 +1123,23 @@ impl ProjectService {
         let mut sources = Vec::with_capacity(targets.len());
         for target in targets {
             let path = target.project_relative_path.as_str();
+            let source_is_visible = self
+                .canvas_workspace
+                .as_ref()
+                .is_ok_and(|workspace| canvas_path_is_visible(path, &workspace.state));
+            let source_is_feedback_maintenance =
+                is_feedback_video_path(&self.feedback_document, path);
             let entry = self
                 .project_tree
                 .entry(path)
-                .filter(|_| {
-                    self.canvas_workspace
-                        .as_ref()
-                        .is_ok_and(|workspace| canvas_path_is_visible(path, &workspace.state))
-                })
+                .filter(|_| source_is_visible || source_is_feedback_maintenance)
                 .cloned()
                 .ok_or_else(|| {
                     ProjectError::service(
-                        "canvas_source_not_visible",
-                        format!("Canvas source is not in the current Folder Disclosure: {path}"),
+                        "canvas_source_not_projected",
+                        format!(
+                            "Canvas source is not in the current visible or Feedback maintenance resources: {path}"
+                        ),
                     )
                 })?;
             if entry.kind != ProjectPathKind::File {
@@ -1146,16 +1161,39 @@ impl ProjectService {
                 ));
             }
             let descriptor = cached.resource.clone();
+            let cached_video_text_tracks = cached.video_text_tracks.clone();
             if matches!(
-                &cached.resource,
+                &descriptor,
                 CanvasResource::File {
                     availability,
                     ..
                 } if matches!(availability.as_ref(), CanvasNodeAvailability::Available { .. })
             ) {
+                let media_kind = match &descriptor {
+                    CanvasResource::File { media_kind, .. } => *media_kind,
+                    CanvasResource::Directory { .. } => unreachable!("a source target is a file"),
+                };
+                let video_text_tracks = if source_is_visible
+                    && media_kind == CanvasMediaKind::Video
+                    && cached_video_text_tracks.is_none()
+                {
+                    let tracks = self.resolve_video_text_track_sources(
+                        &target.project_relative_path,
+                        media_kind,
+                        source_digests,
+                    )?;
+                    self.inspection_cache
+                        .get_mut(path)
+                        .expect("the resolved Canvas source remains cached")
+                        .video_text_tracks = tracks.clone();
+                    tracks
+                } else {
+                    cached_video_text_tracks
+                };
                 sources.push(resolved_canvas_source(
                     target.source_token.clone(),
-                    &cached.resource,
+                    &descriptor,
+                    video_text_tracks,
                 ));
                 continue;
             }
@@ -1178,13 +1216,8 @@ impl ProjectService {
                 CanvasResource::File { media_kind, .. } => *media_kind,
                 CanvasResource::Directory { .. } => unreachable!("a source target is a file"),
             };
-            let mut resource = match source_digests.resolve(&mut file) {
-                Ok(revision) => self.resolve_canvas_file_descriptor(
-                    &entry,
-                    &target.project_relative_path,
-                    &descriptor,
-                    revision,
-                ),
+            let resource = match source_digests.resolve(&mut file) {
+                Ok(revision) => self.resolve_canvas_file_descriptor(&entry, &descriptor, revision),
                 Err(error) => unavailable_canvas_file_resource(
                     &entry,
                     media_kind,
@@ -1193,7 +1226,15 @@ impl ProjectService {
                     },
                 ),
             };
-            self.resolve_video_text_track_sources(&mut resource, source_digests)?;
+            let video_text_tracks = if source_is_visible {
+                self.resolve_video_text_track_sources(
+                    &target.project_relative_path,
+                    media_kind,
+                    source_digests,
+                )?
+            } else {
+                None
+            };
             self.inspection_cache.insert(
                 path.to_owned(),
                 CachedCanvasFileInspection {
@@ -1202,11 +1243,13 @@ impl ProjectService {
                     modified,
                     source_token: target.source_token.clone(),
                     resource: resource.clone(),
+                    video_text_tracks: video_text_tracks.clone(),
                 },
             );
             sources.push(resolved_canvas_source(
                 target.source_token.clone(),
                 &resource,
+                video_text_tracks,
             ));
         }
         Ok(CanvasSourceResolutionView { sources })
@@ -1214,22 +1257,22 @@ impl ProjectService {
 
     fn resolve_video_text_track_sources(
         &mut self,
-        resource: &mut CanvasResource,
+        project_relative_path: &ProjectRelativePath,
+        media_kind: CanvasMediaKind,
         source_digests: &ProjectSourceDigestResolver,
-    ) -> Result<(), ProjectError> {
-        let track_paths = match resource {
-            CanvasResource::File {
-                video_presentation: Some(presentation),
-                ..
-            } => presentation
-                .text_tracks
-                .iter()
-                .map(|track| track.project_relative_path.clone())
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
+    ) -> Result<Option<Vec<CanvasVideoTextTrack>>, ProjectError> {
+        if media_kind != CanvasMediaKind::Video {
+            return Ok(None);
+        }
+        let mut tracks = self
+            .node_adapter
+            .video_text_tracks(&self.root, project_relative_path)?;
+        let track_paths = tracks
+            .iter()
+            .map(|track| track.project_relative_path.clone())
+            .collect::<Vec<_>>();
         if track_paths.is_empty() {
-            return Ok(());
+            return Ok(Some(Vec::new()));
         }
         let targets = track_paths
             .iter()
@@ -1263,14 +1306,7 @@ impl ProjectService {
                 _ => None,
             })
             .collect::<HashMap<_, _>>();
-        let CanvasResource::File {
-            video_presentation: Some(presentation),
-            ..
-        } = resource
-        else {
-            unreachable!("video presentation existed before resolving its text tracks");
-        };
-        for track in &mut presentation.text_tracks {
+        for track in &mut tracks {
             track.revision = revisions
                 .get(&track.project_relative_path)
                 .cloned()
@@ -1284,7 +1320,7 @@ impl ProjectService {
                     )
                 })?;
         }
-        Ok(())
+        Ok(Some(tracks))
     }
 
     pub(crate) fn canvas_source_lease(
@@ -1359,16 +1395,7 @@ impl ProjectService {
         } else {
             None
         };
-        let presentation = if media_kind == CanvasMediaKind::Video {
-            self.node_adapter
-                .video_presentation(&self.root, project_relative_path)
-                .map_err(|error| CanvasNodeAvailability::Unreadable {
-                    message: error.to_string(),
-                })?
-        } else {
-            None
-        };
-        Ok((preview, presentation))
+        Ok(preview)
     }
 
     pub(crate) fn reconcile_committed_path_mutation(
@@ -1601,6 +1628,34 @@ fn disclosed_directory_closure(state: &CanvasState) -> Vec<String> {
     directories
 }
 
+fn feedback_video_paths(document: &CanvasFeedbackDocument) -> HashSet<String> {
+    document
+        .entries
+        .iter()
+        .filter(|(path, entry)| is_feedback_video_entry(path, entry))
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
+fn is_feedback_video_path(document: &CanvasFeedbackDocument, path: &str) -> bool {
+    document
+        .entries
+        .get(path)
+        .is_some_and(|entry| is_feedback_video_entry(path, entry))
+}
+
+fn is_feedback_video_entry(path: &str, entry: &CanvasFeedbackEntry) -> bool {
+    canvas_media_kind_from_path(path) == CanvasMediaKind::Video
+        && entry.items.iter().any(|item| item.moment.is_some())
+}
+
+fn feedback_video_directory_closure(document: &CanvasFeedbackDocument) -> Vec<String> {
+    feedback_video_paths(document)
+        .iter()
+        .flat_map(|path| project_path_ancestors(path))
+        .collect()
+}
+
 fn project_path_ancestors(path: &str) -> Vec<String> {
     if path.is_empty() {
         return Vec::new();
@@ -1655,7 +1710,6 @@ fn unavailable_canvas_file_resource(
         availability: Box::new(availability),
         image_dimensions: None,
         text_language: None,
-        video_presentation: None,
     }
 }
 

@@ -6,7 +6,6 @@ import {
   productInstallerTargets,
   expectedProductInstallerAssets,
   expectedProductReleaseAssets,
-  ffmpegSourceReleaseAssetName,
   productReleaseAssetName,
   productReleaseTargets,
   updateManifestName,
@@ -29,7 +28,6 @@ export async function generateUpdateManifest(input) {
   const allowedInputFiles = new Set([
     ...expectedInstallerAssets,
     ...expectedProductAssets,
-    ffmpegSourceReleaseAssetName,
     updateManifestName,
     updateManifestSignatureName
   ]);
@@ -40,8 +38,7 @@ export async function generateUpdateManifest(input) {
   const missing = [];
   for (const assetName of [
     ...expectedInstallerAssets,
-    ...expectedProductAssets,
-    ffmpegSourceReleaseAssetName
+    ...expectedProductAssets
   ]) {
     try {
       await stat(join(resolvedReleaseDir, assetName));

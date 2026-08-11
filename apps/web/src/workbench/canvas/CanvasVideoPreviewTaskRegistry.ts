@@ -1,47 +1,39 @@
 import {
   canvasPreviewTargetIdentity,
   canvasPreviewTargetKey,
-  type CanvasPreviewCanonicalSourceIdentity,
   type CanvasPreviewTargetIdentity,
   type CanvasPreviewTargetKey
 } from '@debrute/canvas-core';
 
-export const CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS = 10;
+export const CANVAS_VIDEO_PREVIEW_READ_MAX_TARGETS = 10;
 
 export interface CanvasVideoPreviewTarget {
   readonly bindingId: string;
   readonly projectRelativePath: string;
   readonly sourceRevision: string;
   readonly frameTimeMs: number;
+  readonly sourceUrl: string;
 }
 
 export interface CanvasVideoPreviewFailure {
-  readonly stage: 'probe' | 'ensure';
+  readonly stage: 'read' | 'decode' | 'capture' | 'save';
   readonly message: string;
 }
 
 type CanvasVideoPreviewTaskState =
-  | { readonly state: 'needs-probe' }
-  | { readonly state: 'probing' }
-  | {
-      readonly state: 'needs-source';
-      readonly canonicalSourceIdentity: CanvasPreviewCanonicalSourceIdentity;
-    }
-  | {
-      readonly state: 'ensuring';
-      readonly canonicalSourceIdentity: CanvasPreviewCanonicalSourceIdentity;
-    }
+  | { readonly state: 'needs-read' }
+  | { readonly state: 'reading' }
+  | { readonly state: 'needs-capture' }
+  | { readonly state: 'capturing' }
+  | { readonly state: 'saving' }
   | { readonly state: 'failed'; readonly failure: CanvasVideoPreviewFailure };
 
 export type CanvasVideoPreviewTask = CanvasVideoPreviewTarget & CanvasVideoPreviewTaskState;
-
-export type CanvasVideoPreviewTaskUpdate = CanvasVideoPreviewTaskState;
 
 export function canvasVideoPreviewTargetIdentity(
   target: Pick<CanvasVideoPreviewTarget, 'sourceRevision' | 'frameTimeMs'>
 ): CanvasPreviewTargetIdentity {
   return canvasPreviewTargetIdentity([
-    'video',
     target.sourceRevision,
     target.frameTimeMs
   ]);
@@ -57,69 +49,57 @@ export function canvasVideoPreviewTargetKey(target: CanvasVideoPreviewTarget): C
 }
 
 export function reconcileCanvasVideoPreviewTasks(input: {
-  readonly previous: ReadonlyMap<string, CanvasVideoPreviewTask>;
+  readonly previous: ReadonlyMap<CanvasPreviewTargetKey, CanvasVideoPreviewTask>;
   readonly targets: readonly CanvasVideoPreviewTarget[];
   readonly readyTargetKeys: ReadonlySet<CanvasPreviewTargetKey>;
-}): Map<string, CanvasVideoPreviewTask> {
-  const next = new Map<string, CanvasVideoPreviewTask>();
+}): Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask> {
+  const next = new Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask>();
   for (const target of input.targets) {
-    const targetKey = canvasVideoPreviewTargetKey(target);
-    if (input.readyTargetKeys.has(targetKey)) {
-      continue;
-    }
-    const existing = input.previous.get(target.projectRelativePath);
-    next.set(target.projectRelativePath, existing
-      && canvasVideoPreviewTargetKey(existing) === targetKey
-      ? existing
-      : { ...target, state: 'needs-probe' });
+    const key = canvasVideoPreviewTargetKey(target);
+    if (input.readyTargetKeys.has(key)) continue;
+    const existing = input.previous.get(key);
+    next.set(key, existing ?? { ...target, state: 'needs-read' });
   }
   return next;
 }
 
-export function canvasVideoPreviewProbeWindow(
+export function canvasVideoPreviewReadWindow(
   orderedTasks: readonly CanvasVideoPreviewTask[]
 ): CanvasVideoPreviewTask[] {
   return orderedTasks
-    .filter((task) => task.state === 'needs-probe')
-    .slice(0, CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS);
+    .filter((task) => task.state === 'needs-read')
+    .slice(0, CANVAS_VIDEO_PREVIEW_READ_MAX_TARGETS);
 }
 
 export function updateCanvasVideoPreviewTask(
-  current: Map<string, CanvasVideoPreviewTask>,
+  current: ReadonlyMap<CanvasPreviewTargetKey, CanvasVideoPreviewTask>,
   target: CanvasVideoPreviewTarget,
-  update: CanvasVideoPreviewTaskUpdate
-): Map<string, CanvasVideoPreviewTask> {
-  const existing = current.get(target.projectRelativePath);
-  if (!existing || canvasVideoPreviewTargetKey(existing) !== canvasVideoPreviewTargetKey(target)) {
-    return current;
-  }
+  update: CanvasVideoPreviewTaskState
+): Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask> {
+  const key = canvasVideoPreviewTargetKey(target);
+  if (!current.has(key)) return current as Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask>;
   const next = new Map(current);
-  next.set(target.projectRelativePath, { ...target, ...update } as CanvasVideoPreviewTask);
+  next.set(key, { ...target, ...update } as CanvasVideoPreviewTask);
   return next;
 }
 
 export function removeCanvasVideoPreviewTask(
-  current: Map<string, CanvasVideoPreviewTask>,
+  current: ReadonlyMap<CanvasPreviewTargetKey, CanvasVideoPreviewTask>,
   target: CanvasVideoPreviewTarget
-): Map<string, CanvasVideoPreviewTask> {
-  const existing = current.get(target.projectRelativePath);
-  if (!existing || canvasVideoPreviewTargetKey(existing) !== canvasVideoPreviewTargetKey(target)) {
-    return current;
-  }
+): Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask> {
+  const key = canvasVideoPreviewTargetKey(target);
+  if (!current.has(key)) return current as Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask>;
   const next = new Map(current);
-  next.delete(target.projectRelativePath);
+  next.delete(key);
   return next;
 }
 
 export function retryCanvasVideoPreviewTask(
-  current: Map<string, CanvasVideoPreviewTask>,
+  current: ReadonlyMap<CanvasPreviewTargetKey, CanvasVideoPreviewTask>,
   target: CanvasVideoPreviewTarget
-): Map<string, CanvasVideoPreviewTask> {
-  const existing = current.get(target.projectRelativePath);
-  if (!existing
-    || existing.state !== 'failed'
-    || canvasVideoPreviewTargetKey(existing) !== canvasVideoPreviewTargetKey(target)) {
-    return current;
-  }
-  return updateCanvasVideoPreviewTask(current, target, { state: 'needs-probe' });
+): Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask> {
+  const existing = current.get(canvasVideoPreviewTargetKey(target));
+  return existing?.state === 'failed'
+    ? updateCanvasVideoPreviewTask(current, target, { state: 'needs-read' })
+    : current as Map<CanvasPreviewTargetKey, CanvasVideoPreviewTask>;
 }

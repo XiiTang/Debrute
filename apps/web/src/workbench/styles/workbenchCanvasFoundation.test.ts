@@ -95,12 +95,20 @@ describe('Workbench Canvas foundation', () => {
   it('keeps Audio and Video Media Chrome rectangular and the shared presentation scale data-driven', () => {
     const nodeRule = cssRule(canvasStyles, '.canvas-node-element');
     const presentationRule = cssRule(canvasStyles, '.canvas-node-presentation');
+    const titlebarRule = cssRule(canvasStyles, '.db-canvas-node-titlebar');
+    const videoRule = cssRule(canvasStyles, '.canvas-video-node');
+    const audioRule = cssRule(canvasStyles, '.canvas-audio-node');
+    const textRule = cssRule(canvasStyles, '.canvas-text-node');
     const mediaControlRules = cssRule(canvasStyles, '.canvas-video-player media-time-display');
 
     expect(presentationRule).toContain('var(--canvas-node-presentation-scale, 1)');
     expect(nodeRule).toContain('--canvas-local-chrome-scale: var(--canvas-chrome-scale, 1);');
     expect(presentationRule).toContain('var(--canvas-node-presentation-scale-inverse, 1)');
     expect(presentationRule).not.toContain('scale(10)');
+    expect(titlebarRule).toContain('height: var(--canvas-node-titlebar-height);');
+    for (const rule of [videoRule, audioRule, textRule]) {
+      expect(rule).toContain('grid-template-rows: var(--canvas-node-titlebar-height) minmax(0, 1fr);');
+    }
     expect(mediaControlRules).toContain('border-radius: 0;');
   });
 });

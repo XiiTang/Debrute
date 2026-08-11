@@ -143,7 +143,7 @@ impl RuntimeProductService {
     /// cannot be initialized.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the single Runtime composition root keeps Product identity and its owned runtime dependencies explicit"
+        reason = "the single Runtime composition root keeps Product identity, storage, platform, Runtime, and Global authorities explicit"
     )]
     pub fn official(
         current_version: String,

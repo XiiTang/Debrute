@@ -13,6 +13,7 @@ import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type Can
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 import { CanvasContentErrorPresentation } from './CanvasNodeErrorPresentation';
 import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
+import { CANVAS_VIDEO_FALLBACK_CONTENT_SIZE } from './CanvasNodePresentationGeometry.js';
 
 const CanvasVideoPlayerAdapter = React.lazy(async () => {
   const module = await import('./CanvasVideoPlayerAdapter.js');
@@ -297,10 +298,7 @@ export function CanvasVideoNodeContent({
       </section>
     );
   }
-  if (!node.videoPresentation) {
-    throw new Error(`Projected video node is missing videoPresentation: ${node.projectRelativePath}`);
-  }
-  const presentation = node.videoPresentation;
+  const presentation = node.videoMetadata ?? CANVAS_VIDEO_FALLBACK_CONTENT_SIZE;
   const initialTimeMs = projectedPlaybackTimeMs;
   const feedbackMomentTimeSeconds = playing && activeFeedbackMomentTimeSeconds === undefined
     ? undefined

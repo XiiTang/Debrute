@@ -1419,12 +1419,8 @@ mod tests {
 
     use tokio::sync::mpsc;
 
-    use crate::{
-        project::{
-            CanvasFeedbackArtifacts, CanvasVideoToolPaths, DefaultProjectNodeAdapter,
-            ProjectPreviewService, ProjectUseKind,
-        },
-        workers::RuntimeWorkerServices,
+    use crate::project::{
+        CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, ProjectPreviewService, ProjectUseKind,
     };
 
     use super::*;
@@ -1463,11 +1459,7 @@ mod tests {
     }
 
     fn registry(home: &Path) -> ProjectSessionRegistry {
-        let workers = RuntimeWorkerServices::new();
-        let previews = Arc::new(ProjectPreviewService::new(
-            &workers,
-            CanvasVideoToolPaths::for_tests(),
-        ));
+        let previews = Arc::new(ProjectPreviewService::new());
         let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
         ProjectSessionRegistry::new(home, Arc::new(DefaultProjectNodeAdapter), feedback)
     }

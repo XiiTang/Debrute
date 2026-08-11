@@ -839,6 +839,21 @@ impl ProjectSession {
         })
     }
 
+    /// Re-runs only derived feedback artifacts for a newly captured browser video frame.
+    ///
+    /// # Errors
+    /// Returns an error when the session is closed or the scheduler cannot accept the work.
+    pub(crate) fn canvas_video_preview_source_saved(
+        &self,
+        project_relative_path: &str,
+        frame_time_ms: u64,
+    ) -> Result<(), ProjectError> {
+        drop(self.open_state()?);
+        self.feedback_artifacts
+            .resume_video_frame(&self.root, project_relative_path, frame_time_ms)
+            .map_err(|dispatch| dispatch.error)
+    }
+
     /// Applies one asynchronous derived-artifact diagnostic delta as a Project revision.
     ///
     /// # Errors

@@ -24,7 +24,7 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).toContain('preflight:');
     expect(workflow).toContain('node scripts/validate-release-version-contract.mjs');
     expect(workflow).toContain('runs-on: macos-15-intel');
-    expect(workflow).toContain('run: brew install gnupg ripgrep');
+    expect(workflow).toContain('run: brew install ripgrep');
     expect(workflow).toContain('Prepare pinned native raster payload');
     expect(workflow).toContain('pnpm native:raster:prepare');
     expect(workflow).toContain('build-product:');
@@ -47,8 +47,7 @@ describe('GitHub release workflow contract', () => {
     expect(releaseDocs).toContain('Signed Manifest Verification');
     expect(releaseDocs).toContain('debrute-product-X.Y.Z-macos-arm64.zip');
     expect(releaseDocs).toContain('debrute-product-X.Y.Z-windows-x64.zip');
-    expect(releaseDocs).toContain('required nine-file');
-    expect(releaseDocs).toContain('ffmpeg-8.1.2.tar.xz');
+    expect(releaseDocs).toContain('required eight-file');
     expect(releaseDocs).toMatch(/not\s+Authenticode-signed/);
     expect(releaseDocs).toContain('Unknown Publisher');
   });
@@ -68,8 +67,7 @@ describe('GitHub release workflow contract', () => {
     expect(publishReleaseBlock).toContain('Unexpected release assets');
     expect(publishReleaseBlock).toContain('Duplicate release asset');
     expect(publishReleaseBlock).toContain('pattern: debrute-installer-*');
-    expect(publishReleaseBlock).toContain('name: debrute-source-ffmpeg');
-    expect(publishReleaseBlock).toContain('validateCanvasVideoToolsSource');
+    expect(publishReleaseBlock).not.toContain('debrute-source-ffmpeg');
   });
 
   it('does not publish directly from matrix build jobs', () => {
@@ -88,8 +86,7 @@ describe('GitHub release workflow contract', () => {
     expect(buildProductBlock).toContain('Archive Product seed');
     expect(buildProductBlock).toContain('node scripts/archive-product-seed.mjs');
     expect(buildProductBlock).toContain('debrute-product-*-${{ matrix.publicPlatform }}-${{ matrix.arch }}.zip');
-    expect(workflow).toContain('Stage matching FFmpeg source archive');
-    expect(workflow).toContain('FFMPEG_SOURCE_ARCHIVE_NAME');
+    expect(workflow).not.toContain('FFMPEG_SOURCE_ARCHIVE_NAME');
   });
 
   it('blocks every Product release build on the supervised native Project watcher probe', () => {
@@ -324,6 +321,6 @@ describe('GitHub release workflow contract', () => {
   it('runs every Node-backed release job under Node.js 24', () => {
     const configuredNodeVersions = [...workflow.matchAll(/node-version:\s*(\d+)/g)].map((match) => match[1]);
 
-    expect(configuredNodeVersions).toEqual(['24', '24', '24', '24']);
+    expect(configuredNodeVersions).toEqual(['24', '24', '24']);
   });
 });

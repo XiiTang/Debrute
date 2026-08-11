@@ -66,6 +66,28 @@ describe('Canvas Manual Layout drafts', () => {
     });
   });
 
+  it('preserves the video Content Region ratio without scaling its title bar height', () => {
+    const draft = canvasManualLayoutDraftFromResizeInteraction({
+      interaction: resizeState({
+        handle: 'se',
+        start: { x: 0, y: 0 },
+        current: { x: 960, y: 540 },
+        origin: { x: 10, y: 20, width: 1_920, height: 1_400 },
+        preserveAspect: true,
+        mediaKind: 'video'
+      }),
+      point: { x: 960, y: 540 }
+    });
+
+    expect(draft.nodeLayouts[0]).toEqual({
+      projectRelativePath: 'flow/a.png',
+      x: 10,
+      y: 20,
+      width: 2_880,
+      height: 1_940
+    });
+  });
+
   it('clamps resize-node layout overrides to the minimum size', () => {
     const draft = canvasManualLayoutDraftFromResizeInteraction({
       interaction: resizeState({
@@ -164,6 +186,7 @@ function resizeState(input: {
   current?: { x: number; y: number } | undefined;
   origin: Extract<CanvasRuntimeLayoutInteraction, { kind: 'resize-node' }>['origin'];
   preserveAspect: boolean;
+  mediaKind?: 'image' | 'video';
 }): Extract<CanvasRuntimeLayoutInteraction, { kind: 'resize-node' }> {
   return {
     kind: 'resize-node',
@@ -175,7 +198,11 @@ function resizeState(input: {
     start: input.start,
     initialSelection: undefined,
     initialContentInteractionProjectRelativePath: undefined,
-    node: { projectRelativePath: 'flow/a.png', nodeKind: 'file', mediaKind: 'image' },
+    node: {
+      projectRelativePath: 'flow/a.png',
+      nodeKind: 'file',
+      mediaKind: input.mediaKind ?? 'image'
+    },
     origin: input.origin,
     preserveAspect: input.preserveAspect,
     ...(input.current ? { current: input.current } : {})

@@ -505,7 +505,7 @@ mod tests {
     use super::*;
     use crate::product::{
         CommitPlatform, ProductEntrypoints, ProductManifest, ProductManifestFile, ProductPlatform,
-        ProductRuntimeDependencies, ReleaseArchitecture,
+        ReleaseArchitecture,
     };
 
     #[test]
@@ -608,41 +608,13 @@ mod tests {
                 "---\nmetadata:\n  debrute.managed: \"true\"\n  debrute.package: debrute\n---\n",
             ),
             ("native-workers/manifest.json", "worker"),
-            (
-                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffmpeg",
-                "ffmpeg",
-            ),
-            (
-                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/ffprobe",
-                "ffprobe",
-            ),
-            (
-                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/LICENSE",
-                "license",
-            ),
-            (
-                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/THIRD-PARTY-NOTICES.md",
-                "notices",
-            ),
-            (
-                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/BUILD-CONFIG.txt",
-                "config",
-            ),
-            (
-                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools/SOURCE.md",
-                "source",
-            ),
         ];
         let mut declared = Vec::new();
         for (path, contents) in files {
             let destination = seed.join(path);
             fs::create_dir_all(destination.parent().unwrap()).unwrap();
             fs::write(&destination, contents).unwrap();
-            if path.ends_with("/debrute-runtime")
-                || path.ends_with("/ffmpeg")
-                || path.ends_with("/ffprobe")
-                || path == "runtime/debrute"
-            {
+            if path.ends_with("/debrute-runtime") || path == "runtime/debrute" {
                 let mut permissions = fs::metadata(&destination).unwrap().permissions();
                 permissions.set_mode(0o755);
                 fs::set_permissions(&destination, permissions).unwrap();
@@ -654,7 +626,7 @@ mod tests {
             });
         }
         let manifest = ProductManifest {
-            schema_version: 2,
+            schema_version: 3,
             product: "debrute".to_owned(),
             product_version: version.to_owned(),
             control_protocol: CONTROL_PROTOCOL.to_owned(),
@@ -668,7 +640,6 @@ mod tests {
                 skills: "skills/debrute-core/SKILL.md".to_owned(),
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
-            runtime_dependencies: ProductRuntimeDependencies::for_platform(ProductPlatform::Macos),
             files: declared,
         };
         fs::write(

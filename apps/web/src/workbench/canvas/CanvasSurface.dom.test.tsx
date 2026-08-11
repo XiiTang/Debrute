@@ -1614,6 +1614,32 @@ describe('CanvasSurface', () => {
     expect(unavailableMarkup).toContain('Unable to read image metadata.');
   });
 
+  it('scales every video presentation with or without browser metadata', () => {
+    const fallbackVideo = videoProjectionNode('flow/a-fallback.mp4', 0, 0);
+    delete fallbackVideo.videoMetadata;
+    fallbackVideo.width = 3_200;
+    fallbackVideo.height = 2_120;
+    const intrinsicVideo = videoProjectionNode('flow/b-intrinsic.mp4', 3_240, 0);
+    const projection: CanvasProjection = {
+      nodes: [fallbackVideo, intrinsicVideo],
+      edges: []
+    };
+
+    const html = renderToStaticMarkup(surface(projection));
+    const fallbackMarkup = html.slice(
+      html.indexOf('data-canvas-node-path="flow/a-fallback.mp4"'),
+      html.indexOf('data-canvas-node-path="flow/b-intrinsic.mp4"')
+    );
+    const intrinsicMarkup = html.slice(html.indexOf('data-canvas-node-path="flow/b-intrinsic.mp4"'));
+
+    expect(fallbackMarkup).toContain('fixed-presentation');
+    expect(fallbackMarkup).toContain('canvas-node-presentation');
+    expect(fallbackMarkup).toContain('--canvas-node-titlebar-height:32px');
+    expect(intrinsicMarkup).toContain('fixed-presentation');
+    expect(intrinsicMarkup).toContain('canvas-node-presentation');
+    expect(intrinsicMarkup).toContain('--canvas-node-titlebar-height:32px');
+  });
+
   it('keeps every current Canvas node mounted regardless of media type or viewport', () => {
     const projection: CanvasProjection = {
       nodes: [
@@ -3296,7 +3322,7 @@ function videoProjectionNode(path: string, x: number, y: number): CanvasProjecti
     ...nodeFixture(path, x, y),
     mediaKind: 'video',
     width: 640,
-    height: 360,
+    height: 680,
     availability: {
       state: 'available',
       size: 100,
@@ -3304,11 +3330,9 @@ function videoProjectionNode(path: string, x: number, y: number): CanvasProjecti
       fileUrl: `/api/workbench/bindings/123e4567-e89b-42d3-a456-426614174000/files/raw/${path}?v=rev`,
       revision: 'rev'
     },
-    videoPresentation: {
-      kind: 'video',
+    videoMetadata: {
       width: 640,
-      height: 360,
-      textTracks: []
+      height: 360
     }
   };
 }
@@ -3504,8 +3528,8 @@ const actions: WorkbenchActions = {
     throw new Error('not used');
   },
   readCanvasTextPreviewSources: async () => ({ sources: {} }),
-  probeCanvasVideoPreviewSources: async () => ({ sources: {} }),
-  ensureCanvasVideoPreviewSource: async () => ({ status: 'failed', message: 'not used' }),
+  readCanvasVideoPreviewSources: async () => ({ sources: [] }),
+  saveCanvasVideoPreviewSource: async () => { throw new Error('not used'); },
   ensureTextFileBuffer: async () => undefined,
   updateTextFileBuffer: () => undefined,
   saveTextFileBuffer: async () => undefined,

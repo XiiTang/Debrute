@@ -37,7 +37,6 @@ pub struct ProductManifest {
     pub platform: ProductPlatform,
     pub architecture: ReleaseArchitecture,
     pub entrypoints: ProductEntrypoints,
-    pub runtime_dependencies: ProductRuntimeDependencies,
     pub files: Vec<ProductManifestFile>,
 }
 
@@ -60,61 +59,6 @@ pub struct ProductEntrypoints {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProductRuntimeDependencies {
-    pub canvas_video: CanvasVideoRuntimeDependency,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CanvasVideoRuntimeDependency {
-    pub ffmpeg: String,
-    pub ffprobe: String,
-    pub license: String,
-    pub notices: String,
-    pub build_config: String,
-    pub source_notice: String,
-}
-
-impl ProductRuntimeDependencies {
-    #[must_use]
-    pub(crate) fn for_platform(platform: ProductPlatform) -> Self {
-        let root = match platform {
-            ProductPlatform::Macos => {
-                "runtime/Debrute Runtime.app/Contents/Resources/canvas-video-tools"
-            }
-            ProductPlatform::Windows => "runtime/canvas-video-tools",
-        };
-        let executable_extension = match platform {
-            ProductPlatform::Macos => "",
-            ProductPlatform::Windows => ".exe",
-        };
-        Self {
-            canvas_video: CanvasVideoRuntimeDependency {
-                ffmpeg: format!("{root}/ffmpeg{executable_extension}"),
-                ffprobe: format!("{root}/ffprobe{executable_extension}"),
-                license: format!("{root}/LICENSE"),
-                notices: format!("{root}/THIRD-PARTY-NOTICES.md"),
-                build_config: format!("{root}/BUILD-CONFIG.txt"),
-                source_notice: format!("{root}/SOURCE.md"),
-            },
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn paths(&self) -> [&str; 6] {
-        [
-            &self.canvas_video.ffmpeg,
-            &self.canvas_video.ffprobe,
-            &self.canvas_video.license,
-            &self.canvas_video.notices,
-            &self.canvas_video.build_config,
-            &self.canvas_video.source_notice,
-        ]
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductManifestFile {
     pub path: String,
     pub size_bytes: u64,
@@ -123,7 +67,7 @@ pub struct ProductManifestFile {
 
 impl ProductManifest {
     pub(crate) fn validate_contract(&self) -> Result<(), ProductManifestError> {
-        if self.schema_version != 2 {
+        if self.schema_version != 3 {
             return Err(ProductManifestError::InvalidSchemaVersion(
                 self.schema_version,
             ));
@@ -181,12 +125,8 @@ impl ProductManifest {
                 native_workers: "native-workers/manifest.json".to_owned(),
             },
         };
-        let expected_runtime_dependencies = ProductRuntimeDependencies::for_platform(self.platform);
         if self.entrypoints != expected_entrypoints {
             return Err(ProductManifestError::InvalidEntrypoints);
-        }
-        if self.runtime_dependencies != expected_runtime_dependencies {
-            return Err(ProductManifestError::InvalidRuntimeDependencies);
         }
         for entrypoint in [
             self.entrypoints.runtime.as_str(),
@@ -198,13 +138,6 @@ impl ProductManifest {
             if !paths.contains(entrypoint) {
                 return Err(ProductManifestError::MissingEntrypoint(
                     entrypoint.to_owned(),
-                ));
-            }
-        }
-        for dependency in self.runtime_dependencies.paths() {
-            if !paths.contains(dependency) {
-                return Err(ProductManifestError::MissingRuntimeDependency(
-                    dependency.to_owned(),
                 ));
             }
         }
@@ -734,9 +667,7 @@ pub enum ProductManifestError {
     InvalidSha256(String),
     MissingComponent(String),
     InvalidEntrypoints,
-    InvalidRuntimeDependencies,
     MissingEntrypoint(String),
-    MissingRuntimeDependency(String),
 }
 
 impl fmt::Display for ProductManifestError {

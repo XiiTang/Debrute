@@ -35,7 +35,8 @@ function snapshotFixture(): WorkbenchProjectSessionSnapshot {
         nodeStates: {},
         occlusionOrder: []
       },
-      canvasResources: { resources: [] }
+      canvasResources: { resources: [] },
+      feedbackVideoResources: { resources: [] }
     },
     projectTree: [],
     diagnostics: [],

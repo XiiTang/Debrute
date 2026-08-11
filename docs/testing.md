@@ -251,13 +251,16 @@ current Source Identity, Source Version, Raster Preview Engine Version, and
 Variant Key, plus structural reconciliation within the exact current engine
 path.
 
-Canvas video-tools release tests validate the pinned official source identity,
-LGPL-only configure contract, complete per-target inventory, file hashes, and
-rejection of undeclared baggage. Product assembly tests require schema 2 and
-the exact `runtimeDependencies.canvasVideo` paths. Runtime Product tests reject
-missing, changed, or non-executable video tools through the same immutable
-Product validation used before activation; source-development assembly tests
-prove that a payload change invalidates the assembled Runtime layout.
+Canvas video tests separate browser production from Runtime storage. Workbench
+tests cover independent playback and Feedback Moment targets, the one serialized
+capture lane, source read/save requests, browser metadata projection, retry,
+player handoff, active-player capture cancellation, and collapsed-video Feedback
+maintenance without an extra playback target. Runtime tests cover exact Project
+leases, multiple frame times under one Source Revision, PNG and aspect-ratio
+validation, atomic cache files, raster variants, pending Feedback frames, and
+maintenance-resource recovery after a collapsed Project is reopened. Product
+assembly tests require schema 3 and prove that no separate video-tool payload or
+runtime-dependency declaration is packaged.
 
 Native-payload contract and release tests verify the repository lock's URL,
 SHA-256, target, enabled format surface, and libvips 8.18.4 identity. Missing,

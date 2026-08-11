@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { DebruteProductPlatform } from '@debrute/app-protocol';
+import type { CanvasFeedbackVideoResource, DebruteProductPlatform } from '@debrute/app-protocol';
 import type {
   CanvasFeedbackDocument,
   CanvasFeedbackEntry,
@@ -50,6 +50,7 @@ import {
 import {
   CanvasVideoPreviewProvider,
   useCanvasVideoPreviewNode,
+  type CanvasVideoMetadataUpdate,
   type CanvasVideoPreviewNodeSnapshot
 } from './CanvasVideoPreviewRuntime.js';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
@@ -112,10 +113,12 @@ interface CanvasCompletedClickCandidate {
 interface CanvasSurfaceProps {
   expandedDirectories: readonly string[];
   projection: CanvasProjection;
+  feedbackVideoResources?: readonly CanvasFeedbackVideoResource[] | undefined;
   runtime: CanvasEditorRuntime;
   actions: CanvasSceneActions;
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
+  onVideoMetadata?: ((update: CanvasVideoMetadataUpdate) => void) | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
   minimapOpen?: boolean | undefined;
   productPlatform: DebruteProductPlatform;
@@ -128,10 +131,12 @@ interface CanvasSurfaceProps {
 export function CanvasSurface({
   expandedDirectories,
   projection,
+  feedbackVideoResources,
   runtime,
   actions,
   textFileBuffers,
   canvasFeedback,
+  onVideoMetadata,
   feedbackInteraction,
   minimapOpen,
   productPlatform,
@@ -170,10 +175,12 @@ export function CanvasSurface({
     <CanvasSurfaceRuntime
       expandedDirectories={expandedDirectories}
       projection={projection}
+      feedbackVideoResources={feedbackVideoResources}
       runtime={runtime}
       actions={actions}
       textFileBuffers={textFileBuffers}
       canvasFeedback={canvasFeedback}
+      onVideoMetadata={onVideoMetadata}
       feedbackInteraction={feedbackInteraction}
       perfMonitor={perfMonitor}
       minimapOpen={minimapOpen}
@@ -189,10 +196,12 @@ export function CanvasSurface({
 function CanvasSurfaceRuntime({
   expandedDirectories,
   projection,
+  feedbackVideoResources,
   runtime,
   actions,
   textFileBuffers,
   canvasFeedback,
+  onVideoMetadata,
   feedbackInteraction,
   perfMonitor,
   minimapOpen,
@@ -383,8 +392,8 @@ function CanvasSurfaceRuntime({
   }), [actions.resolveCanvasSources, renderLifecycle, runtime]);
   useLayoutEffect(() => sourceResolutionRuntime.attach(), [sourceResolutionRuntime]);
   useLayoutEffect(() => {
-    sourceResolutionRuntime.acceptProjection(projection);
-  }, [projection, sourceResolutionRuntime]);
+    sourceResolutionRuntime.acceptProjection(projection, feedbackVideoResources);
+  }, [feedbackVideoResources, projection, sourceResolutionRuntime]);
   const currentProjectedNode = useCallback((projectRelativePath: string) => {
     const accepted = runtime.scene.getAcceptedNode(projectRelativePath);
     return accepted
@@ -1380,11 +1389,14 @@ function CanvasSurfaceRuntime({
         <CanvasRasterPreviewEnvironmentProvider value={rasterPreviewEnvironment}>
           <CanvasVideoPreviewProvider
             nodes={projectedNodes}
+            feedbackVideoResources={feedbackVideoResources}
             sourceResolutionRuntime={sourceResolutionRuntime}
             activeVideoPaths={activeVideoPaths}
+            feedbackEntries={canvasFeedback?.entries}
             actions={actions}
             previewOrder={renderLifecycle}
             previewResourceScheduler={previewResourceScheduler}
+            onMetadata={onVideoMetadata}
           >
             <CanvasTextPreviewProvider
               nodes={projectedNodes}
@@ -1612,10 +1624,11 @@ function CanvasTextSurfaceNodeShell(props: ResolvedCanvasSurfaceNodeShellProps):
 }
 
 function CanvasVideoSurfaceNodeShell(props: ResolvedCanvasSurfaceNodeShellProps): React.ReactElement {
-  const { request, previewError } = useCanvasVideoPreviewNode(props.node);
+  const { request, previewError, metadata } = useCanvasVideoPreviewNode(props.node);
   return (
     <CanvasSurfaceNodeShellBase
       {...props}
+      node={metadata ? { ...props.node, videoMetadata: metadata } : props.node}
       videoPreviewRequest={request}
       videoPreviewError={previewError}
     />

@@ -27,7 +27,10 @@ Every regular Project file and directory belongs to the Canvas.
 structurally expanded and is never stored in `expandedDirectories`; default
 Canvas state therefore stores `[]` while showing the root and its direct
 children. A child directory begins collapsed. Collapsing one hides descendants
-without clearing their retained state.
+without clearing their retained state. Videos with persisted Feedback Moments
+also remain in a separate lightweight preview-maintenance resource view so their
+exact derived artifacts can settle. That view does not change Canvas membership,
+disclosure, geometry, or node visibility.
 
 Runtime does not compute node rectangles, edges, overlaps, or z values. Every
 durable Canvas change enters one `patchCanvasState` command and atomically

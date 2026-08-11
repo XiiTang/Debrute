@@ -4,13 +4,11 @@ export {
   type CanvasPreviewContinuityKey
 } from './canvasPreviewContinuity.js';
 export {
-  canvasPreviewCanonicalSourceIdentity,
   canvasPreviewTargetIdentity,
   canvasPreviewTargetIdentityFromDigest,
   canvasPreviewTargetKey,
   canvasPreviewVariantIdentity,
   canvasPreviewVariantKey,
-  type CanvasPreviewCanonicalSourceIdentity,
   type CanvasPreviewOwner,
   type CanvasPreviewTargetIdentity,
   type CanvasPreviewTargetKey,

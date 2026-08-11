@@ -207,12 +207,6 @@ pub enum CanvasNodeAvailability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum CanvasVideoPresentationKind {
-    Video,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum CanvasVideoTextTrackKind {
     Subtitles,
     Captions,
@@ -232,17 +226,6 @@ pub struct CanvasVideoTextTrack {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub srclang: Option<String>,
     pub default: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CanvasVideoPresentation {
-    pub kind: CanvasVideoPresentationKind,
-    pub width: u32,
-    pub height: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub duration_seconds: Option<f64>,
-    pub text_tracks: Vec<CanvasVideoTextTrack>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -269,8 +252,6 @@ pub enum CanvasResource {
         image_dimensions: Option<CanvasImageDimensions>,
         #[serde(rename = "textLanguage", skip_serializing_if = "Option::is_none")]
         text_language: Option<String>,
-        #[serde(rename = "videoPresentation", skip_serializing_if = "Option::is_none")]
-        video_presentation: Option<CanvasVideoPresentation>,
     },
 }
 
@@ -364,6 +345,7 @@ pub enum CanvasWorkspaceSnapshot {
     Available {
         workspace: CanvasWorkspaceDocument,
         canvas_resources: CanvasResourceView,
+        feedback_video_resources: CanvasResourceView,
     },
     Unavailable {
         code: CanvasWorkspaceUnavailableCode,

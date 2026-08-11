@@ -620,14 +620,12 @@ function requiredVideo(container: HTMLElement): HTMLVideoElement {
 }
 
 function videoNode(options: { durationSeconds?: number } = {}): ProjectedCanvasNode {
-  const videoPresentation: ProjectedCanvasNode['videoPresentation'] = {
-    kind: 'video',
+  const videoMetadata = {
     width: 640,
-    height: 360,
-    textTracks: []
+    height: 360
   };
   if (options.durationSeconds !== undefined) {
-    videoPresentation.durationSeconds = options.durationSeconds;
+    Object.assign(videoMetadata, { durationSeconds: options.durationSeconds });
   }
   return {
     projectRelativePath: 'media/clip.mp4',
@@ -646,6 +644,7 @@ function videoNode(options: { durationSeconds?: number } = {}): ProjectedCanvasN
       fileUrl: '/api/workbench/bindings/p/files/raw/media/clip.mp4?v=rev',
       revision: 'rev'
     },
-    videoPresentation
+    videoMetadata,
+    videoTextTracks: []
   };
 }

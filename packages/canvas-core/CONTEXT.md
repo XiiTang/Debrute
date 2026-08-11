@@ -246,28 +246,19 @@ pixels. It does not include the Project binding or Project Path that owns a
 resource; those scope resource keys.
 _Avoid_: Source Revision, resource key, cache path
 
-**Canonical Preview Source Identity**:
-The producer-owned identity of the exact canonical raster source materialized
-for one Preview Target Identity. It is distinct only when producer policy cannot
-be known completely at target-selection time, such as Runtime video frame
-extraction; image Source Revision and text Preview Target Identity already
-determine their canonical sources.
-_Avoid_: Preview Target Identity, Source Revision, source URL
-
 **Preview Variant Identity**:
-The identity of one displayable raster derived from a Preview Target Identity,
-the producer's Canonical Preview Source Identity when distinct, and one exact
-requested width. Changing ownership does not change this identity; changing
-width or producer policy does.
+The identity of one displayable raster derived from a Preview Target Identity
+and one exact requested width. Changing ownership does not change this identity;
+changing width or a pixel-producing target input does.
 _Avoid_: Preview Target Identity, source URL, retry key
 
 **Preview Continuity Key**:
 The owner-scoped identity of pixels that may remain visible while another
 Preview Variant width loads. It contains the complete pixel identity but not
 requested width or retry attempt. Image uses its Source Revision, Text uses its
-Preview Target Identity, and Video adds its Canonical Preview Source Identity.
-Changing width preserves continuity; changing any pixel-producing input does
-not.
+Preview Target Identity, and Video uses its Source Revision plus Playback
+Position. Changing width preserves continuity; changing any pixel-producing
+input does not.
 _Avoid_: Preview Variant Identity, source URL, load key
 
 **Preview Quality Settlement**:

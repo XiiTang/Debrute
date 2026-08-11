@@ -425,7 +425,12 @@ directory's direct children. Every loaded directory stays indexed until the
 session closes; disclosure changes never unload it. The public Project snapshot
 is derived output. Explorer consumes the ordered tree; Canvas
 consumes a disclosure-filtered resource view. Workbench derives Canvas scene
-geometry from that view.
+geometry from that view. A separate lightweight Feedback-video resource view
+contains only exact known video paths with persisted Feedback Moments, even when
+an ancestor is collapsed. Runtime loads only the ancestor closure of those known
+paths and leaves source hashing demand-driven. Workbench uses the view solely for
+derived Feedback frame maintenance; it neither adds hidden nodes to the scene nor
+creates their ordinary playback preview target.
 
 Each directory has explicit `unloaded`, `loaded`, or `error` state.
 An unloaded or failed directory is never represented as empty and never

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canvasPreviewCanonicalSourceIdentity,
   canvasPreviewTargetIdentity,
   canvasPreviewTargetIdentityFromDigest,
   canvasPreviewTargetKey,
@@ -32,22 +31,19 @@ describe('Canvas preview identities', () => {
     }));
   });
 
-  it('changes a variant identity for width and canonical source policy', () => {
+  it('changes a variant identity only for its target pixels and width', () => {
     const targetIdentity = canvasPreviewTargetIdentity(['sha256:source', 1250]);
     const base = canvasPreviewVariantIdentity({
       targetIdentity,
-      canonicalSourceIdentity: canvasPreviewCanonicalSourceIdentity('frame-v1--ms-1250'),
       width: 1024
     });
 
     expect(canvasPreviewVariantIdentity({
       targetIdentity,
-      canonicalSourceIdentity: canvasPreviewCanonicalSourceIdentity('frame-v1--ms-1250'),
       width: 2048
     })).not.toBe(base);
     expect(canvasPreviewVariantIdentity({
-      targetIdentity,
-      canonicalSourceIdentity: canvasPreviewCanonicalSourceIdentity('frame-v2--ms-1250'),
+      targetIdentity: canvasPreviewTargetIdentity(['sha256:other-source', 1250]),
       width: 1024
     })).not.toBe(base);
   });
@@ -75,9 +71,6 @@ describe('Canvas preview identities', () => {
     );
     expect(() => canvasPreviewTargetIdentityFromDigest('')).toThrow(
       'Canvas preview target identity digest must be non-empty.'
-    );
-    expect(() => canvasPreviewCanonicalSourceIdentity('')).toThrow(
-      'Canvas canonical preview source identity must be non-empty.'
     );
     expect(() => canvasPreviewVariantIdentity({
       targetIdentity: canvasPreviewTargetIdentity(['source']),

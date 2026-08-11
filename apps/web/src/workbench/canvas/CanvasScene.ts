@@ -4,7 +4,9 @@ import type {
   CanvasResourceView,
   CanvasState,
   CanvasTextViewportState,
+  CanvasVideoMetadata,
   CanvasVideoPlaybackState,
+  CanvasSourceResolutionResponse,
   ProjectTextLanguageId
 } from '@debrute/app-protocol';
 import {
@@ -12,6 +14,10 @@ import {
   type CanvasGenericIdentityRowMeasurer,
   type CanvasGenericNodeSceneSize
 } from './CanvasGenericNodeGeometry.js';
+import {
+  CANVAS_VIDEO_FALLBACK_CONTENT_SIZE,
+  canvasVideoNodeSizeForContent
+} from './CanvasNodePresentationGeometry.js';
 
 type CanvasResource = CanvasResourceView['resources'][number];
 type CanvasFileResource = Extract<CanvasResource, { nodeKind: 'file' }>;
@@ -20,8 +26,6 @@ const TEXT_WIDTH = 4_200;
 const TEXT_HEIGHT = 2_800;
 const AUDIO_WIDTH = 3_200;
 const AUDIO_HEIGHT = 680;
-const UNAVAILABLE_VIDEO_WIDTH = 3_200;
-const UNAVAILABLE_VIDEO_HEIGHT = 1_800;
 const DEPTH_GAP = 100;
 const SIBLING_GAP = 80;
 
@@ -49,7 +53,8 @@ interface ProjectedCanvasNodeBase extends CanvasProjectedNodeGeometry {
   availability: CanvasFileResource['availability'] | { state: 'directory' };
   imageDimensions?: CanvasFileResource['imageDimensions'];
   textLanguage?: ProjectTextLanguageId;
-  videoPresentation?: CanvasFileResource['videoPresentation'];
+  videoMetadata?: CanvasVideoMetadata;
+  videoTextTracks?: CanvasSourceResolutionResponse['sources'][number]['videoTextTracks'];
 }
 
 export type ProjectedCanvasNode = ProjectedCanvasNodeBase & (
@@ -100,6 +105,10 @@ export interface ProjectCanvasNodeSceneInput {
   canonicalRoot: string;
   resources: CanvasResourceView;
   state: CanvasState;
+  videoMetadataByPath?: Readonly<Record<string, {
+    sourceRevision: string;
+    metadata: CanvasVideoMetadata;
+  }>>;
   measureGenericIdentityRows?: CanvasGenericIdentityRowMeasurer;
 }
 
@@ -137,7 +146,12 @@ export function projectCanvasSceneNodes(
   );
   const sizes = new Map(input.resources.resources.map((resource) => [
     resource.projectRelativePath,
-    resourceSize(resource, labels.get(resource.projectRelativePath)!, genericSizes)
+    resourceSize(
+      resource,
+      labels.get(resource.projectRelativePath)!,
+      genericSizes,
+      input.videoMetadataByPath?.[resource.projectRelativePath]
+    )
   ]));
   const columnWidths: number[] = [];
   for (const tree of trees) {
@@ -189,7 +203,7 @@ export function projectCanvasSceneNodes(
       availability: resource.availability,
       ...(resource.imageDimensions ? { imageDimensions: resource.imageDimensions } : {}),
       ...(resource.textLanguage ? { textLanguage: resource.textLanguage } : {}),
-      ...(resource.videoPresentation ? { videoPresentation: resource.videoPresentation } : {})
+      ...videoMetadataForResource(resource, input.videoMetadataByPath?.[resource.projectRelativePath])
     };
   });
   return nodes;
@@ -222,7 +236,8 @@ function resourceLabel(resource: CanvasResource, canonicalRoot: string): string 
 function resourceSize(
   resource: CanvasResource,
   label: string,
-  genericSizes: ReadonlyMap<string, CanvasGenericNodeSceneSize>
+  genericSizes: ReadonlyMap<string, CanvasGenericNodeSceneSize>,
+  videoMetadata: { sourceRevision: string; metadata: CanvasVideoMetadata } | undefined
 ): LayoutSize {
   if (resource.nodeKind === 'file') {
     if (resource.mediaKind === 'text') {
@@ -235,15 +250,8 @@ function resourceSize(
       return resource.imageDimensions;
     }
     if (resource.mediaKind === 'video') {
-      return resource.videoPresentation
-        ? {
-            width: resource.videoPresentation.width,
-            height: resource.videoPresentation.height
-          }
-        : {
-            width: UNAVAILABLE_VIDEO_WIDTH,
-            height: UNAVAILABLE_VIDEO_HEIGHT
-          };
+      const metadata = videoMetadataForResource(resource, videoMetadata).videoMetadata;
+      return canvasVideoNodeSizeForContent(metadata ?? CANVAS_VIDEO_FALLBACK_CONTENT_SIZE);
     }
   }
   const genericSize = genericSizes.get(label);
@@ -251,6 +259,18 @@ function resourceSize(
     throw new Error(`Canvas generic geometry is missing for ${JSON.stringify(label)}.`);
   }
   return genericSize;
+}
+
+function videoMetadataForResource(
+  resource: CanvasResource,
+  value: { sourceRevision: string; metadata: CanvasVideoMetadata } | undefined
+): { videoMetadata?: CanvasVideoMetadata } {
+  return resource.nodeKind === 'file'
+    && resource.mediaKind === 'video'
+    && resource.availability.state === 'available'
+    && value?.sourceRevision === resource.availability.revision
+    ? { videoMetadata: value.metadata }
+    : {};
 }
 
 function resourceUsesGenericGeometry(resource: CanvasResource): boolean {

@@ -524,14 +524,13 @@ mod tests {
     use crate::workbench::ProjectBindingCommit;
     use crate::{
         project::{
-            CanvasFeedbackArtifacts, CanvasVideoToolPaths, DefaultProjectNodeAdapter,
-            ProjectPreviewService, ProjectSessionRegistry, ProjectUseKind,
+            CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, ProjectPreviewService,
+            ProjectSessionRegistry, ProjectUseKind,
         },
         terminal::{
             TERMINAL_PROTOCOL_VERSION, TerminalClientFrame, TerminalServerFrame,
             TerminalSessionStatus, TerminalSessionView,
         },
-        workers::RuntimeWorkerServices,
     };
 
     struct HubFixture {
@@ -550,11 +549,7 @@ mod tests {
             let root =
                 std::env::temp_dir().join(format!("debrute-terminal-hub-{}", Uuid::new_v4()));
             std::fs::create_dir_all(&root).expect("Terminal Hub fixture should exist");
-            let workers = RuntimeWorkerServices::new();
-            let previews = Arc::new(ProjectPreviewService::new(
-                &workers,
-                CanvasVideoToolPaths::for_tests(),
-            ));
+            let previews = Arc::new(ProjectPreviewService::new());
             let feedback = Arc::new(
                 CanvasFeedbackArtifacts::new(previews)
                     .expect("Terminal Hub feedback scheduler should start"),

@@ -245,7 +245,7 @@ pub(super) fn prune_canvas_state_path(state: &CanvasState, removed: &str) -> Can
 }
 
 #[must_use]
-pub(super) fn canvas_media_kind_from_path(path: &str) -> CanvasMediaKind {
+pub(crate) fn canvas_media_kind_from_path(path: &str) -> CanvasMediaKind {
     let media_kind = project_media_kind_from_content_type(project_content_type(path));
     if media_kind != CanvasMediaKind::Unknown {
         return media_kind;

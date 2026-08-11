@@ -265,41 +265,6 @@ impl ProjectCapabilityFs {
         finish_atomic_write(result, &directory, &temporary)
     }
 
-    pub(crate) fn atomic_write_checked<E, F>(
-        &self,
-        relative: &ProjectRelativePath,
-        bytes: &[u8],
-        mut check: F,
-    ) -> Result<(), E>
-    where
-        E: From<ProjectError> + std::fmt::Display,
-        F: FnMut() -> Result<(), E>,
-    {
-        let (parent, name) = split_parent_name(relative);
-        let directory = self.ensure_directory(&parent)?;
-        let temporary = format!(".{name}.{}.tmp", Uuid::new_v4());
-        let result = (|| {
-            check()?;
-            let mut options = cap_std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            let mut file = directory
-                .open_with(&temporary, &options)
-                .map_err(ProjectError::from)?;
-            for chunk in bytes.chunks(1024 * 1024) {
-                check()?;
-                file.write_all(chunk).map_err(ProjectError::from)?;
-            }
-            check()?;
-            file.sync_all().map_err(ProjectError::from)?;
-            check()?;
-            directory
-                .rename(&temporary, &directory, name)
-                .map_err(ProjectError::from)?;
-            Ok(())
-        })();
-        finish_atomic_write(result, &directory, &temporary)
-    }
-
     pub(crate) fn atomic_write_stream_checked<E, R, F>(
         &self,
         relative: &ProjectRelativePath,
@@ -363,17 +328,6 @@ impl ProjectCapabilityFs {
 
     pub(crate) fn remove_file(&self, relative: &ProjectRelativePath) -> Result<(), ProjectError> {
         self.root.remove_file(relative)?;
-        Ok(())
-    }
-
-    pub(crate) fn hard_link_to(
-        &self,
-        source: &ProjectRelativePath,
-        destination: &Dir,
-        destination_name: &str,
-    ) -> Result<(), ProjectError> {
-        normalize_project_path_basename(destination_name)?;
-        self.root.hard_link(source, destination, destination_name)?;
         Ok(())
     }
 }

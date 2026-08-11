@@ -31,8 +31,8 @@ use crate::{
     models::ModelCatalog,
     photoshop::{PhotoshopEnableMutationError, PhotoshopGatewayLifecycle, PhotoshopIntegration},
     project::{
-        CanvasFeedbackArtifacts, CanvasVideoToolPaths, NativeProjectNodeAdapter,
-        OpenProjectSession, ProjectNativeShellService, ProjectPathStateReconciler, ProjectSession,
+        CanvasFeedbackArtifacts, NativeProjectNodeAdapter, OpenProjectSession,
+        ProjectNativeShellService, ProjectPathStateReconciler, ProjectSession,
         ProjectSessionRegistry, ProjectStreamItem, ProjectSubscription, ProjectSyncSnapshot,
         ProjectUse, ProjectUseKind,
     },
@@ -185,12 +185,10 @@ impl WorkbenchRuntimeServices {
     pub fn compose(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
-        canvas_video_tools: CanvasVideoToolPaths,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         Self::compose_with_project_watcher(
             debrute_home,
             runtime_state,
-            canvas_video_tools,
             ProjectWatcherComposition::Production,
         )
     }
@@ -206,12 +204,10 @@ impl WorkbenchRuntimeServices {
     pub fn compose_for_integration_tests(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
-        canvas_video_tools: CanvasVideoToolPaths,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         Self::compose_with_project_watcher(
             debrute_home,
             runtime_state,
-            canvas_video_tools,
             ProjectWatcherComposition::Deterministic,
         )
     }
@@ -219,14 +215,11 @@ impl WorkbenchRuntimeServices {
     fn compose_with_project_watcher(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
-        canvas_video_tools: CanvasVideoToolPaths,
         project_watcher: ProjectWatcherComposition,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         let debrute_home = debrute_home.as_ref().to_path_buf();
         let workers = RuntimeWorkerServices::new();
         let previews = Arc::new(crate::project::ProjectPreviewService::new_with_home(
-            &workers,
-            canvas_video_tools,
             &debrute_home,
         ));
         let feedback = Arc::new(
@@ -1166,10 +1159,12 @@ pub fn public_project_snapshot(
         crate::project::CanvasWorkspaceSnapshot::Available {
             workspace,
             canvas_resources,
+            feedback_video_resources,
         } => json!({
             "status": "available",
             "workspace": workspace,
-            "canvasResources": public_canvas_resource_view(canvas_resources, binding_id)
+            "canvasResources": public_canvas_resource_view(canvas_resources, binding_id),
+            "feedbackVideoResources": public_canvas_resource_view(feedback_video_resources, binding_id)
         }),
         crate::project::CanvasWorkspaceSnapshot::Unavailable { code, message } => json!({
             "status": "unavailable",
@@ -1208,25 +1203,13 @@ pub(crate) fn make_canvas_resource_public(
     if let crate::project::CanvasResource::File {
         project_relative_path,
         availability,
-        video_presentation,
         ..
     } = resource
-    {
-        if let crate::project::CanvasNodeAvailability::Available {
+        && let crate::project::CanvasNodeAvailability::Available {
             file_url, revision, ..
         } = availability.as_mut()
-        {
-            *file_url = project_file_url(binding_id, project_relative_path, revision);
-        }
-        if let Some(presentation) = video_presentation {
-            for track in &mut presentation.text_tracks {
-                track.file_url = Some(project_file_url(
-                    binding_id,
-                    &track.project_relative_path,
-                    &track.revision,
-                ));
-            }
-        }
+    {
+        *file_url = project_file_url(binding_id, project_relative_path, revision);
     }
 }
 

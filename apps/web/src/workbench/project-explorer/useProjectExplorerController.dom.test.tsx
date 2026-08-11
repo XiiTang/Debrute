@@ -465,6 +465,7 @@ function emptyCanvasWorkspace(canonicalRoot: string): WorkbenchProjectSessionSna
       nodeStates: {},
       occlusionOrder: []
     },
-    canvasResources: { resources: [] }
+    canvasResources: { resources: [] },
+    feedbackVideoResources: { resources: [] }
   };
 }

@@ -113,7 +113,43 @@ describe('CanvasScene', () => {
 
     expect(result.nodes.find((node) => node.projectRelativePath === 'missing.mp4')).toMatchObject({
       width: 3_200,
-      height: 1_800
+      height: 2_120
+    });
+  });
+
+  it('adds the title bar above the intrinsic video Content Region', () => {
+    const result = projectCanvasNodeScene({
+      canonicalRoot: '/project',
+      resources: {
+        resources: [
+          { projectRelativePath: '', nodeKind: 'directory' },
+          {
+            projectRelativePath: 'clip.mp4',
+            nodeKind: 'file',
+            mediaKind: 'video',
+            availability: {
+              state: 'available',
+              size: 10,
+              mimeType: 'video/mp4',
+              fileUrl: '/clip.mp4',
+              revision: 'revision-video'
+            }
+          }
+        ]
+      },
+      state: { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] },
+      videoMetadataByPath: {
+        'clip.mp4': {
+          sourceRevision: 'revision-video',
+          metadata: { width: 1_920, height: 1_080 }
+        }
+      },
+      measureGenericIdentityRows: measuredWidths(() => 20)
+    });
+
+    expect(result.nodes.find((node) => node.projectRelativePath === 'clip.mp4')).toMatchObject({
+      width: 1_920,
+      height: 1_400
     });
   });
 

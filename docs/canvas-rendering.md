@@ -209,8 +209,7 @@ Image, text, and video use one mounted Workbench presentation module. Each
 media adapter supplies only a Raster Preview Request:
 
 - a Preview Continuity Key for the complete pixels that may remain visible;
-- the owner-scoped Preview Target Identity and optional Canonical Preview
-  Source Identity;
+- the owner-scoped Preview Target Identity;
 - the canonical source width; and
 - a pure URL factory for an exact requested width.
 
@@ -242,9 +241,10 @@ quality timer. Text may request a layout-effect DOM-commit acknowledgement for
 its editor handoff; that acknowledgement does not claim that a browser paint
 occurred and schedules no animation frame.
 
-Canonical source production remains media-specific. Images use revision-bound
+Source production remains media-specific. Images use revision-bound
 Project bytes, Text retains its latest-wins content and serialized CodeMirror
-capture lane, and Video retains Probe and Ensure frame-source discovery.
+capture lane, and Video retains its serialized browser decode and frame-capture
+lane backed by Runtime source availability and save operations.
 Those producers expose current source readiness and typed source errors to the
 shared presentation request instead of owning width or DOM handoff state.
 
@@ -291,8 +291,8 @@ allocation, and working-set admission. Runtime owns its path, revision, cache,
 cancellation, and resource contracts. Its still-raster implementation calls a
 pinned, packaged libvips build in-process through a narrow Rust boundary;
 libvips is a Runtime implementation detail rather than a process, service, or
-alternate owner. JPEG, PNG, WebP, AVIF, TIFF, text-preview
-rasters, extracted video frames, and Feedback Artifact raster work use this
+alternate owner. JPEG, PNG, WebP, AVIF, TIFF, text-preview rasters,
+browser-captured video-frame sources, and Feedback Artifact raster work use this
 backend. SVG/SVGZ remains owned by `resvg` and outside the detailed scope of
 this backend design.
 
@@ -370,9 +370,9 @@ specific callers own source production, source-current validation, and their
 output policy. Feedback Artifact rendering may retain its own latest-only
 or serialized scheduling, but it consumes the same global slot while performing
 raster work. There are no per-media raster pools, dynamic weights, machine
-memory probing, or user-configurable concurrency. Metadata reads and external
-video-frame extraction keep their own admissions because they are not raster
-rendering, and a direct-source image tier consumes no raster slot.
+memory probing, or user-configurable concurrency. Browser metadata and
+serialized video-frame capture are outside Runtime raster admission, and a
+direct-source image tier consumes no raster slot.
 
 Pool capacity limits active Runtime raster jobs; it does not impose a second
 per-image worker count on libvips or on codecs that manage their own workers.
@@ -446,7 +446,7 @@ increment it automatically. `Version` identifies a code contract, while
 The shared variant service does not create an equal-width variant. When a requested
 width reaches a browser-displayable source's intrinsic width, its caller serves
 that exact revision-bound source: a Project file for an image, the canonical
-browser-captured PNG for text, or the canonical extracted frame for video.
+browser-captured PNG for text, or the browser-captured PNG for video.
 This direct-source tier consumes no Raster Preview Pool slot and creates no
 `preview-w<source-width>` file. It retains the caller's source-identity checks
 and the same loaded/next visual handoff as lower-width variants. TIFF remains a
@@ -481,8 +481,8 @@ quantized-width variants under the exact source revision and current engine
 path until the corresponding source path is invalidated.
 Text caches resolve only the exact requested source identity for each Project
 path; superseded target-identity directories do not participate in current
-lookup. Video caches retain the current source revision and the source identity
-implied by its persisted Playback Position; superseded frame identities do not
+lookup. Video caches retain the current source revision and exact persisted
+Playback Position; superseded frame times do not
 participate in current lookup. Current-identity width variants remain reusable
 across zoom changes, displays, and sessions. This policy does not add a
 user-facing cache setting or cleanup command.

@@ -415,9 +415,10 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
     pendingPreviewRequests.delete(response.request());
     if (isWorkbenchVerificationRequest(response.url())) {
       requestLog.push(`< ${response.status()} ${response.request().method()} ${response.url()}`);
+      const responsePath = new URL(response.url()).pathname;
       if (response.request().method() === 'POST'
-        && (response.url().includes('/canvas-video-previews/probe')
-          || response.url().includes('/canvas-video-previews/ensure'))) {
+        && (responsePath.endsWith('/canvas-video-previews/sources')
+          || responsePath.endsWith('/canvas-video-previews/source'))) {
         void response.text().then((body) => {
           requestLog.push(`= ${body}`);
         }).catch(() => undefined);
@@ -500,13 +501,15 @@ function isRequiredNetworkRequest(request) {
 }
 
 function isCanvasPreviewRequest(request) {
-  if (request.method() !== 'GET') {
-    return false;
-  }
   const path = new URL(request.url()).pathname;
-  return path.endsWith('/canvas-text-preview')
-    || path.endsWith('/canvas-image-preview')
-    || path.endsWith('/canvas-video-preview');
+  return (request.method() === 'GET' && (
+    path.endsWith('/canvas-text-preview')
+      || path.endsWith('/canvas-image-preview')
+      || path.endsWith('/canvas-video-preview')
+  )) || (request.method() === 'POST' && (
+    path.endsWith('/canvas-video-previews/sources')
+      || path.endsWith('/canvas-video-previews/source')
+  ));
 }
 
 async function waitForPendingPreviewRequests(pending, label) {
@@ -529,8 +532,8 @@ function isExpectedAbortedPreviewRequest(request) {
         || path.endsWith('/canvas-video-preview')
       ))
       || (request.method() === 'POST' && (
-        path.endsWith('/canvas-video-previews/probe')
-        || path.endsWith('/canvas-video-previews/ensure')
+        path.endsWith('/canvas-video-previews/sources')
+        || path.endsWith('/canvas-video-previews/source')
       ))
     );
 }

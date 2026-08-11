@@ -8,7 +8,6 @@ import {
   MACOS_RUNTIME_EXECUTABLE,
   assembleMacosRuntimeApplication
 } from './macos-runtime-app.mjs';
-import { validateCanvasVideoToolsPayload } from './canvas-video-tools-payload.mjs';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const supportedPlatforms = new Set(['darwin', 'win32']);
@@ -22,12 +21,9 @@ const manifestKeys = [
   'platform',
   'product',
   'productVersion',
-  'runtimeDependencies',
   'schemaVersion'
 ];
 const entrypointKeys = ['cli', 'nativeWorkers', 'runtime', 'skills', 'web'];
-const runtimeDependencyKeys = ['canvasVideo'];
-const canvasVideoDependencyKeys = ['buildConfig', 'ffmpeg', 'ffprobe', 'license', 'notices', 'sourceNotice'];
 const manifestFileKeys = ['path', 'sha256', 'sizeBytes'];
 const requiredProductComponents = ['runtime', 'web', 'skills', 'native-workers'];
 
@@ -69,7 +65,6 @@ export async function assembleProductSeed(input) {
   }
   await copyFile(cliPath, join(destination, `runtime/debrute${executableSuffix}`));
   const nativeRasterRoot = join(binaryRoot, 'native-raster');
-  const canvasVideoToolsRoot = join(binaryRoot, 'canvas-video-tools');
   const nativeRasterFiles = await readdir(nativeRasterRoot, { withFileTypes: true });
   if (nativeRasterFiles.length === 0 || nativeRasterFiles.some((entry) => !entry.isFile())) {
     throw new Error(`Native raster payload is unavailable: ${nativeRasterRoot}`);
@@ -79,18 +74,11 @@ export async function assembleProductSeed(input) {
       throw new Error(`Native raster payload is missing ${required}: ${nativeRasterRoot}`);
     }
   }
-  const canvasVideoToolFiles = await readdir(canvasVideoToolsRoot, { withFileTypes: true });
-  await validateCanvasVideoToolsPayload({
-    root: canvasVideoToolsRoot,
-    identity: `${platform === 'darwin' ? 'macos' : 'windows'}-${architecture}`,
-    runExecutables: false
-  });
   if (platform === 'darwin') {
     await assembleMacosRuntimeApplication({
       destination: join(destination, 'runtime', MACOS_RUNTIME_APP_NAME),
       runtimeBinary: runtimePath,
       nativeRasterRoot,
-      canvasVideoToolsRoot,
       icon: join(root, 'apps/desktop/build/icon.icns'),
       version
     });
@@ -98,12 +86,6 @@ export async function assembleProductSeed(input) {
   } else {
     for (const entry of nativeRasterFiles) {
       await copyFile(join(nativeRasterRoot, entry.name), join(destination, 'runtime', entry.name));
-    }
-    for (const entry of canvasVideoToolFiles) {
-      await copyFile(
-        join(canvasVideoToolsRoot, entry.name),
-        join(destination, 'runtime/canvas-video-tools', entry.name)
-      );
     }
   }
   await cp(webRoot, join(destination, 'web'), {
@@ -120,14 +102,13 @@ export async function assembleProductSeed(input) {
   const { controlProtocol, controlProtocolVersion } = await readControlProtocol(root);
   const files = await inventory(destination);
   const entrypoints = productEntrypoints(platform === 'darwin' ? 'macos' : 'windows');
-  const runtimeDependencies = productRuntimeDependencies(platform === 'darwin' ? 'macos' : 'windows');
   for (const entrypoint of Object.values(entrypoints)) {
     if (!files.some((file) => file.path === entrypoint)) {
       throw new Error(`Product entrypoint is missing: ${entrypoint}`);
     }
   }
   const manifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     product: 'debrute',
     productVersion: version,
     controlProtocol,
@@ -135,7 +116,6 @@ export async function assembleProductSeed(input) {
     platform: platform === 'darwin' ? 'macos' : 'windows',
     architecture,
     entrypoints,
-    runtimeDependencies,
     files
   };
   await writeFile(join(destination, 'product-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
@@ -158,7 +138,7 @@ export async function validateProductSeed(destination, input = {}) {
     throw new Error(`Product seed manifest is invalid (${detail}): ${root}`);
   };
   assertExactKeys(manifest, manifestKeys, 'root fields', invalid);
-  if (manifest.schemaVersion !== 2) invalid('schemaVersion');
+  if (manifest.schemaVersion !== 3) invalid('schemaVersion');
   if (manifest.product !== 'debrute') invalid('product');
   if (typeof manifest.productVersion !== 'string' || !releaseVersionPattern.test(manifest.productVersion)) {
     invalid('productVersion');
@@ -183,17 +163,6 @@ export async function validateProductSeed(destination, input = {}) {
   if (entrypointKeys.some((key) => manifest.entrypoints[key] !== expectedEntrypoints[key])) {
     invalid('entrypoints');
   }
-  assertExactKeys(manifest.runtimeDependencies, runtimeDependencyKeys, 'runtime dependencies', invalid);
-  assertExactKeys(
-    manifest.runtimeDependencies.canvasVideo,
-    canvasVideoDependencyKeys,
-    'Canvas video dependency',
-    invalid
-  );
-  const expectedRuntimeDependencies = productRuntimeDependencies(manifest.platform);
-  if (JSON.stringify(manifest.runtimeDependencies) !== JSON.stringify(expectedRuntimeDependencies)) {
-    invalid('runtime dependencies');
-  }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) invalid('files');
   const declaredPaths = new Set();
   const components = new Set();
@@ -213,9 +182,6 @@ export async function validateProductSeed(destination, input = {}) {
   if (Object.values(manifest.entrypoints).some((entrypoint) => !declaredPaths.has(entrypoint))) {
     invalid('missing entrypoint');
   }
-  if (Object.values(manifest.runtimeDependencies.canvasVideo).some((path) => !declaredPaths.has(path))) {
-    invalid('missing runtime dependency');
-  }
   const files = await inventory(root);
   const actualByPath = new Map(files.map((file) => [file.path, file]));
   if (
@@ -227,9 +193,7 @@ export async function validateProductSeed(destination, input = {}) {
   if (manifest.platform === 'macos') {
     for (const entrypoint of [
       manifest.entrypoints.runtime,
-      manifest.entrypoints.cli,
-      manifest.runtimeDependencies.canvasVideo.ffmpeg,
-      manifest.runtimeDependencies.canvasVideo.ffprobe
+      manifest.entrypoints.cli
     ]) {
       if (((await stat(join(root, entrypoint))).mode & 0o111) === 0) {
         invalid(`non-executable entrypoint ${entrypoint}`);
@@ -237,23 +201,6 @@ export async function validateProductSeed(destination, input = {}) {
     }
   }
   return manifest;
-}
-
-function productRuntimeDependencies(platform) {
-  const root = platform === 'windows'
-    ? 'runtime/canvas-video-tools'
-    : `runtime/${MACOS_RUNTIME_APP_NAME}/Contents/Resources/canvas-video-tools`;
-  const suffix = platform === 'windows' ? '.exe' : '';
-  return {
-    canvasVideo: {
-      ffmpeg: `${root}/ffmpeg${suffix}`,
-      ffprobe: `${root}/ffprobe${suffix}`,
-      license: `${root}/LICENSE`,
-      notices: `${root}/THIRD-PARTY-NOTICES.md`,
-      buildConfig: `${root}/BUILD-CONFIG.txt`,
-      sourceNotice: `${root}/SOURCE.md`
-    }
-  };
 }
 
 function productEntrypoints(platform) {

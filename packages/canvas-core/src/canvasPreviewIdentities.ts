@@ -2,10 +2,6 @@ export type CanvasPreviewTargetIdentity = string & {
   readonly __canvasPreviewTargetIdentity: unique symbol;
 };
 
-export type CanvasPreviewCanonicalSourceIdentity = string & {
-  readonly __canvasPreviewCanonicalSourceIdentity: unique symbol;
-};
-
 export type CanvasPreviewVariantIdentity = string & {
   readonly __canvasPreviewVariantIdentity: unique symbol;
 };
@@ -38,30 +34,15 @@ export function canvasPreviewTargetIdentityFromDigest(digest: string): CanvasPre
   return digest as CanvasPreviewTargetIdentity;
 }
 
-export function canvasPreviewCanonicalSourceIdentity(
-  identity: string
-): CanvasPreviewCanonicalSourceIdentity {
-  assertNonEmptyString(identity, 'Canvas canonical preview source identity must be non-empty.');
-  return identity as CanvasPreviewCanonicalSourceIdentity;
-}
-
 export function canvasPreviewVariantIdentity(input: {
   targetIdentity: CanvasPreviewTargetIdentity;
-  canonicalSourceIdentity?: CanvasPreviewCanonicalSourceIdentity | undefined;
   width: number;
 }): CanvasPreviewVariantIdentity {
   assertNonEmptyString(input.targetIdentity, 'Canvas preview target identity must be non-empty.');
-  if (input.canonicalSourceIdentity !== undefined) {
-    assertNonEmptyString(
-      input.canonicalSourceIdentity,
-      'Canvas canonical preview source identity must be non-empty.'
-    );
-  }
   assertPositiveInteger(input.width, 'Canvas preview variant width must be a positive integer.');
   return JSON.stringify([
     'canvas-preview-variant-v1',
     input.targetIdentity,
-    input.canonicalSourceIdentity ?? null,
     input.width
   ]) as CanvasPreviewVariantIdentity;
 }
@@ -82,7 +63,6 @@ export function canvasPreviewTargetKey(input: CanvasPreviewOwner & {
 
 export function canvasPreviewVariantKey(input: CanvasPreviewOwner & {
   targetIdentity: CanvasPreviewTargetIdentity;
-  canonicalSourceIdentity?: CanvasPreviewCanonicalSourceIdentity | undefined;
   width: number;
 }): CanvasPreviewVariantKey {
   assertOwner(input);

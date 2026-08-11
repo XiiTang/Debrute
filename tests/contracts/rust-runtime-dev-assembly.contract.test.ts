@@ -22,8 +22,6 @@ const SHA_A = 'a'.repeat(64);
 const SHA_B = 'b'.repeat(64);
 const SHA_C = 'c'.repeat(64);
 const SHA_D = 'd'.repeat(64);
-const SHA_E = 'e'.repeat(64);
-const SHA_F = 'f'.repeat(64);
 
 describe('macOS Runtime development application assembly', () => {
   it('shares the closed Runtime executable assembly rule', () => {
@@ -105,18 +103,16 @@ describe('Windows Runtime development directory assembly', () => {
     compiledRuntimeSha256: SHA_A,
     nativeRasterManifestSha256: SHA_B,
     nativeRasterRuntimeInventorySha256: SHA_C,
-    canvasVideoToolsManifestSha256: SHA_D,
-    canvasVideoToolsInventorySha256: SHA_E,
-    runtimePayloadInventorySha256: SHA_F
+    runtimePayloadInventorySha256: SHA_D
   };
-  const installedIdentity = { schemaVersion: 2 as const, ...expectation };
+  const installedIdentity = { schemaVersion: 3 as const, ...expectation };
 
   it('reuses only an exact executable, payload manifest, and Runtime inventory', () => {
     expect(windowsRuntimeDirectoryNeedsAssembly({
       expectation,
       installedIdentity,
       installedRuntimeSha256: SHA_A,
-      installedRuntimeInventorySha256: SHA_F
+      installedRuntimeInventorySha256: SHA_D
     })).toBe(false);
 
     for (const changed of [
@@ -124,9 +120,7 @@ describe('Windows Runtime development directory assembly', () => {
       { installedIdentity: { ...installedIdentity, compiledRuntimeSha256: SHA_B } },
       { installedIdentity: { ...installedIdentity, nativeRasterManifestSha256: SHA_C } },
       { installedIdentity: { ...installedIdentity, nativeRasterRuntimeInventorySha256: SHA_B } },
-      { installedIdentity: { ...installedIdentity, canvasVideoToolsManifestSha256: SHA_C } },
-      { installedIdentity: { ...installedIdentity, canvasVideoToolsInventorySha256: SHA_D } },
-      { installedIdentity: { ...installedIdentity, runtimePayloadInventorySha256: SHA_E } },
+      { installedIdentity: { ...installedIdentity, runtimePayloadInventorySha256: SHA_C } },
       { installedRuntimeSha256: SHA_B },
       { installedRuntimeInventorySha256: SHA_B },
       { installedIdentity: undefined },
@@ -137,7 +131,7 @@ describe('Windows Runtime development directory assembly', () => {
         expectation,
         installedIdentity,
         installedRuntimeSha256: SHA_A,
-        installedRuntimeInventorySha256: SHA_F,
+        installedRuntimeInventorySha256: SHA_D,
         ...changed
       })).toBe(true);
     }
@@ -163,13 +157,10 @@ describe('Windows Runtime development directory assembly', () => {
       writeFileSync(join(root, 'debrute-runtime.exe'), 'runtime');
       writeFileSync(join(root, 'libvips-42.dll'), 'vips');
       writeFileSync(join(root, 'LICENSE'), 'license');
-      mkdirSync(join(root, 'canvas-video-tools'));
-      writeFileSync(join(root, 'canvas-video-tools/ffmpeg.exe'), 'ffmpeg');
       const initial = await windowsRuntimeDirectoryInventorySha256(root);
       const expectedInventory = [
         inventoryEntry('LICENSE', 'license'),
-        inventoryEntry('libvips-42.dll', 'vips'),
-        inventoryEntry('canvas-video-tools/ffmpeg.exe', 'ffmpeg')
+        inventoryEntry('libvips-42.dll', 'vips')
       ].sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
       const expected = createHash('sha256').update(JSON.stringify(expectedInventory)).digest('hex');
       expect(initial).toBe(expected);

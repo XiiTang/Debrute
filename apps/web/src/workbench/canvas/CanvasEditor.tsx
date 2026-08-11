@@ -1,5 +1,5 @@
 import React from 'react';
-import type { DebruteProductPlatform } from '@debrute/app-protocol';
+import type { CanvasFeedbackVideoResource, DebruteProductPlatform } from '@debrute/app-protocol';
 import { Boxes } from '../ui/index.js';
 import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
 import type { CanvasProjection } from './CanvasScene.js';
@@ -11,6 +11,7 @@ import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
 import type { CanvasEditorActions, CanvasSceneActions } from './CanvasSceneActions.js';
+import type { CanvasVideoMetadataUpdate } from './CanvasVideoPreviewRuntime.js';
 
 export function CanvasEditor({
   canvas,
@@ -23,6 +24,7 @@ export function CanvasEditor({
   actions,
   textFileBuffers,
   canvasFeedback,
+  onVideoMetadata,
   textPreviewStyleDependencyKey,
   runtimeScopeKey,
   minimapOpen,
@@ -33,7 +35,11 @@ export function CanvasEditor({
   onOpenContextMenu,
   interactionBlocked = false,
 }: {
-  canvas: { expandedDirectories: readonly string[]; projection: CanvasProjection } | undefined;
+  canvas: {
+    expandedDirectories: readonly string[];
+    projection: CanvasProjection;
+    feedbackVideoResources?: readonly CanvasFeedbackVideoResource[];
+  } | undefined;
   hasProject: boolean;
   projectOpenAttemptedPath?: string | undefined;
   projectOpenError?: string | undefined;
@@ -43,6 +49,7 @@ export function CanvasEditor({
   actions: CanvasEditorActions;
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
+  onVideoMetadata?: ((update: CanvasVideoMetadataUpdate) => void) | undefined;
   textPreviewStyleDependencyKey: string;
   runtimeScopeKey?: number;
   minimapOpen?: boolean | undefined;
@@ -79,9 +86,11 @@ export function CanvasEditor({
     <CanvasScene
       expandedDirectories={canvas.expandedDirectories}
       projection={canvas.projection}
+      feedbackVideoResources={canvas.feedbackVideoResources}
       actions={actions}
       textFileBuffers={textFileBuffers}
       canvasFeedback={canvasFeedback}
+      onVideoMetadata={onVideoMetadata}
       textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
       runtimeScopeKey={runtimeScopeKey}
       minimapOpen={minimapOpen}
@@ -98,9 +107,11 @@ export function CanvasEditor({
 interface CanvasSceneProps {
   expandedDirectories: readonly string[];
   projection: CanvasProjection;
+  feedbackVideoResources?: readonly CanvasFeedbackVideoResource[] | undefined;
   actions: CanvasSceneActions;
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
+  onVideoMetadata?: ((update: CanvasVideoMetadataUpdate) => void) | undefined;
   textPreviewStyleDependencyKey: string;
   runtimeScopeKey?: number | undefined;
   minimapOpen?: boolean | undefined;
@@ -115,9 +126,11 @@ interface CanvasSceneProps {
 const CanvasScene = React.memo(function CanvasScene({
   expandedDirectories,
   projection,
+  feedbackVideoResources,
   actions,
   textFileBuffers,
   canvasFeedback,
+  onVideoMetadata,
   textPreviewStyleDependencyKey,
   runtimeScopeKey,
   minimapOpen,
@@ -168,10 +181,12 @@ const CanvasScene = React.memo(function CanvasScene({
       <CanvasSurface
         expandedDirectories={expandedDirectories}
         projection={projection}
+        feedbackVideoResources={feedbackVideoResources}
         runtime={runtime}
         actions={actions}
         textFileBuffers={textFileBuffers}
         canvasFeedback={canvasFeedback}
+        onVideoMetadata={onVideoMetadata}
         feedbackInteraction={feedbackInteraction}
         minimapOpen={minimapOpen}
         productPlatform={productPlatform}

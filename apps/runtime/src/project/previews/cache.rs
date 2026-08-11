@@ -275,16 +275,6 @@ pub(super) fn safe_cache_segment(value: &str, label: &str) -> Result<String, Pro
     Ok(encoded)
 }
 
-pub(super) fn validate_cache_segment(value: &str, label: &str) -> Result<String, ProjectError> {
-    if value.is_empty() || matches!(value, "." | "..") || value.contains(['/', '\\']) {
-        Err(ProjectError::Validation(format!(
-            "{label} must be a filesystem-safe path segment."
-        )))
-    } else {
-        Ok(value.to_owned())
-    }
-}
-
 pub(super) fn atomic_write(
     project_root: &std::path::Path,
     project_relative_path: &str,

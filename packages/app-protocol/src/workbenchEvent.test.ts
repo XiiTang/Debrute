@@ -149,7 +149,7 @@ describe('Workbench event decoding', () => {
     })).toBeDefined();
   });
 
-  it('rejects unknown fields in nested Canvas resource facts', () => {
+  it('keeps browser-owned video presentation facts out of Runtime Canvas resources', () => {
     const resource = {
       projectRelativePath: 'clips/demo.mp4',
       nodeKind: 'file' as const,
@@ -160,18 +160,6 @@ describe('Workbench event decoding', () => {
         mimeType: 'video/mp4',
         fileUrl: '/api/workbench/bindings/project-1/files/clips/demo.mp4',
         revision: 'sha256:demo'
-      },
-      videoPresentation: {
-        kind: 'video' as const,
-        width: 1920,
-        height: 1080,
-        textTracks: [{
-          projectRelativePath: 'clips/demo.vtt',
-          revision: 'sha256:track',
-          kind: 'subtitles' as const,
-          label: 'English',
-          default: true
-        }]
       }
     };
     const event = projectEventWithCanvasResource(resource);
@@ -192,17 +180,7 @@ describe('Workbench event decoding', () => {
         ...resource,
         availability: { ...resource.availability, extra: true }
       },
-      {
-        ...resource,
-        videoPresentation: { ...resource.videoPresentation, extra: true }
-      },
-      {
-        ...resource,
-        videoPresentation: {
-          ...resource.videoPresentation,
-          textTracks: [{ ...resource.videoPresentation.textTracks[0], extra: true }]
-        }
-      },
+      { ...resource, videoPresentation: { kind: 'video', width: 1920, height: 1080, textTracks: [] } },
       {
         projectRelativePath: resource.projectRelativePath,
         nodeKind: resource.nodeKind,
@@ -212,6 +190,29 @@ describe('Workbench event decoding', () => {
     ]) {
       expect(decodeWorkbenchEvent(projectEventWithCanvasResource(invalid))).toBeUndefined();
     }
+  });
+
+  it('admits only video files to Feedback preview maintenance resources', () => {
+    const video = {
+      projectRelativePath: 'archive/clip.mkv',
+      nodeKind: 'file',
+      mediaKind: 'video',
+      availability: {
+        state: 'resolving',
+        size: 5,
+        mimeType: 'video/x-matroska',
+        sourceToken: 'source-video'
+      }
+    };
+    expect(decodeWorkbenchEvent(projectEventWithFeedbackVideoResource(video))).toBeDefined();
+    expect(decodeWorkbenchEvent(projectEventWithFeedbackVideoResource({
+      ...video,
+      mediaKind: 'image'
+    }))).toBeUndefined();
+    expect(decodeWorkbenchEvent(projectEventWithFeedbackVideoResource({
+      projectRelativePath: 'archive',
+      nodeKind: 'directory'
+    }))).toBeUndefined();
   });
 
   it('accepts the live Photoshop session and Document projection', () => {
@@ -394,6 +395,9 @@ function snapshotFixture() {
       },
       canvasResources: {
         resources: []
+      },
+      feedbackVideoResources: {
+        resources: []
       }
     },
     projectTree: [],
@@ -417,6 +421,22 @@ function projectEventWithCanvasResource(resource: unknown) {
       canvasWorkspace: {
         ...snapshot.canvasWorkspace,
         canvasResources: { resources: [resource] }
+      }
+    }
+  };
+}
+
+function projectEventWithFeedbackVideoResource(resource: unknown) {
+  const snapshot = snapshotFixture();
+  return {
+    type: 'project.changed',
+    bindingId: 'project-1',
+    projectRevision: 2,
+    snapshot: {
+      ...snapshot,
+      canvasWorkspace: {
+        ...snapshot.canvasWorkspace,
+        feedbackVideoResources: { resources: [resource] }
       }
     }
   };

@@ -1,87 +1,85 @@
 import { describe, expect, it } from 'vitest';
-import { canvasPreviewCanonicalSourceIdentity } from '@debrute/canvas-core';
+import { canvasPreviewTargetIdentity } from '@debrute/canvas-core';
 import {
-  CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS,
-  canvasVideoPreviewProbeWindow,
+  canvasVideoPreviewReadWindow,
+  canvasVideoPreviewTargetIdentity,
   canvasVideoPreviewTargetKey,
   reconcileCanvasVideoPreviewTasks,
   retryCanvasVideoPreviewTask,
-  updateCanvasVideoPreviewTask,
-  type CanvasVideoPreviewTarget,
-  type CanvasVideoPreviewTask
-} from './CanvasVideoPreviewTaskRegistry';
+  type CanvasVideoPreviewTarget
+} from './CanvasVideoPreviewTaskRegistry.js';
 
-describe('Canvas Video Preview task registry', { tags: ['canvas-video'] }, () => {
-  it('keeps the current target and replaces the same path when its identity changes', () => {
-    const current = target('media/a.mp4', 1_000);
-    const previous = new Map<string, CanvasVideoPreviewTask>([[
-      current.projectRelativePath,
-      {
-        ...current,
-        state: 'needs-source',
-        canonicalSourceIdentity: canvasPreviewCanonicalSourceIdentity('source-a')
-      }
-    ]]);
-
-    expect(reconcileCanvasVideoPreviewTasks({
-      previous,
-      targets: [current],
-      readyTargetKeys: new Set()
-    })).toEqual(previous);
-
-    const replacement = target('media/a.mp4', 2_000);
-    expect(reconcileCanvasVideoPreviewTasks({
-      previous,
-      targets: [replacement],
-      readyTargetKeys: new Set()
-    })).toEqual(new Map([[
-      replacement.projectRelativePath,
-      { ...replacement, state: 'needs-probe' }
-    ]]));
-  });
-
-  it('omits targets whose canonical source is already ready', () => {
-    const current = target('media/a.mp4', 1_000);
-    expect(reconcileCanvasVideoPreviewTasks({
+describe('CanvasVideoPreviewTaskRegistry', { tags: ['canvas-video'] }, () => {
+  it('keeps multiple frame times for one video as independent tasks', () => {
+    const first = target(0);
+    const second = target(2_500);
+    const tasks = reconcileCanvasVideoPreviewTasks({
       previous: new Map(),
-      targets: [current],
-      readyTargetKeys: new Set([canvasVideoPreviewTargetKey(current)])
-    })).toEqual(new Map());
+      targets: [first, second],
+      readyTargetKeys: new Set()
+    });
+    expect(tasks.size).toBe(2);
+    expect(canvasVideoPreviewReadWindow([...tasks.values()])).toHaveLength(2);
+    expect(canvasVideoPreviewTargetIdentity(first)).toBe(
+      canvasPreviewTargetIdentity(['rev-a', 0])
+    );
+    expect(canvasVideoPreviewTargetKey(first)).not.toBe(canvasVideoPreviewTargetKey(second));
   });
 
-  it('selects one bounded rolling Probe window without excluding later targets', () => {
-    const tasks = Array.from({ length: CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS + 2 }, (_, index) => ({
-      ...target(`media/${index}.mp4`, index),
-      state: 'needs-probe' as const
-    }));
+  it('retries only the current failed target', () => {
+    const current = target(0);
+    const key = canvasVideoPreviewTargetKey(current);
+    const failed = new Map([[key, {
+      ...current,
+      state: 'failed' as const,
+      failure: { stage: 'decode' as const, message: 'unsupported' }
+    }]]);
+    expect(retryCanvasVideoPreviewTask(failed, current).get(key)?.state).toBe('needs-read');
+    expect(retryCanvasVideoPreviewTask(failed, target(1_000))).toBe(failed);
+  });
 
-    expect(canvasVideoPreviewProbeWindow(tasks).map((task) => task.projectRelativePath)).toEqual(
-      tasks.slice(0, CANVAS_VIDEO_PREVIEW_PROBE_MAX_TARGETS).map((task) => task.projectRelativePath)
+  it('reads at most ten pending targets and leaves non-read states alone', () => {
+    const targets = Array.from({ length: 12 }, (_, index) => target(index * 1_000));
+    const tasks = reconcileCanvasVideoPreviewTasks({
+      previous: new Map(),
+      targets,
+      readyTargetKeys: new Set()
+    });
+    const firstKey = canvasVideoPreviewTargetKey(targets[0]!);
+    tasks.set(firstKey, { ...targets[0]!, state: 'needs-capture' });
+
+    expect(canvasVideoPreviewReadWindow([...tasks.values()])).toEqual(
+      targets.slice(1, 11).map((candidate) => ({ ...candidate, state: 'needs-read' }))
     );
   });
 
-  it('guards state settlement by current target identity and retries only the current failure', () => {
-    const current = target('media/a.mp4', 1_000);
-    const replacement = target('media/a.mp4', 2_000);
-    const failed = new Map<string, CanvasVideoPreviewTask>([[
-      current.projectRelativePath,
-      { ...current, state: 'failed', failure: { stage: 'ensure', message: 'failed' } }
-    ]]);
+  it('preserves matching work while dropping ready and stale target identities', () => {
+    const current = target(0);
+    const ready = target(1_000);
+    const stale = target(2_000);
+    const previous = reconcileCanvasVideoPreviewTasks({
+      previous: new Map(),
+      targets: [current, ready, stale],
+      readyTargetKeys: new Set()
+    });
+    previous.set(canvasVideoPreviewTargetKey(current), { ...current, state: 'capturing' });
 
-    expect(updateCanvasVideoPreviewTask(failed, replacement, { state: 'needs-probe' })).toBe(failed);
-    expect(retryCanvasVideoPreviewTask(failed, replacement)).toBe(failed);
-    expect(retryCanvasVideoPreviewTask(failed, current)).toEqual(new Map([[
-      current.projectRelativePath,
-      { ...current, state: 'needs-probe' }
-    ]]));
+    const reconciled = reconcileCanvasVideoPreviewTasks({
+      previous,
+      targets: [current, ready],
+      readyTargetKeys: new Set([canvasVideoPreviewTargetKey(ready)])
+    });
+
+    expect([...reconciled.values()]).toEqual([{ ...current, state: 'capturing' }]);
   });
 });
 
-function target(projectRelativePath: string, frameTimeMs: number): CanvasVideoPreviewTarget {
+function target(frameTimeMs: number): CanvasVideoPreviewTarget {
   return {
     bindingId: 'project-1',
-    projectRelativePath,
-    sourceRevision: 'revision-1',
+    projectRelativePath: 'media/a.mkv',
+    sourceRevision: 'rev-a',
+    sourceUrl: '/api/video',
     frameTimeMs
   };
 }
