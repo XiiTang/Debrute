@@ -5,7 +5,7 @@ import { I18nProvider } from '../i18n/index.js';
 import { CanvasHierarchyEdgeVisibilityButton } from './CanvasHierarchyEdgeVisibilityButton.js';
 
 describe('CanvasHierarchyEdgeVisibilityButton', { tags: ['settings'] }, () => {
-  it('is always operable and uses pressed state to represent hidden hierarchy edges', async () => {
+  it('is always operable and uses Eye and EyeOff to represent hierarchy-edge visibility', async () => {
     const onHierarchyEdgesVisibleChange = vi.fn();
     const container = document.createElement('div');
     document.body.append(container);
@@ -29,7 +29,9 @@ describe('CanvasHierarchyEdgeVisibilityButton', { tags: ['settings'] }, () => {
       const button = requireButton(container);
       expect(button.disabled).toBe(false);
       expect(button.getAttribute('aria-label')).toBe('Hide hierarchy edges');
-      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(button.querySelector('[data-debrute-icon="eye"]')).not.toBeNull();
+      expect(button.querySelector('[data-debrute-icon="eye-off"]')).toBeNull();
 
       await act(async () => {
         button.click();
@@ -38,8 +40,10 @@ describe('CanvasHierarchyEdgeVisibilityButton', { tags: ['settings'] }, () => {
 
       await render(false);
       expect(button.disabled).toBe(false);
-      expect(button.getAttribute('aria-label')).toBe('Hide hierarchy edges');
-      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(button.getAttribute('aria-label')).toBe('Show hierarchy edges');
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(button.querySelector('[data-debrute-icon="eye"]')).toBeNull();
+      expect(button.querySelector('[data-debrute-icon="eye-off"]')).not.toBeNull();
 
       await act(async () => {
         button.click();

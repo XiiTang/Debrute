@@ -108,8 +108,9 @@ _Avoid_: Runtime projection, Canvas State
 
 **Hierarchy Edge**:
 A derived Canvas Scene Projection edge connecting each visible non-root Canvas
-Node to its visible parent in the Project Tree.
-_Avoid_: Stored edge, link
+Node to its visible parent in the Project Tree. Chinese product copy names it
+**层级线** to distinguish it from other edge semantics.
+_Avoid_: Stored edge, link; Chinese: 连线, 层级连线
 
 **Hierarchy Edge Visibility**:
 The user's global choice to show or hide every Hierarchy Edge without changing

@@ -9,7 +9,9 @@ describe('ProjectOpenPanel', () => {
       <I18nProvider locale="en">
         <ProjectOpenPanel
           opening={false}
+          recentProjectRoots={[]}
           onOpenProject={() => undefined}
+          onOpenRecentProject={() => undefined}
         />
       </I18nProvider>
     );
@@ -26,7 +28,9 @@ describe('ProjectOpenPanel', () => {
           error="Could not open project"
           attemptedPath="/missing/project"
           opening={false}
+          recentProjectRoots={[]}
           onOpenProject={() => undefined}
+          onOpenRecentProject={() => undefined}
         />
       </I18nProvider>
     );
@@ -49,7 +53,9 @@ describe('ProjectOpenPanel', () => {
       <I18nProvider locale="en">
         <ProjectOpenPanel
           opening
+          recentProjectRoots={[]}
           onOpenProject={() => undefined}
+          onOpenRecentProject={() => undefined}
         />
       </I18nProvider>
     );
@@ -67,11 +73,76 @@ describe('ProjectOpenPanel', () => {
           attemptedPath="/damaged/project"
           error="Project root could not be opened"
           opening={false}
+          recentProjectRoots={[]}
           onOpenProject={() => undefined}
+          onOpenRecentProject={() => undefined}
         />
       </I18nProvider>
     );
 
     expect(html).toContain('Project root could not be opened');
+  });
+
+  it('renders up to five recent Projects with their folder name and parent path', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <ProjectOpenPanel
+          opening={false}
+          recentProjectRoots={[
+            '/Users/cq/Projects/Alpha',
+            'C:\\Beta',
+            '/projects/gamma',
+            '/projects/delta',
+            '/projects/epsilon',
+            '/projects/not-rendered'
+          ]}
+          onOpenProject={() => undefined}
+          onOpenRecentProject={() => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toContain('Recent');
+    expect(html).toContain('Alpha');
+    expect(html).toContain('/Users/cq/Projects');
+    expect(html).toContain('aria-label="Open recent Project Alpha at /Users/cq/Projects/Alpha"');
+    expect(html).toContain('Beta');
+    expect(html).toContain('C:\\');
+    expect(html).toContain('epsilon');
+    expect(html).not.toContain('not-rendered');
+    expect(html.match(/project-open-panel__recent-project"/g) ?? []).toHaveLength(5);
+    expect(html).toContain('type="button"');
+  });
+
+  it('keeps an explicit Recent section when no recent Project exists', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <ProjectOpenPanel
+          opening={false}
+          recentProjectRoots={[]}
+          onOpenProject={() => undefined}
+          onOpenRecentProject={() => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toContain('Recent');
+    expect(html).toContain('No Recent Projects');
+  });
+
+  it('renders filesystem roots without repeating them as parent paths', () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <ProjectOpenPanel
+          opening={false}
+          recentProjectRoots={['/', 'C:\\']}
+          onOpenProject={() => undefined}
+          onOpenRecentProject={() => undefined}
+        />
+      </I18nProvider>
+    );
+
+    expect(html).toContain('project-open-panel__recent-project-text"><strong>/</strong></span>');
+    expect(html).toContain('project-open-panel__recent-project-text"><strong>C:\\</strong></span>');
   });
 });

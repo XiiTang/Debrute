@@ -213,8 +213,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
       const button = requireButton(first.container, 'Hide hierarchy edges');
 
       expect(button.disabled).toBe(false);
-      expect(button.getAttribute('aria-pressed')).toBe('false');
-      expect(first.container.querySelector('[data-testid="canvas-reset-layout-button"]')).toBeNull();
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(requireButton(first.container, 'Reset Canvas Layout').disabled).toBe(true);
 
       await act(async () => {
         button.click();
@@ -222,7 +222,8 @@ describe('WorkbenchApp preferences and project behavior', () => {
       });
 
       expect(button.disabled).toBe(false);
-      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(button.getAttribute('aria-label')).toBe('Show hierarchy edges');
+      expect(button.getAttribute('aria-pressed')).toBe('false');
       expect(mutateGlobalSettings).toHaveBeenCalledWith({
         operation: 'set-hierarchy-edges-visible',
         hierarchyEdgesVisible: false
@@ -238,12 +239,12 @@ describe('WorkbenchApp preferences and project behavior', () => {
         await save.promise;
         await Promise.resolve();
       });
-      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(button.getAttribute('aria-pressed')).toBe('false');
 
       await unmount(first.root, first.container);
       const reopened = await renderWorkbenchApp('/');
-      expect(requireButton(reopened.container, 'Hide hierarchy edges').getAttribute('aria-pressed'))
-        .toBe('true');
+      expect(requireButton(reopened.container, 'Show hierarchy edges').getAttribute('aria-pressed'))
+        .toBe('false');
       await unmount(reopened.root, reopened.container);
     });
 
@@ -265,7 +266,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
         await Promise.resolve();
       });
 
-      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(button.getAttribute('aria-pressed')).toBe('true');
       expect(reportActivityNotice).toHaveBeenCalledOnce();
       expect(reportActivityNotice).toHaveBeenCalledWith({
         kind: 'workbench-operation-failed',
@@ -312,7 +313,7 @@ describe('WorkbenchApp preferences and project behavior', () => {
       expect(container.querySelector('.canvas-edge-layer')).toBeNull();
 
       await act(async () => {
-        requireButton(container, 'Hide hierarchy edges').click();
+        requireButton(container, 'Show hierarchy edges').click();
         await Promise.resolve();
         await Promise.resolve();
       });
@@ -487,11 +488,64 @@ describe('WorkbenchApp preferences and project behavior', () => {
     await unmount(root, container);
   });
 
-  it('disables the Terminal panel before a project is open', async () => {
+  it('keeps fixed Workbench controls visible and disables only Project-bound controls before open', async () => {
     const { container, root } = await renderWorkbenchApp('/');
 
+    expect(requireButton(container, 'Explorer').disabled).toBe(true);
+    expect(requireButton(container, 'Inspector').disabled).toBe(true);
+    expect(requireButton(container, 'Feedback').disabled).toBe(true);
     expect(requireButton(container, 'Terminal').disabled).toBe(true);
+    expect(requireButton(container, 'Settings').disabled).toBe(false);
+    expect(requireButton(container, 'Mini Map').disabled).toBe(true);
+    expect(requireButton(container, 'Reset Canvas Layout').disabled).toBe(true);
+    expect(requireButton(container, 'Hide hierarchy edges').disabled).toBe(false);
 
+    await unmount(root, container);
+  });
+
+  it('opens a recent Project from the no-Project page and retains a stale entry after failure', async () => {
+    const failure = new Error('Recent Project is unavailable.');
+    const openProject = vi.fn(async () => {
+      throw failure;
+    });
+    const clearRecentProjectRoots = vi.fn(async () => ({ ok: true as const }));
+    const { container, root } = await renderWorkbenchApp('/', {
+      openProject,
+      clearRecentProjectRoots
+    });
+
+    await act(async () => {
+      emitWorkbenchEvent({
+        type: 'recentProjects.changed',
+        revision: 1,
+        recentProjectRoots: [
+          '/projects/alpha',
+          '/projects/beta',
+          '/projects/gamma',
+          '/projects/delta',
+          '/projects/epsilon',
+          '/projects/not-rendered'
+        ]
+      });
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Recent');
+    expect(container.textContent).toContain('alpha');
+    expect(container.textContent).toContain('epsilon');
+    expect(container.textContent).not.toContain('not-rendered');
+
+    await act(async () => {
+      requireButton(container, 'Open recent Project alpha at /projects/alpha').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(openProject).toHaveBeenCalledWith({ projectRoot: '/projects/alpha' });
+    expect(container.textContent).toContain('/projects/alpha');
+    expect(container.textContent).toContain('Recent Project is unavailable.');
+    expect(container.textContent).toContain('alpha');
+    expect(clearRecentProjectRoots).not.toHaveBeenCalled();
     await unmount(root, container);
   });
 

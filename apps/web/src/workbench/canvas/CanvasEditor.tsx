@@ -18,6 +18,8 @@ export function CanvasEditor({
   projectOpenAttemptedPath,
   projectOpenError,
   projectOpening,
+  recentProjectRoots,
+  onOpenRecentProject,
   actions,
   textFileBuffers,
   canvasFeedback,
@@ -36,6 +38,8 @@ export function CanvasEditor({
   projectOpenAttemptedPath?: string | undefined;
   projectOpenError?: string | undefined;
   projectOpening: boolean;
+  recentProjectRoots: readonly string[];
+  onOpenRecentProject(projectRoot: string): Promise<void>;
   actions: CanvasEditorActions;
   textFileBuffers: Record<string, TextFileBuffer>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
@@ -64,7 +68,9 @@ export function CanvasEditor({
         attemptedPath={projectOpenAttemptedPath}
         error={projectOpenError}
         opening={projectOpening}
+        recentProjectRoots={recentProjectRoots}
         onOpenProject={actions.openProject}
+        onOpenRecentProject={onOpenRecentProject}
       />
     );
   }
@@ -183,13 +189,17 @@ function EmptyCanvas({
   attemptedPath,
   error,
   opening,
-  onOpenProject
+  recentProjectRoots,
+  onOpenProject,
+  onOpenRecentProject
 }: {
   hasProject: boolean;
   attemptedPath?: string | undefined;
   error?: string | undefined;
   opening: boolean;
+  recentProjectRoots: readonly string[];
   onOpenProject(): Promise<void>;
+  onOpenRecentProject(projectRoot: string): Promise<void>;
 }): React.ReactElement {
   if (!hasProject) {
     return (
@@ -198,7 +208,9 @@ function EmptyCanvas({
           attemptedPath={attemptedPath}
           error={error}
           opening={opening}
+          recentProjectRoots={recentProjectRoots}
           onOpenProject={() => { void onOpenProject(); }}
+          onOpenRecentProject={(projectRoot) => { void onOpenRecentProject(projectRoot); }}
         />
       </div>
     );

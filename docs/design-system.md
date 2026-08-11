@@ -381,6 +381,15 @@ Inspector, Feedback Panel, Settings, and Terminal launch from
 `workbench-dock-layer`. Moving a control for collision avoidance does not permit
 crossing this semantic boundary.
 
+Before a Project is bound, every fixed Workbench control remains visible.
+Explorer, Inspector, Feedback Panel, Terminal, Mini Map, and Reset Canvas Layout
+are disabled; Settings and Hierarchy Edge Visibility remain enabled because
+they own Runtime-global preferences. Contextual Canvas Feedback actions do not
+exist without a Canvas target. Hierarchy Edge Visibility renders `Eye` while
+hierarchy edges are visible and `EyeOff` while they are hidden. The icon and
+action label carry the state; this control has no persistent selected
+background, while hover and keyboard focus remain visible.
+
 Settings uses General, Appearance, Feedback, Models, Plugins, and System
 navigation, one title per selected page, explicit loading/error/ready content, ordinary
 sections for General and Appearance settings, and cards only for independent
@@ -404,10 +413,20 @@ unknown or unmapped Feedback Name uses the standard question-mark symbol.
 
 Project Open, Project opening, and failed Project opening render centered status
 content directly over the Canvas background without a page, card, or
-full-viewport surface. Content is centered within the main viewport below the
-title-bar hit area. A Project whose command authority was removed by preemption
-or an ended Runtime connection keeps its last confirmed Canvas visible but
-frozen. A solid, non-dismissible dialog blocks the Canvas, Canvas chrome,
+full-viewport surface. The title, Open Project action, and Recent list are
+centered as one group within the main viewport below the title-bar hit area, so
+adding Recent naturally places Open Project above the viewport midpoint. Recent
+shows at most the first five Runtime-global MRU roots as whole-row buttons with
+a folder icon, folder basename, and muted parent path. An empty list retains the
+Recent heading and shows `No Recent Projects`. Clicking or keyboard-activating a
+row opens it in the current Workbench through the ordinary Project-binding
+lifecycle. A failed or stale root returns to Project Open with the attempted path
+and error, without deleting or reordering the stored recent root. The File menu
+remains the owner of the complete recent list and Clear Recent command.
+
+A Project whose command authority was removed by preemption or an ended Runtime
+connection keeps its last confirmed Canvas visible but frozen. A solid,
+non-dismissible dialog blocks the Canvas, Canvas chrome,
 Workbench dock and windows, title bar, and Activity surfaces without dimming or covering the Canvas.
 The blocker is the highest shell layer and freezes every surface beneath it.
 
@@ -425,7 +444,7 @@ The blocker is the highest shell layer and freezes every surface beneath it.
 | Activity Center | No outer panel paint, perimeter, mask, shadow, divider, or full-height rail; its transparent title and Clear All toolbar uses the title-bar contrast shadow above a thin-scroll collection of Activity Cards | Content-adaptive right overlay capped by the remaining viewport height; only the collection scrolls, and the transparent area outside visible content never intercepts Canvas input |
 | Validation | Inline semantic text within the owning form or action surface | Field or operation ownership, correction context, and persistence |
 | Explorer, Settings, Inspector | Restrained grain and geometry at row scale | Information architecture and row geometry |
-| Project Open | Centered title, status, error context, and action directly over the Canvas background | Opening replaces the entry with progress; content contains no page, card, or mascot |
+| Project Open | Centered title, action, error context, and up to five compact Recent rows directly over the Canvas background | Recent opens in the current Workbench; opening replaces the entry with progress; stale roots remain stored after failure; content contains no page, card, or mascot |
 | Canvas viewport | Neutral audited field and exact grid; no grain | Content judgment, Canvas semantics, handles, feedback colors |
 | Canvas chrome | Lower-region brand panels, bars, menus, and cut controls | Canvas geometry and media presentation; never opens Workbench panels |
 | Terminal viewport | Warm-neutral field, coordinated high-contrast ANSI semantics, and precise mono typography | ANSI role distinctions; no texture, rough masks, ornament, or geometry changes |

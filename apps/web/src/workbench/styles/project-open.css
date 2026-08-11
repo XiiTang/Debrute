@@ -2,7 +2,7 @@
   width: min(520px, calc(100vw - 48px));
   display: grid;
   justify-items: center;
-  gap: var(--db-space-3);
+  gap: var(--db-space-4);
 }
 
 .project-open-panel .db-empty-state strong {
@@ -18,4 +18,107 @@
 
 .project-open-panel__error {
   color: var(--db-danger);
+}
+
+.project-open-panel__recent {
+  width: min(440px, 100%);
+  min-width: 0;
+  display: grid;
+  gap: var(--db-space-2);
+  color: var(--db-text-muted);
+  text-align: start;
+}
+
+.project-open-panel__recent-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--db-space-3);
+}
+
+.project-open-panel__recent-heading h2 {
+  margin: 0;
+  color: var(--db-text-muted);
+  font-size: var(--db-font-xs);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.project-open-panel__recent-heading span {
+  height: 1px;
+  flex: 1 1 auto;
+  background: var(--db-border-muted);
+}
+
+.project-open-panel__recent-list {
+  min-width: 0;
+  display: grid;
+  gap: var(--db-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-open-panel__recent-project {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--db-control-md);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--db-space-3);
+  padding: 0 var(--db-space-3);
+  border: 0;
+  border-radius: var(--db-radius-md);
+  background: transparent;
+  color: var(--db-text-muted);
+  cursor: pointer;
+  text-align: start;
+}
+
+.project-open-panel__recent-project:hover,
+.project-open-panel__recent-project:focus-visible {
+  background: var(--db-surface-2);
+  color: var(--db-text);
+}
+
+.project-open-panel__recent-project-text {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--db-space-2);
+}
+
+.project-open-panel__recent-project-text strong,
+.project-open-panel__recent-project-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-open-panel__recent-project-text strong {
+  flex: 0 1 auto;
+  color: inherit;
+  font-family: var(--db-font-body);
+  font-size: var(--db-font-sm);
+  font-weight: 600;
+}
+
+.project-open-panel__recent-project-text span {
+  flex: 1 1 auto;
+  color: var(--db-text-subtle);
+  font-size: var(--db-font-xs);
+}
+
+.project-open-panel__recent-empty {
+  min-height: var(--db-control-md);
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0 var(--db-space-3);
+  color: var(--db-text-subtle);
+  font-size: var(--db-font-sm);
 }

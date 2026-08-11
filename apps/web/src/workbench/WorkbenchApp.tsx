@@ -1053,6 +1053,10 @@ function WorkbenchBoundProjectApp({
     return projectBindingLifecycle.open({ projectRoot });
   }, [projectBindingLifecycle, setProjectOpenPresentation]);
 
+  const openRecentProject = useCallback(async (projectRoot: string): Promise<void> => {
+    presentProjectOpenOutcome(await openProjectRoot(projectRoot), projectRoot);
+  }, [openProjectRoot, presentProjectOpenOutcome]);
+
   useEffect(() => getDebruteShellApi()?.onNativeProjectOpenRequested((projectRoot) => {
     void openProjectRoot(projectRoot).then((outcome) => {
       presentProjectOpenOutcome(outcome, projectRoot);
@@ -1091,7 +1095,7 @@ function WorkbenchBoundProjectApp({
     recentProjects: presentationController.settings.chrome.recentProjectRoots.map((projectRoot) => ({ projectRoot }))
   }), [presentationController.locale, presentationController.settings.chrome.recentProjectRoots, snapshot?.health.projectName]);
   const disabledFloatingPanelIds = useMemo<readonly FloatingPanelId[]>(() => (
-    runtimeBindingId ? [] : ['feedback', 'terminal']
+    runtimeBindingId ? [] : ['explorer', 'inspector', 'feedback', 'terminal']
   ), [runtimeBindingId]);
   const handlePanelIntent = useCallback((panelId: FloatingPanelId) => {
     if (panelId === 'settings') {
@@ -1193,16 +1197,14 @@ function WorkbenchBoundProjectApp({
       api,
       shell: getDebruteShellApi(),
       openProjectFromPicker: actions.openProject,
-      openProjectRoot: async (projectRoot) => {
-        presentProjectOpenOutcome(await openProjectRoot(projectRoot));
-      }
+      openProjectRoot: openRecentProject
     }).catch(() => {
       globalActivities.report({
         kind: 'workbench-operation-failed',
         operation: 'menu-command'
       });
     });
-  }, [actions.openProject, globalActivities, openProjectRoot, presentProjectOpenFailure, presentProjectOpenOutcome]);
+  }, [actions.openProject, globalActivities, openRecentProject]);
   const handleTitleBarWindowCommand = useCallback((command: 'minimize' | 'toggle-maximize' | 'close') => {
     const shell = getDebruteShellApi();
     if (!shell) {
@@ -1492,6 +1494,8 @@ function WorkbenchBoundProjectApp({
       projectOpenAttemptedPath={projectOpenAttemptedPath}
       projectOpenError={projectOpenError}
       projectOpening={isProjectOpening}
+      recentProjectRoots={presentationController.settings.chrome.recentProjectRoots}
+      onOpenRecentProject={openRecentProject}
       actions={actions}
       textFileBuffers={textFileBuffers}
       canvasFeedback={feedbackInteraction.feedback}
@@ -1634,34 +1638,30 @@ function WorkbenchBoundProjectApp({
             ) : profiledCanvasEditor}
           </div>
           <div className="canvas-chrome-layer" data-testid="canvas-chrome-layer" inert={projectPresentationBlocked}>
+            <CanvasMinimapBar
+              runtime={canvasRuntime}
+              overlayRuntime={canvasOverlayRuntime}
+              open={canvasMinimapOpen}
+              onOpenChange={setCanvasMinimapOpen}
+              panelPlacement={minimapPanelPlacement}
+              interactionBlocked={projectPresentationBlocked}
+            />
+            <CanvasResetLayoutButton
+              enabled={Boolean(availableCanvasWorkspace && canvasState && canResetCanvasLayout)}
+              onResetCanvasLayout={resetCanvasLayout}
+            />
             {availableCanvasWorkspace ? (
-              <>
-                <CanvasMinimapBar
-                  runtime={canvasRuntime}
-                  overlayRuntime={canvasOverlayRuntime}
-                  open={canvasMinimapOpen}
-                  onOpenChange={setCanvasMinimapOpen}
-                  panelPlacement={minimapPanelPlacement}
-                  interactionBlocked={projectPresentationBlocked}
-                />
-                {canvasState ? (
-                  <CanvasResetLayoutButton
-                    enabled={canResetCanvasLayout}
-                    onResetCanvasLayout={resetCanvasLayout}
-                  />
-                ) : null}
-                <CanvasFeedbackInteractionBar
-                  interaction={feedbackInteraction}
-                  availableMarks={globalSettingsController.settings.feedback.actionBar.flatMap((name) => {
-                    const entry = globalSettingsController.settings.feedback.catalog.find((candidate) => candidate.name === name);
-                    return entry ? [entry] : [];
-                  })}
-                  overlayRuntime={canvasOverlayRuntime}
-                  canvasRuntime={canvasRuntime}
-                  viewportRect={workbenchViewportRect}
-                  reservedRects={floatingBarReservedRects}
-                />
-              </>
+              <CanvasFeedbackInteractionBar
+                interaction={feedbackInteraction}
+                availableMarks={globalSettingsController.settings.feedback.actionBar.flatMap((name) => {
+                  const entry = globalSettingsController.settings.feedback.catalog.find((candidate) => candidate.name === name);
+                  return entry ? [entry] : [];
+                })}
+                overlayRuntime={canvasOverlayRuntime}
+                canvasRuntime={canvasRuntime}
+                viewportRect={workbenchViewportRect}
+                reservedRects={floatingBarReservedRects}
+              />
             ) : null}
             <CanvasHierarchyEdgeVisibilityButton
               hierarchyEdgesVisible={hierarchyEdgesVisible}

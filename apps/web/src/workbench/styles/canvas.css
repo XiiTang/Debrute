@@ -50,7 +50,7 @@
   color: var(--db-text);
 }
 
-.db-canvas-control[aria-pressed="true"] {
+.db-canvas-control[aria-pressed="true"]:not(:focus-visible) {
   outline: 0;
 }
 
@@ -110,6 +110,16 @@
   place-items: center;
   padding: 0;
   pointer-events: auto;
+}
+
+.canvas-hierarchy-edge-visibility-button[aria-pressed="true"] {
+  background: transparent;
+  color: var(--db-text-muted);
+}
+
+.canvas-hierarchy-edge-visibility-button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--db-surface-3);
+  color: var(--db-text);
 }
 
 .canvas-minimap-panel {

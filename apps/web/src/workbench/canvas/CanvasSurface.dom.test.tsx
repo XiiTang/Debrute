@@ -2728,6 +2728,8 @@ describe('CanvasSurface', () => {
         }}
         hasProject
         projectOpening={false}
+        recentProjectRoots={[]}
+        onOpenRecentProject={async () => undefined}
         actions={actions}
         textFileBuffers={{}}
         canvasFeedback={undefined}

@@ -40,6 +40,8 @@ describe('CanvasEditor', () => {
             canvas={{ expandedDirectories: canvasState.expandedDirectories, projection }}
             hasProject
             projectOpening={false}
+            recentProjectRoots={[]}
+            onOpenRecentProject={async () => undefined}
             actions={actions}
             textFileBuffers={textFileBuffers}
             canvasFeedback={undefined}
@@ -58,6 +60,8 @@ describe('CanvasEditor', () => {
             hasProject
             projectOpenError="unrelated project-open presentation update"
             projectOpening={false}
+            recentProjectRoots={[]}
+            onOpenRecentProject={async () => undefined}
             actions={actions}
             textFileBuffers={textFileBuffers}
             canvasFeedback={undefined}
