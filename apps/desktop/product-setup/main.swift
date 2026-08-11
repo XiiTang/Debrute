@@ -176,7 +176,7 @@ final class ProductSetupApp: NSObject, NSApplicationDelegate {
     private func presentSuccess(_ application: URL) {
         let success = NSAlert()
         success.messageText = "Installation Complete"
-        success.informativeText = "Debrute is fully installed. The debrute CLI is available to new terminals and Agent processes."
+        success.informativeText = "If an Agent was already open before installation, restart it to load Debrute Skills and the debrute command."
         success.alertStyle = .informational
         success.addButton(withTitle: "Launch Debrute")
         success.addButton(withTitle: "Done")

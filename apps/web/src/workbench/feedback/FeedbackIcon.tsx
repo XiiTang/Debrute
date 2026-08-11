@@ -1,6 +1,9 @@
 import React from 'react';
 import spriteUrl from './phosphor-fill.svg?url';
-import { FEEDBACK_ICON_NAMES } from './generatedFeedbackIconNames.js';
+import {
+  FEEDBACK_ICON_NAMES,
+  UNRESOLVED_FEEDBACK_ICON_NAME
+} from './generatedFeedbackIconNames.js';
 
 const knownIdentifiers = new Set<string>(FEEDBACK_ICON_NAMES);
 
@@ -9,7 +12,7 @@ export function isFeedbackIconIdentifier(value: string): boolean {
 }
 
 export function resolvedFeedbackIconIdentifier(value: string | undefined): string {
-  return value && isFeedbackIconIdentifier(value) ? value : 'question';
+  return value && isFeedbackIconIdentifier(value) ? value : UNRESOLVED_FEEDBACK_ICON_NAME;
 }
 
 export function FeedbackIcon({

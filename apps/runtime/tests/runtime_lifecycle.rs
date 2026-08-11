@@ -254,7 +254,7 @@ fn accepted_product_removal_launches_once_closes_admission_and_enters_removing_a
                 launch_count.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
-            || {},
+            || Ok(()),
         ))
         .unwrap();
 
@@ -281,11 +281,28 @@ fn failed_product_removal_launch_keeps_ready_work_admission() {
     assert_eq!(
         state.request_product_removal(ProductRemovalCommit::new(
             || Err("finalizer did not start".to_owned()),
-            || {},
+            || Ok(()),
         )),
         Err(ControlErrorCode::ProductRemovalUnavailable)
     );
 
     assert_eq!(state.status(), RuntimeStatus::Ready);
     assert!(state.begin_product_work().is_some());
+}
+
+#[test]
+fn failed_product_removal_cancellation_is_reported_as_unavailable() {
+    let state = Arc::new(RuntimeControlState::new("runtime-instance"));
+    assert!(state.finish_startup());
+    state
+        .request_product_quit()
+        .expect("Product Quit should own the lifecycle");
+
+    assert_eq!(
+        state.request_product_removal(ProductRemovalCommit::new(
+            || panic!("a cancelled Product removal must not launch"),
+            || Err("prepared Product removal cleanup failed".to_owned()),
+        )),
+        Err(ControlErrorCode::ProductRemovalUnavailable)
+    );
 }

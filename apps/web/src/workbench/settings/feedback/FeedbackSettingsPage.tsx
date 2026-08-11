@@ -5,6 +5,7 @@ import type {
 } from '@debrute/app-protocol';
 import { FeedbackIcon } from '../../feedback/FeedbackIcon.js';
 import { FeedbackIconPicker } from '../../feedback/FeedbackIconPicker.js';
+import { UNRESOLVED_FEEDBACK_ICON_NAME } from '../../feedback/generatedFeedbackIconNames.js';
 import { Button, IconButton, Input, Plus, Trash2, X } from '../../ui/index.js';
 import { useI18n, type WorkbenchTranslationKey } from '../../i18n/index.js';
 
@@ -16,6 +17,7 @@ const feedbackNameErrorKeys: Record<FeedbackNameError, WorkbenchTranslationKey> 
   duplicate: 'settings.feedback.nameError.duplicate',
   'forbidden-control': 'settings.feedback.nameError.forbiddenControl'
 };
+const DEFAULT_NEW_FEEDBACK_ICON = 'circle';
 
 export function FeedbackSettingsPage({
   settings,
@@ -27,7 +29,7 @@ export function FeedbackSettingsPage({
   const i18n = useI18n();
   const [search, setSearch] = useState('');
   const [name, setName] = useState('');
-  const [icon, setIcon] = useState('question');
+  const [icon, setIcon] = useState(DEFAULT_NEW_FEEDBACK_ICON);
   const [pickerTarget, setPickerTarget] = useState<string | 'new'>();
   const [error, setError] = useState<string>();
   const draggedNameRef = useRef<string | undefined>(undefined);
@@ -79,7 +81,7 @@ export function FeedbackSettingsPage({
     });
     if (!created) return;
     setName('');
-    setIcon('question');
+    setIcon(DEFAULT_NEW_FEEDBACK_ICON);
   };
 
   const startDragging = (
@@ -272,7 +274,8 @@ export function FeedbackSettingsPage({
           <FeedbackIconPicker
             value={pickerTarget === 'new'
               ? icon
-              : settings.catalog.find((entry) => entry.name === pickerTarget)?.icon ?? 'question'}
+              : settings.catalog.find((entry) => entry.name === pickerTarget)?.icon
+                ?? UNRESOLVED_FEEDBACK_ICON_NAME}
             onChange={(nextIcon) => {
               if (pickerTarget === 'new') setIcon(nextIcon);
               else void run({ operation: 'set-feedback-mark-icon', name: pickerTarget, icon: nextIcon });

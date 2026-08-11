@@ -1116,7 +1116,6 @@ push-pin-simple-slash
 push-pin-slash
 puzzle-piece
 qr-code
-question
 question-mark
 queue
 quotes

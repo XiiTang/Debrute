@@ -23,7 +23,7 @@ use super::manifest::{
     ProductRuntimeDependencies, ReleaseArchitecture, ReleaseAssetKind, ReleasePlatform,
     StagedDesktopAsset, TrustedReleaseManifest, verify_signed_release_manifest,
 };
-use super::removal::ProductRemovalExecutor;
+use super::removal::{ProductRemovalExecutor, execute_removal_plan};
 use super::store::{CommitPlatform, ProductStore};
 use super::{InstalledProductLayout, ProductProjectionManager, ProductRemovalCoordinator};
 
@@ -488,6 +488,54 @@ fn product_removal_does_not_recreate_debrute_home_when_no_config_existed() {
     assert!(!layout.debrute_home().exists());
     assert!(!staging.exists());
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn product_removal_keeps_desktop_until_retained_config_restore_succeeds() {
+    let root = std::env::temp_dir().join(format!("debrute-removal-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    let staging = root.join("retained-config");
+    let layout = InstalledProductLayout::for_roots(CommitPlatform::Macos, home, None).unwrap();
+    fs::create_dir_all(layout.debrute_home()).unwrap();
+    fs::create_dir_all(layout.desktop_application()).unwrap();
+    fs::create_dir_all(staging.join("global_settings.json")).unwrap();
+
+    assert!(
+        ProductRemovalExecutor::new(layout.clone())
+            .execute(Some(&staging))
+            .is_err()
+    );
+
+    assert!(layout.desktop_application().exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn product_removal_attempts_all_finalizer_cleanup_before_desktop_completion() {
+    let root = std::env::temp_dir().join(format!("debrute-removal-test-{}", Uuid::new_v4()));
+    let home = root.join("home");
+    let layout = InstalledProductLayout::for_roots(CommitPlatform::Macos, home, None).unwrap();
+    let capsule = root.join("runtime-capsule");
+    let invalid_parent = root.join("transaction-parent-is-a-file");
+    let transaction = invalid_parent.join("transaction");
+    fs::create_dir_all(layout.debrute_home()).unwrap();
+    fs::create_dir_all(layout.desktop_application()).unwrap();
+    fs::create_dir_all(&capsule).unwrap();
+    fs::write(&invalid_parent, "not a directory").unwrap();
+
+    assert!(
+        execute_removal_plan(
+            &ProductRemovalExecutor::new(layout.clone()),
+            None,
+            &transaction,
+            &capsule,
+        )
+        .is_err()
+    );
+
+    assert!(!capsule.exists());
+    assert!(layout.desktop_application().exists());
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

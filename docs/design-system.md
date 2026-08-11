@@ -409,7 +409,8 @@ Debrute Cutout remains the sole icon family for functional Workbench controls.
 User-selected Feedback identity symbols are content decoration from the pinned
 Phosphor Fill family: they appear in the Feedback settings preview, Action Bar,
 and Feedback Panel, but do not replace Cutout buttons or navigation icons. An
-unknown or unmapped Feedback Name uses the standard question-mark symbol.
+unknown or unmapped Feedback Name uses the system-reserved question-mark symbol;
+Settings does not expose that fallback as a configurable Feedback icon.
 
 Project Open, Project opening, and failed Project opening render centered status
 content directly over the Canvas background without a page, card, or

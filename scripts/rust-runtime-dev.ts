@@ -93,7 +93,6 @@ interface WindowsRuntimeAssemblyExpectation {
 }
 
 export async function buildRustRuntime(): Promise<boolean> {
-  await stopLegacyWindowsRuntimeBeforeBuild();
   const previousCompiledRuntime = fileIdentity(runtimeBinary);
   await ensureCanvasVideoToolsPayload({ profile: 'debug' });
   await ensureNativeRasterPayload();
@@ -648,40 +647,6 @@ function isSha256(value: unknown): value is string {
 
 function compareFileNames(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-async function stopLegacyWindowsRuntimeBeforeBuild(): Promise<void> {
-  if (process.platform !== 'win32') {
-    return;
-  }
-  const legacyRuntimeIdentity = fileIdentity(runtimeBinary);
-  if (legacyRuntimeIdentity === undefined) {
-    return;
-  }
-  let control: RuntimeControlClient;
-  try {
-    control = await connectLauncher(Date.now() + RUNTIME_READY_TIMEOUT_MS);
-  } catch (error) {
-    if (error instanceof RuntimeControlError && error.code === 'runtime_unavailable') {
-      return;
-    }
-    throw error;
-  }
-  try {
-    const inspection = await control.inspect();
-    const stagedRuntimeIdentity = fileIdentity(windowsRuntimeExecutable);
-    if (inspection.result === 'inspection'
-      && stagedRuntimeIdentity !== undefined
-      && inspection.executable_identity === stagedRuntimeIdentity) {
-      return;
-    }
-    if (inspection.result === 'inspection'
-      && inspection.executable_identity === legacyRuntimeIdentity) {
-      await stopRustRuntime(control);
-    }
-  } finally {
-    control.close();
-  }
 }
 
 function spawnRuntime(options: RustRuntimeDevelopmentOptions): ChildProcess {

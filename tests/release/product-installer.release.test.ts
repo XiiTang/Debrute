@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('whole-Product installers', () => {
   const root = process.cwd();
+  const agentRestartNotice = 'If an Agent was already open before installation, restart it to load Debrute Skills and the debrute command.';
   const desktopPackage = JSON.parse(
     readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')
   ) as { build?: { nsis?: Record<string, unknown> } };
@@ -32,6 +33,7 @@ describe('whole-Product installers', () => {
     expect(nsis).toContain('Desktop payload installed for Product update transaction');
     expect(nsis).toContain('Delete "$LOCALAPPDATA\\${APP_INSTALLER_STORE_FILE}"');
     expect(nsis).toContain('RMDir "$LOCALAPPDATA\\@debrutedesktop-updater"');
+    expect(nsis).toContain(`!define MUI_FINISHPAGE_TEXT "${agentRestartNotice}"`);
   });
 
   it('uses one native Windows removal decision and the shared Runtime transaction', () => {
@@ -58,6 +60,7 @@ describe('whole-Product installers', () => {
     expect(setup).toContain('appendingPathComponent("Applications"');
     expect(setup).toContain('appendingPathComponent("Debrute.app"');
     expect(setup).toContain('Installation Complete');
+    expect(setup).toContain(agentRestartNotice);
     expect(setup).toContain('["--install-noninteractive"]');
     expect(setup).toContain('runNoninteractiveInstall()');
     expect(setup).toContain('let application = try installProduct()');

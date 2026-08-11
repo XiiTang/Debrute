@@ -586,7 +586,7 @@ mod tests {
         assert!(state.finish_startup());
         let delivery = state.begin_product_work().unwrap();
         state
-            .request_product_removal(ProductRemovalCommit::new(|| Ok(()), || {}))
+            .request_product_removal(ProductRemovalCommit::new(|| Ok(()), || Ok(())))
             .unwrap();
         let response = hold_runtime_work_until_response_body_completion(
             Response::new(Body::from("accepted")),

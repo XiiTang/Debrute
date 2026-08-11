@@ -2,6 +2,8 @@
 !include "nsDialogs.nsh"
 !include "FileFunc.nsh"
 
+!define MUI_FINISHPAGE_TEXT "If an Agent was already open before installation, restart it to load Debrute Skills and the debrute command."
+
 Var KeepDebruteConfigCheckbox
 Var KeepDebruteConfig
 

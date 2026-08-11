@@ -29,6 +29,22 @@ only the resolved removal transaction, restores the two permitted configuration
 files when requested, and removes its private transaction and temporary
 artifacts.
 
+Removal admission and removal completion are distinct. A successful Control
+response means that the detached finalizer has started; the CLI reports that
+request as accepted and Workbench reports that removal is finishing. Neither is
+a completion receipt. The finalizer removes every non-Desktop installed Product
+surface, restores explicitly retained configuration, and disposes the private
+transaction before it removes the registered Desktop location. On macOS it also
+physically removes the temporary Runtime capsule at that boundary. Windows
+cannot remove the finalizer executable while it is mapped, so the finalizer must
+successfully register every capsule entry with the operating system for deletion
+at the next restart. A registration failure prevents Desktop removal. The
+capsule is temporary execution state rather than an installed Product surface,
+so Desktop remains the final installed completion boundary. The Windows native
+uninstaller waits for that location to disappear and reports failure if the
+boundary is not reached; Debrute does not add a second cleanup helper, permanent
+removal receipt, or recovery state machine solely to report the same transition.
+
 The temporary copy is an execution phase of the same Runtime, not a second
 Product authority. Debrute installs no standalone removal helper, cleanup
 daemon, or permanent platform script. The finalization mode accepts no

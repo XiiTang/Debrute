@@ -64,8 +64,5 @@ Thumbs.db
 # Local runtime data
 .debrute-runtime/
 
-# Private documentation repository
-/debrute-docs-private/
-
 # Local development state
 /.scratch/

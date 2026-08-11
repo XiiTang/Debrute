@@ -6,6 +6,11 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const coreRoot = resolve(repositoryRoot, 'apps/web/node_modules/@phosphor-icons/core');
 const { icons } = await import(pathToFileURL(resolve(coreRoot, 'dist/index.mjs')).href);
 const orderedIcons = [...icons].sort((left, right) => left.name.localeCompare(right.name, 'en'));
+const unresolvedFeedbackIconName = 'question';
+if (!orderedIcons.some(({ name }) => name === unresolvedFeedbackIconName)) {
+  throw new Error(`Missing unresolved Feedback icon: ${unresolvedFeedbackIconName}`);
+}
+const configurableIcons = orderedIcons.filter(({ name }) => name !== unresolvedFeedbackIconName);
 
 const manifestPath = resolve(
   repositoryRoot,
@@ -30,7 +35,7 @@ await Promise.all([
   mkdir(dirname(licensePath), { recursive: true })
 ]);
 
-const manifest = orderedIcons.map((icon) => ({
+const manifest = configurableIcons.map((icon) => ({
   name: icon.name,
   categories: icon.categories,
   tags: icon.tags.filter((tag) => tag !== '*new*')
@@ -44,6 +49,7 @@ await writeFile(
 await writeFile(
   namesPath,
   `// Generated from @phosphor-icons/core@2.1.1 by scripts/generate-feedback-icons.mjs.\n`
+    + `export const UNRESOLVED_FEEDBACK_ICON_NAME = ${JSON.stringify(unresolvedFeedbackIconName)};\n`
     + `export const FEEDBACK_ICON_NAMES = ${JSON.stringify(orderedIcons.map(({ name }) => name))} as const;\n`,
   'utf8'
 );
@@ -60,7 +66,11 @@ await writeFile(
   `<svg xmlns="http://www.w3.org/2000/svg"><defs>${symbols.join('')}</defs></svg>\n`,
   'utf8'
 );
-await writeFile(runtimeNamesPath, `${orderedIcons.map(({ name }) => name).join('\n')}\n`, 'utf8');
+await writeFile(
+  runtimeNamesPath,
+  `${configurableIcons.map(({ name }) => name).join('\n')}\n`,
+  'utf8'
+);
 await writeFile(
   licensePath,
   (await readFile(resolve(coreRoot, 'LICENSE'), 'utf8')).replaceAll('\r\n', '\n'),

@@ -171,9 +171,11 @@ Settings mutations use a closed domain-intent union whose variants accept only
 their declared fields. Repeating a valid current value is an idempotent no-op;
 empty objects and unknown fields are invalid requests.
 The Feedback Catalog's `icon` value is the one explicit tolerant-read exception:
-current writes accept only the pinned Phosphor manifest, while an unknown
-persisted identifier remains an opaque value and renders as the question-mark
-fallback. It does not activate compatibility or migration behavior.
+current writes accept only the configurable portion of the pinned Phosphor
+manifest, while an unknown persisted identifier remains an opaque value and
+renders as the system-reserved question-mark fallback. That fallback remains in
+the resolvable sprite but not the writable manifest. It does not activate
+compatibility or migration behavior.
 
 Internal Project documents and runtime state carry no generic `schemaVersion`.
 Explicitly exchanged or distributed contracts are versioned when the version is
@@ -351,8 +353,7 @@ share one five-second deadline; only `EBUSY`, `EMFILE`, `ENFILE`, `ENOTEMPTY`,
 and `EPERM` are retried with bounded backoff. Any other filesystem error fails
 immediately, and exhausting the deadline preserves the final operating-system
 error as the failure cause. The assembly identity is written only after the
-staging directory is active. The launcher also recognizes and stops a legacy
-source Runtime still executing directly from `target/debug` before rebuilding.
+staging directory is active.
 
 The Windows assembly directory is disposable launcher-owned state under the
 repository's ignored `.scratch` tree. Developers do not create a configuration

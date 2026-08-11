@@ -285,7 +285,8 @@ _Avoid_: Reaction event, approval state
 **Feedback Mark Catalog**:
 The machine-local Global Settings collection that maps immutable Feedback Names
 to mutable presentation icons. It configures actions and presentation without
-changing a Project Feedback Document.
+changing a Project Feedback Document. A missing or locally unresolvable icon
+mapping does not invalidate the Feedback Name or its Feedback Marks.
 _Avoid_: Project vocabulary, Feedback Document registry
 
 **Feedback Action Bar**:

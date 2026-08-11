@@ -138,19 +138,26 @@ impl ProductRemovalCoordinator {
                 retained_config,
             })
         })();
-        if prepared.is_err() {
-            let _ = fs::remove_dir_all(&transaction_directory);
-            let _ = fs::remove_dir_all(&capsule_directory);
+        match prepared {
+            Ok(prepared) => Ok(prepared),
+            Err(primary) => Err(with_staging_cleanup(
+                primary,
+                &transaction_directory,
+                &capsule_directory,
+                remove_owned_entry,
+            )),
         }
-        prepared
     }
 }
 
 impl RuntimeProductRemovalService for ProductRemovalCoordinator {
     fn prepare_removal(&self, keep_config: bool) -> Result<ProductRemovalCommit, ControlErrorCode> {
-        let prepared = self
-            .prepare(keep_config)
-            .map_err(|_| ControlErrorCode::ProductRemovalUnavailable)?;
+        let prepared = self.prepare(keep_config).map_err(|error| {
+            if error.has_cleanup_failures() {
+                eprintln!("Debrute Product removal preparation and prepared-state cleanup failed");
+            }
+            ControlErrorCode::ProductRemovalUnavailable
+        })?;
         let shared = Arc::new(std::sync::Mutex::new(Some(prepared)));
         let launch = Arc::clone(&shared);
         Ok(ProductRemovalCommit::new(
@@ -161,7 +168,7 @@ impl RuntimeProductRemovalService for ProductRemovalCoordinator {
                     .take()
                     .expect("prepared Product removal is one-shot")
                     .launch()
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| error.control_diagnostic())
             },
             move || {
                 if let Some(prepared) = shared
@@ -169,7 +176,11 @@ impl RuntimeProductRemovalService for ProductRemovalCoordinator {
                     .expect("prepared Product removal lock poisoned")
                     .take()
                 {
-                    let _ = prepared.cancel();
+                    prepared
+                        .cancel()
+                        .map_err(|error| error.control_diagnostic())
+                } else {
+                    Ok(())
                 }
             },
         ))
@@ -230,11 +241,12 @@ impl PreparedProductRemoval {
         }
         match command.spawn() {
             Ok(_) => Ok(()),
-            Err(error) => {
-                let _ = remove_owned_entry(&self.transaction_directory);
-                let _ = remove_owned_entry(&self.capsule_directory);
-                Err(error.into())
-            }
+            Err(error) => Err(with_staging_cleanup(
+                error.into(),
+                &self.transaction_directory,
+                &self.capsule_directory,
+                remove_owned_entry,
+            )),
         }
     }
 
@@ -244,9 +256,11 @@ impl PreparedProductRemoval {
     ///
     /// Returns [`ProductRemovalError`] if private staging cannot be removed.
     pub(crate) fn cancel(self) -> Result<(), ProductRemovalError> {
-        remove_owned_entry(&self.transaction_directory)?;
-        remove_owned_entry(&self.capsule_directory)?;
-        Ok(())
+        cleanup_removal_staging(
+            &self.transaction_directory,
+            &self.capsule_directory,
+            remove_owned_entry,
+        )
     }
 }
 
@@ -282,10 +296,27 @@ pub fn finalize_product_removal(
     let layout = InstalledProductLayout::for_current_user()?;
     validate_plan(plan_path, &plan, &layout)?;
     wait_for_process_exit(runtime_pid)?;
-    ProductRemovalExecutor::new(layout).execute(plan.retained_config.as_deref())?;
-    dispose_runtime_capsule(&plan.capsule_directory)?;
-    remove_owned_entry(&plan.transaction_directory)?;
-    Ok(())
+    execute_removal_plan(
+        &ProductRemovalExecutor::new(layout),
+        plan.retained_config.as_deref(),
+        &plan.transaction_directory,
+        &plan.capsule_directory,
+    )
+}
+
+pub(crate) fn execute_removal_plan(
+    executor: &ProductRemovalExecutor,
+    retained_config: Option<&Path>,
+    transaction_directory: &Path,
+    capsule_directory: &Path,
+) -> Result<(), ProductRemovalError> {
+    executor.execute_before_desktop(retained_config)?;
+    cleanup_removal_staging(
+        transaction_directory,
+        capsule_directory,
+        dispose_runtime_capsule,
+    )?;
+    executor.remove_desktop()
 }
 
 fn validate_plan(
@@ -484,7 +515,7 @@ fn set_private_file_permissions(_path: &Path) -> Result<(), ProductRemovalError>
 
 fn wait_for_process_exit(pid: u32) -> Result<(), ProductRemovalError> {
     let deadline = Instant::now() + FINALIZER_WAIT_TIMEOUT;
-    while process_is_running(pid) {
+    while process_is_running(pid)? {
         if Instant::now() >= deadline {
             return Err(ProductRemovalError::ProcessExitTimedOut(pid));
         }
@@ -494,20 +525,38 @@ fn wait_for_process_exit(pid: u32) -> Result<(), ProductRemovalError> {
 }
 
 #[cfg(target_os = "macos")]
-fn process_is_running(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
-        return false;
-    };
-    match nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None) {
-        Ok(()) | Err(nix::errno::Errno::EPERM) => true,
-        Err(nix::errno::Errno::ESRCH) => false,
-        Err(_) => false,
+fn process_is_running(pid: u32) -> Result<bool, ProductRemovalError> {
+    let native_pid = i32::try_from(pid).map_err(|_| {
+        ProductRemovalError::Platform(
+            "Runtime process identifier is outside the macOS process range".to_owned(),
+        )
+    })?;
+    classify_macos_process_probe(nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(native_pid),
+        None,
+    ))
+    .map_err(|error| {
+        ProductRemovalError::Platform(format!(
+            "Runtime process probe failed with macOS error {}",
+            error as i32
+        ))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn classify_macos_process_probe(
+    result: Result<(), nix::errno::Errno>,
+) -> Result<bool, nix::errno::Errno> {
+    match result {
+        Ok(()) | Err(nix::errno::Errno::EPERM) => Ok(true),
+        Err(nix::errno::Errno::ESRCH) => Ok(false),
+        Err(error) => Err(error),
     }
 }
 
 #[cfg(target_os = "windows")]
-fn process_is_running(pid: u32) -> bool {
-    debrute_windows_product_fs::process_is_running(pid)
+fn process_is_running(pid: u32) -> Result<bool, ProductRemovalError> {
+    Ok(debrute_windows_product_fs::process_is_running(pid))
 }
 
 #[cfg(target_os = "macos")]
@@ -550,7 +599,16 @@ impl ProductRemovalExecutor {
     /// Returns [`ProductRemovalError`] when the retained directory is inside a
     /// removal boundary, a platform registration cannot be removed, or any owned
     /// filesystem mutation fails.
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn execute(
+        &self,
+        retained_config: Option<&Path>,
+    ) -> Result<(), ProductRemovalError> {
+        self.execute_before_desktop(retained_config)?;
+        self.remove_desktop()
+    }
+
+    fn execute_before_desktop(
         &self,
         retained_config: Option<&Path>,
     ) -> Result<(), ProductRemovalError> {
@@ -562,13 +620,16 @@ impl ProductRemovalExecutor {
         ProductProjectionManager::remove_official_skills(self.layout.skills_directory())?;
         #[cfg(target_os = "windows")]
         self.remove_windows_installer_registration()?;
-        remove_owned_entry(self.layout.desktop_application())?;
         remove_owned_entry(self.layout.debrute_home())?;
         if let Some(staging) = retained_config {
             self.restore_retained_config(staging)?;
             remove_owned_entry(staging)?;
         }
         Ok(())
+    }
+
+    fn remove_desktop(&self) -> Result<(), ProductRemovalError> {
+        remove_owned_entry(self.layout.desktop_application())
     }
 
     fn validate_retained_config(&self, staging: &Path) -> Result<(), ProductRemovalError> {
@@ -676,7 +737,10 @@ fn remove_owned_entry(path: &Path) -> Result<(), ProductRemovalError> {
         loop {
             match remove_owned_entry_once(path) {
                 Ok(()) => return Ok(()),
-                Err(_error) if Instant::now() < deadline => {
+                Err(error)
+                    if is_retryable_owned_entry_remove_error(&error)
+                        && Instant::now() < deadline =>
+                {
                     thread::sleep(Duration::from_millis(100));
                 }
                 Err(error) => return Err(error),
@@ -687,6 +751,25 @@ fn remove_owned_entry(path: &Path) -> Result<(), ProductRemovalError> {
     {
         remove_owned_entry_once(path)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn is_retryable_owned_entry_remove_error(error: &ProductRemovalError) -> bool {
+    use windows_sys::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_BUSY, ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION,
+    };
+
+    let ProductRemovalError::Io(error) = error else {
+        return false;
+    };
+    matches!(
+        error.raw_os_error(),
+        Some(code)
+            if code == ERROR_ACCESS_DENIED as i32
+                || code == ERROR_BUSY as i32
+                || code == ERROR_LOCK_VIOLATION as i32
+                || code == ERROR_SHARING_VIOLATION as i32
+    )
 }
 
 fn remove_owned_entry_once(path: &Path) -> Result<(), ProductRemovalError> {
@@ -701,6 +784,44 @@ fn remove_owned_entry_once(path: &Path) -> Result<(), ProductRemovalError> {
         fs::remove_file(path)?;
     }
     Ok(())
+}
+
+fn cleanup_removal_staging(
+    transaction_directory: &Path,
+    capsule_directory: &Path,
+    dispose_capsule: impl FnOnce(&Path) -> Result<(), ProductRemovalError>,
+) -> Result<(), ProductRemovalError> {
+    let mut failures = Vec::new();
+    if let Err(error) = remove_owned_entry(transaction_directory) {
+        failures.push(error);
+    }
+    if let Err(error) = dispose_capsule(capsule_directory) {
+        failures.push(error);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(ProductRemovalError::Cleanup(failures))
+    }
+}
+
+fn with_staging_cleanup(
+    primary: ProductRemovalError,
+    transaction_directory: &Path,
+    capsule_directory: &Path,
+    dispose_capsule: impl FnOnce(&Path) -> Result<(), ProductRemovalError>,
+) -> ProductRemovalError {
+    match cleanup_removal_staging(transaction_directory, capsule_directory, dispose_capsule) {
+        Ok(()) => primary,
+        Err(ProductRemovalError::Cleanup(cleanup)) => ProductRemovalError::OperationAndCleanup {
+            primary: Box::new(primary),
+            cleanup,
+        },
+        Err(error) => ProductRemovalError::OperationAndCleanup {
+            primary: Box::new(primary),
+            cleanup: vec![error],
+        },
+    }
 }
 
 #[derive(Debug)]
@@ -719,6 +840,30 @@ pub enum ProductRemovalError {
     DesktopRegistrationMismatch,
     InvalidPlan,
     ProcessExitTimedOut(u32),
+    Cleanup(Vec<ProductRemovalError>),
+    OperationAndCleanup {
+        primary: Box<ProductRemovalError>,
+        cleanup: Vec<ProductRemovalError>,
+    },
+}
+
+impl ProductRemovalError {
+    fn has_cleanup_failures(&self) -> bool {
+        match self {
+            Self::Cleanup(cleanup) | Self::OperationAndCleanup { cleanup, .. } => {
+                !cleanup.is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    fn control_diagnostic(&self) -> String {
+        if self.has_cleanup_failures() {
+            "Product removal operation and prepared-state cleanup failed".to_owned()
+        } else {
+            "Product removal operation failed".to_owned()
+        }
+    }
 }
 
 impl fmt::Display for ProductRemovalError {
@@ -735,6 +880,8 @@ impl Error for ProductRemovalError {
             Self::Projection(error) => Some(error),
             Self::Product(error) => Some(error),
             Self::Layout(error) => Some(error),
+            Self::Cleanup(errors) => errors.first().map(|error| error as &(dyn Error + 'static)),
+            Self::OperationAndCleanup { primary, .. } => Some(primary.as_ref()),
             Self::InvalidRetainedConfig(_)
             | Self::Platform(_)
             | Self::UpdateInProgress
@@ -775,5 +922,55 @@ impl From<ProductStoreError> for ProductRemovalError {
 impl From<ProductLayoutError> for ProductRemovalError {
     fn from(error: ProductLayoutError) -> Self {
         Self::Layout(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_process_probe_only_treats_esrch_as_process_exit() {
+        use nix::errno::Errno;
+
+        assert_eq!(super::classify_macos_process_probe(Ok(())), Ok(true));
+        assert_eq!(
+            super::classify_macos_process_probe(Err(Errno::EPERM)),
+            Ok(true)
+        );
+        assert_eq!(
+            super::classify_macos_process_probe(Err(Errno::ESRCH)),
+            Ok(false)
+        );
+        assert_eq!(
+            super::classify_macos_process_probe(Err(Errno::EINVAL)),
+            Err(Errno::EINVAL)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_owned_entry_retry_is_limited_to_transient_lock_errors() {
+        use std::io;
+
+        use windows_sys::Win32::Foundation::{
+            ERROR_ACCESS_DENIED, ERROR_BUSY, ERROR_INVALID_NAME, ERROR_LOCK_VIOLATION,
+            ERROR_SHARING_VIOLATION,
+        };
+
+        for code in [
+            ERROR_ACCESS_DENIED,
+            ERROR_BUSY,
+            ERROR_LOCK_VIOLATION,
+            ERROR_SHARING_VIOLATION,
+        ] {
+            assert!(super::is_retryable_owned_entry_remove_error(
+                &super::ProductRemovalError::Io(io::Error::from_raw_os_error(code as i32))
+            ));
+        }
+        assert!(!super::is_retryable_owned_entry_remove_error(
+            &super::ProductRemovalError::Io(io::Error::from_raw_os_error(
+                ERROR_INVALID_NAME as i32
+            ))
+        ));
     }
 }

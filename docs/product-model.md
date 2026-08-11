@@ -30,7 +30,8 @@ Feedback Name. Icon mapping and the ordered set of at most eight Action Bar
 names are local Global Settings in `~/.debrute/config/global_settings.json`;
 they never enter Project files. Consequently the same Feedback Name may have a
 different icon on another computer, and an unmapped Project name remains valid
-and appears with a question-mark icon. Debrute has no generic Project Settings
+and appears with the system-reserved, non-configurable question-mark icon.
+Debrute has no generic Project Settings
 store or Project-level preference page.
 
 ## Canvas

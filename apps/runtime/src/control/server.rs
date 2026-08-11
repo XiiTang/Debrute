@@ -54,14 +54,14 @@ pub struct ProductUpdateTransitionFailure {
 
 pub struct ProductRemovalCommit {
     launch: Option<Box<dyn FnOnce() -> Result<(), String> + Send>>,
-    cancel: Option<Box<dyn FnOnce() + Send>>,
+    cancel: Option<Box<dyn FnOnce() -> Result<(), String> + Send>>,
 }
 
 impl ProductRemovalCommit {
     #[must_use]
     pub fn new(
         launch: impl FnOnce() -> Result<(), String> + Send + 'static,
-        cancel: impl FnOnce() + Send + 'static,
+        cancel: impl FnOnce() -> Result<(), String> + Send + 'static,
     ) -> Self {
         Self {
             launch: Some(Box::new(launch)),
@@ -74,9 +74,26 @@ impl ProductRemovalCommit {
         self.launch.take().expect("removal launch is one-shot")()
     }
 
-    fn cancel(mut self) {
+    fn cancel(mut self) -> Result<(), String> {
         if let Some(cancel) = self.cancel.take() {
-            cancel();
+            cancel()
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn cancel_product_removal(
+    commit: ProductRemovalCommit,
+    rejection: ControlErrorCode,
+) -> ControlErrorCode {
+    match commit.cancel() {
+        Ok(()) => rejection,
+        Err(_) => {
+            eprintln!(
+                "Debrute Product removal prepared-state cleanup failed while rejecting the request as {rejection:?}"
+            );
+            ControlErrorCode::ProductRemovalUnavailable
         }
     }
 }
@@ -510,20 +527,26 @@ impl RuntimeControlState {
             RuntimeLifecycle::UpdatePreparing(_) | RuntimeLifecycle::Replacing(_) => {
                 drop(lifecycle);
                 drop(transition);
-                commit.cancel();
-                return Err(ControlErrorCode::UpdateCommitInProgress);
+                return Err(cancel_product_removal(
+                    commit,
+                    ControlErrorCode::UpdateCommitInProgress,
+                ));
             }
             RuntimeLifecycle::RemovalPreparing | RuntimeLifecycle::Removing => {
                 drop(lifecycle);
                 drop(transition);
-                commit.cancel();
-                return Err(ControlErrorCode::RemovalInProgress);
+                return Err(cancel_product_removal(
+                    commit,
+                    ControlErrorCode::RemovalInProgress,
+                ));
             }
             RuntimeLifecycle::Starting | RuntimeLifecycle::Exiting => {
                 drop(lifecycle);
                 drop(transition);
-                commit.cancel();
-                return Err(ControlErrorCode::RuntimeExiting);
+                return Err(cancel_product_removal(
+                    commit,
+                    ControlErrorCode::RuntimeExiting,
+                ));
             }
         }
         let (drain_sender, drain_receiver) = std::sync::mpsc::channel();
@@ -551,10 +574,13 @@ impl RuntimeControlState {
         {
             drop(lifecycle);
             drop(transition);
-            commit.cancel();
-            return Err(ControlErrorCode::ProductRemovalUnavailable);
+            return Err(cancel_product_removal(
+                commit,
+                ControlErrorCode::ProductRemovalUnavailable,
+            ));
         }
-        if commit.launch().is_err() {
+        if let Err(error) = commit.launch() {
+            eprintln!("Debrute Product removal finalizer launch failed: {error}");
             drop(lifecycle);
             drop(transition);
             return Err(ControlErrorCode::ProductRemovalUnavailable);

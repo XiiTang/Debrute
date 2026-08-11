@@ -13,11 +13,6 @@ Use `debrute` as the execution interface for image generation and editing.
 
 ## Rules
 
-- Resolve `debrute` normally. If the current Agent process predates Product
-  installation and cannot find it, use only the managed entrypoint:
-  `$HOME/.debrute/bin/debrute` on macOS,
-  `& "$env:USERPROFILE\.debrute\bin\debrute.cmd"` in Windows PowerShell, or
-  `"%USERPROFILE%\.debrute\bin\debrute.cmd"` in Windows `cmd.exe`.
 - Run `debrute models image list` and use each returned `summary` to eliminate
   configured Models that cannot meet the brief's hard requirements. Run
   `debrute models image describe <model-id>` only for the selected candidate.

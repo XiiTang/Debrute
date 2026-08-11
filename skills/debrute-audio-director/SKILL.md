@@ -14,11 +14,6 @@ only their settings and implementation group.
 
 ## Rules
 
-- Resolve `debrute` normally. If the current Agent process predates Product
-  installation and cannot find it, use only the managed entrypoint:
-  `$HOME/.debrute/bin/debrute` on macOS,
-  `& "$env:USERPROFILE\.debrute\bin\debrute.cmd"` in Windows PowerShell, or
-  `"%USERPROFILE%\.debrute\bin\debrute.cmd"` in Windows `cmd.exe`.
 - Pick the use case first. Run the matching `debrute models tts|music|sfx list`
   and use each returned `summary` to eliminate configured Models that cannot
   meet the brief's hard requirements. Run `describe` only for the selected

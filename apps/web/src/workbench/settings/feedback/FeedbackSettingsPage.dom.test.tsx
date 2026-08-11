@@ -38,7 +38,7 @@ describe('FeedbackSettingsPage', { tags: ['settings'] }, () => {
       expect(mutate).toHaveBeenCalledWith({
         operation: 'create-feedback-mark',
         name: '  喜欢👍  ',
-        icon: 'question'
+        icon: 'circle'
       });
 
       const deleteButton = container.querySelector('button[aria-label="删除: like"]');

@@ -23,7 +23,7 @@ impl RuntimeProductRemovalService for RemovalService {
         &self,
         _keep_config: bool,
     ) -> Result<ProductRemovalCommit, ControlErrorCode> {
-        Ok(ProductRemovalCommit::new(|| Ok(()), || {}))
+        Ok(ProductRemovalCommit::new(|| Ok(()), || Ok(())))
     }
 }
 

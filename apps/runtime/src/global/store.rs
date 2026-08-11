@@ -1023,12 +1023,13 @@ mod tests {
         assert!(create_feedback_mark(&mut settings, "bad\nname", "heart").is_err());
         assert!(create_feedback_mark(&mut settings, "bad\u{202e}name", "heart").is_err());
         assert!(create_feedback_mark(&mut settings, "new", "unknown-icon").is_err());
+        assert!(create_feedback_mark(&mut settings, "unresolved", "question").is_err());
     }
 
     #[test]
     fn feedback_action_bar_accepts_eight_and_rejects_invalid_membership() {
         let mut settings = FeedbackSettings::default();
-        create_feedback_mark(&mut settings, "eighth", "question").unwrap();
+        create_feedback_mark(&mut settings, "eighth", "circle").unwrap();
         let eight = settings
             .catalog
             .iter()
@@ -1038,7 +1039,7 @@ mod tests {
         set_feedback_action_bar(&mut settings, &eight).unwrap();
         assert_eq!(settings.action_bar, eight);
 
-        create_feedback_mark(&mut settings, "ninth", "question").unwrap();
+        create_feedback_mark(&mut settings, "ninth", "circle").unwrap();
         let nine = settings
             .catalog
             .iter()

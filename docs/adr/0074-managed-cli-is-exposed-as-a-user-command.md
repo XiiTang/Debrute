@@ -24,10 +24,19 @@ file. Installation, repair, and removal delete stale entries in that exact
 transaction namespace; prefix lookalikes and all other neighboring files remain
 unowned and untouched.
 
-PATH propagation is not an immediate-process guarantee. Official Skills retain
-the stable Product CLI path as a fallback when the invoking Agent predates the
-installation or does not inherit user shell configuration. That fallback may
-not select another `debrute` from PATH or an independently installed version.
+PATH propagation is not an immediate-process guarantee. Official Skills invoke
+only the canonical `debrute` command name and carry no Product-path fallback.
+After interactive Product installation, the installer tells users to restart
+an Agent that was already open so it can discover the installed Skills and the
+new command environment. The installer does not detect, close, or reload Agent
+processes.
+
+This is a pre-release revision of the original decision in this ADR. The
+original contract kept the stable Product CLI path in every official Skill as a
+fallback for Agents that predated installation. That duplicated platform paths
+and retained a second invocation route in operational instructions. The revised
+contract keeps bootstrap guidance at the installer boundary and leaves Skills
+with one command-name invocation route.
 
 Product installation and repair remove complete Debrute-delimited blocks from
 the bounded set of supported shell startup files before projecting the current

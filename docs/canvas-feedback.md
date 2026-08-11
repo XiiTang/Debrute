@@ -68,7 +68,9 @@ Phosphor Fill icon identifiers. Its separate ordered Action Bar list contains
 at most eight Catalog Names. Catalog size is not otherwise capped. Settings may
 create or delete mappings, change icons, and change Action Bar membership and
 order, but none of those actions reads or writes the Project Feedback Document.
-An unmapped Project Name remains accepted and uses the question-mark icon.
+An unmapped Project Name remains accepted and uses the system-reserved
+question-mark icon. That fallback remains resolvable but is not offered by the
+Settings icon picker or accepted by Catalog writes.
 The Settings UI edits membership directly: drag Catalog Feedback into the
 Floating Feedback Bar preview, drag within the preview to reorder, and remove
 from the preview to exclude it. It exposes no duplicate membership checkbox or
