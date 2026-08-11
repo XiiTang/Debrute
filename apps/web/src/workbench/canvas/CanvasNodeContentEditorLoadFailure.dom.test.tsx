@@ -5,28 +5,28 @@ import {
   canvasPreviewContinuityKey,
   canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import type { TextFileBuffer, WorkbenchActions } from '../../types.js';
-import { I18nProvider } from '../i18n/index.js';
-import { CanvasNodeContent } from './CanvasNodeContent.js';
-import { CanvasRasterPreviewEnvironmentProvider } from './CanvasRasterPreviewPresentation.js';
-import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import type { TextFileBuffer, WorkbenchActions } from '../../types';
+import { I18nProvider } from '../i18n/index';
+import { CanvasNodeContent } from './CanvasNodeContent';
+import { CanvasRasterPreviewEnvironmentProvider } from './CanvasRasterPreviewPresentation';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 
 const editorModuleFailure = vi.hoisted(() => new Error('editor chunk unavailable'));
 
-vi.mock('./CanvasTextEditor.js', () => {
+vi.mock('./CanvasTextEditor', () => {
   throw editorModuleFailure;
 });
 
-vi.mock('./CanvasTextRenderProfileContext.js', async () => {
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
+vi.mock('./CanvasTextRenderProfileContext', async () => {
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support');
   return {
     useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
     CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => <>{children}</>
   };
 });
 
-vi.mock('./CanvasTextPreviewRuntime.js', () => ({
+vi.mock('./CanvasTextPreviewRuntime', () => ({
   useCanvasTextPreviewRuntime: () => ({
     retryPreview: () => undefined
   })

@@ -75,36 +75,18 @@ describe('local source installation', () => {
     }
   });
 
-  it('rejects the obsolete Product schema instead of migrating it', async () => {
+  it('rejects an unsupported Product schema version', async () => {
     const root = mkdtempSync(join(tmpdir(), 'debrute-local-product-schema-'));
     try {
       const seed = join(root, 'seed');
       writeProduct(seed, '0.0.3', 'source');
       const manifestPath = join(seed, 'product-manifest.json');
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      manifest.schemaVersion = 1;
+      manifest.schemaVersion = 999;
       writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
       await expect(validateProductSeed(seed)).rejects.toThrow(
         'Product seed manifest is invalid (schemaVersion)'
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects obsolete runtime dependency declarations', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'debrute-local-product-dependency-'));
-    try {
-      const seed = join(root, 'seed');
-      writeProduct(seed, '0.0.3', 'source');
-      const manifestPath = join(seed, 'product-manifest.json');
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      manifest.runtimeDependencies = { canvasVideo: {} };
-      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-
-      await expect(validateProductSeed(seed)).rejects.toThrow(
-        'Product seed manifest is invalid (root fields)'
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

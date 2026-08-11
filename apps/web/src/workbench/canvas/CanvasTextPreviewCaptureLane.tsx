@@ -4,32 +4,32 @@ import {
   canvasTextPreviewTargetKey,
   type CanvasTextPreviewCaptureResult,
   type CanvasTextPreviewCaptureTarget
-} from './CanvasTextPreviewCapture.js';
+} from './CanvasTextPreviewCapture';
 import {
   CanvasTextPreviewFailure,
   canvasTextPreviewFailureFieldsForTarget,
   canvasTextPreviewFailureFromUnknown
-} from './CanvasTextPreviewFailure.js';
+} from './CanvasTextPreviewFailure';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
   type CanvasPerfCounterName,
   type CanvasPerfMonitor
-} from './CanvasPerfMonitor.js';
-import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
+} from './CanvasPerfMonitor';
+import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline';
 import type {
   CanvasTextPreparedFont,
   CanvasTextRenderProfile
-} from './CanvasTextRenderProfile.js';
+} from './CanvasTextRenderProfile';
 import {
   canvasPreviewResourceInteractionActive,
   type CanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler.js';
+} from './CanvasPreviewResourceScheduler';
 
 const CANVAS_TEXT_PREVIEW_LAYOUT_FRAME_LIMIT = 30;
 const CAPTURE_LAYOUT_TOP_TOLERANCE_PX = 0.5;
 const CanvasTextEditor = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('text-editor');
-  const module = await import('./CanvasTextEditor.js');
+  const module = await import('./CanvasTextEditor');
   workbenchStartupTimeline.markFeatureReady('text-editor');
   return { default: module.CanvasTextEditor };
 });

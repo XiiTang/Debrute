@@ -1,6 +1,6 @@
 import React from 'react';
-import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
-import { useCanvasTextProjectFontEnvironment } from './font-subset/CanvasTextProjectFontEnvironment.js';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile';
+import { useCanvasTextProjectFontEnvironment } from './font-subset/CanvasTextProjectFontEnvironment';
 
 interface CanvasTextRenderProfileContextValue {
   readonly profile: CanvasTextRenderProfile;

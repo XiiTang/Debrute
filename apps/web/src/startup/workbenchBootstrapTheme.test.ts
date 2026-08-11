@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DebruteGlobalSettingsView } from '@debrute/app-protocol';
-import { createWorkbenchGlobalProjection } from '../workbench/services/WorkbenchGlobalProjection.js';
-import { holdWorkbenchThemeUntilCommit } from './workbenchBootstrapTheme.js';
+import { createWorkbenchGlobalProjection } from '../workbench/services/WorkbenchGlobalProjection';
+import { holdWorkbenchThemeUntilCommit } from './workbenchBootstrapTheme';
 
 describe('Workbench bootstrap theme', () => {
   it('keeps ordered Global theme events applied until React takes ownership', () => {

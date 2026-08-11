@@ -1,7 +1,7 @@
 import type { ProjectDiagnostic, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import type { WorkbenchState } from '../../types';
-import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
-import type { CanvasSelection } from '../canvas/runtime/canvasSelection.js';
+import type { ProjectedCanvasNode } from '../canvas/CanvasScene';
+import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 
 export type SelectionContext =
   | { kind: 'empty'; diagnostics: ProjectDiagnostic[] }

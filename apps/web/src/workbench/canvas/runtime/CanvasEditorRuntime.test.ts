@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createCanvasEditorRuntime } from './CanvasEditorRuntime.js';
+import { createCanvasEditorRuntime } from './CanvasEditorRuntime';
 
 describe('CanvasEditorRuntime', () => {
   let restoreBrowserRuntime: () => void;

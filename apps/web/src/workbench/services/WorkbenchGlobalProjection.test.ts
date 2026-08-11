@@ -3,7 +3,7 @@ import type {
   DebruteGlobalSettingsView,
   PhotoshopStateView
 } from '@debrute/app-protocol';
-import { createWorkbenchGlobalProjection } from './WorkbenchGlobalProjection.js';
+import { createWorkbenchGlobalProjection } from './WorkbenchGlobalProjection';
 
 describe('WorkbenchGlobalProjection', () => {
   it('retains initial resources before any presentation subscribes', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCanvasDomInteractionTarget } from './CanvasDomInteractionAdapter.js';
+import { resolveCanvasDomInteractionTarget } from './CanvasDomInteractionAdapter';
 
 describe('resolveCanvasDomInteractionTarget', () => {
   it('classifies blank Canvas, blocked camera movement, and targets outside the surface', () => {

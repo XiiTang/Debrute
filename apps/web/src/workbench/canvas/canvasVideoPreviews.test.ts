@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canvasVideoRasterPreviewRequest } from './CanvasVideoPreviewRuntime';
-import type { CanvasVideoPreviewTarget } from './CanvasVideoPreviewTaskRegistry.js';
+import type { CanvasVideoPreviewTarget } from './CanvasVideoPreviewTaskRegistry';
 
 describe('canvas video preview URLs', { tags: ['canvas-video'] }, () => {
   it('builds video preview URLs from one owner-scoped target', () => {

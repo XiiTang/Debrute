@@ -1,7 +1,7 @@
 import React from 'react';
-import { AlertTriangle, RefreshCw } from '../ui/index.js';
+import { AlertTriangle, RefreshCw } from '../ui/index';
 import { useI18n } from '../i18n';
-import { Button } from '../ui/index.js';
+import { Button } from '../ui/index';
 
 export interface CanvasNodeErrorPresentationProps {
   message: string;

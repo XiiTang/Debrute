@@ -1,7 +1,7 @@
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvasCullingController } from './CanvasCullingController.js';
-import type { CanvasSceneSnapshot } from './CanvasScenePresentation.js';
+import { createCanvasCullingController } from './CanvasCullingController';
+import type { CanvasSceneSnapshot } from './CanvasScenePresentation';
 
 describe('CanvasCullingController', () => {
   it('writes only visibility deltas while camera queries change', () => {

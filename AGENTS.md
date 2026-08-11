@@ -24,7 +24,7 @@ Debrute is a pnpm TypeScript monorepo with a Cargo workspace for the Rust Runtim
 
 ## Coding Style & Naming Conventions
 
-Use strict TypeScript ESM with `.js` extensions in relative imports that compile to JavaScript. Follow existing formatting: two-space indentation, single quotes, semicolons, `camelCase` functions/variables, `PascalCase` classes/types/components, and `UPPER_SNAKE_CASE` only for true constants. Prefer `@debrute/*` workspace aliases over deep cross-package imports. Keep package boundaries aligned with `packages/architecture-rules`.
+Use strict TypeScript ESM and follow the resolver of each runtime surface. Bundler-owned no-emit applications such as `apps/web` omit `.js` from relative TypeScript module imports; TypeScript compiled or executed as native ESM uses `.js` extensions. Follow existing formatting: two-space indentation, single quotes, semicolons, `camelCase` functions/variables, `PascalCase` classes/types/components, and `UPPER_SNAKE_CASE` only for true constants. Prefer `@debrute/*` workspace aliases over deep cross-package imports. Keep package boundaries aligned with `packages/architecture-rules`.
 
 Rust interfaces use a seven-parameter Clippy threshold as a design signal. When an interface exceeds it, introduce an input type only when that type hides real invariants or gives callers a deeper module; do not create field-for-field parameter bags solely to satisfy Clippy. Intentional exceptions must use function-local `#[expect(clippy::too_many_arguments, reason = "...")]`, never file-level or unreasoned allowances. Function length is reviewed by cohesion, authority, and transaction or state-machine integrity rather than a fixed line count.
 

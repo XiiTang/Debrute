@@ -2,7 +2,7 @@ import type { CanvasPreviewTargetKey } from '@debrute/canvas-core';
 import {
   canvasTextPreviewTargetKey,
   type CanvasTextPreviewTarget
-} from './CanvasTextPreviewCapture.js';
+} from './CanvasTextPreviewCapture';
 
 export const CANVAS_TEXT_PREVIEW_CONTENT_MAX_TARGETS = 10;
 export const CANVAS_TEXT_PREVIEW_CONTENT_MAX_BYTES = 8 * 1024 * 1024;

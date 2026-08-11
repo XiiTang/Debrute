@@ -107,7 +107,6 @@ pub struct RuntimeHttpServiceError {
     pub status: StatusCode,
     pub code: &'static str,
     pub message: String,
-    pub details: Option<Value>,
 }
 
 impl RuntimeHttpServiceError {
@@ -117,14 +116,7 @@ impl RuntimeHttpServiceError {
             status,
             code,
             message: message.into(),
-            details: None,
         }
-    }
-
-    #[must_use]
-    pub fn with_details(mut self, details: Value) -> Self {
-        self.details = Some(details);
-        self
     }
 }
 
@@ -1098,7 +1090,6 @@ impl RuntimeHttpServiceError {
             },
             code,
             message: error.to_string(),
-            details: None,
         }
     }
 

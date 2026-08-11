@@ -8,7 +8,7 @@ import {
   type CanvasTextFontResource,
   type CanvasTextRenderProfile,
   type CanvasTextRenderProfileDefinition
-} from './CanvasTextRenderProfile.js';
+} from './CanvasTextRenderProfile';
 
 interface CanvasFontCatalogEntry {
   readonly id: CanvasFontId;

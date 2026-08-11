@@ -8,20 +8,20 @@ import type {
   CanvasVideoPreviewSourceRequest,
   CanvasVideoPreviewSourceResponse
 } from '@debrute/app-protocol';
-import type { WorkbenchActions } from '../../types.js';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { WorkbenchActions } from '../../types';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import type {
   CanvasPreviewResourceRequest,
   CanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler.js';
-import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
+} from './CanvasPreviewResourceScheduler';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle';
 import {
   CanvasVideoPreviewProvider,
   canvasVideoPreviewTargetsForNodes,
   useCanvasVideoPreviewNode,
   useCanvasVideoPreviewRuntime,
   type CanvasVideoPreviewRuntimeValue
-} from './CanvasVideoPreviewRuntime.js';
+} from './CanvasVideoPreviewRuntime';
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;

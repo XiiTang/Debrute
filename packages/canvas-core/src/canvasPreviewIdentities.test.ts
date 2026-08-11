@@ -3,7 +3,6 @@ import {
   canvasPreviewTargetIdentity,
   canvasPreviewTargetIdentityFromDigest,
   canvasPreviewTargetKey,
-  canvasPreviewVariantIdentity,
   canvasPreviewVariantKey
 } from './canvasPreviewIdentities';
 
@@ -31,18 +30,27 @@ describe('Canvas preview identities', () => {
     }));
   });
 
-  it('changes a variant identity only for its target pixels and width', () => {
+  it('changes a variant key only for its target pixels and width', () => {
     const targetIdentity = canvasPreviewTargetIdentity(['sha256:source', 1250]);
-    const base = canvasPreviewVariantIdentity({
+    const base = canvasPreviewVariantKey({
+      mediaKind: 'video',
+      bindingId: 'project-a',
+      projectRelativePath: 'clips/a.mp4',
       targetIdentity,
       width: 1024
     });
 
-    expect(canvasPreviewVariantIdentity({
+    expect(canvasPreviewVariantKey({
+      mediaKind: 'video',
+      bindingId: 'project-a',
+      projectRelativePath: 'clips/a.mp4',
       targetIdentity,
       width: 2048
     })).not.toBe(base);
-    expect(canvasPreviewVariantIdentity({
+    expect(canvasPreviewVariantKey({
+      mediaKind: 'video',
+      bindingId: 'project-a',
+      projectRelativePath: 'clips/a.mp4',
       targetIdentity: canvasPreviewTargetIdentity(['sha256:other-source', 1250]),
       width: 1024
     })).not.toBe(base);
@@ -72,7 +80,10 @@ describe('Canvas preview identities', () => {
     expect(() => canvasPreviewTargetIdentityFromDigest('')).toThrow(
       'Canvas preview target identity digest must be non-empty.'
     );
-    expect(() => canvasPreviewVariantIdentity({
+    expect(() => canvasPreviewVariantKey({
+      mediaKind: 'image',
+      bindingId: 'project-a',
+      projectRelativePath: 'images/a.png',
       targetIdentity: canvasPreviewTargetIdentity(['source']),
       width: 0
     })).toThrow('Canvas preview variant width must be a positive integer.');

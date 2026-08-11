@@ -1,12 +1,12 @@
 import type { CanvasStateChange } from '@debrute/app-protocol';
-import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene';
 import {
   getCanvasResizePreserveAspect,
   isAdditiveCanvasSelectionModifier,
   normalizeCanvasWheelDelta,
   shouldCanvasHandleGlobalWheelTarget,
   type NormalizedCanvasWheelDelta
-} from '../../services/canvasInteraction.js';
+} from '../../services/canvasInteraction';
 import {
   CANVAS_CAMERA_IDLE_MS,
   assertCanvasCamera,
@@ -17,22 +17,22 @@ import {
   canvasCameraReset,
   type CanvasCamera,
   type CanvasCameraState
-} from './canvasCamera.js';
+} from './canvasCamera';
 import {
   canvasRectToScreenRect,
   canvasToScreenPoint,
   normalizedSurfaceSize,
   screenToCanvasPoint,
   visibleCanvasRectForCamera
-} from './canvasCoordinateSystem.js';
+} from './canvasCoordinateSystem';
 import {
   rectsIntersect,
   type CanvasPoint,
   type CanvasRect,
   type CanvasSize,
   type ResizeHandle
-} from './canvasGeometry.js';
-import type { CanvasSelection } from './canvasSelection.js';
+} from './canvasGeometry';
+import type { CanvasSelection } from './canvasSelection';
 import {
   canvasNodeSelection,
   normalizeCanvasSelection,
@@ -40,20 +40,20 @@ import {
   sameCanvasSelection,
   selectedNodeProjectRelativePaths,
   unionCanvasNodeSelection
-} from './canvasSelection.js';
+} from './canvasSelection';
 import {
   createCanvasManualLayoutLifecycle
-} from './CanvasManualLayoutLifecycle.js';
-import type { CanvasLayoutOverride } from '../canvasManualLayoutDraft.js';
+} from './CanvasManualLayoutLifecycle';
+import type { CanvasLayoutOverride } from '../canvasManualLayoutDraft';
 import {
   createCanvasScenePresentation,
   type CanvasRuntimeScene
-} from '../CanvasScenePresentation.js';
+} from '../CanvasScenePresentation';
 import {
   CANVAS_POINTER_ACTIVATION_DISTANCE,
   decideCanvasInteraction,
   type CanvasInteractionStateCommand
-} from '../CanvasInteractionPolicy.js';
+} from '../CanvasInteractionPolicy';
 
 export interface CanvasSurfaceElements {
   surface: HTMLElement;

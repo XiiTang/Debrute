@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Bell, ChevronRight, Maximize2, Minus, Square, X } from '../ui/index.js';
+import { Bell, ChevronRight, Maximize2, Minus, Square, X } from '../ui/index';
 import type { WorkbenchMenuId, WorkbenchMenuItem, WorkbenchTitleBarState } from './workbenchTitleBarState';
-import { IconButton, Menu } from '../ui/index.js';
+import { IconButton, Menu } from '../ui/index';
 import {
   closeTitleBarMenu,
   openTitleBarMenu,
@@ -10,7 +10,7 @@ import {
   type OpenTitleBarMenu
 } from './workbenchTitleBarInteraction';
 import { useI18n, type WorkbenchI18n } from '../i18n';
-import type { WorkbenchBehaviorOwner } from '../services/workbenchFocusCommandRouter.js';
+import type { WorkbenchBehaviorOwner } from '../services/workbenchFocusCommandRouter';
 
 type WorkbenchMenuCommandItem = Extract<WorkbenchMenuItem, { kind: 'command' }>;
 

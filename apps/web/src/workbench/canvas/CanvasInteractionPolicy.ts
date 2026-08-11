@@ -1,10 +1,10 @@
-import type { CanvasSelection } from './runtime/canvasSelection.js';
+import type { CanvasSelection } from './runtime/canvasSelection';
 import {
   canvasNodeSelection,
   isCanvasNodeSelected,
   toggleCanvasNodeSelection,
   unionCanvasNodeSelection
-} from './runtime/canvasSelection.js';
+} from './runtime/canvasSelection';
 
 export const CANVAS_POINTER_ACTIVATION_DISTANCE = 4;
 

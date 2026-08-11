@@ -19,22 +19,22 @@ import {
   canvasPreviewContinuityKey,
   type CanvasPreviewTargetKey
 } from '@debrute/canvas-core';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import type { CanvasSceneActions } from './CanvasSceneActions.js';
-import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
-import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
-import type { CanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime.js';
-import { createCanvasPathSnapshotStore } from './CanvasPathSnapshotStore.js';
-import { canvasVideoPreviewUrl } from './canvasVideoPreviews.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import type { CanvasSceneActions } from './CanvasSceneActions';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle';
+import type { CanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime';
+import { createCanvasPathSnapshotStore } from './CanvasPathSnapshotStore';
+import { canvasVideoPreviewUrl } from './canvasVideoPreviews';
 import {
   sameCanvasRasterPreviewRequest,
   type CanvasRasterPreviewRequest
-} from './CanvasRasterPreviewPresentation.js';
-import { canvasRawFileBindingId } from './canvasRawFileUrls.js';
+} from './CanvasRasterPreviewPresentation';
+import { canvasRawFileBindingId } from './canvasRawFileUrls';
 import {
   compareCanvasPreviewPaths,
   orderCanvasPreviewItemsByNode
-} from './CanvasPreviewScheduling.js';
+} from './CanvasPreviewScheduling';
 import {
   canvasVideoPreviewReadWindow,
   canvasVideoPreviewTargetIdentity,
@@ -46,9 +46,9 @@ import {
   type CanvasVideoPreviewFailure,
   type CanvasVideoPreviewTarget,
   type CanvasVideoPreviewTask
-} from './CanvasVideoPreviewTaskRegistry.js';
-import { useCanvasPreviewInteractionGate } from './useCanvasPreviewInteractionGate.js';
-import type { CanvasRect } from './runtime/canvasGeometry.js';
+} from './CanvasVideoPreviewTaskRegistry';
+import { useCanvasPreviewInteractionGate } from './useCanvasPreviewInteractionGate';
+import type { CanvasRect } from './runtime/canvasGeometry';
 
 const MAX_CAPTURE_DIMENSION = 4096;
 const VIDEO_CAPTURE_TIMEOUT_MS = 30_000;

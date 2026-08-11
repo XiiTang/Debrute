@@ -5,7 +5,7 @@ import type {
 import {
   canvasNodeSelection,
   type CanvasSelection
-} from '../canvas/runtime/canvasSelection.js';
+} from '../canvas/runtime/canvasSelection';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import type { ProjectTreeSelectionState } from './projectTreeInteraction';
 

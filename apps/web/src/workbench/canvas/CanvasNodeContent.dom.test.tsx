@@ -6,7 +6,7 @@ import {
   canvasPreviewContinuityKey,
   canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import { EditorView } from '@codemirror/view';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import {
@@ -21,20 +21,20 @@ import {
   type CanvasRasterPreviewRequest
 } from './CanvasRasterPreviewPresentation';
 import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
-import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
-import * as CanvasTextEditorRuntime from './CanvasTextEditorRuntime.js';
-import * as TextEditorLanguages from './textEditorCodeMirrorLanguages.js';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle';
+import * as CanvasTextEditorRuntime from './CanvasTextEditorRuntime';
+import * as TextEditorLanguages from './textEditorCodeMirrorLanguages';
 import { I18nProvider } from '../i18n';
 
-vi.mock('./CanvasTextRenderProfileContext.js', async () => {
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
+vi.mock('./CanvasTextRenderProfileContext', async () => {
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support');
   return {
     useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
     CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => <>{children}</>
   };
 });
 
-vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment', () => ({
   useCanvasTextProjectFontEnvironment: () => ({
     previewSession: {
       prepareCoverage: async () => {
@@ -136,15 +136,6 @@ function renderStaticWithI18n(element: React.ReactElement): string {
     </TestProviders>
   );
 }
-
-// @ts-expect-error CanvasNodeContent requires the video target registry dependency.
-const canvasNodeContentPropsWithoutVideoRegistry: CanvasNodeContentProps = {
-  node: directoryNode('type-check', 'collapsed'),
-  contentInteractionActive: false,
-  actions: actionsFixture(),
-  textBuffer: undefined,
-};
-void canvasNodeContentPropsWithoutVideoRegistry;
 
 describe('CanvasNodeContent', () => {
   it('renders the project root directory with a non-empty label', () => {

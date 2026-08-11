@@ -1,23 +1,23 @@
 import React, { useEffect } from 'react';
-import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types.js';
-import { useI18n } from '../i18n/index.js';
+import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions } from '../../types';
+import { useI18n } from '../i18n/index';
 import {
   basenameFromProjectPath,
   resolveTextEditorWindowGestureRect,
   textBufferStatus
-} from '../services/textEditorWindows.js';
+} from '../services/textEditorWindows';
 import {
   FloatingWindowResizeHandles,
   floatingWindowRectStyle,
   useFloatingWindowGesture
-} from '../shell/floatingWindowGesture.js';
-import { textEditorWindowIdentity } from '../shell/workbenchWindowOrder.js';
-import { useWorkbenchWindow } from '../shell/WorkbenchWindowHost.js';
-import type { WorkbenchWindowRect } from '../shell/windowBounds.js';
+} from '../shell/floatingWindowGesture';
+import { textEditorWindowIdentity } from '../shell/workbenchWindowOrder';
+import { useWorkbenchWindow } from '../shell/WorkbenchWindowHost';
+import type { WorkbenchWindowRect } from '../shell/windowBounds';
 import {
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_PROPERTY,
   FLOATING_TEXT_EDITOR_TITLEBAR_CSS_VALUE
-} from '../shell/windowBounds.js';
+} from '../shell/windowBounds';
 import {
   AlertTriangle,
   DiscardChangesIcon,
@@ -31,7 +31,7 @@ import {
   Save,
   StatusPill,
   X
-} from '../ui/index.js';
+} from '../ui/index';
 
 export function FloatingTextEditorWindowShell({
   windowState,

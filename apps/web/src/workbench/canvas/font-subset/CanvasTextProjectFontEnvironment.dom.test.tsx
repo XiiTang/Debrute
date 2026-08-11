@@ -1,12 +1,12 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from '../CanvasTextRenderProfile.test-support.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from '../CanvasTextRenderProfile.test-support';
 import {
   CanvasTextProjectFontEnvironment,
   CanvasTextProjectFontEnvironmentProvider,
   useCanvasTextProjectFontEnvironment
-} from './CanvasTextProjectFontEnvironment.js';
+} from './CanvasTextProjectFontEnvironment';
 
 describe('CanvasTextProjectFontEnvironmentProvider', { tags: ['canvas-text'] }, () => {
   it('survives the StrictMode effect probe and disposes after the real unmount', async () => {

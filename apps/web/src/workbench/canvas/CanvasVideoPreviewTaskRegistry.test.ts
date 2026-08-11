@@ -7,7 +7,7 @@ import {
   reconcileCanvasVideoPreviewTasks,
   retryCanvasVideoPreviewTask,
   type CanvasVideoPreviewTarget
-} from './CanvasVideoPreviewTaskRegistry.js';
+} from './CanvasVideoPreviewTaskRegistry';
 
 describe('CanvasVideoPreviewTaskRegistry', { tags: ['canvas-video'] }, () => {
   it('keeps multiple frame times for one video as independent tasks', () => {

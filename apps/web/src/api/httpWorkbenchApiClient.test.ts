@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createHttpWorkbenchApiClient } from './httpWorkbenchApiClient.js';
+import { createHttpWorkbenchApiClient } from './httpWorkbenchApiClient';
 
 describe('Runtime Workbench connection', () => {
   afterEach(() => {
@@ -111,6 +111,28 @@ describe('Runtime Workbench connection', () => {
       canonicalRoot: canonicalProjectRoot
     });
     expect(harness.calls.map((call) => call.path)).toEqual(['/api/workbench/connection']);
+    client.dispose();
+  });
+
+  it('preserves the failed initial Project root as an explicit request error field', async () => {
+    const requestedProjectRoot = '/projects/missing';
+    createHarness(1, undefined, {
+      code: 'project_not_found',
+      message: `Debrute Project root does not exist: ${requestedProjectRoot}`
+    });
+    vi.stubGlobal('location', {
+      origin: 'http://127.0.0.1:41001',
+      pathname: '/open',
+      search: `?path=${encodeURIComponent(requestedProjectRoot)}`
+    });
+    const client = createHttpWorkbenchApiClient();
+
+    await expect(client.openProject({ projectRoot: requestedProjectRoot })).rejects.toMatchObject({
+      status: 409,
+      code: 'project_not_found',
+      message: `Debrute Project root does not exist: ${requestedProjectRoot}`,
+      projectRoot: requestedProjectRoot
+    });
     client.dispose();
   });
 
@@ -545,7 +567,11 @@ describe('Runtime Workbench connection', () => {
   });
 });
 
-function createHarness(globalRevision = 1, initialCanonicalRoot?: string) {
+function createHarness(
+  globalRevision = 1,
+  initialCanonicalRoot?: string,
+  initialProjectError?: { code: string; message: string }
+) {
   const calls: Array<{ path: string; init: RequestInit | undefined }> = [];
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   const encoder = new TextEncoder();
@@ -588,6 +614,14 @@ function createHarness(globalRevision = 1, initialCanonicalRoot?: string) {
             records: []
           }));
           if (requestedProjectRoot) {
+            if (initialProjectError) {
+              controller.enqueue(sse(encoder, {
+                type: 'project.open_failed',
+                canonicalRoot: requestedProjectRoot,
+                error: initialProjectError
+              }));
+              return;
+            }
             projectNumber += 1;
             const bindingId = `project-${projectNumber}`;
             currentCanonicalRoot = initialCanonicalRoot ?? requestedProjectRoot;

@@ -105,7 +105,7 @@ describe('Windows Runtime development directory assembly', () => {
     nativeRasterRuntimeInventorySha256: SHA_C,
     runtimePayloadInventorySha256: SHA_D
   };
-  const installedIdentity = { schemaVersion: 3 as const, ...expectation };
+  const installedIdentity = { ...expectation };
 
   it('reuses only an exact executable, payload manifest, and Runtime inventory', () => {
     expect(windowsRuntimeDirectoryNeedsAssembly({

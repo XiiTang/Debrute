@@ -1,5 +1,5 @@
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
-import type { CanvasRect } from './runtime/canvasGeometry.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
+import type { CanvasRect } from './runtime/canvasGeometry';
 
 const TREE_EDGE_TRUNK_MAX_GAP = 96;
 const TREE_EDGE_TRUNK_OVERLAP_OFFSET = 48;

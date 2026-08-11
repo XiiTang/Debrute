@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CanvasProjection } from './CanvasScene.js';
-import type { CanvasEditorActions } from './CanvasSceneActions.js';
-import { CanvasEditor } from './CanvasEditor.js';
+import type { CanvasProjection } from './CanvasScene';
+import type { CanvasEditorActions } from './CanvasSceneActions';
+import { CanvasEditor } from './CanvasEditor';
 
 const canvasState = { expandedDirectories: [], nodeStates: {}, occlusionOrder: [] };
 
@@ -11,7 +11,7 @@ const { canvasSurfaceRenderSpy } = vi.hoisted(() => ({
   canvasSurfaceRenderSpy: vi.fn()
 }));
 
-vi.mock('./CanvasSurface.js', () => ({
+vi.mock('./CanvasSurface', () => ({
   CanvasSurface: () => {
     canvasSurfaceRenderSpy();
     return <div data-testid="canvas-surface-stub" />;

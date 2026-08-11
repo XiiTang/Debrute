@@ -11,7 +11,7 @@ import type {
   CanvasTextPreviewCaptureTarget,
   CanvasTextPreviewCaptureResult
 } from './CanvasTextPreviewCapture';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support';
 
 const TEST_RENDER_PROFILE = DEFAULT_CANVAS_TEXT_RENDER_PROFILE;
 const TEST_PREPARED_FONT = {

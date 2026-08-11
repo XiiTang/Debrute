@@ -4,8 +4,8 @@ import type {
   WorkbenchApiClient
 } from '@debrute/app-protocol';
 import { describe, expect, it } from 'vitest';
-import type { WorkbenchProjectProjectionState } from '../services/WorkbenchProjectProjection.js';
-import { createCanvasOcclusionOrderWrites } from './CanvasOcclusionOrderWrites.js';
+import type { WorkbenchProjectProjectionState } from '../services/WorkbenchProjectProjection';
+import { createCanvasOcclusionOrderWrites } from './CanvasOcclusionOrderWrites';
 
 type CanvasStatePatch = Parameters<WorkbenchApiClient['patchCanvasState']>[0];
 type BoundProject = Extract<WorkbenchProjectProjectionState, { status: 'bound' }>;

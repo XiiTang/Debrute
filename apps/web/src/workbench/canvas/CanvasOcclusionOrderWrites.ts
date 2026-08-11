@@ -3,16 +3,16 @@ import type {
   CanvasState,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
-import type { WorkbenchProjectProjectionState } from '../services/WorkbenchProjectProjection.js';
-import type { CanvasLayoutOverride } from './canvasManualLayoutDraft.js';
-import { canvasNodesWithLayoutOverrides } from './canvasManualLayoutDraft.js';
+import type { WorkbenchProjectProjectionState } from '../services/WorkbenchProjectProjection';
+import type { CanvasLayoutOverride } from './canvasManualLayoutDraft';
+import { canvasNodesWithLayoutOverrides } from './canvasManualLayoutDraft';
 import {
   projectCanvasNodeScene,
   projectCanvasSceneNodes,
   raiseCanvasSelection,
   reconcileCanvasOcclusionOrder,
   type CanvasProjectedRect
-} from './CanvasScene.js';
+} from './CanvasScene';
 
 type CanvasStatePatch = Parameters<WorkbenchApiClient['patchCanvasState']>[0];
 

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import { I18nProvider } from '../i18n/index.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import { I18nProvider } from '../i18n/index';
 
-vi.mock('./CanvasAudioPlayerAdapter.js', () => ({
+vi.mock('./CanvasAudioPlayerAdapter', () => ({
   CanvasAudioPlayerAdapter: ({
     source,
     contentInteractionActive,
@@ -29,7 +29,7 @@ vi.mock('./CanvasAudioPlayerAdapter.js', () => ({
   )
 }));
 
-import { CanvasAudioNodeContent } from './CanvasAudioNodeContent.js';
+import { CanvasAudioNodeContent } from './CanvasAudioNodeContent';
 
 afterEach(() => {
   vi.restoreAllMocks();

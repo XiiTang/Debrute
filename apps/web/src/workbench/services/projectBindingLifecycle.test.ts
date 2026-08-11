@@ -7,8 +7,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createProjectBindingLifecycle,
   type ProjectBindingLifecycle
-} from './projectBindingLifecycle.js';
-import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection.js';
+} from './projectBindingLifecycle';
+import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection';
 
 describe('Project binding lifecycle', () => {
   it('closes command admission synchronously, admits one attempt, and commits only an accepted binding', async () => {

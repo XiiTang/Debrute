@@ -2,13 +2,13 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile';
 import {
   CanvasTextRenderProfileGate,
   CanvasTextRenderProfileProvider,
   useCanvasTextRenderProfile
-} from './CanvasTextRenderProfileContext.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
+} from './CanvasTextRenderProfileContext';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support';
 
 const environmentMock = vi.hoisted(() => ({
   prepareInteractive: vi.fn(),
@@ -26,7 +26,7 @@ environmentMock.environment = {
   }
 };
 
-vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment', () => ({
   useCanvasTextProjectFontEnvironment: () => environmentMock.environment
 }));
 

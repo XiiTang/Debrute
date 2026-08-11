@@ -6,7 +6,7 @@ import {
 import {
   anchorResizedFloatingWindowRect,
   type FloatingWindowGesture
-} from './floatingWindowGesture.js';
+} from './floatingWindowGesture';
 
 export type FloatingPanelId = 'explorer' | 'inspector' | 'feedback' | 'settings' | 'terminal';
 export interface FloatingPanelDefinition {

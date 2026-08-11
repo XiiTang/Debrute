@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from './i18n/index.js';
-import type { ProjectPathCommandRouter } from './services/projectPathCommandRouter.js';
-import { ProjectPathContextMenuHost } from './WorkbenchApp.js';
+import { I18nProvider } from './i18n/index';
+import type { ProjectPathCommandRouter } from './services/projectPathCommandRouter';
+import { ProjectPathContextMenuHost } from './WorkbenchApp';
 
 describe('ProjectPathContextMenuHost', () => {
   it('builds items directly from the closed project-path target', async () => {

@@ -5,7 +5,7 @@ import {
   raiseCanvasSelection,
   reconcileCanvasOcclusionOrder,
   type CanvasProjectedRect
-} from './CanvasScene.js';
+} from './CanvasScene';
 
 describe('CanvasScene', () => {
   it('projects the structural Project root', () => {

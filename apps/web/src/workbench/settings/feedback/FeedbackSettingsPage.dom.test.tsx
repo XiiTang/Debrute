@@ -1,8 +1,8 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from '../../i18n/index.js';
-import { FeedbackSettingsPage } from './FeedbackSettingsPage.js';
+import { I18nProvider } from '../../i18n/index';
+import { FeedbackSettingsPage } from './FeedbackSettingsPage';
 
 describe('FeedbackSettingsPage', { tags: ['settings'] }, () => {
   it('creates an exact multilingual name and confirms local-only deletion', async () => {

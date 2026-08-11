@@ -1,7 +1,7 @@
 import type { WorkbenchApiClient } from '@debrute/app-protocol';
 import { describe, expect, it, vi } from 'vitest';
-import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
-import { createProjectPathCommandEffects } from './projectPathCommandEffects.js';
+import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake';
+import { createProjectPathCommandEffects } from './projectPathCommandEffects';
 
 describe('Project Path Command effects', () => {
   it('submits through the accepted scope and refuses a scope that can no longer submit', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createWorkbenchDevProxy, rewriteRuntimeRedirect } from './devWorkbenchProxy.js';
+import { createWorkbenchDevProxy, rewriteRuntimeRedirect } from './devWorkbenchProxy';
 
 describe('source-dev Workbench proxy', () => {
   it('proxies only the Runtime API, SSE, and WebSocket prefix', () => {

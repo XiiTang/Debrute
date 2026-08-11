@@ -1,6 +1,6 @@
 import React from 'react';
-import { IconButton, Map } from '../ui/index.js';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import { IconButton, Map } from '../ui/index';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import { CANVAS_MINIMAP_PANEL_SIZE, type FloatingBarRect } from '../shell/floatingBars';
 import type { CanvasPoint, CanvasRect } from '../services/canvasInteraction';
 import type { CanvasMinimapDragState, CanvasSize } from './canvasMinimap';
@@ -15,7 +15,7 @@ import {
   type CanvasMinimapModel
 } from './canvasMinimap';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './runtime/CanvasEditorRuntime';
-import type { CanvasSceneSnapshot } from './CanvasScenePresentation.js';
+import type { CanvasSceneSnapshot } from './CanvasScenePresentation';
 import { DEFAULT_CANVAS_CAMERA } from './runtime/canvasCamera';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { useI18n } from '../i18n';

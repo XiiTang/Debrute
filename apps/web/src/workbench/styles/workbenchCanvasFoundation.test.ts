@@ -8,31 +8,24 @@ const tokenStyles = readFileSync('apps/web/src/workbench/ui/styles/tokens.css', 
 const controlStyles = readFileSync('apps/web/src/workbench/ui/styles/controls.css', 'utf8');
 
 describe('Workbench Canvas foundation', () => {
-  it('paints one continuous Canvas background behind a transparent title bar', () => {
+  it('uses one Canvas grid without a shell underlay', () => {
     const shellRule = cssRule(shellStyles, '.workbench-shell');
     const canvasSurfaceRule = cssRule(canvasStyles, '.canvas-surface');
 
-    expect(shellRule).toContain('background: var(--db-canvas-field);');
     expect(shellRule).toContain('background-size: var(--db-canvas-grid-size);');
-    expect(canvasSurfaceRule).toContain('background: var(--db-canvas-field);');
     expect(canvasSurfaceRule).toContain('background-size: var(--db-canvas-grid-size);');
     expect(shellStyles).not.toContain('.workbench-shell::before');
-    expect(titleBarStyles).not.toContain('.workbench-titlebar::before');
   });
 
   it('keeps transparent title-bar controls legible without a persistent strip', () => {
-    const titleBarRule = cssRule(titleBarStyles, '.workbench-titlebar');
     const titleRule = cssRule(titleBarStyles, '.workbench-titlebar__title');
     const menuButtonRule = cssRule(titleBarStyles, '.workbench-titlebar__menu-button');
     const windowButtonRule = cssRule(controlStyles, '.db-icon-button--titlebar');
     const windowButtonIconRule = cssRule(controlStyles, '.db-icon-button--window-close .db-icon-button__icon');
 
-    expect(titleBarRule).not.toContain('background:');
     expect(titleRule).toContain('text-shadow: var(--db-titlebar-contrast-shadow);');
     expect(menuButtonRule).toContain('text-shadow: var(--db-titlebar-contrast-shadow);');
     expect(windowButtonRule).toContain('color: var(--db-text-muted);');
-    expect(controlStyles).toContain('.db-icon-button--titlebar .db-icon-button__icon,');
-    expect(windowButtonIconRule).toContain('background: var(--db-canvas-bg);');
     expect(windowButtonIconRule).toContain('padding: var(--db-titlebar-icon-contrast-inset);');
     expect(titleBarStyles).not.toContain('.db-icon-button__icon');
   });

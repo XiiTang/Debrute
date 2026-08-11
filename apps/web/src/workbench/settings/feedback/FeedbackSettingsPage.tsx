@@ -3,11 +3,11 @@ import type {
   DebruteGlobalFeedbackSettings,
   MutateDebruteGlobalSettingsInput
 } from '@debrute/app-protocol';
-import { FeedbackIcon } from '../../feedback/FeedbackIcon.js';
-import { FeedbackIconPicker } from '../../feedback/FeedbackIconPicker.js';
-import { UNRESOLVED_FEEDBACK_ICON_NAME } from '../../feedback/generatedFeedbackIconNames.js';
-import { Button, IconButton, Input, Plus, Trash2, X } from '../../ui/index.js';
-import { useI18n, type WorkbenchTranslationKey } from '../../i18n/index.js';
+import { FeedbackIcon } from '../../feedback/FeedbackIcon';
+import { FeedbackIconPicker } from '../../feedback/FeedbackIconPicker';
+import { UNRESOLVED_FEEDBACK_ICON_NAME } from '../../feedback/generatedFeedbackIconNames';
+import { Button, IconButton, Input, Plus, Trash2, X } from '../../ui/index';
+import { useI18n, type WorkbenchTranslationKey } from '../../i18n/index';
 
 export type FeedbackNamePreflightError = 'required' | 'duplicate';
 

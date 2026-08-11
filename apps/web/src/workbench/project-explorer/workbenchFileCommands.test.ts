@@ -1,6 +1,6 @@
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { describe, expect, it } from 'vitest';
-import type { WorkbenchFileClipboard } from '../shell/contextMenu.js';
+import type { WorkbenchFileClipboard } from '../shell/contextMenu';
 import {
   batchResultSelectionPaths,
   clearClipboardAfterDeletedPath,
@@ -13,7 +13,7 @@ import {
   reconcileCutClipboardWithProjectEntries,
   rewriteCanvasSelectionAfterPathChanges,
   singleFileBatchResultPath
-} from './workbenchFileCommands.js';
+} from './workbenchFileCommands';
 
 describe('workbench file command helpers', () => {
   it('creates a stable tree selection from ordered paths', () => {

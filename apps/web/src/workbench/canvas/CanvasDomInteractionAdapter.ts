@@ -1,4 +1,4 @@
-import type { CanvasInteractionPolicyNodeZone } from './CanvasInteractionPolicy.js';
+import type { CanvasInteractionPolicyNodeZone } from './CanvasInteractionPolicy';
 
 export type CanvasDomNodeInteractionZone = CanvasInteractionPolicyNodeZone;
 

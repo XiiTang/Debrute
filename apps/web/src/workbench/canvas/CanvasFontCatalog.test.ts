@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CANVAS_FONT_CATALOG,
   canvasTextRenderProfileForAppearance
-} from './CanvasFontCatalog.js';
+} from './CanvasFontCatalog';
 
 const TEST_CANVAS_TEXT_APPEARANCE = {
   fontId: 'noto-sans-mono-cjk-sc',

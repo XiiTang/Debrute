@@ -39,26 +39,26 @@ import {
   isRecognizedWorkbenchProjectConnectionFrame
 } from '@debrute/app-protocol';
 import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
-import { readJsonSseStream } from './streamingSse.js';
-import type { TerminalHubClient } from './terminalHubClient.js';
-import { getDebruteShellApi } from './shellApi.js';
+import { readJsonSseStream } from './streamingSse';
+import type { TerminalHubClient } from './terminalHubClient';
+import { getDebruteShellApi } from './shellApi';
 import {
   createWorkbenchActivities,
   type WorkbenchActivities
-} from '../workbench/services/WorkbenchActivities.js';
+} from '../workbench/services/WorkbenchActivities';
 import {
   createWorkbenchGlobalProjection,
   type WorkbenchGlobalEvent,
   type WorkbenchGlobalProjection
-} from '../workbench/services/WorkbenchGlobalProjection.js';
+} from '../workbench/services/WorkbenchGlobalProjection';
 import {
   createWorkbenchProjectProjection,
   type WorkbenchProjectProjection
-} from '../workbench/services/WorkbenchProjectProjection.js';
+} from '../workbench/services/WorkbenchProjectProjection';
 import {
   workbenchStartupTimeline,
   type WorkbenchStartupTimeline
-} from '../startup/workbenchStartupTimeline.js';
+} from '../startup/workbenchStartupTimeline';
 
 interface ProjectRequestScope {
   bindingId: string;
@@ -88,7 +88,7 @@ export class DebruteHttpRequestError extends Error {
     readonly status: number,
     readonly code: string | undefined,
     message: string,
-    readonly details: Record<string, unknown> | undefined
+    readonly projectRoot: string | undefined
   ) {
     super(message);
   }
@@ -235,7 +235,7 @@ export function createHttpWorkbenchApiClient(options: {
     if (terminalHub) {
       return Promise.resolve(terminalHub);
     }
-    terminalHubLoad ??= import('./terminalHubClient.js').then(({ createTerminalHubClient }) => {
+    terminalHubLoad ??= import('./terminalHubClient').then(({ createTerminalHubClient }) => {
       const hub = createTerminalHubClient();
       if (disposed) {
         hub.dispose();
@@ -567,9 +567,7 @@ export function createHttpWorkbenchApiClient(options: {
                 409,
                 projectConnectionFrame.error.code,
                 projectConnectionFrame.error.message,
-                {
-                  canonicalRoot: projectConnectionFrame.canonicalRoot
-                }
+                projectConnectionFrame.canonicalRoot
               );
               projectSynchronized = true;
               settleReady();
@@ -983,7 +981,7 @@ async function responseError(response: Response): Promise<DebruteHttpRequestErro
   try {
     const parsed = JSON.parse(text) as Partial<DebruteHttpErrorBody>;
     if (parsed.error?.message && parsed.error.code) {
-      return new DebruteHttpRequestError(response.status, parsed.error.code, parsed.error.message, parsed.error.details);
+      return new DebruteHttpRequestError(response.status, parsed.error.code, parsed.error.message, undefined);
     }
     return new DebruteHttpRequestError(response.status, undefined, text, undefined);
   } catch {

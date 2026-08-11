@@ -13,11 +13,11 @@ import {
   canvasGenericNodeSceneSizes,
   type CanvasGenericIdentityRowMeasurer,
   type CanvasGenericNodeSceneSize
-} from './CanvasGenericNodeGeometry.js';
+} from './CanvasGenericNodeGeometry';
 import {
   CANVAS_VIDEO_FALLBACK_CONTENT_SIZE,
   canvasVideoNodeSizeForContent
-} from './CanvasNodePresentationGeometry.js';
+} from './CanvasNodePresentationGeometry';
 
 type CanvasResource = CanvasResourceView['resources'][number];
 type CanvasFileResource = Extract<CanvasResource, { nodeKind: 'file' }>;

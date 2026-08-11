@@ -14,9 +14,9 @@ import {
   canvasPreviewContinuityKey,
   type CanvasPreviewTargetKey
 } from '@debrute/canvas-core';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import type { TextFileBuffer } from '../../types.js';
-import type { CanvasSceneActions } from './CanvasSceneActions.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import type { TextFileBuffer } from '../../types';
+import type { CanvasSceneActions } from './CanvasSceneActions';
 import {
   canvasTextPreviewTargetIdentity,
   canvasTextPreviewTargetKey,
@@ -25,45 +25,45 @@ import {
   type CanvasTextPreviewCaptureResult,
   type CanvasTextPreviewCaptureTarget,
   type CanvasTextPreviewTarget
-} from './CanvasTextPreviewCapture.js';
-import { CanvasTextPreviewCaptureLane } from './CanvasTextPreviewCaptureLane.js';
+} from './CanvasTextPreviewCapture';
+import { CanvasTextPreviewCaptureLane } from './CanvasTextPreviewCaptureLane';
 import {
   CanvasTextPreviewFailure,
   canvasTextPreviewFailureFieldsForTarget,
   canvasTextPreviewFailureFromUnknown
-} from './CanvasTextPreviewFailure.js';
+} from './CanvasTextPreviewFailure';
 import {
   sameCanvasRasterPreviewRequest,
   type CanvasRasterPreviewRequest
-} from './CanvasRasterPreviewPresentation.js';
+} from './CanvasRasterPreviewPresentation';
 import {
   canvasTextPreviewStyleKey,
   canvasTextPreviewStyleSnapshotForDocument
-} from './CanvasTextPreviewStyleKey.js';
+} from './CanvasTextPreviewStyleKey';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
   type CanvasPerfCounterName,
   type CanvasPerfMonitor
-} from './CanvasPerfMonitor.js';
-import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
-import type { CanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime.js';
-import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
+} from './CanvasPerfMonitor';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
+import type { CanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle';
 import {
   canvasChangedRecordPaths,
   canvasRecordsMatchingTargetKeys,
   canvasRecordValuesEqual,
   createCanvasPathSnapshotStore
-} from './CanvasPathSnapshotStore.js';
-import { canvasRawFileBindingId } from './canvasRawFileUrls.js';
-import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
-import type { CanvasTextPreparedFont } from './CanvasTextRenderProfile.js';
+} from './CanvasPathSnapshotStore';
+import { canvasRawFileBindingId } from './canvasRawFileUrls';
+import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext';
+import type { CanvasTextPreparedFont } from './CanvasTextRenderProfile';
 import {
   canvasTextPreviewCoverageContains,
   collectCanvasTextPreviewCoverage,
   mergeCanvasTextPreviewCoverage
-} from './font-subset/CanvasTextPreviewCoverage.js';
-import type { CanvasTextPreviewFontPreparation } from './font-subset/CanvasTextPreviewFontSession.js';
-import { useCanvasTextProjectFontEnvironment } from './font-subset/CanvasTextProjectFontEnvironment.js';
+} from './font-subset/CanvasTextPreviewCoverage';
+import type { CanvasTextPreviewFontPreparation } from './font-subset/CanvasTextPreviewFontSession';
+import { useCanvasTextProjectFontEnvironment } from './font-subset/CanvasTextProjectFontEnvironment';
 import {
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_CONCURRENT_READS,
   canvasTextPreviewContentWindow,
@@ -71,11 +71,11 @@ import {
   canvasTextPreviewTaskHoldsContent,
   reconcileCanvasTextPreviewTasks,
   type CanvasTextPreviewTask
-} from './CanvasTextPreviewTaskRegistry.js';
-import { orderCanvasPreviewItemsByNode } from './CanvasPreviewScheduling.js';
-import { canvasTextPresentationGeometry } from './CanvasNodePresentationGeometry.js';
-import { useCanvasPreviewInteractionGate } from './useCanvasPreviewInteractionGate.js';
-import type { CanvasRect } from './runtime/canvasGeometry.js';
+} from './CanvasTextPreviewTaskRegistry';
+import { orderCanvasPreviewItemsByNode } from './CanvasPreviewScheduling';
+import { canvasTextPresentationGeometry } from './CanvasNodePresentationGeometry';
+import { useCanvasPreviewInteractionGate } from './useCanvasPreviewInteractionGate';
+import type { CanvasRect } from './runtime/canvasGeometry';
 
 export interface CanvasTextPreviewSourceAvailability {
   targetKey: CanvasPreviewTargetKey;

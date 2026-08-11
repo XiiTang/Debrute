@@ -15,19 +15,19 @@ import {
 import {
   createWorkbenchGlobalProjection,
   type WorkbenchGlobalProjectionWriter
-} from './services/WorkbenchGlobalProjection.js';
+} from './services/WorkbenchGlobalProjection';
 import {
   createWorkbenchProjectProjection,
   type WorkbenchProjectProjection
-} from './services/WorkbenchProjectProjection.js';
+} from './services/WorkbenchProjectProjection';
 import {
   createWorkbenchActivities,
   type WorkbenchActivities
-} from './services/WorkbenchActivities.js';
-import { installDialogTestAdapter } from './ui/Modal.test-support.js';
+} from './services/WorkbenchActivities';
+import { installDialogTestAdapter } from './ui/Modal.test-support';
 
-vi.mock('./canvas/CanvasTextRenderProfileContext.js', async () => {
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/CanvasTextRenderProfile.test-support.js');
+vi.mock('./canvas/CanvasTextRenderProfileContext', async () => {
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./canvas/CanvasTextRenderProfile.test-support');
   return {
     CanvasTextRenderProfileGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     CanvasTextRenderProfileProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,

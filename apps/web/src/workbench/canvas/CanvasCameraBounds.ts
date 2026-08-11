@@ -1,4 +1,4 @@
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import { MAX_CANVAS_CAMERA_Z, MIN_CANVAS_CAMERA_Z, type CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
 import { clamp, rectCenter } from './runtime/canvasGeometry';

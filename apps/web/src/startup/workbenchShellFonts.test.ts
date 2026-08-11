@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { waitForWorkbenchShellFonts } from './workbenchShellFonts.js';
+import { waitForWorkbenchShellFonts } from './workbenchShellFonts';
 
 describe('Workbench shell font readiness', () => {
   it('waits once for every base Workbench font face before React renders', async () => {

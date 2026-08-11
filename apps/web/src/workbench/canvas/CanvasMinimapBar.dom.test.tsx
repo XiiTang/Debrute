@@ -3,14 +3,14 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasProjection } from './CanvasScene.js';
+import type { CanvasProjection } from './CanvasScene';
 import { CanvasMinimapBar, formatCanvasMinimapZoomLabel } from './CanvasMinimapBar';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import type { CanvasCamera } from './runtime/canvasCamera';
-import { CANVAS_CAMERA_IDLE_MS } from './runtime/canvasCamera.js';
-import type { CanvasSelection } from './runtime/canvasSelection.js';
+import { CANVAS_CAMERA_IDLE_MS } from './runtime/canvasCamera';
+import type { CanvasSelection } from './runtime/canvasSelection';
 import { CANVAS_MINIMAP_PANEL_SIZE, canvasMinimapButtonRect, placeCanvasMinimapPanel } from '../shell/floatingBars';
 import { I18nProvider } from '../i18n';
 

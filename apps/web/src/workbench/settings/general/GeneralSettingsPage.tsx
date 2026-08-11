@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, RotateCw, Trash2 } from '../../ui/index.js';
+import { RefreshCw, RotateCw, Trash2 } from '../../ui/index';
 import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
@@ -8,10 +8,10 @@ import type {
   MutateDebruteGlobalSettingsInput,
   WorkbenchLocale
 } from '@debrute/app-protocol';
-import type { EventProjection } from '../../../types.js';
-import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
-import { Button, Field, Modal, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index.js';
-import type { WorkbenchSettingsActions } from '../useWorkbenchSettingsController.js';
+import type { EventProjection } from '../../../types';
+import { useI18n, type WorkbenchI18n } from '../../i18n/index';
+import { Button, Field, Modal, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index';
+import type { WorkbenchSettingsActions } from '../useWorkbenchSettingsController';
 
 type OperationState =
   | { status: 'idle' }

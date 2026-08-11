@@ -7,7 +7,7 @@ import {
   canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
 import type { CanvasFeedbackEntry } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import {
   CanvasVideoNodeContent as CanvasVideoNodeContentImplementation,
   canvasVideoFrameContentBox,
@@ -18,11 +18,11 @@ import { I18nProvider } from '../i18n';
 
 const runtimeMocks = vi.hoisted(() => ({ retryPreview: vi.fn() }));
 
-vi.mock('./CanvasVideoPreviewRuntime.js', () => ({
+vi.mock('./CanvasVideoPreviewRuntime', () => ({
   useCanvasVideoPreviewRuntime: () => runtimeMocks
 }));
 
-vi.mock('./CanvasRasterPreviewPresentation.js', () => ({
+vi.mock('./CanvasRasterPreviewPresentation', () => ({
   useCanvasRasterPreviewPresentation: ({
     request,
     hidden,

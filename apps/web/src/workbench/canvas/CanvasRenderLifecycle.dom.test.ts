@@ -1,19 +1,19 @@
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createCanvasPerfMonitor } from './CanvasPerfMonitor.js';
+import { createCanvasPerfMonitor } from './CanvasPerfMonitor';
 import {
   createCanvasRenderLifecycle,
   type CanvasRenderLifecycle
-} from './CanvasRenderLifecycle.js';
+} from './CanvasRenderLifecycle';
 import {
   createCanvasEditorRuntime,
   type CanvasEditorRuntime
-} from './runtime/CanvasEditorRuntime.js';
+} from './runtime/CanvasEditorRuntime';
 import {
   createCanvasStageRuntime,
   type CanvasStageRuntime
-} from './runtime/CanvasStageRuntime.js';
-import { CANVAS_CAMERA_IDLE_MS } from './runtime/canvasCamera.js';
+} from './runtime/CanvasStageRuntime';
+import { CANVAS_CAMERA_IDLE_MS } from './runtime/canvasCamera';
 
 const fixtures = new Set<CanvasRenderLifecycleFixture>();
 

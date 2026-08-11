@@ -1,5 +1,5 @@
 import type { WorkbenchApiClient } from '@debrute/app-protocol';
-import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
+import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake';
 
 export type ProjectPathEffectApi = Pick<WorkbenchApiClient,
   | 'sendProjectFileToPhotoshop'

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { IconButton } from './IconButton';
-import { FolderTree, WorkbenchIconProvider } from './WorkbenchIconProvider.js';
+import { FolderTree, WorkbenchIconProvider } from './WorkbenchIconProvider';
 
 describe('WorkbenchIconProvider', () => {
   it('applies the solid 16px Debrute Cutout icon contract', () => {

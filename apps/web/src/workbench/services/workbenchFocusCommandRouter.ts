@@ -2,16 +2,16 @@ import {
   workbenchCommandShortcutMatches,
   type DebruteProductPlatform
 } from '@debrute/app-protocol';
-import type { CanvasProjection } from '../canvas/CanvasScene.js';
-import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.js';
-import { canvasNodeSelection, selectedNodeProjectRelativePaths } from '../canvas/runtime/canvasSelection.js';
-import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController.js';
-import type { ProjectPathCommandRouter } from './projectPathCommandRouter.js';
+import type { CanvasProjection } from '../canvas/CanvasScene';
+import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
+import { canvasNodeSelection, selectedNodeProjectRelativePaths } from '../canvas/runtime/canvasSelection';
+import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController';
+import type { ProjectPathCommandRouter } from './projectPathCommandRouter';
 import {
   projectPathCommandEntryForCanvasNode,
   resolveProjectPathCommandTarget
-} from './projectPathCommandTarget.js';
-import type { WorkbenchMenuCommandId } from '../shell/workbenchTitleBarState.js';
+} from './projectPathCommandTarget';
+import type { WorkbenchMenuCommandId } from '../shell/workbenchTitleBarState';
 
 export type WorkbenchFocusCommand =
   | 'escape'

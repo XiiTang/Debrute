@@ -1,4 +1,4 @@
-import type { CanvasVideoPreviewTarget } from './CanvasVideoPreviewTaskRegistry.js';
+import type { CanvasVideoPreviewTarget } from './CanvasVideoPreviewTaskRegistry';
 
 export function canvasVideoPreviewUrl(input: {
   target: CanvasVideoPreviewTarget;

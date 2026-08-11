@@ -1,5 +1,5 @@
 import RBush from 'rbush';
-import type { CanvasRect } from './runtime/canvasGeometry.js';
+import type { CanvasRect } from './runtime/canvasGeometry';
 
 interface CanvasSpatialElement {
   id: string;

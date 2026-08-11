@@ -1,10 +1,10 @@
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPoint, CanvasRect } from './runtime/canvasGeometry';
 import { finiteNumber, pointInRect, rectCenter } from './runtime/canvasGeometry';
 import type { CanvasSelection } from './runtime/canvasSelection';
-import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection.js';
-import { visibleCanvasRectForCamera } from './runtime/canvasCoordinateSystem.js';
+import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection';
+import { visibleCanvasRectForCamera } from './runtime/canvasCoordinateSystem';
 
 export interface CanvasSize {
   width: number;

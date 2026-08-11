@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { DebruteGlobalSettingsView, PhotoshopStateView } from '@debrute/app-protocol';
-import { StatusPill, Switch, type StatusTone } from '../../ui/index.js';
-import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
+import { StatusPill, Switch, type StatusTone } from '../../ui/index';
+import { useI18n, type WorkbenchI18n } from '../../i18n/index';
 
 const TRANSFER_IN_PROGRESS = 'Transfer in progress.';
 

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import {
   canvasPreviewResourceInteractionActive,
   type CanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler.js';
+} from './CanvasPreviewResourceScheduler';
 
 interface CanvasPreviewInteractionGate {
   readonly interactionActiveRef: RefObject<boolean>;

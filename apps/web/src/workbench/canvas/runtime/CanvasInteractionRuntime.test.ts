@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvasInteractionRuntime } from './CanvasInteractionRuntime.js';
+import { createCanvasInteractionRuntime } from './CanvasInteractionRuntime';
 
 describe('CanvasInteractionRuntime', () => {
   it('owns one semantic node hover across Content and content-island targets', () => {

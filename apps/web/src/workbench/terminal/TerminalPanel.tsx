@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../styles/terminal.css';
-import { Plus } from '../ui/index.js';
+import { Plus } from '../ui/index';
 import type { TerminalSessionView, WorkbenchApiClient } from '@debrute/app-protocol';
-import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui/index.js';
+import { CloseButton, EmptyState, IconButton, Tab, TabList, Toolbar } from '../ui/index';
 import { useI18n, type WorkbenchI18n } from '../i18n';
 import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
 import { useXtermTerminal } from './useXtermTerminal';
@@ -56,7 +56,6 @@ export function TerminalPanelToolbar({
           <div key={session.id} className="db-terminal-tab-shell">
             <Tab
               active={session.id === activeSessionId}
-              appearance="strip"
               className="db-terminal-tab"
               onClick={() => onSelectSession(session.id)}
             >

@@ -13,7 +13,7 @@ import {
   Send,
   Scissors,
   Trash2
-} from '../ui/index.js';
+} from '../ui/index';
 import {
   clampWorkbenchContextMenuPosition,
   type ProjectPathCommand,
@@ -21,7 +21,7 @@ import {
   type WorkbenchContextMenuItem,
   type WorkbenchContextMenuPosition
 } from './contextMenu';
-import { Menu } from '../ui/index.js';
+import { Menu } from '../ui/index';
 import { useI18n } from '../i18n';
 import {
   projectSystemFileManagerLabelForLocale,

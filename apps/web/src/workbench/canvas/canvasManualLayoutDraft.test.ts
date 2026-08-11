@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import {
   canvasManualLayoutDraftFromInteraction,
   canvasManualLayoutDraftFromMoveInteraction,
   canvasManualLayoutDraftFromResizeInteraction,
   canvasNodesWithLayoutOverrides
 } from './canvasManualLayoutDraft';
-import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime.js';
+import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime';
 
 describe('Canvas Manual Layout drafts', () => {
   it('creates move-node layout overrides from drag delta', () => {

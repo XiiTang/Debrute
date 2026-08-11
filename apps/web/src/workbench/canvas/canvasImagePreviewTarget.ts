@@ -2,10 +2,10 @@ import {
   canvasPreviewContinuityKey,
   canvasPreviewTargetIdentityFromDigest
 } from '@debrute/canvas-core';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation.js';
-import { canvasImageSource } from './canvasImagePreviews.js';
-import { canvasRawFileBindingId } from './canvasRawFileUrls.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentation';
+import { canvasImageSource } from './canvasImagePreviews';
+import { canvasRawFileBindingId } from './canvasRawFileUrls';
 
 export function canvasImageRasterPreviewRequestForNode(
   node: Pick<ProjectedCanvasNode, 'projectRelativePath' | 'nodeKind' | 'mediaKind' | 'width' | 'availability'>

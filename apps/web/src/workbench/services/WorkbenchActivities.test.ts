@@ -8,7 +8,7 @@ import {
   scopeWorkbenchActivityNoticeReporter,
   type WorkbenchActivities,
   type WorkbenchActivityFloatingCard
-} from './WorkbenchActivities.js';
+} from './WorkbenchActivities';
 
 function task(
   status: 'running' | 'succeeded'

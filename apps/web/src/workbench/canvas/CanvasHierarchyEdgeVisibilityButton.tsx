@@ -1,6 +1,6 @@
 import React from 'react';
-import { Eye, EyeOff, IconButton } from '../ui/index.js';
-import { useI18n } from '../i18n/index.js';
+import { Eye, EyeOff, IconButton } from '../ui/index';
+import { useI18n } from '../i18n/index';
 
 export interface CanvasHierarchyEdgeVisibilityButtonProps {
   hierarchyEdgesVisible: boolean;

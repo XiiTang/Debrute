@@ -1,4 +1,4 @@
-import type { CanvasRect } from './runtime/canvasGeometry.js';
+import type { CanvasRect } from './runtime/canvasGeometry';
 
 interface CanvasPreviewSpatialTask extends CanvasRect {
   readonly projectRelativePath: string;

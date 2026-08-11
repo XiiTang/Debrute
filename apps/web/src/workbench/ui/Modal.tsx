@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { cx } from './cx.js';
+import { cx } from './cx';
 
 export function Modal({
   labelledBy,

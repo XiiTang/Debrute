@@ -3,7 +3,7 @@ import type { ProjectPathEntry } from '@debrute/app-protocol';
 import {
   projectPathCommandEntryForCanvasNode,
   resolveProjectPathCommandTarget
-} from './projectPathCommandTarget.js';
+} from './projectPathCommandTarget';
 
 describe('project path command target', () => {
   it('sorts explicit entries while preserving the independent invocation entry', () => {

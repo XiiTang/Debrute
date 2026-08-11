@@ -23,8 +23,7 @@
 }
 
 .db-input,
-.db-select,
-.db-textarea {
+.db-select {
   width: 100%;
   min-width: 0;
   border: 0;
@@ -42,93 +41,36 @@
   font-size: var(--db-font-sm);
 }
 
-.db-textarea {
-  min-height: 76px;
-  padding: var(--db-space-3);
-  resize: vertical;
-}
-
-.db-input::placeholder,
-.db-textarea::placeholder {
+.db-input::placeholder {
   color: var(--db-text-subtle);
   opacity: 1;
 }
 
 .db-input:focus,
-.db-select:focus,
-.db-textarea:focus {
+.db-select:focus {
   box-shadow: var(--db-focus-ring);
 }
 
 .db-input[aria-invalid="true"],
 .db-select[aria-invalid="true"],
-.db-textarea[aria-invalid="true"],
 .db-input--invalid,
 .db-select--invalid,
-.db-textarea--invalid,
 .db-field--invalid .db-input,
-.db-field--invalid .db-select,
-.db-field--invalid .db-textarea {
+.db-field--invalid .db-select {
   box-shadow: 2px 2px 0 var(--db-danger);
 }
 
 .db-input[aria-invalid="true"]:focus,
 .db-select[aria-invalid="true"]:focus,
-.db-textarea[aria-invalid="true"]:focus,
 .db-input--invalid:focus,
 .db-select--invalid:focus,
-.db-textarea--invalid:focus,
 .db-field--invalid .db-input:focus,
-.db-field--invalid .db-select:focus,
-.db-field--invalid .db-textarea:focus {
+.db-field--invalid .db-select:focus {
   box-shadow: var(--db-focus-ring), 2px 2px 0 var(--db-danger);
 }
 
 .db-input--secret {
   -webkit-text-security: disc;
-}
-
-.db-comment-pill-input {
-  position: relative;
-  display: inline-grid;
-  flex: 0 0 auto;
-  width: clamp(
-    var(--db-comment-pill-min-width, 112px),
-    calc(var(--db-comment-pill-input-ch, 12) * 1ch + 44px),
-    var(--db-comment-pill-max-width, 280px)
-  );
-  min-width: var(--db-comment-pill-min-width, 112px);
-  max-width: var(--db-comment-pill-max-width, 280px);
-  height: 30px;
-}
-
-.db-comment-pill-input__field {
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  padding: 5px 12px;
-  background: var(--db-bg);
-  color: var(--db-text);
-  font: inherit;
-  font-size: var(--db-font-sm);
-  line-height: 18px;
-  outline: 0;
-  box-shadow: var(--db-shadow-control);
-}
-
-.db-comment-pill-input__field::placeholder {
-  color: var(--db-text-subtle);
-  opacity: 1;
-}
-
-.db-comment-pill-input:focus-within .db-comment-pill-input__field {
-  box-shadow: var(--db-focus-ring);
-}
-
-.db-comment-pill-input--disabled {
-  opacity: 0.48;
 }
 
 .db-switch {

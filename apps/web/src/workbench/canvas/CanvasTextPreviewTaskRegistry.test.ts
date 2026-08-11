@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { canvasPreviewTargetIdentityFromDigest } from '@debrute/canvas-core';
-import { canvasTextPreviewTargetKey } from './CanvasTextPreviewCapture.js';
+import { canvasTextPreviewTargetKey } from './CanvasTextPreviewCapture';
 import {
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_BYTES,
   CANVAS_TEXT_PREVIEW_CONTENT_MAX_TARGETS,
   canvasTextPreviewContentWindow,
   reconcileCanvasTextPreviewTasks,
   type CanvasTextPreviewTask
-} from './CanvasTextPreviewTaskRegistry.js';
+} from './CanvasTextPreviewTaskRegistry';
 
 describe('CanvasTextPreviewTaskRegistry', { tags: ['canvas-text'] }, () => {
   it('keeps one latest task per path and drops completed or removed targets', () => {

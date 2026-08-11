@@ -1,14 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff } from '../ui/index.js';
+import { Eye, EyeOff } from '../ui/index';
 import type {
   AudioModelKind,
   AudioModelSettingRecord,
   ModelSettingRecord,
   SaveModelSettingInput
 } from '@debrute/app-protocol';
-import { Card, CloseButton, EmptyState, Field, IconButton, Input, SecretInput } from '../ui/index.js';
-import { useI18n } from '../i18n/index.js';
-import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController.js';
+import { Card, CloseButton, EmptyState, Field, IconButton, Input, SecretInput } from '../ui/index';
+import { useI18n } from '../i18n/index';
+import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController';
 
 export interface ModelDraft {
   baseUrlOverride: string;

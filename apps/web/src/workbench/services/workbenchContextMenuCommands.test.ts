@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProjectPathEntry } from '@debrute/app-protocol';
-import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
-import { runProjectPathCommand } from './workbenchContextMenuCommands.js';
-import type { WorkbenchContextMenuTarget } from '../shell/contextMenu.js';
+import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake';
+import { runProjectPathCommand } from './workbenchContextMenuCommands';
+import type { WorkbenchContextMenuTarget } from '../shell/contextMenu';
 
 describe('workbench context menu commands', () => {
   it('uses folded roots for Copy but explicit sorted entries for Copy Relative Paths', () => {

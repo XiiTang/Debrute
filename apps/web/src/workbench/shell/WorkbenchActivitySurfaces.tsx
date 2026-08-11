@@ -14,15 +14,15 @@ import type {
   ExplorerActivityOperation,
   WorkbenchActivityOperation
 } from '@debrute/app-protocol';
-import { Button, Card, IconButton, X } from '../ui/index.js';
-import { useI18n, type WorkbenchI18n } from '../i18n/index.js';
+import { Button, Card, IconButton, X } from '../ui/index';
+import { useI18n, type WorkbenchI18n } from '../i18n/index';
 import {
   isActiveTask,
   isTerminalActivity,
   WORKBENCH_ACTIVITY_FLOAT_MS,
   type WorkbenchActivityFloatingCard,
   type WorkbenchActivities
-} from '../services/WorkbenchActivities.js';
+} from '../services/WorkbenchActivities';
 
 export interface WorkbenchActivitySurfacesProps {
   activities: WorkbenchActivities;

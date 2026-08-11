@@ -1,4 +1,4 @@
-import { CANVAS_NODE_PRESENTATION_SCALE } from './CanvasNodePresentationGeometry.js';
+import { CANVAS_NODE_PRESENTATION_SCALE } from './CanvasNodePresentationGeometry';
 
 export const CANVAS_GENERIC_NODE_PRESENTATION_HEIGHT = 48;
 export const CANVAS_GENERIC_NODE_AUTOMATIC_MIN_WIDTH = 120;

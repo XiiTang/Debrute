@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
-import { orderedFeedbackEntries } from './FeedbackPanel.js';
+import { orderedFeedbackEntries } from './FeedbackPanel';
 
 describe('orderedFeedbackEntries', () => {
   it('uses Explorer order and retains unresolved document paths last', () => {

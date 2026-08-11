@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createCanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler.js';
-import type { CanvasPerfMonitor } from './CanvasPerfMonitor.js';
+} from './CanvasPreviewResourceScheduler';
+import type { CanvasPerfMonitor } from './CanvasPerfMonitor';
 
 describe('CanvasPreviewResourceScheduler', () => {
   it('exposes the current interaction state to resource consumers', () => {

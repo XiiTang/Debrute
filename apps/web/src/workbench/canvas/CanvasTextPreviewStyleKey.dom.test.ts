@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { canvasTextRenderProfileForAppearance } from './CanvasFontCatalog.js';
+import { canvasTextRenderProfileForAppearance } from './CanvasFontCatalog';
 import {
   DEFAULT_CANVAS_TEXT_RENDER_PROFILE,
   TEST_CANVAS_TEXT_APPEARANCE
-} from './CanvasTextRenderProfile.test-support.js';
+} from './CanvasTextRenderProfile.test-support';
 import {
   CANVAS_TEXT_PREVIEW_STYLE_CSS_VARIABLES,
   canvasTextPreviewStyleKey,

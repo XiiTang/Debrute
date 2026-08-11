@@ -4,14 +4,14 @@ import {
   type PhotoshopDocumentTarget,
   type WorkbenchContextMenuItem,
   type WorkbenchContextMenuTarget
-} from '../shell/contextMenu.js';
-import { runProjectPathCommand } from './workbenchContextMenuCommands.js';
-import type { ProjectPathCommandEffects } from './projectPathCommandEffects.js';
+} from '../shell/contextMenu';
+import { runProjectPathCommand } from './workbenchContextMenuCommands';
+import type { ProjectPathCommandEffects } from './projectPathCommandEffects';
 import type {
   AcceptedProjectPathCommandScope,
   ProjectPathCommandIntake
-} from './projectPathCommandIntake.js';
-import { scopeWorkbenchActivityNoticeReporter } from './WorkbenchActivities.js';
+} from './projectPathCommandIntake';
+import { scopeWorkbenchActivityNoticeReporter } from './WorkbenchActivities';
 
 type ProjectPathCommandMenuContext = Omit<
   Parameters<typeof buildWorkbenchContextMenuItems>[0],

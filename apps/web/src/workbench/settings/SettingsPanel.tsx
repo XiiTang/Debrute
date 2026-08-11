@@ -1,20 +1,20 @@
 import React, { useState } from 'react';
-import { AudioLines, Cable, Eye, Heart, Image as ImageIcon, Info, Music, Settings, Video, WandSparkles } from '../ui/index.js';
+import { AudioLines, Cable, Eye, Heart, Image as ImageIcon, Info, Music, Settings, Video, WandSparkles } from '../ui/index';
 import type {
   DebruteGlobalSettingsView,
   DebruteProductState,
   PhotoshopStateView
 } from '@debrute/app-protocol';
-import type { EventProjection } from '../../types.js';
-import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
-import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
-import { PluginsSettingsPage } from './plugins/PluginsSettingsPage.js';
-import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage.js';
-import { SettingsResourcePanel } from './SettingsResourcePanel.js';
-import { FeedbackSettingsPage } from './feedback/FeedbackSettingsPage.js';
-import { useI18n } from '../i18n/index.js';
-import type { WorkbenchResolvedTheme } from '../services/workbenchTheme.js';
-import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController.js';
+import type { EventProjection } from '../../types';
+import { GeneralSettingsPage } from './general/GeneralSettingsPage';
+import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage';
+import { PluginsSettingsPage } from './plugins/PluginsSettingsPage';
+import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage';
+import { SettingsResourcePanel } from './SettingsResourcePanel';
+import { FeedbackSettingsPage } from './feedback/FeedbackSettingsPage';
+import { useI18n } from '../i18n/index';
+import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
+import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController';
 
 const SETTINGS_NAV_GROUPS = [
   {

@@ -2,14 +2,13 @@ import React from 'react';
 import { cx } from './cx';
 
 type ButtonVariant = 'default' | 'primary' | 'danger';
-export type ButtonSize = 'xs' | 'sm' | 'md';
+type ButtonSize = 'xs' | 'sm' | 'md';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   iconStart?: React.ReactNode;
   loading?: boolean;
-  pressed?: boolean;
 }
 
 export function Button({
@@ -17,7 +16,6 @@ export function Button({
   size = 'md',
   iconStart,
   loading = false,
-  pressed,
   className,
   children,
   disabled,
@@ -30,7 +28,6 @@ export function Button({
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      aria-pressed={pressed}
       className={cx('db-button', `db-button--${variant}`, `db-button--${size}`, className)}
     >
       {loading ? <span className="db-button__spinner" aria-hidden="true" /> : iconStart ? <span className="db-button__icon">{iconStart}</span> : null}

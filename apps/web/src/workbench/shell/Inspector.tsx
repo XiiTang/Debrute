@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Loader2
-} from '../ui/index.js';
+} from '../ui/index';
 import type { ProjectDiagnostic } from '@debrute/app-protocol';
 import type { ModelArtifactProvenanceLookup } from '@debrute/app-protocol';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import { EmptyState } from '../ui/index.js';
+import { EmptyState } from '../ui/index';
 import type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 import {
   getSelectionContext,

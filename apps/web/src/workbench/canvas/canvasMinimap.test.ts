@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasProjection } from './CanvasScene.js';
+import type { CanvasProjection } from './CanvasScene';
 import {
   beginCanvasMinimapDrag,
   buildCanvasMinimapStaticModel,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Save, X } from './WorkbenchIconProvider.js';
+import { Save, X } from './WorkbenchIconProvider';
 
 export function DiscardChangesIcon({ size }: { size: number }): React.ReactElement {
   return (

@@ -4,7 +4,7 @@ import {
   canvasRecordsMatchingTargetKeys,
   canvasRecordValuesEqual,
   createCanvasPathSnapshotStore
-} from './CanvasPathSnapshotStore.js';
+} from './CanvasPathSnapshotStore';
 
 describe('CanvasPathSnapshotStore', () => {
   it('derives and notifies only explicitly changed paths', () => {

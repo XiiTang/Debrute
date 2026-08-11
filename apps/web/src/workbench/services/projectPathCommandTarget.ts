@@ -1,5 +1,5 @@
 import type { ProjectPathEntry } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
+import type { ProjectedCanvasNode } from '../canvas/CanvasScene';
 
 export interface WorkbenchProjectPathCommandCandidate {
   pathEntry: ProjectPathEntry;

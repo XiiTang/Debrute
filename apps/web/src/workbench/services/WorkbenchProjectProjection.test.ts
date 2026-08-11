@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection.js';
+import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection';
 
 describe('Workbench Project Projection', () => {
   it('accepts one ordered stream of complete Project snapshots', async () => {

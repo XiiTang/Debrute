@@ -1,5 +1,5 @@
 import type { WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import { resolveProjectPathCommandTarget } from '../services/projectPathCommandTarget.js';
+import { resolveProjectPathCommandTarget } from '../services/projectPathCommandTarget';
 
 export type ProjectTreeInlineEditState =
   | {

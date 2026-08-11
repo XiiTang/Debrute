@@ -5,7 +5,7 @@ import type {
 import type {
   WorkbenchProjectProjection,
   WorkbenchProjectProjectionState
-} from './WorkbenchProjectProjection.js';
+} from './WorkbenchProjectProjection';
 
 export interface ProjectBindingLifecycleState {
   opening: boolean;

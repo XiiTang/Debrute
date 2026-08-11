@@ -7,7 +7,7 @@ import type {
 import {
   isSnapshotAffectingWorkbenchEvent,
   nextSnapshotFromWorkbenchEvent
-} from './workbenchEvents.js';
+} from './workbenchEvents';
 
 interface AcceptedWorkbenchProjectBinding {
   generation: number;

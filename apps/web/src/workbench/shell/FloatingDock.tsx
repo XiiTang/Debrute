@@ -5,13 +5,13 @@ import {
   Heart,
   Settings,
   Terminal
-} from '../ui/index.js';
+} from '../ui/index';
 import {
   FLOATING_PANEL_IDS,
   type FloatingPanelId,
   type FloatingPanelState
 } from './floatingPanels';
-import { IconButton } from '../ui/index.js';
+import { IconButton } from '../ui/index';
 import { useI18n, type WorkbenchTranslationKey } from '../i18n';
 
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {

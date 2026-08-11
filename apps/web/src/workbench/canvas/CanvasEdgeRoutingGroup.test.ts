@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
 import {
   canvasEdgeRoutingGroupsForProjection,
   canvasEdgeRoutingGroupIntersectsRect
-} from './CanvasEdgeRoutingGroup.js';
+} from './CanvasEdgeRoutingGroup';
 
 describe('CanvasEdgeRoutingGroup', () => {
   it('keeps individual edge identity in one source-owned routed path', () => {

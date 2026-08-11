@@ -7,12 +7,10 @@ export {
   canvasPreviewTargetIdentity,
   canvasPreviewTargetIdentityFromDigest,
   canvasPreviewTargetKey,
-  canvasPreviewVariantIdentity,
   canvasPreviewVariantKey,
   type CanvasPreviewOwner,
   type CanvasPreviewTargetIdentity,
   type CanvasPreviewTargetKey,
-  type CanvasPreviewVariantIdentity,
   type CanvasPreviewVariantKey
 } from './canvasPreviewIdentities.js';
 

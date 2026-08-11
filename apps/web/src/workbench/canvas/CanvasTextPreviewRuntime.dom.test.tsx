@@ -2,24 +2,24 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import type { TextFileBuffer, WorkbenchActions } from '../../types.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import type {
   CanvasTextPreviewCaptureResult,
   CanvasTextPreviewCaptureTarget
-} from './CanvasTextPreviewCapture.js';
-import type { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure.js';
-import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler.js';
-import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle.js';
+} from './CanvasTextPreviewCapture';
+import type { CanvasTextPreviewFailure } from './CanvasTextPreviewFailure';
+import type { CanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
+import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle';
 import {
   CanvasTextPreviewProvider,
   useCanvasTextPreviewNode,
   useCanvasTextPreviewRuntime
-} from './CanvasTextPreviewRuntime.js';
-import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
-import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
-import type { CanvasTextPreviewFontSession } from './font-subset/CanvasTextPreviewFontSession.js';
+} from './CanvasTextPreviewRuntime';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile';
+import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support';
+import type { CanvasTextPreviewFontSession } from './font-subset/CanvasTextPreviewFontSession';
 
 type SavePreviewResult = Awaited<ReturnType<WorkbenchActions['saveCanvasTextPreviewSource']>>;
 
@@ -48,7 +48,7 @@ const styleKeyMock = vi.hoisted(() => ({
   key: vi.fn(async (snapshot: { identity: string }) => `sha256:${snapshot.identity}`)
 }));
 
-vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment', () => ({
   useCanvasTextProjectFontEnvironment: () => fontEnvironmentMock
 }));
 
@@ -61,7 +61,7 @@ const laneMock = vi.hoisted(() => ({
   history: [] as string[]
 }));
 
-vi.mock('./CanvasTextPreviewCaptureLane.js', async () => {
+vi.mock('./CanvasTextPreviewCaptureLane', async () => {
   const ReactModule = await import('react');
   return {
     CanvasTextPreviewCaptureLane: (props: NonNullable<typeof laneMock.props>) => {
@@ -74,7 +74,7 @@ vi.mock('./CanvasTextPreviewCaptureLane.js', async () => {
   };
 });
 
-vi.mock('./CanvasTextPreviewStyleKey.js', () => ({
+vi.mock('./CanvasTextPreviewStyleKey', () => ({
   canvasTextPreviewStyleSnapshotForDocument: styleKeyMock.snapshot,
   canvasTextPreviewStyleKey: styleKeyMock.key
 }));

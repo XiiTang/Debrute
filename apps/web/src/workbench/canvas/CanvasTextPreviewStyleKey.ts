@@ -1,5 +1,5 @@
-import { CANVAS_TEXT_EDITOR_SYNTAX_HIGHLIGHT_STYLE_ID } from './CanvasTextEditorContract.js';
-import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import { CANVAS_TEXT_EDITOR_SYNTAX_HIGHLIGHT_STYLE_ID } from './CanvasTextEditorContract';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile';
 
 export const CANVAS_TEXT_PREVIEW_STYLE_SNAPSHOT_VERSION = 'canvas-text-preview-style-v3';
 

@@ -2,7 +2,7 @@ import type { FloatingTextEditorWindowState, TextFileBuffer } from '../../types'
 import {
   anchorResizedFloatingWindowRect,
   type FloatingWindowGesture
-} from '../shell/floatingWindowGesture.js';
+} from '../shell/floatingWindowGesture';
 import {
   constrainContainedRect,
   sameWindowRect,

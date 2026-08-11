@@ -1,24 +1,24 @@
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
   type CanvasPerfMonitor
-} from './CanvasPerfMonitor.js';
+} from './CanvasPerfMonitor';
 import {
   createCanvasCullingController,
   type CanvasCullingCounts
-} from './CanvasCullingController.js';
+} from './CanvasCullingController';
 import type {
   CanvasScenePresentationUpdate,
   CanvasSceneSnapshot
-} from './CanvasScenePresentation.js';
+} from './CanvasScenePresentation';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction,
   CanvasRuntimeSnapshot
-} from './runtime/CanvasEditorRuntime.js';
-import type { CanvasRect } from './runtime/canvasGeometry.js';
-import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime.js';
-import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection.js';
-import { canvasPreviewDistanceSquared } from './CanvasPreviewScheduling.js';
+} from './runtime/CanvasEditorRuntime';
+import type { CanvasRect } from './runtime/canvasGeometry';
+import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
+import { selectedNodeProjectRelativePaths } from './runtime/canvasSelection';
+import { canvasPreviewDistanceSquared } from './CanvasPreviewScheduling';
 
 export interface CanvasPreviewOrderSource {
   getPreviewOrderSnapshot(): CanvasRect;

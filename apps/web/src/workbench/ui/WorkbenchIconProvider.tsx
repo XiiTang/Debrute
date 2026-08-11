@@ -1,22 +1,17 @@
 import React from 'react';
-import { CutoutIconProvider, DEBRUTE_CUTOUT_ICONS } from './icons.js';
-
-export type { CutoutIcon, CutoutIconProps } from './icons.js';
+import { CutoutIconProvider, DEBRUTE_CUTOUT_ICONS } from './icons';
 
 export const {
-  AlertCircle,
   AlertTriangle,
   Bell,
   AudioLines,
   Boxes,
   Cable,
-  Check,
   ChevronRight,
   CircleDot,
   Clipboard,
   Clock3,
   Copy,
-  Download,
   Edit3,
   Eye,
   EyeOff,
@@ -30,8 +25,6 @@ export const {
   Heart,
   Image,
   Info,
-  KeyRound,
-  Link2,
   Loader2,
   LocateFixed,
   Map,
@@ -49,15 +42,10 @@ export const {
   Send,
   Settings,
   Square,
-  Star,
   Terminal,
-  ThumbsDown,
   Trash2,
-  Unlink,
-  Upload,
   Video,
   WandSparkles,
-  Wrench,
   X
 } = DEBRUTE_CUTOUT_ICONS;
 

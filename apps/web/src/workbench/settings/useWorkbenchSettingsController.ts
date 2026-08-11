@@ -7,12 +7,12 @@ import type {
   MutateDebruteGlobalSettingsInput,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
-import type { EventProjection } from '../../types.js';
+import type { EventProjection } from '../../types';
 import type {
   WorkbenchGlobalProjection,
   WorkbenchGlobalProjectionState
-} from '../services/WorkbenchGlobalProjection.js';
-import type { WorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController.js';
+} from '../services/WorkbenchGlobalProjection';
+import type { WorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController';
 
 export interface WorkbenchSettingsActions {
   checkProductUpdate(): Promise<void>;

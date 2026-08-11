@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2 } from './ui/index.js';
+import { Loader2 } from './ui/index';
 import {
   workbenchCommandShortcutMatches,
   type DebruteProductPlatform,
@@ -9,31 +9,31 @@ import {
 import {
   DebruteHttpRequestError,
   type HttpWorkbenchApiClient
-} from '../api/httpWorkbenchApiClient.js';
+} from '../api/httpWorkbenchApiClient';
 import { getDebruteShellApi, type NativeWindowState } from '../api/shellApi';
 import { CanvasEditor } from './canvas/CanvasEditor';
 import { CanvasMinimapBar } from './canvas/CanvasMinimapBar';
 import { CanvasResetLayoutButton } from './canvas/CanvasResetLayoutButton';
-import { CanvasHierarchyEdgeVisibilityButton } from './canvas/CanvasHierarchyEdgeVisibilityButton.js';
+import { CanvasHierarchyEdgeVisibilityButton } from './canvas/CanvasHierarchyEdgeVisibilityButton';
 import {
   canvasPathAncestors,
   projectCanvasHierarchyEdges,
   projectCanvasNodeScene,
   type CanvasProjection
-} from './canvas/CanvasScene.js';
+} from './canvas/CanvasScene';
 import { createCanvasOverlayRuntime } from './canvas/CanvasOverlayRuntime';
-import { createCanvasOcclusionOrderWrites } from './canvas/CanvasOcclusionOrderWrites.js';
-import { createCanvasStateChangeIntake } from './canvas/CanvasStateChangeIntake.js';
+import { createCanvasOcclusionOrderWrites } from './canvas/CanvasOcclusionOrderWrites';
+import { createCanvasStateChangeIntake } from './canvas/CanvasStateChangeIntake';
 import {
   CanvasFeedbackInteractionBar,
   useCanvasFeedbackInteraction
 } from './canvas/CanvasFeedbackInteraction';
-import { FeedbackPanel } from './feedback/FeedbackPanel.js';
+import { FeedbackPanel } from './feedback/FeedbackPanel';
 import type { CanvasEditorRuntime } from './canvas/runtime/CanvasEditorRuntime';
-import type { CanvasVideoMetadataUpdate } from './canvas/CanvasVideoPreviewRuntime.js';
+import type { CanvasVideoMetadataUpdate } from './canvas/CanvasVideoPreviewRuntime';
 import {
   canvasNodeSelection
-} from './canvas/runtime/canvasSelection.js';
+} from './canvas/runtime/canvasSelection';
 import {
   currentDebruteWorkbenchRoute,
   replaceWorkbenchProjectRoute,
@@ -45,7 +45,7 @@ import {
   createProjectBindingLifecycle,
   type ProjectBindingLifecycle,
   type ProjectBindingLifecycleOutcome
-} from './services/projectBindingLifecycle.js';
+} from './services/projectBindingLifecycle';
 import { reconcileWorkbenchViewportLayout } from './services/workbenchViewportLayout';
 import {
   closeTextEditorWindowState,
@@ -56,29 +56,29 @@ import { useTextFileBufferActions } from './services/textFileBufferActions';
 import {
   createProjectPathCommandRouter,
   type ProjectPathCommandRouter
-} from './services/projectPathCommandRouter.js';
+} from './services/projectPathCommandRouter';
 import {
   createWorkbenchFocusCommandRouter,
   workbenchFocusCommandFromKeyboardEvent,
   workbenchFocusCommandFromMenuCommandId,
   type WorkbenchBehaviorOwner,
   type WorkbenchFocusCommandRouter
-} from './services/workbenchFocusCommandRouter.js';
+} from './services/workbenchFocusCommandRouter';
 import {
   createProjectPathCommandEffects,
   type ProjectPathCommandEffects,
   type ProjectPathEffectApiName
-} from './services/projectPathCommandEffects.js';
+} from './services/projectPathCommandEffects';
 import {
   createProjectPathCommandIntake,
   type AcceptedProjectPathCommandScope
-} from './services/projectPathCommandIntake.js';
+} from './services/projectPathCommandIntake';
 import {
   PendingWorkbenchContextMenuDismissal,
   WorkbenchContextMenu
-} from './shell/WorkbenchContextMenu.js';
+} from './shell/WorkbenchContextMenu';
 import { WorkbenchTitleBar } from './shell/WorkbenchTitleBar';
-import { executeDocumentEditCommand, executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands.js';
+import { executeDocumentEditCommand, executeTitleBarMenuCommand } from './shell/workbenchTitleBarCommands';
 import {
   buildWorkbenchTitleBarState,
   workbenchMenuCommandItem,
@@ -90,12 +90,12 @@ import {
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
-import type { WorkbenchProjectProjectionState } from './services/WorkbenchProjectProjection.js';
+import type { WorkbenchProjectProjectionState } from './services/WorkbenchProjectProjection';
 import {
   projectPathDeletionConfirmationMessageForEntries,
   projectTreeSelectionFromPaths
 } from './project-explorer/workbenchFileCommands';
-import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController.js';
+import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController';
 import {
   canvasHierarchyEdgeVisibilityButtonRect,
   canvasMinimapButtonRect,
@@ -105,38 +105,38 @@ import {
 import {
   type FloatingPanelId
 } from './shell/floatingPanels';
-import { FloatingPanelContent } from './shell/FloatingPanel.js';
+import { FloatingPanelContent } from './shell/FloatingPanel';
 import {
   WorkbenchWindowHost,
   type WorkbenchWindowHostHandle
-} from './shell/WorkbenchWindowHost.js';
-import { WorkbenchActivitySurfaces } from './shell/WorkbenchActivitySurfaces.js';
+} from './shell/WorkbenchWindowHost';
+import { WorkbenchActivitySurfaces } from './shell/WorkbenchActivitySurfaces';
 import {
   scopeWorkbenchActivityNoticeReporter,
   type WorkbenchActivityNoticeReporter
-} from './services/WorkbenchActivities.js';
-import { Button, WorkbenchIconProvider } from './ui/index.js';
+} from './services/WorkbenchActivities';
+import { Button, WorkbenchIconProvider } from './ui/index';
 import { TITLE_BAR_RESERVED_RECT, WORKBENCH_TOP_CHROME_RESERVED_RECTS } from './shell/workbenchLayers';
 import { readWorkbenchViewportRect } from './shell/windowBounds';
 import type { FloatingTextEditorWindowState, TextFileBuffer, WorkbenchActions, WorkbenchState } from '../types';
 import { I18nProvider, createI18n, type WorkbenchI18n } from './i18n';
-import type { WorkbenchSettingsController } from './settings/useWorkbenchSettingsController.js';
+import type { WorkbenchSettingsController } from './settings/useWorkbenchSettingsController';
 import {
   useWorkbenchPresentationController,
   type WorkbenchPresentationController
-} from './services/useWorkbenchPresentationController.js';
+} from './services/useWorkbenchPresentationController';
 import {
   useWorkbenchGlobalSettingsController,
   type WorkbenchGlobalSettingsController
-} from './services/useWorkbenchGlobalSettingsController.js';
-import { canvasTextRenderProfileForAppearance } from './canvas/CanvasFontCatalog.js';
+} from './services/useWorkbenchGlobalSettingsController';
+import { canvasTextRenderProfileForAppearance } from './canvas/CanvasFontCatalog';
 import {
   CanvasTextRenderProfileGate,
   CanvasTextRenderProfileProvider
-} from './canvas/CanvasTextRenderProfileContext.js';
-import { decideCanvasInteraction } from './canvas/CanvasInteractionPolicy.js';
-import { CanvasTextProjectFontEnvironmentProvider } from './canvas/font-subset/CanvasTextProjectFontEnvironment.js';
-import { workbenchStartupTimeline } from '../startup/workbenchStartupTimeline.js';
+} from './canvas/CanvasTextRenderProfileContext';
+import { decideCanvasInteraction } from './canvas/CanvasInteractionPolicy';
+import { CanvasTextProjectFontEnvironmentProvider } from './canvas/font-subset/CanvasTextProjectFontEnvironment';
+import { workbenchStartupTimeline } from '../startup/workbenchStartupTimeline';
 
 const productPlatform: DebruteProductPlatform = __DEBRUTE_PLATFORM__;
 
@@ -162,13 +162,13 @@ function canvasContentIslandOwnerPath(target: Element): string | undefined {
 const EMPTY_CANVAS_HIERARCHY_EDGES: CanvasProjection['edges'] = [];
 const TerminalPanel = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('terminal');
-  const module = await import('./terminal/TerminalPanel.js');
+  const module = await import('./terminal/TerminalPanel');
   workbenchStartupTimeline.markFeatureReady('terminal');
   return { default: module.TerminalPanel };
 });
 const loadSettingsFeature = async () => {
   workbenchStartupTimeline.markFeatureRequested('settings');
-  const module = await import('./settings/SettingsFeature.js');
+  const module = await import('./settings/SettingsFeature');
   workbenchStartupTimeline.markFeatureReady('settings');
   return module;
 };
@@ -182,7 +182,7 @@ const WorkbenchSettingsPanelFeature = React.lazy(async () => {
 });
 const loadExplorerFeature = async () => {
   workbenchStartupTimeline.markFeatureRequested('explorer');
-  const module = await import('./project-explorer/ExplorerPanelFeature.js');
+  const module = await import('./project-explorer/ExplorerPanelFeature');
   workbenchStartupTimeline.markFeatureReady('explorer');
   return module;
 };
@@ -196,12 +196,12 @@ const WorkbenchExplorerPanelFeature = React.lazy(async () => {
 });
 const WorkbenchInspectorPanelFeature = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('inspector');
-  const module = await import('./shell/InspectorPanelFeature.js');
+  const module = await import('./shell/InspectorPanelFeature');
   workbenchStartupTimeline.markFeatureReady('inspector');
   return { default: module.WorkbenchInspectorPanelFeature };
 });
 const WorkbenchFloatingTextEditorWindowFeature = React.lazy(async () => {
-  const module = await import('./canvas/FloatingTextEditorWindowFeature.js');
+  const module = await import('./canvas/FloatingTextEditorWindowFeature');
   return { default: module.WorkbenchFloatingTextEditorWindowFeature };
 });
 
@@ -1957,8 +1957,7 @@ function projectRootFromOpenError(error: Error): string | undefined {
   if (!(error instanceof DebruteHttpRequestError)) {
     return undefined;
   }
-  const projectRoot = error.details?.canonicalRoot;
-  return typeof projectRoot === 'string' && projectRoot.length > 0 ? projectRoot : undefined;
+  return error.projectRoot;
 }
 
 function localizedProjectOpenError(error: ProjectOpenStartupError | undefined, i18n: WorkbenchI18n): string | undefined {

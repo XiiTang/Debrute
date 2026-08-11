@@ -1,8 +1,8 @@
-import type { WorkbenchGlobalProjection } from '../workbench/services/WorkbenchGlobalProjection.js';
+import type { WorkbenchGlobalProjection } from '../workbench/services/WorkbenchGlobalProjection';
 import {
   resolveWorkbenchThemePreference,
   type WorkbenchResolvedTheme
-} from '../workbench/services/workbenchTheme.js';
+} from '../workbench/services/workbenchTheme';
 
 export function holdWorkbenchThemeUntilCommit(input: {
   projection: WorkbenchGlobalProjection;

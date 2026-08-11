@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createCanvasTextFontResource } from '../CanvasTextRenderProfile.js';
+import { createCanvasTextFontResource } from '../CanvasTextRenderProfile';
 import type {
   CanvasTextFontSubsetRequest,
   CanvasTextFontSubsetResponse
-} from './CanvasTextFontSubsetProtocol.js';
-import { createCanvasTextPreviewFontSession } from './CanvasTextPreviewFontSession.js';
+} from './CanvasTextFontSubsetProtocol';
+import { createCanvasTextPreviewFontSession } from './CanvasTextPreviewFontSession';
 
 afterEach(() => {
   vi.unstubAllGlobals();

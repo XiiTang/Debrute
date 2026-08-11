@@ -1,18 +1,18 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from '../i18n/index.js';
-import { saveProjectViewState } from '../services/projectViewState.js';
+import { I18nProvider } from '../i18n/index';
+import { saveProjectViewState } from '../services/projectViewState';
 import {
   WorkbenchWindowHost,
   useWorkbenchWindow,
   type WorkbenchWindowHostHandle
-} from './WorkbenchWindowHost.js';
+} from './WorkbenchWindowHost';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
   type FloatingPanelId
-} from './floatingPanels.js';
-import { textEditorWindowIdentity } from './workbenchWindowOrder.js';
+} from './floatingPanels';
+import { textEditorWindowIdentity } from './workbenchWindowOrder';
 
 describe('WorkbenchWindowHost', () => {
   afterEach(() => {

@@ -6,8 +6,8 @@ import {
   floatingWindowRectStyle,
   useFloatingWindowGesture,
   type FloatingWindowGesture
-} from './floatingWindowGesture.js';
-import type { WorkbenchWindowRect } from './windowBounds.js';
+} from './floatingWindowGesture';
+import type { WorkbenchWindowRect } from './windowBounds';
 
 describe('floating window gesture', () => {
   afterEach(() => {

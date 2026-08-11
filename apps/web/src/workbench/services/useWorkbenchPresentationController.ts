@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DebruteGlobalSettingsView, WorkbenchLocale } from '@debrute/app-protocol';
-import { createI18n, type WorkbenchI18n } from '../i18n/index.js';
+import { createI18n, type WorkbenchI18n } from '../i18n/index';
 import {
   resolveWorkbenchThemePreference,
   setDocumentTheme,
   subscribeSystemThemeChanges,
   type WorkbenchResolvedTheme
-} from './workbenchTheme.js';
+} from './workbenchTheme';
 
 export interface WorkbenchPresentationController {
   settings: DebruteGlobalSettingsView;

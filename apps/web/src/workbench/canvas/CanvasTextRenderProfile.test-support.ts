@@ -1,5 +1,5 @@
 import type { CanvasTextAppearance } from '@debrute/app-protocol';
-import { canvasTextRenderProfileForAppearance } from './CanvasFontCatalog.js';
+import { canvasTextRenderProfileForAppearance } from './CanvasFontCatalog';
 
 export const TEST_CANVAS_TEXT_APPEARANCE = {
   fontId: 'noto-sans-mono-cjk-sc',

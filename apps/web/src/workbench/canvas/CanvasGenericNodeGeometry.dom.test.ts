@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { measureCanvasGenericIdentityRows } from './CanvasGenericNodeGeometry.js';
+import { measureCanvasGenericIdentityRows } from './CanvasGenericNodeGeometry';
 
 describe('Canvas generic node production measurement', () => {
   it('measures one rendered identity-row batch after fonts load and caches only complete widths', () => {

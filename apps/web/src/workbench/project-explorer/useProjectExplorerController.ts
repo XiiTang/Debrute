@@ -8,10 +8,10 @@ import type {
 import { getDebruteShellApi } from '../../api/shellApi';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import type { WorkbenchI18n } from '../i18n';
-import type { ProjectPathCommandEffects } from '../services/projectPathCommandEffects.js';
-import type { AcceptedProjectPathCommandScope } from '../services/projectPathCommandIntake.js';
+import type { ProjectPathCommandEffects } from '../services/projectPathCommandEffects';
+import type { AcceptedProjectPathCommandScope } from '../services/projectPathCommandIntake';
 import type { WorkbenchFileClipboard } from '../shell/contextMenu';
-import type { WorkbenchActivityNoticeReporter } from '../services/WorkbenchActivities.js';
+import type { WorkbenchActivityNoticeReporter } from '../services/WorkbenchActivities';
 import { createInlineEditState, validateInlineProjectName, type ProjectTreeInlineEditState } from './projectTreeEditing';
 import { createProjectTreeExternalDropPlan } from './projectTreeExternalDrop';
 import {
@@ -30,7 +30,7 @@ import {
   projectTreeSelectionFromPaths,
   reconcileCutClipboardWithProjectEntries,
   rewriteCanvasSelectionAfterPathChanges
-} from './workbenchFileCommands.js';
+} from './workbenchFileCommands';
 
 type DirectoryLoadOutcome =
   | { ok: true }

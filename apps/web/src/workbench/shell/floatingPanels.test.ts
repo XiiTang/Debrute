@@ -9,7 +9,7 @@ import {
   resolveFloatingPanelGestureRect,
   toggleFloatingPanel
 } from './floatingPanels';
-import type { FloatingWindowResizeDirection } from './floatingWindowGesture.js';
+import type { FloatingWindowResizeDirection } from './floatingWindowGesture';
 
 const viewport = { x: 0, y: 0, width: 1000, height: 700 };
 

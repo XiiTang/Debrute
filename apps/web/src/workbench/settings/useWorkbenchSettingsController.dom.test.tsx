@@ -6,12 +6,12 @@ import type {
   DebruteGlobalSettingsView,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
-import { createWorkbenchGlobalProjection } from '../services/WorkbenchGlobalProjection.js';
-import { useWorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController.js';
+import { createWorkbenchGlobalProjection } from '../services/WorkbenchGlobalProjection';
+import { useWorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController';
 import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
-} from './useWorkbenchSettingsController.js';
+} from './useWorkbenchSettingsController';
 
 describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
   it('presents changes immediately while serializing and coalescing saves', async () => {

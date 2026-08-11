@@ -4,7 +4,7 @@ import {
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
 import type { CanvasCameraState } from './runtime/canvasCamera';
-import { compareCanvasPreviewPaths } from './CanvasPreviewScheduling.js';
+import { compareCanvasPreviewPaths } from './CanvasPreviewScheduling';
 
 export type CanvasPreviewResourceKind = 'image' | 'text' | 'video';
 

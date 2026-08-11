@@ -3,10 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbenchApiClient, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { createI18n } from '../i18n';
-import { createProjectPathCommandEffects } from '../services/projectPathCommandEffects.js';
+import { createProjectPathCommandEffects } from '../services/projectPathCommandEffects';
 import type {
   AcceptedProjectPathCommandScope
-} from '../services/projectPathCommandIntake.js';
+} from '../services/projectPathCommandIntake';
 import { projectTreeSelectionFromPaths } from './workbenchFileCommands';
 import {
   useProjectExplorerController,

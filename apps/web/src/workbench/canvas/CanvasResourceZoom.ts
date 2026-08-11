@@ -1,5 +1,5 @@
-import type { CanvasCameraState } from './runtime/canvasCamera.js';
-import { assertPositiveFiniteNumber } from './runtime/canvasGeometry.js';
+import type { CanvasCameraState } from './runtime/canvasCamera';
+import { assertPositiveFiniteNumber } from './runtime/canvasGeometry';
 
 export function initialCanvasResourceZoom(cameraZoom: number): number {
   assertResourceZoomInput(cameraZoom);

@@ -2,11 +2,11 @@ import { act, useEffect, useSyncExternalStore } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
 import type { DebruteGlobalSettingsView } from '@debrute/app-protocol';
-import { createWorkbenchGlobalProjection } from './WorkbenchGlobalProjection.js';
+import { createWorkbenchGlobalProjection } from './WorkbenchGlobalProjection';
 import {
   useWorkbenchPresentationController,
   type WorkbenchPresentationController
-} from './useWorkbenchPresentationController.js';
+} from './useWorkbenchPresentationController';
 
 describe('useWorkbenchPresentationController', () => {
   it('applies ordered Runtime settings while the Settings feature is absent', async () => {

@@ -92,15 +92,9 @@
   opacity: 0.42;
 }
 
-.db-button[aria-pressed="true"],
 .db-icon-button[aria-pressed="true"] {
   background: var(--db-selection-muted);
   color: var(--db-text);
-}
-
-.db-button--primary[aria-pressed="true"] {
-  --db-primary-surface-bg: var(--db-selection-muted);
-  background: transparent;
 }
 
 .db-button__icon,
@@ -223,12 +217,6 @@
   background: transparent;
   color: var(--db-text-muted);
   cursor: pointer;
-}
-
-.db-tab:hover,
-.db-tab--active {
-  background: var(--db-surface-1);
-  color: var(--db-text);
 }
 
 .db-tab--strip {

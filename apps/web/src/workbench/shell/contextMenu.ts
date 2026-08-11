@@ -6,13 +6,13 @@ import {
   type PhotoshopStateView,
   type ProjectPathEntry
 } from '@debrute/app-protocol';
-import type { CanvasProjection, ProjectedCanvasNode } from '../canvas/CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from '../canvas/CanvasScene';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
 import { cameraCenteredOnCanvasPoint } from '../canvas/runtime/canvasCamera';
 import {
   resolveProjectPathCommandTarget,
   type WorkbenchProjectPathCommandTarget
-} from '../services/projectPathCommandTarget.js';
+} from '../services/projectPathCommandTarget';
 
 export type WorkbenchContextMenuTargetKind = 'file' | 'directory';
 

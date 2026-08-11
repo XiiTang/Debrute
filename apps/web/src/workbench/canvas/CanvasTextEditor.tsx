@@ -2,8 +2,8 @@ import React from 'react';
 import type { ProjectTextLanguageId } from '@debrute/app-protocol';
 import { Compartment } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { loadCodeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages.js';
-import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext.js';
+import { loadCodeMirrorLanguageExtensionForProjectTextLanguage } from './textEditorCodeMirrorLanguages';
+import { useCanvasTextRenderProfile } from './CanvasTextRenderProfileContext';
 import {
   canvasTextEditorApplyFocusRequest,
   canvasTextEditorApplyInitialScroll,

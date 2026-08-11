@@ -22,7 +22,7 @@ vi.mock('media-chrome/react', async () => {
   };
 });
 
-import { CanvasAudioPlayerAdapter } from './CanvasAudioPlayerAdapter.js';
+import { CanvasAudioPlayerAdapter } from './CanvasAudioPlayerAdapter';
 
 afterEach(() => {
   vi.restoreAllMocks();

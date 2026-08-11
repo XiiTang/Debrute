@@ -6,7 +6,7 @@ import type {
 import type {
   WorkbenchGlobalProjection,
   WorkbenchGlobalProjectionState
-} from './WorkbenchGlobalProjection.js';
+} from './WorkbenchGlobalProjection';
 
 export interface WorkbenchGlobalSettingsController {
   settings: DebruteGlobalSettingsView;

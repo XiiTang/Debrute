@@ -1,11 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { FeedbackIcon, resolvedFeedbackIconIdentifier } from './FeedbackIcon.js';
-import { FEEDBACK_ICON_MANIFEST } from './generatedFeedbackIconManifest.js';
+import { FeedbackIcon, resolvedFeedbackIconIdentifier } from './FeedbackIcon';
+import { FEEDBACK_ICON_MANIFEST } from './generatedFeedbackIconManifest';
 import {
   FEEDBACK_ICON_NAMES,
   UNRESOLVED_FEEDBACK_ICON_NAME
-} from './generatedFeedbackIconNames.js';
+} from './generatedFeedbackIconNames';
 
 describe('FeedbackIcon', () => {
   it('reserves one resolvable but non-configurable icon for unknown local mappings', () => {

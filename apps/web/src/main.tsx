@@ -1,14 +1,14 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { createHttpWorkbenchApiClient } from './api/httpWorkbenchApiClient.js';
+import { createHttpWorkbenchApiClient } from './api/httpWorkbenchApiClient';
 import {
   resolveWorkbenchThemePreference,
   setDocumentTheme
-} from './workbench/services/workbenchTheme.js';
+} from './workbench/services/workbenchTheme';
 import './styles.css';
-import { workbenchStartupTimeline } from './startup/workbenchStartupTimeline.js';
-import { holdWorkbenchThemeUntilCommit } from './startup/workbenchBootstrapTheme.js';
-import { waitForWorkbenchShellFonts } from './startup/workbenchShellFonts.js';
+import { workbenchStartupTimeline } from './startup/workbenchStartupTimeline';
+import { holdWorkbenchThemeUntilCommit } from './startup/workbenchBootstrapTheme';
+import { waitForWorkbenchShellFonts } from './startup/workbenchShellFonts';
 
 declare global {
   interface Window {
@@ -33,7 +33,7 @@ void api.bootstrapGlobalSettings().then(async ({ settings }) => {
   });
   await waitForWorkbenchShellFonts(document.fonts);
   workbenchStartupTimeline.mark('shell-fonts-ready');
-  const { WorkbenchApp } = await import('./workbench/WorkbenchApp.js');
+  const { WorkbenchApp } = await import('./workbench/WorkbenchApp');
   workbenchStartupTimeline.mark('workbench-chunk-ready');
   window.__debruteReactRoot ??= createRoot(document.getElementById('root')!);
   window.__debruteReactRoot.render(

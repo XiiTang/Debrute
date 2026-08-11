@@ -1,11 +1,11 @@
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import { buildResizeGeometry } from '../services/canvasInteraction.js';
-import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime.js';
-import type { CanvasPoint } from './runtime/canvasGeometry.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import { buildResizeGeometry } from '../services/canvasInteraction';
+import type { CanvasRuntimeLayoutInteraction } from './runtime/CanvasEditorRuntime';
+import type { CanvasPoint } from './runtime/canvasGeometry';
 import {
   canvasVideoContentSizeForNode,
   canvasVideoNodeSizeForContent
-} from './CanvasNodePresentationGeometry.js';
+} from './CanvasNodePresentationGeometry';
 
 export interface CanvasLayoutOverride {
   projectRelativePath: string;

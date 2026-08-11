@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CANVAS_POINTER_ACTIVATION_DISTANCE,
   decideCanvasInteraction
-} from './CanvasInteractionPolicy.js';
-import { canvasNodeSelection } from './runtime/canvasSelection.js';
+} from './CanvasInteractionPolicy';
+import { canvasNodeSelection } from './runtime/canvasSelection';
 
 const selection = canvasNodeSelection(['old.md']);
 

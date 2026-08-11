@@ -18,7 +18,7 @@ import {
   CANVAS_PREVIEW_QUALITY_SETTLE_MS,
   createCanvasResourceZoomSettlement,
   type CanvasResourceZoomSettlement
-} from './CanvasResourceZoom.js';
+} from './CanvasResourceZoom';
 
 describe('CanvasRasterPreviewPresentation', () => {
   let container: HTMLDivElement;

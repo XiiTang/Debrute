@@ -4,7 +4,7 @@ import {
   CANVAS_GENERIC_NODE_AUTOMATIC_MIN_WIDTH,
   CANVAS_GENERIC_NODE_PRESENTATION_HEIGHT,
   canvasGenericNodeSceneSizes
-} from './CanvasGenericNodeGeometry.js';
+} from './CanvasGenericNodeGeometry';
 
 describe('CanvasGenericNodeGeometry', () => {
   it('batches unique full-row measurements and applies ceil before one continuous clamp', () => {

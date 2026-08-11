@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCanvasSpatialIndex } from './CanvasSpatialIndex.js';
+import { createCanvasSpatialIndex } from './CanvasSpatialIndex';
 
 describe('CanvasSpatialIndex', () => {
   it('bulk loads bounds and returns only entries intersecting the query rectangle', () => {

@@ -7,7 +7,7 @@ import {
   canvasTextRasterEnvironmentIdentity,
   type CanvasTextPreviewCaptureTarget,
   type CanvasTextPreviewTarget
-} from './CanvasTextPreviewCapture.js';
+} from './CanvasTextPreviewCapture';
 
 const decodedSources: string[] = [];
 const svgBlobs: Blob[] = [];

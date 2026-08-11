@@ -1,6 +1,6 @@
 import type React from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction,
@@ -22,8 +22,8 @@ import {
 import type { CanvasSceneSnapshot } from './CanvasScenePresentation';
 import type { CanvasCamera } from './runtime/canvasCamera';
 import type { CanvasPreviewResourceInteractionState } from './CanvasPreviewResourceScheduler';
-import type { CanvasCullingCounts } from './CanvasCullingController.js';
-import type { CanvasRenderLifecycle } from './CanvasRenderLifecycle.js';
+import type { CanvasCullingCounts } from './CanvasCullingController';
+import type { CanvasRenderLifecycle } from './CanvasRenderLifecycle';
 
 export function pointerEventModifiers(
   event: Pick<React.PointerEvent<Element>, 'shiftKey' | 'metaKey' | 'ctrlKey'>,

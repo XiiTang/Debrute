@@ -19,7 +19,7 @@ import { I18nProvider } from '../i18n';
 import type {
   CanvasFeedbackNodeBarTarget,
   CanvasFeedbackSelectionBarTarget
-} from '../shell/floatingBars.js';
+} from '../shell/floatingBars';
 
 describe('CanvasFeedbackInteraction', () => {
   it('keeps Feedback Item values independent and saves only the capsule that loses focus', async () => {

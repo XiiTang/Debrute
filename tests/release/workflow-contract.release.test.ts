@@ -295,8 +295,6 @@ describe('GitHub release workflow contract', () => {
     expect(buildProductBlock).toContain("security find-identity -v -p codesigning \"$SIGNING_KEYCHAIN\" | grep 'Developer ID Application: Hongrui Wu (FR25929R7Z)'");
     expect(buildProductBlock).toContain('echo "CSC_NAME=Hongrui Wu (FR25929R7Z)"');
     expect(buildProductBlock).toContain('Build signed macOS Product Installer');
-    expect(buildProductBlock).toContain('electron-builder --mac dir --${{ matrix.arch }} --publish never');
-    expect(buildProductBlock).toContain('build-macos-product-installer.mjs');
     expect(buildProductBlock).not.toContain('CSC_LINK: ${{ secrets.CSC_LINK }}');
     expect(buildProductBlock).not.toContain('CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}');
     expect(buildProductBlock).toContain('Notarize macOS DMG');

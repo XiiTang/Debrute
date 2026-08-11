@@ -1,4 +1,4 @@
-import type { CanvasTextFontDigest } from '../CanvasTextRenderProfile.js';
+import type { CanvasTextFontDigest } from '../CanvasTextRenderProfile';
 
 export const CANVAS_TEXT_FONT_SUBSET_CONTRACT_VERSION = 1;
 

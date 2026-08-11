@@ -4,15 +4,15 @@ import { createRoot } from 'react-dom/client';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { CanvasTextEditor } from './CanvasTextEditor';
-import * as CanvasTextEditorRuntime from './CanvasTextEditorRuntime.js';
-import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
+import * as CanvasTextEditorRuntime from './CanvasTextEditorRuntime';
+import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support';
 
 const environmentMock = vi.hoisted(() => ({
   prepareInteractive: vi.fn(async () => undefined)
 }));
 
-vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment', () => ({
   useCanvasTextProjectFontEnvironment: () => environmentMock
 }));
 

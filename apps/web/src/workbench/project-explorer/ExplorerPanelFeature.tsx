@@ -1,21 +1,21 @@
 import { useLayoutEffect } from 'react';
 import '../styles/explorer.css';
 import type { DebruteProductPlatform, WorkbenchLocale } from '@debrute/app-protocol';
-import type { WorkbenchState } from '../../types.js';
-import { I18nProvider } from '../i18n/index.js';
+import type { WorkbenchState } from '../../types';
+import { I18nProvider } from '../i18n/index';
 import type {
   WorkbenchContextMenuPosition,
   WorkbenchContextMenuTarget,
   WorkbenchFileClipboard
-} from '../shell/contextMenu.js';
-import { ProjectTree } from './ProjectTree.js';
-import type { ProjectTreeInlineEditState } from './projectTreeEditing.js';
-import type { ProjectTreeFileKeyboardCommand } from './projectTreeKeyboardCommands.js';
+} from '../shell/contextMenu';
+import { ProjectTree } from './ProjectTree';
+import type { ProjectTreeInlineEditState } from './projectTreeEditing';
+import type { ProjectTreeFileKeyboardCommand } from './projectTreeKeyboardCommands';
 import {
   useProjectExplorerController,
   type ProjectExplorerController,
   type ProjectExplorerControllerInput
-} from './useProjectExplorerController.js';
+} from './useProjectExplorerController';
 
 export function WorkbenchExplorerControllerHost({
   onController,

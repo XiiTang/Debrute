@@ -3,15 +3,15 @@ import {
   canvasTextFontFaceDescriptors,
   type CanvasTextFontResource,
   type CanvasTextPreparedFont
-} from '../CanvasTextRenderProfile.js';
-import { canvasTextPreviewCoverageContains } from './CanvasTextPreviewCoverage.js';
+} from '../CanvasTextRenderProfile';
+import { canvasTextPreviewCoverageContains } from './CanvasTextPreviewCoverage';
 import {
   CANVAS_TEXT_FONT_SUBSET_CONTRACT_VERSION,
   type CanvasTextFontSubsetRequest,
   type CanvasTextFontSubsetResponse,
   type CanvasTextFontSubsetSuccess
-} from './CanvasTextFontSubsetProtocol.js';
-import { removeCanvasTextFontFaces } from './CanvasTextFontFaces.js';
+} from './CanvasTextFontSubsetProtocol';
+import { removeCanvasTextFontFaces } from './CanvasTextFontFaces';
 
 export interface CanvasTextPreviewFontSession {
   prepareCoverage(

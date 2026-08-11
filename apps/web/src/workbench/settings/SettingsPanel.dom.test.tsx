@@ -3,17 +3,17 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { DebruteGlobalSettingsView, DebruteProductState } from '@debrute/app-protocol';
-import type { SettingsResource } from '../../types.js';
-import { I18nProvider } from '../i18n/index.js';
-import { installDialogTestAdapter } from '../ui/Modal.test-support.js';
+import type { SettingsResource } from '../../types';
+import { I18nProvider } from '../i18n/index';
+import { installDialogTestAdapter } from '../ui/Modal.test-support';
 import {
   SettingsPanel,
   type SettingsPanelState
-} from './SettingsPanel.js';
-import { AudioModelSettings, ImageModelSettings } from './MediaModelSettingsPage.js';
-import { GeneralSettingsPage } from './general/GeneralSettingsPage.js';
-import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage.js';
-import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController.js';
+} from './SettingsPanel';
+import { AudioModelSettings, ImageModelSettings } from './MediaModelSettingsPage';
+import { GeneralSettingsPage } from './general/GeneralSettingsPage';
+import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage';
+import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController';
 
 describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
   it('groups Settings navigation into General, Models, Plugins, and System', () => {

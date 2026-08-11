@@ -1,11 +1,11 @@
-import type { CanvasProjection } from '../CanvasScene.js';
+import type { CanvasProjection } from '../CanvasScene';
 import {
   canvasManualLayoutDraftFromInteraction,
   canvasNodesWithLayoutOverrides,
   type CanvasLayoutOverride,
   type CanvasManualLayoutDraft
 } from '../canvasManualLayoutDraft';
-import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime.js';
+import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime';
 
 export interface CanvasManualLayoutPresentation {
   layoutOverrides: readonly CanvasLayoutOverride[];

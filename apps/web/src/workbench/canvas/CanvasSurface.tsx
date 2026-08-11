@@ -6,15 +6,15 @@ import type {
   CanvasFeedbackGeometry,
   CanvasTextViewportState
 } from '@debrute/app-protocol';
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
 import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import {
   isAdditiveCanvasSelectionModifier,
   type CanvasPoint,
   type ResizeHandle
-} from '../services/canvasInteraction.js';
-import { projectPathCommandEntryForCanvasNode } from '../services/projectPathCommandTarget.js';
+} from '../services/canvasInteraction';
+import { projectPathCommandEntryForCanvasNode } from '../services/projectPathCommandTarget';
 import {
   type CanvasFeedbackNodeBarTarget
 } from '../shell/floatingBars';
@@ -29,36 +29,36 @@ import {
   resolveCanvasDomInteractionTarget,
   type CanvasDomInteractionTarget,
   type CanvasContentHandoffRequest
-} from './CanvasDomInteractionAdapter.js';
+} from './CanvasDomInteractionAdapter';
 import {
   CANVAS_POINTER_ACTIVATION_DISTANCE,
   decideCanvasInteraction,
   type CanvasInteractionStateCommand
-} from './CanvasInteractionPolicy.js';
-import { CanvasMovingCameraHitTestBlocker } from './CanvasMovingCameraHitTestBlocker.js';
+} from './CanvasInteractionPolicy';
+import { CanvasMovingCameraHitTestBlocker } from './CanvasMovingCameraHitTestBlocker';
 import { CanvasNodeShell } from './CanvasNodeShell';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
 import {
   createCanvasResourceZoomSettlement,
   type CanvasResourceZoomSettlement
-} from './CanvasResourceZoom.js';
+} from './CanvasResourceZoom';
 import {
   CanvasTextPreviewProvider,
   useCanvasTextPreviewNode,
   type CanvasTextPreviewNodeSnapshot
-} from './CanvasTextPreviewRuntime.js';
+} from './CanvasTextPreviewRuntime';
 import {
   CanvasVideoPreviewProvider,
   useCanvasVideoPreviewNode,
   type CanvasVideoMetadataUpdate,
   type CanvasVideoPreviewNodeSnapshot
-} from './CanvasVideoPreviewRuntime.js';
+} from './CanvasVideoPreviewRuntime';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
-import type { CanvasSceneActions } from './CanvasSceneActions.js';
+import type { CanvasSceneActions } from './CanvasSceneActions';
 import {
   createCanvasSourceResolutionRuntime,
   type CanvasSourceResolutionRuntime
-} from './CanvasSourceResolutionRuntime.js';
+} from './CanvasSourceResolutionRuntime';
 import { createCanvasPerfBrowserAdapter } from './CanvasPerfBrowserAdapter';
 import { createCanvasPerfDebugBridge } from './CanvasPerfDebugBridge';
 import {
@@ -66,24 +66,24 @@ import {
   createCanvasPerfMonitor,
   type CanvasPerfMonitor
 } from './CanvasPerfMonitor';
-import { createCanvasRenderLifecycle } from './CanvasRenderLifecycle.js';
-import type { CanvasEdgeRoutingGroup } from './CanvasEdgeRoutingGroup.js';
+import { createCanvasRenderLifecycle } from './CanvasRenderLifecycle';
+import type { CanvasEdgeRoutingGroup } from './CanvasEdgeRoutingGroup';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction,
   CanvasRuntimeSnapshot
 } from './runtime/CanvasEditorRuntime';
-import { createCanvasInteractionRuntime } from './runtime/CanvasInteractionRuntime.js';
+import { createCanvasInteractionRuntime } from './runtime/CanvasInteractionRuntime';
 import { createCanvasStageRuntime, type CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import {
   canvasNodeSelection,
   isCanvasNodeSelected,
   selectedNodeProjectRelativePaths
-} from './runtime/canvasSelection.js';
+} from './runtime/canvasSelection';
 import {
   useCanvasContentInteraction,
   useCanvasSurfaceSize
-} from './runtime/useCanvasRuntimeSnapshot.js';
+} from './runtime/useCanvasRuntimeSnapshot';
 import {
   canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,

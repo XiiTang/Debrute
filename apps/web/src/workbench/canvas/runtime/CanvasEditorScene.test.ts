@@ -1,7 +1,7 @@
-import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene';
 import { describe, expect, it } from 'vitest';
-import type { CanvasScenePresentationUpdate } from '../CanvasScenePresentation.js';
-import { createCanvasEditorRuntime } from './CanvasEditorRuntime.js';
+import type { CanvasScenePresentationUpdate } from '../CanvasScenePresentation';
+import { createCanvasEditorRuntime } from './CanvasEditorRuntime';
 
 describe('CanvasEditorRuntime scene', () => {
   it('exposes stable node membership and exact source routing-group queries', () => {

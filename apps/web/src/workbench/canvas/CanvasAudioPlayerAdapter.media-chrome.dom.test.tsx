@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { CanvasAudioPlayerAdapter } from './CanvasAudioPlayerAdapter.js';
+import { CanvasAudioPlayerAdapter } from './CanvasAudioPlayerAdapter';
 
 describe('CanvasAudioPlayerAdapter with Media Chrome', () => {
   it('keeps the localized audio-player name after the custom element connects', async () => {

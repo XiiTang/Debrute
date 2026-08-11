@@ -281,8 +281,7 @@ pub(super) async fn workbench_connection(
                     "canonicalRoot": project_root,
                     "error": {
                         "code": error.code,
-                        "message": error.message,
-                        "details": error.details
+                        "message": error.message
                     }
                 });
                 let _ = project_sender.try_send(frame);
@@ -1281,8 +1280,7 @@ pub(super) fn service_error_response(error: RuntimeHttpServiceError) -> Response
         Json(json!({
             "error": {
                 "code": error.code,
-                "message": error.message,
-                "details": error.details
+                "message": error.message
             }
         })),
     )

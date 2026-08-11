@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
-import { createCanvasScenePresentation } from './CanvasScenePresentation.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
+import { createCanvasScenePresentation } from './CanvasScenePresentation';
 
 describe('CanvasScenePresentation', () => {
   it('does not inspect unrelated base z values during unchanged-selection drag frames', () => {

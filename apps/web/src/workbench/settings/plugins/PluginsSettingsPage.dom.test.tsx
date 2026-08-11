@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { PhotoshopStateView } from '@debrute/app-protocol';
-import { I18nProvider } from '../../i18n/index.js';
-import { PluginsSettingsPage } from './PluginsSettingsPage.js';
+import { I18nProvider } from '../../i18n/index';
+import { PluginsSettingsPage } from './PluginsSettingsPage';
 
 describe('Plugins settings page', { tags: ['settings'] }, () => {
   it('renders the four Runtime-owned Photoshop statuses with exact diagnostics', () => {

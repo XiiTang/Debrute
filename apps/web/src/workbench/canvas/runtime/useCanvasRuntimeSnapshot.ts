@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import type { CanvasEditorRuntime } from './CanvasEditorRuntime.js';
-import type { CanvasSize } from './canvasGeometry.js';
-import type { CanvasSelection } from './canvasSelection.js';
+import type { CanvasEditorRuntime } from './CanvasEditorRuntime';
+import type { CanvasSize } from './canvasGeometry';
+import type { CanvasSelection } from './canvasSelection';
 
 export function useCanvasSelection(runtime: CanvasEditorRuntime): CanvasSelection | undefined {
   return useSyncExternalStore(

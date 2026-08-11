@@ -2,7 +2,7 @@ export type CanvasPreviewTargetIdentity = string & {
   readonly __canvasPreviewTargetIdentity: unique symbol;
 };
 
-export type CanvasPreviewVariantIdentity = string & {
+type CanvasPreviewVariantIdentity = string & {
   readonly __canvasPreviewVariantIdentity: unique symbol;
 };
 
@@ -34,7 +34,7 @@ export function canvasPreviewTargetIdentityFromDigest(digest: string): CanvasPre
   return digest as CanvasPreviewTargetIdentity;
 }
 
-export function canvasPreviewVariantIdentity(input: {
+function canvasPreviewVariantIdentity(input: {
   targetIdentity: CanvasPreviewTargetIdentity;
   width: number;
 }): CanvasPreviewVariantIdentity {

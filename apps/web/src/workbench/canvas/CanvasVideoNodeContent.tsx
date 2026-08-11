@@ -1,22 +1,22 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Video } from '../ui/index.js';
+import { Video } from '../ui/index';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import { useI18n } from '../i18n';
-import type { CanvasVideoPlaybackToggleRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter.js';
+import type { CanvasVideoPlaybackToggleRequest, CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import {
   useCanvasRasterPreviewPresentation,
   type CanvasRasterPreviewRequest
-} from './CanvasRasterPreviewPresentation.js';
-import { useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime.js';
+} from './CanvasRasterPreviewPresentation';
+import { useCanvasVideoPreviewRuntime } from './CanvasVideoPreviewRuntime';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
 import { CanvasContentErrorPresentation } from './CanvasNodeErrorPresentation';
-import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
-import { CANVAS_VIDEO_FALLBACK_CONTENT_SIZE } from './CanvasNodePresentationGeometry.js';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter';
+import { CANVAS_VIDEO_FALLBACK_CONTENT_SIZE } from './CanvasNodePresentationGeometry';
 
 const CanvasVideoPlayerAdapter = React.lazy(async () => {
-  const module = await import('./CanvasVideoPlayerAdapter.js');
+  const module = await import('./CanvasVideoPlayerAdapter');
   return { default: module.CanvasVideoPlayerAdapter };
 });
 

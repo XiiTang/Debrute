@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { dirname, normalize } from 'node:path/posix';
 
-export const architectureScopes = [
+const architectureScopes = [
   'packages',
   'apps/desktop/package.json',
   'apps/desktop/tsconfig.json',
@@ -16,7 +16,7 @@ export const architectureScopes = [
   'tests'
 ];
 
-export const importMatrix = [
+const importMatrix = [
   {
     name: 'packages do not import apps',
     match: (file) => file.startsWith('packages/') && !file.startsWith('packages/architecture-rules/'),
@@ -78,18 +78,14 @@ export const importMatrix = [
   }
 ];
 
-export function architectureRuleKinds() {
-  return ['imports', 'package-json', 'tsconfig', 'vite-alias'];
-}
-
-export function rgFiles(root, scopes = architectureScopes) {
+function rgFiles(root, scopes = architectureScopes) {
   return execFileSync('rg', ['--files', ...scopes], { cwd: root, encoding: 'utf8' })
     .trim()
     .split('\n')
     .filter(Boolean);
 }
 
-export function isScannableArchitectureFile(file) {
+function isScannableArchitectureFile(file) {
   return !file.endsWith('.md')
     && !file.endsWith('.map')
     && !file.includes('/dist/')
@@ -128,11 +124,11 @@ function importViolations(file, text) {
       }));
 }
 
-export function architectureImportSpecifiers(file, text) {
+function architectureImportSpecifiers(file, text) {
   return importedSpecifiers(text).map((specifier) => resolvedImportSpecifier(file, specifier));
 }
 
-export function resolvedImportSpecifier(file, specifier) {
+function resolvedImportSpecifier(file, specifier) {
   if (!specifier.startsWith('.')) {
     return specifier;
   }
@@ -140,7 +136,7 @@ export function resolvedImportSpecifier(file, specifier) {
   return resolved.startsWith('../') ? specifier : resolved;
 }
 
-export function importedSpecifiers(text) {
+function importedSpecifiers(text) {
   const specifiers = [];
   const importExportPattern = /\b(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g;
   const dynamicImportPattern = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;

@@ -248,10 +248,9 @@ Product release assets:
 
 ```sh
 pnpm package:photoshop-uxp-plugin
-pnpm package:photoshop-plugin
 ```
 
-Both commands create `debrute-photoshop-uxp-X.Y.Z.ccx`. The packaging script
+This command creates `debrute-photoshop-uxp-X.Y.Z.ccx`. The packaging script
 validates the required archive entries, and the plugin package and manifest
 versions must match the root release version.
 

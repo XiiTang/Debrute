@@ -4,13 +4,13 @@ import {
   readVerifiedCanvasTextFontFace,
   type CanvasTextFontResource,
   type CanvasTextRenderProfile
-} from '../CanvasTextRenderProfile.js';
+} from '../CanvasTextRenderProfile';
 import {
   createCanvasTextPreviewFontSession,
   type CanvasTextPreviewFontSession,
   type CanvasTextPreviewFontSubsetMetrics
-} from './CanvasTextPreviewFontSession.js';
-import { removeCanvasTextFontFaces } from './CanvasTextFontFaces.js';
+} from './CanvasTextPreviewFontSession';
+import { removeCanvasTextFontFaces } from './CanvasTextFontFaces';
 
 interface ActiveInteractiveFont {
   readonly resourceIdentity: string;

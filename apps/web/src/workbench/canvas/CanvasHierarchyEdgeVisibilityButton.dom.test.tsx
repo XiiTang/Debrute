@@ -1,8 +1,8 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from '../i18n/index.js';
-import { CanvasHierarchyEdgeVisibilityButton } from './CanvasHierarchyEdgeVisibilityButton.js';
+import { I18nProvider } from '../i18n/index';
+import { CanvasHierarchyEdgeVisibilityButton } from './CanvasHierarchyEdgeVisibilityButton';
 
 describe('CanvasHierarchyEdgeVisibilityButton', { tags: ['settings'] }, () => {
   it('is always operable and uses Eye and EyeOff to represent hierarchy-edge visibility', async () => {

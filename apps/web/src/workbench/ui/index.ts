@@ -1,20 +1,17 @@
-export { Button } from './Button.js';
-export { IconButton } from './IconButton.js';
-export { DiscardChangesIcon } from './DiscardChangesIcon.js';
+export { Button } from './Button';
+export { IconButton } from './IconButton';
+export { DiscardChangesIcon } from './DiscardChangesIcon';
 export {
-  AlertCircle,
   AlertTriangle,
   Bell,
   AudioLines,
   Boxes,
   Cable,
-  Check,
   ChevronRight,
   CircleDot,
   Clipboard,
   Clock3,
   Copy,
-  Download,
   Edit3,
   Eye,
   EyeOff,
@@ -28,8 +25,6 @@ export {
   Heart,
   Image,
   Info,
-  KeyRound,
-  Link2,
   Loader2,
   LocateFixed,
   Map,
@@ -47,33 +42,25 @@ export {
   Send,
   Settings,
   Square,
-  Star,
   Terminal,
-  ThumbsDown,
   Trash2,
-  Unlink,
-  Upload,
   Video,
   WandSparkles,
-  Wrench,
   WorkbenchIconProvider,
   X
-} from './WorkbenchIconProvider.js';
-export type { CutoutIcon, CutoutIconProps } from './WorkbenchIconProvider.js';
-export { CloseButton } from './CloseButton.js';
-export { Field } from './Field.js';
-export { Input, SecretInput } from './Input.js';
-export { CommentPillInput } from './CommentPillInput.js';
-export { Select } from './Select.js';
-export { Textarea } from './Textarea.js';
-export { Switch } from './Switch.js';
-export { Card } from './Card.js';
-export { Panel, PanelBody, PanelHeader, PanelTitle } from './Panel.js';
-export { Toolbar } from './Toolbar.js';
-export { Menu } from './Menu.js';
-export { Modal } from './Modal.js';
-export { Tab, TabList } from './Tabs.js';
-export { StatusPill } from './StatusPill.js';
-export type { StatusTone } from './StatusPill.js';
-export { EmptyState } from './EmptyState.js';
-export { cx } from './cx.js';
+} from './WorkbenchIconProvider';
+export { CloseButton } from './CloseButton';
+export { Field } from './Field';
+export { Input, SecretInput } from './Input';
+export { Select } from './Select';
+export { Switch } from './Switch';
+export { Card } from './Card';
+export { Panel, PanelBody, PanelHeader, PanelTitle } from './Panel';
+export { Toolbar } from './Toolbar';
+export { Menu } from './Menu';
+export { Modal } from './Modal';
+export { Tab, TabList } from './Tabs';
+export { StatusPill } from './StatusPill';
+export type { StatusTone } from './StatusPill';
+export { EmptyState } from './EmptyState';
+export { cx } from './cx';

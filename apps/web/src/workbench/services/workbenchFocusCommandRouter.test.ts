@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.js';
+import { createCanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import {
   createWorkbenchFocusCommandRouter,
   workbenchFocusCommandFromKeyboardEvent
-} from './workbenchFocusCommandRouter.js';
+} from './workbenchFocusCommandRouter';
 
 describe('workbench focus command router', () => {
   it('maps platform edit keys without claiming plain text keys', () => {

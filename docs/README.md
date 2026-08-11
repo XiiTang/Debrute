@@ -54,6 +54,8 @@ remain authoritative when prose and implementation differ.
 
 ## Engineering
 
+- [Roadmap](./roadmap.md) — planned product and engineering work that is not yet
+  a current contract.
 - [Development and architecture governance](./development.md)
 - [Local test system](./testing.md)
 - [Domain-documentation rules](./agents/domain.md)

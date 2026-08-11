@@ -1,5 +1,5 @@
 import React from 'react';
-import type { WorkbenchWindowRect } from './windowBounds.js';
+import type { WorkbenchWindowRect } from './windowBounds';
 
 export const FLOATING_WINDOW_RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
 export type FloatingWindowResizeDirection = typeof FLOATING_WINDOW_RESIZE_DIRECTIONS[number];

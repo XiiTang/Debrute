@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
-import { WorkbenchFloatingTextEditorWindowFeature } from './FloatingTextEditorWindowFeature.js';
+import { WorkbenchFloatingTextEditorWindowFeature } from './FloatingTextEditorWindowFeature';
 import { FLOATING_TEXT_EDITOR_TITLEBAR_HEIGHT } from '../shell/windowBounds';
-import { WorkbenchWindowHost } from '../shell/WorkbenchWindowHost.js';
-import { I18nProvider } from '../i18n/index.js';
+import { WorkbenchWindowHost } from '../shell/WorkbenchWindowHost';
+import { I18nProvider } from '../i18n/index';
 
-vi.mock('./CanvasTextEditor.js', () => {
+vi.mock('./CanvasTextEditor', () => {
   return {
     CanvasTextEditor: () => (
       <div

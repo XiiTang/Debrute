@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldWorkbenchClickEndCanvasContentActivation } from './WorkbenchApp.js';
+import { shouldWorkbenchClickEndCanvasContentActivation } from './WorkbenchApp';
 
 describe('Workbench Canvas Content Activation boundary', () => {
   it('ends activation only for completed primary clicks outside CanvasSurface', () => {

@@ -3,7 +3,7 @@ import {
   canvasTextPresentationGeometry,
   canvasVideoContentSizeForNode,
   canvasVideoNodeSizeForContent
-} from './CanvasNodePresentationGeometry.js';
+} from './CanvasNodePresentationGeometry';
 
 describe('CanvasNodePresentationGeometry', { tags: ['canvas-text'] }, () => {
   it('derives one camera-independent editor and capture geometry from the node', () => {

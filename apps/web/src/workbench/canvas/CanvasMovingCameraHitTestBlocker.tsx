@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime.js';
-import type { CanvasCameraState } from './runtime/canvasCamera.js';
+import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+import type { CanvasCameraState } from './runtime/canvasCamera';
 
 export function CanvasMovingCameraHitTestBlocker({
   runtime,

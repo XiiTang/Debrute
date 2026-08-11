@@ -6,15 +6,15 @@ import {
   type CanvasFeedbackDocument,
   type CanvasState
 } from '@debrute/app-protocol';
-import type { CanvasProjection } from './CanvasScene.js';
-import type { CanvasFeedbackBarTarget } from '../shell/floatingBars.js';
+import type { CanvasProjection } from './CanvasScene';
+import type { CanvasFeedbackBarTarget } from '../shell/floatingBars';
 import type { TextFileBuffer, WorkbenchActions } from '../../types';
 import { CanvasEditor } from './CanvasEditor';
 import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
-import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter';
 import { createCanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import { createCanvasPreviewResourceScheduler } from './CanvasPreviewResourceScheduler';
-import { CANVAS_PREVIEW_QUALITY_SETTLE_MS } from './CanvasResourceZoom.js';
+import { CANVAS_PREVIEW_QUALITY_SETTLE_MS } from './CanvasResourceZoom';
 import { areCanvasNodeShellPropsEqual, type CanvasNodeShellProps } from './CanvasNodeShell';
 import {
   CanvasSurface
@@ -38,13 +38,13 @@ import {
   createCanvasEditorRuntime,
   type CanvasRuntimePointerInteraction
 } from './runtime/CanvasEditorRuntime';
-import { I18nProvider as WorkbenchI18nProvider } from '../i18n/index.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
-import { CanvasTextProjectFontEnvironmentProvider } from './font-subset/CanvasTextProjectFontEnvironment.js';
+import { I18nProvider as WorkbenchI18nProvider } from '../i18n/index';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support';
+import { CanvasTextProjectFontEnvironmentProvider } from './font-subset/CanvasTextProjectFontEnvironment';
 
-vi.mock('./CanvasTextRenderProfileContext.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./CanvasTextRenderProfileContext.js')>();
-  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support.js');
+vi.mock('./CanvasTextRenderProfileContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./CanvasTextRenderProfileContext')>();
+  const { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } = await import('./CanvasTextRenderProfile.test-support');
   return {
     ...actual,
     useCanvasTextRenderProfile: () => DEFAULT_CANVAS_TEXT_RENDER_PROFILE,

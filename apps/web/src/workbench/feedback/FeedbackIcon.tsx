@@ -3,7 +3,7 @@ import spriteUrl from './phosphor-fill.svg?url';
 import {
   FEEDBACK_ICON_NAMES,
   UNRESOLVED_FEEDBACK_ICON_NAME
-} from './generatedFeedbackIconNames.js';
+} from './generatedFeedbackIconNames';
 
 const knownIdentifiers = new Set<string>(FEEDBACK_ICON_NAMES);
 

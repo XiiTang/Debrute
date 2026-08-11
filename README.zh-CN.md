@@ -49,7 +49,7 @@ Agent 使用自己已有的文件、终端、浏览器、生成和编辑工具�
 
 ## 继续使用专业工具完成工作
 
-Debrute 位于完成工作所需的专业工具旁边。随项目提供的 Photoshop UXP 和 CEP 插件可以在 Debrute 与 Photoshop 之间移动 Project 资产，同时保留同一份文件和 Project 身份。
+Debrute 位于完成工作所需的专业工具旁边。随项目提供的 Photoshop UXP 插件可以在 Debrute 与 Photoshop 之间移动 Project 资产，同时保留同一份文件和 Project 身份。
 
 ## 开发版本快速开始
 

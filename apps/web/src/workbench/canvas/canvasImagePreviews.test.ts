@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import { canvasImageRasterPreviewRequestForNode } from './canvasImagePreviewTarget';
 
 describe('canvas image preview target', () => {

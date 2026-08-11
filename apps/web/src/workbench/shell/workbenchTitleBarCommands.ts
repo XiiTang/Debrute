@@ -1,6 +1,6 @@
 import type { NativeMenuCommand, NativeMenuCommandResult } from '@debrute/app-protocol';
 import type { DebruteShellApi } from '../../api/shellApi';
-import type { WorkbenchApiClient } from '../../types.js';
+import type { WorkbenchApiClient } from '../../types';
 import type { WorkbenchMenuCommandId, WorkbenchMenuItem } from './workbenchTitleBarState';
 
 type WorkbenchTitleBarCommandApi = Pick<WorkbenchApiClient, 'clearRecentProjectRoots'>;

@@ -4,9 +4,9 @@ import type {
   FeedbackCatalogEntry,
   ProjectTreeEntry
 } from '@debrute/app-protocol';
-import { FeedbackIcon } from './FeedbackIcon.js';
-import { IconButton, LocateFixed, Trash2 } from '../ui/index.js';
-import { useI18n } from '../i18n/index.js';
+import { FeedbackIcon } from './FeedbackIcon';
+import { IconButton, LocateFixed, Trash2 } from '../ui/index';
+import { useI18n } from '../i18n/index';
 
 export function FeedbackPanel({
   feedback,

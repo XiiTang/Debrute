@@ -4,7 +4,7 @@ import {
   compareCanvasPreviewPaths,
   orderCanvasPreviewItemsByNode,
   orderCanvasPreviewTasks
-} from './CanvasPreviewScheduling.js';
+} from './CanvasPreviewScheduling';
 
 describe('CanvasPreviewScheduling', { tags: ['canvas-text', 'canvas-video'] }, () => {
   const visibleRect = { x: 0, y: 0, width: 100, height: 100 };

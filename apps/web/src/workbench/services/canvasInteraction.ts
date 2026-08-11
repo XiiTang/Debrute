@@ -3,7 +3,7 @@ import type { CanvasMediaKind, CanvasNodeKind } from '@debrute/app-protocol';
 import type { CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
 
 export type { CanvasPoint, CanvasRect, ResizeHandle } from '../canvas/runtime/canvasGeometry';
-export type { CanvasSelection } from '../canvas/runtime/canvasSelection.js';
+export type { CanvasSelection } from '../canvas/runtime/canvasSelection';
 export {
   canvasNodeSelection,
   isCanvasNodeSelected,

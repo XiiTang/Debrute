@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CanvasTextEditor } from './CanvasTextEditor.js';
-import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext.js';
-import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support.js';
+import { CanvasTextEditor } from './CanvasTextEditor';
+import { CanvasTextRenderProfileGate } from './CanvasTextRenderProfileContext';
+import { DEFAULT_CANVAS_TEXT_RENDER_PROFILE } from './CanvasTextRenderProfile.test-support';
 
 const languageMock = vi.hoisted(() => ({
   load: vi.fn()
 }));
 
-vi.mock('./textEditorCodeMirrorLanguages.js', () => ({
+vi.mock('./textEditorCodeMirrorLanguages', () => ({
   loadCodeMirrorLanguageExtensionForProjectTextLanguage: languageMock.load
 }));
 
-vi.mock('./font-subset/CanvasTextProjectFontEnvironment.js', () => ({
+vi.mock('./font-subset/CanvasTextProjectFontEnvironment', () => ({
   useCanvasTextProjectFontEnvironment: () => ({
     prepareInteractive: async () => undefined,
     activeInteractiveProfile: DEFAULT_CANVAS_TEXT_RENDER_PROFILE

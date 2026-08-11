@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import { cameraForCanvasContent, canvasContentBounds } from './CanvasCameraBounds';
 
 describe('CanvasCameraBounds', () => {

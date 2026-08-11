@@ -3,12 +3,12 @@ import type {
   WorkbenchApiClient,
   WorkbenchProjectSessionSnapshot
 } from '@debrute/app-protocol';
-import type { CanvasProjection } from '../canvas/CanvasScene.js';
-import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime.js';
-import { projectTreePasteTargetDirectory } from '../project-explorer/projectTreeEditing.js';
-import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction.js';
-import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController.js';
-import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
+import type { CanvasProjection } from '../canvas/CanvasScene';
+import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
+import { projectTreePasteTargetDirectory } from '../project-explorer/projectTreeEditing';
+import { projectTreeBatchMoveHasConflict } from '../project-explorer/projectTreeInteraction';
+import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController';
+import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake';
 import {
   explorerContextMenuEntries,
   explorerContextMenuPrimaryEntry,
@@ -18,9 +18,9 @@ import {
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget,
   type WorkbenchFileClipboard
-} from '../shell/contextMenu.js';
-import { resolveProjectPathCommandTarget } from './projectPathCommandTarget.js';
-import type { WorkbenchActivityNoticeReporter } from './WorkbenchActivities.js';
+} from '../shell/contextMenu';
+import { resolveProjectPathCommandTarget } from './projectPathCommandTarget';
+import type { WorkbenchActivityNoticeReporter } from './WorkbenchActivities';
 
 type ExplorerContextCommands = Pick<ProjectExplorerController,
   | 'beginCreateFile'

@@ -6,10 +6,10 @@ import type {
   MutateDebruteGlobalSettingsInput,
   WorkbenchThemePreference
 } from '@debrute/app-protocol';
-import { CANVAS_FONT_CATALOG } from '../../canvas/CanvasFontCatalog.js';
-import { useI18n, type WorkbenchI18n } from '../../i18n/index.js';
-import type { WorkbenchResolvedTheme } from '../../services/workbenchTheme.js';
-import { Field, Input, Select, Switch } from '../../ui/index.js';
+import { CANVAS_FONT_CATALOG } from '../../canvas/CanvasFontCatalog';
+import { useI18n, type WorkbenchI18n } from '../../i18n/index';
+import type { WorkbenchResolvedTheme } from '../../services/workbenchTheme';
+import { Field, Input, Select, Switch } from '../../ui/index';
 
 type NumericAppearanceField = 'fontSizePx' | 'lineHeightRatio' | 'fontWeight' | 'letterSpacingPx';
 

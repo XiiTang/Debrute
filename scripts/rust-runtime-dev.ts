@@ -70,7 +70,6 @@ interface RuntimeExecutableAssemblyInput {
 }
 
 interface WindowsRuntimeAssemblyIdentity {
-  schemaVersion: 3;
   compiledRuntimeIdentity: string;
   compiledRuntimeSha256: string;
   nativeRasterManifestSha256: string;
@@ -171,8 +170,7 @@ export function windowsRuntimeDirectoryNeedsAssembly(input: {
     installedRuntimeIdentity: input.installedIdentity?.compiledRuntimeIdentity,
     runtimeExecutableExists: input.installedRuntimeSha256 !== undefined
   })
-    || input.installedIdentity?.schemaVersion !== 3
-    || input.installedIdentity.compiledRuntimeSha256 !== input.expectation.compiledRuntimeSha256
+    || input.installedIdentity?.compiledRuntimeSha256 !== input.expectation.compiledRuntimeSha256
     || input.installedRuntimeSha256 !== input.expectation.compiledRuntimeSha256
     || input.installedIdentity.nativeRasterManifestSha256
       !== input.expectation.nativeRasterManifestSha256
@@ -295,15 +293,13 @@ export function parseWindowsRuntimeAssemblyIdentity(
     'compiledRuntimeSha256',
     'nativeRasterManifestSha256',
     'nativeRasterRuntimeInventorySha256',
-    'runtimePayloadInventorySha256',
-    'schemaVersion'
+    'runtimePayloadInventorySha256'
   ].sort();
   if (keys.length !== expectedKeys.length
     || keys.some((key, index) => key !== expectedKeys[index])) {
     return undefined;
   }
-  return record.schemaVersion === 3
-    && typeof record.compiledRuntimeIdentity === 'string'
+  return typeof record.compiledRuntimeIdentity === 'string'
     && record.compiledRuntimeIdentity.length > 0
     && isSha256(record.compiledRuntimeSha256)
     && isSha256(record.nativeRasterManifestSha256)
@@ -535,7 +531,7 @@ async function prepareWindowsRuntimeDirectory(): Promise<void> {
     );
     await writeFile(
       windowsRuntimeAssemblyIdentityPath,
-      `${JSON.stringify({ schemaVersion: 3, ...expectation }, null, 2)}\n`,
+      `${JSON.stringify(expectation, null, 2)}\n`,
       'utf8'
     );
   } catch (error) {

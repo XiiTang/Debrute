@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake.js';
-import { createProjectPathCommandRouter } from './projectPathCommandRouter.js';
+import type { AcceptedProjectPathCommandScope } from './projectPathCommandIntake';
+import { createProjectPathCommandRouter } from './projectPathCommandRouter';
 
 describe('ProjectPathCommandRouter', () => {
   it('disables menu commands when the shared intake cannot accept work', () => {

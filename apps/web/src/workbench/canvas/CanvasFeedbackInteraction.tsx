@@ -24,7 +24,7 @@ import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import type { CanvasFeedbackComposition } from './canvasFeedbackComposition';
-import { CanvasFeedbackBar, CanvasFeedbackSelectionBar } from './CanvasFeedbackBar.js';
+import { CanvasFeedbackBar, CanvasFeedbackSelectionBar } from './CanvasFeedbackBar';
 
 const FEEDBACK_BAR_DISMISS_DELAY_MS = 120;
 const EMPTY_FLOATING_BAR_RECTS: readonly FloatingBarRect[] = [];

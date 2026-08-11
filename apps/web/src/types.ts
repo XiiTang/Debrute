@@ -17,7 +17,7 @@ import type {
   WriteProjectTextFileInput
 } from '@debrute/app-protocol';
 import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
-import type { CanvasProjection } from './workbench/canvas/CanvasScene.js';
+import type { CanvasProjection } from './workbench/canvas/CanvasScene';
 import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchResolvedTheme } from './workbench/services/workbenchTheme';
 import type { WorkbenchTitleBarState } from './workbench/shell/workbenchTitleBarState';

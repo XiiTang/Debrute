@@ -194,6 +194,39 @@ fn workbench_connection_requires_exact_origin_and_rejects_bearer_auth() {
 }
 
 #[test]
+fn initial_project_open_failure_keeps_the_root_outside_the_closed_error() {
+    let runtime = TestRuntime::start();
+    let client = test_client();
+    let missing_root = runtime
+        .root
+        .join("missing-initial-project")
+        .to_string_lossy()
+        .into_owned();
+    let response = client
+        .post(format!("{}/api/workbench/connection", runtime.origin()))
+        .header(ORIGIN, runtime.origin())
+        .header(ACCEPT, "text/event-stream")
+        .json(&json!({ "requestedProjectRoot": missing_root }))
+        .send()
+        .expect("connection should open");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let mut events = SseEvents::new(response);
+    let failed = events.next_of_type("project.open_failed");
+    assert_eq!(
+        failed,
+        json!({
+            "type": "project.open_failed",
+            "canonicalRoot": missing_root,
+            "error": {
+                "code": "project_not_found",
+                "message": format!("Debrute Project root does not exist: {missing_root}")
+            }
+        })
+    );
+}
+
+#[test]
 fn source_runtime_has_no_product_http_routes() {
     let runtime = TestRuntime::start();
     let client = test_client();
@@ -415,8 +448,7 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
         rejected.json::<Value>().unwrap()["error"],
         json!({
             "code": "photoshop_transfer_in_progress",
-            "message": "Transfer in progress.",
-            "details": null
+            "message": "Transfer in progress."
         })
     );
     assert!(

@@ -103,7 +103,7 @@ describe('brand visual language', () => {
     const menus = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/menus.css'), 'utf8');
     const canvas = readFileSync(join(root, 'apps/web/src/workbench/styles/canvas.css'), 'utf8');
     const buttonRule = controls.match(/\.db-button,\s*\.db-icon-button\s*\{[\s\S]*?\}/)?.[0];
-    const fieldRule = fields.match(/\.db-input,\s*\.db-select,\s*\.db-textarea\s*\{[\s\S]*?\}/)?.[0];
+    const fieldRule = fields.match(/\.db-input,\s*\.db-select\s*\{[\s\S]*?\}/)?.[0];
     expect(buttonRule).toContain('border: 0');
     expect(buttonRule).toContain('box-shadow: var(--db-shadow-control)');
     expect(fieldRule).toContain('border: 0');

@@ -3,16 +3,16 @@ import type {
   FloatingTextEditorWindowState,
   TextFileBuffer,
   WorkbenchActions
-} from '../../types.js';
-import { I18nProvider } from '../i18n/index.js';
-import type { WorkbenchWindowRect } from '../shell/windowBounds.js';
+} from '../../types';
+import { I18nProvider } from '../i18n/index';
+import type { WorkbenchWindowRect } from '../shell/windowBounds';
 import React from 'react';
-import { FloatingTextEditorWindowShell } from './FloatingTextEditorWindowShell.js';
-import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
+import { FloatingTextEditorWindowShell } from './FloatingTextEditorWindowShell';
+import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline';
 
 const CanvasTextEditor = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('text-editor');
-  const module = await import('./CanvasTextEditor.js');
+  const module = await import('./CanvasTextEditor');
   workbenchStartupTimeline.markFeatureReady('text-editor');
   return { default: module.CanvasTextEditor };
 });

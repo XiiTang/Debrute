@@ -1,8 +1,8 @@
 import type { WorkbenchApiClient } from '@debrute/app-protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { createProjectBindingLifecycle } from './projectBindingLifecycle.js';
-import { createProjectPathCommandIntake } from './projectPathCommandIntake.js';
-import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection.js';
+import { createProjectBindingLifecycle } from './projectBindingLifecycle';
+import { createProjectPathCommandIntake } from './projectPathCommandIntake';
+import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection';
 
 describe('Project Path Command intake', () => {
   it('rejects commands without one currently admitted bound Project', () => {

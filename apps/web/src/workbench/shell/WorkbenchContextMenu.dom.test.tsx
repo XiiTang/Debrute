@@ -1,11 +1,11 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from '../i18n/index.js';
+import { I18nProvider } from '../i18n/index';
 import {
   PendingWorkbenchContextMenuDismissal,
   WorkbenchContextMenu
-} from './WorkbenchContextMenu.js';
+} from './WorkbenchContextMenu';
 
 describe('WorkbenchContextMenu lazy items', () => {
   it('labels recoverable and permanent deletion distinctly and pluralizes path copy', async () => {

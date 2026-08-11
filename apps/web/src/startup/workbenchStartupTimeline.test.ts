@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createWorkbenchStartupTimeline } from './workbenchStartupTimeline.js';
+import { createWorkbenchStartupTimeline } from './workbenchStartupTimeline';
 
 describe('Workbench startup timeline', () => {
   it('publishes each first milestone relative to one origin', () => {

@@ -3,7 +3,7 @@ import {
   canvasTextPreviewCoverageContains,
   collectCanvasTextPreviewCoverage,
   mergeCanvasTextPreviewCoverage
-} from './CanvasTextPreviewCoverage.js';
+} from './CanvasTextPreviewCoverage';
 
 describe('CanvasTextPreviewCoverage', { tags: ['canvas-text'] }, () => {
   it('collects the fixed baseline and raw Unicode codepoints exactly once', async () => {

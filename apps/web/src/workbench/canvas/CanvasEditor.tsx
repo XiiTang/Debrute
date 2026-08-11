@@ -1,8 +1,8 @@
 import React from 'react';
 import type { CanvasFeedbackVideoResource, DebruteProductPlatform } from '@debrute/app-protocol';
-import { Boxes } from '../ui/index.js';
+import { Boxes } from '../ui/index';
 import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
-import type { CanvasProjection } from './CanvasScene.js';
+import type { CanvasProjection } from './CanvasScene';
 import type { TextFileBuffer } from '../../types';
 import type { WorkbenchContextMenuPosition, WorkbenchContextMenuTarget } from '../shell/contextMenu';
 import { CanvasSurface } from './CanvasSurface';
@@ -10,8 +10,8 @@ import type { CanvasFeedbackCanvasBinding } from './CanvasFeedbackInteraction';
 import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 import { ProjectOpenPanel } from '../project-open/ProjectOpenPanel';
-import type { CanvasEditorActions, CanvasSceneActions } from './CanvasSceneActions.js';
-import type { CanvasVideoMetadataUpdate } from './CanvasVideoPreviewRuntime.js';
+import type { CanvasEditorActions, CanvasSceneActions } from './CanvasSceneActions';
+import type { CanvasVideoMetadataUpdate } from './CanvasVideoPreviewRuntime';
 
 export function CanvasEditor({
   canvas,

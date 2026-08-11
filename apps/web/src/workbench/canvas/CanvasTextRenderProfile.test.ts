@@ -5,7 +5,7 @@ import {
   readVerifiedCanvasTextFontFace,
   type CanvasTextFontFaceDefinition,
   type CanvasTextRenderProfileDefinition
-} from './CanvasTextRenderProfile.js';
+} from './CanvasTextRenderProfile';
 
 type CanvasTextFontDigest = CanvasTextFontFaceDefinition['sha256'];
 

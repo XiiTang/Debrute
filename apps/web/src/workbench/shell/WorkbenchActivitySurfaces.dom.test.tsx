@@ -2,12 +2,12 @@ import { act, createRef, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { ActivityRecord } from '@debrute/app-protocol';
-import { I18nProvider } from '../i18n/index.js';
+import { I18nProvider } from '../i18n/index';
 import {
   WORKBENCH_ACTIVITY_MOTION_MS,
   createWorkbenchActivities
-} from '../services/WorkbenchActivities.js';
-import { WorkbenchActivitySurfaces } from './WorkbenchActivitySurfaces.js';
+} from '../services/WorkbenchActivities';
+import { WorkbenchActivitySurfaces } from './WorkbenchActivitySurfaces';
 
 const notice: ActivityRecord = {
   id: 'notice-1',

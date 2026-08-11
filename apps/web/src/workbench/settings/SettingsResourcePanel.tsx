@@ -1,8 +1,8 @@
 import React from 'react';
-import { RefreshCw } from '../ui/index.js';
-import type { SettingsResource } from '../../types.js';
-import { Button } from '../ui/index.js';
-import { useI18n } from '../i18n/index.js';
+import { RefreshCw } from '../ui/index';
+import type { SettingsResource } from '../../types';
+import { Button } from '../ui/index';
+import { useI18n } from '../i18n/index';
 
 export function SettingsResourcePanel<T>({
   title,

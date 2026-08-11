@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvasStateChangeIntake } from './CanvasStateChangeIntake.js';
+import { createCanvasStateChangeIntake } from './CanvasStateChangeIntake';
 
 describe('CanvasStateChangeIntake', () => {
   it('drains accepted changes in order when the Canvas Runtime mounts', () => {

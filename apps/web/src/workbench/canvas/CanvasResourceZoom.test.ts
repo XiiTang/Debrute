@@ -3,7 +3,7 @@ import {
   CANVAS_PREVIEW_QUALITY_SETTLE_MS,
   createCanvasResourceZoomSettlement,
   initialCanvasResourceZoom
-} from './CanvasResourceZoom.js';
+} from './CanvasResourceZoom';
 
 describe('CanvasResourceZoom', () => {
   afterEach(() => {

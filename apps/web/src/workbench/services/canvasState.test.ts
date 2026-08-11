@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectDiagnostic } from '@debrute/app-protocol';
-import type { WorkbenchState } from '../../types.js';
-import type { ProjectedCanvasNode } from '../canvas/CanvasScene.js';
-import { getSelectionContext } from './canvasState.js';
+import type { WorkbenchState } from '../../types';
+import type { ProjectedCanvasNode } from '../canvas/CanvasScene';
+import { getSelectionContext } from './canvasState';
 
 describe('Canvas selection context', () => {
   const diagnostic = {

@@ -279,8 +279,7 @@ floating size of `320 x 560`, and maximum of `640 x 900`. These sizes change
 only the available tree viewport; they do not select a different layout,
 density, or interaction mode.
 
-Run `pnpm package:photoshop-plugin` (or
-`pnpm package:photoshop-uxp-plugin`) to create
+Run `pnpm package:photoshop-uxp-plugin` to create
 `release/photoshop-uxp/debrute-photoshop-uxp-X.Y.Z.ccx`. Packaging builds the
 plugin and validates the closed archive. The package is not part of the public
 GitHub Release asset contract.

@@ -1,14 +1,14 @@
 import type { CanvasNodeState, CanvasStateChange } from '@debrute/app-protocol';
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
 import {
   canvasEdgeRoutingGroupForSource,
   canvasEdgeRoutingGroupIntersectsRect,
   canvasEdgeRoutingGroupsForProjection,
   type CanvasEdgeRoutingGroup
-} from './CanvasEdgeRoutingGroup.js';
-import { createCanvasSpatialIndex } from './CanvasSpatialIndex.js';
-import type { CanvasLayoutOverride } from './canvasManualLayoutDraft.js';
-import type { CanvasRect } from './runtime/canvasGeometry.js';
+} from './CanvasEdgeRoutingGroup';
+import { createCanvasSpatialIndex } from './CanvasSpatialIndex';
+import type { CanvasLayoutOverride } from './canvasManualLayoutDraft';
+import type { CanvasRect } from './runtime/canvasGeometry';
 
 export interface CanvasSceneSnapshot {
   nodesByPath: ReadonlyMap<string, ProjectedCanvasNode>;

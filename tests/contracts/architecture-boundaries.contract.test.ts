@@ -2,20 +2,20 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  architectureBoundaryViolations,
-  architectureImportSpecifiers,
-  architectureRuleKinds
-} from '@debrute/architecture-rules';
+import { architectureBoundaryViolations } from '@debrute/architecture-rules';
 
 describe('Debrute architecture boundaries', () => {
-  it('keeps server internals out of the app protocol package', async () => {
+  it('keeps internal assembly helpers out of the app protocol package root', async () => {
     const protocol = await import('@debrute/app-protocol');
-    expect('serviceError' in protocol).toBe(false);
-  });
-
-  it('keeps architecture checks structural instead of token denylist based', () => {
-    expect(architectureRuleKinds()).toEqual(['imports', 'package-json', 'tsconfig', 'vite-alias']);
+    for (const internalName of [
+      'serviceError',
+      'photoshopErrorCodes',
+      'isPhotoshopErrorCode',
+      'photoshopMimeTypes',
+      'isPhotoshopMimeType'
+    ]) {
+      expect(internalName in protocol).toBe(false);
+    }
   });
 
   it('resolves relative imports before applying source boundary rules', async () => {
@@ -45,11 +45,27 @@ describe('Debrute architecture boundaries', () => {
     }
   });
 
-  it('keeps protocol and Runtime imports in the intended direction', () => {
-    expect(architectureImportSpecifiers(
-      'apps/web/src/workbench/example.ts',
-      "import type { ProjectSessionSnapshot } from '@debrute/app-protocol';\n"
-    )).toEqual(['@debrute/app-protocol']);
+  it('keeps protocol imports allowed while rejecting a forbidden peer import', async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'debrute-architecture-protocol-direction-'));
+    try {
+      mkdirSync(join(fixtureRoot, 'apps/web/src/workbench'), { recursive: true });
+      writeFileSync(
+        join(fixtureRoot, 'apps/web/src/workbench/example.ts'),
+        [
+          "import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';",
+          "import { ipcRenderer } from 'electron';"
+        ].join('\n'),
+        'utf8'
+      );
+
+      await expect(architectureBoundaryViolations(fixtureRoot, [
+        'apps/web/src/workbench/example.ts'
+      ])).resolves.toEqual([
+        'web workbench does not import electron: apps/web/src/workbench/example.ts imports "electron"'
+      ]);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it('keeps Electron out of web tests while allowing source inspection helpers', async () => {

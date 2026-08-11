@@ -1,5 +1,5 @@
 import React from 'react';
-import { CloseButton, Panel, PanelBody } from '../ui/index.js';
+import { CloseButton, Panel, PanelBody } from '../ui/index';
 import {
   type FloatingPanelId,
   type FloatingPanelLayout
@@ -8,14 +8,14 @@ import {
   FLOATING_PANEL_DRAG_HIT_AREA_CSS_PROPERTY,
   FLOATING_PANEL_DRAG_HIT_AREA_CSS_VALUE
 } from './windowBounds';
-import type { WorkbenchWindowRect } from './windowBounds.js';
+import type { WorkbenchWindowRect } from './windowBounds';
 import { useI18n, type WorkbenchI18n, type WorkbenchTranslationKey } from '../i18n';
 import {
   FloatingWindowResizeHandles,
   floatingWindowRectStyle,
   useFloatingWindowGesture,
   type FloatingWindowGesture
-} from './floatingWindowGesture.js';
+} from './floatingWindowGesture';
 
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
   explorer: 'shell.panels.explorer',

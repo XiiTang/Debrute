@@ -14,7 +14,25 @@ import {
 } from './photoshopPlugin.js';
 
 export * from './runtimeControl.js';
-export * from './photoshopPlugin.js';
+export {
+  PHOTOSHOP_BASELINE_PLACEMENT_MIME_TYPES,
+  PHOTOSHOP_MAX_BATCH_BYTES,
+  PHOTOSHOP_MAX_BATCH_ITEMS,
+  PHOTOSHOP_MAX_FILE_BYTES,
+  PHOTOSHOP_PORTS,
+  PHOTOSHOP_WEBSOCKET_SUBPROTOCOL,
+  decodePhotoshopHttpErrorEnvelope,
+  parseRuntimeMessage,
+  photoshopPlacementFormatForPath,
+  serializePluginMessage,
+  type PhotoshopDocumentSnapshot,
+  type PhotoshopMimeType,
+  type PhotoshopPlacementFormat,
+  type PhotoshopPlacementRequirement,
+  type PhotoshopProjectSnapshot,
+  type PluginMessage,
+  type RuntimeMessage
+} from './photoshopPlugin.js';
 export { parseDebruteWorkbenchPath, type DebruteWorkbenchRoute } from './workbenchRoute.js';
 export type {
   DebruteShellApi,
@@ -289,7 +307,6 @@ export interface DebruteHttpErrorBody {
   error: {
     code: string;
     message: string;
-    details?: Record<string, unknown>;
   };
 }
 
@@ -1126,6 +1143,7 @@ const workbenchProjectConnectionFrameValidators = {
     && isWorkbenchProjectSessionSnapshotFor(value.project.snapshot, value.project.canonicalRoot)
     && isWorkbenchWorkingCopies(value.workingCopies),
   'project.open_failed': (value) => typeof value.canonicalRoot === 'string'
+    && value.canonicalRoot.length > 0
     && isProtocolObject(value.error)
     && typeof value.error.code === 'string'
     && typeof value.error.message === 'string',

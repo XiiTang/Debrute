@@ -1,6 +1,6 @@
-import type { CanvasDomInteractionTarget } from '../CanvasDomInteractionAdapter.js';
-import type { CanvasCameraState } from './canvasCamera.js';
-import type { CanvasPoint } from './canvasGeometry.js';
+import type { CanvasDomInteractionTarget } from '../CanvasDomInteractionAdapter';
+import type { CanvasCameraState } from './canvasCamera';
+import type { CanvasPoint } from './canvasGeometry';
 
 export interface CanvasInteractionRuntimeSnapshot {
   hoveredNodePath: string | undefined;

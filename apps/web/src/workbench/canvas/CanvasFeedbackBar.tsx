@@ -1,13 +1,13 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import { Clock3, MapPin, Square } from '../ui/index.js';
+import { Clock3, MapPin, Square } from '../ui/index';
 import type { CanvasFeedbackMark, FeedbackCatalogEntry } from '@debrute/app-protocol';
 import type { CanvasOverlayRuntime } from './CanvasOverlayRuntime';
 import type { CanvasFeedbackLocalToolset } from '../shell/floatingBars';
 import type { CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';
-import { CloseButton, IconButton } from '../ui/index.js';
+import { CloseButton, IconButton } from '../ui/index';
 import { useI18n } from '../i18n';
-import { FeedbackIcon } from '../feedback/FeedbackIcon.js';
+import { FeedbackIcon } from '../feedback/FeedbackIcon';
 
 const MOMENT_PILL_COLORS = [
   'var(--db-canvas-moment-1)',

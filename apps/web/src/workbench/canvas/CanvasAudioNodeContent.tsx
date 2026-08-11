@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
-import { CanvasNodeTitleBar } from './CanvasNodeTitleBar.js';
-import { CanvasContentErrorPresentation } from './CanvasNodeErrorPresentation.js';
-import { Music2 } from '../ui/index.js';
-import { useI18n } from '../i18n/index.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
+import { CanvasNodeTitleBar } from './CanvasNodeTitleBar';
+import { CanvasContentErrorPresentation } from './CanvasNodeErrorPresentation';
+import { Music2 } from '../ui/index';
+import { useI18n } from '../i18n/index';
 
 const CanvasAudioPlayerAdapter = React.lazy(async () => {
-  const module = await import('./CanvasAudioPlayerAdapter.js');
+  const module = await import('./CanvasAudioPlayerAdapter');
   return { default: module.CanvasAudioPlayerAdapter };
 });
 

@@ -3,7 +3,7 @@ import {
   type CanvasTextFontSubsetFaceResult,
   type CanvasTextFontSubsetRequest,
   type CanvasTextFontSubsetResponse
-} from './CanvasTextFontSubsetProtocol.js';
+} from './CanvasTextFontSubsetProtocol';
 
 interface CanvasTextSubsetWasmExports {
   readonly memory: WebAssembly.Memory;

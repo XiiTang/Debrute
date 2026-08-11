@@ -2,14 +2,14 @@ import type {
   CanvasFeedbackVideoResource,
   CanvasSourceResolutionResponse
 } from '@debrute/app-protocol';
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
-import type { CanvasSceneActions } from './CanvasSceneActions.js';
-import { compareCanvasPreviewPaths } from './CanvasPreviewScheduling.js';
-import { createCanvasPathSnapshotStore } from './CanvasPathSnapshotStore.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
+import type { CanvasSceneActions } from './CanvasSceneActions';
+import { compareCanvasPreviewPaths } from './CanvasPreviewScheduling';
+import { createCanvasPathSnapshotStore } from './CanvasPathSnapshotStore';
 import type {
   CanvasEditorRuntime,
   CanvasRuntimePointerInteraction
-} from './runtime/CanvasEditorRuntime.js';
+} from './runtime/CanvasEditorRuntime';
 
 type CanvasResolvedSource = CanvasSourceResolutionResponse['sources'][number];
 type CanvasSourceCandidate = ProjectedCanvasNode | CanvasFeedbackVideoResource;

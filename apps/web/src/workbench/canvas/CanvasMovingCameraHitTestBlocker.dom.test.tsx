@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { CanvasMovingCameraHitTestBlocker } from './CanvasMovingCameraHitTestBlocker.js';
-import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime.js';
-import type { CanvasCameraState } from './runtime/canvasCamera.js';
+import { CanvasMovingCameraHitTestBlocker } from './CanvasMovingCameraHitTestBlocker';
+import type { CanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
+import type { CanvasCameraState } from './runtime/canvasCamera';
 
 describe('CanvasMovingCameraHitTestBlocker', () => {
   it('gates semantic interaction before revealing the blocker and reconciles only after hiding it', async () => {

@@ -4,7 +4,6 @@ import {
   Button,
   Card,
   CloseButton,
-  CommentPillInput,
   EmptyState,
   Field,
   IconButton,
@@ -16,7 +15,6 @@ import {
   Switch,
   Tab,
   TabList,
-  Textarea,
   Toolbar
 } from './index';
 import { getNextMenuItemIndex } from './Menu';
@@ -146,10 +144,10 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('db-icon-button--ghost');
   });
 
-  it('renders strip tabs and chrome icon buttons through primitive variants', () => {
+  it('renders Workbench tabs and chrome icon buttons through shared primitives', () => {
     const html = renderToStaticMarkup(
       <TabList aria-label="Panel tabs">
-        <Tab appearance="strip" active>Terminal</Tab>
+        <Tab active>Terminal</Tab>
         <IconButton variant="chrome" size="sm" label="New Terminal" icon={<span />} />
       </TabList>
     );
@@ -164,7 +162,6 @@ describe('Workbench UI primitives', () => {
       <Card>
         <Toolbar ariaLabel="Primitive states">
           <Button loading>Saving</Button>
-          <Button pressed>Pressed</Button>
           <IconButton label="Toggle panel" pressed icon={<span data-icon="panel" />} />
         </Toolbar>
         <Field label="Endpoint" description="Base URL" error="Invalid URL">
@@ -174,7 +171,6 @@ describe('Workbench UI primitives', () => {
         <Select invalid defaultValue="a">
           <option value="a">A</option>
         </Select>
-        <Textarea invalid value="body" readOnly />
         <Switch label="Enabled" checked readOnly />
         <TabList aria-label="Example tabs">
           <Tab active>Active</Tab>
@@ -191,7 +187,6 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('db-input--invalid');
     expect(html).toContain('db-input--secret');
     expect(html).toContain('db-select--invalid');
-    expect(html).toContain('db-textarea--invalid');
     expect(html).toContain('db-switch');
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-selected="true"');
@@ -199,20 +194,4 @@ describe('Workbench UI primitives', () => {
     expect(html).toContain('db-empty-state');
   });
 
-  it('maps reusable comment pill sizing props to accessible input styles', () => {
-    const html = renderToStaticMarkup(
-      <CommentPillInput
-        aria-label="Node feedback comment"
-        value="File comment"
-        readOnly
-        sizing={{ minWidthPx: 112, maxWidthPx: 260 }}
-      />
-    );
-
-    expect(html).toContain('db-comment-pill-input');
-    expect(html).toContain('aria-label="Node feedback comment"');
-    expect(html).toContain('--db-comment-pill-min-width:112px');
-    expect(html).toContain('--db-comment-pill-max-width:260px');
-    expect(html).toContain('--db-comment-pill-input-ch:');
-  });
 });

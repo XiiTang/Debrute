@@ -3,7 +3,7 @@ import {
   replaceWorkbenchProjectRoute,
   resolveInitialProjectRoute,
   shouldShowInitialProjectLoader
-} from './projectSessionState.js';
+} from './projectSessionState';
 
 describe('initial Project route', () => {
   const originalWindow = (globalThis as { window?: unknown }).window;

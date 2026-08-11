@@ -19,13 +19,13 @@ import {
 import type {
   CanvasPreviewResourceKind,
   CanvasPreviewResourceScheduler
-} from './CanvasPreviewResourceScheduler.js';
+} from './CanvasPreviewResourceScheduler';
 import {
   CANVAS_PERF_INTERACTION_SESSION_TYPES,
   type CanvasPerfCounterName,
   type CanvasPerfMonitor
-} from './CanvasPerfMonitor.js';
-import type { CanvasResourceZoomSource } from './CanvasResourceZoom.js';
+} from './CanvasPerfMonitor';
+import type { CanvasResourceZoomSource } from './CanvasResourceZoom';
 
 export interface CanvasRasterPreviewEnvironment {
   resourceZoomSource: CanvasResourceZoomSource;

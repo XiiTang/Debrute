@@ -1,6 +1,6 @@
 import React from 'react';
-import { RotateCcw } from '../ui/index.js';
-import { IconButton } from '../ui/index.js';
+import { RotateCcw } from '../ui/index';
+import { IconButton } from '../ui/index';
 import { useI18n } from '../i18n';
 
 export interface CanvasResetLayoutButtonProps {

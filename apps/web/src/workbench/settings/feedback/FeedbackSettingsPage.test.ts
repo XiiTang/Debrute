@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { feedbackNamePreflightError } from './FeedbackSettingsPage.js';
+import { feedbackNamePreflightError } from './FeedbackSettingsPage';
 
 describe('feedbackNamePreflightError', () => {
   it('rejects only an empty or exact duplicate name before Runtime validation', () => {

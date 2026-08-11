@@ -1,11 +1,11 @@
-import type { CanvasSceneSnapshot } from './CanvasScenePresentation.js';
-import type { CanvasCamera } from './runtime/canvasCamera.js';
+import type { CanvasSceneSnapshot } from './CanvasScenePresentation';
+import type { CanvasCamera } from './runtime/canvasCamera';
 import {
   normalizedSurfaceSize,
   visibleCanvasRectForCamera
-} from './runtime/canvasCoordinateSystem.js';
-import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry.js';
-import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime.js';
+} from './runtime/canvasCoordinateSystem';
+import type { CanvasRect, CanvasSize } from './runtime/canvasGeometry';
+import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
 
 export interface CanvasCullingCounts {
   readonly displayVisibleNodeCount: number;

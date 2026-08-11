@@ -5,11 +5,11 @@ import {
   type CanvasPreviewTargetIdentity,
   type CanvasPreviewTargetKey
 } from '@debrute/canvas-core';
-import type { CanvasTextPreparedFont } from './CanvasTextRenderProfile.js';
+import type { CanvasTextPreparedFont } from './CanvasTextRenderProfile';
 import {
   canvasTextPreviewFailureFromUnknown,
   type CanvasTextPreviewFailureFields
-} from './CanvasTextPreviewFailure.js';
+} from './CanvasTextPreviewFailure';
 
 const CANVAS_TEXT_PREVIEW_RENDER_POLICY_VERSION = 'canvas-text-preview-dom-v5';
 const CANVAS_TEXT_SYSTEM_FALLBACK_POLICY_VERSION = 'canvas-text-system-fallback-v1';

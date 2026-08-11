@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene.js';
-import { createCanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime.js';
-import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime.js';
+import type { CanvasProjection, ProjectedCanvasNode } from './CanvasScene';
+import { createCanvasSourceResolutionRuntime } from './CanvasSourceResolutionRuntime';
+import { createCanvasEditorRuntime } from './runtime/CanvasEditorRuntime';
 
 function resolvingNode(path: string, x: number): ProjectedCanvasNode {
   return {

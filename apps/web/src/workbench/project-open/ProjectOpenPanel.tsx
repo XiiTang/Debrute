@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, EmptyState, Folder, FolderOpen, Loader2, Toolbar } from '../ui/index.js';
+import { Button, EmptyState, Folder, FolderOpen, Loader2, Toolbar } from '../ui/index';
 import { useI18n } from '../i18n';
 
 const RECENT_PROJECT_LIMIT = 5;

@@ -17,7 +17,7 @@ import {
   syntaxTreeAvailable
 } from '@codemirror/language';
 import { search, searchKeymap } from '@codemirror/search';
-import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile.js';
+import type { CanvasTextRenderProfile } from './CanvasTextRenderProfile';
 
 export interface CanvasTextEditorCallbacks {
   onChange: (value: string) => void;

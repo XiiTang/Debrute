@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene.js';
-import { createCanvasManualLayoutLifecycle } from './CanvasManualLayoutLifecycle.js';
-import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime.js';
+import type { CanvasProjection, ProjectedCanvasNode } from '../CanvasScene';
+import { createCanvasManualLayoutLifecycle } from './CanvasManualLayoutLifecycle';
+import type { CanvasRuntimeLayoutInteraction } from './CanvasEditorRuntime';
 
 describe('Canvas Manual Layout lifecycle', () => {
   it('keeps a submitted draft visible until the Canvas Projection confirms it', async () => {

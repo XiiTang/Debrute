@@ -1,15 +1,15 @@
 import { useLayoutEffect } from 'react';
 import '../styles/settings.css';
-import type { HttpWorkbenchApiClient } from '../../api/httpWorkbenchApiClient.js';
-import type { WorkbenchResolvedTheme } from '../services/workbenchTheme.js';
+import type { HttpWorkbenchApiClient } from '../../api/httpWorkbenchApiClient';
+import type { WorkbenchResolvedTheme } from '../services/workbenchTheme';
 import type { WorkbenchLocale } from '@debrute/app-protocol';
-import { I18nProvider } from '../i18n/index.js';
-import { SettingsPanel } from './SettingsPanel.js';
+import { I18nProvider } from '../i18n/index';
+import { SettingsPanel } from './SettingsPanel';
 import {
   useWorkbenchSettingsController,
   type WorkbenchSettingsController
-} from './useWorkbenchSettingsController.js';
-import type { WorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController.js';
+} from './useWorkbenchSettingsController';
+import type { WorkbenchGlobalSettingsController } from '../services/useWorkbenchGlobalSettingsController';
 
 export function WorkbenchSettingsFeatureHost({
   api,

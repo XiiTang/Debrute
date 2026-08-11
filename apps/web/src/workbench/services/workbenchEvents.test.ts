@@ -3,7 +3,7 @@ import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import {
   isSnapshotAffectingWorkbenchEvent,
   nextSnapshotFromWorkbenchEvent
-} from './workbenchEvents.js';
+} from './workbenchEvents';
 
 describe('workbenchEvents', () => {
   it('uses complete Project events as the only snapshot updates', () => {

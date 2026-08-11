@@ -98,6 +98,23 @@ describe('Workbench event decoding', () => {
     })).toBeUndefined();
   });
 
+  it('requires a non-empty Project root in project.open_failed', () => {
+    const frame = {
+      type: 'project.open_failed',
+      canonicalRoot: '/projects/missing',
+      error: {
+        code: 'project_not_found',
+        message: 'Debrute Project root does not exist: /projects/missing'
+      }
+    };
+
+    expect(decodeWorkbenchProjectConnectionFrame(frame)).toEqual(frame);
+    expect(decodeWorkbenchProjectConnectionFrame({
+      ...frame,
+      canonicalRoot: ''
+    })).toBeUndefined();
+  });
+
   it('accepts a complete revisioned Project snapshot event', () => {
     const event = {
       type: 'project.changed',

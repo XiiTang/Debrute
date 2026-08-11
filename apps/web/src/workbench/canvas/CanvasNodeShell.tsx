@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasTextViewportState } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import type { TextFileBuffer } from '../../types';
 import type { ResizeHandle } from '../services/canvasInteraction';
 import type { CanvasStageRuntime } from './runtime/CanvasStageRuntime';
@@ -12,9 +12,9 @@ import {
   CANVAS_NODE_PRESENTATION_SCALE,
   CANVAS_NODE_TITLEBAR_CSS_HEIGHT,
   canvasTextPresentationGeometry
-} from './CanvasNodePresentationGeometry.js';
-import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
-import type { CanvasSceneActions } from './CanvasSceneActions.js';
+} from './CanvasNodePresentationGeometry';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter';
+import type { CanvasSceneActions } from './CanvasSceneActions';
 
 const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 

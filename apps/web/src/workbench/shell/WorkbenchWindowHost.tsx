@@ -1,7 +1,7 @@
 import React from 'react';
-import { restoreProjectViewState, saveProjectViewState } from '../services/projectViewState.js';
-import { FloatingDock } from './FloatingDock.js';
-import { WorkbenchFloatingPanelShell } from './FloatingPanel.js';
+import { restoreProjectViewState, saveProjectViewState } from '../services/projectViewState';
+import { FloatingDock } from './FloatingDock';
+import { WorkbenchFloatingPanelShell } from './FloatingPanel';
 import {
   DEFAULT_FLOATING_PANEL_STATE,
   FLOATING_PANEL_IDS,
@@ -13,9 +13,9 @@ import {
   toggleFloatingPanel,
   type FloatingPanelId,
   type FloatingPanelState
-} from './floatingPanels.js';
-import type { FloatingWindowGesture } from './floatingWindowGesture.js';
-import type { WorkbenchWindowRect } from './windowBounds.js';
+} from './floatingPanels';
+import type { FloatingWindowGesture } from './floatingWindowGesture';
+import type { WorkbenchWindowRect } from './windowBounds';
 import {
   DEFAULT_WORKBENCH_WINDOW_ORDER,
   closeWorkbenchWindow,
@@ -25,7 +25,7 @@ import {
   workbenchWindowZIndex,
   type WorkbenchWindowIdentity,
   type WorkbenchWindowOrderState
-} from './workbenchWindowOrder.js';
+} from './workbenchWindowOrder';
 
 export interface WorkbenchWindowHostHandle {
   openPanel(panelId: FloatingPanelId): void;

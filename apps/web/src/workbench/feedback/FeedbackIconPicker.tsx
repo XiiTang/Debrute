@@ -1,8 +1,8 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, IconButton, Input } from '../ui/index.js';
-import { useI18n } from '../i18n/index.js';
-import { FEEDBACK_ICON_MANIFEST } from './generatedFeedbackIconManifest.js';
-import { FeedbackIcon } from './FeedbackIcon.js';
+import { Button, IconButton, Input } from '../ui/index';
+import { useI18n } from '../i18n/index';
+import { FEEDBACK_ICON_MANIFEST } from './generatedFeedbackIconManifest';
+import { FeedbackIcon } from './FeedbackIcon';
 
 const CELL_SIZE = 48;
 const OVERSCAN_ROWS = 2;

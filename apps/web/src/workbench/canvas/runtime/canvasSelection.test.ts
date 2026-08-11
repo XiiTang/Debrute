@@ -8,7 +8,7 @@ import {
   selectedNodeProjectRelativePaths,
   toggleCanvasNodeSelection,
   unionCanvasNodeSelection
-} from './canvasSelection.js';
+} from './canvasSelection';
 
 describe('Canvas Node Selection', () => {
   it('represents one and many nodes with one canonical nodes selection', () => {

@@ -2,8 +2,8 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from '../i18n/index.js';
-import { FeedbackPanel } from './FeedbackPanel.js';
+import { I18nProvider } from '../i18n/index';
+import { FeedbackPanel } from './FeedbackPanel';
 
 describe('FeedbackPanel', () => {
   it('locates the Project root, identifies unresolved paths, and falls back for unmapped names', async () => {

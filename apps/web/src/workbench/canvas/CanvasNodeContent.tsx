@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AlertTriangle, File, FileText, Folder, FolderOpen, Image as ImageIcon, Maximize2, RefreshCw, Save } from '../ui/index.js';
+import { AlertTriangle, File, FileText, Folder, FolderOpen, Image as ImageIcon, Maximize2, RefreshCw, Save } from '../ui/index';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem, CanvasTextViewportState } from '@debrute/app-protocol';
-import type { ProjectedCanvasNode } from './CanvasScene.js';
+import type { ProjectedCanvasNode } from './CanvasScene';
 import type { TextFileBuffer } from '../../types';
 import { CanvasVideoNodeContent } from './CanvasVideoNodeContent';
-import { CanvasAudioNodeContent } from './CanvasAudioNodeContent.js';
+import { CanvasAudioNodeContent } from './CanvasAudioNodeContent';
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
-import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter.js';
-import type { CanvasSceneActions } from './CanvasSceneActions.js';
+import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter';
+import type { CanvasSceneActions } from './CanvasSceneActions';
 import { canvasImageRasterPreviewRequestForNode } from './canvasImagePreviewTarget';
 import { CanvasMediaFeedbackLayer, type CanvasMediaFeedbackDraftRegion, type CanvasMediaFeedbackMode } from './CanvasMediaFeedbackLayer';
 import { useCanvasTextPreviewRuntime } from './CanvasTextPreviewRuntime';
@@ -21,22 +21,22 @@ import {
   CanvasContentErrorPresentation,
   CanvasNodeErrorPresentation
 } from './CanvasNodeErrorPresentation';
-import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui/index.js';
+import { Button, DiscardChangesIcon, IconButton, StatusPill } from '../ui/index';
 import { useI18n, type WorkbenchI18n } from '../i18n';
-import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline.js';
+import { workbenchStartupTimeline } from '../../startup/workbenchStartupTimeline';
 import {
   CanvasTextRenderProfileGate,
   useCanvasTextRenderProfile
-} from './CanvasTextRenderProfileContext.js';
+} from './CanvasTextRenderProfileContext';
 import {
   CANVAS_NODE_PRESENTATION_SCALE,
   canvasTextPresentationGeometry
-} from './CanvasNodePresentationGeometry.js';
+} from './CanvasNodePresentationGeometry';
 
 const GENERIC_NODE_WRAP_VISUAL_HEIGHT = 88;
 const CanvasTextEditor = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('text-editor');
-  const module = await import('./CanvasTextEditor.js');
+  const module = await import('./CanvasTextEditor');
   workbenchStartupTimeline.markFeatureReady('text-editor');
   return { default: module.CanvasTextEditor };
 });

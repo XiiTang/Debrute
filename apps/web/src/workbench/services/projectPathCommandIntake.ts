@@ -1,5 +1,5 @@
-import type { ProjectBindingLifecycle } from './projectBindingLifecycle.js';
-import type { WorkbenchProjectProjection } from './WorkbenchProjectProjection.js';
+import type { ProjectBindingLifecycle } from './projectBindingLifecycle';
+import type { WorkbenchProjectProjection } from './WorkbenchProjectProjection';
 
 const acceptedProjectPathCommandScope = Symbol('AcceptedProjectPathCommandScope');
 

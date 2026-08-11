@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PHOTOSHOP_MAX_FILE_BYTES, type ProjectPathEntry } from '@debrute/app-protocol';
-import type { CanvasProjection } from '../canvas/CanvasScene.js';
+import type { CanvasProjection } from '../canvas/CanvasScene';
 import {
   buildWorkbenchContextMenuItems,
   cameraCenteredOnNode,
