@@ -224,6 +224,75 @@ fn canvas_hierarchy_edge_visibility_is_one_global_boolean_setting() {
     fs::remove_dir_all(home).expect("temporary home should be removed");
 }
 
+#[test]
+fn runtime_owns_feedback_name_unicode_validation() {
+    let home = temporary_home("feedback-name-validation");
+    let catalog = ModelCatalog::bundled();
+    let store = GlobalConfigStore::new(&home);
+    let longest_valid_name = "👨‍👩‍👧‍👦".repeat(32);
+    let initial_catalog_len = store
+        .read_view(&catalog)
+        .expect("default Feedback settings should load")
+        .feedback
+        .catalog
+        .len();
+
+    store
+        .mutate(
+            &mutation(json!({
+                "operation": "create-feedback-mark",
+                "name": longest_valid_name,
+                "icon": "circle"
+            })),
+            &catalog,
+        )
+        .expect("Runtime should accept 32 Unicode grapheme clusters");
+
+    let too_long = store
+        .mutate(
+            &mutation(json!({
+                "operation": "create-feedback-mark",
+                "name": "👨‍👩‍👧‍👦".repeat(33),
+                "icon": "circle"
+            })),
+            &catalog,
+        )
+        .expect_err("Runtime should reject more than 32 Unicode grapheme clusters");
+    assert_eq!(
+        too_long.to_string(),
+        "Feedback name must contain 1–32 Unicode grapheme clusters."
+    );
+
+    let forbidden_control = store
+        .mutate(
+            &mutation(json!({
+                "operation": "create-feedback-mark",
+                "name": "hidden\u{202e}reorder",
+                "icon": "circle"
+            })),
+            &catalog,
+        )
+        .expect_err("Runtime should reject forbidden Feedback name controls");
+    assert_eq!(
+        forbidden_control.to_string(),
+        "Feedback name contains a forbidden control character."
+    );
+
+    let settings = store
+        .read_view(&catalog)
+        .expect("valid Feedback settings should remain readable");
+    assert_eq!(settings.feedback.catalog.len(), initial_catalog_len + 1);
+    assert!(
+        settings
+            .feedback
+            .catalog
+            .iter()
+            .any(|entry| entry.name == longest_valid_name)
+    );
+
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
 fn canvas_text_appearance_patch_with(field: &str, value: serde_json::Value) -> serde_json::Value {
     let mut patch = json!({
         "operation": "set-canvas-text-appearance",

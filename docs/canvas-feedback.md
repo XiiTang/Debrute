@@ -71,6 +71,10 @@ order, but none of those actions reads or writes the Project Feedback Document.
 An unmapped Project Name remains accepted and uses the system-reserved
 question-mark icon. That fallback remains resolvable but is not offered by the
 Settings icon picker or accepted by Catalog writes.
+Workbench creation preflights only a non-empty Name and an exact local duplicate.
+Runtime remains authoritative for every Catalog write and alone counts Unicode
+graphemes and enforces the 32-grapheme upper bound and forbidden-control rules;
+a rejection retains the exact creation draft.
 The Settings UI edits membership directly: drag Catalog Feedback into the
 Floating Feedback Bar preview, drag within the preview to reorder, and remove
 from the preview to exclude it. It exposes no duplicate membership checkbox or

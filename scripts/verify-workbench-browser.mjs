@@ -932,12 +932,10 @@ async function assertCanvasAudioWorkflow(page, label) {
   if (startedCalls.play !== 1 || startedCalls.pause !== 0) {
     throw new Error(`[${label}] inactive audio control did not activate and play exactly once: ${JSON.stringify(startedCalls)}.`);
   }
-  await assertCanvasContentActivationRing(page, audioNode, '.canvas-audio-content', label, 'initial audio zoom');
-  await dispatchCanvasZoom(page, 12);
-  await page.locator('.canvas-hit-test-blocker').waitFor({ state: 'hidden', timeout: 5000 });
-  await assertCanvasContentActivationRing(page, audioNode, '.canvas-audio-content', label, 'zoomed audio');
-  await dispatchCanvasZoom(page, -12);
-  await page.locator('.canvas-hit-test-blocker').waitFor({ state: 'hidden', timeout: 5000 });
+  const activePresentation = await readCanvasContentPresentation(audioNode, '.canvas-audio-content');
+  if (!activePresentation?.selectionVisible || activePresentation.contentAffordanceVisible) {
+    throw new Error(`[${label}] active Canvas audio did not retain Selection without a Content Activation ring: ${JSON.stringify(activePresentation)}.`);
+  }
 
   await clickVisibleElementPoint(page, playButton, label, 'active Canvas audio pause control');
   await page.waitForFunction((node) => node.querySelector('audio')?.paused === true, await audioNode.elementHandle(), {
@@ -953,29 +951,53 @@ async function assertCanvasAudioWorkflow(page, label) {
   if (!inactive.selected || inactive.active || inactive.playerInstance !== 'stable' || inactive.paused !== true) {
     throw new Error(`[${label}] audio Workbench click-away changed Selection or unloaded playback state: ${JSON.stringify(inactive)}.`);
   }
-  console.log(`[${label}] Audio title/content regions, rectangular Media Chrome controls, first-click activation, and stable deactivation passed.`);
+  await content.hover();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const inactivePresentation = await readCanvasContentPresentation(audioNode, '.canvas-audio-content');
+  if (!inactivePresentation?.selectionVisible || !inactivePresentation.contentAffordanceVisible) {
+    throw new Error(`[${label}] inactive Canvas audio did not retain Selection with its Content Region hover affordance: ${JSON.stringify(inactivePresentation)}.`);
+  }
+  console.log(`[${label}] Audio title/content regions, rectangular Media Chrome controls, first-click activation, Selection-only active presentation, inactive hover, and stable deactivation passed.`);
 }
 
-async function assertCanvasContentActivationRing(page, node, selector, label, stage) {
-  const measurement = await node.evaluate((element, contentSelector) => {
+async function readCanvasContentPresentation(node, selector) {
+  return node.evaluate((element, contentSelector) => {
+    const cssAlpha = (color) => {
+      if (color === 'transparent') {
+        return 0;
+      }
+      const body = color.slice(color.indexOf('(') + 1, -1);
+      const slashAlpha = body.includes('/') ? body.slice(body.lastIndexOf('/') + 1).trim() : undefined;
+      const commaParts = body.split(',').map((part) => part.trim());
+      const alpha = slashAlpha ?? (commaParts.length === 4 ? commaParts[3] : undefined);
+      if (alpha === undefined) {
+        return 1;
+      }
+      return alpha.endsWith('%') ? Number.parseFloat(alpha) / 100 : Number.parseFloat(alpha);
+    };
     const content = element.querySelector(contentSelector);
     if (!(content instanceof HTMLElement) || content.offsetWidth <= 0) {
       return undefined;
     }
-    const boxShadow = getComputedStyle(content, '::after').boxShadow;
-    const lengths = [...boxShadow.matchAll(/(-?[\d.]+)px/g)].map((match) => Number(match[1]));
+    const frameStyle = getComputedStyle(element);
+    const contentBoxShadow = getComputedStyle(content, '::after').boxShadow;
+    const outlineColor = frameStyle.outlineColor;
+    const shadowColor = contentBoxShadow.match(
+      /(?:transparent|(?:rgb|rgba|hsl|hsla|color|lab|lch|oklab|oklch)\([^)]*\))/
+    )?.[0];
+    const shadowLengths = [...contentBoxShadow.matchAll(/(-?[\d.]+)px/g)].map((match) => Number(match[1]));
+    const contentAffordanceAlpha = shadowColor ? cssAlpha(shadowColor) : 0;
     return {
-      boxShadow,
-      localSpread: lengths[3],
-      transformedScale: content.getBoundingClientRect().width / content.offsetWidth
+      selectionVisible: frameStyle.outlineStyle !== 'none'
+        && Number.parseFloat(frameStyle.outlineWidth) > 0
+        && cssAlpha(outlineColor) > 0,
+      contentAffordanceVisible: contentAffordanceAlpha > 0
+        && shadowLengths.some((length) => Math.abs(length) > 0.001),
+      outline: `${frameStyle.outlineWidth} ${frameStyle.outlineStyle} ${outlineColor}`,
+      contentBoxShadow,
+      contentAffordanceAlpha
     };
   }, selector);
-  const screenSpread = measurement?.localSpread === undefined
-    ? undefined
-    : measurement.localSpread * measurement.transformedScale;
-  if (screenSpread === undefined || Math.abs(screenSpread - 2) > 0.25) {
-    throw new Error(`[${label}] ${stage} Content Activation ring was not 2 screen px: ${JSON.stringify({ measurement, screenSpread })}.`);
-  }
 }
 
 async function assertCanvasPreviewResolutionWorkflow(page, label) {

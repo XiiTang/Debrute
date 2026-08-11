@@ -138,9 +138,11 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     await rendered.unmount();
   });
 
-  it('rejects the current and coalesced saves and restores the latest accepted value after failure', async () => {
-    const save = deferred<{ ok: true }>();
-    const mutateGlobalSettings = vi.fn(() => save.promise);
+  it('rejects only the failed save and continues with the latest coalesced value', async () => {
+    const firstSave = deferred<{ ok: true }>();
+    const mutateGlobalSettings = vi.fn()
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockResolvedValue({ ok: true as const });
     const rendered = await renderController(mutateGlobalSettings);
 
     let first!: Promise<void>;
@@ -156,15 +158,59 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     expectCanvasFontSize(rendered.current, 14);
 
     const failure = new Error('save failed');
+    let results!: PromiseSettledResult<void>[];
     await act(async () => {
-      save.reject(failure);
-      await Promise.allSettled([first, second]);
+      firstSave.reject(failure);
+      results = await Promise.allSettled([first, second]);
     });
 
-    await expect(first).rejects.toBe(failure);
-    await expect(second).rejects.toBe(failure);
-    expect(savedFontSizes(mutateGlobalSettings)).toEqual([13]);
-    expectCanvasFontSize(rendered.current, 11);
+    expect(results).toEqual([
+      { status: 'rejected', reason: failure },
+      { status: 'fulfilled', value: undefined }
+    ]);
+    expect(savedFontSizes(mutateGlobalSettings)).toEqual([13, 14]);
+    expectCanvasFontSize(rendered.current, 14);
+    await rendered.unmount();
+  });
+
+  it('continues an unrelated Feedback intent after an earlier Feedback failure', async () => {
+    const firstSave = deferred<{ ok: true }>();
+    const mutateGlobalSettings = vi.fn()
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockResolvedValue({ ok: true as const });
+    const rendered = await renderController(mutateGlobalSettings);
+
+    let iconSave!: Promise<void>;
+    let actionBarSave!: Promise<void>;
+    await act(async () => {
+      iconSave = rendered.current.actions.mutateGlobalSettings({
+        operation: 'set-feedback-mark-icon',
+        name: 'like',
+        icon: 'heart'
+      });
+      actionBarSave = rendered.current.actions.mutateGlobalSettings({
+        operation: 'set-feedback-action-bar',
+        names: ['dislike']
+      });
+      void iconSave.catch(() => undefined);
+      await Promise.resolve();
+    });
+
+    const failure = new Error('icon save failed');
+    let results!: PromiseSettledResult<void>[];
+    await act(async () => {
+      firstSave.reject(failure);
+      results = await Promise.allSettled([iconSave, actionBarSave]);
+    });
+
+    expect(results).toEqual([
+      { status: 'rejected', reason: failure },
+      { status: 'fulfilled', value: undefined }
+    ]);
+    expect(mutateGlobalSettings.mock.calls.map(([input]) => input)).toEqual([
+      { operation: 'set-feedback-mark-icon', name: 'like', icon: 'heart' },
+      { operation: 'set-feedback-action-bar', names: ['dislike'] }
+    ]);
     await rendered.unmount();
   });
 
@@ -307,7 +353,13 @@ function settingsFixture(
     canvas: { hierarchyEdgesVisible: true, textAppearance: appearance },
     chrome: { recentProjectRoots: [] },
     plugins: { photoshop: { enabled: false } },
-    feedback: { catalog: [], actionBar: [] },
+    feedback: {
+      catalog: [
+        { name: 'like', icon: 'thumbs-up' },
+        { name: 'dislike', icon: 'thumbs-down' }
+      ],
+      actionBar: []
+    },
     models: { image: [], video: [], audio: [] }
   };
 }

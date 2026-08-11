@@ -52,8 +52,10 @@ describe('FeedbackSettingsPage', { tags: ['settings'] }, () => {
     }
   });
 
-  it('keeps the exact creation draft when persistence fails', async () => {
-    const mutate = vi.fn(async () => { throw new Error('settings unavailable'); });
+  it('submits Unicode constraints to Runtime and keeps the exact rejected draft', async () => {
+    const rejection = 'Feedback name must contain 1–32 Unicode grapheme clusters.';
+    const mutate = vi.fn(async () => { throw new Error(rejection); });
+    const rejectedName = '👨‍👩‍👧‍👦'.repeat(33);
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -69,15 +71,20 @@ describe('FeedbackSettingsPage', { tags: ['settings'] }, () => {
       if (!(name instanceof HTMLInputElement)) throw new Error('Expected Feedback name input.');
       await act(async () => {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        setter?.call(name, ' exact draft ');
+        setter?.call(name, rejectedName);
         name.dispatchEvent(new Event('input', { bubbles: true }));
       });
       const create = [...container.querySelectorAll('button')]
         .find((button) => button.textContent?.includes('Create'));
       await act(async () => { create?.click(); });
 
-      expect(name.value).toBe(' exact draft ');
-      expect(container.textContent).toContain('settings unavailable');
+      expect(mutate).toHaveBeenCalledWith({
+        operation: 'create-feedback-mark',
+        name: rejectedName,
+        icon: 'circle'
+      });
+      expect(name.value).toBe(rejectedName);
+      expect(container.textContent).toContain(rejection);
     } finally {
       await act(async () => root.unmount());
       container.remove();

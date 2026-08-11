@@ -108,13 +108,10 @@ export function useWorkbenchGlobalSettingsController(input: {
           await input.api.mutateGlobalSettings(task.input);
         } catch (error) {
           delete lane.inFlight;
-          const abandoned = lane.queued.splice(0);
-          lane.running = false;
           task.waiters.forEach((waiter) => waiter.reject(error));
-          abandoned.flatMap((queuedTask) => queuedTask.waiters).forEach((waiter) => waiter.reject(error));
           refresh();
           input.onMutationError?.(error, task.input);
-          return;
+          continue;
         }
         task.waiters.forEach((waiter) => waiter.resolve());
         delete lane.inFlight;

@@ -218,7 +218,7 @@ export function CanvasTextPreviewProvider({
   const currentTargetKeysRef = useRef(new Map<string, CanvasPreviewTargetKey>());
   const currentTargetsRef = useRef<Record<string, CanvasTextPreviewTarget>>({});
   const targetResolutionsRef = useRef(new Map<string, CanvasTextPreviewTargetResolution>());
-  const renderedTargetInputsByPathRef = useRef(new Map<string, CanvasTextPreviewTargetInput>());
+  const renderedNodesByPathRef = useRef(new Map<string, ProjectedCanvasNode>());
   const tasksRef = useRef(tasks);
   const sourceAvailabilityRef = useRef(sourceAvailability);
   const previewErrorsRef = useRef(previewErrors);
@@ -325,6 +325,17 @@ export function CanvasTextPreviewProvider({
       });
     })
   ), [recordTextPreviewCounter]);
+  const currentTargetInputForRenderedNode = useCallback((node: ProjectedCanvasNode) => {
+    const styleKey = styleKeyRef.current;
+    if (!styleKey) {
+      return undefined;
+    }
+    return canvasTextPreviewTargetInput({
+      node,
+      buffer: textFileBuffersRef.current[node.projectRelativePath],
+      styleKey
+    });
+  }, []);
   const updateTasks = useCallback((
     update: (current: Map<string, CanvasTextPreviewTask>) => Map<string, CanvasTextPreviewTask>
   ) => {
@@ -530,9 +541,9 @@ export function CanvasTextPreviewProvider({
       return;
     }
     const projectedPaths = new Set(nodes.map((node) => node.projectRelativePath));
-    for (const path of renderedTargetInputsByPathRef.current.keys()) {
+    for (const path of renderedNodesByPathRef.current.keys()) {
       if (!projectedPaths.has(path)) {
-        renderedTargetInputsByPathRef.current.delete(path);
+        renderedNodesByPathRef.current.delete(path);
       }
     }
     const previous = targetResolutionsRef.current;
@@ -551,12 +562,9 @@ export function CanvasTextPreviewProvider({
         }
         continue;
       }
-      const targetInput = renderedTargetInputsByPathRef.current.get(path)
-        ?? canvasTextPreviewTargetInput({
-          node,
-          buffer: textFileBuffers[path],
-          styleKey: styleKeyState.key
-        });
+      const targetInput = currentTargetInputForRenderedNode(
+        renderedNodesByPathRef.current.get(path) ?? node
+      );
       if (!targetInput) {
         continue;
       }
@@ -577,7 +585,7 @@ export function CanvasTextPreviewProvider({
       }
       commitTargets(resolved);
     });
-  }, [activeInlineTextPath, beginTargetResolution, commitTargets, nodes, sourceResolutionRuntime, styleKeyState.key, textFileBuffers]);
+  }, [activeInlineTextPath, beginTargetResolution, commitTargets, currentTargetInputForRenderedNode, nodes, sourceResolutionRuntime, styleKeyState.key, textFileBuffers]);
 
   useEffect(() => {
     const path = activeInlineTextPath;
@@ -1100,21 +1108,16 @@ export function CanvasTextPreviewProvider({
   }, [finishExecutingTask, isCurrentTarget, setCurrentPreviewFailure]);
 
   const currentTargetForRenderedNode = useCallback((node: ProjectedCanvasNode): CanvasTextPreviewTarget | undefined => {
-    const styleKey = styleKeyRef.current;
     const target = currentTargetsRef.current[node.projectRelativePath];
     const resolution = targetResolutionsRef.current.get(node.projectRelativePath);
-    if (!styleKey || !target || resolution?.target !== target) {
+    if (!target || resolution?.target !== target) {
       return undefined;
     }
-    const renderedInput = canvasTextPreviewTargetInput({
-      node,
-      buffer: textFileBuffersRef.current[node.projectRelativePath],
-      styleKey
-    });
+    const renderedInput = currentTargetInputForRenderedNode(node);
     return renderedInput && canvasTextPreviewTargetInputsEqual(resolution.input, renderedInput)
       ? target
       : undefined;
-  }, []);
+  }, [currentTargetInputForRenderedNode]);
 
   const deriveNodeSnapshot = useCallback((node: ProjectedCanvasNode): CanvasTextPreviewNodeSnapshot => {
     const target = currentTargetForRenderedNode(node);
@@ -1141,21 +1144,16 @@ export function CanvasTextPreviewProvider({
   }), [deriveNodeSnapshot]);
 
   const acceptNode = useCallback((node: ProjectedCanvasNode) => {
-    const styleKey = styleKeyRef.current;
-    if (!styleKey) {
+    const path = node.projectRelativePath;
+    if (isStableCanvasTextNode(node)) {
+      renderedNodesByPathRef.current.set(path, node);
+    } else {
+      renderedNodesByPathRef.current.delete(path);
+    }
+    if (!styleKeyRef.current) {
       return;
     }
-    const path = node.projectRelativePath;
-    const input = canvasTextPreviewTargetInput({
-      node,
-      buffer: textFileBuffersRef.current[path],
-      styleKey
-    });
-    if (input) {
-      renderedTargetInputsByPathRef.current.set(path, input);
-    } else {
-      renderedTargetInputsByPathRef.current.delete(path);
-    }
+    const input = currentTargetInputForRenderedNode(node);
     const previous = targetResolutionsRef.current.get(path);
     if (input && path === activeInlineTextPathRef.current) {
       return;
@@ -1223,7 +1221,7 @@ export function CanvasTextPreviewProvider({
       }));
       nodeSnapshotStore.flush(new Set([path]));
     });
-  }, [beginTargetResolution, nodeSnapshotStore, previewResourceScheduler, updateTasks]);
+  }, [beginTargetResolution, currentTargetInputForRenderedNode, nodeSnapshotStore, previewResourceScheduler, updateTasks]);
 
   const commandHandlersRef = useRef({ retryPreview, acceptNode });
   commandHandlersRef.current = { retryPreview, acceptNode };

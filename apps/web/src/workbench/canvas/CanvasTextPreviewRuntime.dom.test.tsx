@@ -221,6 +221,118 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     )).toBe('true');
   });
 
+  it('uses the last rendered node when the initial style identity settles', async () => {
+    const projectedNode = textNode('initial-style.md', 0, 0);
+    const renderedNode = { ...projectedNode, width: 8400 };
+    const styleKey = deferred<string>();
+    styleKeyMock.key.mockImplementationOnce(() => styleKey.promise);
+
+    await renderProvider({
+      nodes: [projectedNode],
+      actions: actionsFixture(),
+      consumerNode: renderedNode
+    });
+    await act(async () => styleKey.resolve('sha256:initial-style'));
+    await waitFor(() => laneMock.props?.target?.projectRelativePath === projectedNode.projectRelativePath);
+
+    expect(laneMock.props?.target?.contentCssWidth).toBe(840);
+  });
+
+  it('regenerates a rendered preview when its resolved appearance changes', async () => {
+    const node = textNode('appearance.md', 0, 0);
+    const actions = actionsFixture();
+    const previewResourceScheduler = immediateScheduler();
+    styleKeyMock.key
+      .mockResolvedValueOnce('sha256:dark')
+      .mockResolvedValue('sha256:light');
+
+    await renderProvider({
+      nodes: [node],
+      actions,
+      consumerNode: node,
+      previewResourceScheduler,
+      styleDependencyKey: 'dark'
+    });
+    await waitFor(() => laneMock.props?.target?.styleKey === 'sha256:dark');
+    const darkTarget = laneMock.props!.target!;
+    await act(async () => laneMock.props!.onRasterized(darkTarget, rasterResult()));
+    await waitFor(() => container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    ) === 'true');
+
+    const acceptedNode = { ...node };
+    await renderProvider({
+      nodes: [node],
+      actions,
+      consumerNode: acceptedNode,
+      previewResourceScheduler,
+      styleDependencyKey: 'dark'
+    });
+    await flushWork();
+
+    await renderProvider({
+      nodes: [node],
+      actions,
+      consumerNode: acceptedNode,
+      previewResourceScheduler,
+      styleDependencyKey: 'light'
+    });
+    await waitFor(() => laneMock.props?.target?.styleKey === 'sha256:light');
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    )).toBe('false');
+
+    const lightTarget = laneMock.props!.target!;
+    await act(async () => laneMock.props!.onRasterized(lightTarget, rasterResult()));
+    await waitFor(() => container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    ) === 'true');
+  });
+
+  it('regenerates a rendered preview when its text buffer changes', async () => {
+    const node = textNode('buffer.md', 0, 0);
+    const acceptedNode = { ...node };
+    const actions = actionsFixture();
+    const previewResourceScheduler = immediateScheduler();
+    const cleanBuffer = buffer(node.projectRelativePath);
+    const renderWithBuffer = (textBuffer: TextFileBuffer) => renderProvider({
+      nodes: [node],
+      textFileBuffers: { [node.projectRelativePath]: textBuffer },
+      actions,
+      consumerNode: acceptedNode,
+      previewResourceScheduler
+    });
+
+    await renderWithBuffer(cleanBuffer);
+    await waitFor(() => laneMock.props?.target?.projectRelativePath === node.projectRelativePath);
+    const cleanTarget = laneMock.props!.target!;
+    await act(async () => laneMock.props!.onRasterized(cleanTarget, rasterResult()));
+    await waitFor(() => container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    ) === 'true');
+
+    await renderWithBuffer(cleanBuffer);
+    await flushWork();
+    await renderWithBuffer({
+      ...cleanBuffer,
+      content: 'changed text',
+      dirty: true
+    });
+    await waitFor(() => (
+      laneMock.props?.target?.projectRelativePath === node.projectRelativePath
+      && laneMock.props.target.contentDigest !== cleanTarget.contentDigest
+    ));
+    expect(container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    )).toBe('false');
+
+    const dirtyTarget = laneMock.props!.target!;
+    await act(async () => laneMock.props!.onRasterized(dirtyTarget, rasterResult()));
+    await waitFor(() => container.querySelector('[data-preview-presented]')?.getAttribute(
+      'data-preview-presented'
+    ) === 'true');
+  });
+
   it('discards an old availability result when the same target is hidden and shown before settlement', async () => {
     const node = textNode('availability-attempt.md', 0, 0);
     const requests: Array<{
@@ -640,6 +752,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     consumerNode?: ProjectedCanvasNode | undefined;
     children?: React.ReactNode;
     onRender?: React.ProfilerOnRenderCallback | undefined;
+    styleDependencyKey?: string | undefined;
   }): Promise<void> {
     const buffers = input.textFileBuffers ?? Object.fromEntries(input.nodes.map((node) => [
       node.projectRelativePath,
@@ -663,7 +776,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
             textFileBuffers={buffers}
             actions={input.actions}
             previewOrder={previewOrder}
-            styleDependencyKey="test"
+            styleDependencyKey={input.styleDependencyKey ?? 'test'}
             previewResourceScheduler={scheduler}
           >
             {input.children ?? (input.consumerNode ? (

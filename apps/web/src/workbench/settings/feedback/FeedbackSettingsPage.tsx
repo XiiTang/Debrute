@@ -9,13 +9,11 @@ import { UNRESOLVED_FEEDBACK_ICON_NAME } from '../../feedback/generatedFeedbackI
 import { Button, IconButton, Input, Plus, Trash2, X } from '../../ui/index.js';
 import { useI18n, type WorkbenchTranslationKey } from '../../i18n/index.js';
 
-export type FeedbackNameError = 'required' | 'too-long' | 'duplicate' | 'forbidden-control';
+export type FeedbackNamePreflightError = 'required' | 'duplicate';
 
-const feedbackNameErrorKeys: Record<FeedbackNameError, WorkbenchTranslationKey> = {
+const feedbackNamePreflightErrorKeys: Record<FeedbackNamePreflightError, WorkbenchTranslationKey> = {
   required: 'settings.feedback.nameError.required',
-  'too-long': 'settings.feedback.nameError.tooLong',
-  duplicate: 'settings.feedback.nameError.duplicate',
-  'forbidden-control': 'settings.feedback.nameError.forbiddenControl'
+  duplicate: 'settings.feedback.nameError.duplicate'
 };
 const DEFAULT_NEW_FEEDBACK_ICON = 'circle';
 
@@ -44,10 +42,10 @@ export function FeedbackSettingsPage({
     entry.name.toLocaleLowerCase(i18n.locale).includes(normalizedSearch)
       || entry.icon.includes(normalizedSearch)
   ));
-  const nameError = feedbackNameError(name, configuredNames);
-  const nameErrorMessage = nameError ? i18n.t(feedbackNameErrorKeys[nameError]) : undefined;
+  const nameError = feedbackNamePreflightError(name, configuredNames);
+  const nameErrorMessage = nameError ? i18n.t(feedbackNamePreflightErrorKeys[nameError]) : undefined;
 
-  const run = async (mutation: MutateDebruteGlobalSettingsInput): Promise<boolean> => {
+  const submitFeedbackMutation = async (mutation: MutateDebruteGlobalSettingsInput): Promise<boolean> => {
     setError(undefined);
     try {
       await mutate(mutation);
@@ -58,7 +56,10 @@ export function FeedbackSettingsPage({
     }
   };
 
-  const setActionBar = (names: string[]) => run({ operation: 'set-feedback-action-bar', names });
+  const setActionBar = (names: string[]) => submitFeedbackMutation({
+    operation: 'set-feedback-action-bar',
+    names
+  });
   const appendToActionBar = (currentName: string) => {
     if (settings.actionBar.includes(currentName) || settings.actionBar.length >= 8) return;
     void setActionBar([...settings.actionBar, currentName]);
@@ -74,7 +75,7 @@ export function FeedbackSettingsPage({
   };
   const create = async () => {
     if (nameError) return;
-    const created = await run({
+    const created = await submitFeedbackMutation({
       operation: 'create-feedback-mark',
       name,
       icon
@@ -259,7 +260,7 @@ export function FeedbackSettingsPage({
                   size="xs"
                   onClick={() => {
                     if (window.confirm(i18n.t('settings.feedback.deleteConfirm', { name: entry.name }))) {
-                      void run({ operation: 'delete-feedback-mark', name: entry.name });
+                      void submitFeedbackMutation({ operation: 'delete-feedback-mark', name: entry.name });
                     }
                   }}
                 />
@@ -278,7 +279,11 @@ export function FeedbackSettingsPage({
                 ?? UNRESOLVED_FEEDBACK_ICON_NAME}
             onChange={(nextIcon) => {
               if (pickerTarget === 'new') setIcon(nextIcon);
-              else void run({ operation: 'set-feedback-mark-icon', name: pickerTarget, icon: nextIcon });
+              else void submitFeedbackMutation({
+                operation: 'set-feedback-mark-icon',
+                name: pickerTarget,
+                icon: nextIcon
+              });
             }}
             onClose={() => setPickerTarget(undefined)}
           />
@@ -288,26 +293,11 @@ export function FeedbackSettingsPage({
   );
 }
 
-export function feedbackNameError(
+export function feedbackNamePreflightError(
   name: string,
   configuredNames: ReadonlySet<string>
-): FeedbackNameError | undefined {
+): FeedbackNamePreflightError | undefined {
   if (!name) return 'required';
-  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-  const length = [...segmenter.segment(name)].length;
-  if (length > 32) return 'too-long';
   if (configuredNames.has(name)) return 'duplicate';
-  if ([...name].some((character) => isForbiddenNameCodePoint(character.codePointAt(0) ?? 0))) {
-    return 'forbidden-control';
-  }
   return undefined;
-}
-
-function isForbiddenNameCodePoint(codePoint: number): boolean {
-  return codePoint <= 0x1f
-    || (codePoint >= 0x7f && codePoint <= 0x9f)
-    || codePoint === 0x061c
-    || (codePoint >= 0x200e && codePoint <= 0x200f)
-    || (codePoint >= 0x202a && codePoint <= 0x202e)
-    || (codePoint >= 0x2066 && codePoint <= 0x2069);
 }

@@ -510,8 +510,10 @@ mutation response is not confirmation: the local values remain presented until
 ordered `globalSettings.changed` events confirm them. A newer local submission
 retires an older value for the same field that still awaits confirmation. After
 a match, later Runtime events win. Runtime event order remains authoritative
-across windows, and a rejected chain cancels its unsent coalesced work and
-restores the latest Runtime-confirmed values.
+across windows. A rejected submission restores its latest Runtime-confirmed
+value and rejects only that intent; already queued intents remain ordered and
+continue, including a newest unsent value that replaced older same-field work.
+Runtime validates every continued intent independently.
 
 The runtime persists `system`, `dark`, or `light` as the Workbench theme
 preference. `system` follows `prefers-color-scheme`; the resolved value is

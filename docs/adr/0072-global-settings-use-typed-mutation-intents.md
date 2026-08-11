@@ -17,8 +17,10 @@ supersedable values coalesce. Unrelated targets submit independently. Safe
 presentation settings use an immediate local overlay. External, privileged, or
 secret-bearing effects remain accepted-only. In both cases the HTTP result is
 only acknowledgement or failure; ordered complete Global events remain the sole
-accepted state. Failure removes the rejected overlay and restores the latest
-accepted value without overwriting a newer event.
+accepted state. Failure rejects only that submitted intent, removes its overlay,
+and restores the latest accepted value without overwriting a newer event.
+Already queued intents remain ordered and continue independently; Workbench does
+not infer a dependency graph or cancel unsent user intent on Runtime's behalf.
 
 Settings pages submit domain intent and do not own accepted-state caches,
 persistence queues, or rollback logic. Runtime retains the one serialized
