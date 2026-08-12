@@ -64,7 +64,7 @@ body {
   overflow: hidden;
   font-family: var(--db-font-functional);
   font-size: var(--db-font-md);
-  line-height: 1.45;
+  line-height: var(--db-line-height-functional);
   letter-spacing: 0;
 }
 

@@ -70,7 +70,7 @@ async function main() {
       await verifyViewport(context, page, { launchUrl, projectOpenUrl }, { width: 1440, height: 900 }, 'desktop', 420, true);
       await page.close();
       page = await context.newPage();
-      await verifyViewport(context, page, { projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
+      await verifyViewport(context, page, { launchUrl, projectOpenUrl }, { width: 390, height: 844 }, 'narrow', 0, false);
     }
   } catch (error) {
     verificationError = error;
@@ -381,6 +381,22 @@ async function runWindowGestureViewportVerification(context, page, urls, viewpor
 
 async function runViewportVerification(context, page, urls, viewport, label, targetScrollTop, fullCanvasWorkflow) {
   await page.setViewportSize(viewport);
+  if (urls.launchUrl) {
+    await waitForWorkbenchOrigin(context, urls.launchUrl);
+    const root = await context.request.get(urls.launchUrl);
+    if (root.status() !== 200) {
+      throw new Error(`[${label}] stable Workbench root returned ${root.status()} instead of 200.`);
+    }
+    const noProjectPage = await context.newPage();
+    try {
+      await noProjectPage.setViewportSize(viewport);
+      await noProjectPage.goto(urls.launchUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+      await noProjectPage.getByTestId('workbench-shell').waitFor({ state: 'visible', timeout: 60000 });
+      await assertNoProjectWorkbenchTypography(noProjectPage, label);
+    } finally {
+      await noProjectPage.close();
+    }
+  }
   const failures = [];
   const requestLog = [];
   const pendingPreviewRequests = new Set();
@@ -434,13 +450,6 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
   });
 
   try {
-    if (urls.launchUrl) {
-      await waitForWorkbenchOrigin(context, urls.launchUrl);
-      const root = await context.request.get(urls.launchUrl);
-      if (root.status() !== 200) {
-        throw new Error(`[${label}] stable Workbench root returned ${root.status()} instead of 200.`);
-      }
-    }
     if (urls.projectOpenUrl) {
       await page.goto(urls.projectOpenUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
     }
@@ -464,6 +473,7 @@ async function runViewportVerification(context, page, urls, viewport, label, tar
       await assertCanvasTextNodeVisible(page, label);
     }
     await assertActivitySurfaces(page, label, () => connectionCredential);
+    await assertNoVisibleSingleLineTextClipping(page, `${label} final Workbench state`);
     if (failures.length > 0) {
       throw new Error(failures.join('\n'));
     }
@@ -1134,6 +1144,8 @@ async function assertWorkbenchChrome(page, label) {
   await page.getByTestId('floating-dock').waitFor({ state: 'visible', timeout: 60000 });
   await page.getByTestId('canvas-layer').waitFor({ state: 'visible', timeout: 60000 });
   await page.getByTestId('canvas-minimap-bar').waitFor({ state: 'visible', timeout: 60000 });
+  await assertNoVisibleSingleLineTextClipping(page, `${label} Project chrome`);
+  await assertTitleBarMenuTypography(page, label);
 
   const dockButtons = page.getByTestId('floating-dock').locator('button');
   const dockButtonCount = await dockButtons.count();
@@ -1143,10 +1155,12 @@ async function assertWorkbenchChrome(page, label) {
   const dock = page.getByTestId('floating-dock');
   await dock.getByRole('button', { name: 'Inspector', exact: true }).click();
   await page.getByTestId('floating-panel-inspector').waitFor({ state: 'visible', timeout: 10000 });
+  await assertNoVisibleSingleLineTextClipping(page, `${label} Inspector panel`);
   await dock.getByRole('button', { name: 'Feedback', exact: true }).click();
   const feedbackPanel = page.getByTestId('floating-panel-feedback');
   await feedbackPanel.waitFor({ state: 'visible', timeout: 10000 });
   await feedbackPanel.getByText('No feedback yet.').waitFor({ state: 'visible', timeout: 10000 });
+  await assertNoVisibleSingleLineTextClipping(page, `${label} Feedback panel`);
   await dock.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByTestId('floating-panel-settings').waitFor({ state: 'visible', timeout: 10000 });
   const settingsPanel = page.getByTestId('floating-panel-settings');
@@ -1154,6 +1168,7 @@ async function assertWorkbenchChrome(page, label) {
   await settingsPanel.getByRole('heading', { name: 'Feedback', exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await settingsPanel.getByRole('heading', { name: 'Floating Feedback Bar', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
+  await assertNoVisibleSingleLineTextClipping(page, `${label} Feedback settings`);
   const actionCount = await settingsPanel.locator('.feedback-action-bar-preview__item').count();
   const catalogCount = await settingsPanel.locator('.feedback-catalog-row').count();
   if (actionCount !== 7 || catalogCount !== 7) {
@@ -1202,7 +1217,110 @@ async function assertWorkbenchChrome(page, label) {
   await dock.getByRole('button', { name: 'Settings', exact: true }).click();
   await dock.getByRole('button', { name: 'Feedback', exact: true }).click();
   await dock.getByRole('button', { name: 'Inspector', exact: true }).click();
+  await assertFloatingPanelTypography(page, dock, label, 'Explorer');
+  await assertFloatingPanelTypography(page, dock, label, 'Terminal');
   console.log(`[${label}] Workbench launch, title bar, five FloatingDock panels, Feedback settings, and minimap rendered.`);
+}
+
+async function assertNoProjectWorkbenchTypography(page, label) {
+  await page.getByRole('button', { name: 'Open Project', exact: true })
+    .waitFor({ state: 'visible', timeout: 60000 });
+  await assertNoVisibleSingleLineTextClipping(page, `${label} no-Project Workbench`);
+  await assertTitleBarMenuTypography(page, `${label} no-Project`);
+  await saveBrowserScreenshot(page, `${label}-no-project.png`);
+}
+
+async function assertTitleBarMenuTypography(page, label) {
+  for (const menuName of ['File', 'Edit']) {
+    const menuButton = page.getByRole('button', { name: menuName, exact: true });
+    await menuButton.click();
+    await page.locator('.workbench-titlebar__menu-popover [role="menu"]')
+      .waitFor({ state: 'visible', timeout: 10000 });
+    await assertNoVisibleSingleLineTextClipping(page, `${label} ${menuName} menu`);
+    await page.keyboard.press('Escape');
+    await page.locator('.workbench-titlebar__menu-popover [role="menu"]')
+      .waitFor({ state: 'hidden', timeout: 10000 });
+  }
+}
+
+async function assertFloatingPanelTypography(page, dock, label, panelName) {
+  const panelTestId = `floating-panel-${panelName.toLowerCase()}`;
+  const panelButton = dock.getByRole('button', { name: panelName, exact: true });
+  await panelButton.click();
+  await page.getByTestId(panelTestId).waitFor({ state: 'visible', timeout: 10000 });
+  await assertNoVisibleSingleLineTextClipping(page, `${label} ${panelName} panel`);
+  await panelButton.click();
+  await page.getByTestId(panelTestId).waitFor({ state: 'hidden', timeout: 10000 });
+}
+
+async function assertNoVisibleSingleLineTextClipping(page, label) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+  const clippedElements = await page.locator('body').evaluate((body) => {
+    const hiddenOverflowValues = new Set(['hidden', 'clip']);
+    const selectorFor = (element) => {
+      const segments = [];
+      let current = element;
+      while (current && current !== body && segments.length < 5) {
+        let segment = current.localName;
+        if (current.id) {
+          segment += `#${CSS.escape(current.id)}`;
+          segments.unshift(segment);
+          break;
+        }
+        const classes = [...current.classList].slice(0, 3);
+        if (classes.length > 0) {
+          segment += classes.map((className) => `.${CSS.escape(className)}`).join('');
+        }
+        segments.unshift(segment);
+        current = current.parentElement;
+      }
+      return segments.join(' > ');
+    };
+
+    return [...body.querySelectorAll('*')].flatMap((element) => {
+      const text = element.textContent?.trim();
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const singleLineWhiteSpace = style.whiteSpace === 'nowrap'
+        || (style.whiteSpace === 'pre' && !text?.includes('\n'));
+      const clipsOverflow = [style.overflow, style.overflowX, style.overflowY]
+        .flatMap((value) => value.split(/\s+/))
+        .some((value) => hiddenOverflowValues.has(value));
+      const visible = text
+        && element.clientHeight > 0
+        && rect.width > 0
+        && rect.height > 0
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.opacity !== '0'
+        && element.getClientRects().length > 0;
+      if (!visible || !singleLineWhiteSpace || !clipsOverflow || element.scrollHeight <= element.clientHeight) {
+        return [];
+      }
+      return [{
+        selector: selectorFor(element),
+        text: text.slice(0, 120),
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        lineHeight: style.lineHeight,
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        overflow: style.overflow,
+        overflowX: style.overflowX,
+        overflowY: style.overflowY,
+        whiteSpace: style.whiteSpace
+      }];
+    });
+  });
+
+  if (clippedElements.length > 0) {
+    throw new Error(`[${label}] visible single-line text was clipped vertically: ${JSON.stringify(clippedElements, null, 2)}.`);
+  }
 }
 
 const workbenchResizeDirections = [

@@ -596,7 +596,6 @@ html[data-workbench-window-gesture="se"] * {
   overflow: hidden;
   color: var(--db-text-subtle);
   font-size: var(--db-font-xs);
-  line-height: 14px;
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;

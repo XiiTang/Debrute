@@ -17,6 +17,7 @@
   --db-font-sm: 12px;
   --db-font-md: 13px;
   --db-font-lg: 15px;
+  --db-line-height-functional: 1.45;
   --db-font-functional: "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
   --db-font-display: "Smiley Sans", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
   --db-font-technical: "Noto Sans Mono CJK SC", ui-monospace, monospace;
