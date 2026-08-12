@@ -1,5 +1,10 @@
 # Inactive Text Nodes Use Derived Previews
 
+ADR 0015 clarifies that the uniquely selected editor described here is a
+read-only Inline Text Presentation until Canvas Content Activation grants edit
+interaction. The preview and handoff decisions in this ADR otherwise remain
+accepted.
+
 Only the uniquely selected Canvas text node owns a live inline CodeMirror
 editor; inactive text nodes use cached raster previews derived from the same
 content, style, geometry, and persisted Text Viewport. A selected editor may

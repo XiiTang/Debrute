@@ -23,6 +23,14 @@ export function selectedNodeProjectRelativePaths(
   return selection ? [...selection.projectRelativePaths] : [];
 }
 
+export function soleSelectedNodeProjectRelativePath(
+  selection: CanvasSelection | undefined
+): string | undefined {
+  return selection?.projectRelativePaths.length === 1
+    ? selection.projectRelativePaths[0]
+    : undefined;
+}
+
 export function isCanvasNodeSelected(
   selection: CanvasSelection | undefined,
   projectRelativePath: string

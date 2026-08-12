@@ -187,11 +187,11 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     };
 
     const initialNode = nodeAtScroll(0);
-    const renderWithActivePath = async (activeInlineTextPath: string | undefined) => {
+    const renderWithPresentationPath = async (inlineTextPresentationPath: string | undefined) => {
       await renderProvider({
         nodes: [initialNode],
         actions,
-        activeInlineTextPath,
+        inlineTextPresentationPath,
         previewResourceScheduler,
         children: (
           <RuntimeSnapshotController
@@ -201,19 +201,19 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
         )
       });
     };
-    await renderWithActivePath(undefined);
+    await renderWithPresentationPath(undefined);
     await completeCurrentPreview(1);
 
-    await renderWithActivePath(path);
+    await renderWithPresentationPath(path);
     const firstInactiveNode = nodeAtScroll(420);
-    await renderWithActivePath(undefined);
+    await renderWithPresentationPath(undefined);
     await act(async () => {
       setConsumerNode?.(firstInactiveNode);
     });
     await completeCurrentPreview(2);
 
-    await renderWithActivePath(path);
-    await renderWithActivePath(undefined);
+    await renderWithPresentationPath(path);
+    await renderWithPresentationPath(undefined);
     await flushWork();
 
     expect(container.querySelector('[data-preview-presented]')?.getAttribute(
@@ -691,12 +691,12 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
       saveCanvasTextPreviewSource: () => save.promise
     });
     const previewResourceScheduler = immediateScheduler();
-    await renderProvider({ nodes, actions, activeInlineTextPath: 'a.md', previewResourceScheduler });
+    await renderProvider({ nodes, actions, inlineTextPresentationPath: 'a.md', previewResourceScheduler });
     await waitFor(() => laneMock.props?.target?.projectRelativePath === 'b.md');
     const b = laneMock.props!.target!;
     await act(async () => laneMock.props!.onRasterized(b, rasterResult()));
 
-    await renderProvider({ nodes, actions, activeInlineTextPath: undefined, previewResourceScheduler });
+    await renderProvider({ nodes, actions, inlineTextPresentationPath: undefined, previewResourceScheduler });
     await waitFor(() => readCanvasTextPreviewSources.mock.calls.some(([request]) => (
       request.sources.some((source) => source.projectRelativePath === 'a.md')
     )));
@@ -745,7 +745,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
     nodes: ProjectedCanvasNode[];
     actions: WorkbenchActions;
     textFileBuffers?: Record<string, TextFileBuffer>;
-    activeInlineTextPath?: string | undefined;
+    inlineTextPresentationPath?: string | undefined;
     interactionActive?: boolean;
     visibleRect?: { x: number; y: number; width: number; height: number };
     previewResourceScheduler?: CanvasPreviewResourceScheduler;
@@ -772,7 +772,7 @@ describe('CanvasTextPreviewRuntime', { tags: ['canvas-text'] }, () => {
           <CanvasTextPreviewProvider
             nodes={input.nodes}
             sourceResolutionRuntime={sourceNodeReader}
-            activeInlineTextPath={input.activeInlineTextPath}
+            inlineTextPresentationPath={input.inlineTextPresentationPath}
             textFileBuffers={buffers}
             actions={input.actions}
             previewOrder={previewOrder}

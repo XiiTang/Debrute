@@ -69,6 +69,7 @@ describe('CanvasNodeContent editor feature loading', { tags: ['canvas-text'] }, 
               <CanvasNodeContent
                 node={textNode()}
                 contentInteractionActive={contentInteractionActive}
+                inlineTextPresentationRequested={false}
                 actions={actionsFixture()}
                 textBuffer={textBuffer()}
                 textPreviewRequest={textPreviewRequest()}

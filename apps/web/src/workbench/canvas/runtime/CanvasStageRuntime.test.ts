@@ -48,6 +48,25 @@ describe('CanvasStageRuntime', () => {
     expect(element.style.properties.get('z-index')).toBe('7');
   });
 
+  it('writes canonical text presentation geometry with every text node layout', () => {
+    const runtime = createCanvasStageRuntime();
+    const element = fakeElement();
+
+    runtime.registerNodeShell('flow/notes.md', element as unknown as HTMLElement, {
+      presentation: 'text'
+    });
+    runtime.setNodeLayout('flow/notes.md', {
+      x: 10,
+      y: 20,
+      width: 3_333,
+      height: 1_901,
+      z: 7
+    });
+
+    expect(element.style.properties.get('--canvas-node-presentation-width')).toBe('333px');
+    expect(element.style.properties.get('--canvas-node-presentation-height')).toBe('190px');
+  });
+
   it('restores a culled node display without clearing its layout during a pan back', () => {
     const runtime = createCanvasStageRuntime();
     const element = fakeElement();

@@ -35,6 +35,17 @@ this one selection, not separate selection states. It contains only Canvas
 Nodes and is not Canvas State.
 _Avoid_: Mixed selection, selected assets
 
+**Inline Text Presentation**:
+The transient live CodeMirror presentation owned by the sole selected text
+Canvas Node. Selection determines whether that one presentation is requested;
+Canvas Content Activation separately determines whether it is editable and
+interactive. A selected-only presentation is visible, read-only, and inert.
+Empty, non-text, and many-node selections own no Inline Text
+Presentation. An active Selection Marquee retains its pre-gesture presentation
+target until the completed gesture establishes the next stable Selection. It
+is not Canvas State.
+_Avoid_: Canvas Content Activation, text preview, selected editor state
+
 **Canvas Content Activation**:
 The transient, optional identity of the one text, video, or audio Canvas Node whose
 Content Region currently accepts direct content-specific interaction. It is

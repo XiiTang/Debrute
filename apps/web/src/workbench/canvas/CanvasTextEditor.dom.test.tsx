@@ -98,7 +98,7 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
     expect(transaction?.scrollIntoView).toBe(false);
   });
 
-  it('leaves edit focus immediately when the editor enters preview handoff', async () => {
+  it('leaves edit focus immediately when the editor becomes read-only', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -142,7 +142,8 @@ describe('CanvasTextEditor', { tags: ['canvas-text'] }, () => {
         ));
       });
 
-      expect(editorHost?.dataset.editorMode).toBe('handoff');
+      expect(editorHost?.dataset.editorMode).toBe('read');
+      expect(editorHost?.hasAttribute('inert')).toBe(true);
       expect(editorHost?.dataset.pointerFocus).toBe('false');
       expect(document.activeElement).not.toBe(content);
     } finally {

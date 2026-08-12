@@ -6,6 +6,7 @@ import {
   pruneCanvasSelection,
   sameCanvasSelection,
   selectedNodeProjectRelativePaths,
+  soleSelectedNodeProjectRelativePath,
   toggleCanvasNodeSelection,
   unionCanvasNodeSelection
 } from './canvasSelection';
@@ -57,5 +58,14 @@ describe('Canvas Node Selection', () => {
     expect(isCanvasNodeSelected(selection, 'flow/a.png')).toBe(true);
     expect(isCanvasNodeSelected(selection, 'flow/c.png')).toBe(false);
     expect(sameCanvasSelection(selection, canvasNodeSelection(['flow/b.png', 'flow/a.png']))).toBe(true);
+  });
+
+  it('returns a sole node path only for a one-node selection', () => {
+    expect(soleSelectedNodeProjectRelativePath(undefined)).toBeUndefined();
+    expect(soleSelectedNodeProjectRelativePath(canvasNodeSelection(['flow/a.md']))).toBe('flow/a.md');
+    expect(soleSelectedNodeProjectRelativePath(canvasNodeSelection([
+      'flow/a.md',
+      'flow/b.md'
+    ]))).toBeUndefined();
   });
 });

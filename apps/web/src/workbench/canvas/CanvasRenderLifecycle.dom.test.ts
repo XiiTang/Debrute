@@ -164,6 +164,43 @@ describe('CanvasRenderLifecycle', () => {
     unregisterBack();
   });
 
+  it('writes live text presentation geometry during Resize without publishing a React snapshot', () => {
+    const node = {
+      ...textNode('notes.md', 0, 0, 0),
+      width: 1_000,
+      height: 1_000
+    };
+    const fixture = createFixture({ nodes: [node] });
+    const element = document.createElement('div');
+    const unregister = fixture.stageRuntime.registerNodeShell('notes.md', element, {
+      presentation: 'text'
+    });
+    const sceneBeforeResize = fixture.runtime.scene.getRenderSnapshot();
+    const listener = vi.fn();
+    const unsubscribe = fixture.runtime.scene.subscribeRenderSnapshot(listener);
+
+    fixture.runtime.input.beginNodeResize({
+      pointerId: 3,
+      projectRelativePath: 'notes.md',
+      handle: 'e',
+      screenPoint: { x: 0, y: 0 },
+      modifiers: { shiftKey: false, metaKey: false, ctrlKey: false }
+    });
+    fixture.runtime.input.updatePointerInteraction({
+      pointerId: 3,
+      screenPoint: { x: 55, y: 0 }
+    });
+
+    expect(fixture.runtime.scene.getRenderSnapshot()).toBe(sceneBeforeResize);
+    expect(element.style.width).toBe('1055px');
+    expect(element.style.getPropertyValue('--canvas-node-presentation-width')).toBe('106px');
+    expect(element.style.getPropertyValue('--canvas-node-presentation-height')).toBe('100px');
+    expect(listener).not.toHaveBeenCalled();
+
+    unsubscribe();
+    unregister();
+  });
+
   it('invalidates queued viewport work when the Projection changes', () => {
     const fixture = createFixture({ nodes: [directoryNode('old', 0, 0, 1)] });
 
@@ -182,8 +219,12 @@ describe('CanvasRenderLifecycle', () => {
     const fixture = createFixture({ nodes: [stableNode, reflowedNode] });
     const stableElement = document.createElement('div');
     const reflowedElement = document.createElement('div');
-    const unregisterStable = fixture.stageRuntime.registerNodeShell('stable', stableElement, stableNode);
-    const unregisterReflowed = fixture.stageRuntime.registerNodeShell('reflowed', reflowedElement, reflowedNode);
+    const unregisterStable = fixture.stageRuntime.registerNodeShell('stable', stableElement, {
+      initialLayout: stableNode
+    });
+    const unregisterReflowed = fixture.stageRuntime.registerNodeShell('reflowed', reflowedElement, {
+      initialLayout: reflowedNode
+    });
     const setNodeLayout = vi.spyOn(fixture.stageRuntime, 'setNodeLayout');
 
     expect(stableElement.style.transform).toBe('translate(0px, 0px)');

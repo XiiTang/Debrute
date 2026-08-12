@@ -163,14 +163,23 @@ authoritative cross-window projection; a rejected write restores the latest
 Runtime-confirmed appearance. There is no apply action, restore-default action,
 custom font input, font import, or temporary preview editor.
 
-For an inline Canvas text node, explicit Content Activation owns the live
-editor. Canvas Node Selection alone does not. DOM focus is an input detail
-rather than the ownership source. Pressing an inactive preview does not select
-or activate it. Pointer release within the same preview commits the node
-selection, activates its content, and carries those release coordinates into
-the new editor; the runtime resolves a collapsed caret against the measured
-position or the matching visible line block. Text bodies keep Canvas wheel
-routing until focus enters the editor, after which scrolling stays local.
+For an inline Canvas text node, the stable sole Selection owns one live
+CodeMirror presentation. Before Content Activation that presentation is
+published read-only and inert: it supplies current layout and resize reflow but
+cannot take focus, place a caret, scroll locally, or accept input. Content
+Activation reconfigures that same `EditorView` as editable and interactive; it
+does not mount a second editor. DOM focus remains an input detail rather than
+either ownership source. Pointer release within inactive text content sole-
+selects and activates the node, carries those release coordinates into the
+already mounted or preparing editor, and resolves a collapsed caret against the
+measured position or matching visible line block. Text bodies keep Canvas wheel
+routing until focus enters the active editor, after which scrolling stays local.
+
+An active Selection Marquee retains its pre-gesture Inline Text Presentation
+target while membership changes, then adopts the completed Selection once on
+pointer release. This prevents transient one-node intersections from repeatedly
+mounting and retiring CodeMirror. Video and audio do not use this selection-
+derived text lifecycle.
 
 Floating text editor windows use the same editor and buffer but are independent
 of inline Canvas selection and Canvas preview handoff.
@@ -188,9 +197,12 @@ the pending value, restores the last Runtime-confirmed viewport, and is surfaced
 without automatic retry.
 
 The editor tracks its viewport on scroll and commits the last observation on
-blur, unmount, or the active-to-read-only transition. Deselecting an inline text node does not
-immediately destroy its `EditorView`: it becomes read-only and remains the
-visible layer until both conditions are true:
+blur, unmount, or retirement from Inline Text Presentation. Ending Content
+Activation while the text remains the sole Selection only reconfigures the same
+`EditorView` as read-only; it does not start preview handoff. Deselecting the
+text or creating a many-node Selection does not immediately destroy its
+`EditorView`: it becomes read-only and remains the visible layer until both
+conditions are true:
 
 1. the committed Text Viewport is present in current Canvas state; and
 2. the preview for the exact current target has committed as a visible DOM
@@ -200,9 +212,9 @@ This prevents stale-scroll previews and blank editor-to-preview transitions.
 Timeouts, DOM-focus heuristics, and a fallback text renderer are not handoff
 authorities.
 
-When an inactive node already has a loaded preview for the same current target,
+When a node already has a loaded preview for the same current target, sole-
 selecting it keeps that exact DOM image mounted but hidden beneath the live
-editor. Deselecting without a pixel-affecting change reveals the same image after
+presentation. Deselecting without a pixel-affecting change reveals the same image after
 the Text Viewport commit, so it does not reload the resource.
 Any content, language, wrap, geometry, viewport, or style change invalidates the
 retained presentation synchronously before it can become visible.
@@ -279,9 +291,9 @@ and node dragging prevent new
 availability, content-read, coverage, font, and capture jobs from starting.
 In-flight reads, font work, capture, and upload may finish, but identity checks
 discard stale results. The latest stable viewport is consulted again at the
-next job boundary. An actively edited text node has no canonical task; when it
-leaves edit mode it joins the live registry immediately if work remains, or
-starts the next work epoch if the registry was empty.
+next job boundary. The Inline Text Presentation target has no canonical task;
+when it leaves stable sole Selection it joins the live registry immediately if
+work remains, or starts the next work epoch if the registry was empty.
 
 Runtime projects the exact full-file SHA-256 revision and Debrute text language.
 Workbench therefore computes target identities before loading saved file bodies and
@@ -322,11 +334,13 @@ node-local.
 `CanvasTextPreviewCaptureLane` owns one serialized browser capture lane and one
 hidden read-only `CanvasTextEditor`. Work does not enter the lane during camera
 movement or node dragging. Readiness, DOM snapshot slices, image decode, draw,
-and PNG encoding run only for that current job; inactive nodes remain `<img>`
-presentations rather than retaining CodeMirror DOM or loading an editor buffer.
-The title chrome and mounted preview are valid without a `TextFileBuffer`; only
-Content Activation requests the live editor body. The lane incrementally
-rebuilds the current CodeMirror DOM from shallow element clones and text nodes,
+and PNG encoding run only for that current job; nodes without Inline Text
+Presentation remain `<img>` presentations rather than retaining CodeMirror DOM
+or loading an editor buffer. The title chrome and mounted preview are valid
+without a `TextFileBuffer`; only the sole-selected text presentation requests
+the live inline editor buffer, and Content Activation reuses that request. The
+lane incrementally rebuilds the current CodeMirror DOM from shallow element
+clones and text nodes,
 copying an explicit allowlist of pixel-affecting computed styles over eligible
 animation frames with a source-defined slice target. It removes cursor,
 selection, tooltip, panel, and announcement layers, strips URL/event-bearing

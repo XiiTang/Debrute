@@ -183,7 +183,7 @@ export function useCanvasTextPreviewNode(node: ProjectedCanvasNode): CanvasTextP
 export function CanvasTextPreviewProvider({
   nodes,
   sourceResolutionRuntime,
-  activeInlineTextPath,
+  inlineTextPresentationPath,
   textFileBuffers,
   actions,
   previewOrder,
@@ -194,7 +194,7 @@ export function CanvasTextPreviewProvider({
 }: {
   nodes: ProjectedCanvasNode[];
   sourceResolutionRuntime: Pick<CanvasSourceResolutionRuntime, 'getNode'>;
-  activeInlineTextPath?: string | undefined;
+  inlineTextPresentationPath?: string | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;
   actions: CanvasSceneActions;
   previewOrder: CanvasPreviewOrderSource;
@@ -224,7 +224,7 @@ export function CanvasTextPreviewProvider({
   const previewErrorsRef = useRef(previewErrors);
   const changedNodePathsRef = useRef(new Set<string>());
   const textFileBuffersRef = useRef(textFileBuffers);
-  const activeInlineTextPathRef = useRef(activeInlineTextPath);
+  const inlineTextPresentationPathRef = useRef(inlineTextPresentationPath);
   const styleKeyRef = useRef(styleKeyState.key);
   const previewOrderSnapshot = useSyncExternalStore(
     previewOrder.subscribePreviewOrder,
@@ -270,7 +270,7 @@ export function CanvasTextPreviewProvider({
     }
   }, []);
   textFileBuffersRef.current = textFileBuffers;
-  activeInlineTextPathRef.current = activeInlineTextPath;
+  inlineTextPresentationPathRef.current = inlineTextPresentationPath;
   styleKeyRef.current = styleKeyState.key;
   tasksRef.current = tasks;
   sourceAvailabilityRef.current = sourceAvailability;
@@ -374,7 +374,7 @@ export function CanvasTextPreviewProvider({
     }
 
     const workTargets = targets.filter((target) => (
-      target.projectRelativePath !== activeInlineTextPathRef.current
+      target.projectRelativePath !== inlineTextPresentationPathRef.current
     ));
     updateTasks((current) => reconcileCanvasTextPreviewTasks({
       previous: current,
@@ -555,7 +555,7 @@ export function CanvasTextPreviewProvider({
         continue;
       }
       const path = node.projectRelativePath;
-      if (path === activeInlineTextPath) {
+      if (path === inlineTextPresentationPath) {
         const retained = previous.get(path);
         if (retained) {
           next.set(path, retained);
@@ -585,10 +585,10 @@ export function CanvasTextPreviewProvider({
       }
       commitTargets(resolved);
     });
-  }, [activeInlineTextPath, beginTargetResolution, commitTargets, currentTargetInputForRenderedNode, nodes, sourceResolutionRuntime, styleKeyState.key, textFileBuffers]);
+  }, [inlineTextPresentationPath, beginTargetResolution, commitTargets, currentTargetInputForRenderedNode, nodes, sourceResolutionRuntime, styleKeyState.key, textFileBuffers]);
 
   useEffect(() => {
-    const path = activeInlineTextPath;
+    const path = inlineTextPresentationPath;
     if (!path) {
       return;
     }
@@ -600,7 +600,7 @@ export function CanvasTextPreviewProvider({
       markNodePathChanged(path);
       return withoutRecordPath(current, path);
     });
-  }, [activeInlineTextPath, markNodePathChanged, previewResourceScheduler]);
+  }, [inlineTextPresentationPath, markNodePathChanged, previewResourceScheduler]);
 
   useEffect(() => {
     const stateCounts = Object.fromEntries(
@@ -1013,7 +1013,7 @@ export function CanvasTextPreviewProvider({
     updateTasks((current) => {
       const withoutExecutor = withoutCanvasTextPreviewTask(current, target);
       const workTargets = Object.values(currentTargetsRef.current).filter((candidate) => (
-        candidate.projectRelativePath !== activeInlineTextPathRef.current
+        candidate.projectRelativePath !== inlineTextPresentationPathRef.current
       ));
       return reconcileCanvasTextPreviewTasks({
         previous: withoutExecutor,
@@ -1155,7 +1155,7 @@ export function CanvasTextPreviewProvider({
     }
     const input = currentTargetInputForRenderedNode(node);
     const previous = targetResolutionsRef.current.get(path);
-    if (input && path === activeInlineTextPathRef.current) {
+    if (input && path === inlineTextPresentationPathRef.current) {
       return;
     }
     if (!input) {
@@ -1216,7 +1216,7 @@ export function CanvasTextPreviewProvider({
       updateTasks((current) => reconcileCanvasTextPreviewTarget({
         previous: current,
         target,
-        active: activeInlineTextPathRef.current === path,
+        active: inlineTextPresentationPathRef.current === path,
         availability: sourceAvailabilityRef.current[path]
       }));
       nodeSnapshotStore.flush(new Set([path]));

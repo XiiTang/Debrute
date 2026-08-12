@@ -82,6 +82,7 @@ import {
 } from './runtime/canvasSelection';
 import {
   useCanvasContentInteraction,
+  useCanvasSoleSelectedPresentationPath,
   useCanvasSurfaceSize
 } from './runtime/useCanvasRuntimeSnapshot';
 import {
@@ -224,6 +225,7 @@ function CanvasSurfaceRuntime({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const cutPathSet = useMemo(() => new Set(cutPaths), [cutPaths]);
   const contentInteractionPath = useCanvasContentInteraction(runtime);
+  const soleSelectedPresentationPath = useCanvasSoleSelectedPresentationPath(runtime);
   const surfaceSize = useCanvasSurfaceSize(runtime);
   const resourceZoomSettlement = useMemo<CanvasResourceZoomSettlement>(() => (
     createCanvasResourceZoomSettlement({
@@ -965,9 +967,17 @@ function CanvasSurfaceRuntime({
       ? selectedNode
       : undefined;
   }, [contentInteractionPath, runtime]);
-  const activeInlineTextPath = activeContentInteractionNode?.mediaKind === 'text'
-    ? activeContentInteractionNode.projectRelativePath
+  const soleSelectedPresentationNode = soleSelectedPresentationPath
+    ? runtime.scene.getAcceptedNode(soleSelectedPresentationPath)
     : undefined;
+  const inlineTextPresentationPath = soleSelectedPresentationNode?.mediaKind === 'text'
+    ? soleSelectedPresentationNode.projectRelativePath
+    : undefined;
+  if (import.meta.env.DEV
+    && activeContentInteractionNode?.mediaKind === 'text'
+    && inlineTextPresentationPath !== activeContentInteractionNode.projectRelativePath) {
+    throw new Error('Canvas text Content Activation requires the same sole-selected inline presentation.');
+  }
   const contentActiveVideoPaths = useMemo(
     () => activeContentInteractionNode?.mediaKind === 'video'
       ? [activeContentInteractionNode.projectRelativePath]
@@ -1394,7 +1404,7 @@ function CanvasSurfaceRuntime({
             <CanvasTextPreviewProvider
               nodes={projectedNodes}
               sourceResolutionRuntime={sourceResolutionRuntime}
-              activeInlineTextPath={activeInlineTextPath}
+              inlineTextPresentationPath={inlineTextPresentationPath}
               textFileBuffers={textFileBuffers}
               actions={actions}
               previewOrder={renderLifecycle}
@@ -1410,6 +1420,7 @@ function CanvasSurfaceRuntime({
                   sourceResolutionRuntime={sourceResolutionRuntime}
                   cut={cutPathSet.has(node.projectRelativePath)}
                   contentInteractionActive={activeContentInteractionNode?.projectRelativePath === node.projectRelativePath}
+                  inlineTextPresentationRequested={inlineTextPresentationPath === node.projectRelativePath}
                   zIndex={node.z}
                   stageRuntime={stageRuntime}
                   actions={actions}
@@ -1539,6 +1550,7 @@ interface CanvasSurfaceNodeShellProps {
   sourceResolutionRuntime: CanvasSourceResolutionRuntime;
   cut: boolean;
   contentInteractionActive: boolean;
+  inlineTextPresentationRequested: boolean;
   zIndex: number;
   stageRuntime: CanvasStageRuntime;
   actions: CanvasSceneActions;
@@ -1633,6 +1645,7 @@ function CanvasSurfaceNodeShellBase({
   cut,
   showResizeHandles,
   contentInteractionActive,
+  inlineTextPresentationRequested,
   zIndex,
   stageRuntime,
   actions,
@@ -1670,6 +1683,7 @@ function CanvasSurfaceNodeShellBase({
       cut={cut}
       showResizeHandles={showResizeHandles}
       contentInteractionActive={contentInteractionActive}
+      inlineTextPresentationRequested={inlineTextPresentationRequested}
       zIndex={zIndex}
       stageRuntime={stageRuntime}
       actions={actions}

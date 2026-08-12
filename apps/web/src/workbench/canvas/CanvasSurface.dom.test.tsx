@@ -1727,29 +1727,7 @@ describe('CanvasSurface', () => {
     expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
   });
 
-  it('keeps selected-only canvas text nodes as inactive preview bodies', () => {
-    const projection: CanvasProjection = {
-      nodes: [
-        textProjectionNode('flow/a.md', 0, 0, 'rev-a'),
-        textProjectionNode('flow/b.md', 300, 0, 'rev-b')
-      ],
-      edges: [],
-    };
-
-    const html = renderToStaticMarkup(surface(projection, {
-      selection: { projectRelativePaths: ['flow/a.md'] },
-      textFileBuffers: {
-        'flow/a.md': textBufferFixture('flow/a.md', '# A', 'rev-a'),
-        'flow/b.md': textBufferFixture('flow/b.md', '# B', 'rev-b')
-      }
-    }));
-
-    expect(html.match(/data-editor-mode="edit"/g) ?? []).toHaveLength(0);
-    expect(html.match(/canvas-raster-preview-layers/g) ?? []).toHaveLength(2);
-    expect(html).not.toContain(`data-editor-mode="${'pre'}${'view'}"`);
-  });
-
-  it('loads only content-activated text as a live editor and leaves selected-only text as preview', async () => {
+  it('loads only the sole-selected text as a read-only live editor', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -1760,24 +1738,36 @@ describe('CanvasSurface', () => {
       ],
       edges: [],
     };
+    const runtime = canvasRuntimeFixture(projection, {
+      selection: { projectRelativePaths: ['flow/selected.md'] }
+    });
 
     try {
       await act(async () => {
         root.render(surface(projection, {
-          selection: { projectRelativePaths: ['flow/selected.md'] },
-          contentInteractionProjectRelativePath: 'flow/selected.md',
+          runtime,
           textFileBuffers: {
             'flow/selected.md': textBufferFixture('flow/selected.md', '# Selected', 'rev-selected'),
             'flow/inactive.md': textBufferFixture('flow/inactive.md', '# Inactive', 'rev-inactive')
           }
         }));
       });
-      await waitForCanvasSurfaceElement(container, '[data-editor-mode="edit"]');
-      expect(container.querySelectorAll('[data-editor-mode="edit"]')).toHaveLength(1);
+      const readEditor = await waitForCanvasSurfaceElement(container, '[data-editor-mode="read"]');
+      expect(container.querySelectorAll('[data-editor-mode="read"]')).toHaveLength(1);
+      expect(readEditor.hasAttribute('inert')).toBe(true);
+      expect(readEditor.hasAttribute('data-canvas-node-zone')).toBe(false);
       expect(container.querySelectorAll('.canvas-text-node')).toHaveLength(2);
-      expect(container.querySelector('[data-editor-mode="preview"]')).toBeNull();
+      expect(container.querySelector('[data-canvas-node-path="flow/inactive.md"] .canvas-text-editor')).toBeNull();
+
+      await act(async () => {
+        runtime.activateContent('flow/selected.md');
+      });
+      const editEditor = await waitForCanvasSurfaceElement(container, '[data-editor-mode="edit"]');
+      expect(editEditor).toBe(readEditor);
+      expect(editEditor.hasAttribute('inert')).toBe(false);
     } finally {
       await act(async () => root.unmount());
+      runtime.dispose();
       container.remove();
     }
   });
@@ -2893,6 +2883,11 @@ describe('CanvasSurface', () => {
       onContentHandoffConsumed: () => undefined
     })).toBe(false);
 
+    expect(areCanvasNodeShellPropsEqual(props, {
+      ...props,
+      inlineTextPresentationRequested: true
+    })).toBe(false);
+
   });
 
   it('tracks active video paths from content activation, playback, and requested mounts', () => {
@@ -3462,6 +3457,7 @@ function nodeShellProps(node = nodeFixture('flow/cover.png', 0, 0)): CanvasNodeS
     cut: false,
     showResizeHandles: false,
     contentInteractionActive: false,
+    inlineTextPresentationRequested: false,
     zIndex: node.z,
     stageRuntime: createCanvasStageRuntime(),
     actions,

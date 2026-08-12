@@ -65,6 +65,11 @@ the changed node layouts, routing groups, and spatial-index entries. The
 `CanvasStageRuntime`, synchronizes culling, publishes preview order, and owns at
 most one pending animation-frame cull. Camera, surface size, selection, pointer
 geometry, and viewport position retain the exact same React scene snapshot.
+For a text node, the same Stage layout write also derives the canonical rounded
+presentation width and height through the shared text-presentation geometry and
+writes them as node-local CSS properties. The Inline Text Presentation therefore
+reflows during resize without a React geometry update, a second geometry
+formula, or per-frame preview capture.
 
 Moving camera events update the stage transform immediately and coalesce one
 exact-viewport query onto the next animation frame. Node bounds and edge-group

@@ -4,6 +4,12 @@ status: accepted
 
 # Canvas node selection, content activation, and manipulation are distinct
 
+ADR 0015 supersedes only this ADR's text-presentation rule that Content
+Activation is required to hand a preview to the live editor, including the
+claim that an activation click has no selected-only presentation. Selection,
+Content Activation, manipulation, and the video and audio decisions here remain
+accepted.
+
 Canvas Node Selection identifies the nodes targeted by Canvas commands and may
 contain zero, one, or many nodes. Canvas Content Activation separately
 identifies at most one text, video, or audio node whose Content Region accepts direct

@@ -1,4 +1,5 @@
 import { CANVAS_PERF_INTERACTION_SESSION_TYPES, type CanvasPerfCounterName, type CanvasPerfMonitor } from '../CanvasPerfMonitor';
+import { canvasTextPresentationGeometry } from '../CanvasNodePresentationGeometry';
 import { canvasCameraTransform, canvasChromeScale, type CanvasCamera } from './canvasCamera';
 import type { CanvasRect } from './canvasGeometry';
 
@@ -18,10 +19,18 @@ interface RegisteredCanvasDisplay<TElement extends HTMLElement | SVGPathElement>
 
 interface RegisteredCanvasNode extends RegisteredCanvasDisplay<HTMLElement> {
   layout?: CanvasNodeLayout;
+  presentation?: 'text' | undefined;
   lastTransform?: string;
   lastWidth?: string;
   lastHeight?: string;
   lastZIndex?: string;
+  lastPresentationWidth?: string;
+  lastPresentationHeight?: string;
+}
+
+export interface CanvasNodeShellRegistration {
+  initialLayout?: CanvasNodeLayout | undefined;
+  presentation?: 'text' | undefined;
 }
 
 interface RegisteredCanvasEdgeGroup extends RegisteredCanvasDisplay<SVGPathElement> {
@@ -32,7 +41,7 @@ interface RegisteredCanvasEdgeGroup extends RegisteredCanvasDisplay<SVGPathEleme
 export interface CanvasStageRuntime {
   bindStage(stage: HTMLElement): () => void;
   setCamera(camera: CanvasCamera): void;
-  registerNodeShell(path: string, element: HTMLElement, initialLayout?: CanvasNodeLayout): () => void;
+  registerNodeShell(path: string, element: HTMLElement, registration?: CanvasNodeShellRegistration): () => void;
   setHoveredNode(path: string | undefined): void;
   setSelectedNodePaths(paths: ReadonlySet<string>): void;
   isSingleSelectedNode(path: string): boolean;
@@ -106,7 +115,8 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
       writeNodeTransform(node, transformForRect(layout)),
       writeStyleProperty(node, 'width', `${layout.width}px`, 'lastWidth'),
       writeStyleProperty(node, 'height', `${layout.height}px`, 'lastHeight'),
-      writeStyleProperty(node, 'z-index', String(layout.z), 'lastZIndex')
+      writeStyleProperty(node, 'z-index', String(layout.z), 'lastZIndex'),
+      writeTextPresentationGeometry(node, layout)
     ].some(Boolean);
     recordCounter(wrote ? 'stage-node-layout-write' : 'stage-node-layout-noop');
   };
@@ -130,12 +140,13 @@ export function createCanvasStageRuntime(input: CanvasStageRuntimeInput = {}): C
       camera = nextCamera;
       writeStageCamera(nextCamera);
     },
-    registerNodeShell: (path, element, initialLayout) => {
+    registerNodeShell: (path, element, registration) => {
       const record = nodes.get(path) ?? {};
       record.element = element;
+      record.presentation = registration?.presentation;
       nodes.set(path, record);
-      if (initialLayout && !record.layout) {
-        record.layout = initialLayout;
+      if (registration?.initialLayout && !record.layout) {
+        record.layout = registration.initialLayout;
       }
       if (record.layout) {
         writeNodeLayout(record, record.layout);
@@ -336,6 +347,30 @@ function writeStyleProperty(
   node[cacheKey] = value;
   node.element.style.setProperty(property, value);
   return true;
+}
+
+function writeTextPresentationGeometry(
+  node: RegisteredCanvasNode,
+  layout: CanvasNodeLayout
+): boolean {
+  if (node.presentation !== 'text' || !node.element) {
+    return false;
+  }
+  const geometry = canvasTextPresentationGeometry(layout);
+  const width = `${geometry.frameCssWidth}px`;
+  const height = `${geometry.frameCssHeight}px`;
+  let wrote = false;
+  if (node.lastPresentationWidth !== width) {
+    node.lastPresentationWidth = width;
+    node.element.style.setProperty('--canvas-node-presentation-width', width);
+    wrote = true;
+  }
+  if (node.lastPresentationHeight !== height) {
+    node.lastPresentationHeight = height;
+    node.element.style.setProperty('--canvas-node-presentation-height', height);
+    wrote = true;
+  }
+  return wrote;
 }
 
 function writeDisplay<TElement extends HTMLElement | SVGPathElement>(

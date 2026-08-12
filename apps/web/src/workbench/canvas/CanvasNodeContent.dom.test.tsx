@@ -76,13 +76,15 @@ const sourceNodeReader = {
 };
 
 function CanvasNodeContent(
-  props: Omit<CanvasNodeContentProps, 'onContentError'> & {
+  props: Omit<CanvasNodeContentProps, 'inlineTextPresentationRequested' | 'onContentError'> & {
+    inlineTextPresentationRequested?: boolean | undefined;
     onContentError?: CanvasNodeContentProps['onContentError'] | undefined;
   }
 ): React.ReactElement {
   return (
     <CanvasNodeContentImplementation
       {...props}
+      inlineTextPresentationRequested={props.inlineTextPresentationRequested ?? false}
       onContentError={props.onContentError ?? (() => undefined)}
     />
   );
@@ -483,6 +485,36 @@ describe('CanvasNodeContent', () => {
         await act(async () => root.unmount());
         container.remove();
         restoreAnimationFrame();
+      }
+    });
+
+    it('retires a sole-selected read-only editor only after its current preview is ready', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const preview = textPreviewRequest();
+
+      try {
+        await renderTextPreviewNode(root, preview);
+        await renderTextPreviewNode(root, preview, {
+          inlineTextPresentationRequested: true
+        });
+        const readEditor = await waitForElement<HTMLElement>(container, '[data-editor-mode="read"]');
+        await vi.waitFor(() => expect(readEditor.getAttribute('data-editor-published')).toBe('true'));
+        expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
+          'data-canvas-raster-preview-hidden'
+        )).toBe('true');
+
+        await renderTextPreviewNode(root, preview, {
+          inlineTextPresentationRequested: false
+        });
+        await vi.waitFor(() => expect(container.querySelector('.canvas-text-editor')).toBeNull());
+        expect(container.querySelector('.canvas-raster-preview-layers')?.getAttribute(
+          'data-canvas-raster-preview-hidden'
+        )).toBe('false');
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
       }
     });
 
@@ -989,7 +1021,7 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
     )).toBe('flow/readme.md');
   });
 
-  it('does not read inactive text content merely because viewport presentation requests it', () => {
+  it('requests text content only for a live inline presentation', () => {
     const node = textNode('flow/readme.md', 'rev-a');
     expect(canvasTextBufferEnsureKey(node, undefined, false)).toBeUndefined();
     expect(canvasTextBufferEnsureKey(node, undefined, true)).toBe('flow/readme.md');
@@ -1000,16 +1032,20 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
     expect(canvasTextBufferEnsureKey(textNode('flow/readme.md', 'rev-b'), textBuffer('flow/readme.md', 'rev-a'), true)).toBeUndefined();
   });
 
-  it('loads an editor buffer only when the text node actually enters edit mode', async () => {
+  it('loads an editor buffer when the text node becomes the sole-selected presentation', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
     const ensureTextFileBuffer = vi.fn(async () => undefined);
-    const renderNode = (contentInteractionActive: boolean) => (
+    const renderNode = (input: {
+      contentInteractionActive: boolean;
+      inlineTextPresentationRequested: boolean;
+    }) => (
       <TestProviders>
         <CanvasNodeContent
           node={textNode('flow/readme.md', 'rev-a')}
-          contentInteractionActive={contentInteractionActive}
+          contentInteractionActive={input.contentInteractionActive}
+          inlineTextPresentationRequested={input.inlineTextPresentationRequested}
           actions={actionsFixture({ ensureTextFileBuffer })}
           textBuffer={undefined}
           onVideoPlayerMounted={() => undefined}
@@ -1021,12 +1057,24 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
       </TestProviders>
     );
     try {
-      await act(async () => root.render(renderNode(false)));
+      await act(async () => root.render(renderNode({
+        contentInteractionActive: false,
+        inlineTextPresentationRequested: false
+      })));
       expect(ensureTextFileBuffer).not.toHaveBeenCalled();
 
-      await act(async () => root.render(renderNode(true)));
+      await act(async () => root.render(renderNode({
+        contentInteractionActive: false,
+        inlineTextPresentationRequested: true
+      })));
       expect(ensureTextFileBuffer).toHaveBeenCalledOnce();
       expect(ensureTextFileBuffer).toHaveBeenCalledWith('flow/readme.md');
+
+      await act(async () => root.render(renderNode({
+        contentInteractionActive: true,
+        inlineTextPresentationRequested: true
+      })));
+      expect(ensureTextFileBuffer).toHaveBeenCalledOnce();
     } finally {
       await act(async () => root.unmount());
       container.remove();
@@ -1099,6 +1147,7 @@ async function renderTextPreviewNode(
   textPreviewRequest: CanvasRasterPreviewRequest | undefined,
   options?: {
     contentInteractionActive?: boolean | undefined;
+    inlineTextPresentationRequested?: boolean | undefined;
     textPreviewError?: string | undefined;
     contentHandoffRequest?: CanvasNodeContentProps['contentHandoffRequest'] | undefined;
     node?: ProjectedCanvasNode | undefined;
@@ -1112,6 +1161,7 @@ async function renderTextPreviewNode(
         <CanvasNodeContent
           node={options?.node ?? textNode('flow/readme.md', 'rev-a')}
           contentInteractionActive={options?.contentInteractionActive ?? false}
+          inlineTextPresentationRequested={options?.inlineTextPresentationRequested ?? false}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreviewRequest={textPreviewRequest}

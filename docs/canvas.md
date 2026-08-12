@@ -133,6 +133,15 @@ Clicking elsewhere ends Content Activation after the click succeeds, without
 making browser focus a state authority. Generic and image nodes retain their
 whole non-action surface as the move handle.
 
+The stable sole-selected text node owns the one Inline Text Presentation. It
+uses the live CodeMirror layout while remaining read-only and inert until its
+Content Region is activated. Empty, non-text, and many-node
+selections own no Inline Text Presentation. Starting resize continues to end
+Content Activation, but the resized text remains the sole selection, so the
+same CodeMirror presentation stays mounted and reflows throughout the Manual
+Layout Draft. Video and audio retain their independent player lifecycles;
+selection does not mount or activate their players.
+
 Canvas directory click selects and toggles disclosure on pointer up when the
 pointer stays within the drag threshold. Crossing the threshold performs a
 Manual Layout drag. Text, video, and audio move only from their title bars.

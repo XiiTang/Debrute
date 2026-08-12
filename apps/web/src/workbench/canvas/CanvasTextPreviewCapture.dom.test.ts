@@ -258,7 +258,7 @@ function captureRootFixture(): HTMLDivElement {
   root.className = 'canvas-text-preview-capture-target canvas-text-body';
   root.style.fontFamily = '"test"';
   root.innerHTML = [
-    '<div class="canvas-text-editor" data-editor-mode="handoff">',
+    '<div class="canvas-text-editor" data-editor-mode="read">',
     '<div class="cm-editor">',
     '<div class="cm-scroller">',
     '<div class="cm-gutters"><div class="cm-gutter cm-lineNumbers">',

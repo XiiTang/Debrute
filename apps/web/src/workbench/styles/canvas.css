@@ -506,6 +506,8 @@
   position: relative;
   left: 0;
   top: 0;
+  width: var(--canvas-node-presentation-width);
+  height: var(--canvas-node-presentation-height);
 }
 
 .canvas-node-preview {
@@ -1163,8 +1165,8 @@
   display: block;
 }
 
-.canvas-text-editor[data-editor-mode="handoff"] .cm-cursorLayer,
-.canvas-text-editor[data-editor-mode="handoff"] .cm-cursor {
+.canvas-text-editor[data-editor-mode="read"] .cm-cursorLayer,
+.canvas-text-editor[data-editor-mode="read"] .cm-cursor {
   display: none;
   animation: none;
 }

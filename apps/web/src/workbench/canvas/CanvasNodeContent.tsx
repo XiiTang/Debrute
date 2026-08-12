@@ -29,8 +29,7 @@ import {
   useCanvasTextRenderProfile
 } from './CanvasTextRenderProfileContext';
 import {
-  CANVAS_NODE_PRESENTATION_SCALE,
-  canvasTextPresentationGeometry
+  CANVAS_NODE_PRESENTATION_SCALE
 } from './CanvasNodePresentationGeometry';
 
 const GENERIC_NODE_WRAP_VISUAL_HEIGHT = 88;
@@ -41,7 +40,7 @@ const CanvasTextEditor = React.lazy(async () => {
   return { default: module.CanvasTextEditor };
 });
 
-class CanvasTextEditorActivationBoundary extends React.Component<{
+class CanvasTextEditorPresentationBoundary extends React.Component<{
   children: React.ReactNode;
   onError: (error: Error) => void;
 }, { failed: boolean }> {
@@ -63,6 +62,7 @@ class CanvasTextEditorActivationBoundary extends React.Component<{
 export interface CanvasNodeContentProps {
   node: ProjectedCanvasNode;
   contentInteractionActive: boolean;
+  inlineTextPresentationRequested: boolean;
   actions: CanvasSceneActions;
   textBuffer: TextFileBuffer | undefined;
   textPreviewRequest?: CanvasRasterPreviewRequest | undefined;
@@ -93,6 +93,7 @@ export interface CanvasNodeContentProps {
 export function CanvasNodeContent({
   node,
   contentInteractionActive,
+  inlineTextPresentationRequested,
   actions,
   textBuffer,
   textPreviewRequest,
@@ -122,7 +123,7 @@ export function CanvasNodeContent({
   const textBufferEnsureKey = canvasTextBufferEnsureKey(
     node,
     textBuffer,
-    contentInteractionActive
+    contentInteractionActive || inlineTextPresentationRequested
   );
   ensureTextFileBufferRef.current = actions.ensureTextFileBuffer;
 
@@ -163,6 +164,7 @@ export function CanvasNodeContent({
         buffer={textBuffer}
         problem={problem}
         active={contentInteractionActive}
+        inlinePresentationRequested={inlineTextPresentationRequested}
         actions={actions}
         textPreviewRequest={textPreviewRequest}
         textPreviewError={textPreviewError}
@@ -255,9 +257,9 @@ function imageSpatialFeedbackItems(entry: CanvasFeedbackEntry | undefined): Canv
 export function canvasTextBufferEnsureKey(
   node: ProjectedCanvasNode,
   textBuffer: TextFileBuffer | undefined,
-  contentRequested: boolean
+  livePresentationRequested: boolean
 ): string | undefined {
-  if (!contentRequested
+  if (!livePresentationRequested
     || node.mediaKind !== 'text'
     || node.availability.state !== 'available') {
     return undefined;
@@ -373,6 +375,7 @@ function CanvasTextNodeContent({
   buffer,
   problem,
   active,
+  inlinePresentationRequested,
   actions,
   textPreviewRequest,
   textPreviewError,
@@ -386,6 +389,7 @@ function CanvasTextNodeContent({
   buffer: TextFileBuffer | undefined;
   problem: { title: string; message: string } | undefined;
   active: boolean;
+  inlinePresentationRequested: boolean;
   actions: CanvasSceneActions;
   textPreviewRequest?: CanvasRasterPreviewRequest | undefined;
   textPreviewError?: string | undefined;
@@ -400,13 +404,14 @@ function CanvasTextNodeContent({
   const retryTextPreviewSource = useCallback(() => {
     retryPreview(node.projectRelativePath);
   }, [node.projectRelativePath, retryPreview]);
-  const activeRef = useRef(active);
+  const livePresentationRequested = active || inlinePresentationRequested;
+  const livePresentationRequestedRef = useRef(livePresentationRequested);
   useLayoutEffect(() => {
-    activeRef.current = active;
-  }, [active]);
+    livePresentationRequestedRef.current = livePresentationRequested;
+  }, [livePresentationRequested]);
   const [visibleTextLayer, setVisibleTextLayer] = useState<'editor' | 'preview'>('preview');
   const [handoffViewport, setHandoffViewport] = useState<CanvasTextViewportState>();
-  const [editorActivationError, setEditorActivationError] = useState<Error>();
+  const [editorPresentationError, setEditorPresentationError] = useState<Error>();
   const lastActivationRequestIdRef = useRef<number | undefined>(undefined);
   const [focusRequest, setFocusRequest] = useState<CanvasTextEditorFocusRequest>();
   const textRasterPreview = useCanvasRasterPreviewPresentation({
@@ -431,26 +436,26 @@ function CanvasTextNodeContent({
     && (currentTextPreviewError
       || (textRasterPreview.hasVisible
         && textRasterPreview.visibleSourceKey === textRasterPreview.committedSourceKey));
-  const textPreviewProblem = !active && currentTextPreviewError
+  const textPreviewProblem = !livePresentationRequested && currentTextPreviewError
     ? { title: i18n.t('canvas.node.textPreviewError'), message: currentTextPreviewError }
     : undefined;
   const textPreviewBlockingProblem = textRasterPreview.hasVisible ? undefined : textPreviewProblem;
   const textPreviewOverlayProblem = textRasterPreview.hasVisible ? textPreviewProblem : undefined;
-  const editorActivationProblem = buffer?.error !== undefined || editorActivationError !== undefined
+  const editorPresentationProblem = buffer?.error !== undefined || editorPresentationError !== undefined
     ? {
         title: i18n.t('canvas.node.textError'),
-        message: buffer?.error ?? editorActivationError?.message ?? i18n.t('canvas.node.textError')
+        message: buffer?.error ?? editorPresentationError?.message ?? i18n.t('canvas.node.textError')
       }
     : undefined;
-  const editorActivationBlockingProblem = textRasterPreview.hasVisible ? undefined : editorActivationProblem;
-  const editorActivationOverlayProblem = textRasterPreview.hasVisible ? editorActivationProblem : undefined;
+  const editorPresentationBlockingProblem = textRasterPreview.hasVisible ? undefined : editorPresentationProblem;
+  const editorPresentationOverlayProblem = textRasterPreview.hasVisible ? editorPresentationProblem : undefined;
   const bodyProblem = problem
-    ?? editorActivationBlockingProblem
+    ?? editorPresentationBlockingProblem
     ?? (visibleTextLayer === 'preview' ? textPreviewBlockingProblem : undefined);
-  const overlayProblem = editorActivationOverlayProblem ?? textPreviewOverlayProblem;
-  const status = problem || editorActivationProblem || textPreviewProblem
+  const overlayProblem = editorPresentationOverlayProblem ?? textPreviewOverlayProblem;
+  const status = problem || editorPresentationProblem || textPreviewProblem
     ? undefined
-    : textBufferStatus(buffer, active, i18n);
+    : textBufferStatus(buffer, livePresentationRequested, i18n);
   useEffect(() => {
     if (
       contentHandoffRequest?.kind !== 'text-caret'
@@ -461,7 +466,7 @@ function CanvasTextNodeContent({
       return;
     }
     lastActivationRequestIdRef.current = contentHandoffRequest.requestId;
-    setEditorActivationError(undefined);
+    setEditorPresentationError(undefined);
     if (currentTextPreviewError) {
       retryCurrentTextPreview();
     }
@@ -479,25 +484,6 @@ function CanvasTextNodeContent({
     contentHandoffRequest,
     onContentHandoffConsumed
   ]);
-  const geometry = canvasTextPresentationGeometry(node);
-  const bodyRef = useCallback((element: HTMLDivElement | null) => {
-    if (!element || !import.meta.env.DEV) {
-      return;
-    }
-    const assertGeometry = () => {
-      if (element.clientWidth > 0
-        && element.clientHeight > 0
-        && (element.clientWidth !== geometry.contentCssWidth
-          || element.clientHeight !== geometry.contentCssHeight)) {
-        throw new Error(
-          `Canvas text presentation geometry mismatch for ${node.projectRelativePath}: `
-          + `${element.clientWidth}x${element.clientHeight} != `
-          + `${geometry.contentCssWidth}x${geometry.contentCssHeight}.`
-        );
-      }
-    };
-    assertGeometry();
-  }, [geometry.contentCssHeight, geometry.contentCssWidth, node.projectRelativePath]);
   const commitTextViewport = useCallback((viewport: CanvasTextViewportState) => {
     const current = node.textViewport ?? { scrollTop: 0, scrollLeft: 0 };
     if (current.scrollTop === viewport.scrollTop && current.scrollLeft === viewport.scrollLeft) {
@@ -509,19 +495,19 @@ function CanvasTextNodeContent({
     node.textViewport,
     onUpdateTextViewport
   ]);
-  const failEditorActivation = useCallback((error: Error) => {
+  const failEditorPresentation = useCallback((error: Error) => {
     setVisibleTextLayer('preview');
-    setEditorActivationError(error);
+    setEditorPresentationError(error);
     onContentError(node.projectRelativePath);
   }, [node.projectRelativePath, onContentError]);
 
   useEffect(() => {
-    if (active) {
+    if (livePresentationRequested) {
       setHandoffViewport(undefined);
     } else {
       setFocusRequest(undefined);
     }
-  }, [active]);
+  }, [livePresentationRequested]);
 
   useEffect(() => {
     if (active && buffer?.error !== undefined) {
@@ -538,19 +524,19 @@ function CanvasTextNodeContent({
   }, [active, hasAvailabilityProblem, node.projectRelativePath, onContentError]);
 
   useEffect(() => {
-    if (!active
+    if (!livePresentationRequested
       && visibleTextLayer === 'editor'
       && previewHandoffReady) {
       setVisibleTextLayer('preview');
     }
   }, [
-    active,
+    livePresentationRequested,
     previewHandoffReady,
     visibleTextLayer
   ]);
 
-  const editorBuffer = buffer && buffer.error === undefined && editorActivationError === undefined
-    && (active || visibleTextLayer === 'editor')
+  const editorBuffer = buffer && buffer.error === undefined && editorPresentationError === undefined
+    && (livePresentationRequested || visibleTextLayer === 'editor')
     ? buffer
     : undefined;
   const showTextEditor = editorBuffer !== undefined;
@@ -588,7 +574,6 @@ function CanvasTextNodeContent({
         )}
       />
       <div
-        ref={bodyRef}
         className={bodyProblem ? 'canvas-text-body problem' : 'canvas-text-body'}
         data-canvas-local-wheel="focus"
         data-canvas-node-zone="content"
@@ -598,13 +583,13 @@ function CanvasTextNodeContent({
         ) : (
           <>
             {showTextEditor ? (
-              <CanvasTextEditorActivationBoundary onError={failEditorActivation}>
+              <CanvasTextEditorPresentationBoundary onError={failEditorPresentation}>
                 <CanvasTextRenderProfileGate
                   profile={textRenderProfile}
                   pending={<div className="canvas-text-preview-empty" aria-busy="true" />}
                   requireExactProfile={visibleTextLayer === 'preview'}
                   onReady={() => workbenchStartupTimeline.mark('canvas-text-ready')}
-                  onError={failEditorActivation}
+                  onError={failEditorPresentation}
                 >
                   <React.Suspense fallback={<div className="canvas-text-preview-empty" aria-busy="true" />}>
                     <CanvasTextEditor
@@ -612,7 +597,7 @@ function CanvasTextNodeContent({
                       language={editorBuffer.language}
                       wordWrap={editorBuffer.wordWrap}
                       readOnly={!active}
-                      visible={active}
+                      visible={livePresentationRequested}
                       published={visibleTextLayer === 'editor'}
                       focusRequest={active && visibleTextLayer === 'editor' ? focusRequest : undefined}
                       initialScrollTop={node.textViewport?.scrollTop}
@@ -621,20 +606,20 @@ function CanvasTextNodeContent({
                       onSave={() => void actions.saveTextFileBuffer(node.projectRelativePath)}
                       onToggleWordWrap={() => actions.toggleTextFileWordWrap(node.projectRelativePath)}
                       onScrollPositionCommit={commitTextViewport}
-                      onReadOnlyTransition={setHandoffViewport}
+                      onPresentationRetire={setHandoffViewport}
                       onLayoutReady={() => {
-                        if (activeRef.current) {
+                        if (livePresentationRequestedRef.current) {
                           setVisibleTextLayer('editor');
                         }
                       }}
-                      onLayoutFailure={visibleTextLayer === 'preview' ? failEditorActivation : undefined}
+                      onLayoutFailure={visibleTextLayer === 'preview' ? failEditorPresentation : undefined}
                       onFocusRequestConsumed={(requestId) => {
                         setFocusRequest((current) => current?.requestId === requestId ? undefined : current);
                       }}
                     />
                   </React.Suspense>
                 </CanvasTextRenderProfileGate>
-              </CanvasTextEditorActivationBoundary>
+              </CanvasTextEditorPresentationBoundary>
             ) : null}
             {textRasterPreview.layers}
             {!showTextEditor && overlayProblem ? (
@@ -649,11 +634,11 @@ function CanvasTextNodeContent({
 
 function textBufferStatus(
   buffer: TextFileBuffer | undefined,
-  contentRequested: boolean,
+  livePresentationRequested: boolean,
   i18n: WorkbenchI18n
 ): { label: string; tone: 'danger' | 'info' | 'loading' } | undefined {
   if (!buffer) {
-    return contentRequested
+    return livePresentationRequested
       ? { label: i18n.t('canvas.node.loading'), tone: 'loading' }
       : undefined;
   }

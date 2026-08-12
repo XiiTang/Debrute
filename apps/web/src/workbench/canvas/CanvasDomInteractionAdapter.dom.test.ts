@@ -45,7 +45,7 @@ describe('resolveCanvasDomInteractionTarget', () => {
     expect(targets).toHaveLength(6);
   });
 
-  it('keeps content controls in content, title-bar buttons as actions, and editor islands stable', () => {
+  it('keeps inline editors in content while preserving explicit Content Interaction Islands', () => {
     const surface = document.createElement('div');
     const node = document.createElement('div');
     node.dataset.canvasEntity = 'node';
@@ -53,16 +53,18 @@ describe('resolveCanvasDomInteractionTarget', () => {
     const activationZone = document.createElement('div');
     activationZone.dataset.canvasNodeZone = 'content';
     const button = document.createElement('button');
-    activationZone.append(button);
+    const inlineEditor = document.createElement('div');
+    inlineEditor.dataset.canvasTextEditor = 'true';
+    activationZone.append(button, inlineEditor);
     const actionZone = document.createElement('div');
     actionZone.dataset.canvasNodeZone = 'action';
     const actionButton = document.createElement('button');
     actionZone.append(actionButton);
     const resizeHandle = document.createElement('button');
     resizeHandle.dataset.canvasNodeZone = 'resize';
-    const editor = document.createElement('div');
-    editor.dataset.canvasNodeZone = 'content-island';
-    node.append(activationZone, actionZone, resizeHandle, editor);
+    const contentIsland = document.createElement('div');
+    contentIsland.dataset.canvasNodeZone = 'content-island';
+    node.append(activationZone, actionZone, resizeHandle, contentIsland);
     surface.append(node);
 
     expect(resolveCanvasDomInteractionTarget(surface, button)).toMatchObject({
@@ -75,7 +77,12 @@ describe('resolveCanvasDomInteractionTarget', () => {
       projectRelativePath: 'notes/readme.md',
       zone: 'action'
     });
-    expect(resolveCanvasDomInteractionTarget(surface, editor)).toMatchObject({
+    expect(resolveCanvasDomInteractionTarget(surface, inlineEditor)).toMatchObject({
+      kind: 'node',
+      projectRelativePath: 'notes/readme.md',
+      zone: 'content'
+    });
+    expect(resolveCanvasDomInteractionTarget(surface, contentIsland)).toMatchObject({
       kind: 'node',
       projectRelativePath: 'notes/readme.md',
       zone: 'content-island'

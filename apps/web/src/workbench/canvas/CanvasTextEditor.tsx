@@ -45,7 +45,7 @@ export interface CanvasTextEditorProps {
   onToggleWordWrap: () => void;
   onFocusRequestConsumed?: ((requestId: number) => void) | undefined;
   onScrollPositionCommit?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
-  onReadOnlyTransition?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
+  onPresentationRetire?: ((position: CanvasTextEditorScrollPosition) => void) | undefined;
   onLayoutReady?: (() => void) | undefined;
   onLayoutFailure?: ((error: Error) => void) | undefined;
   fontPurpose?: 'interactive' | 'preview' | undefined;
@@ -66,7 +66,7 @@ export function CanvasTextEditor({
   onToggleWordWrap,
   onFocusRequestConsumed,
   onScrollPositionCommit,
-  onReadOnlyTransition,
+  onPresentationRetire,
   onLayoutReady,
   onLayoutFailure,
   fontPurpose = 'interactive'
@@ -89,6 +89,7 @@ export function CanvasTextEditor({
     () => CanvasTextEditorScrollPosition
   ) | undefined>(undefined);
   const previousReadOnlyRef = React.useRef(Boolean(readOnly));
+  const previousVisibleRef = React.useRef(visible !== false);
   const previousPublishedRef = React.useRef(published);
   const callbacksRef = React.useRef<CanvasTextEditorCallbacks>({
     onChange,
@@ -396,25 +397,34 @@ export function CanvasTextEditor({
     if (!wasReadOnly && nextReadOnly) {
       setPointerFocus(false);
       viewRef.current?.contentDOM.blur();
+    }
+  }, [readOnly]);
+
+  React.useLayoutEffect(() => {
+    const wasVisible = previousVisibleRef.current;
+    const nextVisible = visible !== false;
+    previousVisibleRef.current = nextVisible;
+    if (wasVisible && !nextVisible) {
+      setPointerFocus(false);
+      viewRef.current?.contentDOM.blur();
       const position = commitObservedScrollPositionRef.current?.();
       if (position) {
-        onReadOnlyTransition?.(position);
+        onPresentationRetire?.(position);
       }
     }
-  }, [onReadOnlyTransition, readOnly]);
+  }, [onPresentationRetire, visible]);
 
   return (
     <div
       ref={hostRef}
       data-canvas-text-editor="true"
-      data-canvas-node-zone="content-island"
       data-editor-engine="codemirror"
-      data-editor-mode={readOnly ? 'handoff' : 'edit'}
+      data-editor-mode={readOnly ? 'read' : 'edit'}
       data-editor-published={published ? 'true' : 'false'}
       data-word-wrap={wordWrap ? 'on' : 'off'}
       data-pointer-focus={!readOnly && pointerFocus ? 'true' : 'false'}
-      inert={!published}
-      className={`canvas-text-editor canvas-text-editor--${readOnly ? 'handoff' : 'edit'}`}
+      inert={!published || Boolean(readOnly)}
+      className={`canvas-text-editor canvas-text-editor--${readOnly ? 'read' : 'edit'}`}
       style={(fontPurpose === 'preview'
         ? renderProfile.previewEditorStyle
         : renderProfile.editorStyle) as React.CSSProperties}

@@ -10,8 +10,7 @@ import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentati
 import type { CanvasVideoPlayerHandle } from './CanvasVideoPlayerAdapter';
 import {
   CANVAS_NODE_PRESENTATION_SCALE,
-  CANVAS_NODE_TITLEBAR_CSS_HEIGHT,
-  canvasTextPresentationGeometry
+  CANVAS_NODE_TITLEBAR_CSS_HEIGHT
 } from './CanvasNodePresentationGeometry';
 import type { CanvasContentHandoffRequest } from './CanvasDomInteractionAdapter';
 import type { CanvasSceneActions } from './CanvasSceneActions';
@@ -23,6 +22,7 @@ export interface CanvasNodeShellProps {
   cut: boolean;
   showResizeHandles: boolean;
   contentInteractionActive: boolean;
+  inlineTextPresentationRequested: boolean;
   zIndex: number;
   stageRuntime: CanvasStageRuntime;
   actions: CanvasSceneActions;
@@ -58,6 +58,7 @@ function CanvasNodeShellComponent({
   cut,
   showResizeHandles,
   contentInteractionActive,
+  inlineTextPresentationRequested,
   zIndex,
   stageRuntime,
   actions,
@@ -92,17 +93,16 @@ function CanvasNodeShellComponent({
       return;
     }
     return stageRuntime.registerNodeShell(node.projectRelativePath, element, {
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      height: node.height,
-      z: zIndex
+      initialLayout: {
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        z: zIndex
+      },
+      presentation: node.mediaKind === 'text' ? 'text' : undefined
     });
-  }, [stageRuntime, node.projectRelativePath]);
-
-  const textPresentationGeometry = node.mediaKind === 'text'
-    ? canvasTextPresentationGeometry(node)
-    : undefined;
+  }, [stageRuntime, node.mediaKind, node.projectRelativePath]);
   const className = [
     'canvas-node-element',
     'canvas-node-shell',
@@ -116,6 +116,7 @@ function CanvasNodeShellComponent({
     <CanvasNodeContent
       node={node}
       contentInteractionActive={contentInteractionActive}
+      inlineTextPresentationRequested={inlineTextPresentationRequested}
       actions={actions}
       textBuffer={textBuffer}
       textPreviewRequest={textPreviewRequest}
@@ -163,10 +164,6 @@ function CanvasNodeShellComponent({
         ? (
             <div
               className="canvas-node-presentation"
-              style={textPresentationGeometry ? {
-                width: textPresentationGeometry.frameCssWidth,
-                height: textPresentationGeometry.frameCssHeight
-              } : undefined}
             >
               {content}
             </div>
@@ -197,6 +194,7 @@ export function areCanvasNodeShellPropsEqual(
     && previous.cut === next.cut
     && previous.showResizeHandles === next.showResizeHandles
     && previous.contentInteractionActive === next.contentInteractionActive
+    && previous.inlineTextPresentationRequested === next.inlineTextPresentationRequested
     && previous.zIndex === next.zIndex
     && previous.stageRuntime === next.stageRuntime
     && (previous.node.mediaKind === 'text' ? previous.actions === next.actions : true)
