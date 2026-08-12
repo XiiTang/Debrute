@@ -16,6 +16,22 @@ integration does not inherit Photoshop authority or sit below an Adobe vendor
 layer. Shared infrastructure is extracted only after a second implementation
 proves the same contract.
 
+## Terminology
+
+**Professional Application Integration** is the complete Debrute capability
+for one professional application, including its Runtime-owned lifecycle,
+gateway, authority, sessions, commands, host Plugin, and protocol. Photoshop
+Integration is the first such Integration; Integration does not mean only the
+Runtime-side implementation.
+
+**Plugin** is the client component installed and loaded inside a professional
+application. One loaded copy is a **Plugin Instance**, and its memory-only
+session with Runtime is a **Plugin Connection**. Instances and Connections are
+not separate Plugins or Integrations. Integration identity follows the
+professional application, while Plugin identity includes the host technology:
+Photoshop UXP Plugin and a possible future Photoshop CEP Plugin belong to the
+same Photoshop Integration.
+
 ## Contract At A Glance
 
 | Direction | User source | Exact target | File representation | Command bounds |
@@ -43,11 +59,12 @@ The contract has five invariants:
 ## Live Sessions And Discovery
 
 Global Settings persists the closed, default-off
-`plugins.photoshop.enabled` choice. Runtime applies it at startup before the
+`integrations.photoshop.enabled` choice. Runtime applies it at startup before the
 first Workbench Photoshop projection. Off binds no Photoshop port and retains
 no gateway route, session, bearer, or command authority. The Workbench
-**Plugins** page is the only current setting surface; there is no Plugin
-Platform master switch or per-instance connection control.
+**Integrations** page is the only current setting surface; its row is titled
+**Photoshop**. There is no Integration master switch, generic tool catalog, or
+per-instance connection control.
 
 On immediately attempts the first available loopback port from `32124` through
 `32131`. A successful bind publishes `waiting`; full-pool exhaustion keeps the
@@ -290,7 +307,7 @@ The architectural rationale is recorded in ADRs
 [0063](./adr/0063-photoshop-transfers-use-explicit-live-targets.md),
 [0064](./adr/0064-photoshop-connections-use-ephemeral-runtime-sessions.md),
 [0065](./adr/0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md), and
-[0068](./adr/0068-plugin-integration-enablement-is-runtime-owned.md).
+[0068](./adr/0068-professional-application-integration-enablement-is-runtime-owned.md).
 
 ## Explicit Non-Goals
 
@@ -314,7 +331,7 @@ The architectural rationale is recorded in ADRs
 
 ## Verification Contract
 
-Automated verification must cover default-off persistence, closed Plugin
+Automated verification must cover default-off persistence, closed Integration
 settings, conditional gateway lifetime, unavailable retry, transfer-safe
 disable, strict protocol parsing, port-pool behavior, session and bearer
 revocation, exact target binding, immutable staging, live-Document-gated

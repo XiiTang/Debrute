@@ -91,14 +91,14 @@ pub struct ChromeSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PhotoshopPluginSettings {
+pub struct PhotoshopIntegrationSettings {
     pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PluginSettings {
-    pub photoshop: PhotoshopPluginSettings,
+pub struct IntegrationSettings {
+    pub photoshop: PhotoshopIntegrationSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,7 +155,7 @@ pub struct GlobalSettingsConfig {
     pub workbench: WorkbenchSettings,
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
-    pub plugins: PluginSettings,
+    pub integrations: IntegrationSettings,
     pub feedback: FeedbackSettings,
     pub models: Vec<ModelConfig>,
 }
@@ -178,7 +178,7 @@ pub struct GlobalSettingsView {
     pub workbench: WorkbenchSettings,
     pub canvas: CanvasSettings,
     pub chrome: ChromeSettings,
-    pub plugins: PluginSettings,
+    pub integrations: IntegrationSettings,
     pub feedback: FeedbackSettings,
     pub models: ModelSettingsView,
 }
@@ -220,7 +220,7 @@ pub enum GlobalSettingsMutation {
     SetFeedbackActionBar {
         names: Vec<String>,
     },
-    SetPhotoshopPluginEnabled {
+    SetPhotoshopIntegrationEnabled {
         enabled: bool,
     },
     SaveModelSetting {
@@ -465,7 +465,7 @@ fn project_view(snapshot: &GlobalConfigSnapshot, catalog: &ModelCatalog) -> Glob
         workbench: snapshot.settings.workbench.clone(),
         canvas: snapshot.settings.canvas.clone(),
         chrome: snapshot.settings.chrome.clone(),
-        plugins: snapshot.settings.plugins.clone(),
+        integrations: snapshot.settings.integrations.clone(),
         feedback: snapshot.settings.feedback.clone(),
         models: settings_view(snapshot, catalog),
     }
@@ -511,8 +511,8 @@ fn apply_mutation(
         GlobalSettingsMutation::SetFeedbackActionBar { names } => {
             set_feedback_action_bar(&mut snapshot.settings.feedback, names)?;
         }
-        GlobalSettingsMutation::SetPhotoshopPluginEnabled { enabled } => {
-            snapshot.settings.plugins.photoshop.enabled = *enabled;
+        GlobalSettingsMutation::SetPhotoshopIntegrationEnabled { enabled } => {
+            snapshot.settings.integrations.photoshop.enabled = *enabled;
         }
         GlobalSettingsMutation::SaveModelSetting { model_id, setting } => {
             apply_model_mutation(

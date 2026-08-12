@@ -2,7 +2,7 @@
 
 `GlobalConfigStore` is the sole persistence and serialization boundary for
 runtime-wide preferences, the Feedback Mark Catalog and Action Bar, recent
-projects, model overrides, Plugin Integration enablement, and secrets. The
+projects, model overrides, Professional Application Integration enablement, and secrets. The
 Photoshop enable choice enters this store, while
 gateway health, sessions, Documents, credentials, commands, and transfer state
 remain ephemeral. Reads and mutations use one process-local

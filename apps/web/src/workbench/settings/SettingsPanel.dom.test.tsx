@@ -16,7 +16,7 @@ import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage';
 import type { WorkbenchSettingsActions } from './useWorkbenchSettingsController';
 
 describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
-  it('groups Settings navigation into General, Models, Plugins, and System', () => {
+  it('groups Settings navigation into General, Models, Integrations, and System', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <SettingsPanel state={stateWithSettings()} actions={actions()} />
@@ -25,15 +25,15 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
 
     expect(html).toContain('class="settings-directory-group"');
     expect(html).toContain('class="settings-directory-group__label">Models</span>');
-    expect(html).toContain('class="settings-directory-group__label">Plugins</span>');
+    expect(html).toContain('class="settings-directory-group__label">Integrations</span>');
     expect(html).toContain('class="settings-directory-group__label">System</span>');
-    expect(html.indexOf('Image Models')).toBeLessThan(html.indexOf('Plugins</strong>'));
-    expect(html.indexOf('Plugins</strong>')).toBeLessThan(html.indexOf('About &amp; Updates</strong>'));
-    expect(html).not.toContain('Integrations</strong>');
+    expect(html.indexOf('Image Models')).toBeLessThan(html.indexOf('Integrations</strong>'));
+    expect(html.indexOf('Integrations</strong>')).toBeLessThan(html.indexOf('About &amp; Updates</strong>'));
+    expect(html).not.toContain('Plugins</strong>');
     expect(html).not.toContain('Adobe Bridge');
   });
 
-  it('waits for both Settings and Photoshop hydration before rendering Plugins', async () => {
+  it('waits for both Settings and Photoshop hydration before rendering Integrations', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -50,10 +50,10 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
         );
       });
       await act(async () => {
-        requireButton(container, 'Plugins').click();
+        requireButton(container, 'Integrations').click();
       });
       expect(container.querySelector('.settings-page')?.textContent).toContain('Loading settings');
-      expect(container.querySelector('.settings-page')?.textContent).not.toContain('Photoshop Integration');
+      expect(container.querySelector('.settings-page')?.textContent).not.toContain('Photoshop');
 
       await act(async () => {
         root.render(
@@ -62,7 +62,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           </I18nProvider>
         );
       });
-      expect(container.querySelector('.settings-page')?.textContent).toContain('Photoshop Integration');
+      expect(container.querySelector('.settings-page')?.textContent).toContain('Photoshop');
       expect(container.querySelector('.settings-page')?.textContent).toContain('Off');
     } finally {
       await unmount(root, container);
@@ -896,7 +896,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
               textAppearance: globalSettingsFixture().canvas.textAppearance
             },
             chrome: { recentProjectRoots: [] },
-            plugins: { photoshop: { enabled: false } },
+            integrations: { photoshop: { enabled: false } },
             feedback: { catalog: [], actionBar: [] },
             models: { image: [], video: [], audio: [] }
           }}
@@ -1090,7 +1090,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       }
     },
     chrome: { recentProjectRoots: [] },
-    plugins: { photoshop: { enabled: false } },
+    integrations: { photoshop: { enabled: false } },
     models: {
       image: [{
         debruteModelId: 'gpt-image-2',

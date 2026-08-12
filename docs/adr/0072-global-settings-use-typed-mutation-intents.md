@@ -24,11 +24,11 @@ not infer a dependency graph or cancel unsent user intent on Runtime's behalf.
 
 Settings pages submit domain intent and do not own accepted-state caches,
 persistence queues, or rollback logic. Runtime retains the one serialized
-authority; Workbench does not introduce a second accepted store. Plugin
-Integration status, Photoshop transfer operations, Product Update operations,
+authority; Workbench does not introduce a second accepted store. Professional
+Application Integration status, Photoshop transfer operations, Product Update operations,
 and transient secret reveal commands remain outside this settings mutation
 module.
 
-This deepens the Workbench side of system ADR-0005 while preserving Plugin
-Integration lifecycle authority from ADR-0068 and explicit transient Model API
+This deepens the Workbench side of system ADR-0005 while preserving Professional
+Application Integration lifecycle authority from ADR-0068 and explicit transient Model API
 key reveal from ADR-0057.

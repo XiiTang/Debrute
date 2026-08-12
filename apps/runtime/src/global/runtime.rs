@@ -11,7 +11,7 @@ use super::{
     models::ModelSettingsView,
     store::{
         ChromeSettings, FeedbackSettings, GlobalConfigStore, GlobalSettingsError,
-        GlobalSettingsMutation, GlobalSettingsView, PluginSettings, WorkbenchSettings,
+        GlobalSettingsMutation, GlobalSettingsView, IntegrationSettings, WorkbenchSettings,
     },
 };
 
@@ -30,7 +30,7 @@ pub struct DebruteGlobalSettingsView {
     pub workbench: WorkbenchSettings,
     pub canvas: super::store::CanvasSettings,
     pub chrome: ChromeSettings,
-    pub plugins: PluginSettings,
+    pub integrations: IntegrationSettings,
     pub feedback: FeedbackSettings,
     pub models: ModelSettingsView,
 }
@@ -334,7 +334,7 @@ fn complete_view(
         workbench: projection.workbench,
         canvas: projection.canvas,
         chrome: projection.chrome,
-        plugins: projection.plugins,
+        integrations: projection.integrations,
         feedback: projection.feedback,
         models: projection.models,
     }

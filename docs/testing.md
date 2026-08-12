@@ -193,7 +193,7 @@ syntax is the parser's input.
 ## Workbench UI Acceptance
 
 DOM tests exercise rendered state and the action a user can perform. Settings
-coverage verifies the navigation groups and default page; Plugins coverage
+coverage verifies the navigation groups and default page; Integrations coverage
 waits for both authoritative resources, renders all four Photoshop states and
 their exact diagnostics, keeps the switch projection-controlled, and disables
 only that switch during a transfer. Context-menu coverage proves that the whole

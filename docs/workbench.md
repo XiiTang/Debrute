@@ -57,7 +57,7 @@ and accepts that frame into `WorkbenchGlobalProjection` before it imports and
 mounts the Workbench composition root. Bootstrap keeps following ordered theme
 events and remains transparent until the presentation controller commits the
 current projection, then hands document-theme ownership to that controller.
-Theme, locale, recent Projects, Canvas Text Appearance, Plugin enablement,
+Theme, locale, recent Projects, Canvas Text Appearance, Integration enablement,
 Product, and Photoshop presentation read that same
 ordered in-memory projection rather than receiving copied bootstrap props or
 maintaining a second frontend settings store. During that wait the renderer is transparent, so
@@ -144,7 +144,7 @@ Focused units own cohesive state:
   of the open Settings panel. It owns Settings commands and the Canvas Text
   Appearance save lifecycle while reconciling
   accepted values from `WorkbenchGlobalProjection`; it also exposes the
-  existing live Photoshop resource to the Plugins page without inventing
+  existing live Photoshop resource to the Integrations page without inventing
   connection state. It does not own theme, locale, or another accepted Global
   snapshot.
 - `useProjectExplorerController` loads only after Explorer or a file-command
@@ -462,19 +462,20 @@ are documented in [`desktop-shell.md`](./desktop-shell.md).
 
 Settings has one directory and one content surface. Its current pages are
 General; Appearance; Feedback; Image, Video, TTS, Music, and SFX Models;
-Plugins; and System. Plugins controls Runtime-hosted professional-tool
-gateways; there is no recommended-project catalog or generic tool manager.
+Integrations; and System. Integrations controls Runtime-owned Professional
+Application Integrations; there is no recommended-project catalog or generic
+tool manager.
 Appearance composes the Workbench Theme mode with the separate
 global Canvas Text Appearance controls; General retains language and the native
 Start at Login entry, while System
 owns product information and updates. Feedback configures the machine-local
 Feedback Mark Catalog and the ordered Action Bar subset. Runtime-owned Global Settings is
 ready before React mounts. Product retains its own loading and ready state;
-connection failure still ends the Workbench. The Plugins page waits for both Global Settings and
-the live Photoshop resource. Its one **Photoshop Integration** row combines the
-default-off `plugins.photoshop.enabled` choice with `Off`, `Waiting for
+connection failure still ends the Workbench. The Integrations page waits for
+both Global Settings and the live Photoshop resource. Its one **Photoshop** row combines the
+default-off `integrations.photoshop.enabled` choice with `Off`, `Waiting for
 Photoshop`, `Connected · N instances`, or the exact port-pool Unavailable
-diagnostic. It has no Plugin Platform master, instance list, or manual
+diagnostic. It has no Integration master, generic tool catalog, instance list, or manual
 connection action. A transfer disables only this switch and shows `Transfer in
 progress.` Runtime rejects the same stale disable atomically. HTTP success does
 not commit the switch locally; ordered settings and Photoshop events remain its
@@ -514,7 +515,8 @@ line-height ratio, requested weight, letter spacing, and ligature value. The
 Canvas hierarchy-edge control sends the independent
 `canvas.hierarchyEdgesVisible` boolean and has no duplicate Settings page
 control. They use the same always-mounted Workbench Global Settings controller
-as Language, Start at Login, Theme, Feedback, Plugin enablement, and Model persistence. Valid
+as Language, Start at Login, Theme, Feedback, Integration enablement, and Model
+persistence. Valid
 changes update the local Canvas immediately; each Workbench window serializes
 its submissions and coalesces unsent fields to their newest values. A successful
 mutation response is not confirmation: the local values remain presented until

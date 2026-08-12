@@ -1288,7 +1288,7 @@ function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {
       }
     },
     chrome: { recentProjectRoots: [] },
-    plugins: { photoshop: { enabled: false } },
+    integrations: { photoshop: { enabled: false } },
     models: {
       image: imageSettingsFixture(),
       video: [],

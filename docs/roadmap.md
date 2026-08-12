@@ -34,15 +34,17 @@ become user-visible, does not make Project an operating-system sandbox, and
 does not change ordinary editor-style partial copy semantics without a separate
 product decision.
 
-## Photoshop CEP Integration
+## Photoshop CEP Plugin
 
-Debrute may add a separate Photoshop CEP integration for Photoshop environments
-or workflows that cannot use the current UXP plugin. CEP is not currently
-implemented or supported; the shipped Photoshop integration remains UXP-only.
+Debrute may add a Photoshop CEP Plugin for Photoshop environments or workflows
+that cannot use the current UXP Plugin. Both Plugins belong to the same
+Photoshop Integration; CEP does not create a second Integration. CEP is not
+currently implemented or supported, so the shipped Photoshop Integration
+remains UXP-only.
 
-Before CEP can become a current product contract, the work should define and
-verify its supported Photoshop versions, installation and packaging model,
-Runtime connection lifecycle, transfer behavior, platform coverage, and
-real-Photoshop acceptance plan. It must not be presented as an alias or fallback
-for the existing UXP package until that independent implementation and
-verification exist.
+Before the CEP Plugin can become a current product contract, the work should
+define and verify its supported Photoshop versions, installation and packaging
+model, Runtime connection lifecycle, transfer behavior, platform coverage, and
+real-Photoshop acceptance plan. It must not be presented as an alias or
+fallback for the existing UXP package until that independent implementation
+and verification exist.

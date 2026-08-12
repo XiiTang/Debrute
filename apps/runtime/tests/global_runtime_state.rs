@@ -41,7 +41,7 @@ fn defaults_and_recent_projects_match_the_final_global_contract() {
         })
     );
     assert!(initial.chrome.recent_project_roots.is_empty());
-    assert!(!initial.plugins.photoshop.enabled);
+    assert!(!initial.integrations.photoshop.enabled);
     for index in 0..14 {
         let root = project_root(&home, &index.to_string());
         store
@@ -69,44 +69,45 @@ fn defaults_and_recent_projects_match_the_final_global_contract() {
 }
 
 #[test]
-fn photoshop_plugin_enablement_is_one_closed_default_off_global_setting() {
-    let home = temporary_home("photoshop-plugin-setting");
+fn photoshop_integration_enablement_is_one_closed_default_off_global_setting() {
+    let home = temporary_home("photoshop-integration-setting");
     let catalog = ModelCatalog::bundled();
     let store = GlobalConfigStore::new(&home);
 
     let enabled = store
         .mutate(
-            &mutation(json!({ "operation": "set-photoshop-plugin-enabled", "enabled": true })),
+            &mutation(json!({ "operation": "set-photoshop-integration-enabled", "enabled": true })),
             &catalog,
         )
         .expect("Photoshop Integration should enable");
     assert!(enabled.changed);
-    assert!(enabled.view.plugins.photoshop.enabled);
+    assert!(enabled.view.integrations.photoshop.enabled);
     drop(store);
     let store = GlobalConfigStore::new(&home);
     assert!(
         store
             .read_view(&catalog)
             .expect("Photoshop Integration setting should survive store reconstruction")
-            .plugins
+            .integrations
             .photoshop
             .enabled
     );
 
     let no_op = store
         .mutate(
-            &mutation(json!({ "operation": "set-photoshop-plugin-enabled", "enabled": true })),
+            &mutation(json!({ "operation": "set-photoshop-integration-enabled", "enabled": true })),
             &catalog,
         )
         .expect("repeated enable should be idempotent");
     assert!(!no_op.changed);
 
     for invalid in [
-        json!({ "plugins": {} }),
-        json!({ "plugins": { "photoshop": {} } }),
-        json!({ "plugins": { "photoshop": { "enabled": "yes" } } }),
-        json!({ "plugins": { "photoshop": { "enabled": true, "extra": true } } }),
-        json!({ "plugins": { "illustrator": { "enabled": true } } }),
+        json!({ "operation": "set-photoshop-plugin-enabled", "enabled": true }),
+        json!({ "integrations": {} }),
+        json!({ "integrations": { "photoshop": {} } }),
+        json!({ "integrations": { "photoshop": { "enabled": "yes" } } }),
+        json!({ "integrations": { "photoshop": { "enabled": true, "extra": true } } }),
+        json!({ "integrations": { "illustrator": { "enabled": true } } }),
     ] {
         assert!(serde_json::from_value::<GlobalSettingsMutation>(invalid).is_err());
     }
@@ -501,6 +502,26 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
     let secrets_source = fs::read_to_string(&secrets_path).expect("secrets should exist");
     assert!(secrets_source.contains("  sk-opaque  "));
 
+    let mut old_plugin_settings: serde_json::Value =
+        serde_json::from_str(&settings_source).expect("settings should parse as JSON");
+    let integrations = old_plugin_settings
+        .as_object_mut()
+        .expect("settings should be an object")
+        .remove("integrations")
+        .expect("settings should contain Integrations");
+    old_plugin_settings["plugins"] = integrations;
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&old_plugin_settings)
+            .expect("old Plugin settings should serialize"),
+    )
+    .expect("old Plugin settings fixture should write");
+    assert!(matches!(
+        store.read_view(&catalog),
+        Err(GlobalSettingsError::Json(_))
+    ));
+
+    fs::write(&settings_path, &settings_source).expect("settings fixture should restore");
     let mut settings: serde_json::Value =
         serde_json::from_str(&settings_source).expect("settings should parse as JSON");
     settings["unexpectedField"] = json!(true);

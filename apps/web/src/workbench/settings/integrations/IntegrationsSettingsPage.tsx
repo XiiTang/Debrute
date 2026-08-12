@@ -5,14 +5,14 @@ import { useI18n, type WorkbenchI18n } from '../../i18n/index';
 
 const TRANSFER_IN_PROGRESS = 'Transfer in progress.';
 
-export function PluginsSettingsPage({
+export function IntegrationsSettingsPage({
   settings,
   photoshop,
   onSettingsChange
 }: {
-  settings: DebruteGlobalSettingsView['plugins'];
+  settings: DebruteGlobalSettingsView['integrations'];
   photoshop: PhotoshopStateView;
-  onSettingsChange(input: { operation: 'set-photoshop-plugin-enabled'; enabled: boolean }): Promise<void>;
+  onSettingsChange(input: { operation: 'set-photoshop-integration-enabled'; enabled: boolean }): Promise<void>;
 }): React.ReactElement {
   const i18n = useI18n();
   const [saving, setSaving] = useState(false);
@@ -26,7 +26,7 @@ export function PluginsSettingsPage({
     setSaving(true);
     setError(undefined);
     try {
-      await onSettingsChange({ operation: 'set-photoshop-plugin-enabled', enabled });
+      await onSettingsChange({ operation: 'set-photoshop-integration-enabled', enabled });
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -39,17 +39,17 @@ export function PluginsSettingsPage({
   const status = photoshopStatus(photoshop, i18n);
 
   return (
-    <section className="settings-page-body plugins-settings-page">
-      <div className="plugin-settings-row">
-        <div className="plugin-settings-row__body">
-          <div className="plugin-settings-row__header">
-            <h3>{i18n.t('settings.plugins.photoshop.title')}</h3>
+    <section className="settings-page-body integrations-settings-page">
+      <div className="integration-settings-row">
+        <div className="integration-settings-row__body">
+          <div className="integration-settings-row__header">
+            <h3>{i18n.t('settings.integrations.photoshop.title')}</h3>
             <StatusPill tone={status.tone}>{status.label}</StatusPill>
           </div>
-          <small className="db-form-help">{i18n.t('settings.plugins.photoshop.description')}</small>
+          <small className="db-form-help">{i18n.t('settings.integrations.photoshop.description')}</small>
         </div>
         <Switch
-          label={i18n.t('settings.plugins.photoshop.enable')}
+          label={i18n.t('settings.integrations.photoshop.enable')}
           checked={settings.photoshop.enabled}
           disabled={saving || transferMessage !== undefined}
           onChange={(event) => void save(event.currentTarget.checked)}
@@ -59,7 +59,7 @@ export function PluginsSettingsPage({
         <small className="db-form-help" aria-live="polite">{transferMessage}</small>
       ) : error ? (
         <small className="db-form-error" aria-live="polite">
-          {i18n.t('settings.plugins.photoshop.saveFailed', { message: error })}
+          {i18n.t('settings.integrations.photoshop.saveFailed', { message: error })}
         </small>
       ) : null}
     </section>
@@ -71,18 +71,18 @@ function photoshopStatus(
   i18n: WorkbenchI18n
 ): { label: string; tone: StatusTone } {
   if (photoshop.status === 'off') {
-    return { label: i18n.t('settings.plugins.status.off'), tone: 'neutral' };
+    return { label: i18n.t('settings.integrations.status.off'), tone: 'neutral' };
   }
   if (photoshop.status === 'waiting') {
-    return { label: i18n.t('settings.plugins.status.waiting'), tone: 'loading' };
+    return { label: i18n.t('settings.integrations.status.waiting'), tone: 'loading' };
   }
   if (photoshop.status === 'connected') {
     return {
-      label: i18n.t('settings.plugins.status.connected', { count: photoshop.sessions.length }),
+      label: i18n.t('settings.integrations.status.connected', { count: photoshop.sessions.length }),
       tone: 'info'
     };
   }
-  return { label: i18n.t('settings.plugins.status.unavailable'), tone: 'danger' };
+  return { label: i18n.t('settings.integrations.status.unavailable'), tone: 'danger' };
 }
 
 function errorMessage(error: unknown): string {

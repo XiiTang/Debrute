@@ -346,7 +346,7 @@ interface DebruteGlobalChromeSettings {
   recentProjectRoots: string[];
 }
 
-interface DebruteGlobalPluginSettings {
+interface DebruteGlobalIntegrationSettings {
   photoshop: {
     enabled: boolean;
   };
@@ -367,7 +367,7 @@ export interface DebruteGlobalSettingsView {
   workbench: DebruteGlobalWorkbenchSettings;
   canvas: DebruteGlobalCanvasSettings;
   chrome: DebruteGlobalChromeSettings;
-  plugins: DebruteGlobalPluginSettings;
+  integrations: DebruteGlobalIntegrationSettings;
   feedback: DebruteGlobalFeedbackSettings;
   models: {
     image: ModelSettingRecord[];
@@ -386,7 +386,7 @@ export type MutateDebruteGlobalSettingsInput =
   | { operation: 'set-feedback-mark-icon'; name: string; icon: string }
   | { operation: 'delete-feedback-mark'; name: string }
   | { operation: 'set-feedback-action-bar'; names: string[] }
-  | { operation: 'set-photoshop-plugin-enabled'; enabled: boolean }
+  | { operation: 'set-photoshop-integration-enabled'; enabled: boolean }
   | { operation: 'save-model-setting'; modelId: string; setting: SaveModelSettingInput };
 
 export interface WorkbenchProjectFileOperationResult extends ProjectPathEntry, RevisionedProjectResult {}

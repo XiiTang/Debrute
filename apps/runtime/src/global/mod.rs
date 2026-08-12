@@ -16,6 +16,6 @@ pub use store::{
     CanvasFontId, CanvasSettings, CanvasTextAppearance, ChromeSettings, FeedbackCatalogEntry,
     FeedbackSettings, GlobalConfigSnapshot, GlobalConfigStore, GlobalMutationResult,
     GlobalSettingsConfig, GlobalSettingsError, GlobalSettingsMutation, GlobalSettingsView,
-    ModelConfig, PhotoshopPluginSettings, PluginSettings, RecentProjectsMutationResult,
+    IntegrationSettings, ModelConfig, PhotoshopIntegrationSettings, RecentProjectsMutationResult,
     SaveModelSettingMutation, SecretsConfig, WorkbenchSettings,
 };

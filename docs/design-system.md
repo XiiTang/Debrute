@@ -406,14 +406,16 @@ hierarchy edges are visible and `EyeOff` while they are hidden. The icon and
 action label carry the state; this control has no persistent selected
 background, while hover and keyboard focus remain visible.
 
-Settings uses General, Appearance, Feedback, Models, Plugins, and System
+Settings uses General, Appearance, Feedback, Models, Integrations, and System
 navigation, one title per selected page, explicit loading/error/ready content, ordinary
 sections for General and Appearance settings, and cards only for independent
-repeated records. The Plugins page presents one row per Runtime-hosted
-professional-tool Integration with an
+repeated records. The Integrations page presents one row per Runtime-owned
+Professional Application Integration, titled with the professional application's
+name, with an
 aggregate status and controlled switch; it does not present a platform master,
-connection list, or manual Connect action. Photoshop transfer activity disables
-only its row switch and uses one inline `Transfer in progress.` message.
+generic tool catalog, connection list, or manual Connect action. Photoshop
+transfer activity disables only its row switch and uses one inline
+`Transfer in progress.` message.
 General places the controlled Start at Login switch and its one-line description
 directly after Language without a Startup heading or card. While its native
 write is pending, only that switch is disabled; an exact failure appears inline.
