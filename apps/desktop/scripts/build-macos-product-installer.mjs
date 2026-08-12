@@ -20,6 +20,8 @@ export async function buildMacosProductInstaller(input) {
     throw new Error(`Unsupported macOS Product Installer architecture: ${input.arch}`);
   }
 
+  const desktopIcon = await readRequiredDesktopIcon(desktopApp);
+
   const temporary = await mkdtemp(join(tmpdir(), 'debrute-product-installer-'));
   try {
     const setupApp = join(temporary, 'dmg-root', 'Install Debrute.app');
@@ -40,7 +42,7 @@ export async function buildMacosProductInstaller(input) {
     ]);
     await chmod(executable, 0o755);
     await run('/usr/bin/ditto', [desktopApp, join(resources, 'Debrute.app')]);
-    await copyIconIfPresent(desktopApp, resources);
+    await cp(desktopIcon, join(resources, 'Debrute.icns'));
     await writeFile(join(contents, 'Info.plist'), setupInfoPlist(input.version), 'utf8');
 
     await codesign(setupApp, identity, true);
@@ -69,20 +71,21 @@ function macosTarget(arch) {
 }
 
 async function codesign(path, identity, hardenedRuntime) {
-  const arguments = ['--force'];
-  if (hardenedRuntime) arguments.push('--options', 'runtime');
-  if (identity !== '-') arguments.push('--timestamp');
-  arguments.push('--sign', identity, path);
-  await run('/usr/bin/codesign', arguments);
+  const args = ['--force'];
+  if (hardenedRuntime) args.push('--options', 'runtime');
+  if (identity !== '-') args.push('--timestamp');
+  args.push('--sign', identity, path);
+  await run('/usr/bin/codesign', args);
   await run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', path]);
 }
 
-async function copyIconIfPresent(desktopApp, resources) {
+async function readRequiredDesktopIcon(desktopApp) {
   const info = await readFile(join(desktopApp, 'Contents/Info.plist'), 'utf8');
   const icon = info.match(/<key>CFBundleIconFile<\/key>\s*<string>([^<]+)<\/string>/)?.[1];
-  if (!icon) return;
-  const source = join(desktopApp, 'Contents/Resources', icon.endsWith('.icns') ? icon : `${icon}.icns`);
-  await cp(source, join(resources, 'Debrute.icns'));
+  if (!icon) {
+    throw new Error('Desktop application Info.plist is missing required CFBundleIconFile.');
+  }
+  return join(desktopApp, 'Contents/Resources', icon.endsWith('.icns') ? icon : `${icon}.icns`);
 }
 
 function setupInfoPlist(version) {

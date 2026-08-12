@@ -1,6 +1,3 @@
-import type { PhotoshopPanelView } from './PhotoshopPanelView.js';
-import type { PhotoshopPluginRuntime } from './PhotoshopPluginRuntime.js';
-
 export const PHOTOSHOP_PANEL_ID = 'debrutePhotoshopPanel';
 
 interface PhotoshopEntrypointsPort {
@@ -57,5 +54,3 @@ export function installPhotoshopEntrypoints(input: {
 }
 
 export type PhotoshopEntrypoints = PhotoshopEntrypointsPort;
-export type PhotoshopPanelViewLifecycle = Pick<PhotoshopPanelView, 'attach' | 'detach'>;
-export type PhotoshopPluginRuntimeLifecycle = Pick<PhotoshopPluginRuntime, 'start' | 'stop'>;

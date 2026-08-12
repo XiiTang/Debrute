@@ -1,18 +1,14 @@
 import React from 'react';
-import { RefreshCw } from '../ui/index';
-import type { SettingsResource } from '../../types';
-import { Button } from '../ui/index';
+import type { EventProjection } from '../../types';
 import { useI18n } from '../i18n/index';
 
 export function SettingsResourcePanel<T>({
   title,
   resource,
-  onRetry,
   children
 }: {
   title: string;
-  resource: SettingsResource<T>;
-  onRetry?: () => Promise<void>;
+  resource: EventProjection<T>;
   children: (value: T) => React.ReactElement;
 }): React.ReactElement {
   const i18n = useI18n();
@@ -22,18 +18,9 @@ export function SettingsResourcePanel<T>({
         <h2>{title}</h2>
       </header>
       <div className="settings-content-page__body">
-        {resource.status === 'ready' ? children(resource.value) : resource.status === 'loading' ? (
+        {resource.status === 'ready' ? children(resource.value) : (
           <div className="settings-resource-state" aria-busy="true">
             <small>{i18n.t('settings.resource.loading')}</small>
-          </div>
-        ) : (
-          <div className="settings-resource-state settings-resource-state--error" role="alert">
-            <small>{i18n.t('settings.resource.loadFailed', { message: resource.message })}</small>
-            {onRetry ? (
-              <Button type="button" iconStart={<RefreshCw size={14} />} onClick={() => void onRetry()}>
-                {i18n.t('settings.resource.retry')}
-              </Button>
-            ) : null}
           </div>
         )}
       </div>

@@ -15,7 +15,6 @@ pub enum CliCommandPolicy {
 pub enum CliOptionKind {
     Value,
     Flag,
-    Repeatable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

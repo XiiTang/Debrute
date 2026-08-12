@@ -117,10 +117,6 @@
   color: var(--db-text-muted);
 }
 
-.settings-resource-state--error {
-  color: var(--db-danger);
-}
-
 .general-settings-page,
 .appearance-settings-page,
 .settings-page-body {

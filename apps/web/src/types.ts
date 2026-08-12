@@ -28,10 +28,6 @@ export type EventProjection<T> =
   | { status: 'loading' }
   | { status: 'ready'; value: T };
 
-export type SettingsResource<T> =
-  | EventProjection<T>
-  | { status: 'error'; message: string };
-
 export interface WorkbenchState {
   snapshot: WorkbenchProjectSessionSnapshot | undefined;
   canvasProjection: CanvasProjection | undefined;

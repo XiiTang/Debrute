@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildMacosProductInstaller } from '../../apps/desktop/scripts/build-macos-product-installer.mjs';
 
 describe('whole-Product installers', () => {
   const root = process.cwd();
@@ -75,5 +78,33 @@ describe('whole-Product installers', () => {
     expect(smoke).toContain("'--install-noninteractive'");
     expect(smoke).not.toContain("'/usr/bin/ditto'");
     expect(smoke).not.toContain("'install-product'");
+  });
+
+  it('rejects an unsupported host or a Desktop application without the icon required by the macOS Setup container', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'debrute-product-installer-missing-icon-'));
+    const desktopApp = join(fixture, 'Debrute.app');
+    try {
+      await mkdir(join(desktopApp, 'Contents'), { recursive: true });
+      await writeFile(
+        join(desktopApp, 'Contents', 'Info.plist'),
+        '<key>CFBundleName</key><string>Debrute</string>',
+        'utf8'
+      );
+
+      const build = buildMacosProductInstaller({
+        desktopApp,
+        outputDirectory: join(fixture, 'release'),
+        identity: '-',
+        arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+        version: '0.0.4'
+      });
+      const expectedError = process.platform === 'darwin'
+        ? 'Desktop application Info.plist is missing required CFBundleIconFile.'
+        : `macOS Product Installer requires macOS, received ${process.platform}.`;
+
+      await expect(build).rejects.toThrow(expectedError);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
   });
 });

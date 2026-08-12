@@ -59,12 +59,6 @@
   color: var(--db-text-subtle);
 }
 
-.db-canvas-card {
-  height: var(--db-control-sm);
-  border: 0;
-  max-width: 180px;
-}
-
 .canvas-shell {
   position: relative;
   height: 100%;
@@ -401,24 +395,6 @@
 .db-canvas-node-generic--problem svg {
   grid-row: 1 / span 3;
   color: var(--db-danger);
-}
-
-.db-canvas-node-caption {
-  min-width: 0;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  padding: 0 var(--db-space-4);
-  background: var(--db-bg);
-  color: var(--db-text-muted);
-  font-size: var(--db-font-sm);
-}
-
-.db-canvas-node-caption span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .db-canvas-node-titlebar {
@@ -1086,14 +1062,6 @@
   padding: 12px;
   color: var(--db-text-muted);
   text-align: center;
-}
-
-.canvas-text-message--overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background: var(--db-danger-bg);
-  pointer-events: none;
 }
 
 .canvas-text-message svg {

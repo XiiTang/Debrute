@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { DebruteGlobalSettingsView, DebruteProductState } from '@debrute/app-protocol';
-import type { SettingsResource } from '../../types';
+import type { EventProjection } from '../../types';
 import { I18nProvider } from '../i18n/index';
 import { installDialogTestAdapter } from '../ui/Modal.test-support';
 import {
@@ -1154,7 +1154,7 @@ function actions(): WorkbenchSettingsActions {
   };
 }
 
-function readyResourceValue<T>(resource: SettingsResource<T>): T {
+function readyResourceValue<T>(resource: EventProjection<T>): T {
   if (resource.status !== 'ready') {
     throw new Error(`Expected ready resource, got ${resource.status}.`);
   }

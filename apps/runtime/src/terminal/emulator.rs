@@ -122,7 +122,8 @@ impl TerminalEmulator {
             output_sequence: self.output_sequence,
             cols,
             rows,
-            scrollback_rows: u32::try_from(scrollback_rows).unwrap_or(u32::MAX),
+            scrollback_rows: u32::try_from(scrollback_rows)
+                .expect("Terminal scrollback cannot exceed its configured row bound"),
             cursor_row,
             cursor_col,
             cursor_hidden: screen.hide_cursor(),

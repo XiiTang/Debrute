@@ -1,18 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import type { CanvasEditorRuntime, CanvasRuntimeSnapshot } from './CanvasEditorRuntime';
 import type { CanvasSize } from './canvasGeometry';
-import {
-  soleSelectedNodeProjectRelativePath,
-  type CanvasSelection
-} from './canvasSelection';
-
-export function useCanvasSelection(runtime: CanvasEditorRuntime): CanvasSelection | undefined {
-  return useSyncExternalStore(
-    runtime.subscribeSelection,
-    () => runtime.getSnapshot().selection,
-    () => runtime.getSnapshot().selection
-  );
-}
+import { soleSelectedNodeProjectRelativePath } from './canvasSelection';
 
 export function useCanvasContentInteraction(runtime: CanvasEditorRuntime): string | undefined {
   return useSyncExternalStore(

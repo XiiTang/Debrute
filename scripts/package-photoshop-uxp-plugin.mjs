@@ -5,7 +5,6 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import AdmZip from 'adm-zip';
 import { packageManagerCommand } from './package-manager-command.mjs';
-import { validateZipEntries } from './package-validation.mjs';
 import { validateReleaseVersionContract } from './validate-release-version-contract.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -29,12 +28,19 @@ export async function packagePhotoshopUxpPlugin({ outDir = join(workspaceRoot, '
   await new Promise((resolvePackage, rejectPackage) => {
     zip.writeZip(assetPath, (error) => error ? rejectPackage(error) : resolvePackage());
   });
-  validateZipEntries(assetPath, [
+  const entries = new Set(
+    new AdmZip(assetPath).getEntries().map((entry) => entry.entryName.replaceAll('\\', '/'))
+  );
+  for (const requiredEntry of [
     'manifest.json',
     'index.html',
     'assets/index.js',
     'assets/index.css'
-  ]);
+  ]) {
+    if (!entries.has(requiredEntry)) {
+      throw new Error(`Package archive is missing required entry: ${requiredEntry}`);
+    }
+  }
   return { outDir, assetName, assetPath };
 }
 

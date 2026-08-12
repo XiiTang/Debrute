@@ -11,7 +11,6 @@ use super::spec::{CliCommandPolicy, CliCommandSpec, CliOptionKind, command_spec,
 pub struct ParsedCliCommand {
     pub command: &'static str,
     pub policy: CliCommandPolicy,
-    pub command_path: Vec<String>,
     pub positional: Vec<String>,
     pub options: BTreeMap<String, String>,
     pub root: Option<PathBuf>,
@@ -97,7 +96,6 @@ pub fn parse_cli_args(argv: &[String]) -> Result<ParsedCliCommand, CliParseError
     Ok(ParsedCliCommand {
         command: spec.command,
         policy: spec.policy,
-        command_path: spec.path.iter().map(|value| (*value).to_owned()).collect(),
         positional,
         options,
         root,
@@ -139,7 +137,6 @@ fn parse_values(
 ) -> Result<(Vec<String>, BTreeMap<String, String>), CliParseError> {
     let mut positional = Vec::new();
     let mut options = BTreeMap::new();
-    let mut repeated = BTreeMap::<String, Vec<String>>::new();
     let mut index = 0;
     while index < arguments.len() {
         let argument = &arguments[index];
@@ -179,14 +176,7 @@ fn parse_values(
                     spec.command,
                 ));
             }
-            if option.kind == CliOptionKind::Repeatable {
-                let values = repeated.entry(key.to_owned()).or_default();
-                values.push(value.clone());
-                options.insert(
-                    key.to_owned(),
-                    serde_json::to_string(values).expect("string arrays always serialize"),
-                );
-            } else if options.insert(key.to_owned(), value.clone()).is_some() {
+            if options.insert(key.to_owned(), value.clone()).is_some() {
                 return Err(duplicate_option(spec.command, key));
             }
             index += 2;
