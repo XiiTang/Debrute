@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::login::{StartAtLoginSetting, StartAtLoginSnapshot};
 use crate::models::ModelCatalog;
 use crate::photoshop::PhotoshopStateView;
 
@@ -16,9 +17,16 @@ use super::{
 
 pub type GlobalRuntimeObserver = Arc<dyn Fn(GlobalRuntimeEvent) + Send + Sync>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSettingsView {
+    pub start_at_login: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebruteGlobalSettingsView {
+    pub runtime: RuntimeSettingsView,
     pub workbench: WorkbenchSettings,
     pub canvas: super::store::CanvasSettings,
     pub chrome: ChromeSettings,
@@ -44,6 +52,7 @@ pub enum GlobalRuntimeChange {
 pub struct GlobalRuntimeService {
     store: Arc<GlobalConfigStore>,
     catalog: Arc<ModelCatalog>,
+    start_at_login: Arc<dyn StartAtLoginSetting>,
     commit: Mutex<()>,
     delivery: Mutex<()>,
     events: Mutex<GlobalEventState>,
@@ -54,6 +63,7 @@ struct GlobalEventState {
     revision: u64,
     observer: Option<GlobalRuntimeObserver>,
     product: Option<Value>,
+    start_at_login: StartAtLoginSnapshot,
 }
 
 impl GlobalRuntimeService {
@@ -61,14 +71,34 @@ impl GlobalRuntimeService {
     pub fn new(
         store: impl Into<Arc<GlobalConfigStore>>,
         catalog: impl Into<Arc<ModelCatalog>>,
-    ) -> Self {
-        Self {
+        start_at_login: Arc<dyn StartAtLoginSetting>,
+    ) -> Arc<Self> {
+        let start_at_login_snapshot = start_at_login.snapshot();
+        let service = Arc::new(Self {
             store: store.into(),
             catalog: catalog.into(),
+            start_at_login,
             commit: Mutex::new(()),
             delivery: Mutex::new(()),
-            events: Mutex::new(GlobalEventState::default()),
-        }
+            events: Mutex::new(GlobalEventState {
+                start_at_login: start_at_login_snapshot,
+                ..GlobalEventState::default()
+            }),
+        });
+        let weak_service = Arc::downgrade(&service);
+        assert!(
+            service
+                .start_at_login
+                .install_observer(Arc::new(move |snapshot| {
+                    let Some(service) = weak_service.upgrade() else {
+                        return;
+                    };
+                    if let Err(error) = service.publish_start_at_login_changed(snapshot) {
+                        eprintln!("Start at Login settings event could not be published: {error}");
+                    }
+                },))
+        );
+        service
     }
 
     /// Publishes the Runtime-owned Product projection through the same ordered
@@ -131,7 +161,7 @@ impl GlobalRuntimeService {
         self.publish(change);
     }
 
-    /// Returns the complete persisted Global Settings view without probing
+    /// Returns the complete Runtime-owned Global Settings view without probing
     /// optional Photoshop plugin support.
     ///
     /// # Errors
@@ -140,7 +170,7 @@ impl GlobalRuntimeService {
     pub fn settings_get(&self) -> Result<DebruteGlobalSettingsView, GlobalSettingsError> {
         let _commit = self.lock_commit();
         let projection = self.store.read_view(&self.catalog)?;
-        Ok(complete_view(projection))
+        Ok(complete_view(projection, self.current_start_at_login()))
     }
 
     /// Returns one exact configured Model API key without changing or
@@ -164,11 +194,17 @@ impl GlobalRuntimeService {
         &self,
         input: &GlobalSettingsMutation,
     ) -> Result<DebruteGlobalSettingsView, GlobalSettingsError> {
+        if let GlobalSettingsMutation::SetStartAtLogin { enabled } = input {
+            self.start_at_login
+                .set_enabled(*enabled)
+                .map_err(|error| GlobalSettingsError::Native(error.to_string()))?;
+            return self.settings_get();
+        }
         let _delivery = self.lock_delivery();
         let (view, change) = {
             let _commit = self.lock_commit();
             let result = self.store.mutate(input, &self.catalog)?;
-            let view = complete_view(result.view);
+            let view = complete_view(result.view, self.current_start_at_login());
             let change = result
                 .changed
                 .then(|| GlobalRuntimeChange::GlobalSettingsChanged(Box::new(view.clone())));
@@ -178,6 +214,20 @@ impl GlobalRuntimeService {
             self.publish(change);
         }
         Ok(view)
+    }
+
+    fn publish_start_at_login_changed(
+        &self,
+        snapshot: StartAtLoginSnapshot,
+    ) -> Result<(), GlobalSettingsError> {
+        let _delivery = self.lock_delivery();
+        let view = {
+            let _commit = self.lock_commit();
+            self.lock_events().start_at_login = snapshot;
+            complete_view(self.store.read_view(&self.catalog)?, snapshot)
+        };
+        self.publish(GlobalRuntimeChange::GlobalSettingsChanged(Box::new(view)));
+        Ok(())
     }
 
     /// Updates the recent Project MRU and its revisioned projections.
@@ -267,10 +317,20 @@ impl GlobalRuntimeService {
             .lock()
             .expect("Global event state lock poisoned")
     }
+
+    fn current_start_at_login(&self) -> StartAtLoginSnapshot {
+        self.lock_events().start_at_login
+    }
 }
 
-fn complete_view(projection: GlobalSettingsView) -> DebruteGlobalSettingsView {
+fn complete_view(
+    projection: GlobalSettingsView,
+    start_at_login: StartAtLoginSnapshot,
+) -> DebruteGlobalSettingsView {
     DebruteGlobalSettingsView {
+        runtime: RuntimeSettingsView {
+            start_at_login: start_at_login.enabled,
+        },
         workbench: projection.workbench,
         canvas: projection.canvas,
         chrome: projection.chrome,

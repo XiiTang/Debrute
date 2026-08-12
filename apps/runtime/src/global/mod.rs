@@ -10,7 +10,7 @@ pub(crate) use root_state::{root_cache_directory, root_state_directory};
 pub use models::{AudioModelSettingRecord, ModelSettingRecord, ModelSettingsView};
 pub use runtime::{
     DebruteGlobalSettingsView, GlobalRuntimeChange, GlobalRuntimeEvent, GlobalRuntimeObserver,
-    GlobalRuntimeService,
+    GlobalRuntimeService, RuntimeSettingsView,
 };
 pub use store::{
     CanvasFontId, CanvasSettings, CanvasTextAppearance, ChromeSettings, FeedbackCatalogEntry,

@@ -91,6 +91,7 @@ function settingsFixture(
   themePreference: 'dark' | 'light'
 ): DebruteGlobalSettingsView {
   return {
+    runtime: { startAtLogin: false },
     workbench: { locale, themePreference },
     canvas: {
       hierarchyEdgesVisible: true,

@@ -19,6 +19,7 @@ use debrute_runtime::control::{
 use debrute_runtime::{
     cli::RuntimeCliService,
     control::RuntimeControlState,
+    login::MemoryStartAtLoginSetting,
     photoshop::{PhotoshopIntegrationStatus, PhotoshopMimeType, PluginPhotoshopMessage},
     workbench::{
         ProductUpdateInitiator, RuntimeCliHttpService, RuntimeHttpServiceError,
@@ -343,6 +344,46 @@ fn model_api_key_reveal_is_authenticated_non_cacheable_and_not_published() {
         json!({ "apiKey": exact_api_key })
     );
     assert_eq!(runtime.services().global().revision(), revision);
+}
+
+#[test]
+fn start_at_login_mutation_publishes_the_native_state_through_global_settings() {
+    let runtime = TestRuntime::start();
+    let client = test_client();
+    let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
+    assert!(
+        !runtime
+            .services()
+            .global()
+            .settings_get()
+            .unwrap()
+            .runtime
+            .start_at_login
+    );
+
+    let response = client
+        .post(format!(
+            "{}/api/settings/global/mutations",
+            runtime.origin()
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, credential)
+        .json(&json!({ "operation": "set-start-at-login", "enabled": true }))
+        .send()
+        .expect("Start at Login mutation should complete");
+
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        events.next_of_type("globalSettings.changed")["settings"]["runtime"]["startAtLogin"],
+        true
+    );
+    assert!(
+        !runtime
+            .root
+            .join("home/config/global_settings.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -1926,6 +1967,7 @@ impl TestRuntime {
         let services = WorkbenchRuntimeServices::compose_for_integration_tests(
             root.join("home"),
             Arc::clone(&state),
+            Arc::new(MemoryStartAtLoginSetting::new(false)),
         )
         .expect("Runtime services should compose");
         let cli: Arc<dyn RuntimeCliHttpService> = Arc::new(RuntimeCliService::new(

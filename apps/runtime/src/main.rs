@@ -36,7 +36,7 @@ use debrute_runtime::{
         },
         serve_control_connection,
     },
-    login::require_stable_runtime_entrypoint,
+    login::{PlatformStartAtLoginSetting, StartAtLoginSetting, require_stable_runtime_entrypoint},
     product::{
         CommitPhase, CommitPlatform, DesktopHostRegistration, InstalledProductLayout,
         NativeUpdatePlatform, ProductCommitCoordinator, ProductCommitError,
@@ -815,18 +815,22 @@ fn serve_owned_runtime(
     endpoint: &PlatformControlEndpoint,
     stable_runtime_entrypoint: &std::path::Path,
 ) -> Result<(), Box<dyn Error>> {
+    let start_at_login: Arc<dyn StartAtLoginSetting> =
+        Arc::new(PlatformStartAtLoginSetting::new(stable_runtime_entrypoint)?);
     let stop_accepting = Arc::new(AtomicBool::new(false));
     let service_state = Arc::clone(state);
     let service_stop_accepting = Arc::clone(&stop_accepting);
     let service_endpoint = endpoint.clone();
     let service_stable_runtime_entrypoint = stable_runtime_entrypoint.to_owned();
-    let result = tray::run(state, stable_runtime_entrypoint, move || {
+    let service_start_at_login = Arc::clone(&start_at_login);
+    let result = tray::run(state, start_at_login, move || {
         run_runtime_services(
             owner,
             &service_state,
             &service_stop_accepting,
             &service_endpoint,
             &service_stable_runtime_entrypoint,
+            service_start_at_login,
         )
     });
     state.close_connections();
@@ -851,6 +855,7 @@ fn run_runtime_services(
     stop_accepting: &Arc<AtomicBool>,
     endpoint: &PlatformControlEndpoint,
     stable_runtime_entrypoint: &std::path::Path,
+    start_at_login: Arc<dyn StartAtLoginSetting>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let (endpoint_failure_sender, endpoint_failure_receiver) = mpsc::sync_channel(1);
     let accept_worker = spawn_control_accept_worker(
@@ -883,8 +888,9 @@ fn run_runtime_services(
             (None, None) => None,
             _ => unreachable!("Product store and active Product directory are created together"),
         };
-        let runtime_services = WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state))
-            .map_err(|error| io::Error::other(error.message))?;
+        let runtime_services =
+            WorkbenchRuntimeServices::compose(&debrute_home, Arc::clone(state), start_at_login)
+                .map_err(|error| io::Error::other(error.message))?;
         shutdown_services = Some(Arc::clone(&runtime_services));
         let assets_directory = std::env::var_os(WEB_ASSETS_DIRECTORY_ENV)
             .map(PathBuf::from)

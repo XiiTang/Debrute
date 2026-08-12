@@ -227,6 +227,40 @@ describe('useWorkbenchSettingsController', { tags: ['settings'] }, () => {
     await rendered.unmount();
   });
 
+  it('keeps native Start at Login accepted-only until the ordered event arrives', async () => {
+    const save = deferred<{ ok: true }>();
+    const mutateGlobalSettings = vi.fn(() => save.promise);
+    const rendered = await renderController(mutateGlobalSettings);
+
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = rendered.current.actions.mutateGlobalSettings({
+        operation: 'set-start-at-login',
+        enabled: true
+      });
+      await Promise.resolve();
+    });
+    expect(mutateGlobalSettings).toHaveBeenCalledWith({
+      operation: 'set-start-at-login',
+      enabled: true
+    });
+    expect(confirmedSettings(rendered.current).runtime.startAtLogin).toBe(false);
+
+    await act(async () => {
+      const state = rendered.projection.getState();
+      if (state.status === 'uninitialized') throw new Error('Expected initialized Global projection.');
+      rendered.projection.acceptEvent({
+        type: 'globalSettings.changed',
+        revision: state.revision + 1,
+        settings: { ...settingsFixture(), runtime: { startAtLogin: true } }
+      });
+      save.resolve({ ok: true });
+      await pending;
+    });
+    expect(confirmedSettings(rendered.current).runtime.startAtLogin).toBe(true);
+    await rendered.unmount();
+  });
+
   it('exposes the ordered Photoshop resource to Settings without local connection state', async () => {
     const rendered = await renderController(vi.fn(async () => ({ ok: true as const })));
 
@@ -332,6 +366,13 @@ function expectCanvasFontSize(controller: WorkbenchSettingsController, fontSizeP
   }
 }
 
+function confirmedSettings(controller: WorkbenchSettingsController): DebruteGlobalSettingsView {
+  if (controller.globalSettings.status !== 'ready') {
+    throw new Error('Expected ready Global Settings.');
+  }
+  return controller.globalSettings.value;
+}
+
 function savedFontSizes(save: ReturnType<typeof vi.fn>): number[] {
   return save.mock.calls.map(([input]) => (
     (input as { textAppearance: CanvasTextAppearance }).textAppearance.fontSizePx
@@ -349,6 +390,7 @@ function settingsFixture(
   appearance: CanvasTextAppearance = appearanceFixture(12)
 ): DebruteGlobalSettingsView {
   return {
+    runtime: { startAtLogin: false },
     workbench: { locale: 'en', themePreference: 'dark' },
     canvas: { hierarchyEdgesVisible: true, textAppearance: appearance },
     chrome: { recentProjectRoots: [] },

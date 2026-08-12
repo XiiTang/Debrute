@@ -1274,6 +1274,7 @@ function productStateFixture(): DebruteProductState {
 
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
+    runtime: { startAtLogin: false },
     workbench: { locale: 'en', themePreference: 'dark' },
     canvas: {
       hierarchyEdgesVisible: true,

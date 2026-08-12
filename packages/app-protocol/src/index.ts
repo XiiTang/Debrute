@@ -333,6 +333,10 @@ interface DebruteGlobalWorkbenchSettings {
   themePreference: WorkbenchThemePreference;
 }
 
+interface DebruteGlobalRuntimeSettings {
+  startAtLogin: boolean;
+}
+
 interface DebruteGlobalCanvasSettings {
   textAppearance: CanvasTextAppearance;
   hierarchyEdgesVisible: boolean;
@@ -359,6 +363,7 @@ export interface DebruteGlobalFeedbackSettings {
 }
 
 export interface DebruteGlobalSettingsView {
+  runtime: DebruteGlobalRuntimeSettings;
   workbench: DebruteGlobalWorkbenchSettings;
   canvas: DebruteGlobalCanvasSettings;
   chrome: DebruteGlobalChromeSettings;
@@ -373,6 +378,7 @@ export interface DebruteGlobalSettingsView {
 
 export type MutateDebruteGlobalSettingsInput =
   | { operation: 'set-locale'; locale: WorkbenchLocale }
+  | { operation: 'set-start-at-login'; enabled: boolean }
   | { operation: 'set-theme-preference'; themePreference: WorkbenchThemePreference }
   | { operation: 'set-canvas-text-appearance'; textAppearance: CanvasTextAppearance }
   | { operation: 'set-hierarchy-edges-visible'; hierarchyEdgesVisible: boolean }

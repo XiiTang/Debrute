@@ -174,6 +174,10 @@
   font-weight: 500;
 }
 
+.settings-start-at-login {
+  gap: var(--db-space-2);
+}
+
 .settings-group__header {
   min-width: 0;
   display: flex;

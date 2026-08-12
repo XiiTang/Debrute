@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     error::Error,
     io,
-    path::Path,
     sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
@@ -11,10 +10,7 @@ use std::{
 use debrute_runtime::control::{
     ActivationIntent, ProjectFrontend, RuntimeControlState, RuntimeStatus, WorkbenchRoute,
 };
-#[cfg(target_os = "macos")]
-use debrute_runtime::login::MacOsLoginItem as PlatformLoginItem;
-#[cfg(target_os = "windows")]
-use debrute_runtime::login::WindowsLoginItem as PlatformLoginItem;
+use debrute_runtime::login::StartAtLoginSetting;
 use debrute_runtime::native_clipboard::write_text_to_system_clipboard;
 use tao::{
     event::{Event, StartCause},
@@ -39,7 +35,7 @@ const QUIT_ID: &str = "quit-debrute";
 
 pub fn run(
     state: &Arc<RuntimeControlState>,
-    stable_runtime_entrypoint: &Path,
+    start_at_login: Arc<dyn StartAtLoginSetting>,
     service: impl FnOnce() -> ServiceResult + Send + 'static,
 ) -> ServiceResult {
     let mut event_loop = EventLoopBuilder::<RuntimeEvent>::with_user_event().build();
@@ -83,7 +79,7 @@ pub fn run(
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100));
         match event {
             Event::NewEvents(StartCause::Init) => {
-                match RuntimeTray::new(stable_runtime_entrypoint) {
+                match RuntimeTray::new(Arc::clone(&start_at_login)) {
                     Ok(tray) => {
                         application.tray = Some(tray);
                         send_tray_result(&mut tray_ready_sender, Ok(()));
@@ -211,7 +207,8 @@ struct RuntimeTray {
     icon: TrayIcon,
     start_at_login: CheckMenuItem,
     actions: HashMap<String, TrayAction>,
-    login_item: PlatformLoginItem,
+    start_at_login_setting: Arc<dyn StartAtLoginSetting>,
+    last_start_at_login_revision: u64,
     last_confirmed_start_at_login: bool,
     start_at_login_label: String,
     last_status: RuntimeStatus,
@@ -220,13 +217,12 @@ struct RuntimeTray {
 }
 
 impl RuntimeTray {
-    fn new(stable_runtime_entrypoint: &std::path::Path) -> Result<Self, Box<dyn Error>> {
-        let login_item = runtime_login_item(stable_runtime_entrypoint)?;
-        let login_enabled = login_item.is_enabled()?;
+    fn new(start_at_login_setting: Arc<dyn StartAtLoginSetting>) -> Result<Self, Box<dyn Error>> {
+        let login = start_at_login_setting.snapshot();
         let built_menu = build_runtime_menu(
             RuntimeStatus::Starting,
             &[],
-            login_enabled,
+            login.enabled,
             "Start at Login",
         )?;
         #[cfg(target_os = "macos")]
@@ -250,8 +246,9 @@ impl RuntimeTray {
             icon,
             start_at_login: built_menu.start_at_login,
             actions: built_menu.actions,
-            login_item,
-            last_confirmed_start_at_login: login_enabled,
+            start_at_login_setting,
+            last_start_at_login_revision: login.revision,
+            last_confirmed_start_at_login: login.enabled,
             start_at_login_label: "Start at Login".to_owned(),
             last_status: RuntimeStatus::Starting,
             last_recent_projects_revision: None,
@@ -264,8 +261,15 @@ impl RuntimeTray {
         status: RuntimeStatus,
         recent_projects: Option<(u64, Vec<String>)>,
     ) -> Result<(), Box<dyn Error>> {
-        if self.last_status == status && recent_projects.is_none() {
+        let login = self.start_at_login_setting.snapshot();
+        let login_changed = login.revision != self.last_start_at_login_revision;
+        if self.last_status == status && recent_projects.is_none() && !login_changed {
             return Ok(());
+        }
+        if login_changed {
+            self.last_start_at_login_revision = login.revision;
+            self.last_confirmed_start_at_login = login.enabled;
+            "Start at Login".clone_into(&mut self.start_at_login_label);
         }
         let (recent_projects_revision, recent_projects) = recent_projects.map_or_else(
             || {
@@ -293,15 +297,14 @@ impl RuntimeTray {
 
     fn toggle_start_at_login(&mut self) {
         let requested = self.start_at_login.is_checked();
-        let login_item = &self.login_item;
-        match commit_start_at_login_request(
-            &mut self.last_confirmed_start_at_login,
-            requested,
-            |enabled| login_item.set_enabled(enabled),
-        ) {
-            Ok(()) => {
+        match self.start_at_login_setting.set_enabled(requested) {
+            Ok(result) => {
+                self.last_start_at_login_revision = result.snapshot.revision;
+                self.last_confirmed_start_at_login = result.snapshot.enabled;
                 "Start at Login".clone_into(&mut self.start_at_login_label);
                 self.start_at_login.set_text(&self.start_at_login_label);
+                self.start_at_login
+                    .set_checked(self.last_confirmed_start_at_login);
             }
             Err(error) => {
                 self.start_at_login
@@ -498,42 +501,11 @@ fn runtime_status_label(status: RuntimeStatus) -> &'static str {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn runtime_login_item(
-    stable_runtime: &std::path::Path,
-) -> Result<PlatformLoginItem, Box<dyn Error>> {
-    let home = std::env::var_os("HOME").ok_or_else(|| io::Error::other("HOME is unavailable"))?;
-    Ok(PlatformLoginItem::new(home, stable_runtime))
-}
-
-#[cfg(target_os = "windows")]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "both platforms share one fallible login-item construction contract"
-)]
-fn runtime_login_item(
-    stable_runtime: &std::path::Path,
-) -> Result<PlatformLoginItem, Box<dyn Error>> {
-    Ok(PlatformLoginItem::new(stable_runtime))
-}
-
-fn commit_start_at_login_request<E>(
-    confirmed: &mut bool,
-    requested: bool,
-    apply: impl FnOnce(bool) -> Result<(), E>,
-) -> Result<(), E> {
-    apply(requested)?;
-    *confirmed = requested;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use debrute_runtime::control::{ActivationIntent, ProjectFrontend, WorkbenchRoute};
 
-    use super::{
-        TrayAction, commit_start_at_login_request, escape_menu_label, tray_menu_projection,
-    };
+    use super::{TrayAction, escape_menu_label, tray_menu_projection};
 
     #[test]
     fn recent_projects_are_projected_once_into_three_explicit_action_groups() {
@@ -593,30 +565,5 @@ mod tests {
     #[test]
     fn recent_project_paths_escape_native_menu_mnemonics_without_changing_actions() {
         assert_eq!(escape_menu_label("/projects/R&D"), "/projects/R&&D");
-    }
-
-    #[test]
-    fn start_at_login_uses_the_post_click_state_and_confirms_success() {
-        let mut confirmed = false;
-        let mut written = None;
-
-        commit_start_at_login_request(&mut confirmed, true, |requested| {
-            written = Some(requested);
-            Ok::<(), ()>(())
-        })
-        .expect("registration write should succeed");
-
-        assert_eq!(written, Some(true));
-        assert!(confirmed);
-    }
-
-    #[test]
-    fn failed_start_at_login_write_preserves_the_last_confirmed_state() {
-        let mut confirmed = true;
-
-        let result = commit_start_at_login_request(&mut confirmed, false, |_| Err("denied"));
-
-        assert_eq!(result, Err("denied"));
-        assert!(confirmed);
     }
 }
