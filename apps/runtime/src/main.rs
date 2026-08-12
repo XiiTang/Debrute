@@ -41,9 +41,9 @@ use debrute_runtime::{
         CommitPhase, CommitPlatform, DesktopHostRegistration, InstalledProductLayout,
         NativeUpdatePlatform, ProductCommitCoordinator, ProductCommitError,
         ProductInstallationCoordinator, ProductProjectionManager, ProductRemovalCoordinator,
-        ProductStore, ProductUpdateFailureStage, ReleaseArchitecture, ReleasePlatform,
-        ResumeIntent, RuntimeProductService, finalize_product_removal,
-        launch_product_update_failure, read_desktop_host_registration,
+        ProductStore, ProductUpdateFailureStage, ReleaseArchitecture, ResumeIntent,
+        RuntimeProductService, finalize_product_removal, launch_product_update_failure,
+        read_desktop_host_registration,
     },
     project::initialize_raster_preview_engine,
     workbench::{
@@ -728,16 +728,6 @@ fn current_release_architecture() -> io::Result<ReleaseArchitecture> {
     }
 }
 
-#[cfg(target_os = "macos")]
-const fn current_release_platform() -> ReleasePlatform {
-    ReleasePlatform::Macos
-}
-
-#[cfg(target_os = "windows")]
-const fn current_release_platform() -> ReleasePlatform {
-    ReleasePlatform::Windows
-}
-
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn active_product_directory(debrute_home: &std::path::Path) -> Option<PathBuf> {
     if let Some(configured) = std::env::var_os("DEBRUTE_ACTIVE_PRODUCT_DIR").map(PathBuf::from)
@@ -942,9 +932,7 @@ fn run_runtime_services(
             }
             let product_service = RuntimeProductService::official(
                 running_version,
-                current_release_platform(),
-                current_release_architecture()?,
-                debrute_home.clone(),
+                installed_layout,
                 Arc::clone(store),
                 native.clone(),
                 Arc::clone(state),

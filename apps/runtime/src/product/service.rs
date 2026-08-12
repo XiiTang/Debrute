@@ -22,9 +22,9 @@ use crate::{
 };
 
 use super::{
-    CommitPhase, NativeUpdatePlatform, ProductCommitCoordinator, ProductStore,
-    ProductUpdateFailureStage, ReleaseArchitecture, ReleaseAssetKind, ReleasePlatform,
-    ResumeIntent, TrustedReleaseManifest, extract_product_archive,
+    CommitPhase, CommitPlatform, InstalledProductLayout, NativeUpdatePlatform,
+    ProductCommitCoordinator, ProductStore, ProductUpdateFailureStage, ReleaseAssetKind,
+    ReleasePlatform, ResumeIntent, TrustedReleaseManifest, extract_product_archive,
     release::{GitHubProductReleaseSource, ProductReleaseSource},
 };
 
@@ -32,9 +32,7 @@ const AUTOMATIC_DISCOVERY_INTERVAL: Duration = Duration::from_hours(24);
 
 pub struct RuntimeProductService {
     current_version: String,
-    platform: ReleasePlatform,
-    architecture: ReleaseArchitecture,
-    debrute_home: PathBuf,
+    layout: InstalledProductLayout,
     store: Arc<ProductStore>,
     native: NativeUpdatePlatform,
     runtime: Arc<RuntimeControlState>,
@@ -141,20 +139,19 @@ impl RuntimeProductService {
     ///
     /// Returns [`RuntimeHttpServiceError`] if the fixed official release client
     /// cannot be initialized.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the single Runtime composition root keeps Product identity, storage, platform, Runtime, and Global authorities explicit"
-    )]
     pub fn official(
         current_version: String,
-        platform: ReleasePlatform,
-        architecture: ReleaseArchitecture,
-        debrute_home: PathBuf,
+        layout: InstalledProductLayout,
         store: Arc<ProductStore>,
         native: NativeUpdatePlatform,
         runtime: Arc<RuntimeControlState>,
         global: Arc<GlobalRuntimeService>,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
+        assert_eq!(
+            layout.platform(),
+            store.platform(),
+            "Installed Product layout platform must match Product store platform"
+        );
         let source = Arc::new(GitHubProductReleaseSource::new().map_err(|error| {
             RuntimeHttpServiceError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -198,9 +195,7 @@ impl RuntimeProductService {
                 available: None,
             })),
             current_version,
-            platform,
-            architecture,
-            debrute_home,
+            layout,
             store,
             native,
             runtime,
@@ -217,8 +212,7 @@ impl RuntimeProductService {
     fn product_state(&self) -> Value {
         product_state_value(
             &self.current_version,
-            self.platform,
-            &self.debrute_home,
+            &self.layout,
             &self
                 .projection
                 .lock()
@@ -251,6 +245,8 @@ impl RuntimeProductService {
             self.publish_state();
         }
         let result = self.source.latest();
+        let platform = release_platform(self.store.platform());
+        let architecture = self.store.architecture();
         let mut projection = self
             .projection
             .lock()
@@ -262,16 +258,10 @@ impl RuntimeProductService {
                 let available = Version::parse(release.version());
                 match (current, available) {
                     (Ok(current), Ok(available)) if available > current => {
-                        let desktop = release.asset_for(
-                            ReleaseAssetKind::Desktop,
-                            self.platform,
-                            self.architecture,
-                        );
-                        let product = release.asset_for(
-                            ReleaseAssetKind::Product,
-                            self.platform,
-                            self.architecture,
-                        );
+                        let desktop =
+                            release.asset_for(ReleaseAssetKind::Desktop, platform, architecture);
+                        let product =
+                            release.asset_for(ReleaseAssetKind::Product, platform, architecture);
                         if desktop.is_none() || product.is_none() {
                             projection.available = None;
                             projection.update = UpdateState::DiscoveryFailed {
@@ -413,6 +403,8 @@ impl RuntimeProductService {
         &self,
         release: &TrustedReleaseManifest,
     ) -> Result<(PathBuf, super::StagedDesktopAsset), RuntimeHttpServiceError> {
+        let platform = release_platform(self.store.platform());
+        let architecture = self.store.architecture();
         let download_directory = self
             .store
             .root()
@@ -420,10 +412,10 @@ impl RuntimeProductService {
             .join(Uuid::new_v4().to_string());
         let result = (|| {
             let desktop_asset = release
-                .asset_for(ReleaseAssetKind::Desktop, self.platform, self.architecture)
+                .asset_for(ReleaseAssetKind::Desktop, platform, architecture)
                 .ok_or_else(|| update_error("Matching Desktop asset is missing."))?;
             let product_asset = release
-                .asset_for(ReleaseAssetKind::Product, self.platform, self.architecture)
+                .asset_for(ReleaseAssetKind::Product, platform, architecture)
                 .ok_or_else(|| update_error("Matching Product archive is missing."))?;
             let downloaded_desktop = self
                 .source
@@ -435,21 +427,11 @@ impl RuntimeProductService {
                 .map_err(|error| update_error(&error.to_string()))?;
             let staged_desktop = self
                 .store
-                .stage_desktop_asset(
-                    release,
-                    self.platform,
-                    self.architecture,
-                    &downloaded_desktop,
-                )
+                .stage_desktop_asset(release, platform, architecture, &downloaded_desktop)
                 .map_err(|error| update_error(&error.to_string()))?;
             let staged_product = self
                 .store
-                .stage_product_archive(
-                    release,
-                    self.platform,
-                    self.architecture,
-                    &downloaded_product,
-                )
+                .stage_product_archive(release, platform, architecture, &downloaded_product)
                 .map_err(|error| update_error(&error.to_string()))?;
             let extracted =
                 extract_product_archive(&staged_product, &self.store.root().join("extracted"))
@@ -531,8 +513,7 @@ impl RuntimeProductService {
         let global = Arc::clone(&self.global);
         let cancel_projection = Arc::clone(&self.projection);
         let cancel_current_version = self.current_version.clone();
-        let cancel_platform = self.platform;
-        let cancel_debrute_home = self.debrute_home.clone();
+        let cancel_layout = self.layout.clone();
         let cancel_update_version = target_version.clone();
         let accepted = self.runtime.request_product_update(
             &transition_id,
@@ -567,8 +548,7 @@ impl RuntimeProductService {
                 drop(projection);
                 let published_state = product_state_value(
                     &cancel_current_version,
-                    cancel_platform,
-                    &cancel_debrute_home,
+                    &cancel_layout,
                     &cancel_projection
                         .lock()
                         .expect("Product projection lock poisoned")
@@ -750,28 +730,31 @@ impl RuntimeProductHttpService for RuntimeProductService {
 
 fn product_state_value(
     current_version: &str,
-    platform: ReleasePlatform,
-    debrute_home: &std::path::Path,
+    layout: &InstalledProductLayout,
     update: &UpdateState,
 ) -> Value {
-    let user_home = debrute_home.parent().unwrap_or(debrute_home);
-    let cli_path = if platform == ReleasePlatform::Windows {
-        debrute_home.join("bin/debrute.cmd")
-    } else {
-        debrute_home.join("bin/debrute")
-    };
     json!({
         "productVersion": current_version,
-        "platform": if platform == ReleasePlatform::Windows { "win32" } else { "darwin" },
+        "platform": match layout.platform() {
+            CommitPlatform::Macos => "darwin",
+            CommitPlatform::Windows => "win32",
+        },
         "cli": {
             "status": "ready",
             "version": current_version,
-            "path": cli_path,
+            "path": layout.cli_path(),
             "skillsVersion": current_version,
-            "skillsRoot": user_home.join(".agents/skills")
+            "skillsRoot": layout.skills_directory()
         },
         "update": update
     })
+}
+
+const fn release_platform(platform: CommitPlatform) -> ReleasePlatform {
+    match platform {
+        CommitPlatform::Macos => ReleasePlatform::Macos,
+        CommitPlatform::Windows => ReleasePlatform::Windows,
+    }
 }
 
 fn require_empty_object(input: &Value) -> Result<(), RuntimeHttpServiceError> {
@@ -797,6 +780,7 @@ fn update_error(message: &str) -> RuntimeHttpServiceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::product::{CommitPlatform, InstalledProductLayout};
 
     #[test]
     fn update_initiator_freezes_the_authorized_resume_surface() {
@@ -826,5 +810,50 @@ mod tests {
         assert_eq!(preparing["stage"], "closing_new_work");
         assert_eq!(committing["type"], "committing");
         assert_eq!(committing["stage"], "installing_and_selecting");
+    }
+
+    #[test]
+    fn product_state_uses_exact_installed_layout_paths() {
+        let cases = [
+            (
+                InstalledProductLayout::for_roots(
+                    CommitPlatform::Macos,
+                    PathBuf::from("/Users/alice"),
+                    None,
+                )
+                .unwrap(),
+                "darwin",
+                PathBuf::from("/Users/alice/.debrute/bin/debrute"),
+                PathBuf::from("/Users/alice/.agents/skills"),
+            ),
+            (
+                InstalledProductLayout::for_roots(
+                    CommitPlatform::Windows,
+                    PathBuf::from(r"C:\Users\Alice"),
+                    Some(PathBuf::from(r"C:\Users\Alice\AppData\Local")),
+                )
+                .unwrap(),
+                "win32",
+                PathBuf::from(r"C:\Users\Alice/.debrute/bin/debrute.cmd"),
+                PathBuf::from(r"C:\Users\Alice/.agents/skills"),
+            ),
+        ];
+
+        for (layout, expected_platform, expected_cli, expected_skills) in cases {
+            let state = product_state_value(
+                "0.0.4",
+                &layout,
+                &UpdateState::Unknown {
+                    current_version: "0.0.4".to_owned(),
+                },
+            );
+
+            assert_eq!(state.pointer("/platform"), Some(&json!(expected_platform)));
+            assert_eq!(state.pointer("/cli/path"), Some(&json!(expected_cli)));
+            assert_eq!(
+                state.pointer("/cli/skillsRoot"),
+                Some(&json!(expected_skills))
+            );
+        }
     }
 }

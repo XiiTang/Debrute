@@ -3,9 +3,9 @@ import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  productInstallerTargets,
   expectedProductInstallerAssets,
   expectedProductReleaseAssets,
+  productInstallerAssetName,
   productReleaseAssetName,
   productReleaseTargets,
   updateManifestName,
@@ -53,12 +53,12 @@ export async function generateUpdateManifest(input) {
     throw new Error('DEBRUTE_UPDATE_SIGNING_PRIVATE_KEY_PEM is required.');
   }
   const releaseTag = `v${version}`;
-  const desktopAssets = await Promise.all(productInstallerTargets.map(async (target) => {
-    const name = `debrute-installer-${version}-${target.platform}-${target.arch}.${target.extension}`;
+  const desktopAssets = await Promise.all(productReleaseTargets.map(async (target) => {
+    const name = productInstallerAssetName(version, target);
     const bytes = await readFile(join(resolvedReleaseDir, name));
     return {
       kind: 'desktop',
-      platform: target.platform,
+      platform: target.canonicalPlatform,
       arch: target.arch,
       name,
       url: `https://github.com/xiitang/debrute/releases/download/${releaseTag}/${name}`,
@@ -67,11 +67,11 @@ export async function generateUpdateManifest(input) {
     };
   }));
   const productAssets = await Promise.all(productReleaseTargets.map(async (target) => {
-    const name = productReleaseAssetName(version, target.platform, target.arch);
+    const name = productReleaseAssetName(version, target);
     const bytes = await readFile(join(resolvedReleaseDir, name));
     return {
       kind: 'product',
-      platform: target.platform,
+      platform: target.canonicalPlatform,
       arch: target.arch,
       name,
       url: `https://github.com/xiitang/debrute/releases/download/${releaseTag}/${name}`,

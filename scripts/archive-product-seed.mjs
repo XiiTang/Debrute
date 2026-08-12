@@ -2,16 +2,20 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import AdmZip from 'adm-zip';
-import { productReleaseAssetName } from './release-asset-contract.mjs';
+import {
+  productReleaseAssetName,
+  resolveCanonicalProductReleaseTarget,
+  resolveHostProductReleaseTarget
+} from './release-asset-contract.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 export async function archiveProductSeed(input = {}) {
-  const platform = input.platform ?? publicPlatform(process.platform);
   const arch = input.arch ?? process.arch;
-  if (!isSupportedProductTarget(platform, arch)) {
-    throw new Error(`Unsupported Product seed release target: ${platform} ${arch}`);
-  }
+  const target = input.platform === undefined
+    ? resolveHostProductReleaseTarget(process.platform, arch)
+    : resolveCanonicalProductReleaseTarget(input.platform, arch);
+  const platform = target.canonicalPlatform;
   const version = input.version ?? JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version;
   const seed = resolve(input.seed ?? join(root, 'apps/desktop/dist-electron/product-seed'));
   const outDir = resolve(input.outDir ?? join(root, 'apps/desktop/release'));
@@ -20,7 +24,7 @@ export async function archiveProductSeed(input = {}) {
     throw new Error('Product seed identity does not match the requested release archive.');
   }
   await mkdir(outDir, { recursive: true });
-  const assetName = productReleaseAssetName(version, platform, arch);
+  const assetName = productReleaseAssetName(version, target);
   const assetPath = join(outDir, assetName);
   const archive = new AdmZip();
   archive.addLocalFolder(seed);
@@ -37,17 +41,6 @@ export async function archiveProductSeed(input = {}) {
     throw new Error(`Product seed archive inventory mismatch: ${basename(assetPath)}`);
   }
   return { assetName, assetPath };
-}
-
-function isSupportedProductTarget(platform, arch) {
-  return (platform === 'macos' && (arch === 'arm64' || arch === 'x64'))
-    || (platform === 'windows' && arch === 'x64');
-}
-
-function publicPlatform(platform) {
-  if (platform === 'darwin') return 'macos';
-  if (platform === 'win32') return 'windows';
-  return platform;
 }
 
 function valueAfter(flag) {
