@@ -12,7 +12,6 @@ import {
   MAX_CONTROL_FRAME_BYTES,
   type ActivationIntent,
   type ClientMessage,
-  type ClientRole,
   type ControlEvent,
   type ControlRequest,
   type ControlResponse,
@@ -40,7 +39,6 @@ export class RuntimeControlError extends Error {
 }
 
 export interface ConnectRuntimeControlOptions {
-  role: ClientRole;
   productVersion: string;
   readyDeadlineMs: number;
   socketPath?: string;
@@ -56,14 +54,9 @@ export interface RuntimeControlEndpointOptions {
 }
 
 export interface RuntimeControlClient {
-  readonly instanceId: string;
-  readonly status: RuntimeStatus;
-  readonly role: ClientRole;
   waitUntilReady(): Promise<void>;
   inspect(): Promise<ControlResponse>;
   activate(intent: ActivationIntent, preferredDesktopWindowKey?: string): Promise<ControlResponse>;
-  resolveWorkbenchRootUrl(): Promise<ControlResponse>;
-  createCliAuthorization(): Promise<ControlResponse>;
   registerDevWorkbenchOrigin(origin: string): Promise<ControlResponse>;
   createDesktopLaunchTicket(windowKey: string): Promise<ControlResponse>;
   desktopWindowClosed(windowKey: string): Promise<ControlResponse>;
@@ -80,7 +73,6 @@ export async function connectRuntimeControl(
   const socket = createConnection(socketPath);
   const client = new NodeRuntimeControlClient(
     socket,
-    options.role,
     options.productVersion,
     options.readyDeadlineMs
   );
@@ -143,12 +135,9 @@ function readWindowsUserSid(windowsDirectory?: string): string {
 }
 
 class NodeRuntimeControlClient implements RuntimeControlClient {
-  readonly role: ClientRole;
-  instanceId = '';
-  status: RuntimeStatus = 'starting';
-
   private readonly socket: Socket;
   private readonly productVersion: string;
+  private status: RuntimeStatus = 'starting';
   private readonly eventListeners = new Set<(event: ControlEvent) => void>();
   private readonly runtimeLostListeners = new Set<(error: RuntimeControlError) => void>();
   private readonly pending = new Map<string, Deferred<ControlResponse>>();
@@ -166,12 +155,10 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
 
   constructor(
     socket: Socket,
-    role: ClientRole,
     productVersion: string,
     readyDeadlineMs: number
   ) {
     this.socket = socket;
-    this.role = role;
     this.productVersion = productVersion;
     this.readyDeadlineMs = readyDeadlineMs;
     const remaining = Math.max(0, readyDeadlineMs - Date.now());
@@ -190,7 +177,7 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
         protocol: CONTROL_PROTOCOL,
         protocol_version: CONTROL_PROTOCOL_VERSION,
         product_version: this.productVersion,
-        role: this.role
+        role: 'launcher'
       }).catch((error: unknown) => this.fail(asRuntimeLost(error)));
     });
     this.socket.once('timeout', () => {
@@ -248,14 +235,6 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
         ? { preferred_desktop_window_key: preferredDesktopWindowKey }
         : {})
     }, true);
-  }
-
-  async resolveWorkbenchRootUrl(): Promise<ControlResponse> {
-    return await this.request({ command: 'resolve_workbench_root_url' }, true);
-  }
-
-  async createCliAuthorization(): Promise<ControlResponse> {
-    return await this.request({ command: 'create_cli_authorization' }, true);
   }
 
   async registerDevWorkbenchOrigin(origin: string): Promise<ControlResponse> {
@@ -432,7 +411,6 @@ class NodeRuntimeControlClient implements RuntimeControlClient {
       return;
     }
     this.handshakeAccepted = true;
-    this.instanceId = message.instance_id;
     this.status = message.status;
     if (this.status === 'ready') {
       this.readyObserved = true;

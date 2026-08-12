@@ -43,12 +43,9 @@ pub enum CanvasActivityOperation {
     SetDirectoryDisclosure,
     RevealPath,
     RaiseSelection,
-    Create,
-    Rename,
-    Delete,
-    Reorder,
     ResetAutoLayout,
     ResetLayout,
+    ResetCanvas,
     CopyPath,
 }
 
@@ -84,7 +81,7 @@ pub enum ModelRequestKind {
     SoundEffect,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "kebab-case",
@@ -93,7 +90,6 @@ pub enum ModelRequestKind {
 )]
 pub enum ActivityNoticeReport {
     ProjectOpened {},
-    ProjectViewStateReset {},
     ProjectOperationFailed {
         operation: ProjectActivityOperation,
     },
@@ -115,32 +111,20 @@ impl ActivityNoticeReport {
         matches!(
             self,
             Self::ProjectOpened {}
-                | Self::ProjectViewStateReset {}
                 | Self::ProjectOperationFailed { .. }
                 | Self::CanvasOperationFailed { .. }
                 | Self::ExplorerOperationFailed { .. }
         )
     }
-}
 
-impl From<ActivityNoticeReport> for ActivityMessage {
-    fn from(report: ActivityNoticeReport) -> Self {
-        match report {
-            ActivityNoticeReport::ProjectOpened {} => Self::ProjectOpened,
-            ActivityNoticeReport::ProjectViewStateReset {} => Self::ProjectViewStateReset,
-            ActivityNoticeReport::ProjectOperationFailed { operation } => {
-                Self::ProjectOperationFailed { operation }
-            }
-            ActivityNoticeReport::CanvasOperationFailed { operation } => {
-                Self::CanvasOperationFailed { operation }
-            }
-            ActivityNoticeReport::ExplorerOperationFailed { operation } => {
-                Self::ExplorerOperationFailed { operation }
-            }
-            ActivityNoticeReport::WorkbenchOperationFailed { operation } => {
-                Self::WorkbenchOperationFailed { operation }
-            }
-            ActivityNoticeReport::UpdateInstallFailed {} => Self::UpdateInstallFailed,
+    #[must_use]
+    pub const fn source(&self) -> ActivitySource {
+        match self {
+            Self::ProjectOpened {} | Self::ProjectOperationFailed { .. } => ActivitySource::Project,
+            Self::CanvasOperationFailed { .. } => ActivitySource::Canvas,
+            Self::ExplorerOperationFailed { .. } => ActivitySource::Explorer,
+            Self::WorkbenchOperationFailed { .. } => ActivitySource::Workbench,
+            Self::UpdateInstallFailed {} => ActivitySource::Update,
         }
     }
 }
@@ -151,22 +135,7 @@ impl From<ActivityNoticeReport> for ActivityMessage {
     rename_all = "kebab-case",
     rename_all_fields = "camelCase"
 )]
-pub enum ActivityMessage {
-    ProjectOpened,
-    ProjectViewStateReset,
-    ProjectOperationFailed {
-        operation: ProjectActivityOperation,
-    },
-    CanvasOperationFailed {
-        operation: CanvasActivityOperation,
-    },
-    ExplorerOperationFailed {
-        operation: ExplorerActivityOperation,
-    },
-    WorkbenchOperationFailed {
-        operation: WorkbenchActivityOperation,
-    },
-    UpdateInstallFailed,
+pub enum ActivityTaskMessage {
     ModelRequest {
         model_kind: ModelRequestKind,
         item_count: usize,
@@ -178,25 +147,13 @@ pub enum ActivityMessage {
     },
 }
 
-impl ActivityMessage {
+impl ActivityTaskMessage {
     #[must_use]
     pub const fn source(&self) -> ActivitySource {
         match self {
-            Self::ProjectOpened
-            | Self::ProjectViewStateReset
-            | Self::ProjectOperationFailed { .. } => ActivitySource::Project,
-            Self::CanvasOperationFailed { .. } => ActivitySource::Canvas,
-            Self::ExplorerOperationFailed { .. } => ActivitySource::Explorer,
-            Self::WorkbenchOperationFailed { .. } => ActivitySource::Workbench,
-            Self::UpdateInstallFailed => ActivitySource::Update,
             Self::ModelRequest { .. } => ActivitySource::ModelRequest,
             Self::PhotoshopSend { .. } => ActivitySource::Photoshop,
         }
-    }
-
-    #[must_use]
-    pub const fn is_task(&self) -> bool {
-        matches!(self, Self::ModelRequest { .. } | Self::PhotoshopSend { .. })
     }
 }
 
@@ -245,12 +202,12 @@ impl ActivityProgress {
 )]
 pub enum ActivityPayload {
     Notice {
-        message: ActivityMessage,
+        message: ActivityNoticeReport,
     },
     Task {
         status: ActivityTaskStatus,
         progress: ActivityProgress,
-        message: ActivityMessage,
+        message: ActivityTaskMessage,
     },
 }
 
@@ -370,30 +327,21 @@ impl ActivityService {
         project: Option<ActivityProjectContext>,
         report: ActivityNoticeReport,
     ) -> ActivityRecord {
-        self.insert(
-            project,
-            ActivityPayload::Notice {
-                message: ActivityMessage::from(report),
-            },
-        )
+        self.insert(project, ActivityPayload::Notice { message: report })
     }
 
     /// Starts one Runtime-owned Activity task.
     ///
     /// # Panics
     ///
-    /// Panics when the message is not a task message or the initial progress is invalid.
+    /// Panics when the initial progress is invalid.
     pub fn start_task(
         &self,
         project: Option<ActivityProjectContext>,
-        message: ActivityMessage,
+        message: ActivityTaskMessage,
         progress: ActivityProgress,
     ) -> ActivityRecord {
         assert!(progress.is_valid(), "Activity progress must be valid");
-        assert!(
-            message.is_task(),
-            "Activity task message must describe a task"
-        );
         self.insert(
             project,
             ActivityPayload::Task {
@@ -410,24 +358,17 @@ impl ActivityService {
     ///
     /// Returns an error when progress is invalid or an existing record is not an active task.
     ///
-    /// # Panics
-    ///
-    /// Panics when the message is not a task message.
     pub fn upsert_task(
         &self,
         id: String,
         project: Option<ActivityProjectContext>,
-        message: ActivityMessage,
+        message: ActivityTaskMessage,
         status: ActivityTaskStatus,
         progress: ActivityProgress,
     ) -> Result<ActivityRecord, ActivityUpdateError> {
         if !progress.is_valid() {
             return Err(ActivityUpdateError::InvalidProgress);
         }
-        assert!(
-            message.is_task(),
-            "Activity task message must describe a task"
-        );
         let source = message.source();
         let (event, observer, record) = {
             let mut state = self.lock_state();
@@ -585,9 +526,8 @@ impl ActivityService {
         payload: ActivityPayload,
     ) -> ActivityRecord {
         let source = match &payload {
-            ActivityPayload::Notice { message } | ActivityPayload::Task { message, .. } => {
-                message.source()
-            }
+            ActivityPayload::Notice { message } => message.source(),
+            ActivityPayload::Task { message, .. } => message.source(),
         };
         let now = now_rfc3339();
         let record = ActivityRecord {
@@ -667,8 +607,8 @@ mod tests {
     };
 
     use super::{
-        ActivityMessage, ActivityNoticeReport, ActivityProgress, ActivityProjectContext,
-        ActivityService, ActivityTaskStatus, CanvasActivityOperation, ModelRequestKind,
+        ActivityNoticeReport, ActivityProgress, ActivityProjectContext, ActivityService,
+        ActivityTaskMessage, ActivityTaskStatus, CanvasActivityOperation, ModelRequestKind,
     };
 
     fn project() -> ActivityProjectContext {
@@ -695,7 +635,7 @@ mod tests {
         );
         let task = service.start_task(
             Some(project()),
-            ActivityMessage::ModelRequest {
+            ActivityTaskMessage::ModelRequest {
                 model_kind: ModelRequestKind::Video,
                 item_count: 4,
             },
@@ -742,6 +682,33 @@ mod tests {
                 .map(|event| event.revision)
                 .collect::<Vec<_>>(),
             vec![1, 2, 3, 4, 5, 6]
+        );
+    }
+
+    #[test]
+    fn notice_reports_accept_only_the_current_canvas_activity_contract() {
+        assert!(
+            serde_json::from_value::<ActivityNoticeReport>(serde_json::json!({
+                "kind": "canvas-operation-failed",
+                "operation": "reset-canvas"
+            }))
+            .is_ok()
+        );
+        for obsolete in ["create", "rename", "delete", "reorder"] {
+            assert!(
+                serde_json::from_value::<ActivityNoticeReport>(serde_json::json!({
+                    "kind": "canvas-operation-failed",
+                    "operation": obsolete
+                }))
+                .is_err(),
+                "obsolete Canvas Activity operation must be rejected: {obsolete}"
+            );
+        }
+        assert!(
+            serde_json::from_value::<ActivityNoticeReport>(serde_json::json!({
+                "kind": "project-view-state-reset"
+            }))
+            .is_err()
         );
     }
 

@@ -140,28 +140,12 @@ impl TerminalObservation {
         }
     }
 
-    /// Waits for the next ordered Terminal event.
-    ///
-    /// # Errors
-    /// Returns an error after the observation stream closes.
-    pub fn recv(&self) -> Result<TerminalEvent, mpsc::RecvError> {
-        self.receiver.recv()
-    }
-
     /// Waits up to `timeout` for the next ordered Terminal event.
     ///
     /// # Errors
     /// Returns timeout or disconnected receiver state.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<TerminalEvent, mpsc::RecvTimeoutError> {
         self.receiver.recv_timeout(timeout)
-    }
-
-    /// Attempts to receive the next ordered Terminal event without blocking.
-    ///
-    /// # Errors
-    /// Returns empty or disconnected receiver state.
-    pub fn try_recv(&self) -> Result<TerminalEvent, mpsc::TryRecvError> {
-        self.receiver.try_recv()
     }
 }
 
@@ -188,14 +172,6 @@ pub struct TerminalTopologySubscription {
 }
 
 impl TerminalTopologySubscription {
-    /// Waits for the next topology revision.
-    ///
-    /// # Errors
-    /// Returns an error after the topology stream closes.
-    pub fn recv(&self) -> Result<TerminalTopologySnapshot, mpsc::RecvError> {
-        self.receiver.recv()
-    }
-
     /// Waits up to `timeout` for the next topology revision.
     ///
     /// # Errors
@@ -205,14 +181,6 @@ impl TerminalTopologySubscription {
         timeout: Duration,
     ) -> Result<TerminalTopologySnapshot, mpsc::RecvTimeoutError> {
         self.receiver.recv_timeout(timeout)
-    }
-
-    /// Attempts to receive the next topology revision without blocking.
-    ///
-    /// # Errors
-    /// Returns empty or disconnected receiver state.
-    pub fn try_recv(&self) -> Result<TerminalTopologySnapshot, mpsc::TryRecvError> {
-        self.receiver.try_recv()
     }
 }
 
@@ -295,7 +263,7 @@ impl TerminalService {
     /// Creates one Project-owned, memory-only Terminal session.
     ///
     /// # Errors
-    /// Returns a typed error for an invalid Project/cwd, PTY failure, or exhausted topology.
+    /// Returns a typed error for an invalid Project/cwd or PTY failure.
     pub fn create(
         &self,
         canonical_root: &str,
@@ -341,14 +309,7 @@ impl TerminalService {
         let project = projects.entry(project_root).or_default();
         reservation.commit(project);
         project.sessions.insert(id, terminal);
-        if let Err(error) = publish_topology(project) {
-            let terminal = project.sessions.remove(&result.id);
-            drop(projects);
-            if let Some(terminal) = terminal {
-                let _ = terminal.close();
-            }
-            return Err(error);
-        }
+        publish_topology(project);
         Ok(result)
     }
 
@@ -387,7 +348,7 @@ impl TerminalService {
             };
             if let Some(terminal) = project.sessions.remove(&terminal_id) {
                 retired.push(terminal);
-                publish_topology(project)?;
+                publish_topology(project);
             }
         }
         loop {
@@ -410,7 +371,7 @@ impl TerminalService {
                 && let Some(terminal) = project.sessions.remove(&terminal_id)
             {
                 retired.push(terminal);
-                publish_topology(project)?;
+                publish_topology(project);
             }
         }
         let project = projects.entry(canonical_root.clone()).or_default();
@@ -626,7 +587,7 @@ impl TerminalService {
         let mut projects = lock(&self.inner.projects, "Terminal project registry");
         if let Some(project) = projects.get_mut(Path::new(canonical_root)) {
             project.sessions.remove(terminal_id);
-            publish_topology(project)?;
+            publish_topology(project);
         }
         Ok(())
     }
@@ -669,8 +630,8 @@ impl TerminalService {
     /// Closes every Terminal before Runtime shutdown.
     ///
     /// # Errors
-    /// Returns the first close or topology error while retaining every
-    /// Terminal that did not close for an explicit shutdown decision.
+    /// Returns the first close error while retaining every Terminal that did
+    /// not close for an explicit shutdown decision.
     pub fn close_all(&self) -> Result<(), TerminalError> {
         let terminals = lock(&self.inner.projects, "Terminal project registry")
             .iter()
@@ -691,11 +652,7 @@ impl TerminalService {
                     let mut projects = lock(&self.inner.projects, "Terminal project registry");
                     if let Some(project) = projects.get_mut(&canonical_root) {
                         project.sessions.remove(&terminal_id);
-                        if let Err(error) = publish_topology(project)
-                            && first_error.is_none()
-                        {
-                            first_error = Some(error);
-                        }
+                        publish_topology(project);
                     }
                 }
                 Err(error) if first_error.is_none() => first_error = Some(error),
@@ -783,20 +740,15 @@ fn oldest_runtime_retired_terminal(
         .map(|(_, canonical_root, terminal_id)| (canonical_root, terminal_id))
 }
 
-fn publish_topology(project: &mut ProjectTerminals) -> Result<(), TerminalError> {
-    let revision = project.revision.checked_add(1).ok_or_else(|| {
-        TerminalError::new(
-            "terminal_topology_exhausted",
-            "Terminal topology revision is exhausted.",
-        )
-    })?;
-    let mut snapshot = snapshot(project);
-    snapshot.revision = revision;
-    project.revision = revision;
+fn publish_topology(project: &mut ProjectTerminals) {
+    project.revision = project
+        .revision
+        .checked_add(1)
+        .expect("Terminal topology revision exhausted");
+    let snapshot = snapshot(project);
     project
         .observers
         .retain(|_, observer| observer.try_send(snapshot.clone()).is_ok());
-    Ok(())
 }
 
 impl TerminalHandle {
@@ -2326,10 +2278,7 @@ mod writer_tests {
         let mut saw_error = false;
         let mut saw_failed_status = false;
         for _ in 0..50 {
-            match observation
-                .receiver
-                .recv_timeout(Duration::from_millis(100))
-            {
+            match observation.recv_timeout(Duration::from_millis(100)) {
                 Ok(TerminalEvent::Error { code, .. }) if code == "terminal_pty_write_failed" => {
                     saw_error = true;
                 }
@@ -2422,20 +2371,18 @@ mod tests {
                 .code(),
             "terminal_input_out_of_order"
         );
-        let output = (0..20).find_map(|_| {
-            match observation
-                .receiver
-                .recv_timeout(Duration::from_millis(100))
-            {
-                Ok(TerminalEvent::Output { data_base64, .. }) => {
-                    let bytes = STANDARD.decode(data_base64).expect("output should decode");
-                    String::from_utf8_lossy(&bytes)
-                        .contains("debrute")
-                        .then_some(())
-                }
-                _ => None,
-            }
-        });
+        let output =
+            (0..20).find_map(
+                |_| match observation.recv_timeout(Duration::from_millis(100)) {
+                    Ok(TerminalEvent::Output { data_base64, .. }) => {
+                        let bytes = STANDARD.decode(data_base64).expect("output should decode");
+                        String::from_utf8_lossy(&bytes)
+                            .contains("debrute")
+                            .then_some(())
+                    }
+                    _ => None,
+                },
+            );
         assert!(output.is_some());
         service
             .close(&canonical_root, &session.id)
@@ -2461,9 +2408,7 @@ mod tests {
             .expect("exit input should be acknowledged");
         let exited = (0..50).any(|_| {
             matches!(
-                observation
-                    .receiver
-                    .recv_timeout(Duration::from_millis(100)),
+                observation.recv_timeout(Duration::from_millis(100)),
                 Ok(TerminalEvent::Exit { .. })
             )
         });
@@ -2578,13 +2523,17 @@ mod tests {
         let session = service
             .create(&canonical_root, "")
             .expect("terminal should start");
-        let created = topology.recv().expect("create topology should publish");
+        let created = topology
+            .recv_timeout(Duration::from_secs(1))
+            .expect("create topology should publish");
         assert_eq!(created.revision, 1);
         assert_eq!(created.sessions.len(), 1);
         service
             .close(&canonical_root, &session.id)
             .expect("terminal should close");
-        let closed = topology.recv().expect("close topology should publish");
+        let closed = topology
+            .recv_timeout(Duration::from_secs(1))
+            .expect("close topology should publish");
         assert_eq!(closed.revision, 2);
         assert!(closed.sessions.is_empty());
         drop(open_use);

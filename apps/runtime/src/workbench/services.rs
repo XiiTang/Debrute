@@ -14,8 +14,8 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     activity::{
-        ActivityEvent, ActivityMessage, ActivityProgress, ActivityProjectContext, ActivityService,
-        ActivityTaskStatus, ModelRequestKind,
+        ActivityEvent, ActivityProgress, ActivityProjectContext, ActivityService,
+        ActivityTaskMessage, ActivityTaskStatus, ModelRequestKind,
     },
     cli::{CliResult, CliStreamEvent},
     control::RuntimeControlState,
@@ -1047,7 +1047,7 @@ fn publish_model_operation_activity(activity: &ActivityService, snapshot: &Model
     let _ = activity.upsert_task(
         format!("model-operation:{}", snapshot.id),
         None,
-        ActivityMessage::ModelRequest {
+        ActivityTaskMessage::ModelRequest {
             model_kind,
             item_count,
         },

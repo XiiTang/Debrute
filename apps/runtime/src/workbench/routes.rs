@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     activity::{
-        ActivityChange, ActivityEvent, ActivityMessage, ActivityNoticeReport, ActivityProgress,
+        ActivityChange, ActivityEvent, ActivityNoticeReport, ActivityProgress, ActivityTaskMessage,
         ActivityTaskStatus,
     },
     control::RuntimeStatus,
@@ -906,7 +906,7 @@ async fn photoshop_send(
     };
     let activity = state.services.activity().start_task(
         Some(project),
-        ActivityMessage::PhotoshopSend {
+        ActivityTaskMessage::PhotoshopSend {
             project_relative_path: input.project_relative_path.clone(),
             document_title: None,
         },

@@ -167,14 +167,11 @@ fn model_request_execution_error(error: &ModelRequestError) -> ModelRequestExecu
 }
 
 fn redact_model_request_error(error: &ModelRequestError, secrets: &[String]) -> ModelRequestError {
-    let value = super::redaction::redact_model_request_value(
-        &serde_json::Value::String(error.message().to_owned()),
+    let message = super::redaction::redact_model_request_string(
+        error.message().to_owned(),
         secrets.iter().cloned(),
     );
-    ModelRequestError::new(
-        error.code(),
-        value.as_str().unwrap_or("Model request failed."),
-    )
+    ModelRequestError::new(error.code(), message)
 }
 
 fn resolve_model(

@@ -10,6 +10,19 @@ pub(crate) fn redact_model_request_value(
     value: &serde_json::Value,
     configured_secrets: impl IntoIterator<Item = String>,
 ) -> serde_json::Value {
+    let secrets = normalized_secrets(configured_secrets);
+    redact_value(value, &secrets, None)
+}
+
+pub(crate) fn redact_model_request_string(
+    value: String,
+    configured_secrets: impl IntoIterator<Item = String>,
+) -> String {
+    let secrets = normalized_secrets(configured_secrets);
+    redact_string(&value, &secrets)
+}
+
+fn normalized_secrets(configured_secrets: impl IntoIterator<Item = String>) -> Vec<String> {
     let secrets = configured_secrets
         .into_iter()
         .map(|secret| secret.trim().to_owned())
@@ -17,7 +30,7 @@ pub(crate) fn redact_model_request_value(
         .collect::<std::collections::BTreeSet<_>>();
     let mut secrets = secrets.into_iter().collect::<Vec<_>>();
     secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
-    redact_value(value, &secrets, None)
+    secrets
 }
 
 fn redact_value(
