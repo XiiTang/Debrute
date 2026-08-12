@@ -135,6 +135,38 @@ describe('canvasMinimap geometry', () => {
     })).toEqual({ x: -150, y: -100, z: 0.5 });
   });
 
+  it('preserves the exact camera when a Mini Map drag starts inside its viewport', () => {
+    const camera = { x: -10_000, y: -7_500.3, z: 0.73 };
+    const surfaceSize = { width: 1000, height: 500 };
+    const staticModel = buildCanvasMinimapStaticModel({
+      nodes: [nodeFixture('flow/a.png', 0, 0, 100, 100)],
+      selection: undefined,
+      camera,
+      surfaceSize,
+      minimapSize: { width: 220, height: 150 },
+      padding: 10
+    })!;
+    const viewport = buildCanvasMinimapViewportModel({
+      transform: staticModel.transform,
+      camera,
+      surfaceSize
+    })!;
+    const model = { ...staticModel, ...viewport };
+
+    const drag = beginCanvasMinimapDrag({
+      pointerId: 8,
+      minimapPoint: {
+        x: model.viewportRect.x + model.viewportRect.width * 0.37,
+        y: model.viewportRect.y + model.viewportRect.height * 0.61
+      },
+      model,
+      camera,
+      surfaceSize
+    });
+
+    expect(drag.camera).toBe(camera);
+  });
+
   it('keeps using the drag-start transform when camera updates change minimap bounds', () => {
     const surfaceSize = { width: 1000, height: 500 };
     const camera = { x: 0, y: 0, z: 1 };

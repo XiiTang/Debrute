@@ -26,6 +26,7 @@ describe('WorkbenchContextMenu lazy items', () => {
             position={{ x: 12, y: 16 }}
             onCommand={() => undefined}
             onClose={() => undefined}
+            onReturnFocus={() => undefined}
           />
         </I18nProvider>
       );
@@ -58,6 +59,7 @@ describe('WorkbenchContextMenu lazy items', () => {
               position={{ x: 12, y: 16 }}
               onCommand={() => undefined}
               onClose={() => undefined}
+              onReturnFocus={() => undefined}
             />
           </I18nProvider>
         );
@@ -114,6 +116,7 @@ describe('WorkbenchContextMenu lazy items', () => {
             position={{ x: 12, y: 16 }}
             onCommand={() => undefined}
             onClose={() => undefined}
+            onReturnFocus={() => undefined}
           />
         </I18nProvider>
       );
@@ -163,6 +166,7 @@ describe('WorkbenchContextMenu lazy items', () => {
             position={{ x: 12, y: 16 }}
             onCommand={onCommand}
             onClose={() => undefined}
+            onReturnFocus={() => undefined}
           />
         </I18nProvider>
       );
@@ -233,6 +237,7 @@ describe('WorkbenchContextMenu lazy items', () => {
             position={{ x: 12, y: 16 }}
             onCommand={onCommand}
             onClose={() => undefined}
+            onReturnFocus={() => undefined}
           />
         </I18nProvider>
       );
@@ -255,6 +260,35 @@ describe('WorkbenchContextMenu lazy items', () => {
     expect(onCommand).not.toHaveBeenCalled();
 
     await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('returns borrowed focus when its owner removes the menu', async () => {
+    const source = document.createElement('button');
+    const container = document.createElement('div');
+    document.body.append(source, container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(
+      <I18nProvider locale="en">
+        <WorkbenchContextMenu
+          productPlatform="darwin"
+          items={[{ kind: 'action', command: 'copy' }]}
+          position={{ x: 12, y: 16 }}
+          onCommand={() => undefined}
+          onClose={() => undefined}
+          onReturnFocus={() => source.focus()}
+        />
+      </I18nProvider>
+    ));
+    expect(document.activeElement).toBe(container.querySelector('button'));
+
+    await act(async () => root.render(null));
+
+    expect(document.activeElement).toBe(source);
+
+    await act(async () => root.unmount());
+    source.remove();
     container.remove();
   });
 });

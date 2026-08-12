@@ -1770,6 +1770,7 @@ function WorkbenchBoundProjectApp({
             <ProjectPathContextMenuHost
               contextMenu={contextMenu}
               router={projectPathCommandRouter}
+              focusRouter={focusCommandRouter}
               productPlatform={productPlatform}
               onClose={closeWorkbenchContextMenu}
             />
@@ -1784,6 +1785,7 @@ function WorkbenchBoundProjectApp({
 export function ProjectPathContextMenuHost({
   contextMenu,
   router,
+  focusRouter,
   productPlatform,
   onClose
 }: {
@@ -1792,6 +1794,7 @@ export function ProjectPathContextMenuHost({
     position: WorkbenchContextMenuPosition;
   };
   router: ProjectPathCommandRouter | undefined;
+  focusRouter: Pick<WorkbenchFocusCommandRouter, 'restoreOwnerFocus'>;
   productPlatform: DebruteProductPlatform;
   onClose(): void;
 }): React.ReactElement {
@@ -1810,6 +1813,7 @@ export function ProjectPathContextMenuHost({
       selectionCount={resolveProjectPathCommandTarget(contextMenu.target).length}
       onCommand={(command, photoshopTarget) => router.run(command, contextMenu, photoshopTarget)}
       onClose={onClose}
+      onReturnFocus={() => focusRouter.restoreOwnerFocus(contextMenu.target.source)}
     />
   );
 }

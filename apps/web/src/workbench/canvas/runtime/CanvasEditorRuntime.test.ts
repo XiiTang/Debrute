@@ -107,6 +107,22 @@ describe('CanvasEditorRuntime', () => {
     expect(runtime.getSnapshot()).not.toHaveProperty('cameraOrigin');
   });
 
+  it('publishes the previous and current camera at the commit boundary', () => {
+    const runtime = createRuntime();
+    const changes: unknown[] = [];
+    runtime.subscribeCamera((currentCamera, origin, previousCamera) => {
+      changes.push({ previousCamera, currentCamera, origin });
+    });
+
+    runtime.camera.setCamera({ x: 12, y: -8, z: 1.5 }, 'minimap');
+
+    expect(changes).toEqual([{
+      previousCamera: { x: 0, y: 0, z: 1 },
+      currentCamera: { x: 12, y: -8, z: 1.5 },
+      origin: 'minimap'
+    }]);
+  });
+
   it('publishes zoom origin from native gesture input without a duplicate camera API', () => {
     const eventListeners = new Map<string, Set<(event: Event) => void>>();
     const restoreWindow = installBrowserRuntime({ eventListeners });
@@ -184,6 +200,78 @@ describe('CanvasEditorRuntime', () => {
     } finally {
       restoreWindow();
       vi.useRealTimers();
+    }
+  });
+
+  it('does not publish or extend camera movement for an equal camera commit', () => {
+    vi.useFakeTimers();
+    const restoreWindow = installBrowserRuntime();
+    try {
+      const runtime = createRuntime();
+      const cameras: unknown[] = [];
+      const cameraStates: unknown[] = [];
+      runtime.subscribeCamera((camera, origin) => cameras.push({ camera, origin }));
+      runtime.subscribeCameraState((state) => cameraStates.push(state));
+
+      runtime.camera.setCamera({ x: 10, y: 20, z: 1.5 }, 'pan');
+      vi.advanceTimersByTime(63);
+      runtime.camera.setCamera({ x: 10, y: 20, z: 1.5 }, 'zoom');
+
+      expect(cameras).toEqual([{
+        camera: { x: 10, y: 20, z: 1.5 },
+        origin: 'pan'
+      }]);
+      expect(cameraStates).toEqual(['moving']);
+
+      vi.advanceTimersByTime(1);
+
+      expect(cameraStates).toEqual(['moving', 'idle']);
+    } finally {
+      restoreWindow();
+      vi.useRealTimers();
+    }
+  });
+
+  it('consumes clamped wheel input without publishing an equal camera', () => {
+    const eventListeners = new Map<string, Set<(event: Event) => void>>();
+    const restoreWindow = installBrowserRuntime({ eventListeners });
+    const surface: ReturnType<typeof fakeElement> & { contains(target: EventTarget | null): boolean } = {
+      ...fakeElement({ left: 0, top: 0, width: 800, height: 600 }),
+      contains: (target: EventTarget | null): boolean => (
+        target === (surface as unknown as EventTarget)
+      )
+    };
+    try {
+      const runtime = createRuntime({ camera: { x: -10_000, y: -7_500.3, z: 9.99 } });
+      runtime.bindSurface({ surface: surface as unknown as HTMLElement });
+      const cameras: unknown[] = [];
+      runtime.subscribeCamera((camera) => cameras.push(camera));
+      const preventDefault = vi.fn();
+      const wheel = {
+        target: surface,
+        clientX: 0,
+        clientY: 0,
+        deltaX: 0,
+        deltaY: -10,
+        deltaZ: 0,
+        ctrlKey: true,
+        metaKey: false,
+        shiftKey: false,
+        preventDefault
+      } as unknown as Event;
+
+      for (const listener of eventListeners.get('wheel') ?? []) {
+        listener(wheel);
+      }
+
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(cameras).toEqual([]);
+      expect(runtime.getSnapshot()).toMatchObject({
+        camera: { x: -10_000, y: -7_500.3, z: 9.99 },
+        cameraState: 'idle'
+      });
+    } finally {
+      restoreWindow();
     }
   });
 

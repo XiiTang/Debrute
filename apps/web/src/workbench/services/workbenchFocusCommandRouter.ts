@@ -19,6 +19,7 @@ export type WorkbenchBehaviorOwner = 'canvas' | 'explorer' | 'other';
 
 export interface WorkbenchFocusCommandRouter {
   captureOwner(): WorkbenchBehaviorOwner;
+  restoreOwnerFocus(owner: Exclude<WorkbenchBehaviorOwner, 'other'>): void;
   dispatch(command: WorkbenchFocusCommand, owner?: WorkbenchBehaviorOwner): boolean;
 }
 
@@ -30,18 +31,24 @@ export function createWorkbenchFocusCommandRouter(input: {
   getProjectPathRouter(): ProjectPathCommandRouter | undefined;
   getExplorerController(): ProjectExplorerController | undefined;
 }): WorkbenchFocusCommandRouter {
+  const ownerRoot = (owner: Exclude<WorkbenchBehaviorOwner, 'other'>): HTMLElement | null => (
+    owner === 'canvas' ? input.getCanvasRoot() : input.getExplorerRoot()
+  );
   const captureOwner = (): WorkbenchBehaviorOwner => {
     const active = document.activeElement;
-    if (active === input.getCanvasRoot()) {
+    if (active === ownerRoot('canvas')) {
       return 'canvas';
     }
-    if (active === input.getExplorerRoot()) {
+    if (active === ownerRoot('explorer')) {
       return 'explorer';
     }
     return 'other';
   };
   return {
     captureOwner,
+    restoreOwnerFocus(owner) {
+      ownerRoot(owner)?.focus({ preventScroll: true });
+    },
     dispatch(command, owner = captureOwner()) {
       if (owner === 'explorer') {
         const explorer = input.getExplorerController();

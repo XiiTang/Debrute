@@ -22,6 +22,7 @@ describe('WorkbenchContextMenu', () => {
           position={{ x: 12, y: 16 }}
           onCommand={() => undefined}
           onClose={() => undefined}
+          onReturnFocus={() => undefined}
         />
       </I18nProvider>
     );

@@ -630,6 +630,14 @@ remains Canvas-owned, and Photoshop transfer remains integration-owned. A
 generation-local Terminal request stores only its Project-relative cwd and is
 re-admitted when Terminal creates the requested session.
 
+The shared Project Path context menu temporarily borrows DOM focus from the
+Explorer or Canvas surface that opened it. Closing the menu restores focus to
+that source surface only while focus still belongs to the menu; if the user or
+a command has already moved focus elsewhere, that newer destination wins. The
+menu derives the return surface from its command target instead of consulting a
+global last-owner value, and Explorer and Canvas do not duplicate return-focus
+logic.
+
 For one Project-backed PNG, JPEG, WebP, PSD, or AVIF file whose current Canvas
 projection reports a size of at most 256 MiB, the shared context menu adds
 **Send to Photoshop** only when at least one live Photoshop session has an open

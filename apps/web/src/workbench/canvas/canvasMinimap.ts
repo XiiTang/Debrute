@@ -161,7 +161,8 @@ export function beginCanvasMinimapDrag(input: {
 }): { dragState: CanvasMinimapDragState; camera: CanvasCamera } {
   const canvasPoint = minimapPointToCanvasPoint(input.minimapPoint, input.model.transform);
   const visibleCenter = rectCenter(input.model.visibleRect);
-  const pointerOffsetFromViewportCenter = pointInRect(input.minimapPoint, input.model.viewportRect)
+  const pointerInsideViewport = pointInRect(input.minimapPoint, input.model.viewportRect);
+  const pointerOffsetFromViewportCenter = pointerInsideViewport
     ? { x: canvasPoint.x - visibleCenter.x, y: canvasPoint.y - visibleCenter.y }
     : { x: 0, y: 0 };
   return {
@@ -170,7 +171,7 @@ export function beginCanvasMinimapDrag(input: {
       transform: input.model.transform,
       pointerOffsetFromViewportCenter
     },
-    camera: canvasCameraForMinimapCenter({
+    camera: pointerInsideViewport ? input.camera : canvasCameraForMinimapCenter({
       center: {
         x: canvasPoint.x - pointerOffsetFromViewportCenter.x,
         y: canvasPoint.y - pointerOffsetFromViewportCenter.y

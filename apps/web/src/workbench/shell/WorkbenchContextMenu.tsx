@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { DebruteProductPlatform } from '@debrute/app-protocol';
 import {
   Clipboard,
@@ -63,6 +63,7 @@ export function WorkbenchContextMenu({
   position,
   onCommand,
   onClose,
+  onReturnFocus,
   productPlatform,
   selectionCount = 1
 }: {
@@ -70,11 +71,14 @@ export function WorkbenchContextMenu({
   position: WorkbenchContextMenuPosition;
   onCommand: (command: ProjectPathCommand, target?: PhotoshopDocumentTarget) => void;
   onClose: () => void;
+  onReturnFocus: () => void;
   productPlatform: DebruteProductPlatform;
   selectionCount?: number;
 }): React.ReactElement | null {
   const i18n = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef(onReturnFocus);
+  returnFocusRef.current = onReturnFocus;
   const actionCount = items.filter((item) => item.kind !== 'separator').length;
   const separatorCount = items.filter((item) => item.kind === 'separator').length;
   const clampedPosition = useMemo(() => clampWorkbenchContextMenuPosition({
@@ -89,6 +93,25 @@ export function WorkbenchContextMenu({
     }
   }), [actionCount, separatorCount, position]);
 
+  const completeFocusBorrow = useCallback((action: () => void) => {
+    const menu = menuRef.current;
+    const focusWasBorrowed = Boolean(menu?.contains(document.activeElement));
+    action();
+    if (!focusWasBorrowed) {
+      return;
+    }
+    const active = document.activeElement;
+    if (!active || active === document.body || menu?.contains(active)) {
+      returnFocusRef.current?.();
+    }
+  }, []);
+
+  useLayoutEffect(() => () => {
+    if (menuRef.current?.contains(document.activeElement)) {
+      returnFocusRef.current?.();
+    }
+  }, []);
+
   useEffect(() => {
     menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   }, [items]);
@@ -98,26 +121,28 @@ export function WorkbenchContextMenu({
       if (menuRef.current?.contains(event.target as Node)) {
         return;
       }
-      onClose();
+      completeFocusBorrow(onClose);
     };
     const closeOnKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        completeFocusBorrow(onClose);
       }
     };
-    const closeOnWheel = () => onClose();
-    const closeOnScroll = () => onClose();
+    const closeOnWheel = () => completeFocusBorrow(onClose);
+    const closeOnScroll = () => completeFocusBorrow(onClose);
     window.addEventListener('pointerdown', closeOnPointerDown, { capture: true });
-    window.addEventListener('keydown', closeOnKeyDown);
+    window.addEventListener('keydown', closeOnKeyDown, { capture: true });
     window.addEventListener('wheel', closeOnWheel, { capture: true });
     window.addEventListener('scroll', closeOnScroll, { capture: true });
     return () => {
       window.removeEventListener('pointerdown', closeOnPointerDown, { capture: true });
-      window.removeEventListener('keydown', closeOnKeyDown);
+      window.removeEventListener('keydown', closeOnKeyDown, { capture: true });
       window.removeEventListener('wheel', closeOnWheel, { capture: true });
       window.removeEventListener('scroll', closeOnScroll, { capture: true });
     };
-  }, [onClose]);
+  }, [completeFocusBorrow, onClose]);
 
   if (items.length === 0) {
     return null;
@@ -143,7 +168,7 @@ export function WorkbenchContextMenu({
             key={item.command}
             targets={item.targets}
             opensLeft={clampedPosition.x + CONTEXT_MENU_WIDTH * 2 > window.innerWidth}
-            onCommand={(target) => onCommand(item.command, target)}
+            onCommand={(target) => completeFocusBorrow(() => onCommand(item.command, target))}
           />
         ) : (
           <Menu.Item
@@ -155,7 +180,7 @@ export function WorkbenchContextMenu({
               if (item.disabled === true) {
                 return;
               }
-              onCommand(item.command);
+              completeFocusBorrow(() => onCommand(item.command));
             }}
           >
             {item.command === 'reveal-in-system-file-manager'

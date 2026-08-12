@@ -56,6 +56,17 @@ describe('canvas camera runtime', () => {
     }).z).toBe(9.99);
   });
 
+  it('preserves the exact camera when clamped wheel zoom cannot move it', () => {
+    const camera = { x: -10_000, y: -7_500.3, z: 9.99 };
+
+    expect(cameraForWheelDelta({
+      camera,
+      surfaceRect: { left: 0, top: 0 },
+      screenPoint: { x: 400, y: 0 },
+      delta: { x: 0, y: 0, z: 0.1 }
+    })).toBe(camera);
+  });
+
   it('combines gesture scale and gesture-center movement in one camera update', () => {
     const camera = cameraForGestureZoom({
       camera: { x: 10, y: 20, z: 2 },
@@ -86,6 +97,18 @@ describe('canvas camera runtime', () => {
       scale: 20,
       delta: { x: 0, y: 0 }
     }).z).toBe(9.99);
+  });
+
+  it('preserves the exact camera when a clamped stationary gesture cannot move it', () => {
+    const camera = { x: -10_000, y: -7_500.3, z: 9.99 };
+
+    expect(cameraForGestureZoom({
+      camera,
+      surfaceRect: { left: 0, top: 0 },
+      origin: { x: 400, y: 0 },
+      scale: 1.25,
+      delta: { x: 0, y: 0 }
+    })).toBe(camera);
   });
 
   it('centers a canvas point while preserving zoom', () => {

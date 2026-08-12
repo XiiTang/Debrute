@@ -16,6 +16,14 @@ their shared scheduling, culling, and diagnostic boundaries only.
 
 Camera movement is not a React geometry loop. `CanvasEditorRuntime` publishes
 the live camera and `CanvasStageRuntime` writes the stage transform directly.
+After a candidate camera has been validated and constrained, the single camera
+commit boundary compares its `x`, `y`, and `z` with the live camera. An exact
+match is not Camera movement: the originating browser input may still be
+consumed, but the Runtime does not publish a camera change, enter or extend the
+moving state, run Stage or culling subscribers, disturb preview settlement, or
+open a Camera performance session. This rule is shared by pointer, wheel,
+native gesture, Mini Map, and programmatic camera sources; there is no separate
+input-telemetry path for equal camera values.
 Each mounted `CanvasSurface` has one `CanvasRenderLifecycle` bound to its
 `CanvasEditorRuntime`. Workbench owns the accepted Canvas Scene Projection and one
 `CanvasScenePresentation`, which composes every current Projected Canvas node,
@@ -516,6 +524,13 @@ browser rAF frame intervals; ownership-specific counters; explicit final Canvas
 counts; and optional Long Animation Frame entries. Frame-interval summaries
 report p50, p95, p99, minimum, and maximum interval duration rather than
 interpreting camera or pointer callback frequency as browser frame time.
+Camera diagnostic sessions use an exact origin handoff. A committed camera
+change exposes its previous and current values at that boundary. When the
+origin changes, the previous value ends the old session and forms the initial
+boundary of the new session; the current value and its render work belong only
+to the new session. The handoff occurs before Stage and culling subscribers run,
+so the first write and counters from a new origin cannot enter the old session.
+Diagnostics do not retain a second authoritative camera state.
 When diagnostics are enabled, one React Profiler boundary surrounds the Canvas
 surface subtree so the `react-commit` counter includes nested preview-provider
 and node commits rather than only `CanvasSurface` renders.

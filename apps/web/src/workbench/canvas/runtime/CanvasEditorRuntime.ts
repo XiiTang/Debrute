@@ -126,7 +126,11 @@ export interface CanvasEditorRuntime {
   readonly input: CanvasInputController;
   readonly scene: CanvasRuntimeScene;
   subscribe(listener: (snapshot: CanvasRuntimeSnapshot) => void): () => void;
-  subscribeCamera(listener: (camera: CanvasCamera, origin: CanvasCameraChangeOrigin) => void): () => void;
+  subscribeCamera(listener: (
+    camera: CanvasCamera,
+    origin: CanvasCameraChangeOrigin,
+    previousCamera: CanvasCamera
+  ) => void): () => void;
   subscribeCameraState(listener: (state: CanvasCameraState) => void): () => void;
   subscribeSelection(listener: (selection: CanvasSelection | undefined) => void): () => void;
   subscribeContentInteraction(listener: (projectRelativePath: string | undefined) => void): () => void;
@@ -245,7 +249,11 @@ export function createCanvasEditorRuntime(initial: {
   selection?: CanvasSelection | undefined;
 }): CanvasEditorRuntime {
   const listeners = new Set<(snapshot: CanvasRuntimeSnapshot) => void>();
-  const cameraListeners = new Set<(camera: CanvasCamera, origin: CanvasCameraChangeOrigin) => void>();
+  const cameraListeners = new Set<(
+    camera: CanvasCamera,
+    origin: CanvasCameraChangeOrigin,
+    previousCamera: CanvasCamera
+  ) => void>();
   const cameraStateListeners = new Set<(state: CanvasCameraState) => void>();
   const selectionListeners = new Set<(selection: CanvasSelection | undefined) => void>();
   const contentInteractionListeners = new Set<(projectRelativePath: string | undefined) => void>();
@@ -366,9 +374,13 @@ export function createCanvasEditorRuntime(initial: {
     }, CANVAS_CAMERA_IDLE_MS);
   };
 
-  const flushCameraListeners = (camera: CanvasCamera, origin: CanvasCameraChangeOrigin) => {
+  const flushCameraListeners = (
+    camera: CanvasCamera,
+    origin: CanvasCameraChangeOrigin,
+    previousCamera: CanvasCamera
+  ) => {
     for (const listener of cameraListeners) {
-      listener(camera, origin);
+      listener(camera, origin, previousCamera);
     }
   };
 
@@ -377,11 +389,19 @@ export function createCanvasEditorRuntime(initial: {
       return;
     }
     assertCanvasCamera(camera);
+    const previousCamera = state.camera;
+    if (
+      previousCamera.x === camera.x
+      && previousCamera.y === camera.y
+      && previousCamera.z === camera.z
+    ) {
+      return;
+    }
     const previousCameraState = state.cameraState;
     state.camera = camera;
     state.cameraState = 'moving';
     invalidateSnapshot();
-    flushCameraListeners(camera, origin);
+    flushCameraListeners(camera, origin, previousCamera);
     if (previousCameraState !== 'moving') {
       flushCameraStateListeners('moving');
     }

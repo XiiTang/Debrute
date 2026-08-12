@@ -61,7 +61,11 @@ export interface CanvasPerfDebugSnapshotContext {
 export function attachCanvasCameraPerformanceBeforeRender(input: {
   runtime: Pick<CanvasEditorRuntime, 'subscribeCamera'>;
   renderLifecycle: Pick<CanvasRenderLifecycle, 'attach'>;
-  onCameraBeforeRender(camera: CanvasCamera, origin: CanvasCameraChangeOrigin): void;
+  onCameraBeforeRender(
+    camera: CanvasCamera,
+    origin: CanvasCameraChangeOrigin,
+    previousCamera: CanvasCamera
+  ): void;
 }): () => void {
   const unsubscribeCamera = input.runtime.subscribeCamera(input.onCameraBeforeRender);
   let detachRenderLifecycle: () => void;
@@ -80,21 +84,33 @@ export function attachCanvasCameraPerformanceBeforeRender(input: {
 export function syncCanvasPerfSessionState(input: {
   perfMonitor: CanvasPerfMonitor | undefined;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
-  snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
-  origin: CanvasCameraChangeOrigin;
   getFinalState?: (() => Partial<CanvasPerfFinalState>) | undefined;
-}): void {
+} & (
+  | {
+      cameraState: 'moving';
+      camera: CanvasCamera;
+      previousCamera: CanvasCamera;
+      origin: CanvasCameraChangeOrigin;
+    }
+  | {
+      cameraState: 'idle';
+      camera: CanvasCamera;
+    }
+)): void {
   const perfMonitor = input.perfMonitor;
   if (!perfMonitor) {
     return;
   }
-  const sessionType = input.snapshot.cameraState === 'moving'
+  const sessionType = input.cameraState === 'moving'
     ? canvasPerfCameraSessionType(input.origin)
     : undefined;
   const session = input.sessionRef.current;
   if (session?.sessionType === sessionType || (!session && !sessionType)) {
     return;
   }
+  const boundaryCamera = input.cameraState === 'moving'
+    ? input.previousCamera
+    : input.camera;
   const timestamp = canvasPerfTimestamp();
   if (session) {
     perfMonitor.endSession({
@@ -102,9 +118,9 @@ export function syncCanvasPerfSessionState(input: {
       timestamp,
       source: 'CanvasSurface',
       finalState: {
-        zoomLevel: input.snapshot.camera.z,
-        cameraState: input.snapshot.cameraState,
-        ...input.getFinalState?.()
+        ...input.getFinalState?.(),
+        zoomLevel: boundaryCamera.z,
+        cameraState: input.cameraState
       }
     });
     input.sessionRef.current = undefined;
@@ -114,7 +130,7 @@ export function syncCanvasPerfSessionState(input: {
       type: sessionType,
       timestamp,
       source: 'CanvasSurface',
-      detail: { zoomLevel: input.snapshot.camera.z }
+      detail: { zoomLevel: boundaryCamera.z }
     });
     input.sessionRef.current = { sessionId, sessionType };
   }

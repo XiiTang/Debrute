@@ -75,7 +75,6 @@ import type {
 } from './runtime/CanvasEditorRuntime';
 import { createCanvasInteractionRuntime } from './runtime/CanvasInteractionRuntime';
 import { createCanvasStageRuntime, type CanvasStageRuntime } from './runtime/CanvasStageRuntime';
-import type { CanvasCameraChangeOrigin } from './runtime/canvasCamera';
 import {
   canvasNodeSelection,
   isCanvasNodeSelected,
@@ -237,7 +236,6 @@ function CanvasSurfaceRuntime({
   );
   const fittedCanvasRef = useRef(false);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
-  const canvasPerfCameraOriginRef = useRef<CanvasCameraChangeOrigin>('programmatic');
   const canvasPerfPointerInteractionSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const feedbackHoverSuspendedRef = useRef(false);
   const completedClickCandidateRef = useRef<CanvasCompletedClickCandidate | undefined>(undefined);
@@ -397,16 +395,14 @@ function CanvasSurfaceRuntime({
   useLayoutEffect(() => attachCanvasCameraPerformanceBeforeRender({
     runtime,
     renderLifecycle,
-    onCameraBeforeRender: (liveCamera, origin) => {
+    onCameraBeforeRender: (liveCamera, origin, previousCamera) => {
       const snapshot = runtime.getSnapshot();
-      canvasPerfCameraOriginRef.current = origin;
       syncCanvasPerfSessionState({
         perfMonitor,
         sessionRef: canvasPerfSessionRef,
-        snapshot: {
-          cameraState: snapshot.cameraState,
-          camera: liveCamera
-        },
+        cameraState: 'moving',
+        camera: liveCamera,
+        previousCamera,
         origin,
         getFinalState: () => canvasPerfFinalState({
           snapshot,
@@ -542,14 +538,14 @@ function CanvasSurfaceRuntime({
         cameraState,
         pointerInteraction: snapshot.pointerInteraction
       }));
+      if (cameraState !== 'idle') {
+        return;
+      }
       syncCanvasPerfSessionState({
         perfMonitor,
         sessionRef: canvasPerfSessionRef,
-        snapshot: {
-          cameraState,
-          camera: snapshot.camera
-        },
-        origin: canvasPerfCameraOriginRef.current,
+        cameraState,
+        camera: snapshot.camera,
         getFinalState: () => canvasPerfFinalState({
           snapshot,
           renderSnapshot: runtime.scene.getRenderSnapshot(),

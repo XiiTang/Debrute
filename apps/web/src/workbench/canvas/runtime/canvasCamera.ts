@@ -67,16 +67,19 @@ export function cameraForWheelDelta(input: {
       y: input.delta.y * panSpeed
     });
   }
-  const localPoint = screenPointToSurfacePoint(input.screenPoint, input.surfaceRect);
-  const anchor = {
-    x: (localPoint.x - input.camera.x) / input.camera.z,
-    y: (localPoint.y - input.camera.y) / input.camera.z
-  };
   const z = clamp(
     input.camera.z + input.delta.z * zoomSpeed * input.camera.z,
     MIN_CANVAS_CAMERA_Z,
     MAX_CANVAS_CAMERA_Z
   );
+  if (z === input.camera.z) {
+    return input.camera;
+  }
+  const localPoint = screenPointToSurfacePoint(input.screenPoint, input.surfaceRect);
+  const anchor = {
+    x: (localPoint.x - input.camera.x) / input.camera.z,
+    y: (localPoint.y - input.camera.y) / input.camera.z
+  };
   return {
     x: localPoint.x - anchor.x * z,
     y: localPoint.y - anchor.y * z,
@@ -93,12 +96,15 @@ export function cameraForGestureZoom(input: {
 }): CanvasCamera {
   assertCanvasCamera(input.camera);
   assertPositiveFiniteNumber(input.scale, 'Canvas gesture scale must be a positive finite number.');
+  const z = clamp(input.camera.z * input.scale, MIN_CANVAS_CAMERA_Z, MAX_CANVAS_CAMERA_Z);
+  if (z === input.camera.z && input.delta.x === 0 && input.delta.y === 0) {
+    return input.camera;
+  }
   const localOrigin = screenPointToSurfacePoint(input.origin, input.surfaceRect);
   const anchor = {
     x: (localOrigin.x - input.camera.x) / input.camera.z,
     y: (localOrigin.y - input.camera.y) / input.camera.z
   };
-  const z = clamp(input.camera.z * input.scale, MIN_CANVAS_CAMERA_Z, MAX_CANVAS_CAMERA_Z);
   return {
     x: localOrigin.x + input.delta.x - anchor.x * z,
     y: localOrigin.y + input.delta.y - anchor.y * z,

@@ -2946,7 +2946,9 @@ describe('CanvasSurface', () => {
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      snapshot: { cameraState: 'moving', camera: { x: 0, y: 0, z: 1 } },
+      cameraState: 'moving',
+      camera: { x: 0, y: 0, z: 1 },
+      previousCamera: { x: 0, y: 0, z: 1 },
       origin: 'pan'
     });
     monitor.recordCounter({ timestamp: 5, source: 'CanvasRenderLifecycle', name: 'render-snapshot-build' });
@@ -2960,8 +2962,8 @@ describe('CanvasSurface', () => {
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
-      origin: 'pan',
+      cameraState: 'idle',
+      camera: { x: 0, y: 0, z: 1 },
       getFinalState: () => ({
         mountedNodeCount: 2,
         visibleNodeCount: 1,
@@ -2994,17 +2996,16 @@ describe('CanvasSurface', () => {
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      snapshot: {
-        cameraState: 'moving',
-        camera: { x: 0, y: 0, z: 1 }
-      },
+      cameraState: 'moving',
+      camera: { x: 0, y: 0, z: 1 },
+      previousCamera: { x: 0, y: 0, z: 1 },
       origin: 'pan'
     });
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
-      snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
-      origin: 'pan'
+      cameraState: 'idle',
+      camera: { x: 0, y: 0, z: 1 }
     });
 
     expect(monitor.getLastSession()?.counters).toEqual({});
@@ -3014,16 +3015,17 @@ describe('CanvasSurface', () => {
   it('maps camera origins and switches sessions within one moving period', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
-    const moving = { cameraState: 'moving' as const, camera: { x: 0, y: 0, z: 1 } };
+    const camera = { x: 0, y: 0, z: 1 };
+    const moving = { cameraState: 'moving' as const, camera, previousCamera: camera };
 
-    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'programmatic' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, ...moving, origin: 'programmatic' });
     expect(sessionRef.current).toBeUndefined();
 
-    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'pan' });
-    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'pan' });
-    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'zoom' });
-    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'minimap' });
-    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'programmatic' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, ...moving, origin: 'pan' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, ...moving, origin: 'pan' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, ...moving, origin: 'zoom' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, ...moving, origin: 'minimap' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, ...moving, origin: 'programmatic' });
     monitor.recordCounter({ timestamp: 10, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
 
     expect(sessionRef.current).toBeUndefined();
@@ -3045,6 +3047,50 @@ describe('CanvasSurface', () => {
     expect(monitor.getCounterTotals()).toEqual({ 'stage-camera-write': 1 });
   });
 
+  it('hands camera performance sessions off at the previous camera boundary', () => {
+    const monitor = createCanvasPerfMonitor();
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+
+    syncCanvasPerfSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      cameraState: 'moving',
+      camera: { x: 10, y: 0, z: 1 },
+      previousCamera: { x: 0, y: 0, z: 1 },
+      origin: 'pan'
+    });
+    syncCanvasPerfSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      cameraState: 'moving',
+      camera: { x: 10, y: 0, z: 1.1 },
+      previousCamera: { x: 10, y: 0, z: 1 },
+      origin: 'zoom',
+      getFinalState: () => ({ zoomLevel: 1.1, cameraState: 'moving' })
+    });
+    syncCanvasPerfSessionState({
+      perfMonitor: monitor,
+      sessionRef,
+      cameraState: 'idle',
+      camera: { x: 10, y: 0, z: 1.1 }
+    });
+
+    expect(monitor.getTrace().sessions).toMatchObject([
+      {
+        type: 'camera-pan',
+        detail: { zoomLevel: 1 },
+        zoomLevel: 1,
+        cameraState: 'moving'
+      },
+      {
+        type: 'camera-zoom',
+        detail: { zoomLevel: 1 },
+        zoomLevel: 1.1,
+        cameraState: 'idle'
+      }
+    ]);
+  });
+
   it('transitions camera performance sessions before render hot-path work', () => {
     const monitor = createCanvasPerfMonitor();
     const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
@@ -3062,14 +3108,13 @@ describe('CanvasSurface', () => {
     const detach = attachCanvasCameraPerformanceBeforeRender({
       runtime,
       renderLifecycle,
-      onCameraBeforeRender: (camera, origin) => {
+      onCameraBeforeRender: (camera, origin, previousCamera) => {
         syncCanvasPerfSessionState({
           perfMonitor: monitor,
           sessionRef,
-          snapshot: {
-            cameraState: runtime.getSnapshot().cameraState,
-            camera
-          },
+          cameraState: 'moving',
+          camera,
+          previousCamera,
           origin
         });
       }
@@ -3089,6 +3134,48 @@ describe('CanvasSurface', () => {
       { type: 'camera-pan', stageCameraWrites: 1 },
       { type: 'camera-zoom', stageCameraWrites: 1 }
     ]);
+
+    detach();
+    unbindStage();
+    stageRuntime.dispose();
+    runtime.dispose();
+  });
+
+  it('does not run camera performance or render work for an equal camera commit', () => {
+    const monitor = createCanvasPerfMonitor();
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const runtime = createCanvasEditorRuntime({
+      initialProjection: { nodes: [], edges: [] },
+      submitManualLayout: async () => undefined
+    });
+    const stageRuntime = createCanvasStageRuntime({ perfMonitor: monitor });
+    const unbindStage = stageRuntime.bindStage(document.createElement('div'));
+    const renderLifecycle = createCanvasRenderLifecycle({
+      runtime,
+      stageRuntime,
+      perfMonitor: monitor
+    });
+    const detach = attachCanvasCameraPerformanceBeforeRender({
+      runtime,
+      renderLifecycle,
+      onCameraBeforeRender: (camera, origin, previousCamera) => {
+        syncCanvasPerfSessionState({
+          perfMonitor: monitor,
+          sessionRef,
+          cameraState: 'moving',
+          camera,
+          previousCamera,
+          origin
+        });
+      }
+    });
+    monitor.reset();
+
+    runtime.camera.setCamera({ x: 0, y: 0, z: 1 }, 'zoom');
+
+    expect(monitor.getTrace().sessions).toEqual([]);
+    expect(monitor.getCounterTotals()).toEqual({});
+    expect(runtime.getSnapshot().cameraState).toBe('idle');
 
     detach();
     unbindStage();
